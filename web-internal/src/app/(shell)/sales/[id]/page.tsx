@@ -355,6 +355,8 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   const [allocRows, setAllocRows] = useState<AllocRow[]>([]);
   const [commissionPic, setCommissionPic] = useState('');
   const [paymentScheme, setPaymentScheme] = useState<string>(PAYMENT_SCHEMES[0]);
+  // Tombol "Include PPN" (D-4). Default MATI — lihat catatan di lib/sales.ts.
+  const [includePPN, setIncludePPN] = useState(false);
   const [managedSince, setManagedSince] = useState('');
   const [installments, setInstallments] = useState<InstallmentRow[]>([]);
   const [closeSubmitting, setCloseSubmitting] = useState(false);
@@ -531,7 +533,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     quoteTimer.current = setTimeout(async () => {
       const seq = ++quoteSeq.current;
       try {
-        const q = await previewQuote(qSelections);
+        const q = await previewQuote(qSelections, includePPN);
         if (quoteSeq.current === seq) {
           setQQuote(q);
           setQQuoteError(null);
@@ -547,7 +549,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
       if (quoteTimer.current) clearTimeout(quoteTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(qSelections)]);
+  }, [JSON.stringify(qSelections), includePPN]);
 
   // ---- Permission gating (UX only; server is the final authority) ----
   const odOnly = Boolean(role?.od) && !role?.director;
@@ -837,6 +839,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           ...(allocRows.length > 1 ? { commission_payment_pic_id: commissionPic } : {}),
         },
         payment_scheme: paymentScheme,
+        include_ppn: includePPN,
         ...(managedSince ? { managed_since: managedSince } : {}),
         ...(useInstallments
           ? { installments: installments.map((i) => ({ amount: i.amount, due_date: i.due_date })) }
@@ -1337,7 +1340,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                 {qQuoteError && <div className="alert alertError" role="alert">{qQuoteError}</div>}
                 <div className="row" style={{ gap: 24 }}>
                   <div>
-                    <div className="muted" style={{ fontSize: 12 }}>Estimasi Nilai Transaksi (sebelum PPN)</div>
+                    <div className="muted" style={{ fontSize: 12 }}>Estimasi Nilai Transaksi (belum PPN)</div>
                     <div style={{ fontSize: 18, fontWeight: 600 }}>{qQuote?.estimasi_nilai_idr ?? '—'}</div>
                   </div>
                   <div>
@@ -1759,6 +1762,25 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                       <option key={s} value={s}>{s}</option>
                     ))}
                   </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="close-ppn">PPN</label>
+                  <label className="row" style={{ gap: 6, fontSize: 13, paddingTop: 8 }}>
+                    <input
+                      id="close-ppn"
+                      type="checkbox"
+                      checked={includePPN}
+                      onChange={(e) => setIncludePPN(e.target.checked)}
+                    />
+                    <span>Include PPN (11%)</span>
+                  </label>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Semua harga di sistem ini <strong>non-PPN</strong>. Centang kalau
+                    invoice klien ini kena PPN — 11% ditambahkan di atas nilai
+                    transaksi. Nilai yang diakui sebagai pendapatan dan komisi{' '}
+                    <strong>tidak berubah</strong>. Kalau memakai Termin, cicilannya
+                    harus berjumlah nilai + PPN.
+                  </span>
                 </div>
                 <div className="field">
                   <label htmlFor="close-managed">Managed Since (opsional)</label>

@@ -46,6 +46,10 @@ export default function KalkulatorPenawaranPage() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [quoting, setQuoting] = useState(false);
+  // Tombol "Include PPN" (ketokan D-4). Default MATI: invoice yang tidak
+  // ditandai ditagih tanpa pajak — kurang tagih yang kelihatan dan bisa
+  // dikoreksi, bukan lebih tagih ke klien yang tidak pernah menyetujuinya.
+  const [includePPN, setIncludePPN] = useState(false);
 
   const requestSeq = useRef(0);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -140,7 +144,7 @@ export default function KalkulatorPenawaranPage() {
       setQuoting(true);
       setQuoteError(null);
       try {
-        const q = await previewQuote(selections);
+        const q = await previewQuote(selections, includePPN);
         if (requestSeq.current === seq) {
           setQuote(q);
         }
@@ -158,7 +162,7 @@ export default function KalkulatorPenawaranPage() {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(selections)]);
+  }, [JSON.stringify(selections), includePPN]);
 
   const subtotalByService = useMemo(() => {
     const m = new Map<string, string>();
@@ -248,9 +252,25 @@ export default function KalkulatorPenawaranPage() {
           <p className="muted">Pilih minimal 1 layanan untuk melihat estimasi.</p>
         )}
         {!quoteError && selections.length > 0 && (
+          <>
+          <label className="row" style={{ gap: 6, fontSize: 13, marginBottom: 12 }}>
+            <input
+              type="checkbox"
+              checked={includePPN}
+              onChange={(e) => setIncludePPN(e.target.checked)}
+            />
+            <span>
+              <strong>Include PPN (11%)</strong>{' '}
+              <span className="muted">
+                — seluruh harga di sistem ini sudah non-PPN. Centang kalau invoice
+                ini kena PPN; 11% ditambahkan di atas Estimasi Nilai. Komisi tidak
+                ikut berubah, karena PPN bukan pendapatan.
+              </span>
+            </span>
+          </label>
           <div className="row" style={{ gap: 24 }}>
             <div>
-              <div className="muted" style={{ fontSize: 12 }}>Estimasi Nilai (sebelum PPN)</div>
+              <div className="muted" style={{ fontSize: 12 }}>Estimasi Nilai (belum PPN)</div>
               <div style={{ fontSize: 20, fontWeight: 600 }}>
                 {quoting && !quote ? '…' : quote?.estimasi_nilai_idr ?? '—'}
               </div>
@@ -274,6 +294,7 @@ export default function KalkulatorPenawaranPage() {
               </div>
             </div>
           </div>
+          </>
         )}
       </section>
     </div>

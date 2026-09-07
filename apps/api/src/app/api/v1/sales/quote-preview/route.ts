@@ -16,13 +16,15 @@ export async function POST(request: Request): Promise<Response> {
     requireActor(request);
     const body = await readJson<{
       services?: { master_service_id?: string; quantity?: number; amount?: string }[];
+      /** "Include PPN" (D-4) — absent means no tax, the safe side. */
+      include_ppn?: boolean;
     }>(request);
     const selections = (body.services ?? []).map((s) => ({
       masterServiceId: s.master_service_id ?? '',
       quantity: s.quantity,
       amount: s.amount,
     }));
-    const quote = await sales.previewQuote(db(), selections);
+    const quote = await sales.previewQuote(db(), selections, new Date(), body.include_ppn === true);
     // Top-level, snake_case, IDR-only — the Quote shape web-internal declares
     // (lib/sales.ts) and the one Go's handleQuotePreview writes. The mapper is
     // NOT optional: the domain Quote carries bigint money fields that

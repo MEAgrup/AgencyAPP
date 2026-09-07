@@ -32,31 +32,30 @@ export interface LineQuote {
   unit: string;
   standard_price_idr: string;
   komisi_idr: string;
-  /** DASAR, sebelum PPN (D-4). Ini yang diakui sebagai pendapatan. */
+  /**
+   * SELALU non-PPN (D-4). Tidak ada angka PPN per baris, dan itu disengaja:
+   * PPN satu keputusan di invoice, jadi ia dijumlah sekali di bawah.
+   */
   subtotal_idr: string;
-  /** PPN baris ini, di SEBELAH dasarnya. `Rp. 0,00` kalau tidak kena PPN. */
-  ppn_idr: string;
-  /** subtotal + ppn — yang ditagih ke klien untuk baris ini. */
-  total_idr: string;
 }
 
 export interface Quote {
   lines: LineQuote[];
   /**
-   * Σ dasar, SEBELUM PPN (ketokan D-4 2026-09-08). Ini yang diakui mesin
+   * Σ harga, SELALU non-PPN (ketokan D-4 2026-09-08). Ini yang diakui mesin
    * accrual sebagai pendapatan dan yang jadi basis komisi — PPN titipan negara,
    * bukan pendapatan MEA.
    */
   estimasi_nilai_idr: string;
-  /** Σ PPN, terpisah. */
+  /** PPN seluruh invoice; `Rp. 0,00` kalau tombol Include PPN tidak ditekan. */
   total_ppn_idr: string;
   /** Yang ditagih ke klien: dasar + PPN. */
   nilai_ditagih_idr: string;
   total_komisi_idr: string;
 }
 
-export function previewQuote(services: ServiceSelection[]): Promise<Quote> {
-  return api.post<Quote>('/sales/quote-preview', { services });
+export function previewQuote(services: ServiceSelection[], includePPN = false): Promise<Quote> {
+  return api.post<Quote>('/sales/quote-preview', { services, include_ppn: includePPN });
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +231,12 @@ export interface ClosingInput {
   payment_scheme: string;
   managed_since?: string; // "YYYY-MM-DD"
   installments?: ClosingInstallmentInput[];
+  /**
+   * Tombol "Include PPN" (ketokan D-4 2026-09-08). Seluruh harga di sistem ini
+   * non-PPN; ini SATU-SATUNYA tempat yang memutuskan apakah 11% ditambahkan ke
+   * invoice. Kalau menyala, cicilan harus berjumlah dasar + PPN.
+   */
+  include_ppn?: boolean;
 }
 
 // module0_sales.ClosingResult.

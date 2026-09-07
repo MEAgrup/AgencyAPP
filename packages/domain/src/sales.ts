@@ -152,11 +152,13 @@ export class NotClosableError extends Error {
 //   batch_ceiling: subtotal = ceil(qty / min_qty) × min_qty × unit_price
 //   passthrough:   subtotal = input_amount (unit_price ignored)
 //
-// PPN is NOT part of the subtotal (ketokan D-4, 2026-09-08). The subtotal is the
-// BASE — the figure before tax — and `computePPN` returns the tax as a separate
-// number that is stored in its own column beside it. What the client is billed
-// is `subtotal + ppn`; what the company EARNS, and what the accrual engine and
-// the commission rules read, is the subtotal alone.
+// PPN is not here at all (ketokan D-4, 2026-09-08). EVERY price in the catalog
+// is a NON-PPN figure — negotiated and standard alike, across the whole MSL —
+// and tax is a per-INVOICE choice Sales makes with one button, not a property of
+// a service. The same service can be billed with PPN to one client and without
+// to another; only the invoice knows. So `computePPN` takes an `includePPN`
+// that comes from that button, and the result lands in `transactions.total_ppn`
+// beside a `total_agreed_value` that is always the base.
 //
 // Until 2026-09-08 the 11% was folded INTO the subtotal, and that one line had
 // two consequences. The first was that accrual revenue read 11% high — PPN is
@@ -176,7 +178,7 @@ const PRICING_MODES = new Set<string>([
   PRICING_FLAT, PRICING_MIN_FLOOR, PRICING_BATCH_CEILING, PRICING_PASSTHROUGH,
 ]);
 
-/** PPN surcharge: 11% of the subtotal (money.percentOf numerator/scale). */
+/** PPN rate: 11% of the base (money.percentOf numerator/scale). */
 const PPN_NUMERATOR = 11n;
 const PPN_SCALE = 0;
 
@@ -187,7 +189,6 @@ export interface PriceParams {
   quantity: bigint;
   minQty: bigint;
   inputAmount: money.Money;
-  applyPPN: boolean;
 }
 
 /**
@@ -196,9 +197,9 @@ export interface PriceParams {
  * non-positive passthrough amount) throw IncompleteError; an out-of-range
  * product surfaces from money.mul.
  *
- * `p.applyPPN` is deliberately NOT read here: the tax is `computePPN`'s job and
- * lives in its own column (D-4). Folding it back in would silently restore both
- * defects described above.
+ * There is no PPN input here at all, and that is the point (D-4): tax is decided
+ * on the invoice, not on the line, so this function cannot even be handed the
+ * flag that would let it fold 11% back in.
  */
 export function computeSubtotal(p: PriceParams): money.Money {
   if (!PRICING_MODES.has(p.mode)) {
@@ -240,16 +241,17 @@ export function computeSubtotal(p: PriceParams): money.Money {
 }
 
 /**
- * computePPN returns the PPN payable on a base amount — 11%, half-up to whole
- * rupiah — or zero when the catalog entry is not subject to it.
+ * computePPN returns the PPN payable on an invoice's base total — 11%, half-up
+ * to whole rupiah — or zero when Sales did not press "Include PPN".
  *
- * It is an ADDITION beside the base, never folded into it (D-4). Exported
- * because every writer of the money path needs the same one: `renewal.ts` and
- * the closing path both price lines, and two copies of an 11% would eventually
- * disagree by a rounding rule.
+ * `includePPN` is the INVOICE's choice (`transactions.include_ppn`), never a
+ * catalog flag. It is an ADDITION beside the base, never folded into it (D-4).
+ * Exported because every writer of the money path needs the same one:
+ * `renewal.ts` and the closing path both total invoices, and two copies of an
+ * 11% would eventually disagree by a rounding rule.
  */
-export function computePPN(base: money.Money, apply: boolean): money.Money {
-  if (!apply || base <= 0n) {
+export function computePPN(base: money.Money, includePPN: boolean): money.Money {
+  if (!includePPN || base <= 0n) {
     return 0n;
   }
   return money.percentOf(base, PPN_NUMERATOR, PPN_SCALE);
@@ -313,7 +315,6 @@ export interface ServiceLine {
   quantity: bigint; // 0 == 1
   minQty: bigint;
   inputAmount: money.Money; // passthrough only
-  applyPPN: boolean;
   rule: CommissionRule;
 }
 
@@ -324,19 +325,12 @@ function lineParams(l: ServiceLine): PriceParams {
     quantity: l.quantity === 0n ? 1n : l.quantity,
     minQty: l.minQty,
     inputAmount: l.inputAmount,
-    applyPPN: l.applyPPN,
   };
 }
 
 /** lineSubtotal is the line's BASE deal value from the calculator — before PPN. */
 export function lineSubtotal(l: ServiceLine): money.Money {
   return computeSubtotal(lineParams(l));
-}
-
-/** linePPN is the PPN payable on that base, zero when the catalog entry is untaxed. */
-export function linePPN(l: ServiceLine): money.Money {
-  const p = lineParams(l);
-  return computePPN(computeSubtotal(p), p.applyPPN);
 }
 
 /** The computed money view for one service line. */
@@ -347,12 +341,12 @@ export interface LineQuote {
   unit: string;
   standardPriceIdr: string;
   komisiIdr: string;
-  /** BASE — before PPN. This is the accrual figure and the commission base. */
+  /**
+   * ALWAYS non-PPN (D-4). There is no per-line tax figure by design: PPN is one
+   * decision on the invoice, so it is totalled once at the bottom rather than
+   * sprinkled across lines that would each round separately.
+   */
   subtotalIdr: string;
-  /** PPN on this line, beside the base and never inside it (D-4). `Rp. 0,00` when not taxed. */
-  ppnIdr: string;
-  /** What the client is billed for this line: `subtotal + ppn`. */
-  totalIdr: string;
 }
 
 /** Read-only money summary for a Qualified/Closing selection. */
@@ -363,7 +357,7 @@ export interface Quote {
    * what commission is computed from — the money the company actually earns.
    */
   estimasiNilai: money.Money;
-  /** Σ PPN. Held for the state, never revenue. */
+  /** PPN on the whole invoice — zero unless Sales pressed "Include PPN". Held for the state, never revenue. */
   totalPPN: money.Money;
   /** What the client is billed: `estimasiNilai + totalPPN`. */
   nilaiDitagih: money.Money;
@@ -378,8 +372,13 @@ export interface Quote {
  * buildQuote computes Estimasi Nilai Transaksi and Perhitungan Komisi for the
  * selected services, enforcing the 1..MAX_SERVICES rule server-side. Percentage
  * commission computes on each line's subtotal (deal value); flat rules are fixed.
+ *
+ * `includePPN` is the "Include PPN" button Sales presses (D-4). It changes only
+ * what the client is BILLED (`nilaiDitagih`); `estimasiNilai` and every komisi
+ * stay exactly the same either way, because tax is not revenue and not deal
+ * value. Defaults to false — a quote that does not say it is taxed is not.
  */
-export function buildQuote(lines: ServiceLine[]): Quote {
+export function buildQuote(lines: ServiceLine[], includePPN = false): Quote {
   if (lines.length === 0) {
     throw new IncompleteError();
   }
@@ -393,13 +392,11 @@ export function buildQuote(lines: ServiceLine[]): Quote {
   for (const l of lines) {
     const p = lineParams(l);
     const subtotal = computeSubtotal(p);
-    const ppn = computePPN(subtotal, p.applyPPN);
     // Commission on the BASE, never on base+PPN (D-4). Tax collected for the
     // state is not deal value, and paying a percentage of it is money out the
     // door for nothing.
     const komisi = computeCommission(l.rule, subtotal);
     q.estimasiNilai += subtotal;
-    q.totalPPN += ppn;
     q.totalKomisi += komisi;
     q.lines.push({
       serviceId: l.serviceId,
@@ -409,10 +406,13 @@ export function buildQuote(lines: ServiceLine[]): Quote {
       standardPriceIdr: money.format(l.standardPrice),
       komisiIdr: money.format(komisi),
       subtotalIdr: money.format(subtotal),
-      ppnIdr: money.format(ppn),
-      totalIdr: money.format(subtotal + ppn),
     });
   }
+  // ONCE, on the invoice total — not per line. Taxing each line and summing can
+  // land a rupiah away from taxing the sum (11% of 5.000.005 twice ≠ 11% of
+  // 10.000.010 once), and the invoice is what the client pays, so the invoice is
+  // what the rounding must be right for.
+  q.totalPPN = computePPN(q.estimasiNilai, includePPN);
   q.nilaiDitagih = q.estimasiNilai + q.totalPPN;
   q.estimasiNilaiIdr = money.format(q.estimasiNilai);
   q.totalPPNIdr = money.format(q.totalPPN);
@@ -438,7 +438,7 @@ export function lineFromView(v: ServiceView, quantity: bigint, amount: string): 
   const mode = v.pricingMode === '' ? PRICING_FLAT : v.pricingMode;
   const line: ServiceLine = {
     serviceId: v.id, versionNo: v.versionNo, name: v.name, standardPrice: price,
-    unit: v.unit, mode, quantity, minQty: 0n, inputAmount: 0n, applyPPN: v.applyPPN, rule,
+    unit: v.unit, mode, quantity, minQty: 0n, inputAmount: 0n, rule,
   };
   if (mode === PRICING_MIN_FLOOR || mode === PRICING_BATCH_CEILING) {
     const mq = parseWholeQty(v.minQty);
@@ -490,9 +490,14 @@ async function resolveLines(sql: Queryable, selections: ServiceSelection[], now:
  * selections against the MSL version effective today, without persisting. The
  * 1..MAX_SERVICES cap is enforced by buildQuote with the verbatim BI message.
  */
-export async function previewQuote(sql: Sql, selections: ServiceSelection[], now: Date = new Date()): Promise<Quote> {
+export async function previewQuote(
+  sql: Sql,
+  selections: ServiceSelection[],
+  now: Date = new Date(),
+  includePPN = false,
+): Promise<Quote> {
   const lines = await resolveLines(sql, selections, now);
-  return buildQuote(lines);
+  return buildQuote(lines, includePPN);
 }
 
 // ===========================================================================
@@ -677,7 +682,7 @@ export async function submitQualifiedForm(
   // Resolve MSL versions + compute subtotals BEFORE the write transaction; the
   // pinned snapshot (params + subtotal) is what gets persisted.
   const lines = await resolveLines(sql, form.services, now);
-  const pins = lines.map((l) => ({ line: l, subtotal: lineSubtotal(l), ppn: linePPN(l) }));
+  const pins = lines.map((l) => ({ line: l, subtotal: lineSubtotal(l) }));
 
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
@@ -696,17 +701,19 @@ export async function submitQualifiedForm(
          ${nullDecimal(form.marketingBudget)}, ${form.platform}, ${nullString(form.storeLink)},
          ${actor.employeeId})`;
 
-    for (const { line: l, subtotal, ppn } of pins) {
+    for (const { line: l, subtotal } of pins) {
       const p = lineParams(l);
+      // `apply_ppn` is NOT written: it is deprecated by D-4 and its column
+      // default (false) is now the only value it ever takes. `subtotal` is
+      // always the non-PPN base; tax is decided later, on the invoice.
       await tx`
         insert into qualified_form_services
           (attempt_id, master_service_id, master_version_no, name, standard_price, commission_rule,
-           quantity, input_amount, unit, min_qty, pricing_mode, apply_ppn, subtotal, ppn, created_by)
+           quantity, input_amount, unit, min_qty, pricing_mode, subtotal, created_by)
         values
           (${attemptId}, ${l.serviceId}, ${l.versionNo}, ${l.name}, ${money.decimal(l.standardPrice)},
            ${l.rule.raw}, ${p.quantity.toString()}, ${inputAmountValue(l)}, ${nullString(l.unit)},
-           ${minQtyValue(l.minQty)}, ${l.mode}, ${l.applyPPN}, ${money.decimal(subtotal)},
-           ${money.decimal(ppn)}, ${actor.employeeId})`;
+           ${minQtyValue(l.minQty)}, ${l.mode}, ${money.decimal(subtotal)}, ${actor.employeeId})`;
     }
 
     await ex.audit.insertAudit({
@@ -830,10 +837,9 @@ export const DECISION_REJECT = 'reject';
 export interface ProposalLine {
   masterServiceId: string;
   /**
-   * The negotiated BASE, before PPN (D-4). PPN is never typed into this field —
-   * it is added beside it from the catalog's `apply_ppn`, so a negotiated
-   * Rp 50.000.000 on a taxed service is billed Rp 55.500.000 and recognized as
-   * Rp 50.000.000.
+   * The negotiated price, ALWAYS non-PPN (D-4: "semua harga non ppn, negosiasi
+   * maupun non nego"). Nobody types tax into this field; if the invoice is
+   * taxed, 11% is added once at the bottom of the invoice.
    */
   proposedPrice?: string;
   commissionRule?: string;
@@ -842,20 +848,6 @@ export interface ProposalLine {
   quantity?: number;
   /** passthrough rupiah nominal for a standard line in passthrough mode. */
   amount?: string;
-  /**
-   * PPN in rupiah PINNED by the Qualified Form snapshot — INTERNAL ONLY.
-   *
-   * `submitNegotiation` STRIPS this from every caller-supplied line before it
-   * reaches the writer, and there is a test for that: a client that could name
-   * its own tax could name a smaller one (CLAUDE.md #4). The only writer that
-   * legitimately sets it is `standardLines`, which reads it from the snapshot.
-   *
-   * When absent, `resolveProposalLine` computes PPN from the MSL version
-   * effective TODAY. When present, the PIN wins — which is the whole point of
-   * pinning: a deal qualified under a taxed catalog entry must still close with
-   * that tax even if an admin untaxes the entry the next morning.
-   */
-  pinnedPPN?: string;
 }
 
 /**
@@ -918,13 +910,7 @@ export async function submitNegotiation(
     if (!result.ok) {
       return result;
     }
-    // Caller-supplied lines are stripped of `pinnedPPN` HERE, at the door.
-    // Only `standardLines` — which reads the pin out of the Qualified snapshot —
-    // may set it; anything arriving from the wire is discarded so a client can
-    // never name its own tax (CLAUDE.md #4).
-    const proposalLines = noNego && lines.length === 0
-      ? await standardLines(tx, attemptId)
-      : lines.map(({ pinnedPPN: _abaikan, ...l }) => l);
+    const proposalLines = noNego && lines.length === 0 ? await standardLines(tx, attemptId) : lines;
     await writeProposal(tx, ex, actor, attemptId, proposalLines, now, !noNego);
     if (!noNego) {
       await emitPendingApproval(ex.notify, actor, attemptId);
@@ -1103,18 +1089,14 @@ export async function acceptCounter(
  * standard price — MSL v2, DECISIONS 2026-07-16).
  */
 async function standardLines(tx: Queryable, attemptId: string): Promise<ProposalLine[]> {
-  const rows = await tx<{ master_service_id: string; subtotal: string; ppn: string; commission_rule: string }[]>`
-    select master_service_id, subtotal, ppn, commission_rule
+  const rows = await tx<{ master_service_id: string; subtotal: string; commission_rule: string }[]>`
+    select master_service_id, subtotal, commission_rule
     from qualified_form_services where attempt_id = ${attemptId} order by id`;
   if (rows.length === 0) {
     throw new IncompleteError();
   }
-  // `subtotal` is the BASE and `ppn` travels beside it (D-4). Dropping `ppn`
-  // here would under-bill the client by exactly the tax, silently — the pinned
-  // snapshot is the only place that still knows the line was taxed.
   return rows.map((r) => ({
-    masterServiceId: r.master_service_id, proposedPrice: r.subtotal, pinnedPPN: r.ppn,
-    commissionRule: r.commission_rule,
+    masterServiceId: r.master_service_id, proposedPrice: r.subtotal, commissionRule: r.commission_rule,
   }));
 }
 
@@ -1137,7 +1119,7 @@ export async function resolveProposalLine(
   tx: Queryable,
   l: ProposalLine,
   now: Date,
-): Promise<{ price: string; rule: string; ppn: string }> {
+): Promise<{ price: string; rule: string }> {
   if ((l.masterServiceId ?? '').trim() === '') {
     throw new IncompleteError();
   }
@@ -1155,29 +1137,14 @@ export async function resolveProposalLine(
       throw new IncompleteError();
     }
     parseCommissionRule(rule); // throws BadCommissionRuleError on a bad shape
-    // A negotiated price is the BASE (D-4: "semua transaksi dibuat sebelum
-    // PPN"). Whether tax is due is NOT negotiable and NOT typed — it is the
-    // catalog's `apply_ppn` for the version effective today, read here so a
-    // negotiated line and a standard line are taxed by the same rule.
-    // A pinned PPN wins over today's catalog. Without this the no-negotiation
-    // path re-derived the tax from whatever the MSL says at closing time, so an
-    // admin untaxing an entry between qualification and closing silently
-    // changed what an already-agreed deal billed — and every row still looked
-    // self-consistent afterwards.
-    if ((l.pinnedPPN ?? '').trim() !== '') {
-      return { price, rule, ppn: money.decimal(money.parse(l.pinnedPPN as string)) };
-    }
-    const taxed = await effectiveAt(tx, l.masterServiceId, tz.dateString(now));
-    return { price, rule, ppn: money.decimal(computePPN(money.parse(price), taxed.applyPPN)) };
+    // A negotiated price is non-PPN, like every other price (D-4). There is no
+    // tax to resolve here at all — the invoice decides that later, once.
+    return { price, rule };
   }
   const view = await effectiveAt(tx, l.masterServiceId, tz.dateString(now));
   const qty = l.quantity && l.quantity > 0 ? BigInt(Math.trunc(l.quantity)) : 0n;
   const line = lineFromView(view, qty, l.amount ?? '');
-  return {
-    price: money.decimal(lineSubtotal(line)),
-    rule: line.rule.raw,
-    ppn: money.decimal(linePPN(line)),
-  };
+  return { price: money.decimal(lineSubtotal(line)), rule: line.rule.raw };
 }
 
 /**
@@ -1218,10 +1185,10 @@ async function writeProposal(
   // Resolve every line BEFORE the first insert: a bad line must not leave a
   // half-written proposal version behind (the whole call is one transaction, but
   // resolving first also means no NEG- id is burned on an invalid set).
-  const resolved: { line: ProposalLine; price: string; rule: string; ppn: string }[] = [];
+  const resolved: { line: ProposalLine; price: string; rule: string }[] = [];
   for (const l of lines) {
-    const { price, rule, ppn } = await resolveProposalLine(tx, l, now);
-    resolved.push({ line: l, price, rule, ppn });
+    const { price, rule } = await resolveProposalLine(tx, l, now);
+    resolved.push({ line: l, price, rule });
   }
 
   const verRows = await tx<{ max: number | null }[]>`
@@ -1233,11 +1200,11 @@ async function writeProposal(
     insert into negotiation_proposals (id, attempt_id, version_no, proposed_by, created_by)
     values (${proposalId}, ${attemptId}, ${version}, ${actor.employeeId}, ${actor.employeeId})`;
 
-  for (const { line: l, price, rule, ppn } of resolved) {
+  for (const { line: l, price, rule } of resolved) {
     await tx`
       insert into negotiation_proposal_lines
-        (proposal_id, master_service_id, proposed_price, commission_rule, ppn, payment_terms, created_by)
-      values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule}, ${ppn},
+        (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms, created_by)
+      values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule},
               ${nullString(l.paymentTerms)}, ${actor.employeeId})`;
   }
   await ex.audit.insertAudit({
@@ -1332,6 +1299,18 @@ export interface ClosingInput {
   paymentScheme: string;
   installments?: InstallmentInput[];
   managedSince?: string; // optional YYYY-MM-DD
+  /**
+   * The "Include PPN" button Sales presses at closing (ketokan D-4 2026-09-08).
+   * Every price in the system is non-PPN; this is the ONE place that decides
+   * whether 11% is added to the invoice, and it is stored on the transaction so
+   * the answer is never re-derived from a catalog flag that may have moved.
+   *
+   * Absent = false. That default is the safe side: an invoice that nobody
+   * marked as taxed is billed without tax, which under-bills by a visible,
+   * correctable amount — whereas taxing by default would over-bill a client who
+   * never agreed to it.
+   */
+  includePPN?: boolean;
 }
 
 /** The ids birthed by a successful closing. */
@@ -1432,10 +1411,8 @@ export function validateShape(input: ClosingInput): void {
 /** approvedLine is one line of the latest proposal, enriched from the Qualified snapshot. */
 interface ApprovedLine {
   masterServiceId: string;
-  /** BASE, before PPN (D-4). */
+  /** ALWAYS non-PPN (D-4). */
   proposedPrice: string;
-  /** PPN beside it; `'0.00'` when untaxed. */
-  ppn: string;
   commissionRule: string;
   name: string;
   versionNo: number;
@@ -1490,20 +1467,23 @@ export async function close(
     }
 
     // Two totals, and they are NOT interchangeable (D-4):
-    //   total    = Σ proposed_price — the BASE. This is `total_agreed_value`,
-    //              what the accrual engine recognizes and what commission is
-    //              computed from. PPN is never revenue.
-    //   totalPPN = Σ ppn — held for the state, stored in its own column.
-    // What the client is BILLED is the sum of the two, and that is what the
-    // installment schedule has to add up to. Validating the schedule against
-    // the base alone would let a taxed deal close with instalments 11% short
-    // of the invoice — silently, since every row would look self-consistent.
+    //   total    = Σ proposed_price — always non-PPN. This is
+    //              `total_agreed_value`, what the accrual engine recognizes and
+    //              what commission is computed from. PPN is never revenue.
+    //   totalPPN = 11% of that, but ONLY if Sales pressed "Include PPN".
+    //              Computed once on the invoice total, not per line, because
+    //              the invoice is what the client pays and so the invoice is
+    //              what the rounding has to be right for.
+    // What the client is BILLED is the sum, and that is what the installment
+    // schedule has to add up to. Validating the schedule against the base alone
+    // would let a taxed deal close with instalments 11% short of the invoice —
+    // silently, since every row would look self-consistent.
     let total = 0n;
-    let totalPPN = 0n;
     for (const l of lines) {
       total += money.parse(l.proposedPrice);
-      totalPPN += money.parse(l.ppn);
     }
+    const includePPN = input.includePPN ?? false;
+    const totalPPN = computePPN(total, includePPN);
     validateScheduleTotal(input, total + totalPPN);
 
     const primary = input.parties.primarySalespersonId;
@@ -1553,21 +1533,22 @@ export async function close(
       await tx`
         insert into services
           (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule,
-           status, requires_strategy_plan, plan_tier, ppn, created_by)
+           status, requires_strategy_plan, plan_tier, created_by)
         values
           (${svcId}, ${clientId}, ${l.masterServiceId}, ${l.versionNo}, ${l.name}, ${l.proposedPrice},
            ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING}, ${l.requiresStrategyPlan}, ${l.planTier},
-           ${l.ppn}, ${actor.employeeId})`;
+           ${actor.employeeId})`;
     }
 
     // 5) Transaction (TRX-) born awaiting Finance verification.
     const trxId = await ex.ident.identNext('TRX', now);
     await tx`
       insert into transactions
-        (id, client_id, payment_intent_scheme, total_agreed_value, total_ppn, payment_status, created_by)
+        (id, client_id, payment_intent_scheme, total_agreed_value, include_ppn, total_ppn,
+         payment_status, created_by)
       values
-        (${trxId}, ${clientId}, ${input.paymentScheme}, ${money.decimal(total)}, ${money.decimal(totalPPN)},
-         ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
+        (${trxId}, ${clientId}, ${input.paymentScheme}, ${money.decimal(total)}, ${includePPN},
+         ${money.decimal(totalPPN)}, ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
     await tx`update clients set transaction_id = ${trxId}, payment_intent = ${input.paymentScheme} where id = ${clientId}`;
 
     // 6) Installments (INST-) for scheduled schemes.
@@ -1656,11 +1637,11 @@ async function loadQualifiedForm(tx: Queryable, attemptId: string): Promise<Qual
 async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<ApprovedLine[]> {
   const rows = await tx<
     {
-      master_service_id: string; proposed_price: string; ppn: string; commission_rule: string;
+      master_service_id: string; proposed_price: string; commission_rule: string;
       name: string; master_version_no: number; requires_strategy_plan: boolean; plan_tier: string;
     }[]
   >`
-    select npl.master_service_id, npl.proposed_price, npl.ppn, npl.commission_rule,
+    select npl.master_service_id, npl.proposed_price, npl.commission_rule,
            coalesce(qfs.name, at_proposal.name, '') as name,
            coalesce(qfs.master_version_no, at_proposal.version_no, 0) as master_version_no,
            coalesce(pinned.requires_strategy_plan, at_proposal.requires_strategy_plan, false)
@@ -1684,7 +1665,7 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
       and np.version_no = (select max(version_no) from negotiation_proposals where attempt_id = ${attemptId})
     order by npl.id`;
   return rows.map((r) => ({
-    masterServiceId: r.master_service_id, proposedPrice: r.proposed_price, ppn: r.ppn,
+    masterServiceId: r.master_service_id, proposedPrice: r.proposed_price,
     commissionRule: r.commission_rule,
     name: r.name, versionNo: r.master_version_no, requiresStrategyPlan: r.requires_strategy_plan,
     planTier: r.plan_tier,

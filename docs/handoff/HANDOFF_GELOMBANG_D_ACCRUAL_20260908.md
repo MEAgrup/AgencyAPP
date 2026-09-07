@@ -1,9 +1,11 @@
-# Handoff — **Mesin accrual Gelombang D ada. D-3 buntu di satu pertanyaan pemilik.**
+# Handoff — **Gelombang D: mesin accrual + D-KOM + D-4 selesai. D-3 sudah tidak buntu.**
 
 > **Baca ini dulu, lalu:**
 > 1. `docs/DECISIONS.md` — tujuh baris `Decided` bertanggal **2026-09-08**, dan
->    **§Open: `D-3-PERAN` masih 🔴 dan memblokir seluruh D-3 — jangan ditebak.**
->    (`D-4-DASAR` sudah ✅ diketok pemilik 2026-09-08; lihat §4.)
+>    **§Open: NOL baris 🔴 tersisa.** `D-3-PERAN` dan `D-4-DASAR` sudah ✅
+>    diketok pemilik 2026-09-08. Yang perlu dibaca justru baris `Decided`-nya —
+>    terutama **"KOREKSI D-4"**, yang membatalkan bentuk yang sempat dibangun
+>    beberapa jam sebelumnya.
 > 2. `docs/handoff/HANDOFF_GELOMBANG_D_20260907.md` — handoff pendahulunya.
 >    §7 (aturan urutan rilis) **wajib** sebelum menyentuh live. §2 (lima ketokan)
 >    tetap spesifikasi D; jangan ketok ulang.
@@ -17,8 +19,8 @@
 | Gelombang A · B · C | ✅ tutup |
 | **D langkah 1 — kolom `pengakuan` (D-KOM)** | ✅ **SELESAI** — migrasi 190, domain, wire, form admin, tabel |
 | **D langkah 2 — mesin accrual** | ✅ **SELESAI** — `packages/core/src/accrual.ts`, 47 tes, 6 mutasi |
-| **D langkah 3 — kunci tutup buku (D-3)** | 🔴 **BUNTU** — peran yang berwenang menutup tidak pernah disebut siapa pun |
-| **D langkah 4 — PPN (D-4)** | ✅ **DIKETOK & DIBANGUN 2026-09-08** — nilai disimpan sebelum PPN, PPN kolom tambahan. Lihat §4 |
+| **D langkah 3 — kunci tutup buku (D-3)** | 🟢 **SIAP DIBANGUN** — perannya diketok 2026-09-08: `Finance` level `lead` + `Director`. Belum ada kodenya. Lihat §3 |
+| **D langkah 4 — PPN (D-4)** | ✅ **SELESAI** — semua harga non-PPN; PPN tombol Sales per invoice. Lihat §4 |
 
 Migrasi: repo **191**, live **189** — **190 dan 191 BELUM diterapkan ke live.** Lihat §5.
 ⚠️ **191 WAJIB MENYUSUL deploy kodenya**, tidak boleh mendahului. Alasannya di §5.
@@ -97,35 +99,70 @@ keempatnya kini menyebut maksudnya. Itu perilaku yang diinginkan.
 
 ---
 
-## 3. 🔴 Yang MEMBLOKIR langkah berikutnya — jangan ditebak
+## 3. 🟢 D-3 — perannya diketok, tinggal dibangun
 
-**`D-3-PERAN`: peran mana yang berwenang MENUTUP buku bulanan?**
+Ketokan pemilik 2026-09-08: yang berwenang **menutup buku bulanan** adalah
+**Senior Finance / Lead Finance** dan **Director**.
 
-D-3 diketok *"ya, ada kunci tutup buku"* dan menyebut *"satu peran berwenang
-menutup"* — tapi **peran itu tidak pernah disebut**. Dicari 2026-09-08 di
-`DECISIONS.md`, `docs/prd/`, dan seluruh `docs/handoff/`: **nol hasil.**
+Pemetaan ke model peran yang sudah ada — pola yang sama dengan
+`finance.canVoteBermasalah` ("SPV Finance", lead level):
 
-Yang harus ditanyakan ke pemilik sekaligus, karena ketiganya satu paket:
+```ts
+role.division === 'Finance' && role.level === 'lead'   // Senior/Lead Finance
+|| role.director                                        // Director
+```
 
-1. Peran mana yang boleh **menutup** bulan — Director? Finance lead? OD?
-2. Peran mana yang boleh menulis **jurnal koreksi** di bulan berjalan — sama,
-   atau lebih luas?
-3. Bulan yang sudah ditutup, boleh **dibuka lagi** oleh siapa pun, atau tidak
-   sama sekali? (D-3 bilang "tidak bisa diedit sama sekali" — perlu ditegaskan
-   apakah itu berarti tidak ada jalan buka-ulang.)
+### 3.1 Dua turunan yang DIAMBIL SEBAGAI ASUMSI, bukan diketok
 
-Tanpa jawaban #1, mesin statusnya tidak bisa didaftarkan — dan menebaknya berarti
-mengarang siapa yang boleh membekukan angka keuangan perusahaan.
+Ditulis terang-terangan supaya yang membangun tahu ia sedang berdiri di atas
+asumsi, bukan di atas ketokan (`DECISIONS.md` 2026-09-08):
 
-**Sisa Gelombang D tidak diblokir olehnya**, dan sudah dibangun.
+1. **Jurnal koreksi** di bulan berjalan dibatasi ke peran yang **SAMA**.
+   Memperlebarnya berarti orang yang tidak boleh menutup buku tetap bisa
+   mengubah angkanya lewat pintu samping — dan kuncinya berhenti menjaga apa pun.
+2. **Tidak ada jalan buka-ulang** bulan yang sudah ditutup. D-3 berbunyi "tidak
+   bisa diedit sama sekali", dan koreksi lewat jurnal di bulan berjalan sudah
+   jadi jalan keluarnya.
+
+Kalau salah satunya keliru, **koreksinya sebelum mesin statusnya didaftarkan** —
+sesudah itu ia jadi transisi yang sudah tercatat di `audit_log` dan tidak bisa
+ditarik.
+
+### 3.2 Yang belum ada sama sekali
+
+Nol baris kode. Yang dibutuhkan D-3, berurutan:
+
+1. Tabel bulan-tertutup + **angka yang dibekukan** per bulan (mesin laporan
+   membaca bulan tertutup dari sini, BUKAN menghitung ulang dari data mentah).
+2. Mesin status tutup-buku (`sm_machines` 31 → 32) dengan gerbang peran di atas.
+3. Jalur **jurnal koreksi** di bulan berjalan, ikut masuk `audit_log`.
+4. Pagar: bulan tertutup menolak tulisan apa pun — di DB, bukan hanya di TS.
+
+Mesin accrual (§2.2) sudah memenuhi syaratnya: ia **deterministik dan bebas
+jam**, jadi angka beku bisa dibandingkan dengan hasil hitung ulang kapan saja
+untuk mencari selisih.
 
 ---
 
-## 4. ✅ D-4 — diketok pemilik 2026-09-08 dan sudah dibangun
+## 4. ✅ D-4 — SELESAI, dan bentuknya SEMPAT SALAH sebelum dikoreksi
 
-Ketokannya: *"semua laporan keuangan accrual dibuat sebelum PPN. PPN adalah
-penambahan. Cek juga MSL supaya semua transaksi dibuat sebelum PPN, nanti PPN
-adalah kolom tambahan."*
+Pemilik mengetok **dua kali dalam satu hari**, dan yang kedua mengubah bentuknya.
+Urutan itu penting untuk yang membaca commit-nya nanti:
+
+| | Ketokan | Yang dibangun |
+|---|---|---|
+| pertama | *"semua laporan accrual sebelum PPN, PPN kolom tambahan"* | PPN diturunkan dari `master_service_versions.apply_ppn`, kolom PPN di **lima** tabel |
+| kedua | *"semua harga non ppn, negosiasi maupun non nego. Berlaku untuk SEMUA MSL. Sales klik tombol include ppn, harga bertambah 11% di invoice"* | ✅ **bentuk final**: satu penanda di **`transactions`**, katalog tidak menentukan apa pun |
+
+**Kenapa yang kedua benar dan yang pertama tidak:** PPN bukan sifat sebuah
+layanan. Layanan yang sama bisa ditagih ber-PPN ke satu klien dan tidak ke klien
+lain — yang menentukan status transaksinya, bukan jenis jasanya. Menaruh
+penandanya di katalog berarti satu keputusan pajak dipakai ulang untuk semua
+klien, dan itu salah untuk sebagian dari mereka **tanpa ada yang melihatnya**.
+
+Migrasi 191 **ditulis ULANG di tempat**, bukan ditumpuk migrasi koreksi: ia belum
+pernah diterapkan ke live (live 189), jadi menyuntingnya tidak melanggar larangan
+menyunting migrasi yang sudah berjalan.
 
 ### 4.1 Dua cacat yang ditemukan saat membangunnya
 
@@ -139,60 +176,58 @@ Keduanya dibuktikan lewat **kode berjalan**, bukan dari membaca:
 
 **Cacat #2 belum pernah merugikan di live**, dan itu perlu disebut apa adanya:
 keempat baris live yang ber-PPN semuanya beraturan `0% of standard price`, jadi
-selisihnya nol rupiah. Ia laten, bukan kerugian yang sudah terjadi.
+selisihnya nol rupiah. Laten, bukan kerugian yang sudah terjadi.
 
-### 4.2 Yang dibangun
-
-`computeSubtotal` berhenti melebur 11% dan mengembalikan **DASAR**; `computePPN`
-baru mengembalikan pajaknya terpisah. Lima tabel jalur uang dapat kolom PPN
-sendiri:
+### 4.2 Bentuk final
 
 ```
-qualified_form_services.ppn · negotiation_proposal_lines.ppn
-renewal_proposal_lines.ppn  · services.ppn · transactions.total_ppn
+transactions.include_ppn   boolean  — tombol yang Sales tekan
+transactions.total_ppn     numeric  — rupiahnya, DIBEKUKAN
+total_agreed_value                  — SELALU non-PPN
 ```
 
-Komisi kini dihitung dari **dasar**, dan skedul cicilan divalidasi terhadap
-**dasar + PPN** — karena itulah yang ditagih. Pagar terakhir itu yang paling
-penting: skedul yang hanya menjumlah dasarnya terlihat benar dari segala arah
-(ia cocok dengan `total_agreed_value`) dan tetap menagih klien 11% kurang dari
-fakturnya.
+- `computeSubtotal` tidak punya input PPN sama sekali — bukan hanya
+  "tidak membacanya". Ia **tidak bisa** melebur pajak walau salah tulis.
+- **PPN dihitung SEKALI atas total invoice**, bukan per baris lalu dijumlah.
+  11% dari 5.000.005 dua kali membulat berbeda dari 11% dari 10.000.010 sekali,
+  dan yang dibayar klien adalah invoice-nya.
+- **Komisi dari nilai non-PPN.**
+- **Cicilan divalidasi terhadap dasar + PPN** — pagar terpenting: skedul yang
+  hanya menjumlah dasarnya terlihat benar dari segala arah (ia cocok dengan
+  `total_agreed_value`) dan tetap menagih klien 11% kurang dari fakturnya.
+- `total_ppn` **dibekukan**, tidak dihitung ulang dari tarif hari ini — tarif PPN
+  berubah lewat undang-undang, dan invoice lama harus tetap menyebut pajak yang
+  benar-benar ditagihkan waktu itu.
+- Dua CHECK DB: `total_ppn >= 0`, dan `include_ppn OR total_ppn = 0`.
+- `apply_ppn` di katalog & snapshot: **DEPRECATED**, tidak dibaca jalur harga
+  mana pun. Belum di-drop — itu migrasi tersendiri sesudah kode ter-deploy.
 
-### 4.3 ⚠️ Satu turunan yang MENGGESER rupiah tagihan
+Default tombol **MATI**: invoice yang tidak ditandai ditagih tanpa pajak — kurang
+tagih yang kelihatan dan bisa dikoreksi, bukan lebih tagih ke klien yang tidak
+pernah menyetujuinya.
 
-Harga **negosiasi** kini diperlakukan sebagai DASAR, dan PPN ditambahkan di
-atasnya dari penanda katalog. Sebelumnya baris negosiasi tidak pernah kena PPN
-sama sekali. Artinya baris negosiasi Rp 50.000.000 atas layanan ber-PPN yang
-tadinya ditagih Rp 50.000.000 **kini ditagih Rp 55.500.000**.
+### 4.3 Uji-kering backfill ke live (read-only, 2026-09-08) — dan yang SENGAJA dilewat
 
-Itu turunan langsung dari kata "**semua** transaksi dibuat sebelum PPN", tapi ia
-satu-satunya bagian D-4 yang menggeser rupiah tagihan, jadi ia ditulis
-terang-terangan (🟡 di `DECISIONS.md`) alih-alih diselipkan. **Kalau maksud
-pemilik adalah harga negosiasi sudah termasuk PPN, ini yang dikoreksi lebih
-dulu.** Nol baris live terdampak.
+| TRX | Status | Sebelum | Dasar | PPN | 11% tepat? |
+|---|---|---|---|---|---|
+| TRX-202608-0008 | `[Lunas]` | 57.720.000 | 52.000.000 | 5.720.000 | ✅ |
+| TRX-202608-0009 | Menunggu | 22.200.000 | 20.000.000 | 2.200.000 | ✅ |
+| TRX-202608-0010 | `[Lunas]` | 72.150.000 | 65.000.000 | 7.150.000 | ✅ |
+| **TRX-202609-0002** | `[Lunas]` | 23.575.000 | — | — | ⛔ **tidak disentuh** |
 
-### 4.4 Cacat ketiga, ditemukan lewat mutasi yang TETAP HIJAU
+Ketiga yang dipisah: **nilai ditagih tidak bergeser satu sen**, dan ketiganya
+memenuhi 11% tepat.
 
-`standardLines` sudah membawa `ppn` pinnya, tapi `resolveProposalLine`
-memperlakukan baris berharga sebagai custom dan **menghitung ulang PPN dari
-katalog hari itu** — field pinnya tidak pernah terpakai. Akibatnya admin yang
-mematikan `apply_ppn` antara kualifikasi dan closing diam-diam mengubah tagihan
-deal yang **sudah disepakati**.
+**Yang keempat sengaja dilewat, dan itu temuan uji-keringnya.** Versi pertama
+migrasi ini menelusuri lewat `clients.lead_id` dan menyapunya masuk. Totalnya
+23.575.000 sementara baris ber-PPN-nya hanya 5.550.000 — sisanya Rp 18.025.000
+dari baris lain yang tidak bisa diatribusikan. Kalau tetap dipisah, hasilnya
+`total_ppn` 550.000 atas dasar 23.025.000, yaitu **2,4%, bukan 11%**: baris yang
+terlihat sah di setiap layar dan tidak akan pernah bisa dijelaskan siapa pun.
 
-Diperbaiki: pin menang, dan `submitNegotiation` **membuang** `pinnedPPN` dari
-baris kiriman wire supaya klien tidak bisa menamai pajaknya sendiri
-(CLAUDE.md #4). Ada tes untuk keduanya.
-
-### 4.5 Uji-kering backfill terhadap data live (read-only, 2026-09-08)
-
-| Yang diukur | Hasil |
-|---|---|
-| Baris QFS ber-PPN | 4 |
-| Bisa dipisah **eksak** | **4 dari 4** |
-| Baris negosiasi tertelusuri | 4 · renewal 0 · services 3 · TRX 3 |
-| Σ dasar + Σ PPN | 142.000.000 + 15.620.000 = **157.620.000** |
-| Nilai lama | **157.620.000** — tidak bergeser satu sen |
-| TRX `[Lunas]` yang terdampak | 2, keduanya nilai tagihnya **tetap** |
+Jadi §3e sekarang punya **dua pagar** — telusur lewat `services` yang
+benar-benar cocok, DAN hasil pisahnya wajib 11% tepat. Ia ditinggalkan utuh:
+nilai tercatat = ditagih = dibayar, ketiganya tetap benar.
 
 ---
 
@@ -237,20 +272,22 @@ SELECT pengakuan, count(*) FROM terkini WHERE active GROUP BY pengakuan;
 
 ### Verifikasi migrasi 191 sesudah apply — angka yang HARUS keluar
 
-Uji-keringnya sudah dijalankan terhadap live 2026-09-08 (read-only) dan hasilnya
-di §4.5. Sesudah apply, angka ini harus sama:
-
 ```sql
-select sum(total_agreed_value) as dasar, sum(total_ppn) as ppn,
-       sum(total_agreed_value + total_ppn) as ditagih
-  from transactions where total_ppn > 0;
---  dasar 137.000.000 | ppn 15.070.000 | ditagih 152.070.000
---  (tiga TRX: 0008, 0009, 0010 — dua di antaranya sudah [Lunas])
+select count(*)                                as trx_ber_ppn,   -- 3
+       sum(total_agreed_value)                 as dasar,          -- 137.000.000
+       sum(total_ppn)                          as ppn,            -- 15.070.000
+       sum(total_agreed_value + total_ppn)     as ditagih,        -- 152.070.000
+       bool_and(round(total_agreed_value * 0.11, 0) = total_ppn) as semua_11_persen  -- true
+  from transactions where include_ppn;
 ```
 
-Yang WAJIB dicek: **`ditagih` harus sama persis dengan `total_agreed_value`
-sebelum migrasi**. Kalau bergeser, transaksi yang sudah dibayar tidak lagi cocok
-dengan uang yang masuk — hentikan dan jangan lanjutkan.
+Yang WAJIB dicek: **`ditagih` harus sama persis dengan Σ `total_agreed_value`
+tiga TRX itu SEBELUM migrasi** (152.070.000). Kalau bergeser, transaksi yang
+sudah dibayar tidak lagi cocok dengan uang yang masuk — **hentikan, jangan
+lanjutkan.**
+
+Dan pastikan **`TRX-202609-0002` TIDAK ikut** (`include_ppn = false`,
+`total_ppn = 0`) — itu disengaja, alasannya §4.3.
 
 Dan: **migrasi yang SUDAH di-apply ke live tidak boleh disunting.** Perbaikan
 atasnya = migrasi BARU (kelas drift yang O38 lahir darinya).
@@ -297,9 +334,15 @@ cd ../web-client-portal && npx vitest run
   keluarannya DIBACA.** Tanpa `node_modules`, `tsc` membanjiri keluaran dengan
   *"Cannot find module …"* dan galat sungguhan tenggelam. `core-engines`, `api`,
   DAN `db-and-migrations` ketiganya mengompilasi `@cdps/core`.
-- ⚠️ **Jalankan `packages/domain` SENDIRIAN sesudah `db-rebuild`.** Terbukti lagi
-  sesi ini: tanpa rebuild, 2 tes merah palsu; sesudah rebuild, 1996 hijau.
-  **Rebuild dulu, baru cari bug.**
+- ⚠️ **Jalankan `packages/domain` SENDIRIAN sesudah `db-rebuild`, dan JANGAN
+  pernah menjalankan dua `db-rebuild` bersamaan.** Terbukti dua kali sesi ini.
+  Yang kedua paling mahal: dua job latar sempat me-rebuild DB sementara suite
+  berjalan, dan hasilnya **1055 tes merah** — angka yang terlihat seperti
+  bencana dan sepenuhnya palsu. Dijalankan ulang berurutan: 2010 hijau.
+  **Rebuild dulu, sendirian, baru cari bug.**
+- ⚠️ **Postgres mati sendiri DUA KALI sesi ini**, dan salah satunya membuat
+  `db-rebuild` gagal dengan pesan yang terlihat seperti cacat migrasi. `pg_isready`
+  dulu — `service postgresql start` menyelesaikannya, migrasinya tidak apa-apa.
 - **Postgres bisa mati sendiri di container ini** — `pg_isready` dulu sebelum
   menyimpulkan apa pun dari puluhan FAIL.
 - `audit_log` menolak DELETE; `client_pitch_consents` menolak UPDATE dan DELETE.

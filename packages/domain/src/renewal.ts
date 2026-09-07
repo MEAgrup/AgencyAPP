@@ -62,6 +62,7 @@ import {
   MAX_SERVICES,
   NotClosableError,
   NotFoundError,
+  computePPN,
   resolveProposalLine,
   resolvePIC,
   SALES_DIVISION,
@@ -290,10 +291,10 @@ async function writeRenewalProposal(
     }
     seen.add(id);
   }
-  const resolved: { line: RenewalLine; price: string; rule: string; ppn: string }[] = [];
+  const resolved: { line: RenewalLine; price: string; rule: string }[] = [];
   for (const l of lines) {
-    const { price, rule, ppn } = await resolveProposalLine(tx, l, now);
-    resolved.push({ line: l, price, rule, ppn });
+    const { price, rule } = await resolveProposalLine(tx, l, now);
+    resolved.push({ line: l, price, rule });
   }
 
   const version = await nextVersion(tx, renewalRequestId);
@@ -302,12 +303,11 @@ async function writeRenewalProposal(
     values (${renewalRequestId}, ${version}, ${actor.employeeId}, ${actor.employeeId})
     returning id`;
   const proposalId = proposalRows[0].id;
-  for (const { line: l, price, rule, ppn } of resolved) {
+  for (const { line: l, price, rule } of resolved) {
     await tx`
       insert into renewal_proposal_lines
-        (proposal_id, master_service_id, proposed_price, commission_rule, ppn, payment_terms, created_by)
-      values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule}, ${ppn},
-              ${nullString(l.paymentTerms)}, ${actor.employeeId})`;
+        (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms, created_by)
+      values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule}, ${nullString(l.paymentTerms)}, ${actor.employeeId})`;
   }
   await ex.audit.insertAudit({
     entityType: ENTITY, entityId: renewalRequestId, actorEmployeeId: actor.employeeId,
@@ -324,16 +324,16 @@ async function writeRenewalProposal(
 async function loadLatestLines(
   sql: Queryable,
   renewalRequestId: string,
-): Promise<{ masterServiceId: string; proposedPrice: string; ppn: string; commissionRule: string }[]> {
-  const rows = await sql<{ master_service_id: string; proposed_price: string; ppn: string; commission_rule: string }[]>`
-    select l.master_service_id, l.proposed_price, l.ppn, l.commission_rule
+): Promise<{ masterServiceId: string; proposedPrice: string; commissionRule: string }[]> {
+  const rows = await sql<{ master_service_id: string; proposed_price: string; commission_rule: string }[]>`
+    select l.master_service_id, l.proposed_price, l.commission_rule
       from renewal_proposal_lines l
       join renewal_proposals p on p.id = l.proposal_id
      where p.renewal_request_id = ${renewalRequestId}
        and p.version_no = (select max(version_no) from renewal_proposals where renewal_request_id = ${renewalRequestId})
      order by l.id`;
   return rows.map((r) => ({
-    masterServiceId: r.master_service_id, proposedPrice: r.proposed_price, ppn: r.ppn,
+    masterServiceId: r.master_service_id, proposedPrice: r.proposed_price,
     commissionRule: r.commission_rule,
   }));
 }
@@ -502,6 +502,8 @@ export interface ExecuteRenewalInput {
   parties: ClosingParties;
   paymentScheme: string;
   installments?: InstallmentInput[];
+  /** "Include PPN" for this renewal's invoice — same rule as `sales.ClosingInput`. */
+  includePPN?: boolean;
 }
 
 export interface ExecuteRenewalResult {
@@ -563,11 +565,11 @@ export async function executeRenewal(
     // in its own column. The instalment schedule is validated against the BILLED
     // figure — base + PPN — because that is what the client pays.
     let total = 0n;
-    let totalPPN = 0n;
     for (const l of lines) {
       total += money.parse(l.proposedPrice);
-      totalPPN += money.parse(l.ppn);
     }
+    const includePPN = input.includePPN ?? false;
+    const totalPPN = computePPN(total, includePPN);
     validateScheduleTotal({ parties: input.parties, paymentScheme: input.paymentScheme, installments: input.installments }, total + totalPPN);
 
     const primary = input.parties.primarySalespersonId;
@@ -599,21 +601,22 @@ export async function executeRenewal(
       await tx`
         insert into services
           (id, client_id, contract_id, master_service_id, master_version_no, name, standard_price,
-           commission_rule, status, requires_strategy_plan, plan_tier, ppn, created_by)
+           commission_rule, status, requires_strategy_plan, plan_tier, created_by)
         values
           (${svcId}, ${row.client_id}, ${contractId}, ${l.masterServiceId}, ${view.versionNo}, ${view.name}, ${l.proposedPrice},
            ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING}, ${view.requiresStrategyPlan}, ${view.planTier},
-           ${l.ppn}, ${actor.employeeId})`;
+           ${actor.employeeId})`;
     }
 
     // 3) Transaction (TRX-) born awaiting Finance verification.
     const trxId = await ex.ident.identNext('TRX', now);
     await tx`
       insert into transactions
-        (id, client_id, payment_intent_scheme, total_agreed_value, total_ppn, payment_status, created_by)
+        (id, client_id, payment_intent_scheme, total_agreed_value, include_ppn, total_ppn,
+         payment_status, created_by)
       values
-        (${trxId}, ${row.client_id}, ${input.paymentScheme}, ${money.decimal(total)}, ${money.decimal(totalPPN)},
-         ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
+        (${trxId}, ${row.client_id}, ${input.paymentScheme}, ${money.decimal(total)}, ${includePPN},
+         ${money.decimal(totalPPN)}, ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
 
     // 4) Installments (INST-) for scheduled schemes.
     const installments = input.installments ?? [];
