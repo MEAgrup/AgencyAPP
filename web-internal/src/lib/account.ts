@@ -167,6 +167,16 @@ export interface ServiceQueueRow {
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
+  /**
+   * A-3 — the STRG- (M6A) leg of the Plan gate. `strategy_*` is the retired STR-
+   * world (`strategy_plans`); the decided delivery path writes `strategi` and
+   * never writes a `strategy_plans` row, so a Service on it arrives here with
+   * `strategy_id === null` and an `Aktif` Strategi. Reading only `strategy_id`
+   * is what made the queue offer "Buat Strategy & Plan" for a Service whose
+   * Strategi was already approved.
+   */
+  strategi_id: string | null;
+  strategi_status: string | null;
   brief_count: number;
   /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
   client_target_gmv: string | null;
@@ -419,6 +429,40 @@ export interface OnboardingStep {
   label: string;
 }
 
+/**
+ * The STRG- (M6A) statuses this queue reasons about. Mirrors
+ * `packages/domain/src/strategi.ts`; only the four a Service still in onboarding
+ * can be sitting on are named — `Diarsipkan` / `Kedaluwarsa` fall through to the
+ * default below on purpose (an archived version means a newer one is `Aktif`, and
+ * an expired one means the agreement is over, neither of which is a step the AM
+ * takes on THIS screen).
+ */
+export const STRATEGI_DRAFT = 'Draft';
+export const STRATEGI_DRAFT_REVISI = 'Draft Revisi';
+export const STRATEGI_DIAJUKAN = 'Diajukan';
+export const STRATEGI_AKTIF = 'Aktif';
+
+/**
+ * A-3 — what the AM does next on a Service that is on the STRG- path. Same shape
+ * of answer as the STR- ladder above it, one status at a time, so the two paths
+ * never share a branch that would have to know both vocabularies.
+ */
+function strategiOnboardingStep(status: string | null): OnboardingStep {
+  if (status === STRATEGI_AKTIF) {
+    // `approveStrategi` drives the Service to [Strategy Approved] in the same
+    // transaction now, so this is normally reached only by a row from before the
+    // backfill — and the honest answer for it is still "buatkan Brief".
+    return { kind: 'create_brief', label: 'Buat Brief' };
+  }
+  if (status === STRATEGI_DIAJUKAN) {
+    return { kind: 'await_approval', label: 'Menunggu persetujuan SPV' };
+  }
+  if (status === STRATEGI_DRAFT || status === STRATEGI_DRAFT_REVISI) {
+    return { kind: 'submit_strategy', label: 'Lanjutkan & ajukan Strategy' };
+  }
+  return { kind: 'create_brief', label: 'Buat Brief' };
+}
+
 export function nextOnboardingStep(s: ServiceQueueRow): OnboardingStep {
   if (s.status === SERVICE_VOIDED) {
     return { kind: 'none', label: 'Service di-void' };
@@ -435,6 +479,15 @@ export function nextOnboardingStep(s: ServiceQueueRow): OnboardingStep {
     // Plan-gated (§4): the Plan must exist, be submitted, and be approved before
     // any Brief may be created (§4 Rule 5).
     if (s.requires_strategy_plan) {
+      // A-3 — the DECIDED path first. A Service whose agreement carries a
+      // Strategi (STRG-) is on the M6A path, and its `strategy_*` fields are null
+      // by construction, not by omission: the M6A world never writes a
+      // `strategy_plans` row. Asking the STR- questions of it produced the
+      // complaint — "Buat Strategy & Plan" offered forever, and the form behind
+      // that button rejecting with MSG_STRATEGI_EXISTS.
+      if (s.strategi_id !== null) {
+        return strategiOnboardingStep(s.strategi_status);
+      }
       if (s.strategy_id === null) {
         return { kind: 'draft_strategy', label: 'Buat Strategy & Plan' };
       }

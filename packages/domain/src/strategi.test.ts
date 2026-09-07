@@ -21,11 +21,23 @@
  * ids unique per RUN — a fixed id would make "exactly these events" assertions
  * depend on run history (the trap HANDOFF_M6ABC_SESI1 §5 warns about).
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { ident, interview as iv, permission, visibility } from '@cdps/core';
 import * as interview from './interview';
 import { createClient, type Sql } from '@cdps/db';
-import { ALLOWED_DIVISIONS, ConflictError, ForbiddenError, ValidationError } from './account';
+import {
+  ALLOWED_DIVISIONS,
+  ConflictError,
+  ForbiddenError,
+  STRATEGI_STATUS_AKTIF,
+  ValidationError,
+  createBrief,
+  guardBriefCreation,
+  type BriefInput,
+} from './account';
 import { decideGate, DECISION_TANPA_PLAN } from './plangate';
 import {
   MSG_AKSES_BLOCKER_DATE,
@@ -284,6 +296,9 @@ afterEach(async () => {
   // service_plan_gate (seeded by the Rule 1a tests, which call `decideGate`
   // directly) has an FK on `services` — go before it, same as plangate.test.ts.
   await sql`delete from service_plan_gate where created_by like 'ZZ-%'`;
+  // Briefs born by the A-3 seam tests (`account.createBrief` over a Service seeded
+  // here) — they hold an FK on `services`, so they go first.
+  await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -4627,5 +4642,188 @@ describeDb('syncAiOptimizerSkuRevision (M17 §4 / LT-54)', () => {
       { sku: 'SKU-B', field: 'deskripsi', after: 'x', before: null },
     ]);
     expect(crossClient[0].status).toBe('ditunda');
+  });
+});
+
+/**
+ * A-3 — the seam between an approved Strategi (STRG-) and the Brief gate.
+ *
+ * §6 of the plan asks for a SEAM test and says why, and this cluster is the
+ * reason: the fix has two halves in two modules, and each half is green on its
+ * own while the seam between them stays cut. `approveStrategi` moving the Service
+ * proves nothing if `resolveBriefStrategy` still demands a `strategy_plans` row
+ * three lines further down — the AM meets the identical
+ * `[layanan ini wajib memiliki Strategy & Plan yang disetujui sebelum dibuatkan
+ * Brief]` and nothing has been fixed for them.
+ *
+ * So every test here calls BOTH sides for real: approve the Strategi through its
+ * own function, then create a Brief through `account.createBrief`, over one
+ * database.
+ */
+describeDb('A-3 — jahitan STRG- Aktif → gerbang Brief', () => {
+  const BRIEF: BriefInput = {
+    title: 'Konten Lebaran',
+    assignedDivision: 'Creative',
+    deliverableType: 'Product Video',
+    quantityTarget: 3,
+    dueDate: '2026-10-15',
+    priority: 'High',
+  };
+
+  const statusOf = async (serviceId: string) =>
+    (await sql<{ status: string }[]>`select status from services where id = ${serviceId}`)[0].status;
+
+  async function seedAktif(): Promise<{ serviceId: string; strategiId: string }> {
+    const seed = await seedSubmittable();
+    await submitStrategi(sql, am(), seed.strategiId);
+    await approveStrategi(sql, spv(), seed.strategiId);
+    return seed;
+  }
+
+  it('drives the Service to [Strategy Approved] in the approval transaction', async () => {
+    const { serviceId } = await seedSubmittable().then(async (seed) => {
+      await submitStrategi(sql, am(), seed.strategiId);
+      expect(await statusOf(seed.serviceId)).toBe('[Awaiting Onboarding]');
+      await approveStrategi(sql, spv(), seed.strategiId);
+      return seed;
+    });
+    expect(await statusOf(serviceId)).toBe('[Strategy Approved]');
+  });
+
+  /** THE seam test §6 asks for: approve → create Brief → NOT a 409. */
+  it('lets the AM create a Brief right after approval — no MSG_STRATEGY_REQUIRED', async () => {
+    const { serviceId } = await seedAktif();
+    const brief = await createBrief(sql, am(), serviceId, BRIEF);
+    expect(brief.id).toMatch(/^BRF-/);
+    expect(brief.assignedDivision).toBe('Creative');
+    // Neither link: `strategy_id` points at `strategy_plans` (the STR- world,
+    // which M6A never writes) and `plan_row_id` belongs to a Brief inherited
+    // from a Plan row. Both NULL is the shape a Direct Brief already has.
+    expect(brief.strategyId).toBe('');
+    const row = await sql<{ strategy_id: string | null; plan_row_id: number | null }[]>`
+      select strategy_id, plan_row_id from briefs where id = ${brief.id}`;
+    expect(row[0].strategy_id).toBeNull();
+    expect(row[0].plan_row_id).toBeNull();
+    // …and the first Brief still advances the Service (§5 Flow 2).
+    expect(await statusOf(serviceId)).toBe('[Briefed]');
+  });
+
+  /**
+   * The pre-fix state, reconstructed: a Strategi already `Aktif` over a Service
+   * still sitting at `[Awaiting Onboarding]`. This is what every client approved
+   * BEFORE this commit looks like, and there is no "approve again" — an `Aktif`
+   * Strategi cannot return to `Diajukan` (STATE_MACHINES §6b). The raw UPDATE is
+   * legitimate HERE and nowhere else: it is the only way to rebuild history that
+   * the fixed code can no longer produce.
+   */
+  it('opens the gate as a SECOND wall when the status failed to move', async () => {
+    const { serviceId } = await seedAktif();
+    await sql`update services set status = '[Awaiting Onboarding]' where id = ${serviceId}`;
+    await expect(guardBriefCreation(sql, serviceId)).resolves.toBeUndefined();
+    const brief = await createBrief(sql, am(), serviceId, BRIEF);
+    expect(brief.id).toMatch(/^BRF-/);
+  });
+
+  /** …and the gate still CLOSES for a plan-gated Service with nothing approved. */
+  it('still rejects a plan-gated Service whose Strategi is only a draft', async () => {
+    const { serviceId, strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId); // Diajukan, not Aktif
+    await expect(guardBriefCreation(sql, serviceId)).rejects.toThrow(ConflictError);
+    await expect(createBrief(sql, am(), serviceId, BRIEF)).rejects.toThrow(ConflictError);
+  });
+
+  /**
+   * O57 put the Strategi on the AGREEMENT, so approval opens every Service under
+   * it. Picking one would leave its siblings in exactly the state this fixes.
+   */
+  it('opens every Service under the same agreement, not just one', async () => {
+    const { serviceId, strategiId } = await seedSubmittable();
+    seq += 1;
+    const siblingId = `ZZ-SVC-SIB-${RUN}-${seq}`;
+    const parent = await sql<{ client_id: string; contract_id: string; master_service_id: string; master_version_no: number }[]>`
+      select client_id, contract_id, master_service_id, master_version_no
+        from services where id = ${serviceId}`;
+    await sql`
+      insert into services
+        (id, client_id, master_service_id, master_version_no, name, standard_price,
+         commission_rule, status, requires_strategy_plan, plan_tier, contract_id, created_by)
+      values (${siblingId}, ${parent[0].client_id}, ${parent[0].master_service_id},
+              ${parent[0].master_version_no}, 'Layanan Kedua', '10000000.00', '10%',
+              '[Awaiting Onboarding]', true, 'plan_wajib', ${parent[0].contract_id}, 'ZZ-AM')`;
+
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+
+    expect(await statusOf(serviceId)).toBe('[Strategy Approved]');
+    expect(await statusOf(siblingId)).toBe('[Strategy Approved]');
+  });
+
+  /**
+   * Rule 13: version n+1 is approved while the Service has long since moved on.
+   * The Service edge has to be a no-op there, not an invalid transition — an
+   * invalid one would roll the whole approval back, and a revision would become
+   * impossible for every Service that had already been briefed.
+   */
+  it('is a no-op for a Service already past [Strategy Approved]', async () => {
+    const { serviceId, strategiId } = await seedAktif();
+    await createBrief(sql, am(), serviceId, BRIEF);
+    expect(await statusOf(serviceId)).toBe('[Briefed]');
+
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['stok_kosong'],
+      alasanRevisi: 'hero SKU habis',
+      asumsiGugur: ['A1'],
+    });
+    await submitStrategi(sql, am(), v2.id);
+    await approveStrategi(sql, spv(), v2.id);
+    expect(await statusOf(serviceId)).toBe('[Briefed]');
+  });
+
+  /**
+   * The backfill migration, run against the state it was written for. Executing
+   * the FILE rather than a copy of its query is the point: a backfill that has
+   * drifted from the migration on disk is a backfill nobody is running.
+   */
+  it('backfill migration 20260922100400 moves a legacy row, through sm_transition', async () => {
+    const { serviceId } = await seedAktif();
+    await sql`update services set status = '[Awaiting Onboarding]' where id = ${serviceId}`;
+    const before = await sql<{ n: string }[]>`
+      select count(*) as n from audit_log
+       where entity_type = 'service' and entity_id = ${serviceId}`;
+
+    const file = join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../../supabase/migrations/20260922100400_a3_backfill_service_strategy_approved.sql',
+    );
+    await sql.unsafe(readFileSync(file, 'utf8'));
+
+    expect(await statusOf(serviceId)).toBe('[Strategy Approved]');
+    // House rule #3: the move left an audit row. A raw UPDATE would have moved
+    // the status and left every duration metric derived from these timestamps
+    // reading "never onboarded".
+    const after = await sql<{ n: string }[]>`
+      select count(*) as n from audit_log
+       where entity_type = 'service' and entity_id = ${serviceId}`;
+    expect(Number(after[0].n)).toBe(Number(before[0].n) + 1);
+    const last = await sql<{ action: string; actor_employee_id: string }[]>`
+      select action, actor_employee_id from audit_log
+       where entity_type = 'service' and entity_id = ${serviceId}
+       order by id desc limit 1`;
+    expect(last[0].action).toBe('transition:[Awaiting Onboarding]->[Strategy Approved]');
+    expect(last[0].actor_employee_id).toBe('SISTEM');
+
+    // Idempotent: a second run finds no candidate and moves nothing.
+    await sql.unsafe(readFileSync(file, 'utf8'));
+    expect(await statusOf(serviceId)).toBe('[Strategy Approved]');
+  });
+
+  /**
+   * The one copy of a constant this module could not import (account.ts is
+   * imported BY strategi.ts, so the other direction would be a cycle). If the
+   * STRG- vocabulary is ever renamed, this fails instead of the gate silently
+   * matching nothing.
+   */
+  it('keeps account.STRATEGI_STATUS_AKTIF in step with strategi.STRATEGI_AKTIF', () => {
+    expect(STRATEGI_STATUS_AKTIF).toBe(STRATEGI_AKTIF);
   });
 });

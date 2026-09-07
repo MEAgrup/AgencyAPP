@@ -54,6 +54,7 @@ import {
   ForbiddenError,
   NotFoundError,
   ValidationError,
+  advanceServicesToStrategyApproved,
   type Actor,
 } from './account';
 import * as contract from './contract';
@@ -6986,6 +6987,15 @@ export async function approveStrategi(sql: Sql, actor: Actor, id: string): Promi
       tanggalMulaiSiklus: head.tanggalMulaiSiklus,
       durasiKontrakBulan: head.durasiKontrakBulan,
     });
+
+    // A-3 — the Service side of this approval, in the SAME transaction, exactly
+    // as the STR- path has done since M6 §4 Rule 3 (`account.approveStrategy`).
+    // Without it `services.status` never left `[Awaiting Onboarding]` on the
+    // decided delivery path and `guardBriefCreation` rejected every Brief with
+    // MSG_STRATEGY_REQUIRED while the AM was looking at an `Aktif` Strategi
+    // (Account #5). Idempotent per row, so approving a revision (Rule 13) over an
+    // already-briefed Service is a no-op, not a rolled-back approval.
+    await advanceServicesToStrategyApproved(tx, actor, head.contractId);
 
     return loadStrategiRow(tx, id);
   });

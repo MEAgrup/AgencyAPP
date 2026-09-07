@@ -45,6 +45,8 @@ function svc(over: Partial<ServiceQueueRow> = {}): ServiceQueueRow {
     assigned_am_id: 'EMP-0002',
     strategy_id: null,
     strategy_status: null,
+    strategi_id: null,
+    strategi_status: null,
     brief_count: 0,
     client_target_gmv: '20000000.00',
     released_to_account_at: '2026-08-01T00:00:00Z',
@@ -101,6 +103,47 @@ describe('Direct path (§5 Rule 3)', () => {
     // Pinned No, overridden to Yes → plan-gated.
     const gated = svc({ requires_strategy_plan: true, pinned_requires_strategy_plan: false, overridden: true });
     expect(nextOnboardingStep(gated).kind).toBe('draft_strategy');
+  });
+});
+
+/**
+ * A-3 — the STRG- (M6A) leg. `strategy_*` describes the retired STR- world; the
+ * decided delivery path writes `strategi` and never writes a `strategy_plans`
+ * row, so a Service on it arrives with `strategy_id === null`. Reading only that
+ * is what made the queue offer "Buat Strategy & Plan" to an AM whose Strategi was
+ * already approved — and the form behind that button rejects with
+ * MSG_STRATEGI_EXISTS, so the AM had nowhere to go.
+ */
+describe('the STRG- path (A-3)', () => {
+  const strg = (status: string) =>
+    svc({ strategi_id: 'STRG-202609-0001', strategi_status: status });
+
+  it('offers the Brief once the Strategi is Aktif — never "Buat Strategy & Plan"', () => {
+    const step = nextOnboardingStep(strg('Aktif'));
+    expect(step.kind).toBe('create_brief');
+    expect(step.label).toBe('Buat Brief');
+  });
+
+  it('waits on the SPV while the Strategi is Diajukan', () => {
+    expect(nextOnboardingStep(strg('Diajukan')).kind).toBe('await_approval');
+  });
+
+  it('asks the AM to finish and submit a Draft / Draft Revisi', () => {
+    expect(nextOnboardingStep(strg('Draft')).kind).toBe('submit_strategy');
+    expect(nextOnboardingStep(strg('Draft Revisi')).kind).toBe('submit_strategy');
+  });
+
+  it('leaves the STR- ladder untouched when there is no Strategi', () => {
+    // The regression this pair guards: making the new branch unconditional would
+    // swallow the whole §4 ladder for every Service that is genuinely on STR-.
+    expect(nextOnboardingStep(svc()).kind).toBe('draft_strategy');
+    expect(nextOnboardingStep(svc({ strategy_id: 'STR-1', strategy_status: STRATEGY_DRAFTING })).kind)
+      .toBe('submit_strategy');
+  });
+
+  it('counts as onboarding work, so the queue keeps showing it', () => {
+    expect(needsOnboarding(strg('Aktif'))).toBe(true);
+    expect(needsOnboarding(strg('Diajukan'))).toBe(true);
   });
 });
 

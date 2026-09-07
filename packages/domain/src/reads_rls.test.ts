@@ -889,3 +889,88 @@ describeDb('read models under RLS (O37)', () => {
     }
   });
 });
+
+/**
+ * A-3 — the STRG- columns on the Service queue, read under REAL RLS.
+ *
+ * The trap this is written against is the one that has now bitten three times in
+ * this repo (O52, B-D9): the TS predicate lets the actor through, RLS empties the
+ * joined rows, and the page answers 404 or renders a column that is silently
+ * always null. The domain suite cannot catch it — that connection is BYPASSRLS.
+ *
+ * `strategi_select` has an AM arm (`private.jwt_is_am_of_contract`) and an Account
+ * lead arm, which is exactly the audience `serviceQueue` gates on; this asserts
+ * that rather than assuming it. And a LATERAL, unlike an inner join, cannot drop
+ * the Service row — so the failure mode here would be a NULL column, not an empty
+ * page, which is the quieter and more expensive of the two.
+ */
+describeDb('A-3 — kolom STRG- pada antrean Service di bawah RLS', () => {
+  const CLI = 'CLI-ZZR-0930';
+  const CTR = 'CTR-ZZR-0930';
+  const SVC = 'SVC-ZZR-0930';
+  const STRG = 'STRG-ZZR-0930';
+  const AM = 'ZZR-AM930';
+  const OTHER_AM = 'ZZR-AM931';
+
+  async function seedStrg(): Promise<void> {
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id,
+                           released_to_account_at, created_by)
+      values (${CLI}, 'RLS 0930 Fixture', 'Ibu RLS', 'Jakarta', 'Fashion', 'https://shopee/zzr930',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${AM}, now(), ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, created_by)
+      values (${CTR}, ${CLI}, 6, '2026-08-12', '2027-02-11', ${AM})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, requires_strategy_plan, plan_tier,
+                            contract_id, created_by)
+      values (${SVC}, ${CLI}, 'MSV-ZZR-0930', 1, 'rls 0930 service', '9000000.00',
+              '10% of standard price', '[Strategy Approved]', true, 'plan_wajib', ${CTR}, ${AM})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into strategi (id, contract_id, client_id, versi_no, status, created_by)
+      values (${STRG}, ${CTR}, ${CLI}, 1, 'Aktif', ${AM})
+      on conflict (id) do nothing`;
+  }
+
+  afterAll(async () => {
+    if (!sql) return;
+    await sql`truncate strategi_version`;
+    await sql`delete from strategi where id = ${STRG}`;
+    await sql`delete from services where id = ${SVC}`;
+    await sql`delete from contracts where id = ${CTR}`;
+    await sql`delete from clients where id = ${CLI}`;
+  });
+
+  it('reaches the owning AM — strategi_id/status are not silently null', async () => {
+    await seedStrg();
+    const rows = await withClaims(
+      sql,
+      claims({ employeeId: AM, division: 'Account', level: 'staff' }),
+      (tx) => serviceQueue(tx, actor(AM, 'Account', 'staff')),
+    );
+    const row = rows.find((r) => r.serviceId === SVC);
+    expect(row, 'the AM cannot even see their own Service').toBeDefined();
+    expect(row!.strategiId).toBe(STRG);
+    expect(row!.strategiStatus).toBe('Aktif');
+    // The STR- pair stays null — that is the whole reason the second pair exists.
+    expect(row!.strategyId).toBeNull();
+  });
+
+  it('reaches an Account lead too — the role §3 Rule 1 puts in charge', async () => {
+    await seedStrg();
+    const rows = await withClaims(
+      sql,
+      claims({ employeeId: OTHER_AM, division: 'Account', level: 'lead' }),
+      (tx) => serviceQueue(tx, actor(OTHER_AM, 'Account', 'lead')),
+    );
+    const row = rows.find((r) => r.serviceId === SVC);
+    expect(row).toBeDefined();
+    expect(row!.strategiId).toBe(STRG);
+    expect(row!.strategiStatus).toBe('Aktif');
+  });
+});

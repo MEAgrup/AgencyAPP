@@ -119,7 +119,7 @@ All else blocked: `[transisi status tidak diizinkan]`.
 |---|---|---|---|
 | `Draft` | `Diajukan` | AM pemilik (Direksi lolos) | Gerbang kelengkapan berjalan di transaksi yang SAMA (Rules 3/5/8/9/17 + minimum D-8/H-1); `diajukan_pada` dicatat |
 | `Draft Revisi` | `Diajukan` | AM pemilik | Sama, untuk versi n+1 |
-| `Diajukan` | `Aktif` | SPV / Head Account (requireLead) | Rule 12. Kalau ada `versi_sebelumnya_id` yang masih `Aktif`, versi itu diarsipkan di transaksi yang sama (Rule 13) |
+| `Diajukan` | `Aktif` | SPV / Head Account (requireLead) | Rule 12. Kalau ada `versi_sebelumnya_id` yang masih `Aktif`, versi itu diarsipkan di transaksi yang sama (Rule 13). **A-3:** di transaksi yang sama juga, SETIAP Service di bawah `contract_id` yang masih `[Awaiting Onboarding]` didorong ke `[Strategy Approved]` (`account.advanceServicesToStrategyApproved`) — lewat kontrak, bukan lewat satu Service, karena O57 memindahkan Strategi ke `contract_id`. Idempoten per baris: menyetujui revisi atas Service yang sudah `[Briefed]` adalah no-op, bukan edge tak sah |
 | `Diajukan` | `Draft` | SPV / Head Account (requireLead) | Dikembalikan, catatan WAJIB, nomor versi TIDAK berubah (Rule 12) |
 | `Diajukan` | `Draft Revisi` | SPV / Head Account (requireLead) | Idem untuk versi >1 — `sm_edges` tidak bisa melihat asal sebuah `Diajukan`, jadi domain yang memilih tujuan dari `versi_no` |
 | `Aktif` | `Kedaluwarsa` | AM pemilik / SPV | Kontrak berakhir (Rule 14). Terminal |
@@ -129,7 +129,7 @@ All else blocked: `[transisi status tidak diizinkan]`.
 
 - **Satu versi = satu baris.** §7 PRD menuliskan `Aktif → Draft Revisi`, yang bertentangan dengan Rule 13 di dokumen yang sama ("version n stays Aktif until n+1 is approved"). Rule 13 yang dipakai; edge itu TIDAK didaftarkan. Dicatat di `DECISIONS.md` 2026-08-06.
 - Rule 2 ditegakkan index parsial `uq_strategi_aktif_per_service`, bukan oleh kode.
-- **Belum membuka gerbang Brief.** `account.guardBriefCreation` masih membaca entitas M6 §4 (`STR-`) yang dipakai halaman Service hari ini; penyambungannya ikut penggantian form (backlog A-05…A-09).
+- **Gerbang Brief SUDAH tersambung (A-3, 2026-09-07).** Sebelumnya `account.guardBriefCreation` hanya membaca entitas M6 §4 (`STR-`), jadi `services.status` tidak pernah bergerak di jalur ini dan setiap Brief ditolak `[layanan ini wajib memiliki Strategy & Plan yang disetujui sebelum dibuatkan Brief]` padahal STRG--nya `Aktif` (keluhan Account #5). Sekarang tiga hal: (1) `approveStrategi` mendorong Service-nya di transaksi yang sama (baris `Diajukan → Aktif` di atas); (2) `guardBriefCreation` menerima STRG- `Aktif` sebagai dinding kedua, untuk baris yang statusnya gagal bergerak; (3) `resolveBriefStrategy` mengizinkan Brief lahir TANPA `strategy_id` di jalur ini — `strategy_id` menunjuk `strategy_plans`, tabel yang dunia M6A tidak pernah tulis, dan `plan_row_id` milik Brief warisan Plan. Keduanya NULL adalah bentuk yang sudah dipakai Brief Direct. Backfill baris lama: migrasi `20260922100400`, lewat `sm_transition` beraktor `SISTEM`, bukan `UPDATE` mentah.
 - Empat event notifikasi M6A belum diemisikan — katalog v2 masih menunggu tanda tangan (O55). Transisinya tetap tercatat penuh di `audit_log` lewat `sm_transition`.
 
 ## 6c. Vendor `VND-` (M6A §7) — master record bersama

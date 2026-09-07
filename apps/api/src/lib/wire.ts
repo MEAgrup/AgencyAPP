@@ -359,6 +359,15 @@ export interface ServiceQueueRowWire {
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
+  /**
+   * A-3 — the STRG- (M6A) leg, sent for the same reason and with the same
+   * explicit-null discipline as `strategy_id`. A Service on the decided delivery
+   * path has an `Aktif` Strategi and NO `strategy_plans` row; a page reading only
+   * `strategy_id` offers "Buat Strategy & Plan" for a Service whose Strategi is
+   * already approved.
+   */
+  strategi_id: string | null;
+  strategi_status: string | null;
   brief_count: number;
   /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
   client_target_gmv: string | null;
@@ -382,6 +391,8 @@ export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueR
     assigned_am_id: r.assignedAmId,
     strategy_id: r.strategyId,
     strategy_status: r.strategyStatus,
+    strategi_id: r.strategiId,
+    strategi_status: r.strategiStatus,
     brief_count: r.briefCount,
     client_target_gmv: r.clientTargetGmv,
     released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,

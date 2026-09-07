@@ -360,6 +360,15 @@ export const STRATEGY_STATUS_APPROVED = '[Strategy Approved]';
 const SERVICE_STATUS_AWAITING_ONBOARDING = '[Awaiting Onboarding]';
 const SERVICE_STATUS_STRATEGY_APPROVED = '[Strategy Approved]';
 
+/**
+ * The one STRG- state this module needs (A-3). Declared here rather than
+ * imported from `strategi.ts`: that module imports THIS one, so the import would
+ * be a cycle. `strategi.STRATEGI_AKTIF` remains the definition; a domain test
+ * asserts the two spellings are the same string, so a rename cannot leave this
+ * copy pointing at a state that no longer exists.
+ */
+export const STRATEGI_STATUS_AKTIF = 'Aktif';
+
 /** State-machine names (mirror the SQL seed / Go config.go). */
 const MACHINE_STRATEGY_PLAN = 'strategy_plan';
 const MACHINE_SERVICE = 'service';
@@ -1204,6 +1213,16 @@ export interface ServiceQueueRow {
   assignedAmId: string | null;
   strategyId: string | null;
   strategyStatus: string | null;
+  /**
+   * A-3 — the STRG- (M6A) leg of the same question `strategyId`/`strategyStatus`
+   * answer for STR-. Two worlds, two columns: a Service on the decided delivery
+   * path has an `Aktif` Strategi and NO `strategy_plans` row, so a UI that only
+   * reads `strategyId` shows "Buat Strategy & Plan" for a Service whose Strategi
+   * is already approved — and sends the AM to a form that refuses to open
+   * (MSG_STRATEGI_EXISTS). Null when the Service's agreement carries none.
+   */
+  strategiId: string | null;
+  strategiStatus: string | null;
   briefCount: number;
   /** the client's target GMV — the anchor + ±20% baseline for a new Strategy (QA revisi). */
   clientTargetGmv: string | null;
@@ -1224,6 +1243,8 @@ interface ServiceQueueDbRow {
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
+  strategi_id: string | null;
+  strategi_status: string | null;
   brief_count: string;
   client_target_gmv: string | null;
   released_to_account_at: Date | null;
@@ -1250,6 +1271,8 @@ function rowToServiceQueue(r: ServiceQueueDbRow): ServiceQueueRow {
     assignedAmId: r.assigned_am_id,
     strategyId: r.strategy_id,
     strategyStatus: r.strategy_status,
+    strategiId: r.strategi_id,
+    strategiStatus: r.strategi_status,
     briefCount: Number(r.brief_count),
     clientTargetGmv: numOrNull(r.client_target_gmv),
     releasedToAccountAt: r.released_to_account_at,
@@ -1263,6 +1286,13 @@ function serviceQueueCols(sql: Queryable) {
     (select g.keputusan_am from service_plan_gate g where g.service_id = sv.id) as gate_decision,
     c.assigned_am_id,
     sp.id as strategy_id, sp.status as strategy_status,
+    -- A-3 — the STRG- leg. Through contract_id, because O57 moved the Strategi off
+    -- service_id; a Service that was never grouped has contract_id NULL and
+    -- matches nothing. Aktif wins over an in-flight draft so a revision (Rule 13,
+    -- version n+1 opened while n is still live) cannot make an already approved
+    -- Service look un-approved. LATERAL, not a join, so a second version can
+    -- never duplicate the Service row.
+    stg.id as strategi_id, stg.status as strategi_status,
     (select count(*) from briefs b where b.service_id = sv.id) as brief_count,
     c.target_gmv as client_target_gmv,
     c.released_to_account_at`;
@@ -1292,6 +1322,12 @@ export async function serviceQueue(sql: Queryable, actor: Actor): Promise<Servic
         from services sv
         join clients c on c.id = sv.client_id
         left join strategy_plans sp on sp.service_id = sv.id
+        left join lateral (
+          select st.id, st.status from strategi st
+           where st.contract_id = sv.contract_id
+           order by (st.status = ${STRATEGI_STATUS_AKTIF}) desc, st.versi_no desc
+           limit 1
+        ) stg on true
        where c.released_to_account_at is not null
        order by c.released_to_account_at asc, sv.id asc`;
   } else if (actor.role.division === ACCOUNT_DIVISION && actor.role.level === permission.LevelStaff) {
@@ -1300,6 +1336,12 @@ export async function serviceQueue(sql: Queryable, actor: Actor): Promise<Servic
         from services sv
         join clients c on c.id = sv.client_id
         left join strategy_plans sp on sp.service_id = sv.id
+        left join lateral (
+          select st.id, st.status from strategi st
+           where st.contract_id = sv.contract_id
+           order by (st.status = ${STRATEGI_STATUS_AKTIF}) desc, st.versi_no desc
+           limit 1
+        ) stg on true
        where c.assigned_am_id = ${actor.employeeId}
        order by c.released_to_account_at asc, sv.id asc`;
   } else {
@@ -1332,6 +1374,12 @@ export async function getService(sql: Queryable, actor: Actor, serviceId: string
       from services sv
       join clients c on c.id = sv.client_id
       left join strategy_plans sp on sp.service_id = sv.id
+      left join lateral (
+        select st.id, st.status from strategi st
+         where st.contract_id = sv.contract_id
+         order by (st.status = ${STRATEGI_STATUS_AKTIF}) desc, st.versi_no desc
+         limit 1
+      ) stg on true
      where sv.id = ${serviceId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_SERVICE_NOT_FOUND);
@@ -1344,12 +1392,45 @@ export async function getService(sql: Queryable, actor: Actor, serviceId: string
 }
 
 /**
+ * hasActiveStrategi answers "does the DECIDED delivery path (STRG-, M6A) already
+ * hold an approved Strategi for this Service?" — through the agreement, because
+ * O57 moved the Strategi off `service_id` and onto `contract_id`. A Service that
+ * was never grouped into a Contract (`contract_id` NULL) can have none, and says
+ * so without a join that would match every ungrouped Service to every other.
+ *
+ * A-3: this is the seam. `strategy_plans` (STR-, M6 §4) and `strategi` (STRG-,
+ * M6A) are two worlds, and the Brief gate only ever knew the first one — which
+ * is why an AM whose STRG- was `Aktif` still met
+ * MSG_STRATEGY_REQUIRED. Kept as ONE query used by both halves of the gate
+ * (`guardBriefCreation` and `resolveBriefStrategy`), so the two cannot disagree
+ * about whether the STRG- path is open.
+ */
+export async function hasActiveStrategi(sql: Queryable, serviceId: string): Promise<boolean> {
+  const rows = await sql<{ ada: boolean }[]>`
+    select exists (
+      select 1
+        from strategi s
+        join services sv on sv.contract_id = s.contract_id
+       where sv.id = ${serviceId} and s.status = ${STRATEGI_STATUS_AKTIF}
+    ) as ada`;
+  return rows[0]?.ada === true;
+}
+
+/**
  * guardBriefCreation is the §6 data-dependent guard the Brief-creation cluster
  * must call BEFORE driving a Service's [Awaiting Onboarding] → [Briefed] edge. A
  * plan-gated Service still at [Awaiting Onboarding] has not cleared its Strategy
  * gate, so Brief creation is rejected (ConflictError, MSG_STRATEGY_REQUIRED).
  * Direct Services (flag = No), or plan-gated Services already past [Strategy
  * Approved], pass. A missing Service is NotFoundError.
+ *
+ * A-3 — the STRG- (M6A) path opens the gate too. `approveStrategi` now drives the
+ * Service edge in its own transaction, so a Service on that path is normally
+ * already `[Strategy Approved]` and never reaches the check below. The STRG-
+ * lookup stays as the SECOND wall, for the rows that predate the backfill
+ * (migration `20260922100400`) and for any future path that approves a Strategi
+ * without moving the Service: a status that failed to move must not be able to
+ * silently re-close a gate the agreement has already opened.
  */
 export async function guardBriefCreation(sql: Queryable, serviceId: string): Promise<void> {
   const rows = await sql<
@@ -1390,7 +1471,8 @@ export async function guardBriefCreation(sql: Queryable, serviceId: string): Pro
       svc.plan_tier,
       svc.keputusan_am,
     ) &&
-    svc.status === SERVICE_STATUS_AWAITING_ONBOARDING
+    svc.status === SERVICE_STATUS_AWAITING_ONBOARDING &&
+    !(await hasActiveStrategi(sql, serviceId))
   ) {
     throw new ConflictError(MSG_STRATEGY_REQUIRED);
   }
@@ -1970,6 +2052,20 @@ export async function createBrief(sql: Sql, actor: Actor, serviceId: string, inp
  * resolveBriefStrategy returns the strategy_id to store for a new Brief. Direct
  * Service → NULL (a supplied id is rejected); plan-gated Service → must equal the
  * Service's approved Strategy id (§5 Rule 2).
+ *
+ * A-3 — the SECOND half of the seam, and the half that made the first half
+ * useless on its own. Opening `guardBriefCreation` to the STRG- path only moved
+ * the rejection three lines down: a plan-gated Service on the M6A path has zero
+ * `strategy_plans` rows, so this function threw the very same
+ * MSG_STRATEGY_REQUIRED the guard had just stopped throwing. That is why §6 asks
+ * for a seam test and not two unit tests — each half can be green while the seam
+ * between them is cut.
+ *
+ * On the STRG- path a Brief carries NEITHER link: `strategy_id` points at
+ * `strategy_plans` (STR-, a table the M6A world never writes — migration
+ * 20260818000000) and `plan_row_id` belongs to a Brief inherited from a Plan row,
+ * which this one is not. Both NULL is the shape a Direct Brief already has, so
+ * nothing downstream is being taught a new one.
  */
 async function resolveBriefStrategy(
   tx: Queryable,
@@ -1986,12 +2082,74 @@ async function resolveBriefStrategy(
   const rows = await tx<{ id: string; status: string }[]>`
     select id, status from strategy_plans where service_id = ${serviceId}`;
   if (rows.length === 0) {
-    throw new ConflictError(MSG_STRATEGY_REQUIRED); // unreachable past the guard, defensive
+    // No STR- at all: either the STRG- path (allowed, no link to store) or a
+    // plan-gated Service with nothing approved anywhere (rejected, same message
+    // the guard uses — the AM's next action really is "get the Strategy approved").
+    if (await hasActiveStrategi(tx, serviceId)) {
+      if (inStrategyId !== '') {
+        // The caller named an STR- that does not exist for this Service. Same
+        // rejection as naming the wrong one, because it IS the wrong one.
+        throw new ValidationError(MSG_BRIEF_STRATEGY_MISMATCH);
+      }
+      return null;
+    }
+    throw new ConflictError(MSG_STRATEGY_REQUIRED);
   }
   if (rows[0].status !== STRATEGY_STATUS_APPROVED || inStrategyId !== rows[0].id) {
     throw new ValidationError(MSG_BRIEF_STRATEGY_MISMATCH);
   }
   return rows[0].id;
+}
+
+/**
+ * advanceServicesToStrategyApproved drives every Service under one agreement
+ * `[Awaiting Onboarding]` → `[Strategy Approved]` when its Strategi (STRG-) is
+ * approved — the M6A counterpart of the edge `approveStrategy` (STR-) has driven
+ * since M6 §4 Rule 3, and the root of Account #5: on the DECIDED delivery path
+ * nothing ever moved `services.status`, so a Service whose STRG- was `Aktif` sat
+ * at `[Awaiting Onboarding]` forever and `guardBriefCreation` kept rejecting it.
+ *
+ * Why every Service under the CONTRACT and not "the Service": O57 moved the
+ * Strategi off `service_id` onto `contract_id` precisely so that one agreement
+ * covering several purchased services opens once, for all of them. Picking one
+ * would leave the siblings in the state this fixes.
+ *
+ * Idempotent by row: a Service already `[Strategy Approved]` / `[Briefed]` /
+ * `[In Execution]` (or terminal) is skipped, so approving a revision — Rule 13,
+ * version n+1 over an already-active n — is a no-op rather than an invalid edge
+ * that would roll the whole approval back. `for update` because the caller's
+ * transaction is the one the approval lives in.
+ *
+ * `contractId` NULL is not possible from `approveStrategi` (a Strategi has an
+ * agreement by construction), but the guard is kept: a NULL would otherwise match
+ * every ungrouped Service in the table.
+ */
+export async function advanceServicesToStrategyApproved(
+  tx: Queryable,
+  actor: Actor,
+  contractId: string | null,
+): Promise<string[]> {
+  if (contractId === null || contractId === '') {
+    return [];
+  }
+  const rows = await tx<{ id: string }[]>`
+    select id from services
+     where contract_id = ${contractId} and status = ${SERVICE_STATUS_AWAITING_ONBOARDING}
+     order by id asc
+       for update`;
+  const ex = executors(tx);
+  const moved: string[] = [];
+  for (const r of rows) {
+    const res = await statemachine.transition(ex.sm, {
+      machine: MACHINE_SERVICE, entityType: 'service', table: 'services',
+      entityId: r.id, to: SERVICE_STATUS_STRATEGY_APPROVED, actor,
+    });
+    if (!res.ok) {
+      throw transitionError(res);
+    }
+    moved.push(r.id);
+  }
+  return moved;
 }
 
 /**
