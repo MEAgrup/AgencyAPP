@@ -10,7 +10,7 @@
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, showcase, skuscreener, stage, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, showcase, skuscreener, stage, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -2890,6 +2890,117 @@ export function transactionToWire(t: finance.TransactionAggregate): TransactionW
     released_to_account_at: t.releasedToAccountAt ? t.releasedToAccountAt.toISOString() : null,
     ppn_pilihan: t.ppnPilihan,
     installments: t.installments.map(installmentToWire),
+  };
+}
+
+// --- Gelombang D D-3: laporan pengakuan bulanan + tutup buku + jurnal koreksi ---
+
+/** `tutupbuku.PeriodeBuku` sebagaimana web-internal membacanya. */
+export interface PeriodeBukuWire {
+  id: string;
+  bulan: string;
+  status: string;
+  ditutup_pada: string | null;
+  ditutup_oleh: string | null;
+}
+
+export function periodeBukuToWire(p: tutupbuku.PeriodeBuku): PeriodeBukuWire {
+  return {
+    id: p.id,
+    bulan: p.bulan,
+    status: p.status,
+    ditutup_pada: p.ditutupPada,
+    ditutup_oleh: p.ditutupOleh,
+  };
+}
+
+/** Satu baris pengakuan di satu bulan. Nilai sudah terformat IDR. */
+export interface BarisLaporanWire {
+  service_id: string;
+  client_id: string;
+  nama: string;
+  nilai_diakui: string;
+  nilai_bruto: string;
+  pengakuan: string;
+  master_version_no: number;
+}
+
+/** Satu baris jurnal koreksi. `nilai` BERTANDA dan terformat IDR. */
+export interface BarisKoreksiWire {
+  id: string;
+  bulan: string;
+  bulan_dikoreksi: string;
+  client_id: string | null;
+  service_id: string | null;
+  nilai: string;
+  alasan: string;
+  dicatat_oleh: string;
+  dicatat_pada: string;
+}
+
+export function barisKoreksiToWire(k: tutupbuku.BarisKoreksi): BarisKoreksiWire {
+  return {
+    id: k.id,
+    bulan: k.bulan,
+    bulan_dikoreksi: k.bulanDikoreksi,
+    client_id: k.clientId,
+    service_id: k.serviceId,
+    // BERTANDA: `money.format` merender negatifnya, dan halaman menampilkannya
+    // apa adanya — sebuah koreksi turun yang kehilangan tandanya di sini akan
+    // terbaca sebagai koreksi NAIK, dengan besaran yang sama.
+    nilai: idr(k.nilai),
+    alasan: k.alasan,
+    dicatat_oleh: k.dicatatOleh,
+    dicatat_pada: k.dicatatPada,
+  };
+}
+
+/** Laporan pengakuan satu bulan kalender (D-3). */
+export interface LaporanBulanWire {
+  bulan: string;
+  status: string;
+  /**
+   * `'beku'` = dibaca dari angka yang dibekukan saat bulan ditutup;
+   * `'dihitung'` = dihitung ulang dari data mentah, jadi MASIH BISA berubah.
+   * Dikirim apa adanya karena halaman harus bisa menyebutnya sendiri — dua
+   * laporan yang terlihat identik tapi berbeda sumbernya adalah dua hal yang
+   * sangat berbeda saat angkanya dipertanyakan.
+   */
+  sumber: string;
+  ditutup_pada: string | null;
+  ditutup_oleh: string | null;
+  baris: BarisLaporanWire[];
+  total_diakui: string;
+  koreksi: BarisKoreksiWire[];
+  total_koreksi: string;
+  total: string;
+  dikoreksi_oleh: BarisKoreksiWire[];
+  /** Kalimat BI kenapa `baris` kosong; `null` kalau ada isinya. */
+  alasan_kosong: string | null;
+}
+
+export function laporanBulanToWire(l: tutupbuku.LaporanBulan): LaporanBulanWire {
+  return {
+    bulan: l.bulan,
+    status: l.status,
+    sumber: l.sumber,
+    ditutup_pada: l.ditutupPada,
+    ditutup_oleh: l.ditutupOleh,
+    baris: l.baris.map((b) => ({
+      service_id: b.serviceId,
+      client_id: b.clientId,
+      nama: b.nama,
+      nilai_diakui: idr(b.nilaiDiakui),
+      nilai_bruto: idr(b.nilaiBruto),
+      pengakuan: b.pengakuan,
+      master_version_no: b.masterVersionNo,
+    })),
+    total_diakui: idr(l.totalDiakui),
+    koreksi: l.koreksi.map(barisKoreksiToWire),
+    total_koreksi: idr(l.totalKoreksi),
+    total: idr(l.total),
+    dikoreksi_oleh: l.dikoreksiOleh.map(barisKoreksiToWire),
+    alasan_kosong: l.alasanKosong,
   };
 }
 

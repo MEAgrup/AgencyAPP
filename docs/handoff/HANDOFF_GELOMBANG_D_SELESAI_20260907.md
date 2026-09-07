@@ -26,6 +26,7 @@
 | **D-3 — kunci tutup buku + jurnal koreksi** | ✅ **dibangun** (migrasi 191), 26 tes |
 | **D-4 — penanda pilihan PPN per transaksi** | ✅ **dibangun** (migrasi 192), 11 tes domain + 8 tes core |
 | **Apply ke live** | 🔴 **BELUM. Nol dari tiga migrasi.** Lihat §5 |
+| **Permukaan (route + halaman `/finance/accrual`)** | ✅ **dibangun** |
 | Piksel React yang baru | 🔴 belum pernah dibuka di peramban — lihat §7 |
 
 Migrasi: repo **192 berkas**, live **189**. **TIGA berkas menunggu**, dan
@@ -142,6 +143,32 @@ penjualan     `services.created_at` (baris lahir di Closing)
   **katalog memberi SARAN untuk penawaran; `ppn_pilihan` mencatat KEPUTUSAN
   untuk transaksi.**
 
+### 2.6 Permukaan — route + halaman `/finance/accrual`
+
+Tanpa ini, D-3 lengkap tapi tak seorang pun di MEA bisa menutup buku.
+
+| Route | Peran | Isi |
+|---|---|---|
+| `GET /accrual/months/{bulan}` | Finance/OD/Director | laporan pengakuan satu bulan, membawa `sumber` |
+| `POST /accrual/months/{bulan}/close` | Head of Finance/Director | menutup buku (POST, bukan PUT — satu aksi sekali) |
+| `POST /accrual/corrections` | Finance/Director | satu baris jurnal koreksi |
+| `PUT /transactions/{id}/ppn` | Finance/Director | pilihan PPN (D-4) |
+
+Halaman **`/finance/accrual`** ("Pengakuan Pendapatan" di nav Keuangan):
+pemilih 12 bulan terakhir · badge status + badge **`sumber`** yang menyebut
+KONSEKUENSINYA (*"Dihitung ulang — masih bisa berubah"*, bukan hanya
+"dihitung") · tabel per layanan · **dua** tabel jurnal koreksi yang sengaja
+dipisah (*"yang MENDARAT di bulan ini"* vs *"bulan ini SUDAH DIKOREKSI di bulan
+lain"* — dua pertanyaan berbeda, dan yang kedua ada supaya laporan bulan
+tertutup tidak terbaca benar padahal sudah diketahui keliru) · tombol tutup
+buku ber-konfirmasi yang menyebut *"tidak ada jalan buka kembali"* apa adanya
+alih-alih "Anda yakin?" · form jurnal koreksi yang menjelaskan nilai
+**bertanda**.
+
+Halaman kosong mengambil kalimatnya dari `alasan_kosong` **server**, bukan
+mengarang sendiri (aturan rumah #4). `KNOWN_GAPS` di `route-parity.test.ts`
+tetap **kosong**, dan keempat wire type baru terdaftar di `WIRE_TO_FE`.
+
 ---
 
 ## 3. Verifikasi — perintah + angka acuan TERKINI
@@ -166,7 +193,7 @@ cd ../web-client-portal && npx vitest run
 | db | 53 | **53** |
 | apps/api | 490 | **490** |
 | domain | 1988 (+1 skip) | **2054** (+1 skip) |
-| web-internal | 650 | **652** |
+| web-internal | 650 | **663** (+11 `lib/accrual.test.ts`) |
 | web-client-portal | 19 | **19** |
 | migrasi `db-rebuild` | 189 | **192** |
 | tabel `public` | 146 | **149** |
@@ -230,8 +257,14 @@ cd ../web-client-portal && npx vitest run
    `ALTER TABLE ... DISABLE TRIGGER` sengaja TIDAK dipakai: vitest menjalankan
    berkas tes paralel, dan itu akan membuka jendela di mana kekekalan tabel mati
    untuk semua orang.
-8. **`react-hooks/static-components` di `admin/employees/page.tsx`** tetap 1
-   error lint **PRE-EXISTING**, di luar cakupan.
+8. **`rm -rf web-internal/.next` sebelum `npm run build`** kalau ada build lain
+   yang sedang jalan — pesannya cuma *"Build error occurred"* tanpa menyebut
+   sebabnya, dan menjalankannya ulang sesudah build satunya kelar langsung
+   hijau. Terjadi sesi ini karena satu verifikasi latar belakang dan satu build
+   manual berjalan bersamaan.
+9. **`react-hooks/static-components` di `admin/employees/page.tsx`** tetap 1
+   error lint **PRE-EXISTING**, di luar cakupan (`447:20 Cannot create
+   components during render`).
 
 ---
 
@@ -303,9 +336,10 @@ menghasilkan nol kode dan empat pertanyaan.
 - 🔴 **Nol dari tiga migrasi sudah di-apply ke live.** Seluruh §2 hijau di
   Postgres lokal yang dibangun ulang dari 192 migrasi, dan **belum pernah**
   menyentuh `CDPS SG`.
-- 🔴 **Piksel React.** Tiga permukaan baru — dropdown **Kapan Pendapatannya
-  Diakui** + kolom **Pengakuan** di `/master-services`, dan panel **Perlakuan
-  PPN** di `/finance/transactions/{id}` — lolos `tsc`, `vitest`,
+- 🔴 **Piksel React.** Empat permukaan baru — dropdown **Kapan Pendapatannya
+  Diakui** + kolom **Pengakuan** di `/master-services`, panel **Perlakuan PPN**
+  di `/finance/transactions/{id}`, dan **seluruh halaman `/finance/accrual`** —
+  lolos `tsc`, `vitest`,
   `next build`, dan gerbang `shape-parity`/`body-parity`/`route-parity`, tapi
   **belum ada yang membukanya di peramban.** Yang terbukti kontraknya, bukan
   tata letaknya. (Utang yang sama masih berlaku untuk field **Durasi Jasa** dan
@@ -315,13 +349,16 @@ menghasilkan nol kode dan empat pertanyaan.
   bukan di Postgres lokal. Membukanya di peramban menuntut deploy Vercel atau
   runbook baru; keduanya di luar apa yang bisa dilakukan tanpa menyentuh live.
 - 🔴 **`/showcase` di peramban** — utang lama Gelombang C, masih belum dibayar.
-- 🟡 **Mesin accrual belum punya PERMUKAAN.** `domain/accrual.ts` dan
-  `domain/tutupbuku.ts` lengkap dan teruji, tapi **belum ada route `apps/api`
-  dan belum ada halaman** untuk laporan pengakuan bulanan / tombol tutup buku /
-  form jurnal koreksi. Yang ada baru satu route baru:
-  `PUT /transactions/{id}/ppn`. **Itu butir berikutnya yang paling jelas**, dan
-  `KNOWN_GAPS` di `route-parity.test.ts` tetap **kosong** karena belum ada
-  halaman yang memanggil apa pun yang belum ada.
+- ✅ **Permukaannya SUDAH ada** (ditambahkan di commit terakhir sesi ini):
+  `GET /accrual/months/{bulan}` · `POST /accrual/months/{bulan}/close` ·
+  `POST /accrual/corrections` · `PUT /transactions/{id}/ppn`, dan halaman
+  **`/finance/accrual`** ("Pengakuan Pendapatan" di nav Keuangan) dengan pemilih
+  bulan, badge `sumber`, tabel per layanan, dua tabel jurnal koreksi (yang
+  MENDARAT dan yang MENGOREKSI), tombol tutup buku ber-konfirmasi yang menyebut
+  "tidak ada jalan buka kembali" apa adanya, dan form jurnal koreksi.
+  `KNOWN_GAPS` di `route-parity.test.ts` tetap **kosong**, dan keempat wire type
+  baru terdaftar di `WIRE_TO_FE` (`shape-parity`). **Tapi lihat butir piksel di
+  atas: halaman itu juga belum pernah dibuka di peramban.**
 - 🟡 **Nol data uji di live untuk mencoba tutup buku sungguhan.** Live punya 11
   transaksi dan nol layanan yang pernah melewati `[In Execution]` dengan
   riwayat hold; jadi jalur D-2/D-3 di live belum pernah dijalani dengan angka

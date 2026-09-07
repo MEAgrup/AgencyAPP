@@ -764,7 +764,7 @@ describe('perilaku rail (Sidebar IA v3 §5)', () => {
     it('judul grup yang cocok mempertahankan SELURUH isinya', () => {
       // Mencari nama grup harus memperlihatkan isinya, bukan grup kosong.
       expect(titles('keuangan')).toEqual(['Keuangan']);
-      expect(labels('keuangan')).toEqual(['Finance', 'Reminder Pembayaran']);
+      expect(labels('keuangan')).toEqual(['Finance', 'Reminder Pembayaran', 'Pengakuan Pendapatan']);
     });
 
     it('mencari ke DALAM sub-grup, dan judul sub-grup yang cocok membawa seluruh papannya', () => {

@@ -189,6 +189,7 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
  * any route).
  */
 const FE_FILES = [
+  'accrual.ts',
   'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
@@ -393,6 +394,11 @@ const WIRE_TO_FE: Record<string, string> = {
   // to the FE's `ProposalLineInput` cannot drift that way. Direction reverses
   // (the FE emits, the route reads) but key-set equality is the same assertion.
   ProposalLineBody: 'sales.ts::ProposalLineInput',
+  // Gelombang D D-3 — laporan pengakuan bulanan + tutup buku + jurnal koreksi.
+  LaporanBulanWire: 'accrual.ts::LaporanBulan',
+  BarisLaporanWire: 'accrual.ts::BarisLaporan',
+  BarisKoreksiWire: 'accrual.ts::BarisKoreksi',
+  PeriodeBukuWire: 'accrual.ts::PeriodeBuku',
   // M1 leads
   LeadStubWire: 'leads.ts::LeadStub',
   AttemptStubWire: 'leads.ts::AttemptStub',

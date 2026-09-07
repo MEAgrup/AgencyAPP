@@ -357,6 +357,11 @@ const KEUANGAN: NavNode[] = [
   // catatan pra-verifikasi "visible to Finance only".
   { href: '/finance', label: 'Finance', access: ownedBy(FINANCE) },
   { href: '/finance/reminders', label: 'Reminder Pembayaran', access: ownedBy(FINANCE) },
+  // Gelombang D D-3 — pengakuan pendapatan bulanan + tutup buku + jurnal
+  // koreksi. `ownedBy(FINANCE)` sama seperti dua baris di atasnya: gerbang
+  // sebenarnya `accrual.canBacaAccrual` di server (Finance segala level, OD,
+  // Director), dan OD/Director sudah lolos setiap `access` lewat `canReadAll`.
+  { href: '/finance/accrual', label: 'Pengakuan Pendapatan', access: ownedBy(FINANCE) },
 ];
 
 // ---------------------------------------------------------------------------
