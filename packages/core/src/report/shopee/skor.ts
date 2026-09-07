@@ -27,6 +27,9 @@
  * Shopee's business rule faithfully, not to make it match TikTok's.
  */
 import { div } from '../../baseline/angka';
+// Pita label dibagi dengan mesin TikTok — SATU sumber, bukan dua salinan angka
+// yang bisa menyimpang saat salah satunya dikalibrasi ulang (lihat ../skor.ts).
+import { labelSkor } from '../skor';
 import type { ShopeeMetrics } from './metrik';
 import type { Rekomendasi, SkorDimensi } from './types';
 
@@ -126,7 +129,7 @@ export function computeSkor(M: ShopeeMetrics): Skor {
     dimensi.push({ key, label, bobot, skor, catatan });
   }
   total = Math.round(total * 10) / 10;
-  const label = total >= 8 ? 'SEHAT' : total >= 6 ? 'PERLU PERHATIAN' : 'KRITIS';
+  const label = labelSkor(total);
   return { total, label, dimensi };
 }
 

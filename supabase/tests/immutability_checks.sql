@@ -113,6 +113,22 @@ BEGIN
         WHERE event_object_table = 'client_report_berkas'
           AND action_statement LIKE '%client_report_berkas_frozen%'
     ) >= 1, 'client_report_berkas must stay frozen (provenance of a frozen report)';
+
+    ---------------------------------------------------------------------------
+    -- `client_pitch_consents` (C-5, 2026-09-07) is the ONLY record of the basis
+    -- on which a client's real figures were ever allowed into pitch material.
+    -- It carries its own freeze function and — unlike `client_reports` — blocks
+    -- DELETE as well as UPDATE, because the failure mode here is not a rewritten
+    -- number but a vanished one: deleting a `beri` row makes a consent that was
+    -- acted upon indistinguishable from one that never existed. Withdrawing a
+    -- consent is an INSERT of `aksi = 'cabut'`, never a mutation.
+    ---------------------------------------------------------------------------
+    ASSERT (
+        SELECT count(DISTINCT event_manipulation) FROM information_schema.triggers
+        WHERE event_object_table = 'client_pitch_consents'
+          AND action_statement LIKE '%client_pitch_consents_frozen%'
+          AND event_manipulation IN ('UPDATE', 'DELETE')
+    ) = 2, 'client_pitch_consents must stay frozen against UPDATE and DELETE (consent history is the only proof a pitch figure was allowed)';
 END $$;
 
 ROLLBACK;

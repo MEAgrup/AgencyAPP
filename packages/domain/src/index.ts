@@ -100,6 +100,11 @@ export * as plan from './plan';
 export * as briefInherit from './brief-inherit';
 export * as recap from './recap';
 export * as report from './report';
+// Gelombang C — Showcase Klien Terbaik + ledger izin pitch (C-1/C-3/C-5).
+// Berdiri sendiri, TIDAK bagian dari `report`: modul ini adalah satu-satunya
+// tempat divisi Sales boleh menyentuh data klien, dan menumpangkannya ke
+// `report` akan membuat pelebaran itu terjadi karena pemakaian ulang.
+export * as showcase from './showcase';
 export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
