@@ -157,10 +157,15 @@ dari nama berkas repo (O65). Pakai `mcp__Supabase__apply_migration` per berkas.
 
 ## 4. Yang BELUM bisa diklaim
 
-1. **Uji terima §10 butir 1–7 belum dijalankan end-to-end di aplikasi nyata.**
-   Yang terbukti adalah tesnya, bukan layarnya. Butir 2 (upload Shopee) kini
-   bisa diuji karena B2 sudah mendarat. Ini pekerjaan pertama yang layak
-   dilakukan sebelum Gelombang C.
+1. ~~**Uji terima §10 butir 1–7 belum dijalankan end-to-end di aplikasi nyata.**~~
+   ✅ **LUNAS 2026-09-07** — dijalankan lewat rute yang sungguhan; laporannya
+   `UAT_GELOMBANG_B_20260907.md`. Enam butir lolos apa adanya; **butir 7 gagal**
+   dan sebabnya jahitan bocor yang kelasnya sama dengan B2↔B3: `angle_video`
+   ditulis Co-Pilot ke Section E dan tak pernah dibaca siapa pun, jadi Brief
+   Creative lahir tanpa satu pun angle. Sudah ditutup di sesi yang sama
+   (`planpillar.angleVideoDariDetail` → `plan_row.instruksi_brief` →
+   `instructions`). Baca laporannya sebelum Gelombang C — §5-nya menyebut apa
+   yang UAT itu **tidak** buktikan.
 2. **Pertanyaan terbuka yang masih menggantung** (`DECISIONS.md` §Open):
    - **B23-SHP** *(baru)* — kanal `gmv_mix` Shopee mana yang mengisi kolom
      B-2.3 mana. Taksonominya berbeda dan saling tumpang tindih (`shopee_ads` ·

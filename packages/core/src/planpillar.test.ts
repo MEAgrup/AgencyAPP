@@ -8,6 +8,7 @@ import {
   PILAR_BARIS,
   PILAR_PILIH_DIVISI,
   PILAR_TO_DIVISI,
+  angleVideoDariDetail,
   kandidatDivisi,
   parseAngkaTarget,
   parseTargetKuota,
@@ -189,6 +190,7 @@ describe('seedRowFromPillar', () => {
       satuan: 'video',
       divisiPic: 'Creative',
       hasilDiharapkan: '30 video, jembatan Video bertayangan / bulan',
+      instruksiBrief: null,
     });
   });
 
@@ -393,5 +395,50 @@ describe('jahitan B4→B5 — pilar usulan AM Co-Pilot server-side', () => {
     for (const jenis of Object.values(copilot.PILAR_KE_JENIS)) {
       expect(PILAR_TO_DIVISI[jenis]).toBeTruthy();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// angle_video → instruksi_brief (UAT Gelombang B §10 butir 7, 2026-09-07)
+// ---------------------------------------------------------------------------
+describe('angleVideoDariDetail', () => {
+  it('merangkai angle jadi satu baris instruksi', () => {
+    expect(
+      angleVideoDariDetail({ angle_video: ['A — GPM Rp. 120.000,00', 'B — GPM Rp. 90.000,00'] }),
+    ).toBe('Angle video yang sudah perform (Section E): A — GPM Rp. 120.000,00 | B — GPM Rp. 90.000,00');
+  });
+
+  it('null untuk detail tanpa angle — kolomnya tetap kosong, bukan kalimat kosong', () => {
+    for (const kosong of [null, undefined, 42, 'x', {}, { angle_video: [] }, { angle_video: ['', '  '] }, { angle_video: 'bukan array' }]) {
+      expect(angleVideoDariDetail(kosong)).toBeNull();
+    }
+  });
+
+  it('membuang entri kosong tapi mempertahankan yang terisi', () => {
+    expect(angleVideoDariDetail({ angle_video: ['', 'A', '  '] })).toContain('A');
+  });
+});
+
+describe('seedRowFromPillar — angle video ikut ke baris kerja', () => {
+  const DETAIL = { angle_video: ['Racun skincare — GPM Rp. 250.000,00'] };
+
+  it('baris yang disemai membawa angle-nya ke instruksiBrief', () => {
+    const h = seedRowFromPillar(pillar({ detail: DETAIL }), ['TikTok Shop']);
+    expect(h.disemai).toBe(true);
+    if (!h.disemai) return;
+    expect(h.row.instruksiBrief).toContain('Racun skincare');
+  });
+
+  it('pilar yang TIDAK disemai tetap mengusulkan angle-nya (panel Plan memakainya)', () => {
+    const h = seedRowFromPillar(pillar({ jenis: 'sku', detail: DETAIL }), ['TikTok Shop']);
+    expect(h.disemai).toBe(false);
+    if (h.disemai) return;
+    expect(h.alasan).toContain('butuh_divisi');
+    expect(h.usulan.instruksiBrief).toContain('Racun skincare');
+  });
+
+  it('pilar tanpa angle: instruksiBrief null, bukan string kosong', () => {
+    const h = seedRowFromPillar(pillar(), ['TikTok Shop']);
+    expect(h.disemai && h.row.instruksiBrief).toBeNull();
   });
 });

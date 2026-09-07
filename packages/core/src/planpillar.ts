@@ -141,6 +141,40 @@ export interface PillarSeedInput {
   aksi: string | null;
   target: string | null;
   sku: string | null;
+  /**
+   * `strategi_pillar.detail` apa adanya. Satu kunci saja yang dibaca di sini:
+   * `angle_video` (lihat `angleVideoDariDetail`). Sisanya diabaikan — detail
+   * adalah kantong bebas dan berkas ini tidak boleh jadi rumah kedua bagi
+   * skemanya.
+   */
+  detail?: unknown;
+}
+
+/**
+ * `detail.angle_video` → satu baris teks untuk `plan_row.instruksi_brief`.
+ *
+ * KENAPA ADA. AM Co-Pilot menulis angle video yang SUDAH perform (judul + GPM +
+ * VV + GMV, apa adanya dari export Riset Awal) ke `strategi_pillar.detail`
+ * (`web-internal/src/lib/strategi-copilot.ts`), dengan alasan yang ditulis di
+ * sana: supaya `brief-inherit.planRowToBriefInput` meneruskannya ke
+ * `instructions` Brief Creative — permintaan pemilik 2026-09-06. Sampai UAT
+ * Gelombang B §10 butir 7 dijalankan end-to-end (2026-09-07), kunci itu
+ * DITULIS dan tidak pernah DIBACA siapa pun: baris Plan yang disemai tidak
+ * membawa `instruksi_brief`, jadi angle-nya berhenti di Section E dan Creative
+ * tetap menerima brief tanpa satu pun angle. Fungsi ini menutup jahitan itu.
+ *
+ * `null` kalau tak ada angle — dan `null` berarti kolomnya tetap kosong, bukan
+ * diisi kalimat kosong yang lalu muncul sebagai "Instruksi Brief: " di brief.
+ */
+export function angleVideoDariDetail(detail: unknown): string | null {
+  if (detail === null || typeof detail !== 'object') return null;
+  const raw = (detail as Record<string, unknown>).angle_video;
+  if (!Array.isArray(raw)) return null;
+  const angle = raw
+    .map((a) => (typeof a === 'string' ? a.trim() : ''))
+    .filter((a) => a !== '');
+  if (angle.length === 0) return null;
+  return `Angle video yang sudah perform (Section E): ${angle.join(' | ')}`;
 }
 
 /** Baris P-C siap ditulis, seluruh kolomnya turunan dari pilar — nol invensi. */
@@ -154,6 +188,12 @@ export interface SeededPlanRow {
   satuan: string; // PC-6 unit
   divisiPic: string; // PC-8
   hasilDiharapkan: string; // PC-11
+  /**
+   * Bukan kolom PC — teks bebas yang `brief-inherit` sambung ke `instructions`
+   * Brief. Diisi HANYA dari `detail.angle_video` (lihat `angleVideoDariDetail`);
+   * `null` kalau pilar itu tak punya angle.
+   */
+  instruksiBrief: string | null;
 }
 
 /**
@@ -223,6 +263,7 @@ export function seedRowFromPillar(
     aksi: (p.aksi ?? '').trim(),
     skuSasaran: sku === '' ? [] : [sku],
     hasilDiharapkan: (p.target ?? '').trim(),
+    instruksiBrief: angleVideoDariDetail(p.detail),
   };
   if (channel !== null) usulan.channel = channel;
   if (divisiPic !== null) usulan.divisiPic = divisiPic;
@@ -247,6 +288,7 @@ export function seedRowFromPillar(
       satuan: usulan.satuan ?? '',
       divisiPic: divisiPic as string,
       hasilDiharapkan: usulan.hasilDiharapkan ?? '',
+      instruksiBrief: usulan.instruksiBrief ?? null,
     },
   };
 }

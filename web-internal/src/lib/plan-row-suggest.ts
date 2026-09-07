@@ -77,6 +77,22 @@ export function parseTargetKuota(
   return { kuota, satuan: m[2] ?? '' };
 }
 
+/**
+ * Cermin `planpillar.angleVideoDariDetail` — `detail.angle_video` (ditulis AM
+ * Co-Pilot, `strategi-copilot.ts`) jadi satu baris `instruksi_brief`, yang
+ * `brief-inherit` sambung ke `instructions` Brief Creative. Sampai UAT
+ * Gelombang B §10 butir 7 (2026-09-07) kunci itu ditulis dan tak pernah dibaca:
+ * angle-nya berhenti di Section E. `null` = kolomnya tetap kosong.
+ */
+export function angleVideoDariDetail(detail: unknown): string | null {
+  if (detail === null || typeof detail !== 'object') return null;
+  const raw = (detail as Record<string, unknown>).angle_video;
+  if (!Array.isArray(raw)) return null;
+  const angle = raw.map((a) => (typeof a === 'string' ? a.trim() : '')).filter((a) => a !== '');
+  if (angle.length === 0) return null;
+  return `Angle video yang sudah perform (Section E): ${angle.join(' | ')}`;
+}
+
 export interface PlanRowSuggestion {
   aksi: string;
   kuota: string;
@@ -86,6 +102,8 @@ export interface PlanRowSuggestion {
   skuSasaran: string[];
   /** PC-11 — the pillar's target text, verbatim (`planpillar` seeds the same). */
   hasilDiharapkan: string;
+  /** Bukan kolom PC — angle video Section E, '' kalau pilar ini tak punya. */
+  instruksiBrief: string;
 }
 
 export function suggestRowFromPillar(p: StrategiPillar): PlanRowSuggestion {
@@ -98,6 +116,7 @@ export function suggestRowFromPillar(p: StrategiPillar): PlanRowSuggestion {
     divisiPic: PILAR_TO_DIVISI[p.jenis] ?? null,
     skuSasaran: sku ? [sku] : [],
     hasilDiharapkan: (p.target ?? '').trim(),
+    instruksiBrief: angleVideoDariDetail(p.detail) ?? '',
   };
 }
 

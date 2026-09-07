@@ -439,3 +439,11 @@ jobs:
         run: |
           npm run typecheck -w @cdps/domain
           npm test -w @cdps/domain
+      - name: '@cdps/api — test (jalur rute yang butuh DB)'
+        # The `api` job above runs the SAME suite without a DATABASE_URL, so every
+        # DB-backed route test there is silently skipped — including the Gelombang B
+        # acceptance chain (`src/e2e/gelombang-b-uat.e2e.test.ts`), which walks
+        # Riset Awal → Section B → Section E → Plan → Brief through the real route
+        # handlers. Running it here, against the Postgres this job already migrated,
+        # is what makes those skips actually execute somewhere.
+        run: npm test -w @cdps/api

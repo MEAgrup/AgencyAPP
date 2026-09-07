@@ -389,6 +389,16 @@ yang jujur menunjukkan data yang belum diisi.
 
 ## 8. Pertanyaan terbuka — WAJIB diketok pemilik, JANGAN ditebak
 
+> ⚠️ **2026-09-07 — daftar ini SUDAH DIPINDAH.** Butir 1 (B-4 Shopee) sudah
+> diketok 2026-09-06 dan berfungsi (diverifikasi UAT). Butir 3–9 dipindahkan ke
+> `docs/DECISIONS.md` §Open sebagai baris `E9-RETENSI` · `C-1` · `C-2` · `C-3` ·
+> `D-1`…`D-4`, dan briefnya (opsi + untung-rugi + rekomendasi + angka live yang
+> sudah diverifikasi) ada di
+> `docs/handoff/KEPUTUSAN_PEMILIK_GELOMBANG_C_D_20260907.md`. **Pakai dua berkas
+> itu, bukan daftar di bawah** — daftar ini disimpan hanya sebagai riwayat.
+> Khususnya: alasan "halaman Showcase kosong" di §7 **salah sebab**; lihat brief
+> §0.
+
 1. **B-4 untuk Shopee.** Engine Shopee sudah mem-parse chat response rate, response time,
    dan poin penalti (`layanan_chat` + `bisnis_kesehatan`) — **3 dari 6 kolom B-4**.
    Pemilik menyatakan B-4 manual (untuk TikTok, di mana memang tidak ada export). Untuk

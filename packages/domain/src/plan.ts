@@ -976,8 +976,11 @@ async function seedRowsFromPillars(
   planId: string,
 ): Promise<void> {
   const pillars = await tx<
-    { id: string | number; jenis: string; channel: string | null; aksi: string | null; target: string | null; sku: string | null }[]
-  >`select id, jenis, channel, aksi, target, sku
+    {
+      id: string | number; jenis: string; channel: string | null; aksi: string | null;
+      target: string | null; sku: string | null; detail: Record<string, unknown> | null;
+    }[]
+  >`select id, jenis, channel, aksi, target, sku, detail
       from strategi_pillar where strategi_id = ${s.id} order by urutan asc, id asc`;
   if (pillars.length === 0) return;
 
@@ -989,7 +992,10 @@ async function seedRowsFromPillars(
   for (const p of pillars) {
     const pillarId = num(p.id);
     const hasil = planpillar.seedRowFromPillar(
-      { id: pillarId, jenis: p.jenis, channel: p.channel, aksi: p.aksi, target: p.target, sku: p.sku },
+      {
+        id: pillarId, jenis: p.jenis, channel: p.channel, aksi: p.aksi,
+        target: p.target, sku: p.sku, detail: p.detail,
+      },
       channels,
     );
     if (!hasil.disemai) continue;
@@ -998,11 +1004,12 @@ async function seedRowsFromPillars(
     const inserted = await tx<{ id: string | number }[]>`
       insert into plan_row (
         plan_id, channel, pilar, strategi_pillar_id,
-        aksi, sku_sasaran, kuota, satuan, divisi_pic, hasil_diharapkan, created_by)
+        aksi, sku_sasaran, kuota, satuan, divisi_pic, hasil_diharapkan,
+        instruksi_brief, created_by)
       values (
         ${planId}, ${r.channel}, ${r.pilar}, ${r.strategiPillarId},
         ${r.aksi}, ${tx.json(r.skuSasaran as JsonParam)}, ${r.kuota}, ${r.satuan},
-        ${r.divisiPic}, ${r.hasilDiharapkan}, ${actor.employeeId})
+        ${r.divisiPic}, ${r.hasilDiharapkan}, ${r.instruksiBrief}, ${actor.employeeId})
       returning id`;
 
     await ex.audit.insertAudit({
@@ -1019,6 +1026,7 @@ async function seedRowsFromPillars(
         kuota: r.kuota,
         satuan: r.satuan,
         divisi_pic: r.divisiPic,
+        instruksi_brief: r.instruksiBrief,
       },
       createdBy: actor.employeeId,
     });

@@ -6,6 +6,7 @@ import {
   PILAR_PILIH_DIVISI,
   PILAR_TO_DIVISI,
   PILAR_BARIS,
+  angleVideoDariDetail,
   kandidatDivisi,
   kekuranganPilar,
   parseAngkaTarget,
@@ -269,5 +270,30 @@ describe('kekuranganPilar', () => {
       ['Shopee'],
     );
     expect(k).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// angle video → instruksi_brief (cermin `planpillar.angleVideoDariDetail`)
+// ---------------------------------------------------------------------------
+describe('angleVideoDariDetail — cermin core', () => {
+  it('merangkai angle jadi satu baris instruksi', () => {
+    expect(angleVideoDariDetail({ angle_video: ['A — GPM Rp. 120.000,00', 'B — GPM Rp. 90.000,00'] })).toBe(
+      'Angle video yang sudah perform (Section E): A — GPM Rp. 120.000,00 | B — GPM Rp. 90.000,00',
+    );
+  });
+
+  it('null untuk detail tanpa angle', () => {
+    for (const kosong of [null, undefined, 42, 'x', {}, { angle_video: [] }, { angle_video: ['', ' '] }]) {
+      expect(angleVideoDariDetail(kosong)).toBeNull();
+    }
+  });
+
+  it('usulan baris membawa angle pilar; pilar tanpa angle mengusulkan string kosong', () => {
+    const dengan = suggestRowFromPillar(
+      pillar({ detail: { angle_video: ['Racun skincare — GPM Rp. 250.000,00'] } }),
+    );
+    expect(dengan.instruksiBrief).toContain('Racun skincare');
+    expect(suggestRowFromPillar(pillar()).instruksiBrief).toBe('');
   });
 });
