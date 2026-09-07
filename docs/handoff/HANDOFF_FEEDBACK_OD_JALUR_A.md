@@ -71,6 +71,29 @@ Branch Jalur B   : claude/cdps-user-feedback-70vbho-b (cabangkan dari b240f47d)
    jangan susun ulang** — berkas ini tidak punya pemilik di §2 dan itu satu-satunya
    cara membuatnya tidak jadi sesi merge-conflict.
 
+## ⚠️ Irisan dengan pekerjaan lain — diperiksa 2026-09-07, dilaporkan ke pemilik
+
+Guard §0 memerintahkan mencocokkan PR/branch yang berjalan dengan tabel kepemilikan
+§2. Saat F mendarat: **nol PR terbuka**. Sesudah itu muncul branch
+`claude/handoff-gelombang-d-lanjutan-m3qc8n` (satu commit, `10ffa19a` —
+"D-KOM `pengakuan` di katalog + mesin accrual Gelombang D"). Itu memang pekerjaan
+yang diperingatkan §0. Irisannya dipetakan, **bukan di-merge buta**:
+
+| Berkas | Mereka | Jalur A (F) | Putusan |
+|---|---|---|---|
+| `docs/DECISIONS.md` | +6 baris | F-6 | 🔴 **AKAN konflik.** Keduanya menyisip di anchor yang SAMA (tepat sesudah `\|---\|---\|---\|---\|` di tabel `Decided`, dan sesudah header tabel `Open`). Keduanya **murni penyisipan** ⇒ resolusinya *simpan KEDUANYA*, nol baris dibuang. Ini pekerjaan langkah penggabungan (§4 butir 3), bukan pekerjaan di dalam jalur. |
+| `apps/api/src/lib/wire.ts` | +3 (`MasterServiceWire`, baris ~33–60) | F-1 (`BriefWire` ~446, `TransactionWire` ~2860) | 🟢 Bersih. Jaraknya ~400 dan ~2.800 baris; git menggabungnya sendiri. |
+| `apps/api/src/lib/wire.test.ts` | +2 (blok master-service) | F-1 (blok Brief) | 🟢 Bersih. |
+| `packages/core/**` | `accrual.ts` (BARU) + `index.ts` +4 | F-3 (`notification.ts`, `notification.test.ts`) | 🟢 Berkas berbeda. Guard §0 butir 2 dipatuhi: F tidak menyentuh `packages/core` selain katalog notifikasi. |
+| `scripts/db-rebuild.sh` · `.github/workflows/ci.yml` | **tidak disentuh** | F-5 (`notif_events` 69 → 73) | 🟢 **Nol konflik counter** — mereka menambah KOLOM, bukan tabel/mesin/event. |
+| `supabase/migrations/` | `20260922010000` | `20260922100000`, `20260922100200` | 🟢 Nol tabrakan nama; punya mereka menyortir LEBIH DULU. Blok stempel §0 butir 7 bekerja. |
+
+**Satu hal yang perlu dilihat saat menggabungkan:** commit mereka menyebut
+migrasinya "migrasi **190**". Di pohon Jalur A, 190/191/192 adalah migrasi F.
+Angka urutan itu narasi per-pohon, bukan identitas — **identitasnya nama berkas**,
+dan nama berkasnya tidak bertabrakan. Jangan mencoba "membetulkan" salah satu
+nomor; keduanya benar di pohonnya masing-masing.
+
 ## Temuan Jalur A (calon baris DECISIONS, dipindahkan di langkah penggabungan)
 
 | # | Temuan | Status |
