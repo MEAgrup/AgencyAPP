@@ -75,7 +75,8 @@ describe('masterServiceToWire', () => {
       active: true,
       requiresStrategyPlan: false,
       planTier: 'ditentukan_am',
-      durasiJasa: 30,
+      durasiBulan: 6,
+      qtyMenambah: 'durasi',
       versionNo: 3,
       effectiveFrom: '2026-07-01',
     };
@@ -95,7 +96,8 @@ describe('masterServiceToWire', () => {
       active: true,
       requires_strategy_plan: false,
       plan_tier: 'ditentukan_am',
-      durasi_jasa: 30,
+      durasi_bulan: 6,
+      qty_menambah: 'durasi',
       version_no: 3,
       effective_from: '2026-07-01',
     });

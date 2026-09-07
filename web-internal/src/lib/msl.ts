@@ -5,7 +5,7 @@
  * is FULL REPLACE. Every "Ubah" writes a brand-new immutable version row from
  * whatever the payload contains, so a field the form forgets to carry is not
  * "left alone" — it is erased in the new version. That is not a hypothetical:
- * until 2026-09-07 the form neither showed nor sent `durasi_jasa`, so editing
+ * until 2026-09-07 the form neither showed nor sent `durasi_bulan`, so editing
  * either of the two services that had one (AI Video, Optimasi SKU — seeded with
  * 30 days by migration `20260831070000`) would have silently written NULL.
  *
@@ -16,7 +16,7 @@
  * quietly disappears the next time someone edits a price.
  */
 import { api } from './api';
-import type { MasterService, PlanTier } from './types';
+import type { MasterService, PlanTier, QtyMenambah } from './types';
 
 export interface MslFormState {
   name: string;
@@ -34,10 +34,11 @@ export interface MslFormState {
   plan_tier: PlanTier;
   /**
    * Held as the raw string the input carries, not as a number: '' is how the
-   * admin says "tidak berlaku", and it has to survive being typed through
-   * (someone clearing the box mid-edit) without becoming 0.
+   * admin says "layanan sekali jadi, tidak punya periode", and it has to survive
+   * being typed through (someone clearing the box mid-edit) without becoming 0.
    */
-  durasi_jasa: string;
+  durasi_bulan: string;
+  qty_menambah: QtyMenambah;
   effective_from: string;
 }
 
@@ -56,8 +57,9 @@ export interface MslPayload {
   description: string;
   active: boolean;
   plan_tier: PlanTier;
-  /** null = tidak berlaku. The key is ALWAYS present — see the note above. */
-  durasi_jasa: number | null;
+  /** null = sekali jadi. The key is ALWAYS present — see the note above. */
+  durasi_bulan: number | null;
+  qty_menambah: QtyMenambah;
   effective_from: string;
 }
 
@@ -82,7 +84,11 @@ export const EMPTY_MSL_FORM: MslFormState = {
   // Default to the safest tier: a new catalog entry must not silently start
   // demanding a Strategi. The Sales Head opts in (O54).
   plan_tier: 'tanpa_plan',
-  durasi_jasa: '',
+  durasi_bulan: '',
+  // 'volume' is the safe default for the same reason the DB defaults to it:
+  // under-stating a duration shows up fast, over-stating it spreads revenue
+  // across years without anyone noticing.
+  qty_menambah: 'volume',
   effective_from: todayISO(),
 };
 
@@ -109,20 +115,21 @@ export function serviceToForm(service: MasterService): MslFormState {
     description: service.description,
     active: service.active,
     plan_tier: service.plan_tier,
-    durasi_jasa: service.durasi_jasa === null ? '' : String(service.durasi_jasa),
+    durasi_bulan: service.durasi_bulan === null ? '' : String(service.durasi_bulan),
+    qty_menambah: service.qty_menambah,
     effective_from: todayISO(),
   };
 }
 
 /**
- * parseDurasiJasa turns what the admin typed into what the API stores. Empty
- * (or whitespace) is the legitimate "tidak berlaku" and becomes null; anything
- * that is not a whole positive number of days is ALSO sent as-typed so the
+ * parseDurasiBulan turns what the admin typed into what the API stores. Empty
+ * (or whitespace) is the legitimate "sekali jadi" and becomes null; anything
+ * that is not a whole positive number of MONTHS is ALSO sent as-typed so the
  * server rejects it with the house BI message rather than the form quietly
  * rounding it — except that a non-numeric string has no number to send, so it
  * becomes NaN and the server answers `[data tidak lengkap, ...]`.
  */
-export function parseDurasiJasa(raw: string): number | null {
+export function parseDurasiBulan(raw: string): number | null {
   const t = raw.trim();
   if (t === '') return null;
   return Number(t);
@@ -150,20 +157,31 @@ export function formToPayload(form: MslFormState): MslPayload {
     description: form.description,
     active: form.active,
     plan_tier: form.plan_tier,
-    durasi_jasa: parseDurasiJasa(form.durasi_jasa),
+    durasi_bulan: parseDurasiBulan(form.durasi_bulan),
+    qty_menambah: form.qty_menambah,
     effective_from: form.effective_from,
   };
 }
 
 /**
- * formatDurasiJasa renders the column. House rule #7: a value that does not
- * apply renders as an em dash, never as 0 — "0 hari" would read as a real
- * duration of zero, which is a different claim from "durasinya tidak dipakai".
+ * formatDurasiBulan renders the column. House rule #7: a value that does not
+ * apply renders as an em dash, never as 0 — "0 bulan" would read as a real
+ * duration of zero, which is a different claim from "sekali jadi".
+ *
+ * The unit is spelled out because the same column used to hold DAYS: a bare
+ * "6" in a catalogue that once meant days is exactly the ambiguity that put
+ * month numbers in the `unit` column in the first place.
  */
-export function formatDurasiJasa(days: number | null | undefined): string {
-  if (days === null || days === undefined) return '—';
-  return `${days} hari`;
+export function formatDurasiBulan(months: number | null | undefined): string {
+  if (months === null || months === undefined) return '—';
+  return `${months} bulan`;
 }
+
+/** Human labels for the qty rule — used by the form and the table alike. */
+export const QTY_MENAMBAH_LABELS: Record<QtyMenambah, string> = {
+  durasi: 'Durasi (qty = jumlah bulan)',
+  volume: 'Volume (qty = jumlah keluaran)',
+};
 
 /**
  * saveMasterService is the one door the MSL admin writes through — create when

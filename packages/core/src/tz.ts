@@ -158,6 +158,41 @@ export function addDaysToDate(ymdStr: string, n: number): string {
   return ymd(ms + n * DAY_MS);
 }
 
+/**
+ * addMonthsToDate shifts a "YYYY-MM-DD" WIB calendar date by n whole CALENDAR
+ * months, clamping to the last day of the target month when the day-of-month
+ * does not exist there.
+ *
+ * This is what "durasi 1 bulan" means to the business and it is NOT 30 days:
+ * a service that starts 31 January and runs one month ends 28 February (29 in a
+ * leap year), not 2 March. Getting that wrong by a few days per period is not a
+ * rounding detail once the accrual engine reads it — every period boundary
+ * drifts a little further from the month it is supposed to close in, and D-3
+ * locks the books PER MONTH.
+ *
+ * Clamping (not spilling into the next month) is the same convention the rest of
+ * the world writes contracts with: "31 Jan + 1 bulan" is end of February, and
+ * two starts that clamp to the same day stay merged rather than crossing over.
+ */
+export function addMonthsToDate(ymdStr: string, n: number): string {
+  const ms = Date.parse(`${ymdStr}T00:00:00Z`);
+  if (Number.isNaN(ms)) {
+    throw new RangeError(`invalid WIB date: ${ymdStr}`);
+  }
+  if (!Number.isInteger(n)) {
+    throw new RangeError(`month shift must be a whole number: ${n}`);
+  }
+  const d = new Date(ms);
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth();
+  const day = d.getUTCDate();
+  // Day 0 of month+1 is the LAST day of that month — how many days the target
+  // month actually has, so the clamp needs no table and no leap-year branch.
+  const target = new Date(Date.UTC(year, month + n, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  return `${pad(target.getUTCFullYear(), 4)}-${pad(target.getUTCMonth() + 1, 2)}-${pad(Math.min(day, lastDay), 2)}`;
+}
+
 function ymd(ms: number): string {
   const d = new Date(ms);
   return `${pad(d.getUTCFullYear(), 4)}-${pad(d.getUTCMonth() + 1, 2)}-${pad(d.getUTCDate(), 2)}`;

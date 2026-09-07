@@ -62,10 +62,10 @@ export interface Campaign {
 // stored; recomputed every read (house rule #4). GET /campaigns/{id}/management-date.
 export interface AdsManagementDate {
   start_date: string; // "YYYY-MM-DD"
-  durasi_jasa: number; // hari kalender, dari Master Service List
+  durasi_bulan: number; // hari kalender, dari Master Service List
   additional_days: number; // manual (mis. libur Lebaran)
   total_hari_hold: number; // diturunkan dari riwayat transisi Hold, tidak disimpan
-  end_date: string; // "YYYY-MM-DD" — start_date + durasi_jasa + additional_days + total_hari_hold
+  end_date: string; // "YYYY-MM-DD" — start_date + durasi_bulan + additional_days + total_hari_hold
 }
 
 // module8_ads.MetricEntry (metrics.go:42-52). NOTE: response carries NO ctr/cvr.

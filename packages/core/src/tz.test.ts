@@ -1,6 +1,6 @@
 // Ported 1:1 from archive/backend-go/internal/core/tz/tz_test.go.
 import { describe, expect, it } from 'vitest';
-import { WIB_OFFSET_HOURS, addDaysToDate, dateString, dateTimeString, daysBetween, isoWeekOf, isoWeekOfDate, period } from './tz';
+import { WIB_OFFSET_HOURS, addDaysToDate, addMonthsToDate, dateString, dateTimeString, daysBetween, isoWeekOf, isoWeekOfDate, period } from './tz';
 
 // Helper: build a UTC instant the way the Go tests do (time.Date(..., time.UTC)).
 const utc = (y: number, mo: number, d: number, h = 0, mi = 0): Date =>
@@ -86,5 +86,38 @@ describe('daysBetween calendar days', () => {
     expect(daysBetween(due, utc(2026, 6, 20, 18, 0))).toBe(4);
     // Before the WIB midnight roll (2026-06-20T10:00Z == 17:00 WIB) it's 3.
     expect(daysBetween(due, utc(2026, 6, 20, 10, 0))).toBe(3);
+  });
+});
+
+describe('addMonthsToDate', () => {
+  it('keeps the same day-of-month when that day exists in the target month', () => {
+    expect(addMonthsToDate('2026-07-01', 1)).toBe('2026-08-01');
+    expect(addMonthsToDate('2026-01-15', 6)).toBe('2026-07-15');
+    expect(addMonthsToDate('2026-03-31', 3)).toBe('2026-06-30'); // June has 30
+  });
+
+  it('CLAMPS to the last day when the day does not exist — 31 Jan + 1 bulan is end of Feb, not 2 Mar', () => {
+    // This is the whole reason the helper exists: +30 days would say 2026-03-02.
+    expect(addMonthsToDate('2026-01-31', 1)).toBe('2026-02-28');
+    expect(addMonthsToDate('2028-01-31', 1)).toBe('2028-02-29'); // leap year
+    expect(addMonthsToDate('2026-08-31', 1)).toBe('2026-09-30');
+  });
+
+  it('crosses the year boundary, forwards and backwards', () => {
+    expect(addMonthsToDate('2026-11-15', 3)).toBe('2027-02-15');
+    expect(addMonthsToDate('2026-12-31', 12)).toBe('2027-12-31');
+    expect(addMonthsToDate('2026-02-15', -3)).toBe('2025-11-15');
+  });
+
+  it('is a no-op for 0 and rejects a fractional shift or a bad date', () => {
+    expect(addMonthsToDate('2026-07-01', 0)).toBe('2026-07-01');
+    expect(() => addMonthsToDate('2026-07-01', 1.5)).toThrow(RangeError);
+    expect(() => addMonthsToDate('bukan-tanggal', 1)).toThrow(RangeError);
+  });
+
+  it('differs from 30-day arithmetic exactly where the business cares — a 12-month contract', () => {
+    // 12 months of 30 days lands 5 days early and in the wrong month-end.
+    expect(addMonthsToDate('2026-01-01', 12)).toBe('2027-01-01');
+    expect(addDaysToDate('2026-01-01', 360)).toBe('2026-12-27');
   });
 });

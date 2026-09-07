@@ -115,12 +115,23 @@ export interface ServiceView {
    */
   planTier: PlanTier;
   /**
-   * Durasi jasa dalam HARI KALENDER (M16 LT-42 / M17 §5.4) — dipakai Ads
-   * Management Date (`ads.ts computeAdsManagementEndDate`) untuk service Ads,
-   * dan sebagai masa langganan biasa untuk item lain (mis. AI Video/Optimasi
-   * SKU). `null` = tidak berlaku untuk layanan ini (mis. Komisi/passthrough).
+   * Durasi jasa dalam BULAN KALENDER, dihitung dari tanggal layanan MULAI
+   * JALAN (untuk Ads: start campaign — periode riset tidak dihitung). Dipakai
+   * Ads Management Date (`ads.ts computeAdsManagementEndDate`) dan, nanti,
+   * mesin accrual Gelombang D.
+   *
+   * `null` BUKAN "belum diisi": ia berarti layanan ini **sekali jadi** dan
+   * tidak punya periode sama sekali, jadi pendapatannya diakui SEKALIGUS saat
+   * selesai, bukan disebar satu bulan (ketokan Q5 2026-09-07).
    */
-  durasiJasa: number | null;
+  durasiBulan: number | null;
+  /**
+   * Apa yang bertambah kalau klien membeli lebih dari satu (ketokan Q3):
+   * `'durasi'` ⇒ durasi total = qty × durasiBulan (GMV Max beli 3 = 3 bulan);
+   * `'volume'` ⇒ qty adalah jumlah keluaran dalam periode yang sama (Nano KOL
+   * beli 10 = 10 KOL, durasinya tidak berubah).
+   */
+  qtyMenambah: QtyMenambah;
   versionNo: number;
   effectiveFrom: string;
 }
@@ -141,7 +152,8 @@ interface VersionRow {
   active: boolean;
   requires_strategy_plan: boolean;
   plan_tier: string;
-  durasi_jasa: number | null;
+  durasi_bulan: number | null;
+  qty_menambah: string;
   version_no: number;
   effective_from: Date | string;
 }
@@ -153,7 +165,8 @@ function toView(r: VersionRow): ServiceView {
     applyPPN: r.apply_ppn, frequency: r.frequency ?? '', priceNote: r.price_note ?? '',
     description: r.description ?? '', active: r.active, requiresStrategyPlan: r.requires_strategy_plan,
     planTier: r.plan_tier as PlanTier,
-    durasiJasa: r.durasi_jasa,
+    durasiBulan: r.durasi_bulan,
+    qtyMenambah: r.qty_menambah as QtyMenambah,
     versionNo: r.version_no,
     effectiveFrom: r.effective_from instanceof Date
       ? r.effective_from.toISOString().slice(0, 10)
@@ -163,7 +176,7 @@ function toView(r: VersionRow): ServiceView {
 
 const VERSION_COLUMNS = `service_id, name, standard_price, commission_rule, category, unit, min_qty,
   pricing_mode, apply_ppn, frequency, price_note, description, active, requires_strategy_plan,
-  plan_tier, durasi_jasa, version_no, effective_from`;
+  plan_tier, durasi_bulan, qty_menambah, version_no, effective_from`;
 
 /**
  * effectiveAt returns the MSL version effective on `date` (YYYY-MM-DD, WIB) for a
@@ -174,7 +187,7 @@ export async function effectiveAt(sql: Queryable, serviceId: string, date: strin
   const rows = await sql<VersionRow[]>`
     select service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, plan_tier, durasi_jasa, version_no, effective_from
+           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, version_no, effective_from
     from master_service_versions
     where service_id = ${serviceId} and effective_from <= ${date}
     order by effective_from desc, version_no desc limit 1`;
@@ -194,7 +207,7 @@ export async function listEffectiveAt(sql: Queryable, date: string): Promise<Ser
     select distinct on (service_id)
            service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, plan_tier, durasi_jasa, version_no, effective_from
+           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, version_no, effective_from
     from master_service_versions
     where effective_from <= ${date}
     order by service_id, effective_from desc, version_no desc`;
@@ -206,7 +219,7 @@ export async function listVersions(sql: Queryable, serviceId: string): Promise<S
   const rows = await sql<VersionRow[]>`
     select service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, plan_tier, durasi_jasa, version_no, effective_from
+           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, version_no, effective_from
     from master_service_versions
     where service_id = ${serviceId}
     order by version_no desc`;
@@ -263,12 +276,25 @@ export interface ServiceInput {
    * mencegah. Jadi kedua bentuk kekosongan diterima; yang ditolak hanya nilai
    * yang bukan durasi (0, negatif, pecahan).
    */
-  durasiJasa?: number | null;
+  durasiBulan?: number | null;
+  /**
+   * Default `'volume'` bila tidak diberikan — sisi yang AMAN. Salah menandai
+   * layanan berdurasi sebagai `volume` membuat durasinya terlalu pendek, dan
+   * itu ketahuan cepat; sebaliknya menyebar pendapatan bertahun-tahun, dan itu
+   * tidak kelihatan.
+   */
+  qtyMenambah?: QtyMenambah;
   effectiveFrom: string; // YYYY-MM-DD
 }
 
 /** The three catalog tiers, as an input-validation set. */
 const PLAN_TIERS = new Set<string>([TIER_PLAN_WAJIB, TIER_DITENTUKAN_AM, TIER_TANPA_PLAN]);
+
+/** What a purchased qty multiplies — periods sold, or outputs within one period. */
+export type QtyMenambah = 'durasi' | 'volume';
+export const QTY_MENAMBAH_DURASI: QtyMenambah = 'durasi';
+export const QTY_MENAMBAH_VOLUME: QtyMenambah = 'volume';
+const QTY_MENAMBAH = new Set<string>([QTY_MENAMBAH_DURASI, QTY_MENAMBAH_VOLUME]);
 
 /**
  * reconcileTier keeps `plan_tier` and the legacy `requires_strategy_plan`
@@ -308,7 +334,7 @@ export function reconcileTier(
 }
 
 /** A normalized (validated) input ready to persist. */
-interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit' | 'minQty' | 'frequency' | 'priceNote' | 'description' | 'durasiJasa'>> {
+interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit' | 'minQty' | 'frequency' | 'priceNote' | 'description' | 'durasiBulan'>> {
   category: string;
   unit: string;
   minQty: string;
@@ -316,7 +342,7 @@ interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit
   priceNote: string;
   description: string;
   /** null = tidak berlaku untuk layanan ini (disimpan SQL NULL). */
-  durasiJasa: number | null;
+  durasiBulan: number | null;
 }
 
 /**
@@ -394,15 +420,27 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
     minQty = norm;
   }
 
-  // durasi_jasa (M16 LT-42 / M17 §5.4): undefined = tidak berlaku (NULL). Kalau
-  // diberikan, wajib bilangan bulat positif (hari kalender) — bukan 0/negatif,
-  // yang tidak berarti sebagai durasi.
-  let durasiJasa: number | null = null;
-  if (inp.durasiJasa !== undefined && inp.durasiJasa !== null) {
-    if (!Number.isInteger(inp.durasiJasa) || inp.durasiJasa <= 0) {
+  // durasi_bulan: undefined/null = layanan sekali jadi, tidak punya periode.
+  // Kalau diberikan, wajib bilangan bulat positif BULAN — bukan 0/negatif/
+  // pecahan, yang tidak berarti sebagai durasi.
+  let durasiBulan: number | null = null;
+  if (inp.durasiBulan !== undefined && inp.durasiBulan !== null) {
+    if (!Number.isInteger(inp.durasiBulan) || inp.durasiBulan <= 0) {
       throw new IncompleteError();
     }
-    durasiJasa = inp.durasiJasa;
+    durasiBulan = inp.durasiBulan;
+  }
+
+  // qty_menambah: default ke sisi yang aman. `durasi` tanpa `durasiBulan` tidak
+  // punya arti — qty mengalikan durasi, dan tidak ada yang bisa dikali — jadi
+  // ditolak di sini DAN oleh CHECK di DB (`ck_msv_qty_durasi_butuh_durasi_bulan`).
+  // Dua lapis karena route bukan satu-satunya penulis tabel ini.
+  const qtyMenambah = inp.qtyMenambah ?? QTY_MENAMBAH_VOLUME;
+  if (!QTY_MENAMBAH.has(qtyMenambah)) {
+    throw new IncompleteError();
+  }
+  if (qtyMenambah === QTY_MENAMBAH_DURASI && durasiBulan === null) {
+    throw new IncompleteError();
   }
 
   return {
@@ -411,7 +449,8 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
     priceNote: inp.priceNote ?? '', description: inp.description ?? '',
     applyPPN: inp.applyPPN ?? false, requiresStrategyPlan: tier.requiresStrategyPlan,
     planTier: tier.planTier,
-    durasiJasa,
+    durasiBulan,
+    qtyMenambah,
     active: inp.active ?? false,
   };
 }
@@ -444,12 +483,12 @@ async function insertVersion(
     insert into master_service_versions
       (service_id, version_no, name, standard_price, commission_rule, category, unit,
        min_qty, pricing_mode, apply_ppn, frequency, price_note, description,
-       active, requires_strategy_plan, plan_tier, durasi_jasa, effective_from, created_by)
+       active, requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, effective_from, created_by)
     values
       (${serviceId}, ${versionNo}, ${inp.name}, ${inp.standardPrice}, ${inp.commissionRule},
        ${nullText(inp.category)}, ${nullText(inp.unit)}, ${nullText(inp.minQty)}, ${inp.pricingMode},
        ${inp.applyPPN}, ${nullText(inp.frequency)}, ${nullText(inp.priceNote)}, ${nullText(inp.description)},
-       ${inp.active}, ${inp.requiresStrategyPlan}, ${inp.planTier}, ${inp.durasiJasa}, ${inp.effectiveFrom}, ${actorId})`;
+       ${inp.active}, ${inp.requiresStrategyPlan}, ${inp.planTier}, ${inp.durasiBulan}, ${inp.qtyMenambah}, ${inp.effectiveFrom}, ${actorId})`;
 }
 
 /**

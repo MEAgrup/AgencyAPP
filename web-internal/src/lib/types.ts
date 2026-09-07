@@ -190,6 +190,13 @@ export const FREQUENCIES = ['', 'Monthly', 'One-time', 'Campaign'] as const;
  */
 export type PlanTier = 'plan_wajib' | 'ditentukan_am' | 'tanpa_plan';
 
+/**
+ * Apa yang bertambah kalau klien beli lebih dari satu (ketokan Q3 2026-09-07).
+ * `durasi` ⇒ durasi total = qty × durasi_bulan; `volume` ⇒ qty adalah jumlah
+ * keluaran dalam periode yang sama.
+ */
+export type QtyMenambah = 'durasi' | 'volume';
+
 export interface MasterService {
   id: string;
   name: string;
@@ -207,8 +214,10 @@ export interface MasterService {
   requires_strategy_plan: boolean;
   /** Catalog tier — set by Sales Head in the MSL admin (O54). */
   plan_tier: PlanTier;
-  /** M16 LT-42 / M17 §5.4 — hari kalender. null = tidak berlaku untuk layanan ini. */
-  durasi_jasa: number | null;
+  /** BULAN kalender. null = layanan sekali jadi, tidak punya periode (Q5). */
+  durasi_bulan: number | null;
+  /** Apa yang ditambah qty yang dibeli klien (Q3). */
+  qty_menambah: QtyMenambah;
   version_no: number;
   effective_from: string;
 }

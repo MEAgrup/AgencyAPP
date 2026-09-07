@@ -285,7 +285,8 @@ export interface Campaign {
 /** Ads Management Date (M16 LT-42) — end_date turunan read-only, tidak disimpan. */
 export interface AdsManagementDate {
   startDate: string;
-  durasiJasa: number;
+  /** BULAN kalender dari MSL (0 kalau versi ter-pin tidak punya durasi). */
+  durasiBulan: number;
   additionalDays: number;
   totalHariHold: number;
   endDate: string;
@@ -526,9 +527,22 @@ export async function setAdditionalDays(sql: Sql, actor: Actor, campaignId: stri
 /**
  * computeAdsManagementEndDate (M16 §4.2 LT-42) — `end_date` is a READ-ONLY
  * derivation (house rule #4), never stored:
- *   end_date = start_date + durasi_jasa + additional_days + total_hari_hold
+ *   end_date = start_date + durasi_bulan BULAN + additional_days + total_hari_hold
  *
- * `durasi_jasa` comes from the MASTER SERVICE LIST version pinned on the
+ * The two halves have DIFFERENT units and that is deliberate. `durasi_bulan` is
+ * what the client bought — calendar months, added month-wise so a service that
+ * starts 31 January and runs one month ends 28 February, not 2 March (`tz
+ * .addMonthsToDate`). `additional_days` and `total_hari_hold` are calendar
+ * DAYS: they are interruptions to a running period (libur Lebaran, a pause),
+ * not extra periods sold, so they push the finish line by exactly the days lost.
+ *
+ * DEVIASI PRD YANG DISENGAJA: M16 LT-42 spells `durasi_jasa` in calendar days.
+ * The owner (Nerissa, COO) re-decided the unit to months on 2026-09-07 (Q1
+ * opsi b), because the business sells and contracts in months and D-3 locks the
+ * books per month — see `DECISIONS.md` and migration
+ * `20260918010000_d0_durasi_bulan_qty_menambah.sql`.
+ *
+ * `durasi_bulan` comes from the MASTER SERVICE LIST version pinned on the
  * parent Brief's Service (`services.master_service_id`/`master_version_no` —
  * the same pin `msl.ts effectiveAt` reads), defaulting to 0 when the pinned
  * version has none. `total_hari_hold` is NEVER a column — it is summed from
@@ -550,18 +564,26 @@ export async function computeAdsManagementEndDate(sql: Queryable, actor: Actor, 
   const startDate = dateStr(row.start_date);
   const additionalDays = Number(row.additional_days);
 
-  const msvRows = await sql<{ durasi_jasa: number | null }[]>`
-    select msv.durasi_jasa
+  const msvRows = await sql<{ durasi_bulan: number | null }[]>`
+    select msv.durasi_bulan
       from briefs b
       join services sv on sv.id = b.service_id
       join master_service_versions msv
         on msv.service_id = sv.master_service_id and msv.version_no = sv.master_version_no
      where b.id = ${row.brief_id}`;
-  const durasiJasa = msvRows.length > 0 ? Number(msvRows[0].durasi_jasa ?? 0) : 0;
+  const durasiBulan = msvRows.length > 0 ? Number(msvRows[0].durasi_bulan ?? 0) : 0;
 
   const totalHariHold = await computeTotalHariHold(sql, campaignId);
-  const endDate = addCalendarDays(startDate, durasiJasa + additionalDays + totalHariHold);
-  return { startDate, durasiJasa, additionalDays, totalHariHold, endDate };
+  // Months first, then days. Adding the days first and the months after would
+  // give a different date whenever the day-of-month clamps (31 Jan + 3 hari +
+  // 1 bulan is 3 Mar; 31 Jan + 1 bulan + 3 hari is 3 Mar too — but 29 Jan + 3
+  // hari + 1 bulan is 1 Mar while 29 Jan + 1 bulan + 3 hari is 2 Mar). The
+  // period the client bought is the anchor; interruptions extend it afterwards.
+  const endDate = tz.addDaysToDate(
+    tz.addMonthsToDate(startDate, durasiBulan),
+    additionalDays + totalHariHold,
+  );
+  return { startDate, durasiBulan, additionalDays, totalHariHold, endDate };
 }
 
 /**
@@ -588,13 +610,6 @@ async function computeTotalHariHold(sql: Queryable, campaignId: string): Promise
     }
   }
   return total;
-}
-
-/** addCalendarDays adds `days` (may be 0) calendar days to a YYYY-MM-DD string. */
-function addCalendarDays(dateStr_: string, days: number): string {
-  const d = new Date(`${dateStr_}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
 }
 
 /** allLinkedAssetsApproved: at least one currently-linked Asset AND all approved (§4 Rule 2 / §12). */

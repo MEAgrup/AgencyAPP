@@ -284,66 +284,112 @@ describeDb('updateService', () => {
 });
 
 // ---------------------------------------------------------------------------
-// durasi_jasa (M16 LT-42 / M17 §5.4) — the field the accrual engine of Gelombang
-// D reads. It went untested until 2026-09-07, and the gap hid a real defect: the
-// MSL admin form neither showed it nor sent it, so every "Ubah" on a service
+// durasi_bulan + qty_menambah — what the accrual engine of Gelombang D reads.
+//
+// The duration went untested until 2026-09-07, and the gap hid a real defect:
+// the MSL admin form neither showed it nor sent it, so every "Ubah" on a service
 // that HAD a duration wrote a new version with NULL. These tests pin the two
 // halves of that: the value survives an edit that carries it, and both shapes of
-// emptiness (undefined and null) mean the same NULL.
+// emptiness (undefined and null) mean the same NULL — which here reads "layanan
+// sekali jadi, tidak punya periode", not "belum diisi".
 // ---------------------------------------------------------------------------
-describeDb('durasi_jasa', () => {
-  it('persists on create and reads back as the same whole number of days', async () => {
+describeDb('durasi_bulan', () => {
+  it('persists on create and reads back as the same whole number of MONTHS', async () => {
     const id = await createService(sql, salesLead(), {
       name: 'Jasa berdurasi', standardPrice: '1000000', commissionRule: 'flat Rp 100',
-      effectiveFrom: '2020-01-01', active: true, durasiJasa: 30,
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 6,
     });
-    expect((await effectiveAt(sql, id, TODAY)).durasiJasa).toBe(30);
+    expect((await effectiveAt(sql, id, TODAY)).durasiBulan).toBe(6);
   });
 
   it('SURVIVES an update that carries it forward — the version 2 that wiped it was the bug', async () => {
     const id = await createService(sql, salesLead(), {
       name: 'AI Video', standardPrice: '1000000', commissionRule: 'flat Rp 100',
-      effectiveFrom: '2020-01-01', active: true, durasiJasa: 30,
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 1,
     });
     await updateService(sql, salesLead(), id, {
       name: 'AI Video (harga naik)', standardPrice: '1200000', commissionRule: 'flat Rp 100',
-      effectiveFrom: '2020-06-01', active: true, durasiJasa: 30,
+      effectiveFrom: '2020-06-01', active: true, durasiBulan: 1,
     });
     const v2 = await effectiveAt(sql, id, TODAY);
     expect(v2.versionNo).toBe(2);
-    expect(v2.durasiJasa).toBe(30);
+    expect(v2.durasiBulan).toBe(1);
   });
 
   it('an update that omits it CLEARS it — full-replace semantics, stated so no caller is surprised', async () => {
     const id = await createService(sql, salesLead(), {
       name: 'Jasa berdurasi 2', standardPrice: '1000000', commissionRule: 'flat Rp 100',
-      effectiveFrom: '2020-01-01', active: true, durasiJasa: 45,
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 6,
     });
     await updateService(sql, salesLead(), id, {
       name: 'Jasa berdurasi 2', standardPrice: '1000000', commissionRule: 'flat Rp 100',
       effectiveFrom: '2020-06-01', active: true,
     });
-    expect((await effectiveAt(sql, id, TODAY)).durasiJasa).toBeNull();
+    expect((await effectiveAt(sql, id, TODAY)).durasiBulan).toBeNull();
     // …and version 1 still carries it: history is append-only, never rewritten.
     const chain = await listVersions(sql, id);
-    expect(chain.find((v) => v.versionNo === 1)!.durasiJasa).toBe(45);
+    expect(chain.find((v) => v.versionNo === 1)!.durasiBulan).toBe(6);
   });
 
   it('treats an explicit null exactly like an omitted key — a form payload always has the key', async () => {
     const id = await createService(sql, salesLead(), {
       name: 'Jasa tanpa durasi', standardPrice: '1000000', commissionRule: 'flat Rp 100',
-      effectiveFrom: '2020-01-01', active: true, durasiJasa: null,
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: null,
     });
-    expect((await effectiveAt(sql, id, TODAY)).durasiJasa).toBeNull();
+    expect((await effectiveAt(sql, id, TODAY)).durasiBulan).toBeNull();
   });
 
   it('rejects a value that is not a duration — 0, negative, and fractional', async () => {
     for (const bad of [0, -1, 1.5]) {
       await expect(createService(sql, salesLead(), {
         name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100',
-        effectiveFrom: '2020-01-01', durasiJasa: bad,
+        effectiveFrom: '2020-01-01', durasiBulan: bad,
       })).rejects.toBeInstanceOf(IncompleteError);
     }
+  });
+
+  it('defaults qty_menambah to volume — the safe side, not the one that spreads revenue for years', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Nano KOL', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true,
+    });
+    expect((await effectiveAt(sql, id, TODAY)).qtyMenambah).toBe('volume');
+  });
+
+  it('persists qty_menambah = durasi when the service really is sold by the period', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'GMV Max', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 1, qtyMenambah: 'durasi',
+    });
+    expect((await effectiveAt(sql, id, TODAY)).qtyMenambah).toBe('durasi');
+  });
+
+  it('REFUSES qty_menambah = durasi without a durasiBulan — qty would multiply nothing', async () => {
+    await expect(createService(sql, salesLead(), {
+      name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', qtyMenambah: 'durasi',
+    })).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('the DB refuses that combination too, not only TS — the CHECK is the real gate', async () => {
+    // msl.ts is not the only writer of this table (seeds, migrations, a future
+    // import), so the invariant has to hold at the row, not just at the route.
+    const msvId = 'MSV-209912-9001';
+    await sql`insert into master_services (id, created_by) values (${msvId}, 'ZZ-SLEAD')`;
+    await expect(sql`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, pricing_mode,
+         durasi_bulan, qty_menambah, effective_from, created_by)
+      values (${msvId}, 1, 'x', '1000', 'flat Rp 100', 'flat', null, 'durasi', '2020-01-01', 'ZZ-SLEAD')`,
+    ).rejects.toThrow(/ck_msv_qty_durasi_butuh_durasi_bulan/);
+  });
+
+  it('rejects a qty_menambah that is neither durasi nor volume', async () => {
+    await expect(createService(sql, salesLead(), {
+      name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', durasiBulan: 1,
+      qtyMenambah: 'bulanan' as never,
+    })).rejects.toBeInstanceOf(IncompleteError);
   });
 });
 
