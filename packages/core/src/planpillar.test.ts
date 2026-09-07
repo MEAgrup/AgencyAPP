@@ -348,7 +348,11 @@ describe('jahitan B4→B5 — pilar usulan AM Co-Pilot server-side', () => {
         { id: 1, jenis: a.jenis, channel: 'TikTok Shop', aksi: `${a.kode} ${a.nama}`, target: a.target, sku: null },
         ['TikTok Shop'],
       );
+      // `HasilSemai` adalah union ber-diskriminan: menyempitkannya lewat `if`
+      // (bukan hanya `expect`) adalah yang membuat `tsc --noEmit` ikut menjaga
+      // cabang ini — `expect` saja lolos tes tapi gagal typecheck.
       expect(hasil.disemai).toBe(false);
+      if (hasil.disemai) throw new Error('pilar Co-Pilot seharusnya tidak disemai otomatis');
       expect(hasil.alasan).toContain('butuh_kuota');
       // Divisi dan channel-nya SUDAH terisi, jadi yang tersisa untuk AM benar-benar
       // hanya satu angka — bukan tiga kolom kosong.
@@ -366,6 +370,7 @@ describe('jahitan B4→B5 — pilar usulan AM Co-Pilot server-side', () => {
       { id: 7, jenis: a.jenis, channel: 'TikTok Shop', aksi: `${a.kode} ${a.nama}`, target: a.target, sku: null },
       ['TikTok Shop'],
     );
+    if (hasil.disemai) throw new Error('pilar Co-Pilot seharusnya tidak disemai otomatis');
     expect(hasil.usulan.hasilDiharapkan).toBe(a.target);
     expect(hasil.usulan.strategiPillarId).toBe(7);
   });
