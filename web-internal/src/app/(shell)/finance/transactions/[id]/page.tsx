@@ -387,8 +387,12 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <div>
           <h1>{trx.id}</h1>
+          {/* Finance #1 — nama toko lebih dulu, id-nya menyusul dalam tanda
+              kurung. Halaman ini dibuka dari antrean, jadi yang dicari mata
+              pertama kali adalah konfirmasi "ini transaksi toko yang benar". */}
           <p className="muted">
-            Klien: <Link href={`/clients/${trx.client_id}`}>{trx.client_id}</Link>
+            Klien: <Link href={`/clients/${trx.client_id}`}>{trx.toko || '—'}</Link>
+            {' '}({trx.client_id})
           </p>
         </div>
         <div className="row" style={{ gap: 8 }}>

@@ -103,6 +103,31 @@ nomor; keduanya benar di pohonnya masing-masing.
 | A-T4 | **`admin.test.ts` "hari libur" tidak tahan dijalankan dua kali** atas DB yang sama: ia meng-assert `count(*) = 1` atas `audit_log` tanpa aktor unik, jadi jalan kedua melihat 7. `audit_log` menolak DELETE, jadi `afterEach` tidak bisa membersihkannya. Bukan bug produksi, dan **bukan** disebabkan A-5 — dibuktikan dengan `db-rebuild` lalu jalan ulang: 1991 lulus. Tapi ia memakan satu siklus dan akan memakan siklus Jalur B juga. Perbaikannya sudah ada polanya di repo: `aktorUnik()` (`showcase.test.ts`). | Belum diperbaiki — **di luar cakupan feedback OD**, dicatat supaya tidak dikira regresi. Kalau muncul: `db-rebuild` dulu, baru cari bug. |
 | A-T3 | **Service tidak punya jalur untuk SELESAI.** `[In Execution] → Done` ada di `sm_edges` tapi nol pemanggil di seluruh domain. | Dicatat O75 di F-6. **Butuh ketokan pemilik.** Di luar cakupan feedback. |
 
+## ⚠️ Utang UAT mata manusia
+
+Rencana §6 menutup dengan peringatan yang lahir dari Gelombang C: *lolos `tsc` +
+`vitest` + `next build` tapi tata letaknya tidak pernah dilihat siapa pun.* Utang
+itu **belum dibayar** untuk perubahan render Jalur A, dan ditulis di sini supaya
+tidak lewat:
+
+| Yang perlu dilihat | Halaman | Penguji yang tepat |
+|---|---|---|
+| Nama toko jadi baris pertama, `CLI-…` baris kedua — muat di lebar kolom, tidak membuat baris tabel jadi dua kali tinggi | `/finance` | Finance (yang menulis keluhan #1) |
+| Header transaksi: `Klien: Nama Toko (CLI-…)` | `/finance/transactions/{id}` | Finance |
+| Catatan pengganti field PIC di form Brief — terbaca sebagai penjelasan, bukan sebagai error | `/account/services/{id}` | AM/CRO (keluhan Account #2) |
+
+**Kenapa belum dilakukan di sesi ini, apa adanya:** repo ini tidak punya harness
+peramban (nol Playwright di `scripts/` dan `package.json`; screenshot yang ada di
+`docs/handoff/screenshots/` dibuat manual), dan menegakkan auth + API + dev server
+hanya untuk memotret satu sel tabel bukan biaya yang sepadan di dalam sesi ini.
+Yang SUDAH dibuktikan: `tsc` bersih, `next build` sukses dengan halaman-halaman itu
+ikut ter-compile, dan rantai datanya utuh dari kueri sampai kunci wire (ada tes per
+mata rantai). Yang BELUM: ada mata yang melihatnya.
+
+Markup-nya sengaja dijaga rendah risiko: satu `<Link>` plus satu
+`<div className="muted">` di dalam `<td>` yang sudah ada — pola yang sudah dipakai
+di halaman yang sama (panel perubahan skema, baris 94) dan di `EmployeePicker`.
+
 ## Permintaan ke Jalur B (berkas milik B — JANGAN diedit dari sini)
 
 _(belum ada)_
@@ -111,7 +136,7 @@ _(belum ada)_
 
 | # | Item | Status |
 |---|---|---|
-| A-1 | Nama klien di antrean approval Finance (render) | belum |
+| A-1 | Nama klien di antrean approval Finance (render) | ✅ **SELESAI** — ⚠️ **utang UAT mata manusia**, lihat di bawah |
 | A-2 | Request pembayaran creator sampai ke Finance (+ migrasi RLS `…T10####`) | belum |
 | A-3 | Status CRO mentok `[Awaiting Onboarding]` — jahitan STRG- → gerbang Brief | belum |
 | A-4 | Durasi kerja sama pindah dari CRO ke closing Sales (K-2) | belum |

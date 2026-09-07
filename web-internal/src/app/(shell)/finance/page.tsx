@@ -134,8 +134,17 @@ export default function FinanceQueuePage() {
                     <td>
                       <Link href={`/finance/transactions/${t.id}`}>{t.id}</Link>
                     </td>
+                    {/* Feedback OD 2026-09-07, keluhan Finance #1: kolom ini
+                        dulu HANYA `CLI-…`, dan Finance tidak menghafal id klien —
+                        mereka menghafal nama toko. Nama jadi baris pertama (dan
+                        pemegang tautannya, karena itu yang dibaca dan diklik
+                        orang); id-nya turun jadi baris kedua, tidak dibuang,
+                        karena ia tetap yang dipakai saat mencocokkan dengan
+                        sistem lain. `—` kalau kosong, bukan sel kosong: sel
+                        kosong tidak bisa dibedakan dari kolom yang rusak. */}
                     <td>
-                      <Link href={`/clients/${t.client_id}`}>{t.client_id}</Link>
+                      <Link href={`/clients/${t.client_id}`}>{t.toko || '—'}</Link>
+                      <div className="muted" style={{ fontSize: 12 }}>{t.client_id}</div>
                     </td>
                     <td><StatusBadge status={t.payment_status} /></td>
                     <td>{t.payment_intent_scheme || '—'}</td>
