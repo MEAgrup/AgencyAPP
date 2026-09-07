@@ -358,6 +358,11 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   // Tombol "Include PPN" (D-4). Default MATI — lihat catatan di lib/sales.ts.
   const [includePPN, setIncludePPN] = useState(false);
   const [managedSince, setManagedSince] = useState('');
+  // K-2 — durasi kerja sama. Kosong = pakai angka katalog (layanan TERPANJANG
+  // yang dibeli); diisi = menimpanya, dan alasannya WAJIB. Sejak A-4 inilah
+  // satu-satunya tempat durasi diketik: form Strategi milik CRO/AM read-only.
+  const [durasiOverride, setDurasiOverride] = useState('');
+  const [alasanOverride, setAlasanOverride] = useState('');
   const [installments, setInstallments] = useState<InstallmentRow[]>([]);
   const [closeSubmitting, setCloseSubmitting] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
@@ -841,6 +846,11 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
         payment_scheme: paymentScheme,
         include_ppn: includePPN,
         ...(managedSince ? { managed_since: managedSince } : {}),
+        // Kirim HANYA kalau diisi. Mengirim `null` "untuk aman" akan menempuh
+        // jalur yang sama dengan angka, dan alasan wajibnya ikut menyala.
+        ...(durasiOverride.trim() !== ''
+          ? { durasi_bulan_override: Number(durasiOverride), alasan_override: alasanOverride }
+          : {}),
         ...(useInstallments
           ? { installments: installments.map((i) => ({ amount: i.amount, due_date: i.due_date })) }
           : {}),
@@ -1783,12 +1793,57 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                   </span>
                 </div>
                 <div className="field">
-                  <label htmlFor="close-managed">Managed Since (opsional)</label>
+                  {/* A-4 (K-2): label diperjelas — field ini bukan lagi hanya
+                      catatan "sejak kapan dikelola", ia adalah TANGGAL MULAI
+                      kontrak yang dicetak closing ini. */}
+                  <label htmlFor="close-managed">Tanggal Mulai Kerja Sama (opsional)</label>
                   <input
                     id="close-managed"
                     type="date"
                     value={managedSince}
                     onChange={(e) => setManagedSince(e.target.value)}
+                  />
+                  <div className="muted">
+                    Awal kontrak. Dikosongkan = tanggal closing hari ini.
+                  </div>
+                </div>
+              </div>
+
+              {/*
+                K-2 — durasi kerja sama pindah ke sini dari form Strategi milik
+                CRO/AM. Kosong adalah jalur normal: durasi diambil dari katalog
+                MSL (layanan TERPANJANG yang dibeli) dan tanggal akhirnya dihitung
+                kalender-aware. Diisi = Sales menimpa angka katalog, dan alasannya
+                wajib — angka yang menyimpang tanpa alasan tidak bisa ditinjau
+                siapa pun sebulan kemudian.
+              */}
+              <div className="formRow">
+                <div className="field">
+                  <label htmlFor="close-durasi">Durasi Kerja Sama (bulan) — opsional</label>
+                  <input
+                    id="close-durasi"
+                    type="number"
+                    min="1"
+                    max="36"
+                    step="1"
+                    placeholder="otomatis dari katalog"
+                    value={durasiOverride}
+                    onChange={(e) => setDurasiOverride(e.target.value)}
+                  />
+                  <div className="muted">
+                    Dikosongkan = otomatis dari katalog MSL (layanan terpanjang yang dibeli).
+                  </div>
+                </div>
+                <div className="field">
+                  <label htmlFor="close-alasan">Alasan Override</label>
+                  <input
+                    id="close-alasan"
+                    type="text"
+                    required={durasiOverride.trim() !== ''}
+                    disabled={durasiOverride.trim() === ''}
+                    value={alasanOverride}
+                    onChange={(e) => setAlasanOverride(e.target.value)}
+                    placeholder="wajib bila durasi diisi"
                   />
                 </div>
               </div>

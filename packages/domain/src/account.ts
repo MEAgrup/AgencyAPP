@@ -814,6 +814,11 @@ function dateStr(v: string | Date): string {
   return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
 }
 
+/** dateStr for a nullable column — null stays null, never the string 'null'. */
+function ymdOrNull(v: string | Date | null | undefined): string | null {
+  return v === null || v === undefined ? null : dateStr(v);
+}
+
 // --- Create / edit draft ---
 
 /**
@@ -1223,6 +1228,17 @@ export interface ServiceQueueRow {
    */
   strategiId: string | null;
   strategiStatus: string | null;
+  /**
+   * A-4 (K-2) — the agreement window this Service hangs under, minted by
+   * `sales.close` at closing. Projected here because the Strategi form on the
+   * Service hub used to be where an AM TYPED it; it is read-only for CRO/AM now,
+   * and a read-only field still has to show the number. Null when the Service was
+   * never grouped (an all one-off closing, or a pre-A-4 row).
+   */
+  contractId: string | null;
+  contractDurasiBulan: number | null;
+  contractTanggalMulai: string | null;
+  contractTanggalAkhir: string | null;
   briefCount: number;
   /** the client's target GMV — the anchor + ±20% baseline for a new Strategy (QA revisi). */
   clientTargetGmv: string | null;
@@ -1245,6 +1261,10 @@ interface ServiceQueueDbRow {
   strategy_status: string | null;
   strategi_id: string | null;
   strategi_status: string | null;
+  contract_id: string | null;
+  contract_durasi_bulan: number | null;
+  contract_tanggal_mulai: Date | string | null;
+  contract_tanggal_akhir: Date | string | null;
   brief_count: string;
   client_target_gmv: string | null;
   released_to_account_at: Date | null;
@@ -1273,6 +1293,10 @@ function rowToServiceQueue(r: ServiceQueueDbRow): ServiceQueueRow {
     strategyStatus: r.strategy_status,
     strategiId: r.strategi_id,
     strategiStatus: r.strategi_status,
+    contractId: r.contract_id,
+    contractDurasiBulan: r.contract_durasi_bulan === null ? null : Number(r.contract_durasi_bulan),
+    contractTanggalMulai: ymdOrNull(r.contract_tanggal_mulai),
+    contractTanggalAkhir: ymdOrNull(r.contract_tanggal_akhir),
     briefCount: Number(r.brief_count),
     clientTargetGmv: numOrNull(r.client_target_gmv),
     releasedToAccountAt: r.released_to_account_at,
@@ -1293,6 +1317,9 @@ function serviceQueueCols(sql: Queryable) {
     -- Service look un-approved. LATERAL, not a join, so a second version can
     -- never duplicate the Service row.
     stg.id as strategi_id, stg.status as strategi_status,
+    -- A-4 (K-2) — the agreement window, read-only for CRO/AM from now on.
+    ctr.id as contract_id, ctr.durasi_bulan as contract_durasi_bulan,
+    ctr.tanggal_mulai as contract_tanggal_mulai, ctr.tanggal_akhir as contract_tanggal_akhir,
     (select count(*) from briefs b where b.service_id = sv.id) as brief_count,
     c.target_gmv as client_target_gmv,
     c.released_to_account_at`;
@@ -1328,6 +1355,7 @@ export async function serviceQueue(sql: Queryable, actor: Actor): Promise<Servic
            order by (st.status = ${STRATEGI_STATUS_AKTIF}) desc, st.versi_no desc
            limit 1
         ) stg on true
+        left join contracts ctr on ctr.id = sv.contract_id
        where c.released_to_account_at is not null
        order by c.released_to_account_at asc, sv.id asc`;
   } else if (actor.role.division === ACCOUNT_DIVISION && actor.role.level === permission.LevelStaff) {
@@ -1342,6 +1370,7 @@ export async function serviceQueue(sql: Queryable, actor: Actor): Promise<Servic
            order by (st.status = ${STRATEGI_STATUS_AKTIF}) desc, st.versi_no desc
            limit 1
         ) stg on true
+        left join contracts ctr on ctr.id = sv.contract_id
        where c.assigned_am_id = ${actor.employeeId}
        order by c.released_to_account_at asc, sv.id asc`;
   } else {
@@ -1380,6 +1409,7 @@ export async function getService(sql: Queryable, actor: Actor, serviceId: string
          order by (st.status = ${STRATEGI_STATUS_AKTIF}) desc, st.versi_no desc
          limit 1
       ) stg on true
+      left join contracts ctr on ctr.id = sv.contract_id
      where sv.id = ${serviceId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_SERVICE_NOT_FOUND);

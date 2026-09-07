@@ -206,6 +206,17 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       if (svc.client_target_gmv) {
         setSGmv((prev) => (prev === '' ? svc.client_target_gmv ?? '' : prev));
       }
+      // A-4 (K-2) — jendela kontrak sudah diputuskan Sales saat closing, jadi
+      // ketiga field di form Strategi di bawah TIDAK lagi diketik AM: mereka
+      // dipaksa ke angka kontrak dan dikunci. Bukan sekadar kosmetik —
+      // `contract.ensureContractForService` menolak jendela yang berbeda dari
+      // kontrak yang sudah menaungi layanan (MSG_WINDOW_MISMATCH), jadi field
+      // yang bisa diketik di sini hanya menyiapkan penolakan.
+      if (svc.contract_id !== null) {
+        setStgDurasi(String(svc.contract_durasi_bulan ?? ''));
+        setStgMulai(svc.contract_tanggal_mulai ?? '');
+        setStgAkhir(svc.contract_tanggal_akhir ?? '');
+      }
     } catch (err) {
       setServiceError(errorMessage(err));
     }
@@ -372,6 +383,9 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // AM never has to retype kuota/divisi/hasil that Plan already holds. Only an
   // Aktif Strategi has generated periods, so this stays null until then.
   const strgActiveContractId = strategiList.find((st) => st.status === 'Aktif')?.contract_id ?? null;
+  // A-4 (K-2) — the Service already hangs under an agreement, so its window is
+  // decided and the three fields below are read-only for CRO/AM.
+  const kontrakTerkunci = service?.contract_id != null;
   // The two §4 write doors are only open at [Awaiting Onboarding] (createStrategy /
   // setStrategyRequirement both reject otherwise, MSG_SERVICE_NOT_AWAITING). When
   // the Service read is unavailable, fall back to permissive and let the server
@@ -781,6 +795,20 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                 Section A→J di halaman Strategi setelah ini. Perlu ACC Head/SPV sebelum aktif.
               </div>
               {stgError && <div className="alert alertError" role="alert">{stgError}</div>}
+              {/*
+                A-4 (K-2) — durasi + kedua tanggal kontrak sekarang milik closing
+                Sales. Kalau layanannya sudah bernaung di sebuah CTR-, ketiganya
+                ditampilkan APA ADANYA dan dikunci; yang mau mengubah durasi
+                mengubahnya di kontrak, bukan di sini.
+              */}
+              {kontrakTerkunci && (
+                <div className="alert alertInfo" role="status">
+                  Durasi dan jendela kontrak di bawah diambil dari kontrak{' '}
+                  <strong>{service?.contract_id}</strong> yang dibuat Sales saat closing (K-2),
+                  jadi tidak bisa diubah dari sini. Perlu diubah? Minta Sales/Direksi mengubahnya
+                  di kontraknya.
+                </div>
+              )}
               <div className="formRow">
                 <div className="field">
                   <label htmlFor="stg-durasi">Durasi kontrak (bulan)</label>
@@ -789,11 +817,15 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                     type="number"
                     min="1"
                     required
+                    readOnly={kontrakTerkunci}
+                    disabled={kontrakTerkunci}
                     value={stgDurasi}
                     onChange={(e) => setStgDurasi(e.target.value)}
                   />
                   <span className="muted" style={{ fontSize: 12 }}>
-                    Menentukan berapa periode Plan lahir saat Strategi disetujui (M6B Rule 1).
+                    {kontrakTerkunci
+                      ? 'Ditetapkan Sales saat closing (K-2) — read-only di sini.'
+                      : 'Menentukan berapa periode Plan lahir saat Strategi disetujui (M6B Rule 1).'}
                   </span>
                 </div>
                 <div className="field">
@@ -816,6 +848,8 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                     id="stg-mulai"
                     type="date"
                     required
+                    readOnly={kontrakTerkunci}
+                    disabled={kontrakTerkunci}
                     value={stgMulai}
                     onChange={(e) => setStgMulai(e.target.value)}
                   />
@@ -826,6 +860,8 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                     id="stg-akhir"
                     type="date"
                     required
+                    readOnly={kontrakTerkunci}
+                    disabled={kontrakTerkunci}
                     value={stgAkhir}
                     onChange={(e) => setStgAkhir(e.target.value)}
                   />

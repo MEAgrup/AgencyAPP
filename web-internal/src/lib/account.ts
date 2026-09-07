@@ -177,6 +177,16 @@ export interface ServiceQueueRow {
    */
   strategi_id: string | null;
   strategi_status: string | null;
+  /**
+   * A-4 (K-2) — jendela kontrak yang dicetak `sales.close` saat closing. Durasi
+   * dan kedua tanggal ini **read-only** untuk CRO/AM: yang mengetiknya Sales,
+   * sekali, di form closing. Null kalau layanan belum bernaung di kontrak mana
+   * pun (seluruh layanannya "sekali jadi", atau baris sebelum A-4).
+   */
+  contract_id: string | null;
+  contract_durasi_bulan: number | null;
+  contract_tanggal_mulai: string | null;
+  contract_tanggal_akhir: string | null;
   brief_count: number;
   /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
   client_target_gmv: string | null;

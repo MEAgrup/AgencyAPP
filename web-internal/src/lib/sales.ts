@@ -237,12 +237,23 @@ export interface ClosingInput {
    * invoice. Kalau menyala, cicilan harus berjumlah dasar + PPN.
    */
   include_ppn?: boolean;
+  /**
+   * K-2 — durasi kerja sama. Kosongkan untuk memakai angka katalog (layanan
+   * TERPANJANG yang dibeli); isi untuk menimpanya, dan `alasan_override` jadi
+   * WAJIB. Sejak A-4 ini satu-satunya tempat durasi diketik — form Strategi
+   * milik CRO/AM membacanya read-only.
+   */
+  durasi_bulan_override?: number | null;
+  /** K-2 — wajib bila `durasi_bulan_override` diisi. */
+  alasan_override?: string;
 }
 
 // module0_sales.ClosingResult.
 export interface ClosingResult {
   client_id: string;
   transaction_id: string;
+  /** K-2 — CTR- yang lahir di closing; null bila semua layanan "sekali jadi". */
+  contract_id: string | null;
 }
 
 // ---- Constants (verbatim BI / status strings — do not rename) ----

@@ -368,6 +368,15 @@ export interface ServiceQueueRowWire {
    */
   strategi_id: string | null;
   strategi_status: string | null;
+  /**
+   * A-4 (K-2) — the agreement window minted by `sales.close`. Explicit nulls: a
+   * Service with no contract is a real state (all-one-off closing, or a row from
+   * before A-4), and the Strategi form has to tell it apart from "key missing".
+   */
+  contract_id: string | null;
+  contract_durasi_bulan: number | null;
+  contract_tanggal_mulai: string | null;
+  contract_tanggal_akhir: string | null;
   brief_count: number;
   /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
   client_target_gmv: string | null;
@@ -393,6 +402,10 @@ export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueR
     strategy_status: r.strategyStatus,
     strategi_id: r.strategiId,
     strategi_status: r.strategiStatus,
+    contract_id: r.contractId,
+    contract_durasi_bulan: r.contractDurasiBulan,
+    contract_tanggal_mulai: r.contractTanggalMulai,
+    contract_tanggal_akhir: r.contractTanggalAkhir,
     brief_count: r.briefCount,
     client_target_gmv: r.clientTargetGmv,
     released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,

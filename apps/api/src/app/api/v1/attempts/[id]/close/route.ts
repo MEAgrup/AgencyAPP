@@ -29,6 +29,10 @@ interface Body {
    * stray string can never switch tax on for a client who did not agree to it.
    */
   include_ppn?: boolean;
+  /** K-2 — Sales overrides the catalog-derived engagement duration. */
+  durasi_bulan_override?: number | null;
+  /** K-2 — mandatory whenever `durasi_bulan_override` is sent. */
+  alasan_override?: string;
 }
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
@@ -49,7 +53,21 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       installments: (b.installments ?? []).map((i) => ({ amount: i.amount ?? '', dueDate: i.due_date ?? '' })),
       managedSince: b.managed_since,
       includePPN: b.include_ppn === true,
+      // `null` from the wire means "no override" exactly like an absent key —
+      // a form that clears the field sends null, and treating that as the number
+      // `null` would reach the range check and fail a legitimate closing.
+      durasiBulanOverride: b.durasi_bulan_override ?? undefined,
+      alasanOverride: b.alasan_override,
     });
-    return json({ client_id: result.clientId, transaction_id: result.transactionId }, 201);
+    return json(
+      {
+        client_id: result.clientId,
+        transaction_id: result.transactionId,
+        // Explicit null, never omitted (O43): "no agreement window" is a state
+        // the closing screen has to be able to tell apart from "key missing".
+        contract_id: result.contractId,
+      },
+      201,
+    );
   });
 }

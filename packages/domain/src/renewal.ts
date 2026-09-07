@@ -17,11 +17,15 @@
  * gate), `validateShape`/`validateScheduleTotal`/`validateParties` (the exact
  * M0 §6 allocation + payment-schedule rules), `resolvePIC`. Execution births
  * `SVC-`/`TRX-`/`INST-` with the SAME status constants and table shapes
- * `sales.close()` births them with. `CTR-` is the one exception: `close()`
- * never mints a Contract at all (Services stay contract-less until the AM
- * groups them via `contract.ensureContractForService`, M6A) — a renewal has
- * exactly one natural grouping (this request's own lines), so execution
- * mints the Contract directly and pre-attaches the Services to it. This is
+ * `sales.close()` births them with. `CTR-` used to be the one exception —
+ * `close()` minted no Contract at all and Services stayed contract-less until
+ * the AM grouped them via `contract.ensureContractForService` (M6A). **A-4
+ * (K-2, 2026-09-07) closed that gap:** a fresh closing now mints its own
+ * agreement window too, derived from the catalog with a Sales override. The two
+ * paths therefore now agree in shape; a renewal still mints its own because it
+ * has exactly one natural grouping (this request's own lines) AND a `jenis` /
+ * `contract_sebelumnya_id` chain a first-time closing has nothing to say about.
+ * This is
  * also how R-03 sidesteps the GARIS STOP `DECISIONS.md` Kinerja Sales #4
  * recorded: it never calls `contract.canWriteContract` (that gate, and the
  * Account-side Strategi/Plan-per-Contract cycle behind it, are untouched —
@@ -588,9 +592,10 @@ export async function executeRenewal(
         (${contractId}, ${row.client_id}, ${durasi}, ${mulai}, ${akhir}, ${row.jenis}, ${contractSebelumnyaId}, ${actor.employeeId})`;
 
     // 2) Services (SVC- per line, born [Awaiting Onboarding]) under this
-    //    Contract — same birth status as sales.close(), attached from day 1
-    //    (unlike a fresh closing, whose Services start contract-less until an
-    //    AM groups them — here the Contract already exists, so attach now).
+    //    Contract — same birth status as sales.close(), attached from day 1.
+    //    Since A-4 a fresh closing attaches its Services too; the difference
+    //    that remains is only WHERE the window comes from (this request's own
+    //    fields here, the MSL catalog + Sales override there).
     //    name/requires_strategy_plan/plan_tier come from the MSL catalog
     //    (effectiveAt) — the proposal only ever pinned price/commission_rule,
     //    same enrichment sales.close() does via loadApprovedLines.

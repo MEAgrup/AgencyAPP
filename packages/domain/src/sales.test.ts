@@ -8,12 +8,17 @@
  *   test namespaces its ids with `ZZ-` and afterEach deletes the rows it made.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { bi, money, page, permission } from '@cdps/core';
+import { bi, money, page, permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { leads } from './index';
 import {
   acceptCounter,
   AllocationTotalError,
+  CONTRACT_MAX_MONTHS,
+  deriveDurasiBulan,
+  DurasiOverrideReasonError,
+  DurasiRangeError,
+  type ApprovedLine,
   BadCommissionRuleError,
   buildQuote,
   close,
@@ -1311,5 +1316,242 @@ describeDb('read models', () => {
     // silently hiding the engine baseline UI for every client (the bug this fixes).
     expect(client.platforms.map((p) => p.platform).sort()).toEqual(['Shopee', 'TikTok Shop', 'Tokopedia']);
     expect(client.platforms.every((p) => p.active)).toBe(true);
+  });
+});
+
+/**
+ * A-4 / K-2 — the engagement window is decided at CLOSING, by the person who
+ * negotiated it.
+ *
+ * Before this, the only UI that ever wrote `contracts.durasi_bulan` was the AM's
+ * Strategi form, weeks later: `sales.close` never printed a `contracts` row at
+ * all. So "how many months did we sell them" had no answer until an Account
+ * Manager typed one — and M6B generates one Plan period per contract month from
+ * exactly that number.
+ */
+describe('A-4 / K-2 — deriveDurasiBulan (pure)', () => {
+  const line = (over: Partial<ApprovedLine>): ApprovedLine => ({
+    masterServiceId: 'SVC-X', proposedPrice: '1000000.00', commissionRule: '10%',
+    name: 'X', versionNo: 1, requiresStrategyPlan: false, planTier: 'tanpa_plan',
+    durasiBulan: 1, qtyMenambah: 'volume', quantity: 1,
+    ...over,
+  });
+
+  it('is the LONGEST service purchased, not the first or the sum', () => {
+    expect(deriveDurasiBulan([
+      line({ durasiBulan: 3 }),
+      line({ durasiBulan: 12 }),
+      line({ durasiBulan: 6 }),
+    ])).toBe(12);
+  });
+
+  it('skips a one-off line — NULL durasi is "sekali jadi" (Q4), not "unknown"', () => {
+    expect(deriveDurasiBulan([line({ durasiBulan: null }), line({ durasiBulan: 4 })])).toBe(4);
+    // Every line one-off ⇒ there is no window at all, and close() mints no CTR-.
+    expect(deriveDurasiBulan([line({ durasiBulan: null }), line({ durasiBulan: null })])).toBeNull();
+    expect(deriveDurasiBulan([])).toBeNull();
+  });
+
+  /**
+   * Q3 — the quantity a client buys means different things per service.
+   * `qty_menambah = 'durasi'` makes qty a COUNT OF PERIODS (the PRD's own
+   * example: GMV Max × 3 = 3 months); `'volume'` makes it output inside the same
+   * window (Nano KOL × 10 = ten creators, not ten months).
+   */
+  it('multiplies by qty only for qty_menambah = durasi', () => {
+    expect(deriveDurasiBulan([line({ durasiBulan: 1, qtyMenambah: 'durasi', quantity: 6 })])).toBe(6);
+    expect(deriveDurasiBulan([line({ durasiBulan: 1, qtyMenambah: 'volume', quantity: 10 })])).toBe(1);
+    // Mixed basket: the volume line is long, the durasi line is longer once qty
+    // is applied. Reading `MAX(durasi_bulan)` alone would answer 3 here.
+    expect(deriveDurasiBulan([
+      line({ durasiBulan: 3, qtyMenambah: 'volume', quantity: 10 }),
+      line({ durasiBulan: 2, qtyMenambah: 'durasi', quantity: 3 }),
+    ])).toBe(6);
+  });
+});
+
+describeDb('A-4 / K-2 — durasi kerja sama dicetak saat closing', () => {
+  const contractOf = (clientId: string) =>
+    sql<{
+      id: string; durasi_bulan: number; tanggal_mulai: string; tanggal_akhir: string; catatan: string | null;
+    }[]>`
+      select id, durasi_bulan, tanggal_mulai::text, tanggal_akhir::text, catatan
+        from contracts where client_id = ${clientId}`;
+
+  /** Seed a catalog service carrying a window, then close a one-line deal on it. */
+  async function closeWith(
+    id: string,
+    msv: { durasiBulan: number | null; qtyMenambah?: string },
+    opts: { quantity?: number; managedSince?: string; override?: number; alasan?: string } = {},
+  ) {
+    const svc = await seedService(id);
+    await sql`
+      update master_service_versions
+         set durasi_bulan = ${msv.durasiBulan}, qty_menambah = ${msv.qtyMenambah ?? 'volume'}
+       where service_id = ${svc}`;
+    const actor = budi();
+    const attemptId = await contactedAttempt(actor);
+    await submitQualifiedForm(sql, actor, attemptId, {
+      namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+      kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '50000000', targetGmv: '80000000',
+      services: [{ masterServiceId: svc, quantity: opts.quantity ?? 1 }],
+    });
+    await submitNegotiation(sql, actor, attemptId, [], true);
+    return close(sql, actor, attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      managedSince: opts.managedSince,
+      durasiBulanOverride: opts.override,
+      alasanOverride: opts.alasan,
+    });
+  }
+
+  it('derives the duration from the catalog and attaches every Service to the CTR-', async () => {
+    const res = await closeWith('SVC-ZZ-K2-BASE', { durasiBulan: 6 }, { managedSince: '2026-08-12' });
+    expect(res.contractId).not.toBeNull();
+    const [ctr] = await contractOf(res.clientId);
+    expect(ctr.id).toBe(res.contractId);
+    expect(ctr.durasi_bulan).toBe(6);
+    expect(ctr.tanggal_mulai).toBe('2026-08-12');
+    expect(ctr.catatan).toContain('Durasi otomatis dari katalog MSL');
+    // O57 option (a): one client, one agreement, one Strategi — so the Services
+    // hang under it from day one instead of waiting for an AM to group them.
+    const svcs = await sql<{ contract_id: string | null }[]>`
+      select contract_id from services where client_id = ${res.clientId}`;
+    expect(svcs.length).toBeGreaterThan(0);
+    expect(svcs.every((r) => r.contract_id === res.contractId)).toBe(true);
+  });
+
+  /**
+   * The end date is CALENDAR months with an end-of-month clamp, never `+30 hari`.
+   * A deal signed 31 January for one month ends 28 February; +30 days would say
+   * 2 March, and every Plan period after it drifts a little further out of the
+   * month D-3 closes the books in.
+   */
+  it('computes tanggal_akhir calendar-aware — starting on the 31st clamps', async () => {
+    const res = await closeWith('SVC-ZZ-K2-CLAMP', { durasiBulan: 1 }, { managedSince: '2026-01-31' });
+    const [ctr] = await contractOf(res.clientId);
+    expect(ctr.tanggal_akhir).toBe('2026-02-28');
+    expect(ctr.tanggal_akhir).not.toBe('2026-03-02'); // what `+30 hari` would give
+    expect(ctr.tanggal_akhir).toBe(tz.addMonthsToDate('2026-01-31', 1));
+  });
+
+  it('handles a leap February the same way, with no leap-year branch anywhere', async () => {
+    const res = await closeWith('SVC-ZZ-K2-LEAP', { durasiBulan: 1 }, { managedSince: '2028-01-31' });
+    const [ctr] = await contractOf(res.clientId);
+    expect(ctr.tanggal_akhir).toBe('2028-02-29');
+  });
+
+  it('multiplies qty into the window for a qty_menambah = durasi service (Q3)', async () => {
+    const res = await closeWith(
+      'SVC-ZZ-K2-QTY',
+      { durasiBulan: 1, qtyMenambah: 'durasi' },
+      { quantity: 3, managedSince: '2026-08-12' },
+    );
+    const [ctr] = await contractOf(res.clientId);
+    expect(ctr.durasi_bulan).toBe(3);
+    expect(ctr.tanggal_akhir).toBe('2026-11-12');
+  });
+
+  it('mints NO contract when every line is one-off (durasi_bulan NULL)', async () => {
+    const res = await closeWith('SVC-ZZ-K2-NULL', { durasiBulan: null });
+    expect(res.contractId).toBeNull();
+    expect(await contractOf(res.clientId)).toHaveLength(0);
+    // The closing itself still succeeded — a one-off engagement is a real deal.
+    const svcs = await sql<{ id: string }[]>`select id from services where client_id = ${res.clientId}`;
+    expect(svcs.length).toBeGreaterThan(0);
+  });
+
+  it('lets the override win, and records the catalog answer it departed from', async () => {
+    const res = await closeWith(
+      'SVC-ZZ-K2-OVR',
+      { durasiBulan: 6 },
+      { managedSince: '2026-08-12', override: 12, alasan: 'klien minta paket setahun di luar katalog' },
+    );
+    const [ctr] = await contractOf(res.clientId);
+    expect(ctr.durasi_bulan).toBe(12);
+    expect(ctr.tanggal_akhir).toBe('2027-08-12');
+    expect(ctr.catatan).toContain('di-override');
+    expect(ctr.catatan).toContain('katalog: 6 bulan');
+    expect(ctr.catatan).toContain('klien minta paket setahun di luar katalog');
+  });
+
+  it('overrides a one-off basket into a real window — the only way to get one', async () => {
+    const res = await closeWith(
+      'SVC-ZZ-K2-OVR-NULL',
+      { durasiBulan: null },
+      { managedSince: '2026-08-12', override: 3, alasan: 'retainer disepakati terpisah' },
+    );
+    expect(res.contractId).not.toBeNull();
+    const [ctr] = await contractOf(res.clientId);
+    expect(ctr.durasi_bulan).toBe(3);
+    expect(ctr.catatan).toContain('katalog: sekali jadi');
+  });
+
+  it('REFUSES an override with no reason — the whole point of K-2', async () => {
+    await expect(
+      closeWith('SVC-ZZ-K2-NOREASON', { durasiBulan: 6 }, { override: 12 }),
+    ).rejects.toThrow(DurasiOverrideReasonError);
+    await expect(
+      closeWith('SVC-ZZ-K2-BLANKREASON', { durasiBulan: 6 }, { override: 12, alasan: '   ' }),
+    ).rejects.toThrow(DurasiOverrideReasonError);
+  });
+
+  it('REFUSES an override outside 1..36 — the agreement cannot express it', async () => {
+    await expect(
+      closeWith('SVC-ZZ-K2-RANGE-HI', { durasiBulan: 6 }, { override: 37, alasan: 'x' }),
+    ).rejects.toThrow(DurasiRangeError);
+    await expect(
+      closeWith('SVC-ZZ-K2-RANGE-LO', { durasiBulan: 6 }, { override: 0, alasan: 'x' }),
+    ).rejects.toThrow(DurasiRangeError);
+  });
+
+  /**
+   * A catalog quirk (a `durasi` service bought in bulk) must never cost a real
+   * signed deal. The clamp is applied, and SAID — in the contract note and in the
+   * audit row — rather than quietly rewriting the number.
+   */
+  it('clamps a derivation above 36 months instead of failing the closing, and says so', async () => {
+    const res = await closeWith(
+      'SVC-ZZ-K2-CLAMP36',
+      { durasiBulan: 1, qtyMenambah: 'durasi' },
+      { quantity: 40, managedSince: '2026-08-12' },
+    );
+    const [ctr] = await contractOf(res.clientId);
+    expect(ctr.durasi_bulan).toBe(CONTRACT_MAX_MONTHS);
+    expect(ctr.catatan).toContain('Dibatasi ke 36 bulan');
+    expect(ctr.catatan).toContain('40 bulan');
+  });
+
+  it('falls back to the closing date (WIB) when Sales leaves the start blank', async () => {
+    const svc = await seedService('SVC-ZZ-K2-TODAY');
+    await sql`update master_service_versions set durasi_bulan = 2 where service_id = ${svc}`;
+    const actor = budi();
+    const attemptId = await autoApprovedAttempt(actor, svc);
+    // 2026-03-15 17:00 UTC is already 2026-03-16 in WIB — the fallback must be
+    // the WIB calendar date, not the UTC one.
+    const now = new Date('2026-03-15T17:00:00Z');
+    const res = await close(sql, actor, attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    }, now);
+    const [ctr] = await contractOf(res.clientId);
+    expect(ctr.tanggal_mulai).toBe('2026-03-16');
+    expect(ctr.tanggal_akhir).toBe('2026-05-16');
+  });
+
+  it('leaves an audit row naming both numbers — derived and override', async () => {
+    const res = await closeWith(
+      'SVC-ZZ-K2-AUDIT',
+      { durasiBulan: 6 },
+      { managedSince: '2026-08-12', override: 9, alasan: 'diskon paket 9 bulan' },
+    );
+    const rows = await sql<{ after_json: Record<string, unknown> }[]>`
+      select after_json from audit_log
+       where entity_type = 'contract' and entity_id = ${res.contractId!}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].after_json.durasi_bulan).toBe(9);
+    expect(rows[0].after_json.durasi_katalog).toBe(6);
+    expect(rows[0].after_json.alasan_override).toBe('diskon paket 9 bulan');
   });
 });
