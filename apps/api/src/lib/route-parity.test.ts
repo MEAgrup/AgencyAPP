@@ -86,4 +86,13 @@ describe('FE↔API route parity', () => {
     // catch the route file going missing.
     expect(routes).toContain('GET /leads/export');
   });
+
+  it('serves GET /clients/{}/assets — the Ads Asset picker (B-5 / K-3)', () => {
+    // Positive assertion because THIS route existing is the whole of B-5's
+    // second lock: before it, `/ads/[id]` shipped a "type the AST- from memory"
+    // textbox precisely because no list endpoint existed. If the route file ever
+    // goes missing, the picker degrades to an empty dropdown — which reads as a
+    // permission problem, not a missing route.
+    expect(routes).toContain('GET /clients/{}/assets');
+  });
 });

@@ -44,12 +44,13 @@ Expected result: every individual creative output is traceable, revisions don't 
 1. Creative roles: **Videographer, Editor, Graphic Designer, Copywriter, Social Media Officer**, plus a **Team Leader (Video)** and **Team Leader (Graphic)** who oversee their respective sub-teams.
 2. Each Creative staff member sees a personal queue: all Assets assigned to them, across all Briefs/clients, sorted by due date.
 3. **Team Leader can reassign PIC** on any Asset within their sub-team (logged) but cannot delete history (house convention).
-4. A Brief lands in the general Creative queue (unassigned) until its Assets are auto-assigned by current availability/workload across the sub-team (Team Leader can override any auto-assignment) — assignment happens per-Asset, not necessarily all at once for the whole Brief (useful when a 12-video Brief is split between two Videographers, M7-OA-1 resolved).
+4. A Brief lands in the general Creative queue (unassigned) until the **Team Leader distributes its Assets across the sub-team** — assignment happens per-Asset, not necessarily all at once for the whole Brief (useful when a 12-video Brief is split between two Videographers). ⚠️ **Amended by owner's ruling K-1, 2026-09-07 (option B) — see M7-OA-1 below.** The earlier wording said Assets were *auto-assigned by current availability/workload*; that mechanism was never built, and K-1 retires it rather than leaving the PRD contradicting the code.
 
 ### Flow
 1. Brief arrives from Module 6, visible to the Creative Team Leader(s).
-2. Assets auto-assign to staff by current availability/workload; Team Leader overrides when needed (M7-OA-1).
+2. The Team Leader distributes Assets to PICs (`createAssetBatch`, "N units to this person"); a staff member may still self-claim their own unit (§4 Flow 1). K-1: handing units OUT is the Leader's call — no auto-assignment step exists.
 3. Each staff member works their personal Asset queue independently of how the rest of the Brief is progressing.
+4. **Internal QC before the AM ever sees it (K-1).** A `[Submitted]` Asset goes to the Team Leader, who either forwards it (`[Submitted]` → `[In Review]`) or sends it back to the PIC (`[Submitted]` → `[Revision Requested]`, feedback mandatory, lead-only). Only then does the AM give the client-side verdict — **`[In Review]` → `[Approved]` remains the AM's alone.** A Leader QC reject does **not** count toward the Asset's Revision Count (§6 Rule 2), because that figure measures revisions the *client* asked for. Transition table: `docs/STATE_MACHINES.md` §7.
 
 ---
 
@@ -197,7 +198,10 @@ Two months in, Ads reports that the exact product video Rian shot for Alpha Digi
 
 ## 10. Resolved Decisions (Module 7)
 
-- **M7-OA-1 (Asset assignment model) — ✅ Resolved.** Assets are **auto-assigned based on current availability/workload** across the sub-team; Team Leader can override any auto-assignment when needed (e.g. matching a specific Videographer's strength to a tricky shoot) — supersedes the original "Team Leader assigns / self-claim" framing with a third, confirmed model.
+- **M7-OA-1 (Asset assignment model) — ✅ Resolved, then ♻️ SUPERSEDED by K-1 (owner, 2026-09-07, option B).**
+  - **Now in force:** the **Team Leader distributes** Assets across the sub-team, and a staff member may **self-claim** their own unit. The Leader is additionally the **internal QC gate** (§3 Flow 4). The AM chooses the **division only** — never a staff name — and keeps final approval.
+  - **Retired:** the earlier resolution ("Assets are auto-assigned based on current availability/workload, Team Leader can override"). **It was never built** — there is no availability/workload signal in CDPS to auto-assign from, and CDPS is not the HRIS that would hold one. It is recorded here as retired rather than deleted so a future reader does not re-derive a requirement from a line the code never honoured. Reviving it needs a fresh decision entry, not a re-reading of this bullet.
+  - Roles **Strategist / Content Creator / SMO** and the Leader's **daily schedule** view are explicitly **out of scope** of K-1 (the role model today is only `staff` | `lead`); they are their own wave.
 - **M7-OA-2 (Hours Logged usage) — ✅ Resolved.** Stays optional and non-punitive (never feeds Speed/Quantity KPI scoring), but the system now sends an **automatic end-of-day reminder** if nothing's been logged — nudges completion without making it mandatory.
 - **M7-OA-3 (Revision SLA) — ✅ Resolved.** A **separate, shorter SLA applies to revision rounds** specifically (distinct from the Asset's original Due Date) — default **24–48 hours** depending on Asset Type/complexity, set at Brief-breakdown time alongside the original SLA. Feeds a parallel `revision_speed_score` (Module 12 §5.1 addition) so "how fast was the fix" is measured against its own yardstick, not folded into the original turnaround target.
 - **M7-OA-4 (GMV attribution mechanism) — ✅ Resolved.** Stays **manual tagging** by Ads/Reporting for now (UTM/link-tracking automation not yet built) — **with one addition:** a **monthly review-and-lock cadence** before that period's Attributed GMV figures are treated as final for KPI purposes, rather than treating every ad-hoc tag as immediately locked-in.

@@ -186,8 +186,16 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
   const canDecideBlock = !odOnly && (director || leadCreative);
   // Ajukan block: staff/lead Creative, owning AM, atau Director.
   const canRequestBlock = !odOnly && (director || inCreativeDivision || isAM);
-  // Review/Approve/Request-Revision: owning AM atau Director (server memutuskan owning-nya).
-  const canReview = !odOnly && (director || isAM);
+  // Review — TIGA pintu berbeda sejak B-4/K-1, jangan disatukan lagi jadi satu
+  // flag: server memutuskan per-edge (`creative.canDriveReviewEdge`), dan satu
+  // flag gabungan pasti menampilkan tombol yang lalu ditolak 403.
+  //   QC internal lolos  [Submitted] -> [In Review]          lead divisi / AM / Director
+  //   QC internal tolak  [Submitted] -> [Revision Requested] lead divisi / Director
+  //   putusan klien      [In Review] -> [Approved]/[Revision Requested]  AM / Director
+  const leadOfThisBrief = leadCreative && isCreativeBrief;
+  const canStartReview = !odOnly && (director || isAM || leadOfThisBrief);
+  const canQcReject = !odOnly && (director || leadOfThisBrief);
+  const canAmVerdict = !odOnly && (director || isAM);
   // Hours Logged: PIC yang di-assign (diri sendiri), lead Creative, atau Director.
   const canLogHours = !odOnly && (director || leadCreative || isSelfPic);
   // Kelola PIC/SLA: SPV/Lead Creative atau Director.
@@ -269,10 +277,14 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
     runReview(() => approveAsset(id), 'Asset disetujui');
   }
 
-  function handleRequestRevision() {
-    const feedback = window.prompt('Catatan revisi untuk PIC:');
+  // Satu endpoint, dua pintu: statusnya sekarang yang memutuskan apakah ini
+  // putusan klien (dari [In Review]) atau tolakan QC internal (dari [Submitted]).
+  function handleRequestRevision(qc = false) {
+    const feedback = window.prompt(
+      qc ? 'Alasan QC internal ditolak (dibaca PIC, wajib):' : 'Catatan revisi untuk PIC:',
+    );
     if (!feedback) return;
-    runReview(() => requestAssetRevision(id, feedback), 'Revisi diminta');
+    runReview(() => requestAssetRevision(id, feedback), qc ? 'Ditolak QC internal' : 'Revisi diminta');
   }
 
   async function handleLogHours(e: FormEvent) {
@@ -407,8 +419,10 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
   const showRequestBlock = canRequestBlock && status === '[In Progress]';
   const hasExecAction = showStart || showSubmit || showRework || showResume || showRequestBlock;
 
-  const showReview = canReview && status === ASSET_SUBMITTED;
-  const showApproveOrRevision = canReview && status === ASSET_IN_REVIEW;
+  const showReview = canStartReview && status === ASSET_SUBMITTED;
+  const showQcReject = canQcReject && status === ASSET_SUBMITTED;
+  const showApproveOrRevision = canAmVerdict && status === ASSET_IN_REVIEW;
+  const hasReviewAction = showReview || showQcReject || showApproveOrRevision;
 
   return (
     <div className="stack">
@@ -619,15 +633,30 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
 
       <section className="card">
         <div className="cardHeader">
-          <h2>Review Asset (AM)</h2>
+          <h2>QC Internal &amp; Review</h2>
         </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Dua tahap, bukan satu: <strong>Lead divisi</strong> meloloskan atau menolak hasil PIC lebih
+          dulu (QC internal), lalu <strong>AM pemilik klien</strong> yang memberi persetujuan akhir.
+          Tolakan QC internal tidak dihitung sebagai revisi klien.
+        </p>
         {reviewError && <div className="alert alertError" role="alert">{reviewError}</div>}
         {reviewMessage && <div className="alert alertSuccess" role="status">{reviewMessage}</div>}
-        {showReview || showApproveOrRevision ? (
+        {hasReviewAction ? (
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
             {showReview && (
               <button type="button" className="btn btnPrimary" disabled={reviewSubmitting} onClick={handleReview}>
-                {reviewSubmitting ? 'Memproses...' : 'Mulai Review'}
+                {reviewSubmitting ? 'Memproses...' : 'Loloskan QC \u2192 Review AM'}
+              </button>
+            )}
+            {showQcReject && (
+              <button
+                type="button"
+                className="btn btnSecondary"
+                disabled={reviewSubmitting}
+                onClick={() => handleRequestRevision(true)}
+              >
+                {reviewSubmitting ? 'Memproses...' : 'Tolak QC \u2192 Balik ke PIC'}
               </button>
             )}
             {showApproveOrRevision && (
@@ -639,7 +668,7 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
                   type="button"
                   className="btn btnSecondary"
                   disabled={reviewSubmitting}
-                  onClick={handleRequestRevision}
+                  onClick={() => handleRequestRevision(false)}
                 >
                   {reviewSubmitting ? 'Memproses...' : 'Minta Revisi'}
                 </button>
@@ -648,8 +677,9 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
           </div>
         ) : (
           <p className="muted">
-            Tidak ada aksi review yang tersedia untuk Anda pada status ini. Hanya Account Manager pemilik
-            klien atau Director yang dapat mereview.
+            Tidak ada aksi review yang tersedia untuk Anda pada status ini. QC internal
+            ([Submitted]) milik Lead divisi pelaksana; persetujuan akhir ([In Review]) milik Account
+            Manager pemilik klien. Director boleh keduanya.
           </p>
         )}
       </section>

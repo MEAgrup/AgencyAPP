@@ -255,6 +255,43 @@ export function listBriefAssets(briefId: string): Promise<{ data: Asset[] }> {
 }
 
 // ---------------------------------------------------------------------------
+// Aset [Approved] milik satu klien (B-5 / K-3) — sumber data `AssetPicker`.
+//
+// Sampai B-5, halaman kampanye Ads meminta Advertiser MENGETIK `AST-202607-0001`
+// dari ingatan, dan tidak ada satu pun cara untuk menemukannya: nol endpoint
+// daftar, dan `creative.canSeeAsset` menolak divisi Ads sama sekali sehingga
+// menebak ID yang benar pun tetap 403.
+// ---------------------------------------------------------------------------
+
+/** Satu baris pilihan di picker aset (`GET /clients/{id}/assets`). */
+export interface ClientAssetOption {
+  id: string; // AST-
+  brief_id: string; // Brief Creative asalnya
+  brief_title: string;
+  asset_type: string;
+  sequence_no: number;
+  output_link: string;
+  /** Waktu disetujui, diturunkan dari audit log — `null` hanya untuk baris pra-log. */
+  approved_at: string | null;
+}
+
+/**
+ * Aset `[Approved]` milik satu klien, approval terbaru lebih dulu.
+ *
+ * `sourceBriefId` menyempitkan ke SATU Brief Creative sumber (K-3: brief Ads
+ * menunjuk brief Creative asalnya, kolom `briefs.source_creative_brief_id`).
+ * Kosong ⇒ seluruh aset `[Approved]` milik klien itu — fallback ini disengaja:
+ * picker yang menyempit lalu diam-diam kosong lebih buruk daripada picker lebar.
+ */
+export function listClientApprovedAssets(
+  clientId: string,
+  sourceBriefId?: string,
+): Promise<{ data: ClientAssetOption[] }> {
+  const q = sourceBriefId ? `?source_brief=${encodeURIComponent(sourceBriefId)}` : '';
+  return api.get<{ data: ClientAssetOption[] }>(`/clients/${clientId}/assets${q}`);
+}
+
+// ---------------------------------------------------------------------------
 // Submit Output Massal (C2/C3, Revisi Sales/Creative/Performa) — submit/start
 // many Assets of one Brief at once, replacing one window.prompt per Asset.
 // ---------------------------------------------------------------------------

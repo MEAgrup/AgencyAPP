@@ -1,0 +1,58 @@
+-- ============================================================================
+-- B-4 — gerbang QC internal Leader Creative.
+--
+-- Ketokan pemilik K-1 (Nerissa, 2026-09-07, opsi B): Leader Creative jadi
+-- gerbang dan boleh meloloskan/menolak hasil PIC SEBELUM naik ke AM. AM tetap
+-- pemegang approval akhir.
+--
+-- Yang berubah di mesin status: SATU edge baru.
+--
+--     ('brief_task', '[Submitted]', '[Revision Requested]', require_lead=true)
+--
+-- Artinya: "QC internal gagal, balik ke PIC". Ia melengkapi edge yang SUDAH ada
+-- `[Submitted]` → `[In Review]` ("lolos QC internal, teruskan ke AM"), yang
+-- aktornya dilebarkan di TypeScript (`creative.lockAssetOwner`) — bukan di sini,
+-- karena `sm_edges.require_lead` tidak tahu DIVISI mana yang dimaksud.
+--
+-- ⛔ NOL mesin baru dan NOL state baru (aturan rumah #2). `sm_machines` TETAP 31
+--    dan `sm_edges` tidak dihitung gerbang `scripts/db-rebuild.sh`, jadi
+--    migrasi ini tidak menyentuh counter mana pun.
+--
+-- ---------------------------------------------------------------------------
+-- KENAPA `require_lead = true` SAJA TIDAK CUKUP (dan kenapa itu tetap benar).
+--
+-- `sm_transition` mengevaluasi `require_lead` sebagai `p_role_director OR
+-- p_role_lead`, dan `p_role_lead` diturunkan dari `actor.role.level === 'lead'`
+-- TANPA melihat divisinya (`packages/core/src/statemachine.ts:108`). Jadi baris
+-- ini sendiri juga akan meloloskan seorang lead divisi lain yang memanggil
+-- fungsinya langsung lewat service-role.
+--
+-- Itu disengaja dan sesuai pembagian yang sudah dipakai seluruh repo: DB
+-- memikul gerbang KASAR yang tidak bisa dilewati siapa pun (staff biasa nol
+-- akses ke edge ini, bahkan lewat service-role), dan domain memikul gerbang
+-- HALUS yang butuh konteks baris (lead divisi eksekusi brief-nya, atau AM
+-- pemilik klien). Membuat DB tahu divisi berarti menyalin `briefs`→`services`→
+-- `clients` ke dalam `sm_transition` — versi kedua dari aturan yang sama.
+--
+-- ---------------------------------------------------------------------------
+-- KENAPA `[Submitted]` → `[Revision Requested]` DAN BUKAN state QC baru.
+--
+-- Aturan rumah #2 melarang mengarang status. Yang dibutuhkan Leader cuma dua
+-- keputusan yang KEDUANYA sudah punya state tujuannya: teruskan (`[In Review]`)
+-- atau tolak (`[Revision Requested]`, yang sudah berarti "balik ke PIC" dan
+-- sudah punya edge keluar `[Revision Requested]` → `[In Progress]`).
+--
+-- Konsekuensi yang HARUS diketahui pembaca berikutnya: Revision Count per Aset
+-- (M7 §6 Rule 2/Rule 4) diturunkan dari audit_log dengan action PERSIS
+-- `transition:[In Review]->[Revision Requested]` (`creative.ts`
+-- deriveAssetRevisionCount). Penolakan QC internal menulis
+-- `transition:[Submitted]->[Revision Requested]`, jadi ia **tidak** ikut
+-- terhitung — dan itu memang yang dikehendaki: Revision Count adalah ukuran
+-- revisi yang diminta KLIEN lewat AM, bukan QC internal divisi. Kalau suatu
+-- saat QC internal ingin dihitung, itu keputusan baru + entri DECISIONS, bukan
+-- efek samping migrasi ini.
+-- ============================================================================
+
+INSERT INTO sm_edges (machine, from_state, to_state, require_lead, created_by) VALUES
+    ('brief_task', '[Submitted]', '[Revision Requested]', true, 'B4-LEAD-QC')
+ON CONFLICT (machine, from_state, to_state) DO NOTHING;

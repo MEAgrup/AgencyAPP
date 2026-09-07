@@ -21,6 +21,7 @@ import {
   type Brief,
   type CreatorList,
 } from '@/lib/kol';
+import { hitungProgres, labelProgres, pesanRollupTertahan } from '@/lib/brief-progress';
 import StatusBadge from '@/components/StatusBadge';
 import StageTimelinePanel from '@/components/StageTimelinePanel';
 
@@ -271,6 +272,12 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
     (eligibleSet.size !== includedSet.size || [...eligibleSet].some((x) => !includedSet.has(x)));
   const newEligibleCount = creatorList ? creatorList.eligible_bookings.filter((x) => !includedSet.has(x)).length : 0;
 
+  // B-3 / B-1a: progres "n dari N". `bookings` masih `null` selama fetch, dan 0
+  // yang belum selesai dimuat terbaca sama seperti 0 yang sungguhan — jadi
+  // pesannya baru dirender setelah daftarnya ada.
+  const progres = hitungProgres(bookings?.length ?? 0, brief.quantity_target);
+  const rollupTertahan = bookings === null ? null : pesanRollupTertahan(progres, 'Booking');
+
   return (
     <div className="stack">
       <div>
@@ -317,21 +324,35 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
             <div>{brief.priority}</div>
           </div>
           <div>
-            <div className="muted" style={{ fontSize: 12 }}>Due Date</div>
+            <div className="muted" style={{ fontSize: 12 }}>Jatuh Tempo (Due Date)</div>
             <div>{brief.due_date || '—'}</div>
+          </div>
+          <div>
+            {/* B-3: `quantity_target` MENGUNCI roll-up Brief tapi sampai sekarang
+                tidak dirender di satu halaman pun. Itulah kenapa divisi bisa
+                bilang "sudah beres" sementara status Brief tidak bergerak
+                (keluhan Account #3 & #4) — angkanya ada, orangnya tidak pernah
+                melihatnya. */}
+            <div className="muted" style={{ fontSize: 12 }}>Progres Booking (Quantity/Target)</div>
+            <div>{labelProgres(progres, 'creator')}</div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Instruksi</div>
             <div style={{ whiteSpace: 'pre-wrap' }}>{brief.instructions || '—'}</div>
           </div>
         </div>
+        {rollupTertahan && (
+          <div className="alert alertInfo" role="status" style={{ marginTop: 12 }}>
+            {rollupTertahan}
+          </div>
+        )}
       </section>
 
       <StageTimelinePanel briefId={brief.id} assignedDivision={brief.assigned_division} canReview={canCreate} />
 
       <section className="card">
         <div className="cardHeader">
-          <h2>Booking ({bookings?.length ?? 0})</h2>
+          <h2>Booking &mdash; {labelProgres(progres, 'creator')}</h2>
         </div>
         {bookings && bookings.length === 0 ? (
           <div className="emptyState">Belum ada Booking untuk Brief ini.</div>

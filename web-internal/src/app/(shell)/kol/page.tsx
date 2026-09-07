@@ -218,6 +218,12 @@ export default function KolWorkspacePage() {
                   <th>Prioritas</th>
                   <th>Status</th>
                   <th>Jatuh Tempo</th>
+                  {/* B-3: `quantity_target` sudah ada di wire tapi tidak pernah
+                      dirender, padahal ia yang MENGUNCI roll-up Brief. Kolom ini
+                      baru penyebutnya; pembilangnya ("n dari N") butuh jumlah
+                      Booking per baris antrean — satu field wire baru, lihat
+                      docs/handoff/HANDOFF_FEEDBACK_OD_JALUR_B.md. */}
+                  <th>Target Creator</th>
                 </tr>
               </thead>
               <tbody>
@@ -230,6 +236,7 @@ export default function KolWorkspacePage() {
                     <td>{b.priority}</td>
                     <td><StatusBadge status={b.status} /></td>
                     <td>{b.due_date || '—'}</td>
+                    <td>{b.quantity_target > 0 ? b.quantity_target : '—'}</td>
                   </tr>
                 ))}
               </tbody>

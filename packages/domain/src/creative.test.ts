@@ -15,7 +15,9 @@ import { createClient, type Sql } from '@cdps/db';
 import {
   approveAsset,
   approveAssetBatch,
+  canAssignAssetBatch,
   canCreateAsset,
+  canDriveReviewEdge,
   canLogHours,
   canRunHoursReminderScan,
   canSeeAsset,
@@ -26,16 +28,23 @@ import {
   dailyOutput,
   ForbiddenError,
   getAsset,
+  listApprovedAssetsForClient,
   listBriefAssets,
   listMyAssets,
   logHours,
+  MSG_ASSET_FORBIDDEN,
   MSG_ASSET_NOT_FOUND,
   MSG_INVALID_PIC,
+  MSG_BATCH_ASSIGN_FORBIDDEN,
+  MSG_CLIENT_NOT_FOUND,
   MSG_INVALID_QUANTITY,
+  MSG_QC_REJECT_FORBIDDEN,
   MSG_QUANTITY_EXCEEDS_TARGET,
   MSG_REVIEW_FORBIDDEN,
+  MSG_REVIEW_START_FORBIDDEN,
   NotFoundError,
   requestAssetRevision,
+  reviewEdgeForbiddenMessage,
   reviewAsset,
   reviewAssetBatch,
   runHoursReminderScan,
@@ -64,6 +73,7 @@ const creativeLead = (id = 'ZZ-CLEAD'): Actor => ({
 });
 const adsStaff = (): Actor => ({ employeeId: 'ZZ-A', divisi: 'Ads', role: permission.makeRole({ division: 'Ads', level: 'staff' }) });
 const accountLead = (): Actor => ({ employeeId: 'ZZ-ALEAD', divisi: 'Account', role: permission.makeRole({ division: 'Account', level: 'lead' }) });
+const adsLead = (): Actor => ({ employeeId: 'ZZ-ALEAD-ADS', divisi: 'Ads', role: permission.makeRole({ division: 'Ads', level: 'lead' }) });
 const am = (id = 'ZZ-SINTA'): Actor => ({ employeeId: id, divisi: 'Account', role: permission.makeRole({ division: 'Account', level: 'staff' }) });
 const od = (): Actor => ({ employeeId: 'ZZ-OD', divisi: 'Management', role: permission.makeRole({ od: true }) });
 const director = (): Actor => ({ employeeId: 'ZZ-DIR', divisi: 'Management', role: permission.makeRole({ director: true }) });
@@ -79,11 +89,20 @@ describe('creative predicates', () => {
     expect(canCreateAsset(adsStaff())).toBe(false);
     expect(canCreateAsset(am())).toBe(false);
   });
-  it('canSeeAsset: OD/Director/Account-lead/owner-AM/Creative-division', () => {
+  it('canSeeAsset: OD/Director/Account-lead/owner-AM/Creative-division, plus the B-5 Ads arm', () => {
     expect(canSeeAsset(od(), 'ZZ-SINTA', 'Creative')).toBe(true);
     expect(canSeeAsset(am(), 'ZZ-SINTA', 'Creative')).toBe(true);
     expect(canSeeAsset(creativeStaff(), 'ZZ-SINTA', 'Creative')).toBe(true);
-    expect(canSeeAsset(adsStaff(), 'ZZ-SINTA', 'Creative')).toBe(false);
+    // B-5/K-3: the Ads division now reads Creative Assets (it has to link them
+    // into campaigns — PRD M8 §9.1). Before this it was `false`, which is why
+    // the campaign page shipped a type-the-id-from-memory textbox.
+    expect(canSeeAsset(adsStaff(), 'ZZ-SINTA', 'Creative')).toBe(true);
+    expect(canSeeAsset(adsLead(), 'ZZ-SINTA', 'Creative')).toBe(true);
+    // Still shut for a division with no business in Creative output.
+    expect(canSeeAsset(
+      { employeeId: 'ZZ-K', divisi: 'KOL', role: permission.makeRole({ division: 'KOL', level: 'staff' }) },
+      'ZZ-SINTA', 'Creative',
+    )).toBe(false);
   });
   it('canLogHours: assigned PIC, Creative lead, or Director', () => {
     expect(canLogHours(creativeStaff('ZZ-C'), 'Creative', 'ZZ-C')).toBe(true);
@@ -99,6 +118,55 @@ describe('creative predicates', () => {
     expect(canSeeDailyOutput(creativeStaff('ZZ-OTHER'), 'ZZ-RIAN')).toBe(false); // foreign Creative staff
     expect(canSeeDailyOutput(am(), 'ZZ-RIAN')).toBe(false); // owning AM is not a Daily-Output viewer
     expect(canSeeDailyOutput(accountLead(), 'ZZ-RIAN')).toBe(false);
+  });
+  // ---- B-4 / K-1: the leader is the internal-QC gate, the AM still approves ----
+  it('canDriveReviewEdge: the QC pass is lead-OR-AM, the QC reject is lead-only, approval is AM-only', () => {
+    const SUBMITTED = '[Submitted]';
+    const IN_REVIEW = '[In Review]';
+    // The whole ruling as one table: actor · from · to · may?  Written out so a
+    // future widening has to change a row here rather than slip through.
+    const cases: [string, Actor, string, string, boolean][] = [
+      // [Submitted] -> [In Review] : "lolos QC internal, teruskan ke AM"
+      ['lead QC-passes', creativeLead(), SUBMITTED, IN_REVIEW, true],
+      ['owning AM still starts review', am(), SUBMITTED, IN_REVIEW, true],
+      ['Director', director(), SUBMITTED, IN_REVIEW, true],
+      ['plain Creative staff', creativeStaff(), SUBMITTED, IN_REVIEW, false],
+      ['a FOREIGN AM', am('ZZ-OTHER'), SUBMITTED, IN_REVIEW, false],
+      ['a lead of ANOTHER division', adsLead(), SUBMITTED, IN_REVIEW, false],
+      ['OD (read-only everywhere)', od(), SUBMITTED, IN_REVIEW, false],
+      // [Submitted] -> [Revision Requested] : "QC internal gagal, balik ke PIC"
+      ['lead QC-rejects', creativeLead(), SUBMITTED, '[Revision Requested]', true],
+      ['AM cannot QC-reject a not-yet-reviewed Asset', am(), SUBMITTED, '[Revision Requested]', false],
+      ['staff cannot QC-reject', creativeStaff(), SUBMITTED, '[Revision Requested]', false],
+      // [In Review] -> [Approved] : the client's verdict, the AM's alone (K-1)
+      ['owning AM approves', am(), IN_REVIEW, '[Approved]', true],
+      ['lead may NOT approve', creativeLead(), IN_REVIEW, '[Approved]', false],
+      ['Director may approve', director(), IN_REVIEW, '[Approved]', true],
+      // [In Review] -> [Revision Requested] : also the AM's verdict, unchanged
+      ['owning AM asks for revision', am(), IN_REVIEW, '[Revision Requested]', true],
+      ['lead may NOT ask for a client revision', creativeLead(), IN_REVIEW, '[Revision Requested]', false],
+    ];
+    for (const [label, actor, from, to, expected] of cases) {
+      expect(canDriveReviewEdge(actor, from, to, 'ZZ-SINTA', 'Creative'), label).toBe(expected);
+    }
+  });
+  it('reviewEdgeForbiddenMessage names the door that was refused, not always the AM', () => {
+    // The old single message said "only the owning AM" for every refusal; after
+    // B-4 that is a lie on two of the three doors.
+    expect(reviewEdgeForbiddenMessage('[Submitted]', '[In Review]')).toBe(MSG_REVIEW_START_FORBIDDEN);
+    expect(reviewEdgeForbiddenMessage('[Submitted]', '[Revision Requested]')).toBe(MSG_QC_REJECT_FORBIDDEN);
+    expect(reviewEdgeForbiddenMessage('[In Review]', '[Approved]')).toBe(MSG_REVIEW_FORBIDDEN);
+    expect(reviewEdgeForbiddenMessage('[In Review]', '[Revision Requested]')).toBe(MSG_REVIEW_FORBIDDEN);
+  });
+  it('canAssignAssetBatch: Creative lead or Director hand work OUT; staff never do', () => {
+    expect(canAssignAssetBatch(creativeLead())).toBe(true);
+    expect(canAssignAssetBatch(director())).toBe(true);
+    expect(canAssignAssetBatch(creativeStaff())).toBe(false);
+    expect(canAssignAssetBatch(adsLead())).toBe(false);
+    expect(canAssignAssetBatch(am())).toBe(false);
+    expect(canAssignAssetBatch(od())).toBe(false);
+    // canCreateAsset is deliberately NOT narrowed — the self-claim survives.
+    expect(canCreateAsset(creativeStaff())).toBe(true);
   });
   it('canRunHoursReminderScan: Creative (any level) or Director; not other divisions', () => {
     expect(canRunHoursReminderScan(creativeStaff())).toBe(true);
@@ -367,6 +435,270 @@ describeDb('Asset review + revision loop (§6)', () => {
   });
 });
 
+describeDb('B-5 / K-3 — Ads menemukan aset lewat daftar, bukan hafalan', () => {
+  /** A client with `n` Approved Assets on one Creative Brief, plus one still [Submitted]. */
+  async function clientWithApproved(n: number): Promise<{ clientId: string; briefId: string; approved: string[] }> {
+    const clientId = uid('CLI');
+    const svcId = uid('SVC');
+    const briefId = uid('BRF');
+    await insertClient(clientId, 'ZZ-SINTA');
+    await insertService(svcId, clientId);
+    await insertBrief(briefId, svcId, 'Creative', n + 1);
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    const staff = creativeStaff('ZZ-C');
+    const approved: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = await createAsset(sql, staff, briefId, { sequenceNo: i + 1 });
+      await startAsset(sql, staff, a.id);
+      await submitAsset(sql, staff, a.id, `https://drive/${a.id}`);
+      await reviewAsset(sql, am(), a.id);
+      await approveAsset(sql, am(), a.id);
+      approved.push(a.id);
+    }
+    // One more that is only [Submitted] — it must NOT be offered as linkable.
+    const pending = await createAsset(sql, staff, briefId, { sequenceNo: n + 1 });
+    await startAsset(sql, staff, pending.id);
+    await submitAsset(sql, staff, pending.id, 'https://drive/pending');
+    return { clientId, briefId, approved };
+  }
+
+  it('an Advertiser reads the client\'s [Approved] Assets — and only those', async () => {
+    const { clientId, approved } = await clientWithApproved(2);
+    const rows = await listApprovedAssetsForClient(sql, adsStaff(), clientId);
+    // Derived from what the machine actually approved, not from a hand-written
+    // literal: an `expect` on a guessed id is green even when the filter is wrong.
+    expect(rows.map((r) => r.id).sort()).toEqual([...approved].sort());
+    expect(rows.every((r) => r.outputLink !== '')).toBe(true);
+    // approvedAt comes out of the immutable log (house rule 4), so it is present
+    // for every row the engine approved — a null here means the derivation broke.
+    expect(rows.every((r) => r.approvedAt instanceof Date)).toBe(true);
+    expect(rows.every((r) => r.briefTitle === 'Brief' && r.assetType === 'Product Video')).toBe(true);
+  });
+
+  it('never leaks another client\'s Assets, even to the same Advertiser', async () => {
+    const mine = await clientWithApproved(2);
+    const theirs = await clientWithApproved(1);
+    const rows = await listApprovedAssetsForClient(sql, adsStaff(), mine.clientId);
+    const ids = new Set(rows.map((r) => r.id));
+    expect(theirs.approved.every((id) => !ids.has(id))).toBe(true);
+    expect(ids.size).toBe(2);
+  });
+
+  it('the source-Brief filter narrows to one Creative Brief and falls back when empty', async () => {
+    const first = await clientWithApproved(2);
+    // A SECOND Creative Brief for the SAME client, one Approved Asset.
+    const svc2 = uid('SVC');
+    const brief2 = uid('BRF');
+    await sql`insert into services (id, client_id, master_service_id, master_version_no, name,
+        standard_price, commission_rule, status, requires_strategy_plan, created_by)
+      values (${svc2}, ${first.clientId}, 'MSV-X', 1, 'Svc2', '10000000.00', 'rule', '[Briefed]', false, 'ZZ-TEST')`;
+    await insertBrief(brief2, svc2, 'Creative', 1);
+    const staff = creativeStaff('ZZ-C');
+    const other = await createAsset(sql, staff, brief2, { sequenceNo: 1 });
+    await startAsset(sql, staff, other.id);
+    await submitAsset(sql, staff, other.id, 'https://drive/other');
+    await reviewAsset(sql, am(), other.id);
+    await approveAsset(sql, am(), other.id);
+
+    // Narrowed: only the named Brief's Assets.
+    expect((await listApprovedAssetsForClient(sql, adsStaff(), first.clientId, brief2)).map((r) => r.id))
+      .toEqual([other.id]);
+    expect((await listApprovedAssetsForClient(sql, adsStaff(), first.clientId, first.briefId)).map((r) => r.id).sort())
+      .toEqual([...first.approved].sort());
+    // Empty / absent / whitespace ⇒ the fallback, all three Assets. Asserted for
+    // every spelling because '' is what an unset FE prop actually sends.
+    for (const src of [undefined, '', '   ']) {
+      expect((await listApprovedAssetsForClient(sql, adsStaff(), first.clientId, src)).length).toBe(3);
+    }
+  });
+
+  it('gates by role and by client existence — 403 and 404, never a misleading empty list', async () => {
+    const { clientId } = await clientWithApproved(1);
+    // Allowed: Ads staff/lead, the owning AM, Account lead, OD, Director, Creative.
+    for (const actor of [adsStaff(), adsLead(), am(), accountLead(), od(), director(), creativeStaff('ZZ-C')]) {
+      expect((await listApprovedAssetsForClient(sql, actor, clientId)).length).toBe(1);
+    }
+    // Refused: a foreign AM, and a division with no business in Creative output.
+    const kolStaff: Actor = {
+      employeeId: 'ZZ-K', divisi: 'KOL', role: permission.makeRole({ division: 'KOL', level: 'staff' }),
+    };
+    for (const actor of [am('ZZ-OTHER'), kolStaff]) {
+      await expect(listApprovedAssetsForClient(sql, actor, clientId)).rejects.toBeInstanceOf(ForbiddenError);
+      await expect(listApprovedAssetsForClient(sql, actor, clientId)).rejects.toThrow(MSG_ASSET_FORBIDDEN);
+    }
+    // A client that does not exist is a 404, not an empty 200 — otherwise a typo
+    // in the id looks exactly like "this client has no approved Assets".
+    await expect(listApprovedAssetsForClient(sql, adsStaff(), 'CLI-GHOST-0'))
+      .rejects.toBeInstanceOf(NotFoundError);
+    await expect(listApprovedAssetsForClient(sql, adsStaff(), 'CLI-GHOST-0'))
+      .rejects.toThrow(MSG_CLIENT_NOT_FOUND);
+  });
+});
+
+describeDb('B-4 / K-1 — Leader Creative jadi gerbang QC internal', () => {
+  /** One Creative Asset driven to [Submitted] through the real division flow. */
+  async function submitted(qty = 2): Promise<{ assetId: string; briefId: string; staff: Actor }> {
+    const { briefId } = await creativeBrief(qty);
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    await registerStaff('ZZ-CLEAD', 'Creative', 'lead');
+    const staff = creativeStaff('ZZ-C');
+    const a = await createAsset(sql, staff, briefId, { sequenceNo: 1 });
+    await startAsset(sql, staff, a.id);
+    await submitAsset(sql, staff, a.id, 'https://drive/x');
+    return { assetId: a.id, briefId, staff };
+  }
+
+  it('the edge exists in sm_edges as lead-gated, and NO new machine or state came with it', async () => {
+    // Derived from the real table, not from a literal in the test: the migration
+    // is the thing under test, so reading it back is the whole point.
+    const edge = await sql<{ require_lead: boolean }[]>`
+      select require_lead from sm_edges
+       where machine='brief_task' and from_state='[Submitted]' and to_state='[Revision Requested]'`;
+    expect(edge).toHaveLength(1);
+    expect(edge[0].require_lead).toBe(true); // staff cannot reach it even via service-role
+    // House rule 2: nol mesin baru, nol state baru. Every brief_task edge must
+    // still land on a state the machine already had before B-4.
+    const states = new Set((await sql<{ s: string }[]>`
+      select from_state as s from sm_edges where machine='brief_task'
+      union select to_state as s from sm_edges where machine='brief_task'`).map((r) => r.s));
+    expect([...states].sort()).toEqual([
+      '[Approved]', '[Blocked]', '[Cancelled — Service Voided]', '[In Progress]', '[In Review]',
+      '[Revision Requested]', '[Submitted]', '[To Do]',
+    ]);
+  });
+
+  it('lead QC-passes to [In Review]; AM then approves — the seam, both halves real', async () => {
+    // Quantity/Target 1 so the parent Brief's roll-up can reach [Approved]: with
+    // an unfilled target it stops at [In Progress] regardless of the Assets in
+    // it, which is B-1a and is NOT what this test is about.
+    const { assetId, briefId } = await submitted(1);
+    // The leader forwards internal QC. Before B-4 this was a 403.
+    await reviewAsset(sql, creativeLead(), assetId);
+    expect(await assetStatus(assetId)).toBe('[In Review]');
+    // The leader may NOT sign off for the client (K-1: "AM tetap pemegang approval akhir").
+    await expect(approveAsset(sql, creativeLead(), assetId)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(approveAsset(sql, creativeLead(), assetId)).rejects.toThrow(MSG_REVIEW_FORBIDDEN);
+    expect(await assetStatus(assetId)).toBe('[In Review]'); // refusal wrote nothing
+    // The AM does, and the parent Brief rolls up with it.
+    await approveAsset(sql, am(), assetId);
+    expect(await assetStatus(assetId)).toBe('[Approved]');
+    expect(await briefStatus(briefId)).toBe('[Approved]'); // the seam holds end to end
+  });
+
+  it('lead QC-rejects to [Revision Requested]: feedback mandatory, PIC can rework, count untouched', async () => {
+    const { assetId, staff } = await submitted();
+    await expect(requestAssetRevision(sql, creativeLead(), assetId, '   ')).rejects.toBeInstanceOf(ValidationError);
+    await requestAssetRevision(sql, creativeLead(), assetId, 'framing kepotong, ulangi');
+    expect(await assetStatus(assetId)).toBe('[Revision Requested]');
+    // The feedback is readable on the SAME audit action the FE already looks for.
+    const fb = await sql<{ after_json: { feedback: string } }[]>`
+      select after_json from audit_log
+       where entity_type='asset' and entity_id=${assetId} and action='revision_feedback'`;
+    expect(fb.map((r) => r.after_json.feedback)).toEqual(['framing kepotong, ulangi']);
+    // Revision Count is the CLIENT's revision count (M7 §6 Rule 2) — internal QC
+    // must not inflate it, or the Quality score punishes the division for its own
+    // QC being strict.
+    expect((await getAsset(sql, am(), assetId)).revisionCount).toBe(0);
+    // …and the PIC's way back is the edge that already existed.
+    await reworkAsset(sql, staff, assetId);
+    expect(await assetStatus(assetId)).toBe('[In Progress]');
+  });
+
+  it('a QC reject at revision count 3 does NOT re-fire the §6 Rule 4 flag', async () => {
+    const { assetId, staff } = await submitted();
+    // Three real AM revision rounds → count 3, flag fires exactly once.
+    for (let i = 0; i < 3; i++) {
+      if (i > 0) {
+        await reworkAsset(sql, staff, assetId);
+        await submitAsset(sql, staff, assetId, 'https://drive/x');
+      }
+      await reviewAsset(sql, am(), assetId);
+      await requestAssetRevision(sql, am(), assetId, `revisi ${i + 1}`);
+    }
+    const flagCount = async (): Promise<number> => Number((await sql<{ n: string }[]>`
+      select count(*) as n from notifications
+       where recipient_employee_id='ZZ-CLEAD' and event_type='m12.revision_count.flag' and entity_id=${assetId}`)[0].n);
+    expect((await getAsset(sql, am(), assetId)).revisionCount).toBe(3);
+    expect(await flagCount()).toBe(1);
+    // Now a LEAD QC reject while the count already sits at 3. The count does not
+    // move, so the "exact 3rd revision" flag must not fire a second time.
+    await reworkAsset(sql, staff, assetId);
+    await submitAsset(sql, staff, assetId, 'https://drive/x');
+    await requestAssetRevision(sql, creativeLead(), assetId, 'QC internal: audio pecah');
+    expect((await getAsset(sql, am(), assetId)).revisionCount).toBe(3);
+    expect(await flagCount()).toBe(1);
+  });
+
+  it('a lead of ANOTHER division, plain staff, and OD are all refused both QC doors', async () => {
+    const { assetId } = await submitted();
+    const staff = creativeStaff('ZZ-C');
+    for (const actor of [adsLead(), staff, accountLead()]) {
+      await expect(reviewAsset(sql, actor, assetId)).rejects.toBeInstanceOf(ForbiddenError);
+      await expect(requestAssetRevision(sql, actor, assetId, 'x')).rejects.toBeInstanceOf(ForbiddenError);
+    }
+    // accountLead is refused by the review gate, not by RLS — assert the message
+    // so a future widening of Account-lead reads cannot silently open a WRITE.
+    await expect(reviewAsset(sql, accountLead(), assetId)).rejects.toThrow(MSG_REVIEW_START_FORBIDDEN);
+    await expect(requestAssetRevision(sql, staff, assetId, 'x')).rejects.toThrow(MSG_QC_REJECT_FORBIDDEN);
+    expect(await assetStatus(assetId)).toBe('[Submitted]');
+  });
+
+  it('the batch QC pass is open to the lead; the batch approve stays the AM\'s', async () => {
+    const { briefId } = await creativeBrief(2);
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    await registerStaff('ZZ-CLEAD', 'Creative', 'lead');
+    const staff = creativeStaff('ZZ-C');
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const a = await createAsset(sql, staff, briefId, { sequenceNo: i + 1 });
+      await startAsset(sql, staff, a.id);
+      await submitAsset(sql, staff, a.id, `https://drive/${a.id}`);
+      ids.push(a.id);
+    }
+    const reviewed = await reviewAssetBatch(sql, creativeLead(), briefId, ids);
+    expect(reviewed.applied).toBe(2);
+    expect(reviewed.rejected).toBe(0);
+    // The lead's batch approve is refused per row, and (batch semantics) writes nothing.
+    const refused = await approveAssetBatch(sql, creativeLead(), briefId, ids);
+    expect(refused.applied).toBe(0);
+    expect(refused.rejections.map((r) => r.reason)).toEqual([MSG_REVIEW_FORBIDDEN, MSG_REVIEW_FORBIDDEN]);
+    expect(await assetStatus(ids[0])).toBe('[In Review]');
+    // The AM's does land.
+    expect((await approveAssetBatch(sql, am(), briefId, ids)).applied).toBe(2);
+    expect(await briefStatus(briefId)).toBe('[Approved]');
+  });
+
+  it('batch fan-out is lead-only; a staffer keeps the §4 Flow 1 self-claim of ONE unit', async () => {
+    const { briefId } = await creativeBrief(6);
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    await registerStaff('ZZ-CLEAD', 'Creative', 'lead');
+    const staff = creativeStaff('ZZ-C');
+    // Assigning someone ELSE: refused, whatever the quantity.
+    await expect(createAssetBatch(sql, staff, briefId, [{ assignedPic: 'ZZ-RIAN', quantity: 1 }]))
+      .rejects.toThrow(MSG_BATCH_ASSIGN_FORBIDDEN);
+    // Mixed batch: one own line + one foreign line is still a distribution, and
+    // it must create NOTHING (the refusal lands before the transaction opens).
+    await expect(createAssetBatch(sql, staff, briefId, [{ quantity: 1 }, { assignedPic: 'ZZ-RIAN', quantity: 1 }]))
+      .rejects.toThrow(MSG_BATCH_ASSIGN_FORBIDDEN);
+    expect((await sql<{ n: string }[]>`select count(*) as n from assets where brief_id=${briefId}`)[0].n).toBe('0');
+    // A bad quantity is still a 400, not a 403 — the permission check must not
+    // swallow the real complaint.
+    await expect(createAssetBatch(sql, staff, briefId, [{ quantity: 0 }])).rejects.toBeInstanceOf(ValidationError);
+    // The self-claim survives, both spellings (empty PIC and own id), and is NOT
+    // capped at one unit — createAssetBatch is the only door that reuses a
+    // Sequence # gap, so capping it would cost the self-claimer that.
+    expect(await createAssetBatch(sql, staff, briefId, [{ quantity: 2 }])).toHaveLength(2);
+    const own = await createAssetBatch(sql, staff, briefId, [{ assignedPic: 'ZZ-C', quantity: 1 }]);
+    expect(own.map((a) => a.assignedPic)).toEqual(['ZZ-C']);
+    // The lead still distributes freely (3 slots left of 6).
+    const fan = await createAssetBatch(sql, creativeLead(), briefId, [
+      { assignedPic: 'ZZ-RIAN', quantity: 2 }, { assignedPic: 'ZZ-C', quantity: 1 },
+    ]);
+    expect(fan).toHaveLength(3);
+  });
+});
+
 describeDb('reviewAssetBatch / approveAssetBatch (C4, Revisi Sales/Creative/Performa)', () => {
   /** N Assets driven to [Submitted] via the real division-side flow (not raw SQL). */
   async function submittedAssets(briefId: string, staff: Actor, n: number): Promise<string[]> {
@@ -419,8 +751,11 @@ describeDb('reviewAssetBatch / approveAssetBatch (C4, Revisi Sales/Creative/Perf
 
     // Forbidden — a different AM does not own this client.
     const [submitted] = await submittedAssets(briefId, staff, 1);
+    // B-4 widened THIS door ([Submitted]->[In Review]) to the executing division's
+    // lead, so its refusal now names both roles; the approve door below still
+    // carries MSG_REVIEW_FORBIDDEN, which is why both constants stay asserted.
     const forbidden = await reviewAssetBatch(sql, am('ZZ-OTHER-AM'), briefId, [submitted]);
-    expect(forbidden.rejections[0].reason).toBe(MSG_REVIEW_FORBIDDEN);
+    expect(forbidden.rejections[0].reason).toBe(MSG_REVIEW_START_FORBIDDEN);
 
     // Wrong source state — approve before review.
     const wrongState = await approveAssetBatch(sql, am(), briefId, [submitted]);
@@ -510,7 +845,16 @@ describeDb('Hours Logged (§5) + asset metrics + reads', () => {
     await createAsset(sql, staff, briefId, { sequenceNo: 1 });
     const list = await listBriefAssets(sql, accountLead(), briefId);
     expect(list.map((x) => x.sequenceNo)).toEqual([1, 2]);
-    await expect(listBriefAssets(sql, adsStaff(), briefId)).rejects.toBeInstanceOf(ForbiddenError);
+    // B-5/K-3 opened the READ side of Assets to the Ads division (`canSeeAsset`),
+    // so an Advertiser now lists a Brief's Assets — that is the point: the picker
+    // links to the Asset page, and a 403 there would be a dead end. The gate is
+    // still shut for a division with no business in Creative output.
+    expect((await listBriefAssets(sql, adsStaff(), briefId)).map((x) => x.sequenceNo)).toEqual([1, 2]);
+    await expect(listBriefAssets(
+      sql,
+      { employeeId: 'ZZ-K', divisi: 'KOL', role: permission.makeRole({ division: 'KOL', level: 'staff' }) },
+      briefId,
+    )).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
 

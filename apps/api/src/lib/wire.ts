@@ -842,6 +842,41 @@ export function myAssetQueueItemToWire(a: creative.MyAssetQueueItem): MyAssetQue
   };
 }
 
+/**
+ * creative.ClientAssetOption → wire (B-5 / K-3 — the Ads Asset picker).
+ *
+ * ⚠️ NOTE FOR THE F-MERGE: Jalur B put this here, ~350 lines below `BriefWire`
+ * and ~2000 above `TransactionWire`, precisely so it sits nowhere near either
+ * F-1 insertion point. It is a Jalur-B addition to an F-owned file — recorded in
+ * `docs/handoff/HANDOFF_FEEDBACK_OD_JALUR_B.md` rather than negotiated, since a
+ * route that returns a raw domain object is an O43-class bug (page blank, route
+ * answers 200).
+ *
+ * `approved_at` is sent as an explicit `null`, never omitted: a MISSING key is
+ * more dangerous than a null one (CLAUDE.md).
+ */
+export interface ClientAssetOptionWire {
+  id: string;
+  brief_id: string;
+  brief_title: string;
+  asset_type: string;
+  sequence_no: number;
+  output_link: string;
+  approved_at: string | null;
+}
+
+export function clientAssetOptionToWire(a: creative.ClientAssetOption): ClientAssetOptionWire {
+  return {
+    id: a.id,
+    brief_id: a.briefId,
+    brief_title: a.briefTitle,
+    asset_type: a.assetType,
+    sequence_no: a.sequenceNo,
+    output_link: a.outputLink,
+    approved_at: a.approvedAt === null ? null : a.approvedAt.toISOString(),
+  };
+}
+
 export function assetToWire(a: creative.Asset): AssetWire {
   return {
     id: a.id,
