@@ -167,6 +167,21 @@ export interface ServiceQueueRow {
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
+  /**
+   * A-3 — the STRG- (M6A) path, the successor to the `strategy_*` pair above.
+   * It is the CONTRACT's Strategi (O57: one STRG- covers n Services), null when
+   * there is none. `nextOnboardingStep` reads it first, so an AM stops being
+   * told to "Buat Strategy & Plan" for an agreement that already has one.
+   */
+  strategi_id: string | null;
+  strategi_status: string | null;
+  /**
+   * A-4 — the agreement covering this Service (O57), null when it has none
+   * (a deal made only of one-off services, or a Service closed before A-4).
+   * When it is set, the contract window is READ-ONLY on the Strategi form: the
+   * closing already settled it.
+   */
+  contract_id: string | null;
   brief_count: number;
   /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
   client_target_gmv: string | null;
@@ -419,6 +434,40 @@ export interface OnboardingStep {
   label: string;
 }
 
+/** STRG- (M6A machine #15) states — mirror of the domain constants. */
+export const STRATEGI_DRAFT = 'Draft';
+export const STRATEGI_DIAJUKAN = 'Diajukan';
+export const STRATEGI_AKTIF = 'Aktif';
+export const STRATEGI_DRAFT_REVISI = 'Draft Revisi';
+
+/**
+ * strategiOnboardingStep maps a STRG- status to the AM's next action, the same
+ * three-step shape the STR- path uses (draft → submit → await → brief).
+ *
+ * `Aktif` means the Service has been driven to [Strategy Approved] in the same
+ * transaction (A-3), so a Service still showing [Awaiting Onboarding] next to an
+ * `Aktif` Strategi is the late-attachment case `guardBriefCreation`'s STRG- arm
+ * covers — briefable, and the label says so rather than sending the AM to a form
+ * that is already done.
+ *
+ * The terminal statuses (`Kedaluwarsa`, `Diarsipkan`) land on `draft_strategy`:
+ * an expired or superseded Strategi with the Service still awaiting onboarding
+ * genuinely does need a new one.
+ */
+function strategiOnboardingStep(status: string | null): OnboardingStep {
+  switch (status) {
+    case STRATEGI_DRAFT:
+    case STRATEGI_DRAFT_REVISI:
+      return { kind: 'submit_strategy', label: 'Ajukan Strategi untuk persetujuan' };
+    case STRATEGI_DIAJUKAN:
+      return { kind: 'await_approval', label: 'Menunggu persetujuan SPV' };
+    case STRATEGI_AKTIF:
+      return { kind: 'create_brief', label: 'Buat Brief' };
+    default:
+      return { kind: 'draft_strategy', label: 'Buat Strategi' };
+  }
+}
+
 export function nextOnboardingStep(s: ServiceQueueRow): OnboardingStep {
   if (s.status === SERVICE_VOIDED) {
     return { kind: 'none', label: 'Service di-void' };
@@ -435,6 +484,15 @@ export function nextOnboardingStep(s: ServiceQueueRow): OnboardingStep {
     // Plan-gated (§4): the Plan must exist, be submitted, and be approved before
     // any Brief may be created (§4 Rule 5).
     if (s.requires_strategy_plan) {
+      // A-3 — the STRG- path is read FIRST, and only when there is a STRG- to
+      // read. The two paths coexist while the legacy STR- form is hidden
+      // (SHOW_LEGACY_STR_PATH), and the STRG- record is the one an AM actually
+      // fills today; without this branch the AM is told to "Buat Strategy &
+      // Plan" for an agreement whose Strategi is already `Aktif`, because
+      // `strategy_id` (the STR- row) is null and always will be.
+      if (s.strategi_id !== null) {
+        return strategiOnboardingStep(s.strategi_status);
+      }
       if (s.strategy_id === null) {
         return { kind: 'draft_strategy', label: 'Buat Strategy & Plan' };
       }

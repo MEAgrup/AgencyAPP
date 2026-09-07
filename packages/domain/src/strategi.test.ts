@@ -25,7 +25,16 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { ident, interview as iv, permission, visibility } from '@cdps/core';
 import * as interview from './interview';
 import { createClient, type Sql } from '@cdps/db';
-import { ALLOWED_DIVISIONS, ConflictError, ForbiddenError, ValidationError } from './account';
+import {
+  ALLOWED_DIVISIONS,
+  ConflictError,
+  ForbiddenError,
+  MSG_STRATEGY_REQUIRED,
+  ValidationError,
+  createBrief,
+  guardBriefCreation,
+  type BriefInput,
+} from './account';
 import { decideGate, DECISION_TANPA_PLAN } from './plangate';
 import {
   MSG_AKSES_BLOCKER_DATE,
@@ -284,6 +293,14 @@ afterEach(async () => {
   // service_plan_gate (seeded by the Rule 1a tests, which call `decideGate`
   // directly) has an FK on `services` — go before it, same as plangate.test.ts.
   await sql`delete from service_plan_gate where created_by like 'ZZ-%'`;
+  // Briefs, from the A-3 seam tests: they call the REAL `account.createBrief`,
+  // and `fk_briefs_service` is NO ACTION — so a leftover Brief makes the
+  // `services` delete below fail for every later test in the file, not just its
+  // own. `brief_stage_sla` is minted by the M16 pipeline on Brief birth and has
+  // its own FK, so it goes first.
+  await sql`delete from brief_stage_sla where brief_id in
+              (select id from briefs where created_by like 'ZZ-%')`;
+  await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -4627,5 +4644,163 @@ describeDb('syncAiOptimizerSkuRevision (M17 §4 / LT-54)', () => {
       { sku: 'SKU-B', field: 'deskripsi', after: 'x', before: null },
     ]);
     expect(crossClient[0].status).toBe('ditunda');
+  });
+});
+
+/**
+ * A-3 — the SEAM. Not a unit test on either side, on purpose.
+ *
+ * The defect this closes (Account #5) was invisible to unit tests precisely
+ * because both halves were green: `approveStrategi` correctly drove the STRG- to
+ * `Aktif`, and `guardBriefCreation` correctly rejected a plan-gated Service
+ * still at [Awaiting Onboarding]. Nothing connected them, so the CRO's Service
+ * sat at [Awaiting Onboarding] forever and every Brief attempt came back with
+ * MSG_STRATEGY_REQUIRED — telling the AM to get an approval they already had.
+ *
+ * So each test here calls BOTH sides for real. A test that stubbed either one
+ * would pass against the bug.
+ */
+describeDb('A-3 — approval → Brief, the seam (Account #5)', () => {
+  const briefInput = (): BriefInput => ({
+    title: 'Konten Promo Lebaran',
+    assignedDivision: 'Creative',
+    deliverableType: 'Video',
+    quantityTarget: 12,
+    dueDate: '2026-08-15',
+    priority: 'High',
+  });
+
+  const statusOf = async (serviceId: string): Promise<string> =>
+    (await sql<{ status: string }[]>`select status from services where id = ${serviceId}`)[0].status;
+
+  it('THE SEAM: approve the STRG- and the Brief goes through — no 409', async () => {
+    const { serviceId, strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+
+    // Before: the exact rejection the CRO was stuck on.
+    await expect(guardBriefCreation(sql, serviceId)).rejects.toThrow(MSG_STRATEGY_REQUIRED);
+
+    await approveStrategi(sql, spv(), strategiId);
+
+    // After: the gate opens AND a real Brief is created. Both, in that order —
+    // asserting only the guard would miss a Brief path that rejects for a
+    // different reason further in.
+    await expect(guardBriefCreation(sql, serviceId)).resolves.toBeUndefined();
+    const brief = await createBrief(sql, am(), serviceId, briefInput());
+    expect(brief.serviceId).toBe(serviceId);
+  });
+
+  it('moves the Service status itself — the root cause, not just the gate', async () => {
+    const { serviceId, strategiId } = await seedSubmittable();
+    expect(await statusOf(serviceId)).toBe('[Awaiting Onboarding]');
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    expect(await statusOf(serviceId)).toBe('[Strategy Approved]');
+  });
+
+  it('leaves an audit row for the Service move — house rule #3, aktor = the approver', async () => {
+    const { serviceId, strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const rows = await sql<{ action: string; actor_employee_id: string }[]>`
+      select action, actor_employee_id from audit_log
+       where entity_type = 'service' and entity_id = ${serviceId}
+         and action like 'transition:%'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].action).toBe('transition:[Awaiting Onboarding]->[Strategy Approved]');
+    expect(rows[0].actor_employee_id).toBe('ZZ-SPV');
+  });
+
+  it('drives EVERY Service the contract covers — O57: one STRG-, n Services', async () => {
+    const { serviceId, strategiId } = await seedSubmittable();
+    // A second plan-gated Service attached to the SAME agreement. This is the
+    // case a Service-scoped copy of `account.approveStrategy` would silently
+    // miss, because since O57 the Strategi hangs off the contract.
+    const sibling = `${serviceId}-B`;
+    await sql`
+      insert into services
+        (id, client_id, contract_id, master_service_id, master_version_no, name, standard_price,
+         commission_rule, status, requires_strategy_plan, plan_tier, created_by)
+      select ${sibling}, sv.client_id, sv.contract_id, sv.master_service_id, sv.master_version_no,
+             'Layanan Kedua', sv.standard_price, sv.commission_rule, '[Awaiting Onboarding]',
+             true, 'plan_wajib', 'ZZ-AM'
+        from services sv where sv.id = ${serviceId}`;
+
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+
+    expect(await statusOf(serviceId)).toBe('[Strategy Approved]');
+    expect(await statusOf(sibling)).toBe('[Strategy Approved]');
+  });
+
+  it('leaves a DIRECT Service where it is — its path never includes [Strategy Approved]', async () => {
+    const { serviceId, strategiId } = await seedSubmittable();
+    const direct = `${serviceId}-D`;
+    await sql`
+      insert into services
+        (id, client_id, contract_id, master_service_id, master_version_no, name, standard_price,
+         commission_rule, status, requires_strategy_plan, plan_tier, created_by)
+      select ${direct}, sv.client_id, sv.contract_id, sv.master_service_id, sv.master_version_no,
+             'Layanan Direct', sv.standard_price, sv.commission_rule, '[Awaiting Onboarding]',
+             false, 'tanpa_plan', 'ZZ-AM'
+        from services sv where sv.id = ${serviceId}`;
+
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+
+    expect(await statusOf(direct)).toBe('[Awaiting Onboarding]');
+    // …and it was never blocked in the first place — it goes straight to Brief.
+    await expect(guardBriefCreation(sql, direct)).resolves.toBeUndefined();
+  });
+
+  /**
+   * The order that ISN'T normal, and the reason the guard needed a second arm
+   * rather than just reading the status: a Service attached to the agreement
+   * AFTER its Strategi was approved never sat at the approval moment, so nothing
+   * was there to move it. Reading the status alone would lock it out forever.
+   */
+  it('opens the gate for a Service attached AFTER the approval — the late-attachment case', async () => {
+    const { serviceId, strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+
+    const late = `${serviceId}-L`;
+    await sql`
+      insert into services
+        (id, client_id, contract_id, master_service_id, master_version_no, name, standard_price,
+         commission_rule, status, requires_strategy_plan, plan_tier, created_by)
+      select ${late}, sv.client_id, sv.contract_id, sv.master_service_id, sv.master_version_no,
+             'Layanan Menyusul', sv.standard_price, sv.commission_rule, '[Awaiting Onboarding]',
+             true, 'plan_wajib', 'ZZ-AM'
+        from services sv where sv.id = ${serviceId}`;
+
+    // Status untouched (nothing ran for it) — and briefable anyway.
+    expect(await statusOf(late)).toBe('[Awaiting Onboarding]');
+    await expect(guardBriefCreation(sql, late)).resolves.toBeUndefined();
+  });
+
+  it('a Service with NO contract stays blocked — the arm is contract-scoped, not a blanket open', async () => {
+    const orphan = await seedService('plan_wajib');
+    await expect(guardBriefCreation(sql, orphan)).rejects.toThrow(MSG_STRATEGY_REQUIRED);
+  });
+
+  it('approving a REVISION does not fail on Services already past onboarding', async () => {
+    const { serviceId, strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    await createBrief(sql, am(), serviceId, briefInput());
+    expect(await statusOf(serviceId)).toBe('[Briefed]');
+
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['stok_kosong'],
+      alasanRevisi: 'hero SKU habis',
+      asumsiGugur: ['A1'],
+    });
+    await submitStrategi(sql, am(), v2.id);
+    // The Service is [Briefed]; [Briefed] → [Strategy Approved] is NOT an edge.
+    // Filtering on [Awaiting Onboarding] in the query is what keeps this from
+    // throwing and rolling the whole revision approval back.
+    await approveStrategi(sql, spv(), v2.id);
+    expect(await statusOf(serviceId)).toBe('[Briefed]');
   });
 });

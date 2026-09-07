@@ -356,6 +356,11 @@ export interface ServiceQueueRowWire {
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
+  /** A-3 — the STRG- (M6A) path, explicit null when the contract carries none. */
+  strategi_id: string | null;
+  strategi_status: string | null;
+  /** A-4 — the agreement covering this Service (O57), explicit null when none. */
+  contract_id: string | null;
   brief_count: number;
   /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
   client_target_gmv: string | null;
@@ -379,6 +384,9 @@ export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueR
     assigned_am_id: r.assignedAmId,
     strategy_id: r.strategyId,
     strategy_status: r.strategyStatus,
+    strategi_id: r.strategiId,
+    strategi_status: r.strategiStatus,
+    contract_id: r.contractId,
     brief_count: r.briefCount,
     client_target_gmv: r.clientTargetGmv,
     released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,
