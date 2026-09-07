@@ -2,13 +2,14 @@
 
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, errorMessage } from '@/lib/api';
-import { FREQUENCIES, PRICING_MODES, type MasterService, type PlanTier, type QtyMenambah } from '@/lib/types';
+import { FREQUENCIES, PRICING_MODES, type MasterService, type Pengakuan, type PlanTier, type QtyMenambah } from '@/lib/types';
 import { TIER_LABELS } from '@/lib/account';
 import { formatIDR } from '@/lib/money';
 import {
   EMPTY_MSL_FORM,
   formatDurasiBulan,
   formToPayload,
+  PENGAKUAN_LABELS,
   QTY_MENAMBAH_LABELS,
   saveMasterService,
   serviceToForm,
@@ -337,6 +338,31 @@ export default function MasterServicesPage() {
                 (Nano KOL beli 10 berarti 10 KOL, durasinya tidak berubah).
               </span>
             </div>
+            <div className="field" style={{ maxWidth: 360 }}>
+              <label htmlFor="pengakuan">Kapan Pendapatan Diakui</label>
+              <select
+                id="pengakuan"
+                value={form.pengakuan}
+                onChange={(e) => setForm((f) => ({ ...f, pengakuan: e.target.value as Pengakuan }))}
+              >
+                <option value="per_periode">{PENGAKUAN_LABELS.per_periode}</option>
+                <option value="saat_selesai">{PENGAKUAN_LABELS.saat_selesai}</option>
+                <option value="bulan_berikutnya">{PENGAKUAN_LABELS.bulan_berikutnya}</option>
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Kapan mesin laporan keuangan boleh mengakui uang layanan ini.{' '}
+                <strong>Rata sepanjang durasi</strong> menyebarnya per bulan dan{' '}
+                <strong>wajib punya durasi</strong> di atas. <strong>Sekaligus saat selesai</strong>{' '}
+                mengakuinya penuh di bulan layanan dinyatakan selesai (Jasa Pengajuan Shopee Mall,
+                Nano KOL). <strong>Bulan berikutnya</strong> untuk Komisi, yang angkanya baru
+                diketahui bulan depan.{' '}
+                <strong>
+                  Ini tidak bisa ditebak dari durasi
+                </strong>{' '}
+                — Komisi dan Jasa Pengajuan Shopee Mall sama-sama tanpa durasi tapi diakui di
+                bulan yang berbeda, jadi layanan yang punya durasi wajib memilih di sini.
+              </span>
+            </div>
             <label className="row" style={{ gap: 6, fontSize: 13 }}>
               <input
                 type="checkbox"
@@ -387,6 +413,7 @@ export default function MasterServicesPage() {
                   <th>Frekuensi</th>
                   <th>Durasi Jasa</th>
                   <th>Qty Menambah</th>
+                  <th>Pengakuan</th>
                   <th>Strategi &amp; Plan</th>
                   <th>Aktif</th>
                   <th>Versi</th>
@@ -409,6 +436,7 @@ export default function MasterServicesPage() {
                       <td>{s.frequency || '—'}</td>
                       <td>{formatDurasiBulan(s.durasi_bulan)}</td>
                       <td>{s.qty_menambah === 'durasi' ? 'Durasi' : 'Volume'}</td>
+                      <td>{PENGAKUAN_LABELS[s.pengakuan]}</td>
                       <td>{TIER_LABELS[s.plan_tier]}</td>
                       <td>
                         <span className={`badge badge-${s.active ? 'green' : 'darkgray'}`}>
@@ -448,6 +476,7 @@ export default function MasterServicesPage() {
                                   <th>Frekuensi</th>
                                   <th>Durasi Jasa</th>
                                   <th>Qty Menambah</th>
+                                  <th>Pengakuan</th>
                                   <th>Strategi &amp; Plan</th>
                                   <th>Aktif</th>
                                   <th>Berlaku Sejak</th>
@@ -467,6 +496,7 @@ export default function MasterServicesPage() {
                                     <td>{v.frequency || '—'}</td>
                                     <td>{formatDurasiBulan(v.durasi_bulan)}</td>
                                     <td>{v.qty_menambah === 'durasi' ? 'Durasi' : 'Volume'}</td>
+                                    <td>{PENGAKUAN_LABELS[v.pengakuan]}</td>
                                     <td>{TIER_LABELS[v.plan_tier]}</td>
                                     <td>{v.active ? 'Aktif' : 'Nonaktif'}</td>
                                     <td>{v.effective_from}</td>

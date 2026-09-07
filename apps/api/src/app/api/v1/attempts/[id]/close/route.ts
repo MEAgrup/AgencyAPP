@@ -23,6 +23,12 @@ interface Body {
   payment_scheme?: string;
   installments?: { amount?: string; due_date?: string }[];
   managed_since?: string;
+  /**
+   * "Include PPN" — the one button that decides whether 11% is added to this
+   * invoice (D-4). Read strictly as `=== true` so a missing key, `null`, or a
+   * stray string can never switch tax on for a client who did not agree to it.
+   */
+  include_ppn?: boolean;
 }
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
@@ -42,6 +48,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       paymentScheme: b.payment_scheme ?? '',
       installments: (b.installments ?? []).map((i) => ({ amount: i.amount ?? '', dueDate: i.due_date ?? '' })),
       managedSince: b.managed_since,
+      includePPN: b.include_ppn === true,
     });
     return json({ client_id: result.clientId, transaction_id: result.transactionId }, 201);
   });

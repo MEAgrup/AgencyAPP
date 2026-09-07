@@ -21,7 +21,7 @@
  * Reference: archive/backend-go/internal/admin/master_service.go.
  */
 
-import { money, permission } from '@cdps/core';
+import { accrual, money, permission } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 // `plangate_rules` is pure (its only import is @cdps/core), so taking the tier
 // vocabulary from it cannot form a cycle — unlike `sales`, which this module
@@ -132,6 +132,21 @@ export interface ServiceView {
    * beli 10 = 10 KOL, durasinya tidak berubah).
    */
   qtyMenambah: QtyMenambah;
+  /**
+   * KAPAN pendapatan layanan ini diakui mesin accrual Gelombang D (ketokan
+   * D-KOM 2026-09-07 opsi a):
+   *   `'per_periode'`      disebar rata sepanjang `durasiBulan`;
+   *   `'saat_selesai'`     diakui PENUH saat status layanan selesai;
+   *   `'bulan_berikutnya'` diakui satu bulan SESUDAH penjualan yang
+   *                        melahirkannya, karena angkanya baru diketahui bulan
+   *                        depan (`Komisi`).
+   *
+   * TIDAK bisa diturunkan dari `durasiBulan`: `Komisi` dan `Jasa Pengajuan
+   * Shopee Mall` sama-sama `durasiBulan = null` dengan arti yang berbeda. Itu
+   * satu nilai kosong yang membawa dua arti — persis kelas cacat yang aturan
+   * rumah #4 ada untuk mencegah.
+   */
+  pengakuan: Pengakuan;
   versionNo: number;
   effectiveFrom: string;
 }
@@ -154,6 +169,7 @@ interface VersionRow {
   plan_tier: string;
   durasi_bulan: number | null;
   qty_menambah: string;
+  pengakuan: string;
   version_no: number;
   effective_from: Date | string;
 }
@@ -167,6 +183,7 @@ function toView(r: VersionRow): ServiceView {
     planTier: r.plan_tier as PlanTier,
     durasiBulan: r.durasi_bulan,
     qtyMenambah: r.qty_menambah as QtyMenambah,
+    pengakuan: r.pengakuan as Pengakuan,
     versionNo: r.version_no,
     effectiveFrom: r.effective_from instanceof Date
       ? r.effective_from.toISOString().slice(0, 10)
@@ -176,7 +193,7 @@ function toView(r: VersionRow): ServiceView {
 
 const VERSION_COLUMNS = `service_id, name, standard_price, commission_rule, category, unit, min_qty,
   pricing_mode, apply_ppn, frequency, price_note, description, active, requires_strategy_plan,
-  plan_tier, durasi_bulan, qty_menambah, version_no, effective_from`;
+  plan_tier, durasi_bulan, qty_menambah, pengakuan, version_no, effective_from`;
 
 /**
  * effectiveAt returns the MSL version effective on `date` (YYYY-MM-DD, WIB) for a
@@ -187,7 +204,7 @@ export async function effectiveAt(sql: Queryable, serviceId: string, date: strin
   const rows = await sql<VersionRow[]>`
     select service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, version_no, effective_from
+           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan, version_no, effective_from
     from master_service_versions
     where service_id = ${serviceId} and effective_from <= ${date}
     order by effective_from desc, version_no desc limit 1`;
@@ -207,7 +224,7 @@ export async function listEffectiveAt(sql: Queryable, date: string): Promise<Ser
     select distinct on (service_id)
            service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, version_no, effective_from
+           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan, version_no, effective_from
     from master_service_versions
     where effective_from <= ${date}
     order by service_id, effective_from desc, version_no desc`;
@@ -219,7 +236,7 @@ export async function listVersions(sql: Queryable, serviceId: string): Promise<S
   const rows = await sql<VersionRow[]>`
     select service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, version_no, effective_from
+           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan, version_no, effective_from
     from master_service_versions
     where service_id = ${serviceId}
     order by version_no desc`;
@@ -284,6 +301,23 @@ export interface ServiceInput {
    * tidak kelihatan.
    */
   qtyMenambah?: QtyMenambah;
+  /**
+   * KAPAN pendapatan layanan ini diakui (ketokan D-KOM 2026-09-07 opsi a).
+   *
+   * Boleh dihilangkan HANYA kalau `durasiBulan` kosong — layanan tanpa periode
+   * berarti `'saat_selesai'`, dan itu satu-satunya arti yang tersisa untuknya
+   * (`'per_periode'` mustahil tanpa periode, `'bulan_berikutnya'` adalah kasus
+   * `Komisi` yang wajib disebut terang-terangan).
+   *
+   * Kalau `durasiBulan` TERISI, ia WAJIB disebut. Layanan berdurasi bisa sah
+   * `'per_periode'` maupun `'saat_selesai'` (proyek 3 bulan yang dibayar penuh
+   * saat rampung), dan menebak salah satunya diam-diam menempatkan pendapatan
+   * di bulan yang salah selama berbulan-bulan tanpa ada yang melihatnya. Hari
+   * ini 42 dari 42 layanan berdurasi memang `'per_periode'` — tapi itu keadaan
+   * data, bukan aturan, dan menjadikannya default berarti menurunkan
+   * `pengakuan` dari `durasiBulan` lagi, hal yang persis dilarang D-KOM.
+   */
+  pengakuan?: Pengakuan;
   effectiveFrom: string; // YYYY-MM-DD
 }
 
@@ -295,6 +329,16 @@ export type QtyMenambah = 'durasi' | 'volume';
 export const QTY_MENAMBAH_DURASI: QtyMenambah = 'durasi';
 export const QTY_MENAMBAH_VOLUME: QtyMenambah = 'volume';
 const QTY_MENAMBAH = new Set<string>([QTY_MENAMBAH_DURASI, QTY_MENAMBAH_VOLUME]);
+
+/**
+ * KAPAN pendapatan sebuah layanan diakui — kosakata bersama dengan
+ * `@cdps/core` `accrual.Pengakuan` dan CHECK `ck_msv_pengakuan` di DB.
+ */
+export type Pengakuan = accrual.Pengakuan;
+export const PENGAKUAN_PER_PERIODE: Pengakuan = accrual.PENGAKUAN_PER_PERIODE;
+export const PENGAKUAN_SAAT_SELESAI: Pengakuan = accrual.PENGAKUAN_SAAT_SELESAI;
+export const PENGAKUAN_BULAN_BERIKUTNYA: Pengakuan = accrual.PENGAKUAN_BULAN_BERIKUTNYA;
+const PENGAKUAN = new Set<string>([PENGAKUAN_PER_PERIODE, PENGAKUAN_SAAT_SELESAI, PENGAKUAN_BULAN_BERIKUTNYA]);
 
 /**
  * reconcileTier keeps `plan_tier` and the legacy `requires_strategy_plan`
@@ -343,6 +387,7 @@ interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit
   description: string;
   /** null = tidak berlaku untuk layanan ini (disimpan SQL NULL). */
   durasiBulan: number | null;
+  pengakuan: Pengakuan;
 }
 
 /**
@@ -443,6 +488,28 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
     throw new IncompleteError();
   }
 
+  // pengakuan (D-KOM). Tanpa `durasiBulan` hanya ada satu arti yang tersisa,
+  // jadi boleh dihilangkan; DENGAN `durasiBulan` ia wajib disebut, karena dua
+  // arti sama-sama mungkin dan tidak ada sisi yang aman untuk ditebak.
+  // `per_periode` tanpa periode ditolak di sini DAN oleh
+  // `ck_msv_per_periode_butuh_durasi_bulan` di DB — dua lapis, karena route MSL
+  // bukan satu-satunya penulis tabel ini.
+  let pengakuan: Pengakuan;
+  if (inp.pengakuan === undefined || inp.pengakuan === null) {
+    if (durasiBulan !== null) {
+      throw new IncompleteError();
+    }
+    pengakuan = PENGAKUAN_SAAT_SELESAI;
+  } else {
+    if (!PENGAKUAN.has(inp.pengakuan)) {
+      throw new IncompleteError();
+    }
+    pengakuan = inp.pengakuan;
+  }
+  if (pengakuan === PENGAKUAN_PER_PERIODE && durasiBulan === null) {
+    throw new IncompleteError();
+  }
+
   return {
     name, standardPrice, commissionRule, effectiveFrom, pricingMode,
     category: inp.category ?? '', unit: inp.unit ?? '', minQty, frequency,
@@ -451,6 +518,7 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
     planTier: tier.planTier,
     durasiBulan,
     qtyMenambah,
+    pengakuan,
     active: inp.active ?? false,
   };
 }
@@ -483,12 +551,13 @@ async function insertVersion(
     insert into master_service_versions
       (service_id, version_no, name, standard_price, commission_rule, category, unit,
        min_qty, pricing_mode, apply_ppn, frequency, price_note, description,
-       active, requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, effective_from, created_by)
+       active, requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan, effective_from, created_by)
     values
       (${serviceId}, ${versionNo}, ${inp.name}, ${inp.standardPrice}, ${inp.commissionRule},
        ${nullText(inp.category)}, ${nullText(inp.unit)}, ${nullText(inp.minQty)}, ${inp.pricingMode},
        ${inp.applyPPN}, ${nullText(inp.frequency)}, ${nullText(inp.priceNote)}, ${nullText(inp.description)},
-       ${inp.active}, ${inp.requiresStrategyPlan}, ${inp.planTier}, ${inp.durasiBulan}, ${inp.qtyMenambah}, ${inp.effectiveFrom}, ${actorId})`;
+       ${inp.active}, ${inp.requiresStrategyPlan}, ${inp.planTier}, ${inp.durasiBulan}, ${inp.qtyMenambah},
+       ${inp.pengakuan}, ${inp.effectiveFrom}, ${actorId})`;
 }
 
 /**

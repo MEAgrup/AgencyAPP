@@ -70,6 +70,10 @@ export * as adsscanner from './adsscanner';
 export * as reportShopee from './report/shopee';
 // Gelombang C — pemilih "klien terbaik" untuk halaman Showcase (gerbang C-2/C-4).
 export * as showcase from './showcase';
+// Gelombang D — mesin accrual: kapan sebuah rupiah masuk ke bulan mana
+// (ketokan D-1 hangus · D-2 hold menjeda · D-KOM penanda pengakuan; nilainya
+// BRUTO, PPN tidak pernah disentuh mesin ini — D-4).
+export * as accrual from './accrual';
 // CR-12 — aset dokumen laporan yang ditempel (CSS, ikon, Chart.js, boot Print).
 // Diekspor supaya tes di luar `packages/core` bisa memeriksa isinya.
 export * as docassets from './docassets';

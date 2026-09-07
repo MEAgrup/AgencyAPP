@@ -33,6 +33,13 @@ interface ServiceBody {
   durasi_bulan?: number | null;
   /** 'durasi' | 'volume'. Absent = 'volume' (sisi aman, lihat msl.ts). */
   qty_menambah?: string;
+  /**
+   * 'per_periode' | 'saat_selesai' | 'bulan_berikutnya' (D-KOM). Boleh absent
+   * HANYA bila `durasi_bulan` kosong; kalau layanannya berdurasi, absennya
+   * ditolak dengan pesan gerbang wajib — dua arti sama-sama mungkin dan tidak
+   * ada sisi yang aman untuk ditebak (lihat msl.ts).
+   */
+  pengakuan?: string;
   effective_from?: string;
 }
 
@@ -58,6 +65,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       planTier: b.plan_tier as msl.ServiceInput['planTier'],
       durasiBulan: b.durasi_bulan,
       qtyMenambah: b.qty_menambah as msl.ServiceInput['qtyMenambah'],
+      pengakuan: b.pengakuan as msl.ServiceInput['pengakuan'],
       effectiveFrom: b.effective_from ?? '',
     });
     return json({ id, version_no: versionNo });
