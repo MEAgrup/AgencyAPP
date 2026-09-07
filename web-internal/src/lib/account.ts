@@ -202,6 +202,12 @@ export interface Brief {
   // M16 — null untuk divisi tanpa pipeline tahapan (mis. Store Operation).
   stage_pipeline_code: string | null;
   production_stage: string | null;
+  // Feedback OD 2026-09-07 Creative #3 — identitas klien + PIC, ada di SETIAP
+  // baca Brief. Non-opsional: `''` dikirim eksplisit kalau Brief belum punya
+  // PIC, supaya halaman bisa merender `—` alih-alih `undefined`.
+  client_id: string;
+  client_nama: string;
+  assigned_pic_nama: string;
 }
 
 export interface BriefInput {

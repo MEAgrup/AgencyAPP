@@ -229,6 +229,9 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
       created_at: '2026-07-19T02:00:00.000Z',
       stage_pipeline_code: 'CREATIVE_CONTENT',
       production_stage: 'Script',
+      client_id: 'CLI-202607-0001',
+      client_nama: 'Alpha Digital',
+      assigned_pic_nama: 'Rian Pratama',
     });
     expectNoCamelKeys(briefToWire(full));
   });
@@ -238,6 +241,9 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
       ...full, strategyId: '', assignedPic: '', recurring: false,
       recurringFrequency: '', recurringCount: 0, recurringEndDate: '',
       instructions: '', referenceAttachments: '',
+      // No PIC ⇒ no PIC name. Kept in step with `assignedPic` deliberately: the
+      // assertion below is about a key that is PRESENT while empty.
+      assignedPicNama: '',
     };
     const wire = briefToWire(bare) as unknown as Record<string, unknown>;
     for (const k of ['strategy_id', 'assigned_pic', 'recurring_frequency',
@@ -246,6 +252,14 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
     }
     // recurring itself is never omitempty — the FE reads it unconditionally.
     expect(wire.recurring).toBe(false);
+    // …and neither are the three identity keys (Creative #3). A Brief with no
+    // PIC must still CARRY `assigned_pic_nama`, as `''`: the FE renders a
+    // missing key as `undefined` and the column goes blank, which is the very
+    // symptom this field was added to fix.
+    for (const k of ['client_id', 'client_nama', 'assigned_pic_nama']) {
+      expect(k in wire, `${k} must never be omitted`).toBe(true);
+    }
+    expect(wire.assigned_pic_nama).toBe('');
   });
 });
 

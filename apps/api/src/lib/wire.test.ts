@@ -305,6 +305,9 @@ describe('M6 account wire mappers', () => {
       quantity_target: 12, due_date: '2026-08-15', priority: 'High', recurring: false, title: 'Promo',
       status: '[To Do]', revision_count: 0, revision_flagged: false, created_by: 'EMP-SINTA',
       created_at: '2026-07-01T00:00:00.000Z', stage_pipeline_code: null, production_stage: null,
+      // Creative #3 — ketiganya nol omitempty: `assigned_pic_nama` tetap dikirim
+      // sebagai `''` walau Brief ini belum punya PIC.
+      client_id: 'CLI-202607-0001', client_nama: 'Alpha Digital', assigned_pic_nama: '',
     });
   });
 
