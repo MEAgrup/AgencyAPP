@@ -26,7 +26,7 @@ import { listClients } from './client';
 import { getBrief, listStrategies, serviceQueue, type Actor } from './account';
 import { getAsset } from './creative';
 import { staffLanding } from './portal';
-import { reminderDashboard } from './finance';
+import { financeQueue, reminderDashboard } from './finance';
 import { allowedTransitions } from './engine';
 import { getAttempt } from './sales';
 import { getStageOverview } from './stage';
@@ -198,6 +198,67 @@ describeDb('read models under RLS (O37)', () => {
       expect([...asOutsider.overdue, ...asOutsider.upcoming].some((r) => r.installmentId === INST)).toBe(false);
     } finally {
       await sql`delete from installments where id = ${INST}`;
+      await sql`delete from transactions where id = ${TRX}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
+  /**
+   * Feedback OD 2026-09-07, Finance #1: the approval queue showed `client_id`
+   * only, and Finance does not memorise `CLI-…` ids. F-2 adds `join clients` to
+   * `financeQueue` for `clients.toko`.
+   *
+   * That join is the O52 shape — a read model joining `clients` for one column —
+   * and the ONLY reason it does not erase Finance's rows is the
+   * `jwt_division() = 'Finance'` arm on `clients_select`. Nothing in TS says so,
+   * so this test is where that dependency is written down: narrow the policy and
+   * the queue silently empties instead of failing loudly, exactly the QA
+   * 2026-08-04 defect one table over.
+   *
+   * `toko` is asserted by VALUE, not by presence: `join` + a null column would
+   * satisfy `toHaveProperty` while the page still renders blank.
+   */
+  it('gives Finance the client NAME on the approval queue, not just the id (Finance #1)', async () => {
+    const CLI = 'CLI-ZZR-0F02';
+    const TRX = 'TRX-ZZR-0F02';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, payment_intent, created_by)
+      values (${CLI}, 'Toko Antrean Finance', 'Ibu F2', 'Bandung', 'Fashion', 'https://shopee/zzrf2',
+              '5000000.00', '9000000.00', ${OWNER}, ${OWNER}, '[Bayar Penuh]', ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value,
+                               payment_status, created_by)
+      values (${TRX}, ${CLI}, '[Bayar Penuh]', '5000000.00', '[Menunggu Verifikasi]', ${OWNER})
+      on conflict (id) do nothing`;
+
+    try {
+      const finActor = actor('ZZR-FIN', 'Finance', 'staff');
+      const rows = await withClaims(
+        sql,
+        claims({ employeeId: 'ZZR-FIN', division: 'Finance', level: 'staff' }),
+        (tx) => financeQueue(tx, finActor),
+      );
+      const mine = rows.find((r) => r.id === TRX);
+      expect(mine, 'the join must not erase Finance’s own worklist row (O52 class)').toBeDefined();
+      expect(mine!.toko).toBe('Toko Antrean Finance');
+
+      // The premise, asserted rather than assumed: strip the Finance arm and this
+      // is what the queue would look like. An execution division has no arm on
+      // `clients_select`, so it reads zero client rows — which is precisely why
+      // the equivalent Brief-side join uses `private.*` instead of a raw join.
+      const cliVisibleToCreative = await withClaims(
+        sql,
+        claims({ employeeId: OUTSIDER, division: 'Creative', level: 'staff' }),
+        (tx) => tx<{ n: number }[]>`select count(*)::int as n from clients where id = ${CLI}`,
+      );
+      expect(
+        cliVisibleToCreative[0].n,
+        'premise broken: if any division can read clients, the O52 reasoning behind this join no longer holds',
+      ).toBe(0);
+    } finally {
       await sql`delete from transactions where id = ${TRX}`;
       await sql`delete from contracts where client_id = ${CLI}`;
       await sql`delete from clients where id = ${CLI}`;

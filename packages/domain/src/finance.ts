@@ -1776,6 +1776,12 @@ function accountReleasedOnly(actor: Actor): boolean {
 export interface TransactionAggregate {
   id: string;
   clientId: string;
+  /**
+   * Nama toko klien (`clients.toko`), Finance #1: antrean approval hanya
+   * memperlihatkan `client_id`, dan Finance tidak menghafal ID. Selalu terisi —
+   * `transactions.client_id` NOT NULL dan join-nya inner.
+   */
+  toko: string;
   scheme: string;
   totalAgreedValue: string;
   amountVerified: string;
@@ -1791,6 +1797,7 @@ export interface TransactionAggregate {
 interface TransactionDbRow {
   id: string;
   client_id: string;
+  toko: string;
   payment_intent_scheme: string;
   total_agreed_value: string;
   payment_status: string;
@@ -1849,6 +1856,7 @@ async function hydrateAggregate(sql: Queryable, r: TransactionDbRow): Promise<Tr
   return {
     id: r.id,
     clientId: r.client_id,
+    toko: r.toko,
     scheme: r.payment_intent_scheme,
     totalAgreedValue: money.decimal(total),
     amountVerified: money.decimal(verified),
@@ -1874,17 +1882,25 @@ async function hydrateAggregate(sql: Queryable, r: TransactionDbRow): Promise<Tr
  * when it is touched — the queue's subject is Amount Outstanding, and §6 makes
  * chasing the remainder Finance's work. [Lunas] is the only exit (it is the
  * terminal state, §2), so the list still shrinks on its own.
+ *
+ * The `join clients` is safe under RLS here and is NOT an O52 row-erasure: the
+ * live `clients_select` policy carries a `jwt_division() = 'Finance'` arm, so
+ * Finance reads the row through the policy rather than around it. Verified by
+ * probe (`authenticated` + Finance staff AND lead claims ⇒ 1 row each) before
+ * the join was added. Same precedent as `schemeChangeRequests`. An execution
+ * division would still lose the row — that path uses `private.*` instead.
  */
 export async function financeQueue(sql: Queryable, actor: Actor): Promise<TransactionAggregate[]> {
   if (!canReadFinanceQueue(actor)) {
     throw new ForbiddenError();
   }
   const rows = await sql<TransactionDbRow[]>`
-    select id, client_id, payment_intent_scheme, total_agreed_value, payment_status,
-           bermasalah, contract_attachment, released_to_account_at
-    from transactions
-    where payment_status <> ${PAYMENT_LUNAS}
-    order by case when payment_status = ${PAYMENT_MENUNGGU} then 0 else 1 end, id`;
+    select t.id, t.client_id, c.toko, t.payment_intent_scheme, t.total_agreed_value,
+           t.payment_status, t.bermasalah, t.contract_attachment, t.released_to_account_at
+    from transactions t
+    join clients c on c.id = t.client_id
+    where t.payment_status <> ${PAYMENT_LUNAS}
+    order by case when t.payment_status = ${PAYMENT_MENUNGGU} then 0 else 1 end, t.id`;
   const out: TransactionAggregate[] = [];
   for (const r of rows) {
     out.push(await hydrateAggregate(sql, r));
@@ -1908,11 +1924,12 @@ export async function loadTransactionAggregate(
   }
   const releasedOnly = accountReleasedOnly(actor);
   const rows = await sql<TransactionDbRow[]>`
-    select id, client_id, payment_intent_scheme, total_agreed_value, payment_status,
-           bermasalah, contract_attachment, released_to_account_at
-    from transactions
-    where id = ${transactionId}
-      and (${!releasedOnly} or released_to_account_at is not null)`;
+    select t.id, t.client_id, c.toko, t.payment_intent_scheme, t.total_agreed_value,
+           t.payment_status, t.bermasalah, t.contract_attachment, t.released_to_account_at
+    from transactions t
+    join clients c on c.id = t.client_id
+    where t.id = ${transactionId}
+      and (${!releasedOnly} or t.released_to_account_at is not null)`;
   if (rows.length === 0) {
     throw new NotFoundError();
   }
