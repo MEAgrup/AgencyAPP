@@ -384,6 +384,119 @@ describeDb('durasi_bulan', () => {
     ).rejects.toThrow(/ck_msv_qty_durasi_butuh_durasi_bulan/);
   });
 
+  // -------------------------------------------------------------------------
+  // pengakuan (D-KOM) — penanda yang memutuskan BULAN MANA yang mengakui.
+  //
+  // Ia diuji terpisah dari `durasi_bulan` justru karena alasan keberadaannya:
+  // sesudah pengisian katalog 2026-09-07, `Komisi` dan `Jasa Pengajuan Shopee
+  // Mall` sama-sama `durasi_bulan = NULL` dengan ARTI YANG BERBEDA. Kalau ada
+  // yang suatu hari mencoba menurunkan penanda ini dari durasi, tes di bawah
+  // yang menyimpan dua nilai berbeda untuk dua layanan tanpa durasi itulah yang
+  // merah lebih dulu.
+  // -------------------------------------------------------------------------
+
+  it('defaults ke saat_selesai — satu-satunya nilai yang sah untuk SETIAP durasi', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa Pengajuan Shopee Mall', standardPrice: '5000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true,
+    });
+    expect((await effectiveAt(sql, id, TODAY)).pengakuan).toBe('saat_selesai');
+  });
+
+  it('menyimpan bulan_berikutnya untuk Komisi — arti kedua dari durasi NULL yang sama', async () => {
+    const komisi = await createService(sql, salesLead(), {
+      name: 'Komisi', standardPrice: '1000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-01-01', active: true, pengakuan: 'bulan_berikutnya',
+    });
+    const sekaliJadi = await createService(sql, salesLead(), {
+      name: 'Jasa Pengajuan Shopee Mall 2', standardPrice: '5000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, pengakuan: 'saat_selesai',
+    });
+    const a = await effectiveAt(sql, komisi, TODAY);
+    const b = await effectiveAt(sql, sekaliJadi, TODAY);
+    // Durasi identik (NULL), penanda berbeda: inilah yang tidak bisa diturunkan.
+    expect(a.durasiBulan).toBeNull();
+    expect(b.durasiBulan).toBeNull();
+    expect(a.pengakuan).toBe('bulan_berikutnya');
+    expect(b.pengakuan).toBe('saat_selesai');
+  });
+
+  it('SURVIVES an update that carries it forward — versi baru adalah tulis PENUH', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'GMV MAX MEA PRO', standardPrice: '10000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 6, pengakuan: 'per_periode',
+    });
+    await updateService(sql, salesLead(), id, {
+      name: 'GMV MAX MEA PRO (harga naik)', standardPrice: '12000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-06-01', active: true, durasiBulan: 6, pengakuan: 'per_periode',
+    });
+    const v2 = await effectiveAt(sql, id, TODAY);
+    expect(v2.versionNo).toBe(2);
+    expect(v2.pengakuan).toBe('per_periode');
+  });
+
+  it('an update that omits it falls back ke default — full-replace, dinyatakan supaya tak mengagetkan', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Komisi 2', standardPrice: '1000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-01-01', active: true, pengakuan: 'bulan_berikutnya',
+    });
+    await updateService(sql, salesLead(), id, {
+      name: 'Komisi 2', standardPrice: '1000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-06-01', active: true,
+    });
+    expect((await effectiveAt(sql, id, TODAY)).pengakuan).toBe('saat_selesai');
+    // …dan versi 1 tetap membawanya: riwayat append-only, tidak pernah ditulis ulang.
+    const chain = await listVersions(sql, id);
+    expect(chain.find((v) => v.versionNo === 1)!.pengakuan).toBe('bulan_berikutnya');
+  });
+
+  it('REFUSES per_periode tanpa durasiBulan — "rata sepanjang durasi" tak punya pembagi', async () => {
+    await expect(createService(sql, salesLead(), {
+      name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', pengakuan: 'per_periode',
+    })).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('the DB refuses that combination too — CHECK-nya gerbang yang sebenarnya', async () => {
+    const msvId = 'MSV-209912-9002';
+    await sql`insert into master_services (id, created_by) values (${msvId}, 'ZZ-SLEAD')`;
+    await expect(sql`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, pricing_mode,
+         durasi_bulan, pengakuan, effective_from, created_by)
+      values (${msvId}, 1, 'x', '1000', 'flat Rp 100', 'flat', null, 'per_periode', '2020-01-01', 'ZZ-SLEAD')`,
+    ).rejects.toThrow(/ck_msv_pengakuan_periode_butuh_durasi_bulan/);
+  });
+
+  it('membolehkan saat_selesai untuk layanan YANG PUNYA durasi — arahnya satu arah saja', async () => {
+    // Kebalikannya bukan invariant: layanan 1 bulan yang pendapatannya baru
+    // diakui saat pekerjaannya kelar adalah kombinasi yang sah. Menegakkannya
+    // dua arah berarti mengarang aturan yang tidak pernah diketok pemilik.
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa 1 bulan sekali bayar', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 1, pengakuan: 'saat_selesai',
+    });
+    expect((await effectiveAt(sql, id, TODAY)).pengakuan).toBe('saat_selesai');
+  });
+
+  it('rejects a pengakuan di luar kosakata', async () => {
+    await expect(createService(sql, salesLead(), {
+      name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', pengakuan: 'bulanan' as never,
+    })).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('the DB refuses a pengakuan di luar kosakata too', async () => {
+    const msvId = 'MSV-209912-9003';
+    await sql`insert into master_services (id, created_by) values (${msvId}, 'ZZ-SLEAD')`;
+    await expect(sql`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, pricing_mode,
+         pengakuan, effective_from, created_by)
+      values (${msvId}, 1, 'x', '1000', 'flat Rp 100', 'flat', 'bulanan', '2020-01-01', 'ZZ-SLEAD')`,
+    ).rejects.toThrow(/ck_msv_pengakuan/);
+  });
+
   it('rejects a qty_menambah that is neither durasi nor volume', async () => {
     await expect(createService(sql, salesLead(), {
       name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100',

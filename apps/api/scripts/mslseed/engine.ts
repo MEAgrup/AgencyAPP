@@ -152,6 +152,22 @@ export async function execute(
 
     if (p.action === ACTION_UPDATE) {
       const existing = p.existing!;
+      // Versi baru = penulisan PENUH (`updateService` tidak menambal, ia
+      // meng-append versi utuh), sedangkan CSV ini tidak punya kolom untuk
+      // `durasi_bulan`, `qty_menambah`, dan `pengakuan`. Tanpa dibawa ulang
+      // dari versi efektif, satu perubahan HARGA di CSV akan menulis versi
+      // baru yang durasinya NULL dan `pengakuan`-nya kembali ke default —
+      // menghapus, diam-diam, tiga penanda yang dipakai mesin accrual dan Ads
+      // Management Date. Ini cacat yang sama yang pernah terjadi di form MSL
+      // admin (lihat `msl.test.ts` §durasi_bulan), di jalur yang berbeda.
+      // Kalau suatu hari CSV-nya punya kolomnya, di sinilah tempat
+      // membacanya — dan `sameService` yang harus ikut membandingkannya.
+      const input: msl.ServiceInput = {
+        ...p.input,
+        durasiBulan: existing.durasiBulan,
+        qtyMenambah: existing.qtyMenambah,
+        pengakuan: existing.pengakuan,
+      };
       if (!apply) {
         rep.newVersion++;
         log(
@@ -161,7 +177,7 @@ export async function execute(
         continue;
       }
       try {
-        const ver = await msl.updateService(sql, actor, existing.id, p.input);
+        const ver = await msl.updateService(sql, actor, existing.id, input);
         rep.newVersion++;
         log(`versi baru    baris ${p.row.line} (${p.row.serviceKey}): ${p.input.name} -> ${existing.id} v${ver}`);
       } catch (e) {
@@ -196,7 +212,10 @@ export async function execute(
  *
  * `requiresStrategyPlan` is deliberately NOT compared: it is not a seeded column
  * (the CSV has no such field, and M6 owns it), so comparing it would make every
- * rerun append a spurious version.
+ * rerun append a spurious version. The same holds for `durasiBulan`,
+ * `qtyMenambah`, and `pengakuan` — the three Gelombang-D catalog markers the CSV
+ * has no column for. They are carried forward verbatim on update instead (see
+ * ACTION_UPDATE above), so ignoring them here cannot lose them.
  */
 export function sameService(existing: msl.ServiceView, want: msl.ServiceInput): boolean {
   const wantPrice = want.standardPrice === '' ? '0' : want.standardPrice;

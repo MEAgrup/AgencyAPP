@@ -2,13 +2,14 @@
 
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, errorMessage } from '@/lib/api';
-import { FREQUENCIES, PRICING_MODES, type MasterService, type PlanTier, type QtyMenambah } from '@/lib/types';
+import { FREQUENCIES, PRICING_MODES, type MasterService, type Pengakuan, type PlanTier, type QtyMenambah } from '@/lib/types';
 import { TIER_LABELS } from '@/lib/account';
 import { formatIDR } from '@/lib/money';
 import {
   EMPTY_MSL_FORM,
   formatDurasiBulan,
   formToPayload,
+  PENGAKUAN_LABELS,
   QTY_MENAMBAH_LABELS,
   saveMasterService,
   serviceToForm,
@@ -337,6 +338,31 @@ export default function MasterServicesPage() {
                 (Nano KOL beli 10 berarti 10 KOL, durasinya tidak berubah).
               </span>
             </div>
+            <div className="field" style={{ maxWidth: 320 }}>
+              <label htmlFor="pengakuan">Kapan Pendapatannya Diakui</label>
+              <select
+                id="pengakuan"
+                value={form.pengakuan}
+                onChange={(e) => setForm((f) => ({ ...f, pengakuan: e.target.value as Pengakuan }))}
+              >
+                <option value="saat_selesai">{PENGAKUAN_LABELS.saat_selesai}</option>
+                <option value="per_periode">{PENGAKUAN_LABELS.per_periode}</option>
+                <option value="bulan_berikutnya">{PENGAKUAN_LABELS.bulan_berikutnya}</option>
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Menentukan <strong>bulan mana</strong> yang mengakui pendapatan layanan ini di
+                laporan keuangan.{' '}
+                <strong>Penuh saat selesai</strong> untuk layanan sekali jadi (Jasa Pengajuan
+                Shopee Mall, Nano KOL).{' '}
+                <strong>Rata sepanjang durasi</strong> untuk layanan berjalan (GMV Max, Store
+                Management) — pilihan ini <strong>wajib punya durasi</strong> di atas, kalau
+                kosong simpanan ditolak.{' '}
+                <strong>Bulan berikutnya</strong> khusus <strong>Komisi</strong>: angkanya baru
+                diketahui bulan depan, jadi diakui satu bulan sesudah penjualannya. Penanda ini{' '}
+                <strong>tidak bisa ditebak dari durasi</strong> — Komisi dan Jasa Pengajuan Shopee
+                Mall dua-duanya tanpa durasi, dengan arti yang berbeda.
+              </span>
+            </div>
             <label className="row" style={{ gap: 6, fontSize: 13 }}>
               <input
                 type="checkbox"
@@ -387,6 +413,7 @@ export default function MasterServicesPage() {
                   <th>Frekuensi</th>
                   <th>Durasi Jasa</th>
                   <th>Qty Menambah</th>
+                  <th>Pengakuan</th>
                   <th>Strategi &amp; Plan</th>
                   <th>Aktif</th>
                   <th>Versi</th>
@@ -409,6 +436,7 @@ export default function MasterServicesPage() {
                       <td>{s.frequency || '—'}</td>
                       <td>{formatDurasiBulan(s.durasi_bulan)}</td>
                       <td>{s.qty_menambah === 'durasi' ? 'Durasi' : 'Volume'}</td>
+                      <td>{PENGAKUAN_LABELS[s.pengakuan]}</td>
                       <td>{TIER_LABELS[s.plan_tier]}</td>
                       <td>
                         <span className={`badge badge-${s.active ? 'green' : 'darkgray'}`}>
@@ -430,7 +458,7 @@ export default function MasterServicesPage() {
                     </tr>
                     {expandedId === s.id && (
                       <tr>
-                        <td colSpan={16} style={{ background: 'var(--color-bg)' }}>
+                        <td colSpan={17} style={{ background: 'var(--color-bg)' }}>
                           {versionsLoadingId === s.id && <p className="muted">Memuat riwayat versi...</p>}
                           {versionsError && <div className="alert alertError">{versionsError}</div>}
                           {versionsByService[s.id] && versionsByService[s.id].length > 0 && (
@@ -448,6 +476,7 @@ export default function MasterServicesPage() {
                                   <th>Frekuensi</th>
                                   <th>Durasi Jasa</th>
                                   <th>Qty Menambah</th>
+                                  <th>Pengakuan</th>
                                   <th>Strategi &amp; Plan</th>
                                   <th>Aktif</th>
                                   <th>Berlaku Sejak</th>
@@ -467,6 +496,7 @@ export default function MasterServicesPage() {
                                     <td>{v.frequency || '—'}</td>
                                     <td>{formatDurasiBulan(v.durasi_bulan)}</td>
                                     <td>{v.qty_menambah === 'durasi' ? 'Durasi' : 'Volume'}</td>
+                                    <td>{PENGAKUAN_LABELS[v.pengakuan]}</td>
                                     <td>{TIER_LABELS[v.plan_tier]}</td>
                                     <td>{v.active ? 'Aktif' : 'Nonaktif'}</td>
                                     <td>{v.effective_from}</td>

@@ -16,7 +16,7 @@
  * quietly disappears the next time someone edits a price.
  */
 import { api } from './api';
-import type { MasterService, PlanTier, QtyMenambah } from './types';
+import type { MasterService, Pengakuan, PlanTier, QtyMenambah } from './types';
 
 export interface MslFormState {
   name: string;
@@ -39,6 +39,7 @@ export interface MslFormState {
    */
   durasi_bulan: string;
   qty_menambah: QtyMenambah;
+  pengakuan: Pengakuan;
   effective_from: string;
 }
 
@@ -60,6 +61,7 @@ export interface MslPayload {
   /** null = sekali jadi. The key is ALWAYS present — see the note above. */
   durasi_bulan: number | null;
   qty_menambah: QtyMenambah;
+  pengakuan: Pengakuan;
   effective_from: string;
 }
 
@@ -89,6 +91,12 @@ export const EMPTY_MSL_FORM: MslFormState = {
   // under-stating a duration shows up fast, over-stating it spreads revenue
   // across years without anyone noticing.
   qty_menambah: 'volume',
+  // 'saat_selesai' for the same reason the DB defaults to it: it is the only
+  // value valid for EVERY durasi_bulan (including none), and it is the visible
+  // side when wrong — a duration service left on it piles its whole revenue
+  // into one month, which gets reported. The opposite mistake spreads revenue
+  // across months that never existed, and nobody sees that.
+  pengakuan: 'saat_selesai',
   effective_from: todayISO(),
 };
 
@@ -117,6 +125,7 @@ export function serviceToForm(service: MasterService): MslFormState {
     plan_tier: service.plan_tier,
     durasi_bulan: service.durasi_bulan === null ? '' : String(service.durasi_bulan),
     qty_menambah: service.qty_menambah,
+    pengakuan: service.pengakuan,
     effective_from: todayISO(),
   };
 }
@@ -159,6 +168,7 @@ export function formToPayload(form: MslFormState): MslPayload {
     plan_tier: form.plan_tier,
     durasi_bulan: parseDurasiBulan(form.durasi_bulan),
     qty_menambah: form.qty_menambah,
+    pengakuan: form.pengakuan,
     effective_from: form.effective_from,
   };
 }
@@ -181,6 +191,20 @@ export function formatDurasiBulan(months: number | null | undefined): string {
 export const QTY_MENAMBAH_LABELS: Record<QtyMenambah, string> = {
   durasi: 'Durasi (qty = jumlah bulan)',
   volume: 'Volume (qty = jumlah keluaran)',
+};
+
+/**
+ * Human labels for the recognition marker — form dropdown and table column.
+ *
+ * They spell out WHEN, not the enum value, because the column is the one thing
+ * that decides which month a rupiah lands in, and "per_periode" tells a Sales
+ * Head nothing about that. The engine's own one-liners live in `@cdps/core`
+ * `accrual.PENGAKUAN_KALIMAT`; these are the shorter table/dropdown form.
+ */
+export const PENGAKUAN_LABELS: Record<Pengakuan, string> = {
+  per_periode: 'Rata sepanjang durasi',
+  saat_selesai: 'Penuh saat selesai',
+  bulan_berikutnya: 'Bulan berikutnya (komisi)',
 };
 
 /**

@@ -49,6 +49,8 @@
  */
 
 export * as money from './money';
+// Gelombang D — jadwal pengakuan pendapatan per bulan kalender (D-1…D-4, D-KOM).
+export * as accrual from './accrual';
 export * as page from './page';
 export * as tz from './tz';
 export * as permission from './permission';

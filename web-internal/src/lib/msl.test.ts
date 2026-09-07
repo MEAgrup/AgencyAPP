@@ -45,6 +45,7 @@ function fixture(over: Partial<MasterService> = {}): MasterService {
     plan_tier: 'ditentukan_am',
     durasi_bulan: 6,
     qty_menambah: 'durasi',
+    pengakuan: 'per_periode',
     version_no: 1,
     effective_from: '2026-08-31',
     ...over,
@@ -72,6 +73,7 @@ const RECOVERED_FROM: { [K in keyof MslPayload]: (s: MasterService) => MslPayloa
   plan_tier: (s) => s.plan_tier,
   durasi_bulan: (s) => s.durasi_bulan,
   qty_menambah: (s) => s.qty_menambah,
+  pengakuan: (s) => s.pengakuan,
   effective_from: () => 'SKIP',
 };
 
@@ -119,6 +121,25 @@ describe('serviceToForm → formToPayload', () => {
     // the form state: a new catalog entry must never start life claiming that
     // buying 10 of it means a ten-month contract.
     expect(formToPayload(EMPTY_MSL_FORM).qty_menambah).toBe('volume');
+  });
+
+  it('carries pengakuan through an edit — the marker that decides WHICH MONTH gets the money', () => {
+    // Same regression class as durasi_bulan, with a worse blast radius: a
+    // full-replace edit that drops this would move a service's revenue from
+    // "spread across the period" to "all in the month it finished", silently,
+    // in a closed-books regime (D-3).
+    for (const p of ['per_periode', 'saat_selesai', 'bulan_berikutnya'] as const) {
+      const durasi = p === 'per_periode' ? 6 : null;
+      const payload = formToPayload(serviceToForm(fixture({ pengakuan: p, durasi_bulan: durasi })));
+      expect(payload.pengakuan).toBe(p);
+    }
+  });
+
+  it('a blank new-service form sends pengakuan saat_selesai — the only value valid for every durasi', () => {
+    expect(formToPayload(EMPTY_MSL_FORM).pengakuan).toBe('saat_selesai');
+    // …and it is sent as a real key, so the server default and the form default
+    // can never disagree about what "not chosen" means.
+    expect('pengakuan' in formToPayload(EMPTY_MSL_FORM)).toBe(true);
   });
 });
 

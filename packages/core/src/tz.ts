@@ -159,6 +159,33 @@ export function addDaysToDate(ymdStr: string, n: number): string {
 }
 
 /**
+ * daysBetweenDate counts whole calendar days from `fromYmd` to `toYmd`, both
+ * "YYYY-MM-DD" WIB dates. Positive when `to` is later; the convention is
+ * HALF-OPEN — `daysBetweenDate('2026-01-01', '2026-02-01')` is 31, the number
+ * of days in [1 Jan, 1 Feb).
+ *
+ * Half-open is what makes period arithmetic composable: a period of one month
+ * from 1 January covers exactly the days this function counts to its end date,
+ * so "how long did it run" and "when does it end" can never disagree by a day.
+ * The accrual engine (Gelombang D) divides money by this count, and an
+ * off-by-one there is an off-by-one in the books.
+ *
+ * Both dates are read at WIB midnight, so DST does not exist and the difference
+ * is always a whole number of days.
+ */
+export function daysBetweenDate(fromYmd: string, toYmd: string): number {
+  const from = Date.parse(`${fromYmd}T00:00:00Z`);
+  const to = Date.parse(`${toYmd}T00:00:00Z`);
+  if (Number.isNaN(from)) {
+    throw new RangeError(`invalid WIB date: ${fromYmd}`);
+  }
+  if (Number.isNaN(to)) {
+    throw new RangeError(`invalid WIB date: ${toYmd}`);
+  }
+  return Math.round((to - from) / DAY_MS);
+}
+
+/**
  * addMonthsToDate shifts a "YYYY-MM-DD" WIB calendar date by n whole CALENDAR
  * months, clamping to the last day of the target month when the day-of-month
  * does not exist there.

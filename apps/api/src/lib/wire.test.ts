@@ -77,6 +77,7 @@ describe('masterServiceToWire', () => {
       planTier: 'ditentukan_am',
       durasiBulan: 6,
       qtyMenambah: 'durasi',
+      pengakuan: 'per_periode',
       versionNo: 3,
       effectiveFrom: '2026-07-01',
     };
@@ -98,6 +99,7 @@ describe('masterServiceToWire', () => {
       plan_tier: 'ditentukan_am',
       durasi_bulan: 6,
       qty_menambah: 'durasi',
+      pengakuan: 'per_periode',
       version_no: 3,
       effective_from: '2026-07-01',
     });

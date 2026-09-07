@@ -33,6 +33,8 @@ export interface MasterServiceWire {
   durasi_bulan: number | null;
   /** 'durasi' | 'volume' — apa yang ditambah qty yang dibeli klien (Q3). */
   qty_menambah: string;
+  /** 'per_periode' | 'saat_selesai' | 'bulan_berikutnya' — kapan diakui (D-KOM). */
+  pengakuan: string;
   version_no: number;
   effective_from: string;
 }
@@ -57,6 +59,7 @@ export function masterServiceToWire(v: msl.ServiceView): MasterServiceWire {
     plan_tier: v.planTier,
     durasi_bulan: v.durasiBulan,
     qty_menambah: v.qtyMenambah,
+    pengakuan: v.pengakuan,
     version_no: v.versionNo,
     effective_from: v.effectiveFrom,
   };

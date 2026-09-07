@@ -33,6 +33,13 @@ interface ServiceBody {
   durasi_bulan?: number | null;
   /** 'durasi' | 'volume'. Absent = 'volume' (sisi aman, lihat msl.ts). */
   qty_menambah?: string;
+  /**
+   * 'per_periode' | 'saat_selesai' | 'bulan_berikutnya' (D-KOM). Absent =
+   * 'saat_selesai'. Sama seperti `durasi_bulan`, sebuah `PUT` menulis versi
+   * BARU secara penuh: kunci yang hilang di sini MENGOSONGKAN penandanya ke
+   * default, tidak membawa nilai versi sebelumnya.
+   */
+  pengakuan?: string;
   effective_from?: string;
 }
 
@@ -58,6 +65,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       planTier: b.plan_tier as msl.ServiceInput['planTier'],
       durasiBulan: b.durasi_bulan,
       qtyMenambah: b.qty_menambah as msl.ServiceInput['qtyMenambah'],
+      pengakuan: b.pengakuan as msl.ServiceInput['pengakuan'],
       effectiveFrom: b.effective_from ?? '',
     });
     return json({ id, version_no: versionNo });

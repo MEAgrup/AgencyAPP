@@ -343,6 +343,12 @@ check "notif_katalog_sesuai" "select case when (select count(*) from notif_event
 check "employees"        "select count(*) from employees"        "10"
 check "role_mappings"    "select count(*) from role_mappings"    "12"
 check "master_services"  "select count(*) from master_services"  "6"
+# D-KOM (migrasi 20260922010000): `Komisi` diakui BULAN BERIKUTNYA. Ini satu
+# ketokan pemilik yang TIDAK BISA diturunkan dari kolom lain mana pun — `Komisi`
+# dan layanan sekali-jadi sama-sama `durasi_bulan IS NULL`. Kalau suatu hari ada
+# yang "menyederhanakan" penandanya jadi turunan durasi, di sinilah ia merah,
+# bukan di laporan keuangan bulan depan.
+check "pengakuan_komisi" "select count(*) from master_service_versions where name = 'Komisi' and pengakuan = 'bulan_berikutnya'" "1"
 check "demo_tasks"       "select count(*) from demo_tasks"       "1"
 
 echo "→ invariant SQL"
