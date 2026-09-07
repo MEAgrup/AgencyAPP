@@ -356,6 +356,11 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   const [commissionPic, setCommissionPic] = useState('');
   const [paymentScheme, setPaymentScheme] = useState<string>(PAYMENT_SCHEMES[0]);
   const [managedSince, setManagedSince] = useState('');
+  // A-4 (K-2) — durasi kerja sama. Empty means "take the catalog's answer"; the
+  // reason box only appears once a number is typed, because a reason with no
+  // override is noise and an override with no reason is refused server-side.
+  const [durasiOverride, setDurasiOverride] = useState('');
+  const [alasanOverride, setAlasanOverride] = useState('');
   const [installments, setInstallments] = useState<InstallmentRow[]>([]);
   const [closeSubmitting, setCloseSubmitting] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
@@ -838,6 +843,15 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
         },
         payment_scheme: paymentScheme,
         ...(managedSince ? { managed_since: managedSince } : {}),
+        // Omitted entirely when blank — the server reads "absent" as "derive
+        // from the catalog", so sending 0 or null here would be a different
+        // request than the one the AM made.
+        ...(durasiOverride.trim() !== ''
+          ? {
+              durasi_bulan_override: Number(durasiOverride),
+              alasan_override: alasanOverride.trim(),
+            }
+          : {}),
         ...(useInstallments
           ? { installments: installments.map((i) => ({ amount: i.amount, due_date: i.due_date })) }
           : {}),
@@ -1761,6 +1775,44 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                     onChange={(e) => setManagedSince(e.target.value)}
                   />
                 </div>
+              </div>
+
+              {/* A-4 (ketokan K-2, 2026-09-07) — durasi kerja sama pindah ke
+                  sini dari form Strategi milik AM. Ini momen angkanya benar-benar
+                  diketahui: yang mengisi ada di negosiasinya. Dibiarkan kosong,
+                  durasinya diturunkan dari katalog (MAX durasi_bulan atas layanan
+                  yang ditutup) — jadi jalur normalnya nol input tambahan. */}
+              <div className="formRow">
+                <div className="field">
+                  <label htmlFor="close-durasi">Durasi Kerja Sama (bulan, opsional)</label>
+                  <input
+                    id="close-durasi"
+                    type="number"
+                    min="1"
+                    max="36"
+                    step="1"
+                    placeholder="ikuti katalog"
+                    value={durasiOverride}
+                    onChange={(e) => setDurasiOverride(e.target.value)}
+                  />
+                  <p className="muted" style={{ fontSize: 12 }}>
+                    Kosongkan untuk memakai durasi katalog. Isi hanya kalau kesepakatannya berbeda &mdash;
+                    tanggal akhir kontrak dihitung otomatis per bulan kalender.
+                  </p>
+                </div>
+                {durasiOverride.trim() !== '' && (
+                  <div className="field">
+                    <label htmlFor="close-alasan">Alasan Perubahan Durasi (wajib)</label>
+                    <input
+                      id="close-alasan"
+                      type="text"
+                      required
+                      value={alasanOverride}
+                      onChange={(e) => setAlasanOverride(e.target.value)}
+                      placeholder="mis. klien minta 6 bulan dulu sebelum perpanjangan"
+                    />
+                  </div>
+                )}
               </div>
 
               {(paymentScheme === '[Termin]' || paymentScheme === '[Bayar di Belakang]') && (

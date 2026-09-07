@@ -218,6 +218,14 @@ export interface ClosingInput {
   payment_scheme: string;
   managed_since?: string; // "YYYY-MM-DD"
   installments?: ClosingInstallmentInput[];
+  /**
+   * A-4 (K-2) — the cooperation duration in months. LEAVE UNSET to take the
+   * catalog's answer (MAX durasi_bulan over the closed services); send a number
+   * only to override it, and then `alasan_override` is mandatory. Sending an
+   * explicit null is the same as leaving it out.
+   */
+  durasi_bulan_override?: number | null;
+  alasan_override?: string | null;
 }
 
 // module0_sales.ClosingResult.
