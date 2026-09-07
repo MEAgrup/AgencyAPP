@@ -686,12 +686,18 @@ describe('M0 quote preview wire mapper (C-03 finding)', () => {
         standardPriceIdr: 'Rp. 3.500.000,00',
         komisiIdr: 'Rp. 350.000,00',
         subtotalIdr: 'Rp. 7.000.000,00',
+        ppnIdr: 'Rp. 770.000,00',
+        totalIdr: 'Rp. 7.770.000,00',
       },
     ],
     // bigint — JSON.stringify throws on these; the mapper must drop them.
     estimasiNilai: 7_000_000n,
+    totalPPN: 770_000n,
+    nilaiDitagih: 7_770_000n,
     totalKomisi: 350_000n,
     estimasiNilaiIdr: 'Rp. 7.000.000,00',
+    totalPPNIdr: 'Rp. 770.000,00',
+    nilaiDitagihIdr: 'Rp. 7.770.000,00',
     totalKomisiIdr: 'Rp. 350.000,00',
   };
 
@@ -706,9 +712,13 @@ describe('M0 quote preview wire mapper (C-03 finding)', () => {
           standard_price_idr: 'Rp. 3.500.000,00',
           komisi_idr: 'Rp. 350.000,00',
           subtotal_idr: 'Rp. 7.000.000,00',
+          ppn_idr: 'Rp. 770.000,00',
+          total_idr: 'Rp. 7.770.000,00',
         },
       ],
       estimasi_nilai_idr: 'Rp. 7.000.000,00',
+      total_ppn_idr: 'Rp. 770.000,00',
+      nilai_ditagih_idr: 'Rp. 7.770.000,00',
       total_komisi_idr: 'Rp. 350.000,00',
     });
   });

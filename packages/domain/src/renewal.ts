@@ -290,10 +290,10 @@ async function writeRenewalProposal(
     }
     seen.add(id);
   }
-  const resolved: { line: RenewalLine; price: string; rule: string }[] = [];
+  const resolved: { line: RenewalLine; price: string; rule: string; ppn: string }[] = [];
   for (const l of lines) {
-    const { price, rule } = await resolveProposalLine(tx, l, now);
-    resolved.push({ line: l, price, rule });
+    const { price, rule, ppn } = await resolveProposalLine(tx, l, now);
+    resolved.push({ line: l, price, rule, ppn });
   }
 
   const version = await nextVersion(tx, renewalRequestId);
@@ -302,11 +302,12 @@ async function writeRenewalProposal(
     values (${renewalRequestId}, ${version}, ${actor.employeeId}, ${actor.employeeId})
     returning id`;
   const proposalId = proposalRows[0].id;
-  for (const { line: l, price, rule } of resolved) {
+  for (const { line: l, price, rule, ppn } of resolved) {
     await tx`
       insert into renewal_proposal_lines
-        (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms, created_by)
-      values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule}, ${nullString(l.paymentTerms)}, ${actor.employeeId})`;
+        (proposal_id, master_service_id, proposed_price, commission_rule, ppn, payment_terms, created_by)
+      values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule}, ${ppn},
+              ${nullString(l.paymentTerms)}, ${actor.employeeId})`;
   }
   await ex.audit.insertAudit({
     entityType: ENTITY, entityId: renewalRequestId, actorEmployeeId: actor.employeeId,
@@ -320,15 +321,21 @@ async function writeRenewalProposal(
 }
 
 /** loadLatestLines reads the newest proposal version's priced lines. */
-async function loadLatestLines(sql: Queryable, renewalRequestId: string): Promise<{ masterServiceId: string; proposedPrice: string; commissionRule: string }[]> {
-  const rows = await sql<{ master_service_id: string; proposed_price: string; commission_rule: string }[]>`
-    select l.master_service_id, l.proposed_price, l.commission_rule
+async function loadLatestLines(
+  sql: Queryable,
+  renewalRequestId: string,
+): Promise<{ masterServiceId: string; proposedPrice: string; ppn: string; commissionRule: string }[]> {
+  const rows = await sql<{ master_service_id: string; proposed_price: string; ppn: string; commission_rule: string }[]>`
+    select l.master_service_id, l.proposed_price, l.ppn, l.commission_rule
       from renewal_proposal_lines l
       join renewal_proposals p on p.id = l.proposal_id
      where p.renewal_request_id = ${renewalRequestId}
        and p.version_no = (select max(version_no) from renewal_proposals where renewal_request_id = ${renewalRequestId})
      order by l.id`;
-  return rows.map((r) => ({ masterServiceId: r.master_service_id, proposedPrice: r.proposed_price, commissionRule: r.commission_rule }));
+  return rows.map((r) => ({
+    masterServiceId: r.master_service_id, proposedPrice: r.proposed_price, ppn: r.ppn,
+    commissionRule: r.commission_rule,
+  }));
 }
 
 async function renewalTransition(sm: statemachine.SmExecutor, id: string, to: string, actor: Actor): Promise<statemachine.TransitionResult> {
@@ -551,11 +558,17 @@ export async function executeRenewal(
     if (lines.length === 0) {
       throw new IncompleteError();
     }
+    // Same split as `sales.close()` (D-4): `total` is the BASE that becomes
+    // `total_agreed_value` and feeds accrual + commission; `totalPPN` is the tax
+    // in its own column. The instalment schedule is validated against the BILLED
+    // figure — base + PPN — because that is what the client pays.
     let total = 0n;
+    let totalPPN = 0n;
     for (const l of lines) {
       total += money.parse(l.proposedPrice);
+      totalPPN += money.parse(l.ppn);
     }
-    validateScheduleTotal({ parties: input.parties, paymentScheme: input.paymentScheme, installments: input.installments }, total);
+    validateScheduleTotal({ parties: input.parties, paymentScheme: input.paymentScheme, installments: input.installments }, total + totalPPN);
 
     const primary = input.parties.primarySalespersonId;
     const pic = resolvePIC(input.parties);
@@ -586,20 +599,21 @@ export async function executeRenewal(
       await tx`
         insert into services
           (id, client_id, contract_id, master_service_id, master_version_no, name, standard_price,
-           commission_rule, status, requires_strategy_plan, plan_tier, created_by)
+           commission_rule, status, requires_strategy_plan, plan_tier, ppn, created_by)
         values
           (${svcId}, ${row.client_id}, ${contractId}, ${l.masterServiceId}, ${view.versionNo}, ${view.name}, ${l.proposedPrice},
            ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING}, ${view.requiresStrategyPlan}, ${view.planTier},
-           ${actor.employeeId})`;
+           ${l.ppn}, ${actor.employeeId})`;
     }
 
     // 3) Transaction (TRX-) born awaiting Finance verification.
     const trxId = await ex.ident.identNext('TRX', now);
     await tx`
       insert into transactions
-        (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_by)
+        (id, client_id, payment_intent_scheme, total_agreed_value, total_ppn, payment_status, created_by)
       values
-        (${trxId}, ${row.client_id}, ${input.paymentScheme}, ${money.decimal(total)}, ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
+        (${trxId}, ${row.client_id}, ${input.paymentScheme}, ${money.decimal(total)}, ${money.decimal(totalPPN)},
+         ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
 
     // 4) Installments (INST-) for scheduled schemes.
     const installments = input.installments ?? [];
@@ -640,6 +654,7 @@ export async function executeRenewal(
       beforeJson: { allocations: before },
       afterJson: {
         contract_id: contractId, transaction_id: trxId, total_agreed_value: money.decimal(total),
+        total_ppn: money.decimal(totalPPN), ditagih: money.decimal(total + totalPPN),
         payment_scheme: input.paymentScheme, allocations: input.parties.allocations,
       },
       createdBy: actor.employeeId,

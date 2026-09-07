@@ -250,9 +250,21 @@ export default function KalkulatorPenawaranPage() {
         {!quoteError && selections.length > 0 && (
           <div className="row" style={{ gap: 24 }}>
             <div>
-              <div className="muted" style={{ fontSize: 12 }}>Estimasi Nilai</div>
+              <div className="muted" style={{ fontSize: 12 }}>Estimasi Nilai (sebelum PPN)</div>
               <div style={{ fontSize: 20, fontWeight: 600 }}>
                 {quoting && !quote ? '…' : quote?.estimasi_nilai_idr ?? '—'}
+              </div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 12 }}>PPN</div>
+              <div style={{ fontSize: 20, fontWeight: 600 }}>
+                {quoting && !quote ? '…' : quote?.total_ppn_idr ?? '—'}
+              </div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 12 }}>Ditagih ke Klien</div>
+              <div style={{ fontSize: 20, fontWeight: 600 }}>
+                {quoting && !quote ? '…' : quote?.nilai_ditagih_idr ?? '—'}
               </div>
             </div>
             <div>

@@ -1,9 +1,9 @@
 # Handoff — **Mesin accrual Gelombang D ada. D-3 buntu di satu pertanyaan pemilik.**
 
 > **Baca ini dulu, lalu:**
-> 1. `docs/DECISIONS.md` — empat baris `Decided` bertanggal **2026-09-08**, dan
->    **§Open dua baris baru: `D-3-PERAN` (🔴) dan `D-4-DASAR` (🟠).**
->    Yang 🔴 memblokir seluruh D-3 dan **tidak boleh ditebak**.
+> 1. `docs/DECISIONS.md` — tujuh baris `Decided` bertanggal **2026-09-08**, dan
+>    **§Open: `D-3-PERAN` masih 🔴 dan memblokir seluruh D-3 — jangan ditebak.**
+>    (`D-4-DASAR` sudah ✅ diketok pemilik 2026-09-08; lihat §4.)
 > 2. `docs/handoff/HANDOFF_GELOMBANG_D_20260907.md` — handoff pendahulunya.
 >    §7 (aturan urutan rilis) **wajib** sebelum menyentuh live. §2 (lima ketokan)
 >    tetap spesifikasi D; jangan ketok ulang.
@@ -18,9 +18,10 @@
 | **D langkah 1 — kolom `pengakuan` (D-KOM)** | ✅ **SELESAI** — migrasi 190, domain, wire, form admin, tabel |
 | **D langkah 2 — mesin accrual** | ✅ **SELESAI** — `packages/core/src/accrual.ts`, 47 tes, 6 mutasi |
 | **D langkah 3 — kunci tutup buku (D-3)** | 🔴 **BUNTU** — peran yang berwenang menutup tidak pernah disebut siapa pun |
-| **D langkah 4 — penanda PPN (D-4)** | 🟢 sisi mesin **sudah terpenuhi**; sisa satu keputusan wiring (🟠 `D-4-DASAR`) |
+| **D langkah 4 — PPN (D-4)** | ✅ **DIKETOK & DIBANGUN 2026-09-08** — nilai disimpan sebelum PPN, PPN kolom tambahan. Lihat §4 |
 
-Migrasi: repo **190**, live **189** — **190 BELUM diterapkan ke live.** Lihat §5.
+Migrasi: repo **191**, live **189** — **190 dan 191 BELUM diterapkan ke live.** Lihat §5.
+⚠️ **191 WAJIB MENYUSUL deploy kodenya**, tidak boleh mendahului. Alasannya di §5.
 
 ---
 
@@ -120,20 +121,78 @@ mengarang siapa yang boleh membekukan angka keuangan perusahaan.
 
 ---
 
-## 4. 🟠 `D-4-DASAR` — satu keputusan wiring, bukan pekerjaan mesin
+## 4. ✅ D-4 — diketok pemilik 2026-09-08 dan sudah dibangun
 
-Penanda pilihan PPN per transaksi **sudah ada sejak dulu**: `sales.ts` menyimpan
-`apply_ppn` per BARIS kalkulator, di-seed dari `apply_ppn` versi MSL yang di-pin.
+Ketokannya: *"semua laporan keuangan accrual dibuat sebelum PPN. PPN adalah
+penambahan. Cek juga MSL supaya semua transaksi dibuat sebelum PPN, nanti PPN
+adalah kolom tambahan."*
 
-Yang belum diputuskan: **laporan accrual membaca angka sebelum atau sesudah
-PPN?** `sales.ts` hari ini menyimpan `subtotal` yang **sudah ditambah 11%**
-ketika penandanya menyala. Mesin accrual menerima apa pun yang diberikan dan
-tidak menghitung PPN sendiri (persis yang D-4 minta), jadi pertanyaannya ada di
-pemanggilnya.
+### 4.1 Dua cacat yang ditemukan saat membangunnya
 
-Kabar baiknya: **penanda dan subtotal sama-sama tersimpan**, jadi kedua angka
-masih bisa dipulihkan kapan pun. Kabar buruknya: memilihnya diam-diam berarti
-seluruh laporan keuangan berbeda 11% tanpa ada yang menyebutkannya.
+Keduanya dibuktikan lewat **kode berjalan**, bukan dari membaca:
+
+1. Laporan accrual akan mengakui pendapatan **11% lebih besar** dari yang
+   benar-benar milik perusahaan. PPN titipan negara, bukan pendapatan.
+2. `buildQuote` menghitung **komisi dari nilai yang sudah ber-PPN**.
+   Rp 10.000.000 dengan aturan `10% of standard price` membayar
+   **Rp 1.110.000**, bukan Rp 1.000.000 — komisi atas uang pajak.
+
+**Cacat #2 belum pernah merugikan di live**, dan itu perlu disebut apa adanya:
+keempat baris live yang ber-PPN semuanya beraturan `0% of standard price`, jadi
+selisihnya nol rupiah. Ia laten, bukan kerugian yang sudah terjadi.
+
+### 4.2 Yang dibangun
+
+`computeSubtotal` berhenti melebur 11% dan mengembalikan **DASAR**; `computePPN`
+baru mengembalikan pajaknya terpisah. Lima tabel jalur uang dapat kolom PPN
+sendiri:
+
+```
+qualified_form_services.ppn · negotiation_proposal_lines.ppn
+renewal_proposal_lines.ppn  · services.ppn · transactions.total_ppn
+```
+
+Komisi kini dihitung dari **dasar**, dan skedul cicilan divalidasi terhadap
+**dasar + PPN** — karena itulah yang ditagih. Pagar terakhir itu yang paling
+penting: skedul yang hanya menjumlah dasarnya terlihat benar dari segala arah
+(ia cocok dengan `total_agreed_value`) dan tetap menagih klien 11% kurang dari
+fakturnya.
+
+### 4.3 ⚠️ Satu turunan yang MENGGESER rupiah tagihan
+
+Harga **negosiasi** kini diperlakukan sebagai DASAR, dan PPN ditambahkan di
+atasnya dari penanda katalog. Sebelumnya baris negosiasi tidak pernah kena PPN
+sama sekali. Artinya baris negosiasi Rp 50.000.000 atas layanan ber-PPN yang
+tadinya ditagih Rp 50.000.000 **kini ditagih Rp 55.500.000**.
+
+Itu turunan langsung dari kata "**semua** transaksi dibuat sebelum PPN", tapi ia
+satu-satunya bagian D-4 yang menggeser rupiah tagihan, jadi ia ditulis
+terang-terangan (🟡 di `DECISIONS.md`) alih-alih diselipkan. **Kalau maksud
+pemilik adalah harga negosiasi sudah termasuk PPN, ini yang dikoreksi lebih
+dulu.** Nol baris live terdampak.
+
+### 4.4 Cacat ketiga, ditemukan lewat mutasi yang TETAP HIJAU
+
+`standardLines` sudah membawa `ppn` pinnya, tapi `resolveProposalLine`
+memperlakukan baris berharga sebagai custom dan **menghitung ulang PPN dari
+katalog hari itu** — field pinnya tidak pernah terpakai. Akibatnya admin yang
+mematikan `apply_ppn` antara kualifikasi dan closing diam-diam mengubah tagihan
+deal yang **sudah disepakati**.
+
+Diperbaiki: pin menang, dan `submitNegotiation` **membuang** `pinnedPPN` dari
+baris kiriman wire supaya klien tidak bisa menamai pajaknya sendiri
+(CLAUDE.md #4). Ada tes untuk keduanya.
+
+### 4.5 Uji-kering backfill terhadap data live (read-only, 2026-09-08)
+
+| Yang diukur | Hasil |
+|---|---|
+| Baris QFS ber-PPN | 4 |
+| Bisa dipisah **eksak** | **4 dari 4** |
+| Baris negosiasi tertelusuri | 4 · renewal 0 · services 3 · TRX 3 |
+| Σ dasar + Σ PPN | 142.000.000 + 15.620.000 = **157.620.000** |
+| Nilai lama | **157.620.000** — tidak bergeser satu sen |
+| TRX `[Lunas]` yang terdampak | 2, keduanya nilai tagihnya **tetap** |
 
 ---
 
@@ -146,9 +205,20 @@ berkas repo — `O65`, masih terbuka). Pakai `mcp__Supabase__apply_migration`
 **per berkas**, lalu **verifikasi lewat kueri katalog** — jangan percaya
 `success: true` saja. Proyek live: `egddxfcnrtecheiykhlf` (`CDPS SG`).
 
-Migrasi 190 **aditif** (kolom baru + backfill, nol rename, nol drop), jadi ia
-**boleh mendahului kode**. Tapi urutan yang terbukti tetap lebih aman dan itu
-yang dipakai untuk 186–189:
+**Migrasi 190 dan 191 punya aturan urutan yang BERBEDA. Jangan disamakan.**
+
+**190** aditif murni (kolom baru + backfill, nol rename, nol drop) ⇒ **boleh
+mendahului kode**.
+
+⛔ **191 WAJIB MENYUSUL deploy kodenya.** Ia menulis ulang
+`subtotal`/`proposed_price`/`total_agreed_value` jadi 11% lebih kecil dan
+memindahkan selisihnya ke kolom PPN baru. Kode LAMA membaca kolom-kolom itu
+sebagai satu angka utuh — jadi di antara apply dan deploy, setiap halaman uang
+akan menampilkan dan menagih **11% lebih kecil dari yang benar**, tanpa error di
+mana pun. Ini kelas yang sama dengan migrasi 186 (§7 handoff sebelumnya), bukan
+kelas 187.
+
+Urutan yang terbukti dan yang harus dipakai untuk keduanya:
 
 > **merge → tunggu tiga deploy Vercel produksi READY di commit merge → apply per
 > berkas → verifikasi kueri katalog.**
@@ -164,6 +234,23 @@ SELECT pengakuan, count(*) FROM terkini WHERE active GROUP BY pengakuan;
 --  saat_selesai      37     <- 38 dikurangi Komisi
 --  bulan_berikutnya   1     <- Komisi
 ```
+
+### Verifikasi migrasi 191 sesudah apply — angka yang HARUS keluar
+
+Uji-keringnya sudah dijalankan terhadap live 2026-09-08 (read-only) dan hasilnya
+di §4.5. Sesudah apply, angka ini harus sama:
+
+```sql
+select sum(total_agreed_value) as dasar, sum(total_ppn) as ppn,
+       sum(total_agreed_value + total_ppn) as ditagih
+  from transactions where total_ppn > 0;
+--  dasar 137.000.000 | ppn 15.070.000 | ditagih 152.070.000
+--  (tiga TRX: 0008, 0009, 0010 — dua di antaranya sudah [Lunas])
+```
+
+Yang WAJIB dicek: **`ditagih` harus sama persis dengan `total_agreed_value`
+sebelum migrasi**. Kalau bergeser, transaksi yang sudah dibayar tidak lagi cocok
+dengan uang yang masuk — hentikan dan jangan lanjutkan.
 
 Dan: **migrasi yang SUDAH di-apply ke live tidak boleh disunting.** Perbaikan
 atasnya = migrasi BARU (kelas drift yang O38 lahir darinya).
@@ -191,10 +278,11 @@ cd ../web-client-portal && npx vitest run
 | core | 935 | **982** (+47 accrual) |
 | db | 53 | 53 |
 | apps/api | 490 | 490 |
-| domain | 1988 (+1 skip) | **1996** (+1 skip) (+8 pengakuan) |
+| **catatan** | | shape-parity & round-trip FE **sempat merah** saat kunci PPN ditambah — itu tugasnya; keduanya hijau lagi sesudah kontrak FE dilengkapi |
+| domain | 1988 (+1 skip) | **2010** (+1 skip) (+8 pengakuan, +14 PPN) |
 | web-internal | 650 | 650 |
 | web-client-portal | 19 | 19 |
-| migrasi `db-rebuild` | 189 | **190** |
+| migrasi `db-rebuild` | 189 | **191** |
 
 `entity_prefix` 40 · `sm_machines` 31 · `notif_events` 69 — **tidak berubah**
 (migrasi 190 murni kolom + data).
@@ -231,9 +319,16 @@ tambahan yang lahir dari sesi ini:
    sengaja dijalankan atas `accrual.ts`; **lima memerah**. Yang keenam TETAP
    HIJAU — dan itu **bukan** celah tes: dua pagar berbeda sama-sama menutup
    kasus yang sama, jadi mencabut salah satunya tidak mengubah hasil. Dibuktikan
-   dengan mencabut **keduanya sekaligus**, yang langsung memerah. **Mutasi yang
-   tetap hijau wajib dijelaskan, bukan diabaikan** — jawabannya bisa "kodenya
-   berlebihan" atau "tesnya bohong", dan keduanya penting.
+   dengan mencabut **keduanya sekaligus**, yang langsung memerah.
+
+   **Mutasi yang tetap hijau wajib dijelaskan, bukan diabaikan.** Sesi ini
+   menemukan bahwa jawabannya bisa ada TIGA, bukan dua: "kodenya berlebihan",
+   "tesnya bohong", atau — yang paling mahal — **"field itu memang tidak pernah
+   terpakai"**. Yang ketiga terjadi di D-4: memutasi `standardLines` agar
+   membuang PPN pinnya tidak memerahkan apa pun, karena
+   `resolveProposalLine` memang sudah menghitung ulang PPN dari katalog dan
+   field pinnya tidak pernah dibaca siapa pun. Itu bug yang hanya ketahuan
+   karena mutasinya ditanyakan, bukan karena ada tes yang gagal.
 10. **Bentuk keluaran mesin dipilih oleh gerbang yang paling kaku, bukan oleh
     yang paling enak dibaca.** Irisan bulanan dipilih bukan karena lebih rapi,
     tapi karena D-3 (bulan tertutup tidak bisa diedit) **melarang** bentuk yang
@@ -258,4 +353,11 @@ tambahan yang lahir dari sesi ini:
 - **Riwayat hold belum diturunkan dari `audit_log` untuk layanan.** Mesin
   menerima `Hold[]`, dan `ads.computeTotalHariHold` adalah polanya — tapi
   penurun untuk entitas layanan/kontrak **belum ditulis**.
-- **Migrasi 190 belum di-live** (§5).
+- **Migrasi 190 dan 191 belum di-live** (§5). 191 punya aturan urutan yang
+  BERBEDA dari 190 — ia wajib MENYUSUL deploy kodenya, tidak boleh mendahului.
+- **Halaman uang belum dibuka di peramban sesudah D-4.** Kalkulator Sales dan
+  halaman attempt kini menampilkan tiga angka (dasar · PPN · ditagih) alih-alih
+  satu. Lolos `tsc`, `vitest`, `next build`, `lint`, dan gerbang shape-parity —
+  tapi tata letak tiga kolom itu belum pernah dilihat manusia.
+- **Turunan D-4 yang menggeser tagihan** (§4.3) belum dikonfirmasi pemilik: harga
+  negosiasi kini diperlakukan sebagai dasar dan dikenai PPN di atasnya.

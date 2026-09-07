@@ -2169,13 +2169,23 @@ export interface LineQuoteWire {
   unit: string;
   standard_price_idr: string;
   komisi_idr: string;
+  /** BASE, before PPN (D-4). */
   subtotal_idr: string;
+  /** PPN on this line; `Rp. 0,00` when untaxed. */
+  ppn_idr: string;
+  /** subtotal + ppn — what the client is billed for this line. */
+  total_idr: string;
 }
 
 /** module0_sales.Quote — web-internal's `Quote` (lib/sales.ts). */
 export interface QuoteWire {
   lines: LineQuoteWire[];
+  /** BASE, before PPN — the accrual figure and the commission base (D-4). */
   estimasi_nilai_idr: string;
+  /** PPN beside it, never inside it. */
+  total_ppn_idr: string;
+  /** What the client is billed: base + PPN. */
+  nilai_ditagih_idr: string;
   total_komisi_idr: string;
 }
 
@@ -2198,8 +2208,12 @@ export function quoteToWire(q: sales.Quote): QuoteWire {
       standard_price_idr: l.standardPriceIdr,
       komisi_idr: l.komisiIdr,
       subtotal_idr: l.subtotalIdr,
+      ppn_idr: l.ppnIdr,
+      total_idr: l.totalIdr,
     })),
     estimasi_nilai_idr: q.estimasiNilaiIdr,
+    total_ppn_idr: q.totalPPNIdr,
+    nilai_ditagih_idr: q.nilaiDitagihIdr,
     total_komisi_idr: q.totalKomisiIdr,
   };
 }

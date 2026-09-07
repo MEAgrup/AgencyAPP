@@ -1337,8 +1337,16 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                 {qQuoteError && <div className="alert alertError" role="alert">{qQuoteError}</div>}
                 <div className="row" style={{ gap: 24 }}>
                   <div>
-                    <div className="muted" style={{ fontSize: 12 }}>Estimasi Nilai Transaksi</div>
+                    <div className="muted" style={{ fontSize: 12 }}>Estimasi Nilai Transaksi (sebelum PPN)</div>
                     <div style={{ fontSize: 18, fontWeight: 600 }}>{qQuote?.estimasi_nilai_idr ?? '—'}</div>
+                  </div>
+                  <div>
+                    <div className="muted" style={{ fontSize: 12 }}>PPN</div>
+                    <div style={{ fontSize: 18, fontWeight: 600 }}>{qQuote?.total_ppn_idr ?? '—'}</div>
+                  </div>
+                  <div>
+                    <div className="muted" style={{ fontSize: 12 }}>Ditagih ke Klien</div>
+                    <div style={{ fontSize: 18, fontWeight: 600 }}>{qQuote?.nilai_ditagih_idr ?? '—'}</div>
                   </div>
                   <div>
                     <div className="muted" style={{ fontSize: 12 }}>Perhitungan Komisi</div>
