@@ -68,6 +68,7 @@ import { formatIDR } from '@/lib/money';
 import { getStrategi, listStrategiQueue, type StrategiPillar } from '@/lib/strategi';
 import { getClient, type ServiceLine } from '@/lib/clients';
 import { suggestRowFromPillar } from '@/lib/plan-row-suggest';
+import PilarBelumJadiBaris from '@/components/plan/PilarBelumJadiBaris';
 import { JENIS_LAINNYA, PIC_GROUPS, findJenis, jenisBySatuan, jenisFor } from '@/lib/plantask';
 import {
   jenisDefaults,
@@ -323,6 +324,16 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
   // contract) — flattened across every `Aktif` Strategi so the dropdown can
   // show one merged list.
   const [clientPillars, setClientPillars] = useState<{ strategiId: string; pillar: StrategiPillar }[]>([]);
+  /**
+   * B5 — Section E of the KONTRAK Plan's own Strategi. Not the PC-3 dropdown
+   * the owner removed 2026-09-02 (that let an AM re-point any row at any
+   * pillar); this feeds one read-only panel that lists the pillars which have
+   * NO row yet, so "not seeded" stays visible as work instead of vanishing.
+   * `channels` (B-0.1) comes along because it decides whether a cross-channel
+   * pillar is unambiguous — the same rule `planpillar` applies server-side.
+   */
+  const [strategiPillars, setStrategiPillars] = useState<StrategiPillar[]>([]);
+  const [strategiChannels, setStrategiChannels] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -377,6 +388,18 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
             setClientPillars(perStrategi.flat());
           })
           .catch(() => setClientPillars([]));
+      } else if (d.plan.strategi_id) {
+        // Advisory, like the Satuan fetches above: a failure hides the panel,
+        // it must not fail the page.
+        getStrategi(d.plan.strategi_id)
+          .then((det) => {
+            setStrategiPillars(det.pillars);
+            setStrategiChannels(det.channels.map((c) => c.channel));
+          })
+          .catch(() => {
+            setStrategiPillars([]);
+            setStrategiChannels([]);
+          });
       }
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -681,6 +704,19 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
           </div>
         )}
       </div>
+
+      {/* -------- B5: Section E pillars that have no row yet -------- */}
+      {!isKlien && canAddRow && (
+        <PilarBelumJadiBaris
+          planId={id}
+          pillars={strategiPillars}
+          rows={rows}
+          channelStrategi={strategiChannels}
+          channelOptions={channelOptions}
+          disabled={acting}
+          onCreated={load}
+        />
+      )}
 
       {/* -------- P-C work rows — the task-assignment section -------- */}
       <div className="card">

@@ -97,6 +97,7 @@ import {
   computePeriods,
   contractDeficit,
   createPlanRow,
+  listPlanRows,
   updatePlanRowOrigin,
   deletePlanRow,
   distributeWeeks,
@@ -1084,6 +1085,190 @@ describeDb('generatePlanPeriods', () => {
     );
     expect(second).toEqual([]);
     expect(await listPlansForContract(sql, am(), f.contractId)).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B5 — row skeleton seeded from Section E (M6B §6 Flow step 1)
+// ---------------------------------------------------------------------------
+
+describeDb('generatePlanPeriods — semai baris dari Section E', () => {
+  async function seedChannels(strategiId: string, channels: string[]): Promise<void> {
+    for (const channel of channels) {
+      await sql`
+        insert into strategi_channel
+          (strategi_id, channel, status_channel, nama_toko, url_toko, created_by)
+        values (${strategiId}, ${channel}, 'Eksisting', ${`Toko ${channel}`},
+                'https://contoh.test', 'ZZ-AM')`;
+    }
+  }
+
+  async function seedPillar(
+    strategiId: string,
+    over: Partial<{ jenis: string; channel: string | null; aksi: string; target: string; sku: string | null; urutan: number }> = {},
+  ): Promise<number> {
+    const r = await sql<{ id: string | number }[]>`
+      insert into strategi_pillar (strategi_id, jenis, channel, urutan, sku, aksi, target, created_by)
+      values (${strategiId}, ${over.jenis ?? 'konten'}, ${over.channel === undefined ? 'Shopee' : over.channel},
+              ${over.urutan ?? 1}, ${over.sku ?? null}, ${over.aksi ?? 'V2 Naikkan kuota video'},
+              ${over.target ?? '30 video, jembatan Video bertayangan / bulan'}, 'ZZ-AM')
+      returning id`;
+    return Number(r[0].id);
+  }
+
+  async function generate(f: { clientId: string; contractId: string; strategiId: string }, months = 2): Promise<string[]> {
+    return sql.begin((tx) =>
+      generatePlanPeriods(tx, am(), {
+        id: f.strategiId,
+        contractId: f.contractId,
+        clientId: f.clientId,
+        tanggalMulaiSiklus: '2026-08-12',
+        durasiKontrakBulan: months,
+      }),
+    );
+  }
+
+  it('menyemai satu baris P-C per pilar tanpa ambiguitas, hanya di periode 1', async () => {
+    const f = await seedContractStrategi();
+    await seedChannels(f.strategiId, ['Shopee']);
+    const pillarId = await seedPillar(f.strategiId, { sku: 'RAK-A' });
+    const ids = await generate(f, 2);
+
+    const rows1 = await listPlanRows(sql, ids[0]);
+    expect(rows1).toHaveLength(1);
+    expect(rows1[0]).toMatchObject({
+      channel: 'Shopee',
+      pilar: 'konten',
+      aksi: 'V2 Naikkan kuota video',
+      kuota: 30,
+      satuan: 'video',
+      divisiPic: 'Creative',
+      hasilDiharapkan: '30 video, jembatan Video bertayangan / bulan',
+      strategiPillarId: pillarId,
+    });
+    expect(rows1[0].skuSasaran).toEqual(['RAK-A']);
+
+    // Periode 2..n tetap kosong: Rule 17 hanya periode 1 yang dikerjakan AM
+    // sekarang, dan menyalin baris ke enam periode akan mengarang komitmen
+    // bulan-bulan yang belum direncanakan.
+    expect(await listPlanRows(sql, ids[1])).toHaveLength(0);
+  });
+
+  it('baris yang disemai BUKAN di_luar_strategi — itu daya beda metrik PG-1', async () => {
+    const f = await seedContractStrategi();
+    await seedChannels(f.strategiId, ['Shopee']);
+    await seedPillar(f.strategiId);
+    const ids = await generate(f, 1);
+    const row = (await listPlanRows(sql, ids[0]))[0];
+    expect(row.diLuarStrategi).toBe(false);
+    expect(row.diLuarService).toBe(false);
+    expect(row.serviceId).toBeNull();
+    expect(row.strategiPillarId).not.toBeNull();
+  });
+
+  it('memakai default kolom untuk apa yang pilar tak sebut — nol invensi', async () => {
+    const f = await seedContractStrategi();
+    await seedChannels(f.strategiId, ['Shopee']);
+    await seedPillar(f.strategiId);
+    const ids = await generate(f, 1);
+    const row = (await listPlanRows(sql, ids[0]))[0];
+    expect(row.budget).toBeNull();
+    expect(row.mingguSasaran).toEqual([]);
+    expect(row.prasyarat).toBeNull();
+    expect(row.instruksiBrief).toBeNull();
+    expect(row.prioritas).toBe('Penting');
+    expect(row.visibilitas).toBe('Bagikan ke Klien');
+    expect(row.statusBaris).toBe('Rencana');
+    expect(row.terbawa).toBe(false);
+  });
+
+  it('memetakan kelima jenis ke divisinya, satu baris masing-masing', async () => {
+    const f = await seedContractStrategi();
+    await seedChannels(f.strategiId, ['Shopee']);
+    const jenisList = ['konten', 'iklan', 'affiliate', 'live', 'operasional'];
+    for (const [i, jenis] of jenisList.entries()) {
+      await seedPillar(f.strategiId, { jenis, urutan: i + 1, target: `${i + 2} unit` });
+    }
+    const ids = await generate(f, 1);
+    const rows = await listPlanRows(sql, ids[0]);
+    expect(rows.map((r) => [r.pilar, r.divisiPic])).toEqual([
+      ['konten', 'Creative'],
+      ['iklan', 'Ads'],
+      ['affiliate', 'KOL'],
+      ['live', 'Live Stream'],
+      ['operasional', 'Ops'],
+    ]);
+    expect(rows.map((r) => r.kuota)).toEqual([2, 3, 4, 5, 6]);
+  });
+
+  it('TIDAK menyemai sku/harga/retensi — divisinya keputusan AM', async () => {
+    const f = await seedContractStrategi();
+    await seedChannels(f.strategiId, ['Shopee']);
+    for (const [i, jenis] of ['sku', 'harga', 'retensi'].entries()) {
+      await seedPillar(f.strategiId, { jenis, urutan: i + 1 });
+    }
+    const ids = await generate(f, 1);
+    expect(await listPlanRows(sql, ids[0])).toHaveLength(0);
+  });
+
+  it('TIDAK menyemai pilar tidak_dikerjakan', async () => {
+    const f = await seedContractStrategi();
+    await seedChannels(f.strategiId, ['Shopee']);
+    await seedPillar(f.strategiId, { jenis: 'tidak_dikerjakan' });
+    const ids = await generate(f, 1);
+    expect(await listPlanRows(sql, ids[0])).toHaveLength(0);
+  });
+
+  it('target tanpa angka ⇒ tak ada baris, BUKAN baris kuota 0 (yang tak pernah jadi Brief)', async () => {
+    const f = await seedContractStrategi();
+    await seedChannels(f.strategiId, ['Shopee']);
+    await seedPillar(f.strategiId, { target: 'perbaikan listing hero SKU' });
+    const ids = await generate(f, 1);
+    expect(await listPlanRows(sql, ids[0])).toHaveLength(0);
+  });
+
+  it('pilar lintas channel: disemai pada Strategi satu channel, ditahan pada multi-channel', async () => {
+    const satu = await seedContractStrategi();
+    await seedChannels(satu.strategiId, ['Shopee']);
+    await seedPillar(satu.strategiId, { channel: null });
+    const idsSatu = await generate(satu, 1);
+    expect((await listPlanRows(sql, idsSatu[0]))[0].channel).toBe('Shopee');
+
+    const banyak = await seedContractStrategi();
+    await seedChannels(banyak.strategiId, ['Shopee', 'TikTok Shop']);
+    await seedPillar(banyak.strategiId, { channel: null });
+    const idsBanyak = await generate(banyak, 1);
+    expect(await listPlanRows(sql, idsBanyak[0])).toHaveLength(0);
+  });
+
+  it('Strategi tanpa pilar sama sekali tetap menghasilkan periode, tanpa baris', async () => {
+    const f = await seedContractStrategi();
+    await seedChannels(f.strategiId, ['Shopee']);
+    const ids = await generate(f, 2);
+    expect(ids).toHaveLength(2);
+    expect(await listPlanRows(sql, ids[0])).toHaveLength(0);
+  });
+
+  it('mencatat audit baris_disemai — log tak pernah mengaku baris ini diketik manusia', async () => {
+    const f = await seedContractStrategi();
+    await seedChannels(f.strategiId, ['Shopee']);
+    await seedPillar(f.strategiId);
+    const ids = await generate(f, 1);
+    const rows = await sql<{ action: string; after_json: Record<string, unknown> }[]>`
+      select action, after_json from audit_log
+       where entity_type = 'plan' and entity_id = ${ids[0]} and action = 'baris_disemai'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].after_json).toMatchObject({
+      channel: 'Shopee',
+      pilar: 'konten',
+      divisi_pic: 'Creative',
+      kuota: 30,
+    });
+    // Tidak ada `baris_dibuat` — itu aksi jalur tulis AM.
+    const manual = await sql<{ n: string | number }[]>`
+      select count(*) as n from audit_log
+       where entity_type = 'plan' and entity_id = ${ids[0]} and action = 'baris_dibuat'`;
+    expect(Number(manual[0].n)).toBe(0);
   });
 });
 
