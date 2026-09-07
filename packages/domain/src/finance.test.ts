@@ -19,6 +19,7 @@ import {
   canApproveSchemeChange,
   canManageScheme,
   canVerifyPayment,
+  canPilihPpn,
   canVoteBermasalah,
   CHANGE_APPROVED,
   CHANGE_CANCELLED,
@@ -35,6 +36,8 @@ import {
   IncompleteError,
   INST_TERVERIFIKASI,
   NotFoundError,
+  MSG_PPN_DENIED,
+  MSG_PPN_TAK_SAH,
   overdueLabel,
   OutstandingTotalError,
   OverVerificationError,
@@ -44,9 +47,11 @@ import {
   resolveBermasalah,
   ScheduleTotalError,
   schemeChangeRequests,
+  setPpnPilihan,
   scanReminders,
   SchemeLockedError,
   type Actor,
+  loadTransactionAggregate,
   verifyPayment,
 } from './finance';
 
@@ -69,6 +74,11 @@ const accountLead = (): Actor => ({
 const budi = (): Actor => ({
   employeeId: 'ZZ-BUDI', divisi: 'Sales',
   role: permission.makeRole({ division: 'Sales', level: 'staff' }),
+});
+/** OD: membaca segalanya, menulis NOL (Role Matrix Fase 0 §4). */
+const od = (): Actor => ({
+  employeeId: 'ZZ-OD', divisi: 'Management',
+  role: permission.makeRole({ od: true }),
 });
 
 // ---------------------------------------------------------------------------
@@ -173,6 +183,7 @@ async function seedService(id: string): Promise<string> {
 async function closedDeal(
   scheme: string,
   installments?: { amount: string; dueDate: string }[],
+  ppn?: 'kena' | 'tidak_kena' | null,
 ): Promise<{ transactionId: string; clientId: string; installmentIds: string[] }> {
   const svc = await seedService(uniqueSvc());
   const { attempt } = await leads.register(sql, budi(), { leadName: 'Alpha Digital', phoneNumber: uniquePhone() });
@@ -187,6 +198,7 @@ async function closedDeal(
     parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
     paymentScheme: scheme,
     installments,
+    ppn,
   });
   const insts = await sql<{ id: string }[]>`
     select id from installments where transaction_id = ${res.transactionId} order by installment_no`;
@@ -859,5 +871,122 @@ describeDb('scheme change: file → Director ACC (M5-OA-7)', () => {
     expect(seen).toContain('scheme_change_requested');
     expect(seen).toContain('scheme_change_approved');
     expect(seen).toContain('scheme_changed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-4 — perlakuan PPN sebagai PILIHAN per transaksi.
+//
+// Yang dijaga bukan "kolomnya bisa diisi", melainkan tiga hal yang kalau salah
+// baru ketahuan di dokumen pajak:
+//
+//   1. **`null` bukan `'tidak_kena'`.** Sebuah transaksi yang belum pernah
+//      ditanyakan harus bisa dibedakan dari yang sudah diputuskan tidak kena —
+//      itu seluruh alasan kolomnya nullable tanpa default (aturan kerja #4).
+//   2. **Nilai transaksinya TIDAK bergerak.** Ketokan D-4 menyimpan bruto dan
+//      mencatat pilihan; sebuah implementasi yang "sekalian" menambah 11% ke
+//      `total_agreed_value` akan terlihat benar di satu invoice dan salah di
+//      seluruh laporan.
+//   3. **Setiap perubahan punya barisnya di audit log**, termasuk yang pertama
+//      (dari belum-dipilih ke sebuah pilihan) — "siapa memutuskan ini tidak
+//      kena PPN, dan kapan" adalah pertanyaan auditor, bukan hipotesis.
+// ---------------------------------------------------------------------------
+describe('canPilihPpn (unit)', () => {
+  it('Finance segala level atau Director — bukan Sales, bukan Account, bukan OD', () => {
+    expect(canPilihPpn(financeStaff())).toBe(true);
+    expect(canPilihPpn(financeLead())).toBe(true);
+    expect(canPilihPpn(director())).toBe(true);
+    expect(canPilihPpn(budi())).toBe(false);
+    expect(canPilihPpn(accountLead())).toBe(false);
+    // OD membaca segalanya dan menulis NOL (Role Matrix Fase 0 §4).
+    expect(canPilihPpn(od())).toBe(false);
+  });
+});
+
+describeDb('setPpnPilihan (D-4)', () => {
+  it('sebuah transaksi baru lahir BELUM DIPILIH — null, bukan tidak_kena', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const t = await loadTransactionAggregate(sql, financeStaff(), transactionId);
+    expect(t.ppnPilihan).toBeNull();
+  });
+
+  it('Sales bisa memilihnya SAAT CLOSING, dan pilihannya tersimpan apa adanya', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS, undefined, 'kena');
+    const t = await loadTransactionAggregate(sql, financeStaff(), transactionId);
+    expect(t.ppnPilihan).toBe('kena');
+  });
+
+  it('Closing dengan pilihan `tidak_kena` BERBEDA dari Closing tanpa pilihan', async () => {
+    // Inti butir (1): dua keadaan yang mudah dianggap sama.
+    const a = await closedDeal(sales.PAYMENT_SCHEME_LUNAS, undefined, 'tidak_kena');
+    const b = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const ta = await loadTransactionAggregate(sql, financeStaff(), a.transactionId);
+    const tb = await loadTransactionAggregate(sql, financeStaff(), b.transactionId);
+    expect(ta.ppnPilihan).toBe('tidak_kena');
+    expect(tb.ppnPilihan).toBeNull();
+    expect(ta.ppnPilihan).not.toBe(tb.ppnPilihan);
+  });
+
+  it('Finance mencatat pilihannya sesudah Closing, dan nilai transaksinya TIDAK berubah', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const sebelum = await loadTransactionAggregate(sql, financeStaff(), transactionId);
+    await setPpnPilihan(sql, financeStaff(), transactionId, 'kena');
+    const sesudah = await loadTransactionAggregate(sql, financeStaff(), transactionId);
+    expect(sesudah.ppnPilihan).toBe('kena');
+    // Butir (2): brutonya tetap bruto, sampai ke sen terakhir.
+    expect(sesudah.totalAgreedValue).toBe(sebelum.totalAgreedValue);
+    expect(sesudah.amountOutstanding).toBe(sebelum.amountOutstanding);
+  });
+
+  it('setiap perubahan punya baris audit before→after, termasuk yang PERTAMA', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await setPpnPilihan(sql, financeStaff(), transactionId, 'tidak_kena');
+    await setPpnPilihan(sql, financeLead(), transactionId, 'kena');
+    const audit = await sql<{ before_json: { ppn_pilihan: string | null }; after_json: { ppn_pilihan: string }; actor_employee_id: string }[]>`
+      select before_json, after_json, actor_employee_id from audit_log
+       where entity_type = 'transaction' and entity_id = ${transactionId}
+         and action = 'ppn_pilihan_set'
+       order by id asc`;
+    expect(audit).toHaveLength(2);
+    expect(audit[0].before_json.ppn_pilihan).toBeNull();
+    expect(audit[0].after_json.ppn_pilihan).toBe('tidak_kena');
+    expect(audit[1].before_json.ppn_pilihan).toBe('tidak_kena');
+    expect(audit[1].after_json.ppn_pilihan).toBe('kena');
+    expect(audit[1].actor_employee_id).toBe('ZZ-FINLEAD');
+  });
+
+  it('menolak pilihan di luar kosakata dengan pesan BI-nya sendiri', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    for (const bad of ['', 'ya', 'KENA', 'true']) {
+      await expect(setPpnPilihan(sql, financeStaff(), transactionId, bad))
+        .rejects.toThrow(MSG_PPN_TAK_SAH);
+    }
+  });
+
+  it('DB menolak nilai di luar kosakata juga — CHECK-nya gerbang yang sebenarnya', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await expect(sql`update transactions set ppn_pilihan = 'ya' where id = ${transactionId}`)
+      .rejects.toThrow(/ck_trx_ppn_pilihan/);
+  });
+
+  it('Sales, Account, dan OD tidak boleh mencatatnya', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    for (const aktor of [budi(), accountLead(), od()]) {
+      await expect(setPpnPilihan(sql, aktor, transactionId, 'kena'))
+        .rejects.toThrow(MSG_PPN_DENIED);
+    }
+  });
+
+  it('transaksi yang tidak ada ditolak NotFound — sesudah gerbang peran, bukan sebelumnya', async () => {
+    await expect(setPpnPilihan(sql, financeStaff(), 'TRX-209912-9999', 'kena'))
+      .rejects.toBeInstanceOf(NotFoundError);
+    // …dan aktor tanpa hak tetap 403, bukan 404: 404 membocorkan keberadaannya.
+    await expect(setPpnPilihan(sql, budi(), 'TRX-209912-9999', 'kena'))
+      .rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('Closing dengan pilihan di luar kosakata ditolak gerbang wajib', async () => {
+    await expect(closedDeal(sales.PAYMENT_SCHEME_LUNAS, undefined, 'ya' as never))
+      .rejects.toBeInstanceOf(sales.IncompleteError);
   });
 });

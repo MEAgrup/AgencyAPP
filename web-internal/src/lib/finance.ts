@@ -31,6 +31,19 @@ export interface Transaction {
   bermasalah: boolean;
   contract_attachment: string;
   released_to_account_at: string | null;
+  /**
+   * Perlakuan PPN yang DIPILIH manusia (ketokan D-4 2026-09-07): `'kena'` |
+   * `'tidak_kena'` | `null`.
+   *
+   * `null` berarti **belum ada yang memilih**, BUKAN "tidak kena PPN" — dan
+   * halaman wajib menuliskannya begitu. Sebuah sel kosong di kolom ini akan
+   * dibaca sebagai "tidak kena", yang untuk pajak adalah kesimpulan yang
+   * berbeda dan mahal.
+   *
+   * `total_agreed_value` di atas tetap BRUTO: sistem tidak menambah atau
+   * mengurangi PPN dari angka itu.
+   */
+  ppn_pilihan: string | null;
   installments: Installment[];
 }
 
@@ -190,6 +203,36 @@ export function attachContract(id: string, contractAttachment: string): Promise<
   return api.post<{ status: string }>(`/transactions/${id}/contract`, {
     contract_attachment: contractAttachment,
   });
+}
+
+/** Perlakuan PPN transaksi — kosakata D-4, dipakai form dan tabel. */
+export type PpnPilihan = 'kena' | 'tidak_kena';
+
+/**
+ * Label per pilihan, PLUS label untuk keadaan belum-dipilih. Satu tempat,
+ * karena "Belum dipilih" yang jadi string kosong di satu halaman dan kalimat
+ * penuh di halaman lain adalah dua jawaban berbeda untuk satu keadaan.
+ */
+export const PPN_LABELS: Record<PpnPilihan, string> = {
+  kena: 'Kena PPN',
+  tidak_kena: 'Tidak kena PPN',
+};
+export const PPN_BELUM_DIPILIH = 'Belum dipilih';
+
+/** labelPpn merender pilihan (atau ketiadaannya) — jangan pernah sel kosong. */
+export function labelPpn(v: string | null | undefined): string {
+  if (v === 'kena' || v === 'tidak_kena') {
+    return PPN_LABELS[v];
+  }
+  return PPN_BELUM_DIPILIH;
+}
+
+/**
+ * setPpnPilihan mencatat perlakuan PPN transaksi (D-4). Finance/Direktur.
+ * Nilai transaksinya tidak berubah — yang dicatat hanya pilihannya.
+ */
+export function setPpnPilihan(id: string, pilihan: PpnPilihan): Promise<{ ppn_pilihan: string }> {
+  return api.put<{ ppn_pilihan: string }>(`/transactions/${id}/ppn`, { ppn_pilihan: pilihan });
 }
 
 // ---- Perubahan transaksi (AJUKAN → ACC Direktur, M5-OA-7) ----

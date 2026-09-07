@@ -2864,6 +2864,12 @@ export interface TransactionWire {
   bermasalah: boolean;
   contract_attachment: string;
   released_to_account_at: string | null;
+  /**
+   * 'kena' | 'tidak_kena' | null (D-4). `null` berarti BELUM DIPILIH, bukan
+   * "tidak kena" — kuncinya selalu ADA di badan respons, karena kunci yang
+   * hilang lebih berbahaya daripada null (CLAUDE.md §batas camelCase↔snake_case).
+   */
+  ppn_pilihan: string | null;
   installments: InstallmentWire[];
 }
 
@@ -2882,6 +2888,7 @@ export function transactionToWire(t: finance.TransactionAggregate): TransactionW
     bermasalah: t.bermasalah,
     contract_attachment: t.contractAttachment ?? '',
     released_to_account_at: t.releasedToAccountAt ? t.releasedToAccountAt.toISOString() : null,
+    ppn_pilihan: t.ppnPilihan,
     installments: t.installments.map(installmentToWire),
   };
 }

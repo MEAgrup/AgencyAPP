@@ -28,7 +28,7 @@
  * archive/backend-go/internal/admin/master_service.go (EffectiveAt / ServiceView).
  */
 
-import { bi, money, notification, page, permission, statemachine, tz } from '@cdps/core';
+import { bi, money, notification, page, permission, ppn, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { effectiveAt, type ServiceView } from './msl';
 import { resolveWin } from './leads';
@@ -163,9 +163,16 @@ const PRICING_MODES = new Set<string>([
   PRICING_FLAT, PRICING_MIN_FLOOR, PRICING_BATCH_CEILING, PRICING_PASSTHROUGH,
 ]);
 
-/** PPN surcharge: 11% of the subtotal (money.percentOf numerator/scale). */
-const PPN_NUMERATOR = 11n;
-const PPN_SCALE = 0;
+/**
+ * PPN surcharge: 11% of the subtotal (money.percentOf numerator/scale).
+ *
+ * Tarifnya DIBACA dari `@cdps/core` `ppn`, bukan ditulis di sini: sejak D-4
+ * membuat perlakuan PPN jadi pilihan per transaksi, angka ini dibaca dari lebih
+ * dari satu tempat, dan sebuah tarif pajak yang punya dua definisi akan berbeda
+ * pada perubahan pertama.
+ */
+const PPN_NUMERATOR = ppn.PPN_TARIF_PEMBILANG;
+const PPN_SCALE = ppn.PPN_TARIF_SKALA;
 
 /** Resolved calculator inputs for one service line. */
 export interface PriceParams {
@@ -1225,6 +1232,21 @@ export interface ClosingInput {
   paymentScheme: string;
   installments?: InstallmentInput[];
   managedSince?: string; // optional YYYY-MM-DD
+  /**
+   * Perlakuan PPN transaksi ini (ketokan D-4 2026-09-07) — `'kena'` |
+   * `'tidak_kena'`. Absent/`null` berarti **belum ada yang memilih**, dan itu
+   * nilai yang SAH: pilihannya milik manusia, dan Finance bisa memilihnya nanti
+   * lewat `finance.setPpnPilihan` saat menerbitkan invoice.
+   *
+   * SENGAJA tidak diturunkan dari `apply_ppn` katalog. Katalog memberi SARAN
+   * untuk kalkulator penawaran; kolom ini mencatat KEPUTUSAN untuk transaksi —
+   * dan sebuah keputusan yang diturunkan otomatis dari saran berhenti bisa
+   * dibedakan dari keputusan yang benar-benar diambil (aturan kerja #4).
+   *
+   * `total_agreed_value` tetap BRUTO apa adanya; penanda ini tidak menambah
+   * atau mengurangi sepeser pun.
+   */
+  ppn?: ppn.PpnPilihan | null;
 }
 
 /** The ids birthed by a successful closing. */
@@ -1290,6 +1312,13 @@ export function resolvePIC(c: ClosingParties): string {
 export function validateShape(input: ClosingInput): void {
   validateParties(input.parties);
   if (!PAYMENT_SCHEMES.has(input.paymentScheme)) {
+    throw new IncompleteError();
+  }
+  // D-4: pilihan PPN OPSIONAL (absent/null = belum dipilih, dan itu sah — lihat
+  // `ClosingInput.ppn`), tapi kalau diberikan ia harus ada di kosakata. Nilai
+  // liar ditolak di sini DAN oleh CHECK `ck_trx_ppn_pilihan` di DB, karena
+  // route bukan satu-satunya penulis tabel itu.
+  if (input.ppn !== undefined && input.ppn !== null && !ppn.isPpnPilihan(input.ppn)) {
     throw new IncompleteError();
   }
   const installments = input.installments ?? [];
@@ -1440,13 +1469,17 @@ export async function close(
            ${actor.employeeId})`;
     }
 
-    // 5) Transaction (TRX-) born awaiting Finance verification.
+    // 5) Transaction (TRX-) born awaiting Finance verification. `ppn_pilihan`
+    //    ikut apa adanya: `null` saat Sales belum memilih, dan `null` di sana
+    //    berarti "belum ada yang memilih", bukan "tidak kena PPN" (D-4).
+    const pilihanPpn = input.ppn ?? null;
     const trxId = await ex.ident.identNext('TRX', now);
     await tx`
       insert into transactions
-        (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_by)
+        (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, ppn_pilihan, created_by)
       values
-        (${trxId}, ${clientId}, ${input.paymentScheme}, ${money.decimal(total)}, ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
+        (${trxId}, ${clientId}, ${input.paymentScheme}, ${money.decimal(total)}, ${TRX_STATUS_MENUNGGU},
+         ${pilihanPpn}, ${actor.employeeId})`;
     await tx`update clients set transaction_id = ${trxId}, payment_intent = ${input.paymentScheme} where id = ${clientId}`;
 
     // 6) Installments (INST-) for scheduled schemes.

@@ -30,7 +30,7 @@
  * Reference: archive/backend-go/internal/module5_finance/{verify,contract,reads}.go.
  */
 
-import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
+import { bi, money, notification, permission, ppn, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { computeCommission, parseCommissionRule } from './sales';
 
@@ -98,6 +98,20 @@ export class ForbiddenError extends Error {
   constructor(message = bi.TRANSITION_ROLE_DENIED) {
     super(message);
     this.name = 'FinanceForbiddenError';
+  }
+}
+
+/**
+ * Sebuah masukan tidak lolos gerbangnya, dengan pesan BI-nya SENDIRI (→ 400).
+ *
+ * Terpisah dari `IncompleteError` yang selalu memakai pesan default rumah:
+ * "pilihan PPN harus kena atau tidak_kena" bukan "data tidak lengkap" — yang
+ * mengirimnya sudah mengisi sesuatu, yang salah adalah nilainya.
+ */
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FinanceValidationError';
   }
 }
 
@@ -601,6 +615,77 @@ export async function attachContract(sql: Sql, actor: Actor, transactionId: stri
       action: 'contract_attached', beforeJson: { contract_attachment: trx.contractAttachment },
       afterJson: { contract_attachment: trimmed }, createdBy: actor.employeeId,
     });
+  });
+}
+
+/**
+ * canPilihPpn — Finance segala level atau Director (D-4).
+ *
+ * Ketokan menyebut *"Sales/Finance yang memilih"*, dan keduanya memang memilih —
+ * tapi di titik yang berbeda: **Sales memilih SAAT CLOSING** (lewat
+ * `sales.ClosingInput.ppn`, sekali, bersama nilai yang ia sepakati), dan
+ * **Finance mengubahnya SESUDAH ITU** (lewat pintu ini) karena invoice adalah
+ * artefaknya. Pembagian itu dipilih di sini dan BELUM diketok pemilik; ia
+ * dicatat sebagai pertanyaan terbuka `D-ACC-4` di `DECISIONS.md`. Kalau pemilik
+ * ingin Sales tetap bisa mengubahnya sesudah Closing, yang berubah hanya
+ * predikat ini.
+ *
+ * OD DI LUAR: ia membaca segalanya dan menulis nol (Role Matrix Fase 0 §4).
+ */
+export function canPilihPpn(actor: Actor): boolean {
+  return actor.role.director || actor.role.division === FINANCE_DIVISION;
+}
+
+/** Pesan BI persis saat aktor tak berhak memilih perlakuan PPN. */
+export const MSG_PPN_DENIED =
+  '[hanya Finance atau Direktur yang dapat memilih perlakuan PPN transaksi]';
+/** Pesan BI persis saat pilihannya di luar kosakata. */
+export const MSG_PPN_TAK_SAH =
+  '[pilihan PPN harus "kena" atau "tidak_kena"]';
+
+/**
+ * setPpnPilihan mencatat perlakuan PPN satu Transaksi (D-4). Nilai
+ * `total_agreed_value` TIDAK disentuh — itu seluruh isi ketokannya: yang
+ * disimpan bruto, yang dicatat hanya pilihannya.
+ *
+ * Setiap perubahan masuk `audit_log` dengan before→after, termasuk perubahan
+ * dari `null` (belum dipilih) ke sebuah pilihan — karena "siapa yang memutuskan
+ * transaksi ini tidak kena PPN, dan kapan" adalah pertanyaan yang akan ditanya
+ * auditor, bukan pertanyaan hipotetis.
+ *
+ * Ia SENGAJA tidak menolak perubahan pada transaksi yang sudah `[Lunas]`:
+ * perlakuan pajak bisa terbukti keliru sesudah pembayaran selesai, dan
+ * memaksanya beku di situ hanya memindahkan koreksinya ke luar sistem. Yang
+ * menjaga pertanggungjawabannya adalah audit log, bukan larangan.
+ */
+export async function setPpnPilihan(
+  sql: Sql,
+  actor: Actor,
+  transactionId: string,
+  pilihan: string,
+): Promise<ppn.PpnPilihan> {
+  if (!canPilihPpn(actor)) {
+    throw new ForbiddenError(MSG_PPN_DENIED);
+  }
+  if (!ppn.isPpnPilihan(pilihan)) {
+    throw new ValidationError(MSG_PPN_TAK_SAH);
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const before = await tx<{ ppn_pilihan: string | null }[]>`
+      select ppn_pilihan from transactions where id = ${transactionId} for update`;
+    if (before.length === 0) {
+      throw new NotFoundError();
+    }
+    await tx`update transactions set ppn_pilihan = ${pilihan} where id = ${transactionId}`;
+    await ex.audit.insertAudit({
+      entityType: 'transaction', entityId: transactionId, actorEmployeeId: actor.employeeId,
+      action: 'ppn_pilihan_set',
+      beforeJson: { ppn_pilihan: before[0].ppn_pilihan },
+      afterJson: { ppn_pilihan: pilihan },
+      createdBy: actor.employeeId,
+    });
+    return pilihan;
   });
 }
 
@@ -1784,6 +1869,12 @@ export interface TransactionAggregate {
   bermasalah: boolean;
   contractAttachment: string | null;
   releasedToAccountAt: Date | null;
+  /**
+   * Perlakuan PPN yang DIPILIH manusia (D-4). `null` berarti belum ada yang
+   * memilih — BUKAN "tidak kena". `totalAgreedValue` di atas tetap BRUTO apa
+   * adanya; penanda ini tidak mengubahnya sedikit pun.
+   */
+  ppnPilihan: ppn.PpnPilihan | null;
   installments: InstallmentRow[];
 }
 
@@ -1797,6 +1888,7 @@ interface TransactionDbRow {
   bermasalah: boolean;
   contract_attachment: string | null;
   released_to_account_at: Date | null;
+  ppn_pilihan: string | null;
 }
 
 /** Raw installments row (column list kept identical across every read). */
@@ -1857,6 +1949,10 @@ async function hydrateAggregate(sql: Queryable, r: TransactionDbRow): Promise<Tr
     bermasalah: r.bermasalah,
     contractAttachment: r.contract_attachment,
     releasedToAccountAt: r.released_to_account_at,
+    // Nilai yang tak dikenal kosakata dijadikan `null`, BUKAN diteruskan apa
+    // adanya: CHECK di DB sudah menutupnya, dan meneruskan string liar ke tipe
+    // uni hanya memindahkan kejutannya ke pembaca.
+    ppnPilihan: ppn.isPpnPilihan(r.ppn_pilihan) ? r.ppn_pilihan : null,
     installments: instRows.map(toInstallmentRow),
   };
 }
@@ -1881,7 +1977,7 @@ export async function financeQueue(sql: Queryable, actor: Actor): Promise<Transa
   }
   const rows = await sql<TransactionDbRow[]>`
     select id, client_id, payment_intent_scheme, total_agreed_value, payment_status,
-           bermasalah, contract_attachment, released_to_account_at
+           bermasalah, contract_attachment, released_to_account_at, ppn_pilihan
     from transactions
     where payment_status <> ${PAYMENT_LUNAS}
     order by case when payment_status = ${PAYMENT_MENUNGGU} then 0 else 1 end, id`;
@@ -1909,7 +2005,7 @@ export async function loadTransactionAggregate(
   const releasedOnly = accountReleasedOnly(actor);
   const rows = await sql<TransactionDbRow[]>`
     select id, client_id, payment_intent_scheme, total_agreed_value, payment_status,
-           bermasalah, contract_attachment, released_to_account_at
+           bermasalah, contract_attachment, released_to_account_at, ppn_pilihan
     from transactions
     where id = ${transactionId}
       and (${!releasedOnly} or released_to_account_at is not null)`;

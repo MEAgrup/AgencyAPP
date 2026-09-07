@@ -12,13 +12,16 @@ import {
   getBermasalah,
   getTransaction,
   idrToInput,
+  labelPpn,
   listSchemeChangeRequests,
   rejectSchemeChange,
   requestSchemeChange,
   scheduleOutstanding,
+  setPpnPilihan,
   verify,
   voteBermasalah,
   type BermasalahStatus,
+  type PpnPilihan,
   type SchemeChangeRequest,
   type Transaction,
 } from '@/lib/finance';
@@ -99,6 +102,14 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
 
+  // Perlakuan PPN (D-4). `''` di state berarti "belum dipilih" — dan dropdown-nya
+  // punya opsi bernama untuk itu, bukan opsi kosong: sebuah pilihan kosong akan
+  // terbaca sebagai "tidak kena PPN", kesimpulan yang berbeda dan mahal.
+  const [ppnPilihan, setPpnPilihanState] = useState<PpnPilihan | ''>('');
+  const [ppnSubmitting, setPpnSubmitting] = useState(false);
+  const [ppnError, setPpnError] = useState<string | null>(null);
+  const [ppnMessage, setPpnMessage] = useState<string | null>(null);
+
   // [Bermasalah]
   const [flagSubmitting, setFlagSubmitting] = useState(false);
   const [flagError, setFlagError] = useState<string | null>(null);
@@ -115,6 +126,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
       const t = res.transaction;
       setTrx(t);
       setContractLink(t.contract_attachment || '');
+      setPpnPilihanState(t.ppn_pilihan === 'kena' || t.ppn_pilihan === 'tidak_kena' ? t.ppn_pilihan : '');
       // The installment being verified is never a free choice: it is whichever
       // rows are still open. Selecting a settled one could only ever be rejected.
       const open = t.installments.filter((i) => i.status !== INST_TERVERIFIKASI);
@@ -192,6 +204,31 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
       setVerifyError(errorMessage(err));
     } finally {
       setVerifySubmitting(false);
+    }
+  }
+
+  /**
+   * Menyimpan pilihan PPN (D-4). Ia TIDAK mengubah nilai transaksinya — dan
+   * kalimat itu ada di layar, bukan hanya di sini, supaya tidak ada yang
+   * mengira menekan tombol ini menambah 11% ke totalnya.
+   */
+  async function handleSavePpn(e: FormEvent) {
+    e.preventDefault();
+    setPpnError(null);
+    setPpnMessage(null);
+    if (ppnPilihan === '') {
+      setPpnError('Pilih dulu perlakuan PPN-nya.');
+      return;
+    }
+    setPpnSubmitting(true);
+    try {
+      await setPpnPilihan(id, ppnPilihan);
+      setPpnMessage('Perlakuan PPN tersimpan.');
+      await load();
+    } catch (err) {
+      setPpnError(errorMessage(err));
+    } finally {
+      setPpnSubmitting(false);
     }
   }
 
@@ -374,6 +411,11 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
   const pendingChange = changeRequests.find((r) => r.status === 'pending') ?? null;
   const decidedChanges = changeRequests.filter((r) => r.status !== 'pending');
   const canRequestChange = !!role && (role.director || (role.division === 'Finance' && role.level === 'lead'));
+  // D-4: Finance SEGALA LEVEL atau Direktur — lebih lebar daripada pengajuan
+  // perubahan skema, dan sengaja: memilih perlakuan PPN adalah pekerjaan
+  // pembukuan harian, dan setiap perubahannya masuk audit log. Cermin
+  // `finance.canPilihPpn` di domain.
+  const canPilihPpn = !!role && (role.director || role.division === 'Finance');
   const canDecide = !!role?.director;
   const canCancelChange =
     !!pendingChange && !!employee && pendingChange.requested_by === employee.employee_id;
@@ -429,8 +471,53 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
             <div className="muted" style={{ fontSize: 12 }}>Dirilis ke Account</div>
             <div>{formatDate(trx.released_to_account_at)}</div>
           </div>
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>Perlakuan PPN</div>
+            <div>
+              {trx.ppn_pilihan ? (
+                labelPpn(trx.ppn_pilihan)
+              ) : (
+                // Bukan em dash: "—" di kolom pajak akan dibaca sebagai "tidak
+                // kena". Yang benar adalah menyebut keadaannya.
+                <span className="badge badge-darkgray">{labelPpn(null)}</span>
+              )}
+            </div>
+          </div>
         </div>
       </section>
+
+      {canPilihPpn && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Perlakuan PPN</h2>
+          </div>
+          <p className="muted" style={{ fontSize: 12 }}>
+            Nilai transaksi di atas disimpan <strong>BRUTO</strong>. Penanda ini hanya mencatat{' '}
+            <strong>pilihan</strong> perlakuan PPN-nya (ketokan pemilik D-4, 2026-09-07); menyimpannya{' '}
+            <strong>tidak menambah atau mengurangi</strong> sepeser pun dari nilai transaksi.{' '}
+            <strong>Belum dipilih</strong> bukan berarti tidak kena PPN — ia berarti belum ada yang memutuskan.
+          </p>
+          {ppnError && <div className="alert alertError">{ppnError}</div>}
+          {ppnMessage && <div className="alert alertSuccess">{ppnMessage}</div>}
+          <form onSubmit={handleSavePpn} className="row" style={{ gap: 8, alignItems: 'flex-end' }}>
+            <div className="field" style={{ maxWidth: 240 }}>
+              <label htmlFor="ppn_pilihan">Pilihan</label>
+              <select
+                id="ppn_pilihan"
+                value={ppnPilihan}
+                onChange={(e) => setPpnPilihanState(e.target.value as PpnPilihan | '')}
+              >
+                <option value="">{labelPpn(null)}</option>
+                <option value="kena">{labelPpn('kena')}</option>
+                <option value="tidak_kena">{labelPpn('tidak_kena')}</option>
+              </select>
+            </div>
+            <button type="submit" className="btn btnPrimary" disabled={ppnSubmitting || ppnPilihan === ''}>
+              {ppnSubmitting ? 'Menyimpan...' : 'Simpan Perlakuan PPN'}
+            </button>
+          </form>
+        </section>
+      )}
 
       <section className="card">
         <div className="cardHeader">

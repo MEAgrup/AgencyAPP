@@ -3,6 +3,7 @@
  *
  * This package exports the following engines (ported incrementally per phase):
  * - money: Commission, allocation (Σ=100%), installment rollup, ROAS math ✅
+ * - ppn: kosakata perlakuan PPN per transaksi (D-4) + tarifnya, satu tempat ✅
  * - accrual: jadwal pengakuan pendapatan per BULAN KALENDER untuk satu layanan
  *   terbeli (Gelombang D) — pro-rata harian, hangus D-1, jeda hold D-2, tiga
  *   nilai `pengakuan` D-KOM; nilai BRUTO apa adanya, nol hitungan PPN (D-4) ✅
@@ -54,6 +55,10 @@
 export * as money from './money';
 // Gelombang D — jadwal pengakuan pendapatan per bulan kalender (D-1…D-4, D-KOM).
 export * as accrual from './accrual';
+// Gelombang D D-4 — kosakata perlakuan PPN per transaksi + SATU tempat tarifnya
+// hidup. Di core karena yang memilih adalah Sales (Closing) dan Finance
+// (invoice), dan `finance.ts` sudah mengimpor `sales.ts` — arah baliknya siklus.
+export * as ppn from './ppn';
 export * as page from './page';
 export * as tz from './tz';
 export * as permission from './permission';
