@@ -1013,6 +1013,9 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                             satuan: d.satuan.trim() ? d.satuan : s.satuan,
                             divisi_pic: s.divisiPic ?? d.divisi_pic,
                             sku_sasaran: d.sku_sasaran.trim() ? d.sku_sasaran : s.skuSasaran.join(', '),
+                            instruksi_brief: d.instruksi_brief.trim()
+                              ? d.instruksi_brief
+                              : s.instruksiBrief,
                           };
                         });
                         return;
