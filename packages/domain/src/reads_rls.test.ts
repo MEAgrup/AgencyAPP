@@ -974,3 +974,112 @@ describeDb('A-3 — kolom STRG- pada antrean Service di bawah RLS', () => {
     expect(row!.strategiStatus).toBe('Aktif');
   });
 });
+
+/**
+ * A-req-3 — the "n dari N" numerator, read under REAL RLS.
+ *
+ * This is the test the field exists for. `assets_select` opens only to the
+ * Asset's own PIC/creator and to a LEAD of the owning division;
+ * `creator_bookings_select` has no division arm at ALL. So a plain
+ * `(select count(*) …)` in the queue projection would answer a WRONG NUMBER —
+ * not an empty row — for readers the queue gate legitimately admits. "0 dari 8"
+ * looks correct in a way a blank screen never does, which is why the count goes
+ * through `private.brief_created_count` (O52 option (b)).
+ *
+ * Both assertions are made from a seat that would be wrong, and each states its
+ * PREMISE first: if a later migration widens the policy, the premise fails and
+ * the reason for the function is gone, rather than the test quietly passing for
+ * the wrong reason.
+ *
+ * ⚠️ Deliberately NOT covered here: a division STAFF. On this branch
+ * `briefs_select` has no staff-division arm, so a Creative staffer cannot read
+ * the Brief row at all — the regression Jalur B patches in migration
+ * `20260922200400` (PR #312). Adding a second migration over the same policy is
+ * exactly what the two-lane guard forbids, so the case is written down in
+ * `HANDOFF_FEEDBACK_OD_JALUR_A.md` instead of patched twice.
+ */
+describeDb('A-req-3 — pembilang "n dari N" di bawah RLS', () => {
+  const CLI = 'CLI-ZZR-0940';
+  const SVC = 'SVC-ZZR-0940';
+  const BRF = 'BRF-ZZR-0940'; // Creative, 3 Assets
+  const KOL_BRF = 'BRF-ZZR-0941'; // KOL, 2 Bookings
+  const AM = 'ZZR-AM940';
+  const PIC = 'ZZR-CRV940'; // Creative staff, PIC of exactly one Asset
+  const ACC_LEAD = 'ZZR-ACC940';
+  const KOL_LEAD = 'ZZR-KOL940';
+
+  afterAll(async () => {
+    if (!sql) return;
+    await sql`delete from assets where brief_id = ${BRF}`;
+    await sql`delete from creator_bookings where brief_id = ${KOL_BRF}`;
+    await sql`delete from briefs where id in (${BRF}, ${KOL_BRF})`;
+    await sql`delete from services where id = ${SVC}`;
+    await sql`delete from contracts where client_id = ${CLI}`;
+    await sql`delete from clients where id = ${CLI}`;
+  });
+
+  async function seedUnits(): Promise<void> {
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id,
+                           released_to_account_at, created_by)
+      values (${CLI}, 'RLS 0940 Fixture', 'Ibu RLS', 'Jakarta', 'Fashion', 'https://shopee/zzr940',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${AM}, now(), ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values (${SVC}, ${CLI}, 'MSV-ZZR-0940', 1, 'rls 0940 service', '9000000.00',
+              '10% of standard price', 'Ongoing', ${AM})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into briefs (id, service_id, title, status, assigned_division, quantity_target, created_by)
+      values (${BRF}, ${SVC}, 'rls 0940 brief', '[To Do]', 'Creative', 12, ${AM}),
+             (${KOL_BRF}, ${SVC}, 'rls 0941 brief', '[To Do]', 'KOL', 8, ${AM})
+      on conflict (id) do nothing`;
+    for (let i = 1; i <= 3; i++) {
+      await sql`
+        insert into assets (id, brief_id, asset_type, sequence_no, assigned_pic, created_by)
+        values (${`AST-ZZR-0940-${i}`}, ${BRF}, 'Video', ${i}, ${i === 1 ? PIC : null}, ${AM})
+        on conflict (id) do nothing`;
+    }
+    for (let i = 1; i <= 2; i++) {
+      await sql`
+        insert into creator_bookings (id, brief_id, creator_name, platform, source_pool, agreed_rate, created_by)
+        values (${`BOK-ZZR-0941-${i}`}, ${KOL_BRF}, ${`Creator ${i}`}, 'TikTok', 'Internal',
+                '1000000.00', ${AM})
+        on conflict (id) do nothing`;
+    }
+  }
+
+  it('counts every Booking for the KOL lead, who is coordinator of none', async () => {
+    await seedUnits();
+    const c = claims({ employeeId: KOL_LEAD, division: 'KOL', level: 'lead' });
+    const a = actor(KOL_LEAD, 'KOL', 'lead');
+    // The premise: `creator_bookings_select` has no division arm, so a lead of
+    // the very division that owns the Brief reads ZERO of its Bookings.
+    const visible = await withClaims(sql, c, (tx) =>
+      tx<{ n: string }[]>`select count(*) as n from creator_bookings where brief_id = ${KOL_BRF}`);
+    expect(Number(visible[0].n)).toBe(0);
+
+    const queue = await withClaims(sql, c, (tx) => listDivisionQueue(tx, a, 'KOL'));
+    const row = queue.find((b) => b.id === KOL_BRF);
+    expect(row, 'the KOL lead cannot see the Brief at all').toBeDefined();
+    expect(row!.createdCount).toBe(2); // …not 0, which the visible rows would give
+    expect(row!.quantityTarget).toBe(8);
+  });
+
+  it('counts every Asset for the Account lead, who owns none of them', async () => {
+    await seedUnits();
+    const c = claims({ employeeId: ACC_LEAD, division: 'Account', level: 'lead' });
+    const a = actor(ACC_LEAD, 'Account', 'lead');
+    // The premise: an Account lead may read the queue (§6 Rule 1) but reads zero
+    // `assets` rows — `jwt_division_owns_brief` is false for a Creative Brief.
+    const visible = await withClaims(sql, c, (tx) =>
+      tx<{ n: string }[]>`select count(*) as n from assets where brief_id = ${BRF}`);
+    expect(Number(visible[0].n)).toBe(0);
+
+    const queue = await withClaims(sql, c, (tx) => listDivisionQueue(tx, a, 'Creative'));
+    expect(queue.find((b) => b.id === BRF)?.createdCount).toBe(3); // …not 0
+  });
+});

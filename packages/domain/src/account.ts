@@ -524,6 +524,14 @@ export const MSG_GMV_APPROVE_FORBIDDEN =
   '[anda tidak memiliki akses untuk menyetujui penyesuaian target GMV]';
 
 const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * A-req-1 — a rupiah figure as it crosses this boundary: digits with at most two
+ * decimals, no separators, no sign. It answers "is this a number at all" so a
+ * malformed string never reaches Postgres as a 22P02 (which surfaces as a 500);
+ * "is it non-negative" is `ck_briefs_budget_non_negatif` in the DB, which is why
+ * the sign is simply not accepted here rather than range-checked.
+ */
+const RE_MONEY = /^\d+(\.\d{1,2})?$/;
 
 // --- Types ---
 
@@ -1775,6 +1783,23 @@ export interface BriefInput {
   instructions?: string;
   referenceAttachments?: string;
   isAddendum?: boolean;
+  /**
+   * A-req-1 (F-4 columns) — the work WINDOW and the money behind this Brief.
+   *
+   * `dueDate` is a deadline; a KOL campaign also has a start, and a Brief that
+   * carries a budget stops making Ads/KOL retype a number the Plan already
+   * committed to (until now it only "stuck" as free text inside `instructions`,
+   * `brief-inherit.ts`).
+   *
+   * All three optional and all three nullable in the DB. The three CHECKs added
+   * by migration `20260922100200` own the RULES — window ordered, budget ≥ 0,
+   * source ≠ self — and are deliberately NOT restated here; what happens below is
+   * only normalization (blank ⇒ NULL) and shape (is this a date at all).
+   */
+  tanggalMulai?: string; // YYYY-MM-DD
+  tanggalAkhir?: string; // YYYY-MM-DD
+  /** Rupiah, raw decimal string ("5000000.00"). Never a JS number — money. */
+  budget?: string;
 }
 
 /** A Brief record (BRF-). */
@@ -1818,6 +1843,28 @@ export interface Brief {
    * employee_id-nya — sebuah id masih lebih berguna daripada kolom kosong.
    */
   assignedPicNama: string;
+  /**
+   * A-req-1 — the work window and the budget (F-4 columns). `null`, not `''`:
+   * these are nullable in the DB and "no start date" is a different fact from
+   * "the empty string", which is what every other optional Brief field means
+   * here. `budget` is a raw decimal string ("5000000.00"), the same shape every
+   * other rupiah figure crosses this boundary in.
+   */
+  tanggalMulai: string | null;
+  tanggalAkhir: string | null;
+  budget: string | null;
+  /**
+   * A-req-3 — how many work units already exist for this Brief (Assets for
+   * Creative/Ads/tasks, Creator Bookings for KOL). The denominator is
+   * `quantityTarget`, so together they are the "n dari N" a division queue shows
+   * per row without an N+1 call to `GET /briefs/{id}/rollup`.
+   *
+   * Counted through `private.brief_created_count`, NOT a plain subquery: neither
+   * `assets_select` nor `creator_bookings_select` opens to every legitimate
+   * reader of a division queue, and a count under RLS comes back WRONG rather
+   * than empty — "2 dari 12" looks correct in a way a missing row never does.
+   */
+  createdCount: number;
 }
 
 // --- Input validation ---
@@ -1857,6 +1904,21 @@ function validateBrief(input: BriefInput): void {
   // membacanya. Yang ditutup di sini hanya pintu masuk sisi AM.
   if ((input.assignedPic ?? '').trim() !== '') {
     throw new ValidationError(MSG_PIC_BUKAN_WEWENANG_AM);
+  }
+  // A-req-1 — SHAPE only, never the rules. "Is this a date at all" and "is this
+  // a number at all" have to be answered here because the alternative is a
+  // Postgres 22007/22P02 surfacing as a 500; whether the window is ORDERED and
+  // whether the budget is NON-NEGATIVE belong to the three CHECKs migration
+  // 20260922100200 put in the DB, and are deliberately not repeated.
+  for (const d of [input.tanggalMulai, input.tanggalAkhir]) {
+    const v = (d ?? '').trim();
+    if (v !== '' && (!RE_DATE.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`)))) {
+      throw new ValidationError(bi.INCOMPLETE_DATA);
+    }
+  }
+  const budget = (input.budget ?? '').trim();
+  if (budget !== '' && !RE_MONEY.test(budget)) {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
   }
   // Recurring toggle: when on, its sub-fields become mandatory (§9.4).
   if (input.recurring) {
@@ -1912,17 +1974,26 @@ export async function insertBrief(
   // tidak "ditransisikan ke", pola yang sama dengan `status` di atas).
   const pipeline = await stage.resolvePipeline(tx, input.assignedDivision, input.deliverableType);
 
+  // A-req-1 — the F-4 columns. `orNull` on all three: a blank string is "not
+  // filled in", and storing `''` into a `date`/`numeric` is an error rather than
+  // an absence. The three CHECKs in the DB own the rules (window ordered, budget
+  // ≥ 0, source ≠ self) — they are not restated here.
+  const tanggalMulai = orNull(input.tanggalMulai);
+  const tanggalAkhir = orNull(input.tanggalAkhir);
+  const budget = orNull(input.budget);
+
   await tx`
     insert into briefs
       (id, service_id, strategy_id, plan_row_id, assigned_division, assigned_pic, deliverable_type,
        quantity_target, due_date, priority, recurring, recurring_frequency, recurring_count,
        recurring_end_date, instructions, reference_attachments, title, status, created_by,
-       stage_pipeline_code, production_stage)
+       stage_pipeline_code, production_stage, tanggal_mulai, tanggal_akhir, budget)
     values (${id}, ${serviceId}, ${strategyId}, ${planRowId}, ${input.assignedDivision}, ${orNull(input.assignedPic)},
       ${input.deliverableType}, ${input.quantityTarget}, ${input.dueDate.trim()}, ${input.priority}, ${recurring},
       ${orNull(input.recurringFrequency)}, ${recCount}, ${orNull(input.recurringEndDate)},
       ${orNull(input.instructions)}, ${orNull(input.referenceAttachments)}, ${input.title.trim()}, ${birth},
-      ${actor.employeeId}, ${pipeline?.code ?? null}, ${pipeline?.initialState ?? null})`;
+      ${actor.employeeId}, ${pipeline?.code ?? null}, ${pipeline?.initialState ?? null},
+      ${tanggalMulai}, ${tanggalAkhir}, ${budget})`;
   await ex.audit.insertAudit({
     entityType: 'brief', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
     beforeJson: null,
@@ -1959,6 +2030,11 @@ export async function insertBrief(
     revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
     stagePipelineCode: pipeline?.code ?? null, productionStage: pipeline?.initialState ?? null,
     clientId: ident.clientId, clientNama: ident.clientNama, assignedPicNama: ident.assignedPicNama,
+    tanggalMulai, tanggalAkhir, budget,
+    // A Brief has no children the instant it is born — the first Asset/Booking
+    // is a later act by the division. Literal 0, not a query that can only
+    // answer 0.
+    createdCount: 0,
   };
 }
 
@@ -2423,6 +2499,10 @@ interface BriefRow {
   client_id: string | null;
   client_nama: string | null;
   assigned_pic_nama: string | null;
+  tanggal_mulai: string | Date | null;
+  tanggal_akhir: string | Date | null;
+  budget: string | null;
+  created_count: number | string | null;
 }
 
 /**
@@ -2447,6 +2527,8 @@ function briefCols(sql: Queryable) {
     b.quantity_target, b.due_date, b.priority, b.recurring, b.recurring_frequency, b.recurring_count,
     b.recurring_end_date, b.instructions, b.reference_attachments, b.title, b.status, b.created_by, b.created_at,
     b.stage_pipeline_code, b.production_stage,
+    b.tanggal_mulai, b.tanggal_akhir, b.budget,
+    private.brief_created_count(b.id) as created_count,
     private.brief_client_id(b.id) as client_id,
     private.brief_client_toko(b.id) as client_nama,
     case when b.assigned_pic is null then null
@@ -2465,6 +2547,9 @@ function rowToBrief(r: BriefRow): Brief {
     stagePipelineCode: r.stage_pipeline_code, productionStage: r.production_stage,
     clientId: r.client_id ?? '', clientNama: r.client_nama ?? '',
     assignedPicNama: r.assigned_pic_nama ?? '',
+    tanggalMulai: ymdOrNull(r.tanggal_mulai), tanggalAkhir: ymdOrNull(r.tanggal_akhir),
+    budget: numOrNull(r.budget),
+    createdCount: Number(r.created_count ?? 0),
   };
 }
 

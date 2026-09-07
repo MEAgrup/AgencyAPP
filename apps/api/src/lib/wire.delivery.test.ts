@@ -202,6 +202,10 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
     clientId: 'CLI-202607-0001',
     clientNama: 'Alpha Digital',
     assignedPicNama: 'Rian Pratama',
+    tanggalMulai: '2026-09-01',
+    tanggalAkhir: '2026-10-15',
+    budget: '5000000.00',
+    createdCount: 2,
   };
 
   it('maps every Brief field to its snake_case wire key', () => {
@@ -232,6 +236,13 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
       client_id: 'CLI-202607-0001',
       client_nama: 'Alpha Digital',
       assigned_pic_nama: 'Rian Pratama',
+      // A-req-1 (kolom F-4) — jendela kerja + uang, nol omitempty.
+      tanggal_mulai: '2026-09-01',
+      tanggal_akhir: '2026-10-15',
+      budget: '5000000.00',
+      budget_display: 'Rp. 5.000.000,00',
+      // A-req-3 — pembilang "n dari N" untuk baris antrean divisi.
+      created_count: 2,
     });
     expectNoCamelKeys(briefToWire(full));
   });

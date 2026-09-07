@@ -228,6 +228,24 @@ export interface Brief {
   client_id: string;
   client_nama: string;
   assigned_pic_nama: string;
+  /**
+   * A-req-1 (kolom F-4) — jendela kerja + uang di balik Brief ini. `null`, bukan
+   * `undefined`: server mengirim ketiganya eksplisit, dan "belum diisi" harus
+   * bisa dirender `—` alih-alih mengosongkan kolomnya (kelas O43).
+   * `budget` mentah untuk berhitung, `budget_display` sudah berformat rumah
+   * (`Rp. X.XXX.XXX,00`) supaya tidak ada halaman yang memformat ulang.
+   */
+  tanggal_mulai: string | null; // YYYY-MM-DD
+  tanggal_akhir: string | null; // YYYY-MM-DD
+  budget: string | null;
+  budget_display: string | null;
+  /**
+   * A-req-3 — pembilang "n dari N" pada baris antrean divisi; penyebutnya
+   * `quantity_target` yang sudah ada. Satu field, bukan satu rute: memanggil
+   * `GET /briefs/{id}/rollup` per baris adalah N+1 di layar yang justru dibuka
+   * untuk melihat semua baris sekaligus.
+   */
+  created_count: number;
 }
 
 export interface BriefInput {
@@ -246,6 +264,10 @@ export interface BriefInput {
   instructions?: string;
   reference_attachments?: string;
   is_addendum?: boolean;
+  /** A-req-1 — jendela kerja + budget. Kosongkan/`null` kalau belum ada. */
+  tanggal_mulai?: string | null; // YYYY-MM-DD
+  tanggal_akhir?: string | null; // YYYY-MM-DD
+  budget?: string | null;
 }
 
 // ---------------------------------------------------------------------------

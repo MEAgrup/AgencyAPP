@@ -177,6 +177,8 @@ afterEach(async () => {
   // NOTE: notifications + audit_log are append-only (no-delete triggers), so they
   // are never cleaned here — test assertions filter by the unique per-test entity id.
   await sql`delete from complaints where created_by like 'ZZ-%'`;
+  // A-req-3 seeds child units to count; they hold an FK on `briefs`.
+  await sql`delete from assets where created_by like 'ZZ-%'`;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from strategy_plans where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
@@ -867,6 +869,116 @@ describeDb('createBrief (§5)', () => {
     // A second Brief leaves the service already [Briefed] (idempotent §5 Flow 2).
     await createBrief(sql, accountStaff(amId), svcId, { ...goodBrief(), assignedDivision: 'Ads' });
     expect(await svcStatus(svcId)).toBe('[Briefed]');
+  });
+
+  /**
+   * A-req-1 (F-4 columns) — a Brief can carry a work WINDOW and a BUDGET.
+   *
+   * Until now the only date on a Brief was `due_date`, and the money behind it
+   * merely "stuck" as free text inside `instructions` (`brief-inherit.ts`), where
+   * nothing could read it back. The columns landed in F-4; this is the TS write
+   * and read path over them.
+   */
+  it('stores the work window + budget, and reads all three back on GET', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(),
+      tanggalMulai: '2026-09-01',
+      tanggalAkhir: '2026-10-15',
+      budget: '5000000.00',
+    });
+    // The value returned by the birth path itself…
+    expect(b.tanggalMulai).toBe('2026-09-01');
+    expect(b.tanggalAkhir).toBe('2026-10-15');
+    expect(b.budget).toBe('5000000.00');
+    // …and the value a later read projects, which is the one every page sees.
+    const got = await getBrief(sql, accountStaff(amId), b.id);
+    expect(got.tanggalMulai).toBe('2026-09-01');
+    expect(got.tanggalAkhir).toBe('2026-10-15');
+    expect(got.budget).toBe('5000000.00');
+    // The division queue is the same projection (briefCols), so it carries them too.
+    const queue = await listDivisionQueue(sql, accountLead(), 'Creative');
+    expect(queue.find((q) => q.id === b.id)?.budget).toBe('5000000.00');
+  });
+
+  it('leaves all three NULL when not supplied — never 1970-01-01 or 0', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, goodBrief());
+    expect(b.tanggalMulai).toBeNull();
+    expect(b.tanggalAkhir).toBeNull();
+    expect(b.budget).toBeNull();
+    const row = await sql<{ tanggal_mulai: Date | null; budget: string | null }[]>`
+      select tanggal_mulai, budget from briefs where id = ${b.id}`;
+    expect(row[0].tanggal_mulai).toBeNull();
+    expect(row[0].budget).toBeNull();
+    // A blank string is "not filled in", not a value: storing '' into a date or a
+    // numeric is a Postgres error, which would surface as a 500 rather than a
+    // Brief with no window.
+    const blank = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), tanggalMulai: '', tanggalAkhir: '', budget: '',
+    });
+    expect(blank.budget).toBeNull();
+  });
+
+  it('rejects a malformed date or budget as a SHAPE error, not a 500', async () => {
+    const { svcId, amId } = await directFixture();
+    for (const bad of [
+      { tanggalMulai: '01-09-2026' },
+      { tanggalAkhir: '2026-13-40' },
+      { budget: '5.000.000' },
+      { budget: 'lima juta' },
+      { budget: '-1' },
+    ]) {
+      await expect(
+        createBrief(sql, accountStaff(amId), svcId, { ...goodBrief(), ...bad }),
+      ).rejects.toBeInstanceOf(ValidationError);
+    }
+  });
+
+  /**
+   * The three RULES stay in the DB (migration 20260922100200) and are NOT
+   * restated in TS — this asserts they are actually enforced there, because "the
+   * DB owns it" is only true while the constraint exists.
+   */
+  it('leaves the window/budget RULES to the DB CHECKs that own them', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, goodBrief());
+    await expect(
+      sql`update briefs set tanggal_mulai = '2026-10-15', tanggal_akhir = '2026-09-01' where id = ${b.id}`,
+    ).rejects.toThrow(/ck_briefs_jendela_urut/);
+    await expect(
+      sql`update briefs set budget = -1 where id = ${b.id}`,
+    ).rejects.toThrow(/ck_briefs_budget_non_negatif/);
+    // One side NULL is an INCOMPLETE window, not a wrong one — it passes.
+    await expect(
+      sql`update briefs set tanggal_mulai = '2026-10-15', tanggal_akhir = null where id = ${b.id}`,
+    ).resolves.toBeTruthy();
+    // Budget zero is a real answer: a Brief with no money allocated to it.
+    await expect(sql`update briefs set budget = 0 where id = ${b.id}`).resolves.toBeTruthy();
+  });
+
+  /**
+   * A-req-3 — the numerator of "n dari N" travels with the queue row, so a
+   * division leader sees progress per row without one `GET /briefs/{id}/rollup`
+   * per line (N+1 on the screen that exists to show every line at once).
+   */
+  it('carries createdCount — 0 at birth, then the real number of work units', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, goodBrief());
+    expect(b.createdCount).toBe(0); // a Brief has no children the instant it is born
+    expect((await getBrief(sql, accountStaff(amId), b.id)).createdCount).toBe(0);
+
+    for (let i = 1; i <= 3; i++) {
+      await sql`
+        insert into assets (id, brief_id, asset_type, sequence_no, created_by)
+        values (${`AST-ZZ-REQ3-${i}`}, ${b.id}, 'Video', ${i}, 'ZZ-CRV')`;
+    }
+    expect((await getBrief(sql, accountStaff(amId), b.id)).createdCount).toBe(3);
+    const queue = await listDivisionQueue(sql, accountLead(), 'Creative');
+    const row = queue.find((q) => q.id === b.id);
+    // "3 dari 12" — the denominator is quantityTarget, already on the row.
+    expect(row?.createdCount).toBe(3);
+    expect(row?.quantityTarget).toBe(12);
   });
 
   it('a Live Stream Brief is born off-machine ([Dispatched to Vendor], §6 Rule 2)', async () => {

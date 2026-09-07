@@ -504,6 +504,27 @@ export interface BriefWire {
   client_id: string;
   client_nama: string;
   assigned_pic_nama: string;
+  /**
+   * A-req-1 (F-4 columns) — the work window and the money behind this Brief.
+   * Nol omitempty, like the three above and for the same reason: a MISSING key
+   * renders `undefined` and blanks the column (O43), while an explicit `null`
+   * reads as "belum diisi" and can be rendered as `—`.
+   *
+   * `budget` is the raw decimal ("5000000.00") for arithmetic; `budget_display`
+   * carries the house format (rule #7, `Rp. X.XXX.XXX,00`) so no page
+   * re-implements it — the same pair `agreed_rate`/`agreed_rate_display` uses.
+   */
+  tanggal_mulai: string | null;
+  tanggal_akhir: string | null;
+  budget: string | null;
+  budget_display: string | null;
+  /**
+   * A-req-3 — the numerator of "n dari N" on a division-queue row (`N` is
+   * `quantity_target`, already here). One field, not a second route: calling
+   * `GET /briefs/{id}/rollup` per row is N+1 on the very screen that exists to
+   * show every row at once.
+   */
+  created_count: number;
 }
 
 export function briefToWire(b: account.Brief): BriefWire {
@@ -534,6 +555,11 @@ export function briefToWire(b: account.Brief): BriefWire {
     client_id: b.clientId,
     client_nama: b.clientNama,
     assigned_pic_nama: b.assignedPicNama,
+    tanggal_mulai: b.tanggalMulai,
+    tanggal_akhir: b.tanggalAkhir,
+    budget: b.budget,
+    budget_display: b.budget === null ? null : idr(b.budget),
+    created_count: b.createdCount,
     // ANCHOR-WIRE-DELIVERY (F-1) — titik sisip field wire Jalur B (Delivery:
     // Creative/Ads/KOL/tasks). Tambahkan field Brief baru DI SINI, bukan di
     // tengah blok di atas: anchor Jalur A ada di TransactionWire, ~2.400 baris
@@ -559,6 +585,10 @@ export function toBriefInput(b: {
   instructions?: string;
   reference_attachments?: string;
   is_addendum?: boolean;
+  /** A-req-1 — the F-4 window + budget (all optional, all nullable in the DB). */
+  tanggal_mulai?: string | null;
+  tanggal_akhir?: string | null;
+  budget?: string | null;
 }): account.BriefInput {
   return {
     title: b.title ?? '',
@@ -576,6 +606,11 @@ export function toBriefInput(b: {
     instructions: b.instructions ?? '',
     referenceAttachments: b.reference_attachments ?? '',
     isAddendum: b.is_addendum === true,
+    // `null` from the wire collapses to `''`, which `orNull` stores as SQL NULL —
+    // the same journey an absent key takes. A form that CLEARS a date sends null.
+    tanggalMulai: b.tanggal_mulai ?? '',
+    tanggalAkhir: b.tanggal_akhir ?? '',
+    budget: b.budget ?? '',
   };
 }
 

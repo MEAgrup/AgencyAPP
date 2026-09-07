@@ -302,6 +302,7 @@ describe('M6 account wire mappers', () => {
       createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
       stagePipelineCode: null, productionStage: null,
       clientId: 'CLI-202607-0001', clientNama: 'Alpha Digital', assignedPicNama: '',
+      tanggalMulai: null, tanggalAkhir: null, budget: null, createdCount: 0,
     };
     expect(briefToWire(b)).toEqual({
       id: 'BRF-202607-0001', service_id: 'SVC-1', assigned_division: 'Creative', deliverable_type: 'Video',
@@ -311,6 +312,11 @@ describe('M6 account wire mappers', () => {
       // Creative #3 — ketiganya nol omitempty: `assigned_pic_nama` tetap dikirim
       // sebagai `''` walau Brief ini belum punya PIC.
       client_id: 'CLI-202607-0001', client_nama: 'Alpha Digital', assigned_pic_nama: '',
+      // A-req-1 — same discipline: the four keys are PRESENT and explicitly
+      // null. `budget_display` is null too, not 'Rp. 0,00' — a Brief with no
+      // budget has not been given zero rupiah, it has not been given a figure.
+      tanggal_mulai: null, tanggal_akhir: null, budget: null, budget_display: null,
+      created_count: 0,
     });
   });
 
@@ -323,6 +329,7 @@ describe('M6 account wire mappers', () => {
       revisionCount: 3, revisionFlagged: true, createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
       stagePipelineCode: null, productionStage: null,
       clientId: 'CLI-202607-0002', clientNama: 'Beta Store', assignedPicNama: 'Rian Pratama',
+      tanggalMulai: '2026-09-01', tanggalAkhir: '2026-10-15', budget: '5000000.00', createdCount: 7,
     };
     const w = briefToWire(b);
     expect(w.strategy_id).toBe('STR-1');
@@ -331,6 +338,13 @@ describe('M6 account wire mappers', () => {
     expect(w.recurring_count).toBe(4);
     expect(w.recurring_end_date).toBe('2026-09-15');
     expect(w.revision_flagged).toBe(true);
+    // A-req-1 — the raw decimal for arithmetic, the house format for display
+    // (rule #7), so no page re-implements the formatting.
+    expect(w.tanggal_mulai).toBe('2026-09-01');
+    expect(w.tanggal_akhir).toBe('2026-10-15');
+    expect(w.budget).toBe('5000000.00');
+    expect(w.budget_display).toBe('Rp. 5.000.000,00');
+    expect(w.created_count).toBe(7);
   });
 
   it('toBriefInput maps snake_case body → camelCase BriefInput (defaults)', () => {
@@ -338,6 +352,10 @@ describe('M6 account wire mappers', () => {
       title: 'T', strategyId: '', assignedDivision: 'Creative', assignedPic: '', deliverableType: 'Video',
       quantityTarget: 5, dueDate: '2026-08-15', priority: 'High', recurring: false, recurringFrequency: '',
       recurringCount: 0, recurringEndDate: '', instructions: '', referenceAttachments: '', isAddendum: false,
+      // A-req-1 — an absent key becomes `''`, which `insertBrief` stores as SQL
+      // NULL. Not `undefined`: `orNull` reads the empty string, and a key that is
+      // simply missing from the object would leave the field un-normalized.
+      tanggalMulai: '', tanggalAkhir: '', budget: '',
     });
   });
 
