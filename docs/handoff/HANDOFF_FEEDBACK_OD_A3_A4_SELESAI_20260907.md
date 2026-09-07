@@ -102,6 +102,7 @@ db-rebuild.sh  194 migrasi   (dari 193)
   invariant: ident_checks · immutability_checks · rls_checks · auth_claims_checks
 
 domain            2017 lulus (+1 skip)   (dari 1994; +8 jahitan A-3, +14 A-4, +1 RLS A-3)
+                  74 file lulus, NOL FAIL di DB bersih — diverifikasi terpisah
 core               936
 db                  53
 apps/api           492   (route-parity & shape-parity hijau)
@@ -112,8 +113,9 @@ web-client-portal   19
 ### ⚠️ A-T4 muncul, persis seperti diperingatkan
 
 Jalan KEDUA suite domain atas DB yang sama memberi 2 FAIL
-(`admin.test.ts` "hari libur", `client.test.ts` "Hold Service"). Keduanya
-**lulus di DB bersih** — pencemaran `audit_log` tanpa aktor unik, `audit_log`
+(`admin.test.ts` "hari libur", `client.test.ts` "Hold Service"). Suite yang
+sama, dijalankan SEKALI sesudah `db-rebuild`, memberi **74 file lulus / 2017
+tes lulus / nol FAIL** — jadi keduanya **lulus di DB bersih** — pencemaran `audit_log` tanpa aktor unik, `audit_log`
 menolak DELETE sehingga `afterEach` tidak bisa membersihkannya. **Bukan
 regresi.** Kalau muncul: `db-rebuild` dulu, baru cari bug. Polanya sudah ada di
 repo (`aktorUnik()` di `showcase.test.ts`); di luar cakupan feedback OD.
