@@ -293,28 +293,55 @@ ditulis dari dua kursi lain yang sama-sama salah hitung tanpa
 mendarat, tambahkan kursi staff-divisi ke `reads_rls.test.ts`** — satu `it`,
 polanya sudah ada persis di sebelahnya.
 
-## Angka verifikasi §6 — apa adanya, sesudah `npm install`
+## Rebase ke `main` — Gelombang D mendarat di tengah sesi ini
 
-Dijalankan di atas `db-rebuild` bersih (jebakan A-T4: `audit_log` menolak
-DELETE, jadi menjalankan suite domain berkali-kali atas DB yang sama membuat tes
-berhitung-baris merah — rebuild dulu, baru simpulkan).
+`main` bergerak dari `e8cee053` ke **`1fee983`** (PR #309 — mesin accrual +
+D-KOM `pengakuan` + **D-4 PPN per invoice**) sementara sesi ini berjalan.
+Branch ini **sudah di-rebase ke situ**, bukan ditinggalkan di belakang.
+
+Empat konflik, **semuanya di jalur closing dan semuanya PENYISIPAN MURNI** —
+D-4 menambahkan tombol "Include PPN" ke `ClosingInput`/form closing, A-4
+menambahkan durasi + alasan override ke tempat yang sama. Resolusinya *simpan
+keduanya*, nol baris dibuang:
+
+| Berkas | Resolusi |
+|---|---|
+| `packages/domain/src/sales.ts` | `ClosingInput` membawa `includePPN` **dan** `durasiBulanOverride`/`alasanOverride`. Badan `close()` auto-merge bersih (blok PPN di langkah 5/6, blok kontrak di 4b). |
+| `apps/api/src/app/api/v1/attempts/[id]/close/route.ts` | `Body` + pemetaannya membawa ketiga field. |
+| `web-internal/src/lib/sales.ts` | idem, sisi tipe FE. |
+| `web-internal/src/app/(shell)/sales/[id]/page.tsx` | Baris field jadi tiga (skema · PPN · tanggal mulai) — tata letak `main` dipertahankan; A-4 hanya memperjelas label "Managed Since" jadi "Tanggal Mulai Kerja Sama" karena field itu kini benar-benar `contracts.tanggal_mulai`. ⚠️ **Tiga field dalam satu `formRow` belum pernah dilihat mata** — masuk daftar utang UAT di bawah. |
+
+Migrasi Gelombang D (`20260922010000`, `20260923010000`) **nol tabrakan nama**
+dengan blok `…T10####` Jalur A, dan menyortir mengapit — persis seperti yang
+dipetakan sesi F. Gerbang angka juga tidak bergeser: mereka menambah KOLOM.
+
+## Angka verifikasi §6 — apa adanya, PASCA-REBASE ke `1fee983`
+
+Dijalankan di atas `db-rebuild` bersih dan sesudah `npm install` (jebakan A-T4:
+`audit_log` menolak DELETE, jadi menjalankan suite domain berkali-kali atas DB
+yang sama membuat tes berhitung-baris merah — rebuild dulu, baru simpulkan).
 
 ```
-db-rebuild.sh   195 migrasi
+db-rebuild.sh   197 migrasi   (195 milik Jalur A + 2 Gelombang D)
   gate: 146 tabel · 40 entity_prefix · 31 sm_machines · 73 notif_events
         + notif_katalog_sesuai
   invariant: ident_checks · immutability_checks · rls_checks · auth_claims_checks
-  → NOL counter digeser Jalur A. Dua migrasi sesi ini nol tabel/prefix/mesin/event.
+  → NOL counter digeser, oleh Jalur A maupun Gelombang D. Dua migrasi sesi ini
+    nol tabel/prefix/mesin/event; Gelombang D menambah kolom.
 ```
 
-| Suite | Acuan §6 | Sesudah A-3/A-4/A-req-1/2/3 |
-|---|---|---|
-| `packages/domain` (sendirian, pasca-rebuild) | 1994 (+1 skip) | **2031** (+1 skip) |
-| `packages/core` | 936 | **936** |
-| `packages/db` | 53 | **53** |
-| `apps/api` | 492 | **492** |
-| `web-internal` | 650 | **655** |
-| `web-client-portal` | 19 | **19** |
+| Suite | Acuan §6 | Pra-rebase | **Pasca-rebase** |
+|---|---|---|---|
+| `packages/domain` (sendirian, pasca-rebuild) | 1994 (+1 skip) | 2031 (+1 skip) | **2053** (+1 skip) |
+| `packages/core` | 936 | 936 | **983** |
+| `packages/db` | 53 | 53 | **53** |
+| `apps/api` | 492 | 492 | **492** |
+| `web-internal` | 650 | 655 | **655** |
+| `web-client-portal` | 19 | 19 | **19** |
+
+Kenaikan `core` 936 → 983 dan `domain` 2031 → 2053 adalah milik Gelombang D
+(accrual + PPN), bukan sesi ini — dicatat apa adanya supaya angkanya tidak
+terbaca sebagai klaim Jalur A.
 
 `npm run typecheck --workspaces` sesudah `npm install`: empat workspace bersih.
 `cd web-internal && rm -rf .next && npx tsc --noEmit && npm run build`: bersih,
@@ -350,6 +377,7 @@ build. Yang SUDAH dibuktikan untuk keempat layar baru: `tsc` bersih,
 | _(utang lama, A-1/A-2)_ nama toko baris pertama + `CLI-…` baris kedua; panel "Permintaan ke Finance" 8 kolom | `/finance`, `/finance/transactions/{id}`, `/persetujuan`, `/kol/payment-requests/{id}` | Finance, KOL |
 | _(utang lama, A-5)_ catatan pengganti field PIC — terbaca sebagai penjelasan, bukan error | `/account/services/{id}` | AM/CRO |
 | **BARU (A-4)** dua field "Durasi Kerja Sama (bulan)" + "Alasan Override" di form closing — alasannya `disabled` sampai durasi diisi, dan labelnya tidak memotong | `/sales/{id}` | Sales |
+| **BARU (pasca-rebase)** baris field pertama form closing kini bertiga: Payment Scheme · **Include PPN (11%)** · Tanggal Mulai Kerja Sama. Muat dalam satu baris tanpa checkbox PPN-nya terjepit? | `/sales/{id}` | Sales — irisan A-4 × D-4, dua tiket yang tidak saling melihat |
 | **BARU (A-4)** tiga field jendela kontrak di form Strategi tampil **terkunci** dengan kalimat "diambil dari kontrak CTR-… yang dibuat Sales saat closing" — terbaca sebagai penjelasan, bukan form rusak | `/account/services/{id}` | AM/CRO |
 | **BARU (A-req-2)** picker "Brief Creative sumber (opsional)" MUNCUL saat divisi tujuan diubah ke Ads dan HILANG saat diubah kembali | `/account/services/{id}` | AM |
 | **BARU (A-3)** langkah onboarding untuk Service ber-STRG-: tidak lagi menawarkan "Buat Strategy & Plan" untuk Strategi yang sudah `Aktif` | `/account`, `/account/services/{id}` | AM/CRO — **ini keluhan Account #5 sendiri**, jadi penguji paling tepatnya yang menulis keluhannya |
@@ -370,6 +398,12 @@ Daftar migrasi Jalur A yang menunggu, dalam urutan apply:
 | 4 | `20260922100300_a2_rls_cpr_lengan_finance.sql` | lengan Finance pada `creator_payment_requests_select` | tidak — policy dilebarkan |
 | 5 | **`20260922100400_a3_backfill_service_strategy_approved.sql`** | backfill status Service lewat `sm_transition` | tidak — nol DDL. **Menulis baris `audit_log`**, jadi ia TIDAK idempoten dalam arti "tidak meninggalkan jejak": jalan kedua menemukan nol kandidat dan tidak menulis apa pun, tapi jalan pertama memang mencatat satu baris per Service. Itu yang diinginkan. |
 | 6 | **`20260922100500_areq3_private_brief_created_count.sql`** | 1 fungsi `private.*` | tidak — aditif |
+
+⚠️ **Urutan gabungan sesudah rebase.** Gelombang D menyelipkan dua berkas yang
+mengapit blok Jalur A: `20260922010000_dkom_pengakuan_katalog.sql` menyortir
+**sebelum** keenam berkas di atas, dan `20260923010000_d4_ppn_kolom_terpisah.sql`
+**sesudah**. Urutan apply-nya tetap deterministik menurut nama; jangan menyusun
+ulang atau "membetulkan" nomornya.
 
 Verifikasi sesudah apply untuk dua yang baru (jangan percaya `success: true`):
 
