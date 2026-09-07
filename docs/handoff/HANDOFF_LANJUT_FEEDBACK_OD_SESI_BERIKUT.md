@@ -8,12 +8,22 @@
 ## Posisi, sejujurnya
 
 ```
-main                : e8cee053  (F + A-1 + A-2 + A-5, lewat PR #310 & #311)
+main                : 1fee9839  (F + A-1 + A-2 + A-5 lewat PR #310/#311,
+                                 lalu PR #309 Gelombang D accrual lewat merge)
 PR Jalur B          : #312  claude/cdps-user-feedback-70vbho-b -> main
-                      6 commit · 50 berkas · +4023/-118 · SUDAH di-rebase ke main
+                      8 commit · 52 berkas · SUDAH di-merge dengan main 1fee9839
 Branch Jalur A      : claude/cdps-user-feedback-account-a-igix3n  (A-3, A-4 belum)
-Pekerjaan lain jalan: PR #309 Gelombang D accrual (Finance) — MASIH TERBUKA
+Pekerjaan lain      : PR #309 SUDAH MERGE (2026-09-07). Irisannya dengan Jalur B
+                      cuma `apps/api/src/lib/wire.ts` + `wire.test.ts`, dan
+                      keduanya auto-merge bersih — nol konflik.
 ```
+
+> **Kenapa merge, bukan rebase.** Branch ini sudah terbit di PR #312 sejak
+> commit `3f8e1a25`; §4 rencana minta "rebase harian", tapi rebase atas branch
+> yang PR-nya sudah dibaca orang berarti force-push. Sesudah PR terbuka,
+> `main` masuk lewat **merge commit** (`07b6338b`). Sebelum PR terbuka, branch
+> ini memang di-rebase dua kali (ke commit F, lalu ke `main` sesudah #310/#311)
+> — itu yang §4 maksud.
 
 | Keluhan divisi | Tiket | Status |
 |---|---|---|
@@ -33,6 +43,10 @@ Pekerjaan lain jalan: PR #309 Gelombang D accrual (Finance) — MASIH TERBUKA
 ### 1. Tunggu / dorong PR #312 sampai hijau lalu merge
 Sesi ini sudah `subscribe_pr_activity` ke #312. Kalau CI merah saat chat
 berikutnya mulai: baca check run-nya, perbaiki, push. Jangan buka PR baru.
+
+PR #309 sudah masuk dan sudah di-merge ke branch ini, jadi tidak ada lagi
+pekerjaan lain yang menggantung di atas `wire.ts`. Kalau `main` bergerak lagi:
+**merge**, jangan rebase (branch-nya sudah terbit).
 
 ### 2. Kirim prompt cek ke Akun A
 `docs/handoff/PROMPT_CEK_JALUR_A_SISA_FEEDBACK_OD.md` — tempel apa adanya ke
@@ -114,18 +128,27 @@ tabel/prefix/mesin. Rinciannya §3 rencana induk.
 
 ## Angka acuan terakhir (di atas `main` + PR #312)
 
-`scripts/db-rebuild.sh` — **198 migrasi**, gerbang **tabel 146 · entity_prefix 40
-· sm_machines 31 · notif_events 73**, seluruh invariant SQL hijau.
+Diukur ULANG 2026-09-07 di atas merge `main`+#309 (`07b6338b`), bukan angka
+sebelum merge:
 
-| Suite | Acuan §6 | Terakhir |
-|---|---|---|
-| `packages/core` | 930 | **936** |
-| `packages/db` | 53 | **53** |
-| `apps/api` | 490 | **493** |
-| `packages/domain` | 1977 (+1 skip) | **2040** (+1 skip) |
-| `web-internal` | 640 | **677** |
-| `web-client-portal` | 19 | **19** |
+`scripts/db-rebuild.sh` — **200 migrasi** (198 + dua migrasi Gelombang D:
+`20260922010000_dkom_pengakuan_katalog.sql`, `20260923010000_d4_ppn_kolom_terpisah.sql`),
+gerbang **tabel 146 · entity_prefix 40 · sm_machines 31 · notif_events 73**
+(TIDAK bergeser — #309 menambah kolom dan baris katalog, bukan
+tabel/prefix/mesin/event), seluruh invariant SQL hijau (`ident`,
+`immutability`, `rls`, `auth_claims`).
 
-`tsc --noEmit` + `next build` web-internal bersih. `route-parity` `KNOWN_GAPS`
-**kosong**. `npm run lint`: 1 error PRE-EXISTING
-(`react-hooks/static-components` di `admin/employees/page.tsx`).
+| Suite | Acuan §6 | Sebelum merge #309 | Sesudah merge #309 |
+|---|---|---|---|
+| `packages/core` | 930 | 936 | **983** (+47 dari `accrual.test.ts` #309) |
+| `packages/db` | 53 | 53 | **53** |
+| `apps/api` | 490 | 493 | **493** |
+| `packages/domain` | 1977 (+1 skip) | 2040 (+1 skip) | **2062** (+1 skip) |
+| `web-internal` | 640 | 677 | **677** |
+| `web-client-portal` | 19 | 19 | **19** |
+
+`npm run typecheck --workspaces` bersih (dijalankan SESUDAH `npm install` —
+ranjau #3 di bawah). `tsc --noEmit` + `next build` web-internal bersih.
+`route-parity` `KNOWN_GAPS` **kosong**, `shape-parity` hijau (18 tes parity).
+`npm run lint`: 1 error PRE-EXISTING (`react-hooks/static-components` di
+`admin/employees/page.tsx`).

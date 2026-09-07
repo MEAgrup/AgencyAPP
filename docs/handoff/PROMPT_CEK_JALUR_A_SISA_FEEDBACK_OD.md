@@ -11,7 +11,8 @@
 Kamu AKUN A (Jalur A) pada perbaikan "Feedback Final - OD"
 (`docs/handoff/PARALEL_FEEDBACK_OD_DUA_AKUN.md`). Jalur B sudah selesai dan
 membuka **PR #312** (`claude/cdps-user-feedback-70vbho-b` → `main`, sudah
-di-rebase ke `main` sesudah PR #310/#311 kamu merge).
+disejajarkan dengan `main` sesudah PR #310/#311 kamu merge DAN sesudah PR #309
+Gelombang D merge).
 
 Baca dulu, jangan dilewati:
 1. `docs/handoff/HANDOFF_FEEDBACK_OD_JALUR_B.md` — SELURUHNYA. Di situ ada
@@ -90,11 +91,13 @@ hanya tes domain biasa.
 ## Tugas 3 — kalau A-3/A-4/A-req masih ada yang belum
 
 Kerjakan sisanya di branch-mu, **rebase ke `main` dulu** (`main` sekarang di
-`e8cee053`; kalau PR #312 sudah merge, rebase ke yang terbaru). Aturan yang tidak
+`1fee9839` — sudah termasuk PR #309 Gelombang D accrual; kalau PR #312 sudah
+merge, rebase ke yang terbaru). Aturan yang tidak
 berubah:
 
 - Stempel migrasi Jalur A `…T10####`. Jalur B sudah memakai
-  `20260922200000` · `200100` · `200200` · `200300` · `200400`.
+  `20260922200000` · `200100` · `200200` · `200300` · `200400`; Gelombang D
+  sudah memakai `20260922010000` dan `20260923010000`.
 - **JANGAN naikkan counter** — 146 tabel / 40 prefix / 31 mesin / 73 event.
   Kalau migrasimu menambah tabel/prefix/mesin: rebase, jalankan ulang
   `scripts/db-rebuild.sh`, **ambil angka yang SEBENARNYA** di `db-rebuild.sh`
