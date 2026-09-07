@@ -1750,6 +1750,22 @@ export const MSG_INVALID_PRIORITY = '[prioritas tidak valid]';
 export const MSG_BRIEF_STRATEGY_MISMATCH =
   '[Strategy ID brief harus menunjuk Strategy & Plan yang disetujui untuk layanan ini]';
 export const MSG_BRIEF_STRATEGY_NOT_ALLOWED = '[layanan Direct tidak boleh memiliki Strategy ID pada brief]';
+
+/** The two Brief divisions A-req-2 (K-3) connects: Ads draws its assets from Creative. */
+export const DIVISION_ADS = 'Ads';
+export const DIVISION_CREATIVE = 'Creative';
+
+/**
+ * A-req-2 (K-3) — a source Creative Brief only means something on an Ads Brief.
+ * Rejected rather than dropped: a field that is sent and silently discarded is
+ * the surest way to make the caller believe the link was saved (the same stance
+ * K-1 takes on `assigned_pic`).
+ */
+export const MSG_BRIEF_SOURCE_ONLY_ADS =
+  '[brief sumber Creative hanya dapat diisi pada Brief divisi Ads]';
+/** A-req-2 — the picked source is not a Creative Brief of this client. */
+export const MSG_BRIEF_SOURCE_INVALID =
+  '[brief sumber harus Brief Creative milik klien yang sama]';
 export const MSG_QUEUE_FORBIDDEN = '[anda tidak memiliki akses ke antrean brief divisi ini]';
 export const MSG_BRIEF_REVIEW_FORBIDDEN =
   '[hanya Account Manager pemilik klien yang dapat mereview Brief layanan ini]';
@@ -1800,6 +1816,20 @@ export interface BriefInput {
   tanggalAkhir?: string; // YYYY-MM-DD
   /** Rupiah, raw decimal string ("5000000.00"). Never a JS number — money. */
   budget?: string;
+  /**
+   * A-req-2 (K-3) — the Creative Brief this Ads Brief draws its assets from.
+   *
+   * The complaint behind K-3 is an Advertiser who could not find the approved
+   * assets for the campaign they were running and went back to a Google Sheet.
+   * The picker on the campaign page narrows by exactly this column; without it
+   * the narrowing has nothing to narrow BY.
+   *
+   * Ads-only, and only a Creative Brief of the same client — validated in
+   * `createBrief`, where the DB is reachable. The DB's own CHECK
+   * (`ck_briefs_sumber_bukan_diri`) plus the self-referencing FK are the
+   * backstop, not the gate.
+   */
+  sourceCreativeBriefId?: string;
 }
 
 /** A Brief record (BRF-). */
@@ -1865,6 +1895,11 @@ export interface Brief {
    * than empty — "2 dari 12" looks correct in a way a missing row never does.
    */
   createdCount: number;
+  /**
+   * A-req-2 (K-3) — the Creative Brief this (Ads) Brief draws its assets from.
+   * `null` for every Brief that is not an Ads Brief with a source picked.
+   */
+  sourceCreativeBriefId: string | null;
 }
 
 // --- Input validation ---
@@ -1981,19 +2016,24 @@ export async function insertBrief(
   const tanggalMulai = orNull(input.tanggalMulai);
   const tanggalAkhir = orNull(input.tanggalAkhir);
   const budget = orNull(input.budget);
+  // A-req-2 — validated by `guardSourceCreativeBrief` before this point on the
+  // manual path; NULL for every other origin (a Plan-inherited Brief names no
+  // source, and the M6B world has no Ads picker).
+  const sourceCreativeBriefId = orNull(input.sourceCreativeBriefId);
 
   await tx`
     insert into briefs
       (id, service_id, strategy_id, plan_row_id, assigned_division, assigned_pic, deliverable_type,
        quantity_target, due_date, priority, recurring, recurring_frequency, recurring_count,
        recurring_end_date, instructions, reference_attachments, title, status, created_by,
-       stage_pipeline_code, production_stage, tanggal_mulai, tanggal_akhir, budget)
+       stage_pipeline_code, production_stage, tanggal_mulai, tanggal_akhir, budget,
+       source_creative_brief_id)
     values (${id}, ${serviceId}, ${strategyId}, ${planRowId}, ${input.assignedDivision}, ${orNull(input.assignedPic)},
       ${input.deliverableType}, ${input.quantityTarget}, ${input.dueDate.trim()}, ${input.priority}, ${recurring},
       ${orNull(input.recurringFrequency)}, ${recCount}, ${orNull(input.recurringEndDate)},
       ${orNull(input.instructions)}, ${orNull(input.referenceAttachments)}, ${input.title.trim()}, ${birth},
       ${actor.employeeId}, ${pipeline?.code ?? null}, ${pipeline?.initialState ?? null},
-      ${tanggalMulai}, ${tanggalAkhir}, ${budget})`;
+      ${tanggalMulai}, ${tanggalAkhir}, ${budget}, ${sourceCreativeBriefId})`;
   await ex.audit.insertAudit({
     entityType: 'brief', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
     beforeJson: null,
@@ -2030,7 +2070,7 @@ export async function insertBrief(
     revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
     stagePipelineCode: pipeline?.code ?? null, productionStage: pipeline?.initialState ?? null,
     clientId: ident.clientId, clientNama: ident.clientNama, assignedPicNama: ident.assignedPicNama,
-    tanggalMulai, tanggalAkhir, budget,
+    tanggalMulai, tanggalAkhir, budget, sourceCreativeBriefId,
     // A Brief has no children the instant it is born — the first Asset/Booking
     // is a later act by the division. Literal 0, not a query that can only
     // answer 0.
@@ -2126,6 +2166,11 @@ export async function createBrief(sql: Sql, actor: Actor, serviceId: string, inp
 
     const planGated = effectiveRequiresPlan(svc.requires_strategy_plan, svc.requires_strategy_plan_override);
     const strategyId = await resolveBriefStrategy(tx, serviceId, planGated, (input.strategyId ?? '').trim());
+    // A-req-2 (K-3) — the Ads↔Creative link, checked BEFORE the Brief is born so
+    // a bad pick never leaves a row behind.
+    await guardSourceCreativeBrief(
+      tx, serviceId, input.assignedDivision, (input.sourceCreativeBriefId ?? '').trim(),
+    );
 
     // Brief-birth (id + insert + create-audit) lives in the shared `insertBrief`;
     // the manual STR- path carries a strategy_id and no plan_row link.
@@ -2152,6 +2197,48 @@ export async function createBrief(sql: Sql, actor: Actor, serviceId: string, inp
 
     return brief;
   });
+}
+
+/**
+ * guardSourceCreativeBrief validates the K-3 link before a Brief is born.
+ *
+ * Two rules, both needing the DB, which is why this is not in `validateBrief`:
+ *   1. an Ads Brief only — anything else sending the field is REFUSED, not
+ *      quietly stripped (a discarded field reads as a saved one);
+ *   2. the source must be a Creative Brief **of the same client**.
+ *
+ * Same CLIENT, not same Service, on purpose: an engagement's Creative work and
+ * its Ads work regularly sit on two different purchased Services, and scoping to
+ * the Service would leave the picker empty in exactly the ordinary case. It is
+ * also the scope the read half already uses — `GET /clients/{id}/assets` is
+ * client-scoped — so the two halves of K-3 agree about what "the same client"
+ * means. The client is resolved through `private.brief_client_id`, the same door
+ * `briefCols` uses (O52): a `join services` here would drop the row for any
+ * caller without a `services_select` arm.
+ */
+async function guardSourceCreativeBrief(
+  tx: Queryable,
+  serviceId: string,
+  assignedDivision: string,
+  sourceId: string,
+): Promise<void> {
+  if (sourceId === '') {
+    return;
+  }
+  if (assignedDivision !== DIVISION_ADS) {
+    throw new ValidationError(MSG_BRIEF_SOURCE_ONLY_ADS);
+  }
+  const rows = await tx<{ ok: boolean }[]>`
+    select (b.assigned_division = ${DIVISION_CREATIVE}
+            and private.brief_client_id(b.id) is not null
+            and private.brief_client_id(b.id) = private.service_client_id(${serviceId})) as ok
+      from briefs b where b.id = ${sourceId}`;
+  if (rows.length === 0 || rows[0].ok !== true) {
+    // One message for "does not exist" and for "wrong client/division" — from the
+    // AM's seat both mean the same thing (that id is not a source they may pick),
+    // and telling them WHICH would leak whether another client's Brief exists.
+    throw new ValidationError(MSG_BRIEF_SOURCE_INVALID);
+  }
 }
 
 /**
@@ -2356,6 +2443,44 @@ export async function listServiceBriefs(sql: Queryable, actor: Actor, serviceId:
   return rows.map(rowToBrief);
 }
 
+/**
+ * listClientBriefs returns a client's Briefs, optionally narrowed to one
+ * division — the list the AM's Ads-Brief form picks its SOURCE from (A-req-2 /
+ * K-3). Same read gate as `listServiceBriefs`: the owning AM, Account lead,
+ * OD/Director.
+ *
+ * Client-scoped rather than service-scoped because the link is: an engagement's
+ * Creative work and its Ads work regularly sit on two different purchased
+ * Services, and a service-scoped picker would be empty in the ordinary case. The
+ * client is resolved through `private.brief_client_id` — a `join services` would
+ * drop rows under RLS (O52) instead of returning them.
+ */
+export async function listClientBriefs(
+  sql: Queryable,
+  actor: Actor,
+  clientId: string,
+  division = '',
+): Promise<Brief[]> {
+  const owner = await sql<{ assigned_am_id: string | null }[]>`
+    select assigned_am_id from clients where id = ${clientId}`;
+  if (owner.length === 0) {
+    throw new NotFoundError(MSG_NOT_FOUND);
+  }
+  if (!(permission.canReadDivision(actor, ACCOUNT_DIVISION) || owner[0].assigned_am_id === actor.employeeId)) {
+    throw new ForbiddenError(MSG_BRIEF_FORBIDDEN);
+  }
+  const want = division.trim();
+  if (want !== '' && !BRIEF_ASSIGNABLE_DIVISIONS.includes(want as (typeof BRIEF_ASSIGNABLE_DIVISIONS)[number])) {
+    throw new ValidationError(MSG_INVALID_DIVISION);
+  }
+  const rows = await sql<BriefRow[]>`
+    select ${briefCols(sql)} from briefs b
+     where private.brief_client_id(b.id) = ${clientId}
+       and (${want} = '' or b.assigned_division = ${want})
+     order by b.id asc`;
+  return rows.map(rowToBrief);
+}
+
 // ===========================================================================
 // Cluster 4 part A — Revision routing / AM-side review edges (§7).
 // Ported from archive/backend-go/internal/module6_account/brief_review.go.
@@ -2503,6 +2628,7 @@ interface BriefRow {
   tanggal_akhir: string | Date | null;
   budget: string | null;
   created_count: number | string | null;
+  source_creative_brief_id: string | null;
 }
 
 /**
@@ -2527,7 +2653,7 @@ function briefCols(sql: Queryable) {
     b.quantity_target, b.due_date, b.priority, b.recurring, b.recurring_frequency, b.recurring_count,
     b.recurring_end_date, b.instructions, b.reference_attachments, b.title, b.status, b.created_by, b.created_at,
     b.stage_pipeline_code, b.production_stage,
-    b.tanggal_mulai, b.tanggal_akhir, b.budget,
+    b.tanggal_mulai, b.tanggal_akhir, b.budget, b.source_creative_brief_id,
     private.brief_created_count(b.id) as created_count,
     private.brief_client_id(b.id) as client_id,
     private.brief_client_toko(b.id) as client_nama,
@@ -2550,6 +2676,7 @@ function rowToBrief(r: BriefRow): Brief {
     tanggalMulai: ymdOrNull(r.tanggal_mulai), tanggalAkhir: ymdOrNull(r.tanggal_akhir),
     budget: numOrNull(r.budget),
     createdCount: Number(r.created_count ?? 0),
+    sourceCreativeBriefId: r.source_creative_brief_id,
   };
 }
 

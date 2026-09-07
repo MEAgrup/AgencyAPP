@@ -24,6 +24,7 @@ import {
   isAccountLead,
   isAccountStaff,
   isReadOnlyOD,
+  listClientBriefs,
   listServiceBriefs,
   listStrategies,
   nextOnboardingStep,
@@ -165,6 +166,12 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // Create Brief form
   const [bTitle, setBTitle] = useState('');
   const [bDivision, setBDivision] = useState<string>(BRIEF_DIVISIONS[0]);
+  // A-req-2 (K-3) — Brief Creative SUMBER sebuah Brief Ads. Daftarnya
+  // client-scoped, bukan service-scoped: kerja Creative dan kerja Ads sebuah
+  // engagement lazim dibeli sebagai dua Service yang berbeda, jadi daftar
+  // per-Service akan kosong justru di kasus yang biasa.
+  const [creativeBriefs, setCreativeBriefs] = useState<Brief[]>([]);
+  const [bSourceCreative, setBSourceCreative] = useState('');
   const [bDeliverable, setBDeliverable] = useState('');
   const [bQty, setBQty] = useState('');
   const [bDue, setBDue] = useState('');
@@ -212,6 +219,15 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       // `contract.ensureContractForService` menolak jendela yang berbeda dari
       // kontrak yang sudah menaungi layanan (MSG_WINDOW_MISMATCH), jadi field
       // yang bisa diketik di sini hanya menyiapkan penolakan.
+      // A-req-2 — pilihan Brief Creative untuk picker sumber (hanya dipakai kalau
+      // divisi tujuannya Ads). Kegagalannya TIDAK menjatuhkan halaman: picker
+      // kosong lebih baik daripada form Brief yang tidak bisa dibuka sama sekali.
+      try {
+        const cb = await listClientBriefs(svc.client_id, 'Creative');
+        setCreativeBriefs(cb.data);
+      } catch {
+        setCreativeBriefs([]);
+      }
       if (svc.contract_id !== null) {
         setStgDurasi(String(svc.contract_durasi_bulan ?? ''));
         setStgMulai(svc.contract_tanggal_mulai ?? '');
@@ -444,6 +460,12 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         // ErrBriefStrategyMismatch) — never fall back to a non-approved draft.
         strategy_id: planGated ? (approvedStrategy?.id ?? '') : '',
         assigned_division: bDivision,
+        // A-req-2 (K-3): hanya untuk Ads. Server MENOLAK field ini di divisi
+        // lain (MSG_BRIEF_SOURCE_ONLY_ADS) — ditolak, bukan diabaikan — jadi
+        // mengirimnya "untuk aman" justru menggagalkan pembuatan Brief.
+        ...(bDivision === 'Ads' && bSourceCreative !== ''
+          ? { source_creative_brief_id: bSourceCreative }
+          : {}),
         // K-1: DIVISI saja. PIC-nya ditetapkan lead divisi tujuan sesudah Brief
         // diterima (`task.assignPic`), dan server MENOLAK `assigned_pic` di sini
         // — jadi mengirimnya "untuk aman" justru membuat pembuatan Brief gagal.
@@ -1232,6 +1254,36 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                 </span>
               </div>
             </div>
+            {/* A-req-2 (K-3) — Brief Ads MENUNJUK Brief Creative sumbernya.
+                Keluhan yang dijawab: Advertiser tidak bisa menemukan aset yang
+                sudah di-approve untuk kampanye yang sedang ia jalankan, lalu
+                kembali membuka Google Sheet. Picker aset di halaman kampanye
+                menyempitkan pilihannya TEPAT lewat kolom ini; kalau tidak
+                terisi, penyempitannya tidak punya apa-apa untuk disempitkan.
+                Opsional: Brief Ads yang memang tidak bersumber dari satu Brief
+                Creative tertentu tetap boleh dibuat. */}
+            {bDivision === 'Ads' && (
+              <div className="field">
+                <label htmlFor="b-source-creative">Brief Creative sumber (opsional)</label>
+                <select
+                  id="b-source-creative"
+                  value={bSourceCreative}
+                  onChange={(e) => setBSourceCreative(e.target.value)}
+                >
+                  <option value="">— tanpa Brief sumber —</option>
+                  {creativeBriefs.map((cb) => (
+                    <option key={cb.id} value={cb.id}>
+                      {cb.title} ({cb.id})
+                    </option>
+                  ))}
+                </select>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {creativeBriefs.length === 0
+                    ? 'Klien ini belum punya Brief Creative — Brief Ads tetap bisa dibuat tanpa sumber.'
+                    : 'Menyempitkan picker aset di halaman kampanye ke aset dari Brief ini.'}
+                </span>
+              </div>
+            )}
             <div className="formRow">
               <div className="field">
                 <label htmlFor="b-deliverable">Deliverable Type</label>

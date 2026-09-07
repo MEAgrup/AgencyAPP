@@ -366,6 +366,7 @@ describe('briefInheritResultToWire (RAB-16 — one-click inheritance)', () => {
           tanggalAkhir: null,
           budget: null,
           createdCount: 0,
+          sourceCreativeBriefId: null,
         },
       ],
       skipped: [{ planRowId: 7, reason: 'di_luar' }],

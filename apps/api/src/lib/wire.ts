@@ -525,6 +525,15 @@ export interface BriefWire {
    * show every row at once.
    */
   created_count: number;
+  /**
+   * A-req-2 (K-3) — the Creative Brief an Ads Brief draws its assets from.
+   * Explicit `null` for every Brief without one. Jalur B's asset picker narrows
+   * by this value through the CAMPAIGN it hangs on (`ads.Campaign`,
+   * `private.brief_source_creative_id`); it is projected here as well because the
+   * AM's own Brief screens are what SET it, and a field that cannot be read back
+   * is a field nobody can tell is wrong.
+   */
+  source_creative_brief_id: string | null;
 }
 
 export function briefToWire(b: account.Brief): BriefWire {
@@ -560,6 +569,7 @@ export function briefToWire(b: account.Brief): BriefWire {
     budget: b.budget,
     budget_display: b.budget === null ? null : idr(b.budget),
     created_count: b.createdCount,
+    source_creative_brief_id: b.sourceCreativeBriefId,
     // ANCHOR-WIRE-DELIVERY (F-1) — titik sisip field wire Jalur B (Delivery:
     // Creative/Ads/KOL/tasks). Tambahkan field Brief baru DI SINI, bukan di
     // tengah blok di atas: anchor Jalur A ada di TransactionWire, ~2.400 baris
@@ -589,6 +599,8 @@ export function toBriefInput(b: {
   tanggal_mulai?: string | null;
   tanggal_akhir?: string | null;
   budget?: string | null;
+  /** A-req-2 (K-3) — Ads-only; the server refuses it on any other division. */
+  source_creative_brief_id?: string | null;
 }): account.BriefInput {
   return {
     title: b.title ?? '',
@@ -611,6 +623,7 @@ export function toBriefInput(b: {
     tanggalMulai: b.tanggal_mulai ?? '',
     tanggalAkhir: b.tanggal_akhir ?? '',
     budget: b.budget ?? '',
+    sourceCreativeBriefId: b.source_creative_brief_id ?? '',
   };
 }
 

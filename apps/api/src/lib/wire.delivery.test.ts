@@ -206,6 +206,7 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
     tanggalAkhir: '2026-10-15',
     budget: '5000000.00',
     createdCount: 2,
+    sourceCreativeBriefId: 'BRF-202607-0009',
   };
 
   it('maps every Brief field to its snake_case wire key', () => {
@@ -243,6 +244,7 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
       budget_display: 'Rp. 5.000.000,00',
       // A-req-3 — pembilang "n dari N" untuk baris antrean divisi.
       created_count: 2,
+      source_creative_brief_id: 'BRF-202607-0009',
     });
     expectNoCamelKeys(briefToWire(full));
   });

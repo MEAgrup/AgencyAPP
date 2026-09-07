@@ -303,6 +303,7 @@ describe('M6 account wire mappers', () => {
       stagePipelineCode: null, productionStage: null,
       clientId: 'CLI-202607-0001', clientNama: 'Alpha Digital', assignedPicNama: '',
       tanggalMulai: null, tanggalAkhir: null, budget: null, createdCount: 0,
+      sourceCreativeBriefId: null,
     };
     expect(briefToWire(b)).toEqual({
       id: 'BRF-202607-0001', service_id: 'SVC-1', assigned_division: 'Creative', deliverable_type: 'Video',
@@ -317,6 +318,7 @@ describe('M6 account wire mappers', () => {
       // budget has not been given zero rupiah, it has not been given a figure.
       tanggal_mulai: null, tanggal_akhir: null, budget: null, budget_display: null,
       created_count: 0,
+      source_creative_brief_id: null,
     });
   });
 
@@ -330,6 +332,7 @@ describe('M6 account wire mappers', () => {
       stagePipelineCode: null, productionStage: null,
       clientId: 'CLI-202607-0002', clientNama: 'Beta Store', assignedPicNama: 'Rian Pratama',
       tanggalMulai: '2026-09-01', tanggalAkhir: '2026-10-15', budget: '5000000.00', createdCount: 7,
+      sourceCreativeBriefId: 'BRF-202607-0009',
     };
     const w = briefToWire(b);
     expect(w.strategy_id).toBe('STR-1');
@@ -345,6 +348,7 @@ describe('M6 account wire mappers', () => {
     expect(w.budget).toBe('5000000.00');
     expect(w.budget_display).toBe('Rp. 5.000.000,00');
     expect(w.created_count).toBe(7);
+    expect(w.source_creative_brief_id).toBe('BRF-202607-0009');
   });
 
   it('toBriefInput maps snake_case body → camelCase BriefInput (defaults)', () => {
@@ -355,7 +359,7 @@ describe('M6 account wire mappers', () => {
       // A-req-1 — an absent key becomes `''`, which `insertBrief` stores as SQL
       // NULL. Not `undefined`: `orNull` reads the empty string, and a key that is
       // simply missing from the object would leave the field un-normalized.
-      tanggalMulai: '', tanggalAkhir: '', budget: '',
+      tanggalMulai: '', tanggalAkhir: '', budget: '', sourceCreativeBriefId: '',
     });
   });
 

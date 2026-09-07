@@ -246,6 +246,13 @@ export interface Brief {
    * untuk melihat semua baris sekaligus.
    */
   created_count: number;
+  /**
+   * A-req-2 (K-3) — Brief Creative yang jadi sumber aset Brief Ads ini. `null`
+   * untuk Brief mana pun yang bukan Ads-dengan-sumber. Inilah kolom yang dipakai
+   * picker aset di halaman kampanye untuk menyempitkan pilihan; tanpa terisi,
+   * penyempitannya tidak punya apa-apa untuk disempitkan.
+   */
+  source_creative_brief_id: string | null;
 }
 
 export interface BriefInput {
@@ -268,6 +275,8 @@ export interface BriefInput {
   tanggal_mulai?: string | null; // YYYY-MM-DD
   tanggal_akhir?: string | null; // YYYY-MM-DD
   budget?: string | null;
+  /** A-req-2 (K-3) — hanya untuk Brief divisi Ads; server MENOLAK di divisi lain. */
+  source_creative_brief_id?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -772,6 +781,17 @@ export function createBrief(serviceId: string, input: BriefInput): Promise<Brief
 
 export function listServiceBriefs(serviceId: string): Promise<{ data: Brief[] }> {
   return api.get<{ data: Brief[] }>(`/services/${serviceId}/briefs`);
+}
+
+/**
+ * A-req-2 (K-3) — Brief milik satu KLIEN, boleh disempitkan ke satu divisi.
+ * Dipakai form Brief AM untuk memilih Brief Creative SUMBER sebuah Brief Ads.
+ * Client-scoped, bukan service-scoped: kerja Creative dan kerja Ads sebuah
+ * engagement lazim berada di dua Service yang berbeda.
+ */
+export function listClientBriefs(clientId: string, division?: string): Promise<{ data: Brief[] }> {
+  const q = division ? `?division=${encodeURIComponent(division)}` : '';
+  return api.get<{ data: Brief[] }>(`/clients/${clientId}/briefs${q}`);
 }
 
 export function getBrief(id: string): Promise<Brief> {

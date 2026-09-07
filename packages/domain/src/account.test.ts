@@ -54,7 +54,11 @@ import {
   STRATEGY_STATUS_DRAFTING,
   submitStrategy,
   updateDraft,
+  MSG_BRIEF_SOURCE_INVALID,
+  MSG_BRIEF_SOURCE_ONLY_ADS,
+  MSG_INVALID_DIVISION,
   ValidationError,
+  listClientBriefs,
   workload,
   type Actor,
   MSG_PIC_BUKAN_WEWENANG_AM,
@@ -979,6 +983,97 @@ describeDb('createBrief (§5)', () => {
     // "3 dari 12" — the denominator is quantityTarget, already on the row.
     expect(row?.createdCount).toBe(3);
     expect(row?.quantityTarget).toBe(12);
+  });
+
+  /**
+   * A-req-2 (K-3) — an Ads Brief NAMES the Creative Brief its assets come from.
+   *
+   * The complaint: an Advertiser could not find the approved assets for the
+   * campaign they were running, and went back to a Google Sheet. The picker on
+   * the campaign page narrows by exactly this column, so until something FILLS
+   * it, the narrowing has nothing to narrow by.
+   */
+  it('links an Ads Brief to its source Creative Brief, and reads it back', async () => {
+    const { svcId, amId } = await directFixture();
+    const creative = await createBrief(sql, accountStaff(amId), svcId, goodBrief());
+    const ads = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), assignedDivision: 'Ads', sourceCreativeBriefId: creative.id,
+    });
+    expect(ads.sourceCreativeBriefId).toBe(creative.id);
+    expect((await getBrief(sql, accountStaff(amId), ads.id)).sourceCreativeBriefId).toBe(creative.id);
+    // Optional: an Ads Brief with no single Creative source is still legal.
+    const loose = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), assignedDivision: 'Ads',
+    });
+    expect(loose.sourceCreativeBriefId).toBeNull();
+  });
+
+  it('accepts a source Creative Brief from ANOTHER Service of the same client', async () => {
+    // The ordinary case, not the exotic one: Creative work and Ads work are two
+    // purchased Services more often than they are one, so a service-scoped rule
+    // would refuse the link exactly when an AM needs it.
+    const { clientId, svcId, amId } = await directFixture();
+    const otherSvc = nextSvcId();
+    await insertService(otherSvc, clientId, false, '[Awaiting Onboarding]');
+    const creative = await createBrief(sql, accountStaff(amId), svcId, goodBrief());
+    const ads = await createBrief(sql, accountStaff(amId), otherSvc, {
+      ...goodBrief(), assignedDivision: 'Ads', sourceCreativeBriefId: creative.id,
+    });
+    expect(ads.sourceCreativeBriefId).toBe(creative.id);
+  });
+
+  it('REFUSES a source on a non-Ads Brief — refused, not silently dropped', async () => {
+    const { svcId, amId } = await directFixture();
+    const creative = await createBrief(sql, accountStaff(amId), svcId, goodBrief());
+    for (const div of ['Creative', 'KOL']) {
+      await expect(
+        createBrief(sql, accountStaff(amId), svcId, {
+          ...goodBrief(), assignedDivision: div, sourceCreativeBriefId: creative.id,
+        }),
+      ).rejects.toThrow(MSG_BRIEF_SOURCE_ONLY_ADS);
+    }
+  });
+
+  it('REFUSES a source that is not a Creative Brief of this client', async () => {
+    const { svcId, amId } = await directFixture();
+    const adsBrief = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), assignedDivision: 'Ads',
+    });
+    // Another client's Creative Brief — the case that would have Ads reading a
+    // stranger's assets.
+    const other = await directFixture();
+    const foreign = await createBrief(sql, accountStaff(other.amId), other.svcId, goodBrief());
+
+    for (const bad of [foreign.id, adsBrief.id, 'BRF-000000-9999']) {
+      await expect(
+        createBrief(sql, accountStaff(amId), svcId, {
+          ...goodBrief(), assignedDivision: 'Ads', sourceCreativeBriefId: bad,
+        }),
+      ).rejects.toThrow(MSG_BRIEF_SOURCE_INVALID);
+    }
+  });
+
+  it('listClientBriefs feeds the picker — the client\'s Creative Briefs, across Services', async () => {
+    const { clientId, svcId, amId } = await directFixture();
+    const otherSvc = nextSvcId();
+    await insertService(otherSvc, clientId, false, '[Awaiting Onboarding]');
+    const c1 = await createBrief(sql, accountStaff(amId), svcId, goodBrief());
+    const c2 = await createBrief(sql, accountStaff(amId), otherSvc, goodBrief());
+    await createBrief(sql, accountStaff(amId), svcId, { ...goodBrief(), assignedDivision: 'Ads' });
+    // A different client's Creative Brief must never appear in this picker.
+    const other = await directFixture();
+    const foreign = await createBrief(sql, accountStaff(other.amId), other.svcId, goodBrief());
+
+    const picked = await listClientBriefs(sql, accountStaff(amId), clientId, 'Creative');
+    expect(picked.map((b) => b.id).sort()).toEqual([c1.id, c2.id].sort());
+    expect(picked.map((b) => b.id)).not.toContain(foreign.id);
+    // Unfiltered returns every division; an unknown division is a validation error.
+    expect((await listClientBriefs(sql, accountStaff(amId), clientId)).length).toBe(3);
+    await expect(listClientBriefs(sql, accountStaff(amId), clientId, 'Marketing'))
+      .rejects.toThrow(MSG_INVALID_DIVISION);
+    // Same read gate as listServiceBriefs.
+    await expect(listClientBriefs(sql, accountStaff('ZZ-OTHER'), clientId)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(listClientBriefs(sql, accountLead(), clientId)).resolves.toBeTruthy();
   });
 
   it('a Live Stream Brief is born off-machine ([Dispatched to Vendor], §6 Rule 2)', async () => {
