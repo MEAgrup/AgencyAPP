@@ -29,8 +29,10 @@ export interface MasterServiceWire {
   active: boolean;
   requires_strategy_plan: boolean;
   plan_tier: string;
-  /** M16 LT-42 / M17 §5.4 — hari kalender, null = tidak berlaku. */
-  durasi_jasa: number | null;
+  /** BULAN kalender. null = layanan sekali jadi, tidak punya periode (Q5). */
+  durasi_bulan: number | null;
+  /** 'durasi' | 'volume' — apa yang ditambah qty yang dibeli klien (Q3). */
+  qty_menambah: string;
   version_no: number;
   effective_from: string;
 }
@@ -53,7 +55,8 @@ export function masterServiceToWire(v: msl.ServiceView): MasterServiceWire {
     active: v.active,
     requires_strategy_plan: v.requiresStrategyPlan,
     plan_tier: v.planTier,
-    durasi_jasa: v.durasiJasa,
+    durasi_bulan: v.durasiBulan,
+    qty_menambah: v.qtyMenambah,
     version_no: v.versionNo,
     effective_from: v.effectiveFrom,
   };
@@ -975,7 +978,8 @@ export function campaignToWire(c: ads.Campaign): CampaignWire {
 /** module16_ads.AdsManagementDate — Ads Management Date, LT-42 (end_date turunan). */
 export interface AdsManagementDateWire {
   start_date: string;
-  durasi_jasa: number;
+  /** BULAN kalender dari MSL; `additional_days`/`total_hari_hold` tetap HARI. */
+  durasi_bulan: number;
   additional_days: number;
   total_hari_hold: number;
   end_date: string;
@@ -983,7 +987,7 @@ export interface AdsManagementDateWire {
 
 export function adsManagementDateToWire(d: ads.AdsManagementDate): AdsManagementDateWire {
   return {
-    start_date: d.startDate, durasi_jasa: d.durasiJasa, additional_days: d.additionalDays,
+    start_date: d.startDate, durasi_bulan: d.durasiBulan, additional_days: d.additionalDays,
     total_hari_hold: d.totalHariHold, end_date: d.endDate,
   };
 }

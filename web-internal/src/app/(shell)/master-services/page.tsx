@@ -2,13 +2,19 @@
 
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, errorMessage } from '@/lib/api';
-import { FREQUENCIES, PRICING_MODES, type MasterService, type PlanTier } from '@/lib/types';
+import { FREQUENCIES, PRICING_MODES, type MasterService, type PlanTier, type QtyMenambah } from '@/lib/types';
 import { TIER_LABELS } from '@/lib/account';
 import { formatIDR } from '@/lib/money';
-
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
+import {
+  EMPTY_MSL_FORM,
+  formatDurasiBulan,
+  formToPayload,
+  QTY_MENAMBAH_LABELS,
+  saveMasterService,
+  serviceToForm,
+  todayISO,
+  type MslFormState,
+} from '@/lib/msl';
 
 // "Batas Minimal" is stored as a DECIMAL string ("5.00") but is always a whole
 // quantity (see backend parseWholeQty) — display it as a plain integer.
@@ -19,42 +25,6 @@ function formatQty(value: string | undefined): string {
   return String(Math.trunc(n));
 }
 
-interface FormState {
-  name: string;
-  standard_price: string;
-  commission_rule: string;
-  category: string;
-  unit: string;
-  min_qty: string;
-  pricing_mode: string;
-  apply_ppn: boolean;
-  frequency: string;
-  price_note: string;
-  description: string;
-  active: boolean;
-  plan_tier: PlanTier;
-  effective_from: string;
-}
-
-const EMPTY_FORM: FormState = {
-  name: '',
-  standard_price: '',
-  commission_rule: '',
-  category: '',
-  unit: '',
-  min_qty: '',
-  pricing_mode: 'flat',
-  apply_ppn: false,
-  frequency: '',
-  price_note: '',
-  description: '',
-  active: true,
-  // Default to the safest tier: a new catalog entry must not silently start
-  // demanding a Strategi. The Sales Head opts in (O54).
-  plan_tier: 'tanpa_plan',
-  effective_from: todayISO(),
-};
-
 export default function MasterServicesPage() {
   const [effectiveAt, setEffectiveAt] = useState(todayISO());
   const [services, setServices] = useState<MasterService[] | null>(null);
@@ -62,7 +32,7 @@ export default function MasterServicesPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [form, setForm] = useState<MslFormState>(EMPTY_MSL_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -91,29 +61,17 @@ export default function MasterServicesPage() {
 
   function openCreateForm() {
     setEditingId(null);
-    setForm(EMPTY_FORM);
+    setForm(EMPTY_MSL_FORM);
     setFormError(null);
     setShowForm(true);
   }
 
   function openEditForm(service: MasterService) {
     setEditingId(service.id);
-    setForm({
-      name: service.name,
-      standard_price: String(service.standard_price),
-      commission_rule: service.commission_rule,
-      category: service.category,
-      unit: service.unit,
-      min_qty: service.min_qty,
-      pricing_mode: service.pricing_mode || 'flat',
-      apply_ppn: service.apply_ppn,
-      frequency: service.frequency,
-      price_note: service.price_note,
-      description: service.description,
-      active: service.active,
-      plan_tier: service.plan_tier,
-      effective_from: todayISO(),
-    });
+    // `serviceToForm` reads back EVERY field the payload will send. That is not
+    // tidiness: an update is a full replace, so a field this form does not carry
+    // is erased in the new version — see `lib/msl.ts`.
+    setForm(serviceToForm(service));
     setFormError(null);
     setShowForm(true);
   }
@@ -125,29 +83,8 @@ export default function MasterServicesPage() {
     e.preventDefault();
     setFormError(null);
     setSubmitting(true);
-    // Backend expects standard_price as a decimal string and requires effective_from.
-    const payload = {
-      name: form.name,
-      standard_price: isPassthrough ? '0' : form.standard_price,
-      commission_rule: form.commission_rule,
-      category: form.category,
-      unit: form.unit,
-      min_qty: needsMinQty ? form.min_qty : '',
-      pricing_mode: form.pricing_mode,
-      apply_ppn: form.apply_ppn,
-      frequency: form.frequency,
-      price_note: form.price_note,
-      description: form.description,
-      active: form.active,
-      plan_tier: form.plan_tier,
-      effective_from: form.effective_from,
-    };
     try {
-      if (editingId) {
-        await api.put(`/master-services/${editingId}`, payload);
-      } else {
-        await api.post('/master-services', payload);
-      }
+      await saveMasterService(editingId, formToPayload(form));
       setShowForm(false);
       await load(effectiveAt);
     } catch (err) {
@@ -361,6 +298,45 @@ export default function MasterServicesPage() {
                 yang sedang jalan memakai versi yang sudah dipin.
               </span>
             </div>
+            <div className="field" style={{ maxWidth: 260 }}>
+              <label htmlFor="durasi_bulan">Durasi Jasa (bulan)</label>
+              <input
+                id="durasi_bulan"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="kosongkan bila sekali jadi"
+                value={form.durasi_bulan}
+                onChange={(e) => setForm((f) => ({ ...f, durasi_bulan: e.target.value }))}
+              />
+              <span className="muted" style={{ fontSize: 12 }}>
+                Berapa lama jasa ini berjalan, dalam <strong>bulan kalender</strong>, dihitung
+                dari tanggal layanan <strong>mulai jalan</strong> (untuk Ads: start campaign —
+                periode riset tidak dihitung). Dipakai Ads untuk Management Date dan menjadi
+                dasar skedul pengakuan pendapatan.{' '}
+                <strong>Kosongkan untuk layanan sekali jadi</strong> (mis. Jasa Pengajuan Shopee
+                Mall): pendapatannya diakui sekaligus saat selesai, bukan disebar 1 bulan.
+              </span>
+            </div>
+            <div className="field" style={{ maxWidth: 320 }}>
+              <label htmlFor="qty_menambah">Kalau Klien Beli Lebih dari Satu</label>
+              <select
+                id="qty_menambah"
+                value={form.qty_menambah}
+                onChange={(e) => setForm((f) => ({ ...f, qty_menambah: e.target.value as QtyMenambah }))}
+              >
+                <option value="volume">{QTY_MENAMBAH_LABELS.volume}</option>
+                <option value="durasi">{QTY_MENAMBAH_LABELS.durasi}</option>
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>
+                <strong>Durasi</strong> = qty adalah jumlah periode, jadi durasi total ={' '}
+                qty &times; durasi di atas (GMV Max beli 3 berarti 3 bulan). Pilihan ini{' '}
+                <strong>wajib punya durasi</strong> di atas — kalau kosong, tidak ada yang bisa
+                dikali dan simpanan ditolak.{' '}
+                <strong>Volume</strong> = qty adalah jumlah keluaran dalam periode yang sama
+                (Nano KOL beli 10 berarti 10 KOL, durasinya tidak berubah).
+              </span>
+            </div>
             <label className="row" style={{ gap: 6, fontSize: 13 }}>
               <input
                 type="checkbox"
@@ -409,6 +385,8 @@ export default function MasterServicesPage() {
                   <th>Mode</th>
                   <th>PPN</th>
                   <th>Frekuensi</th>
+                  <th>Durasi Jasa</th>
+                  <th>Qty Menambah</th>
                   <th>Strategi &amp; Plan</th>
                   <th>Aktif</th>
                   <th>Versi</th>
@@ -429,6 +407,8 @@ export default function MasterServicesPage() {
                       <td>{s.pricing_mode || 'flat'}</td>
                       <td>{s.apply_ppn ? 'Ya' : 'Tidak'}</td>
                       <td>{s.frequency || '—'}</td>
+                      <td>{formatDurasiBulan(s.durasi_bulan)}</td>
+                      <td>{s.qty_menambah === 'durasi' ? 'Durasi' : 'Volume'}</td>
                       <td>{TIER_LABELS[s.plan_tier]}</td>
                       <td>
                         <span className={`badge badge-${s.active ? 'green' : 'darkgray'}`}>
@@ -450,7 +430,7 @@ export default function MasterServicesPage() {
                     </tr>
                     {expandedId === s.id && (
                       <tr>
-                        <td colSpan={13} style={{ background: 'var(--color-bg)' }}>
+                        <td colSpan={16} style={{ background: 'var(--color-bg)' }}>
                           {versionsLoadingId === s.id && <p className="muted">Memuat riwayat versi...</p>}
                           {versionsError && <div className="alert alertError">{versionsError}</div>}
                           {versionsByService[s.id] && versionsByService[s.id].length > 0 && (
@@ -466,6 +446,8 @@ export default function MasterServicesPage() {
                                   <th>Mode</th>
                                   <th>PPN</th>
                                   <th>Frekuensi</th>
+                                  <th>Durasi Jasa</th>
+                                  <th>Qty Menambah</th>
                                   <th>Strategi &amp; Plan</th>
                                   <th>Aktif</th>
                                   <th>Berlaku Sejak</th>
@@ -483,6 +465,8 @@ export default function MasterServicesPage() {
                                     <td>{v.pricing_mode || 'flat'}</td>
                                     <td>{v.apply_ppn ? 'Ya' : 'Tidak'}</td>
                                     <td>{v.frequency || '—'}</td>
+                                    <td>{formatDurasiBulan(v.durasi_bulan)}</td>
+                                    <td>{v.qty_menambah === 'durasi' ? 'Durasi' : 'Volume'}</td>
                                     <td>{TIER_LABELS[v.plan_tier]}</td>
                                     <td>{v.active ? 'Aktif' : 'Nonaktif'}</td>
                                     <td>{v.effective_from}</td>

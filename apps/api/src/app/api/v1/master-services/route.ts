@@ -28,8 +28,16 @@ interface ServiceBody {
   active?: boolean;
   requires_strategy_plan?: boolean;
   plan_tier?: string;
-  /** M16 LT-42 / M17 §5.4 — hari kalender. Absent/undefined = tidak berlaku. */
-  durasi_jasa?: number;
+  /**
+   * BULAN kalender. Absent, undefined, ATAU `null` sama artinya: layanan ini
+   * sekali jadi dan tidak punya periode. `null` diterima karena pengirim
+   * utamanya adalah form MSL admin, yang selalu punya kuncinya; memaksanya
+   * menghilangkan kunci saat kosong adalah cara termudah menghilangkan nilainya
+   * tanpa sadar.
+   */
+  durasi_bulan?: number | null;
+  /** 'durasi' | 'volume'. Absent = 'volume' (sisi aman, lihat msl.ts). */
+  qty_menambah?: string;
   effective_from?: string;
 }
 
@@ -49,7 +57,8 @@ function toInput(b: ServiceBody): msl.ServiceInput {
     active: b.active,
     requiresStrategyPlan: b.requires_strategy_plan,
     planTier: b.plan_tier as msl.ServiceInput['planTier'],
-    durasiJasa: b.durasi_jasa,
+    durasiBulan: b.durasi_bulan,
+    qtyMenambah: b.qty_menambah as msl.ServiceInput['qtyMenambah'],
     effectiveFrom: b.effective_from ?? '',
   };
 }

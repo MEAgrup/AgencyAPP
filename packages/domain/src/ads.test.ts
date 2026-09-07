@@ -718,34 +718,34 @@ describeDb('M16 LT-42: Ads Management Date (end_date turunan)', () => {
   // `commission_rule` is irrelevant to end_date, but it still has to be a real
   // rule: O73 put the O14 grammar behind a CHECK, and this fixture used to write
   // the placeholder 'flat' (which is a pricing_mode, not a rule).
-  async function seedMasterService(durasiJasaHari: number | null): Promise<string> {
+  async function seedMasterService(durasiBulan: number | null): Promise<string> {
     const msvId = uid('MSV');
     await sql`insert into master_services (id, created_by) values (${msvId}, 'ZZ-TEST')`;
     await sql`
       insert into master_service_versions
-        (service_id, version_no, name, standard_price, commission_rule, pricing_mode, durasi_jasa, effective_from, created_by)
-      values (${msvId}, 1, 'Ads Management', '5000000', '10% of standard price', 'flat', ${durasiJasaHari}, '2026-01-01', 'ZZ-TEST')`;
+        (service_id, version_no, name, standard_price, commission_rule, pricing_mode, durasi_bulan, effective_from, created_by)
+      values (${msvId}, 1, 'Ads Management', '5000000', '10% of standard price', 'flat', ${durasiBulan}, '2026-01-01', 'ZZ-TEST')`;
     return msvId;
   }
 
-  it('end_date = start_date + durasi_jasa + additional_days + total_hari_hold, none of it stored', async () => {
+  it('end_date = start_date + durasi_bulan BULAN + additional_days + total_hari_hold, none of it stored', async () => {
     const { briefId } = await adsBrief();
-    const msvId = await seedMasterService(30);
+    const msvId = await seedMasterService(1); // 1 BULAN, bukan 30 hari
     await sql`update services set master_service_id = ${msvId}, master_version_no = 1
               where id = (select service_id from briefs where id = ${briefId})`;
     const c = await createCampaign(sql, adsStaff(), briefId, goodInput()); // startDate 2026-07-01
 
     let d = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
     expect(d.startDate).toBe('2026-07-01');
-    expect(d.durasiJasa).toBe(30);
+    expect(d.durasiBulan).toBe(1);
     expect(d.additionalDays).toBe(0);
     expect(d.totalHariHold).toBe(0);
-    expect(d.endDate).toBe('2026-07-31'); // + 30 days
+    expect(d.endDate).toBe('2026-08-01'); // + 1 bulan kalender (BUKAN + 30 hari = 07-31)
 
     await setAdditionalDays(sql, adsStaff(), c.id, 5); // e.g. libur Lebaran
     d = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
     expect(d.additionalDays).toBe(5);
-    expect(d.endDate).toBe('2026-08-05'); // + 30 + 5
+    expect(d.endDate).toBe('2026-08-06'); // + 1 bulan + 5 hari
 
     // Hold 3 days then resume ⇒ end_date moves forward another 3 days. `audit_log`
     // is append-only (no UPDATE path — asserted elsewhere), so the hold history is
@@ -758,7 +758,7 @@ describeDb('M16 LT-42: Ads Management Date (end_date turunan)', () => {
              ('ad_campaign', ${c.id}, 'ZZ-ADV', 'transition:[Paused]->[Active]', '2026-08-13T00:00:00Z', 'ZZ-ADV')`;
     d = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
     expect(d.totalHariHold).toBe(3);
-    expect(d.endDate).toBe('2026-08-08'); // + 30 + 5 + 3
+    expect(d.endDate).toBe('2026-08-09'); // + 1 bulan + 5 + 3
 
     // A hold that has NOT yet resumed does not extend end_date yet (moves only
     // "setiap iklan di-resume" — at resume time, not while still held).
@@ -769,11 +769,25 @@ describeDb('M16 LT-42: Ads Management Date (end_date turunan)', () => {
     expect(d.totalHariHold).toBe(3); // unchanged — the second hold is still open
   });
 
-  it('a NULL durasi_jasa reads as 0 (no MSL pin, or an unset durasi_jasa)', async () => {
+  it('adds MONTHS calendar-aware, then days — a period that starts on the 31st clamps', async () => {
+    // The case that separates "1 bulan" from "30 hari": +30 days would say
+    // 2026-03-02, and every later period would keep drifting out of its month.
+    const { briefId } = await adsBrief();
+    const msvId = await seedMasterService(1);
+    await sql`update services set master_service_id = ${msvId}, master_version_no = 1
+              where id = (select service_id from briefs where id = ${briefId})`;
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    await sql`update ad_campaigns set start_date = '2026-01-31' where id = ${c.id}`;
+
+    const d = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
+    expect(d.endDate).toBe('2026-02-28');
+  });
+
+  it('a NULL durasi_bulan reads as 0 (no MSL pin, or an unset durasi_bulan)', async () => {
     const { briefId } = await adsBrief(); // insertService pins a nonexistent MSV-X — no match
     const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
     const d = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
-    expect(d.durasiJasa).toBe(0);
+    expect(d.durasiBulan).toBe(0);
     expect(d.endDate).toBe(d.startDate);
   });
 

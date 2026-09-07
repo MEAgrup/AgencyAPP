@@ -1,6 +1,6 @@
 /**
  * GET /api/v1/campaigns/{id}/management-date — Ads Management Date (M16 §4.2
- * LT-42): end_date TURUNAN read-only = start_date + durasi_jasa + additional_days
+ * LT-42): end_date TURUNAN read-only = start_date + durasi_bulan + additional_days
  * + total_hari_hold. Nol kolom disimpan; dihitung ulang setiap dibaca.
  */
 import { ads } from '@cdps/domain';
