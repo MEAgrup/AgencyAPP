@@ -173,6 +173,29 @@ export const EVENTS = {
   AttemptUnrespon: 'm1.attempt.unrespon',                       // -> attempt owner
   AttemptAutoNotQualified: 'm1.attempt.auto_not_qualified',     // -> attempt owner
 
+  // ----- catalog v15 (Feedback OD 2026-09-07) — 4 event -----
+  // SATU bump untuk KEEMPATNYA, alasan yang sama persis dengan v12: invariant
+  // di sini menjumlahkan `eventCount` per versi DAN `notif_catalog.reals.test.ts`
+  // membandingkan TS↔DB set-equal, jadi dua bump dari dua jalur paralel akan
+  // memecahkan keduanya dua kali. Emitter dipasang jalur masing-masing —
+  // MENDAFTARKAN EVENT TANPA EMITTER ITU AMAN, gate-nya membandingkan NAMA
+  // event, bukan keberadaan pemanggilnya.
+  //
+  // Keluhan yang ditutup (Account #3 & #4): katalog hari ini memberi tahu AM
+  // saat divisi MENERIMA (v12 `diterima_divisi`) atau MENGEMBALIKAN
+  // (`dikembalikan`) sebuah Brief — dan sesudah itu tidak pernah lagi. Divisi
+  // bilang "sudah beres", AM tidak pernah tahu, dan yang tampak di CRO cuma
+  // status yang tidak bergerak. Dua event pertama menutup ujung diam itu.
+  // Dotted `mN` karena PRD-nya tidak pernah menuliskan identifiernya sendiri —
+  // aturan yang sama dipakai `m6.client.assigned` (O53).
+  BriefSiapReviewAm: 'm6.brief.siap_review_am',        // -> AM pemilik klien
+  BriefSelesai: 'm6.brief.selesai',                    // -> AM pemilik klien
+  // KOL #1: worksheet KOL aslinya berputar di sekitar `end date` dan jatuh
+  // tempo, dan CDPS tidak pernah membunyikan keduanya — itulah kenapa timnya
+  // masih memakai Google Sheet paralel.
+  BookingJatuhTempo: 'm9.booking.jatuh_tempo',         // -> koordinator KOL + AM
+  CampaignMendekatiAkhir: 'm9.campaign.mendekati_akhir', // -> koordinator KOL + AM
+
 } as const;
 
 /** A cataloged event type. */
@@ -288,6 +311,14 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'Revisi Sales/Creative/Performa L2 — 2 event lead aging otomatis (m1.attempt.unrespon → pemilik attempt saat New Lead/Contacted menua 3 hari diam; m1.attempt.auto_not_qualified → pemilik attempt saat [Unrespon] menua 14 hari, auto Not Qualified). Emitter: job harian leads_unrespon_tick.',
     eventCount: 2,
     decisionRef: 'docs/DECISIONS.md 2026-09-04 (REV-1..REV-4, permintaan Nerissa/COO)',
+  },
+  {
+    version: 15,
+    description:
+      'Feedback OD 2026-09-07 — 4 event: 2 Brief menutup ujung diam ke AM (m6.brief.siap_review_am → AM pemilik klien saat QC internal divisi lolos; m6.brief.selesai → AM pemilik klien saat rollup Brief mencapai selesai) + 2 KOL berbasis waktu (m9.booking.jatuh_tempo → koordinator KOL + AM saat Booking mendekati/lewat jatuh tempo; m9.campaign.mendekati_akhir → koordinator KOL + AM saat campaign mendekati tanggal akhir). Didaftarkan sekaligus dalam SATU bump karena dua jalur paralel mengerjakan emitternya masing-masing; emitter Brief di recomputeBriefRollup, emitter KOL di job tick.',
+    eventCount: 4,
+    decisionRef:
+      'docs/DECISIONS.md 2026-09-07 (K-1..K-7) + docs/handoff/PARALEL_FEEDBACK_OD_DUA_AKUN.md §1 F-3',
   },
 ] as const;
 
@@ -441,6 +472,15 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   // persis dengan seed migrasi 20260911050000_m1_unrespon_notif.sql. ---
   [EVENTS.AttemptUnrespon]: { description: 'Attempt menua ke [Unrespon] setelah 3 hari diam — ke pemilik attempt', resolver: 'explicit', version: 14 },
   [EVENTS.AttemptAutoNotQualified]: { description: 'Attempt auto Not Qualified setelah 14 hari diam di [Unrespon] — ke pemilik attempt', resolver: 'explicit', version: 14 },
+
+  // --- v15 (Feedback OD 2026-09-07). Description/resolver WAJIB sama persis
+  // dengan seed migrasi 20260922100100_f3_notif_feedback_od.sql —
+  // `notif_catalog.reals.test.ts` membandingkan
+  // (event_type, catalog_version, resolver) set-equal TS↔DB. ---
+  [EVENTS.BriefSiapReviewAm]: { description: 'Brief lolos QC internal divisi dan menunggu review AM — ke AM pemilik klien', resolver: 'explicit', version: 15 },
+  [EVENTS.BriefSelesai]: { description: 'Rollup Brief mencapai selesai — ke AM pemilik klien', resolver: 'explicit', version: 15 },
+  [EVENTS.BookingJatuhTempo]: { description: 'Booking KOL mendekati (H-1) atau melewati jatuh tempo — ke koordinator KOL + AM pemilik klien', resolver: 'explicitOrLeads', version: 15 },
+  [EVENTS.CampaignMendekatiAkhir]: { description: 'Campaign KOL mendekati tanggal akhir — ke koordinator KOL + AM pemilik klien', resolver: 'explicitOrLeads', version: 15 },
 };
 
 /** All registered event types (introspection / tests). */
