@@ -448,7 +448,10 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
                         className="btn btnGhost btnSm"
                         onClick={() => setOpenInsight((cur) => (cur === r.id ? null : r.id))}
                       >
-                        {openInsight === r.id ? 'tutup insight' : 'insight & terbit'}
+                        {/* Owner QA 2026-09-06: dilaporkan "tak ada tombol edit
+                            insight". Tombolnya ada, tapi labelnya tidak memuat
+                            kata yang dicari orang — "edit". */}
+                        {openInsight === r.id ? 'Tutup insight' : 'Edit insight & terbitkan'}
                       </button>
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>

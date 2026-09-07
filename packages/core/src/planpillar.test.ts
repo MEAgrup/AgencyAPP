@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as copilot from './copilot';
 import * as division from './division';
 import * as plantask from './plantask';
 import {
@@ -292,5 +293,100 @@ describe('seedRowFromPillar', () => {
   it('satuan baris yang disemai dirapikan ke katalog divisinya', () => {
     const h = seedRowFromPillar(pillar({ target: '40 Video seller per bulan' }), ['Shopee']);
     expect(h.disemai && h.row.satuan).toBe('video');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Jahitan B4 → B5 — pilar dari AM Co-Pilot SERVER-SIDE, bukan dari tool HTML
+// ---------------------------------------------------------------------------
+
+/**
+ * Dua jalur mengisi Section E dan **bentuk `target`-nya berbeda**, jadi jahitan
+ * ini wajib dipaku dari kedua sisi:
+ *
+ *  - tool HTML (`buildCockpitPillars`) menulis `"30 video, jembatan …"` — diawali
+ *    angka, jadi `parseTargetKuota` membacanya dan barisnya disemai penuh;
+ *  - Co-Pilot server-side (`copilot.susunUsulan`, B4) menulis
+ *    `"jembatan Median VV video toko: 10,0 VV → 12,5 VV dalam 3 minggu"` —
+ *    **tidak** diawali angka.
+ *
+ * Yang kedua HARUS jatuh ke `butuh_kuota`, dan itu **benar, bukan bug**: `kuota`
+ * PC-6 adalah *berapa deliverable akan dibuat* (40 video, 7 listing, 36 jam
+ * live) — keputusan perencanaan yang server tak punya sumbernya. Target jembatan
+ * (median VV 12.500) adalah angka yang BERBEDA; menyemainya sebagai kuota akan
+ * melahirkan baris kerja yang menuntut 12.500 unit pekerjaan.
+ *
+ * Tes ini memakai `copilot` yang SEBENARNYA, bukan string yang ditulis ulang di
+ * sini — kalau salah satu sisi mengubah format `target`, jahitan ini yang
+ * memerah lebih dulu, bukan seorang AM yang menemukan Plan-nya kosong.
+ */
+describe('jahitan B4→B5 — pilar usulan AM Co-Pilot server-side', () => {
+  const BENCH = {
+    cr: 2, refund: 5, vidPostToko: 20, vidSalesToko: 25, vidSalesAff: 20, gpmToko: 30_000,
+    liveSesi: 12, liveJam: 40, liveGmvJam: 1_000_000, liveCtor: 3, krSales: 30, krKonsen: 40,
+    skuSales: 40, roas: 4, adsDep: 30, spikeFlag: 2,
+  };
+  const usulan = copilot.susunUsulan({
+    benchmark_dipakai: BENCH,
+    video: { toko: { diposting_periode: 8, rate: 0.1, gpm_median: 11_000 } },
+    skor: { pilar: { video: 21 } },
+  });
+  const aksi = usulan.pilar.flatMap((x) => x.aksi);
+
+  it('Co-Pilot memang menghasilkan pilar konten untuk toko ini', () => {
+    expect(aksi.length).toBeGreaterThan(0);
+    expect(usulan.pilar[0].jenis).toBe('konten');
+  });
+
+  it('divisi PIC-nya diturunkan otomatis — konten → Creative', () => {
+    expect(PILAR_TO_DIVISI[usulan.pilar[0].jenis]).toBe('Creative');
+  });
+
+  it('target jembatan TIDAK dibaca sebagai kuota — baris tidak disemai, alasannya butuh_kuota', () => {
+    for (const a of aksi) {
+      const hasil = seedRowFromPillar(
+        { id: 1, jenis: a.jenis, channel: 'TikTok Shop', aksi: `${a.kode} ${a.nama}`, target: a.target, sku: null },
+        ['TikTok Shop'],
+      );
+      expect(hasil.disemai).toBe(false);
+      expect(hasil.alasan).toContain('butuh_kuota');
+      // Divisi dan channel-nya SUDAH terisi, jadi yang tersisa untuk AM benar-benar
+      // hanya satu angka — bukan tiga kolom kosong.
+      expect(hasil.alasan).not.toContain('butuh_divisi');
+      expect(hasil.alasan).not.toContain('butuh_channel');
+      expect(hasil.usulan.divisiPic).toBe('Creative');
+      expect(hasil.usulan.kuota).toBeUndefined();
+      expect(ALASAN_LABEL.butuh_kuota).toBe('isi kuota + satuan');
+    }
+  });
+
+  it('target jembatan tetap terbawa sebagai hasil_diharapkan (PC-11), tidak hilang', () => {
+    const a = aksi[0];
+    const hasil = seedRowFromPillar(
+      { id: 7, jenis: a.jenis, channel: 'TikTok Shop', aksi: `${a.kode} ${a.nama}`, target: a.target, sku: null },
+      ['TikTok Shop'],
+    );
+    expect(hasil.usulan.hasilDiharapkan).toBe(a.target);
+    expect(hasil.usulan.strategiPillarId).toBe(7);
+  });
+
+  it('bentuk tool HTML ("30 video, jembatan …") tetap disemai penuh — jalur itu tidak ikut rusak', () => {
+    const hasil = seedRowFromPillar(
+      { id: 2, jenis: 'konten', channel: 'TikTok Shop', aksi: 'V2 Naikkan kuota video', target: '30 video, jembatan Video bertayangan / bulan', sku: null },
+      ['TikTok Shop'],
+    );
+    expect(hasil.disemai).toBe(true);
+    if (hasil.disemai) {
+      expect(hasil.row.kuota).toBe(30);
+      expect(hasil.row.divisiPic).toBe('Creative');
+    }
+  });
+
+  it('semua jenis pilar yang Co-Pilot bisa hasilkan punya divisi bawaan — nol butuh_divisi', () => {
+    // Katalog Co-Pilot hanya 4 pilar; keempatnya harus ada di PILAR_TO_DIVISI,
+    // kalau tidak setiap usulan akan menuntut AM memilih divisi tanpa alasan.
+    for (const jenis of Object.values(copilot.PILAR_KE_JENIS)) {
+      expect(PILAR_TO_DIVISI[jenis]).toBeTruthy();
+    }
   });
 });

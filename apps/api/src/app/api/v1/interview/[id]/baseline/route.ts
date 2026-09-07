@@ -4,7 +4,7 @@
  *  - GET  /api/v1/interview/{id}/baseline — read every platform's baseline row
  *    plus the auto-filled interview fields (RAB-05) awaiting confirmation.
  *  - POST /api/v1/interview/{id}/baseline — submit ONE active platform's baseline
- *    (TikTok Shop = engine payload; every other platform = minimal manual entry).
+ *    (TikTok Shop dan Shopee = jalur mesin; platform lain = entri manual minimal).
  *
  * The route is a thin shell: resolve the actor, map the snake_case body to the
  * camelCase domain input, call the domain, map back through wire.ts. The engine
@@ -55,6 +55,8 @@ interface AnalisaWire {
   hist?: unknown[];
   net?: boolean;
   linked_accounts?: string[];
+  /** Shopee saja — label periode bebas-teks (export Shopee tak membawa rentangnya). */
+  periode?: string | null;
 }
 
 interface SubmitWire {
@@ -81,6 +83,7 @@ function toSubmitInput(b: SubmitWire): risetAwal.SubmitBaselineInput {
           hist: (b.analisa.hist ?? []) as risetAwal.AnalisaPenuhInput['hist'],
           net: b.analisa.net,
           linkedAccounts: b.analisa.linked_accounts,
+          periode: b.analisa.periode ?? null,
         }
       : undefined,
     manual: b.manual

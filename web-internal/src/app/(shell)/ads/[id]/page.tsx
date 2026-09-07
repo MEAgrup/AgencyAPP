@@ -314,7 +314,7 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
               is a field there and not a picker). */}
           <p className="muted" style={{ marginTop: 4 }}>
             <Link href={`/ads/screening?client=${encodeURIComponent(campaign.client_id)}`}>
-              Screening SKU klien ini &rarr;
+              Shopee Screening SKU klien ini &rarr;
             </Link>
           </p>
         </div>

@@ -24,6 +24,8 @@ export interface RisetAwalAnalisa {
   kondisi_toko: string;
   skor: number | null;
   benchmark_versi: number | null;
+  /** Terisi HANYA untuk baris Shopee — versi `report_benchmark_shopee` (B2). */
+  benchmark_versi_shopee: number | null;
   parser_versi: string | null;
   cakupan_riwayat: string | null;
   created_at: string;
@@ -152,11 +154,16 @@ export function submitBaselineAnalisa(
   clientPlatformId: number,
   files: ParsedExport[],
   hist: HistRowWire[],
-  opts: { net?: boolean; linkedAccounts?: string[] } = {},
+  opts: { net?: boolean; linkedAccounts?: string[]; periode?: string | null } = {},
 ): Promise<RisetAwalBaseline> {
   return api.post<RisetAwalBaseline>(`/interview/${id}/baseline`, {
     client_platform_id: clientPlatformId,
-    analisa: { files, hist, net: opts.net ?? true, linked_accounts: opts.linkedAccounts ?? [] },
+    analisa: {
+      files, hist, net: opts.net ?? true, linked_accounts: opts.linkedAccounts ?? [],
+      // Shopee saja — export-nya tak membawa rentang tanggal yang bisa dibaca
+      // mesin, jadi labelnya diketik AM. Jalur TikTok mengabaikannya.
+      periode: opts.periode ?? null,
+    },
   });
 }
 
@@ -183,4 +190,53 @@ export function submitBaselineManual(
 /** POST /interview/{id}/baseline/confirm — the AM confirms/corrects fields per number. */
 export function confirmBaselineIsian(id: string, items: ConfirmIsianItemWire[]): Promise<RisetAwalBaseline> {
   return api.post<RisetAwalBaseline>(`/interview/${id}/baseline/confirm`, { items });
+}
+
+// ---------------------------------------------------------------------------
+// Registry tipe berkas + pemilih mesin (UI). Tinggal di lapis data, bukan di
+// komponen, supaya bisa dipaku tes — pola dual-home registry yang sudah
+// dipakai `plan-row-suggest.ts`.
+// ---------------------------------------------------------------------------
+export const TIPE_OVERRIDE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Otomatis (deteksi server)' },
+  { value: 'vid_toko', label: 'Video — Toko Sendiri' },
+  { value: 'vid_aff', label: 'Video — Afiliasi' },
+  { value: 'live_toko', label: 'LIVE — Toko Sendiri' },
+  { value: 'live_aff', label: 'LIVE — Afiliasi' },
+];
+
+/**
+ * B2 — 17 slot berkas Shopee (`report/shopee/types.ts` SHOPEE_MODULE_LABEL).
+ * Daftarnya lebih panjang dari TikTok karena Shopee mengekspor satu berkas per
+ * modul; deteksi server sudah menangani nama mentah Seller Centre, jadi dropdown
+ * ini murni jalan keluar ketika nama berkasnya sudah diubah orang.
+ */
+export const TIPE_OVERRIDE_SHOPEE: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Otomatis (deteksi server)' },
+  { value: 'bisnis_home', label: 'Bisnis — Home (wajib)' },
+  { value: 'bisnis_produk', label: 'Bisnis — Produk' },
+  { value: 'bisnis_live', label: 'Bisnis — Live' },
+  { value: 'bisnis_video', label: 'Bisnis — Shopee Video' },
+  { value: 'bisnis_kesehatan', label: 'Bisnis — Kesehatan Toko' },
+  { value: 'ads_toko', label: 'Ads — Toko' },
+  { value: 'ads_produk', label: 'Ads — Produk' },
+  { value: 'ads_live', label: 'Ads — Live' },
+  { value: 'ads_banner', label: 'Ads — Banner (Search Brand)' },
+  { value: 'aff_product', label: 'Affiliate — Product' },
+  { value: 'aff_creator', label: 'Affiliate — Creator' },
+  { value: 'promo_diskon', label: 'Promo — Diskon' },
+  { value: 'promo_voucher', label: 'Promo — Voucher' },
+  { value: 'promo_flashsale', label: 'Promo — Flashsale' },
+  { value: 'layanan_chat', label: 'Layanan — Chat' },
+  { value: 'layanan_broadcast', label: 'Layanan — Broadcast' },
+  { value: 'meta', label: 'Meta CPAS' },
+];
+
+/**
+ * Mesin mana yang melayani sebuah platform `analisa_penuh` — cermin
+ * `mesinForPlatform` di domain. Dipakai HANYA untuk memilih label & dropdown;
+ * metode, deteksi berkas, ambang, dan skor tetap milik server (keputusan 4).
+ */
+export function mesinPlatform(platform: string): 'tiktok' | 'shopee' {
+  return platform.trim().toLowerCase() === 'shopee' ? 'shopee' : 'tiktok';
 }

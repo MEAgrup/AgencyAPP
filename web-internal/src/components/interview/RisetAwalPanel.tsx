@@ -36,9 +36,12 @@ import { INTERVIEW_FIELDS, minorToRupiah, rupiahToMinor } from '@/lib/interview-
 import { formatIDR } from '@/lib/money';
 import {
   confirmBaselineIsian,
+  mesinPlatform,
   parseExportFile,
   submitBaselineAnalisa,
   submitBaselineManual,
+  TIPE_OVERRIDE_OPTIONS,
+  TIPE_OVERRIDE_SHOPEE,
   type ConfirmIsianItemWire,
   type HistRowWire,
   type ManualBaselineWire,
@@ -55,14 +58,6 @@ const TICK_MS = 30_000;
 
 /** File-type override choices — the only ambiguous case is toko-vs-afiliasi
  *  (baseline fix #3). Everything else the server auto-detects. */
-const TIPE_OVERRIDE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: '', label: 'Otomatis (deteksi server)' },
-  { value: 'vid_toko', label: 'Video — Toko Sendiri' },
-  { value: 'vid_aff', label: 'Video — Afiliasi' },
-  { value: 'live_toko', label: 'LIVE — Toko Sendiri' },
-  { value: 'live_aff', label: 'LIVE — Afiliasi' },
-];
-
 /** Human labels for the auto-filled fields (single source: the interview catalog). */
 function isianLabel(fieldKey: string): string {
   return INTERVIEW_FIELDS.find((f) => f.fieldKey === fieldKey)?.label ?? fieldKey;
@@ -452,7 +447,10 @@ function PlatformBaselineCard({
 }
 
 // ---------------------------------------------------------------------------
-// analisa_penuh — upload exports + optional 6-month GMV history (TikTok Shop)
+// analisa_penuh — upload exports + optional 6-month GMV history.
+// Melayani DUA mesin sejak B2: TikTok Shop dan Shopee. Yang berbeda hanya
+// daftar tipe berkas dan tiga kolom pendamping; alur unggah, riwayat GMV, dan
+// kontrak submit-nya identik — server yang memilih mesin dari nama platform.
 // ---------------------------------------------------------------------------
 
 interface UploadedFile extends ParsedExport {
@@ -473,10 +471,15 @@ function AnalisaPenuhForm({
   platform: RisetAwalPlatform;
   onReload: () => Promise<void>;
 }) {
+  const mesin = mesinPlatform(platform.platform);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [hist, setHist] = useState<HistRowWire[]>([emptyHist(), emptyHist(), emptyHist()]);
   const [net, setNet] = useState(true);
   const [linked, setLinked] = useState('');
+  // Shopee saja: label periode bebas-teks. Export Seller Centre tidak membawa
+  // rentang tanggal yang bisa dibaca mesin, jadi tidak ada yang bisa diturunkan
+  // darinya — sama seperti mesin laporan Shopee yang sudah jalan.
+  const [periode, setPeriode] = useState('');
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -521,6 +524,7 @@ function AnalisaPenuhForm({
       await submitBaselineAnalisa(interviewId, platform.client_platform_id, payloadFiles, histRows, {
         net,
         linkedAccounts,
+        periode: mesin === 'shopee' ? (periode.trim() === '' ? null : periode.trim()) : null,
       });
       await onReload();
     } catch (e) {
@@ -537,8 +541,20 @@ function AnalisaPenuhForm({
     <div className="stack" style={{ gap: 10, marginTop: 10 }}>
       {err && <div className="alert alertError" style={{ fontSize: 13 }}>{err}</div>}
 
+      {mesin === 'shopee' && (
+        <div className="alert alertInfo" style={{ fontSize: 12 }}>
+          Unggah export Shopee Seller Centre &amp; Ads Center apa adanya — nama berkas mentah sudah dikenali server,
+          tidak perlu di-rename. Hanya <strong>Bisnis — Home</strong> yang wajib; makin lengkap berkasnya, makin
+          banyak kolom Section B yang terisi otomatis dan makin sedikit dimensi skor yang dinilai netral.
+        </div>
+      )}
+
       <div className="field">
-        <label>Export dari Seller Center / Ads Manager (.xlsx)</label>
+        <label>
+          {mesin === 'shopee'
+            ? 'Export dari Shopee Seller Centre / Ads Center (.xlsx, .csv)'
+            : 'Export dari Seller Center / Ads Manager (.xlsx)'}
+        </label>
         <input
           type="file"
           accept=".xlsx,.xls,.csv"
@@ -574,7 +590,7 @@ function AnalisaPenuhForm({
                     onChange={(e) => setFiles((prev) => prev.map((x, idx) => (idx === i ? { ...x, tipe: e.target.value } : x)))}
                     style={{ fontSize: 12, padding: '4px 8px' }}
                   >
-                    {TIPE_OVERRIDE_OPTIONS.map((o) => (
+                    {(mesin === 'shopee' ? TIPE_OVERRIDE_SHOPEE : TIPE_OVERRIDE_OPTIONS).map((o) => (
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
                   </select>
@@ -637,16 +653,37 @@ function AnalisaPenuhForm({
         </button>
       </details>
 
-      <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label className="row" style={{ gap: 6, fontSize: 13 }}>
-          <input type="checkbox" checked={net} disabled={saving} onChange={(e) => setNet(e.target.checked)} />
-          GMV net (standar MEA)
-        </label>
-        <div className="field" style={{ flex: 1, minWidth: 220 }}>
-          <label style={{ fontSize: 12 }}>Akun TikTok toko sendiri (pisahkan koma) — bantu bedakan toko vs afiliasi</label>
-          <input value={linked} disabled={saving} placeholder="@tokoklien, @tokoklien.id" onChange={(e) => setLinked(e.target.value)} />
+      {/* Dua kolom di bawah ini TikTok-only: `net` memilih GMV kotor vs
+          dikurangi pengembalian dana, dan `linked` membedakan video toko dari
+          video afiliasi. Export Shopee tidak punya kedua persoalan itu —
+          menampilkannya di sana hanya akan menyuruh AM mengisi hal yang tak
+          dipakai. Periode menggantikannya, karena export Shopee tak membawanya. */}
+      {mesin === 'shopee' ? (
+        <div className="field" style={{ maxWidth: 320 }}>
+          <label style={{ fontSize: 12 }}>Periode export (mis. Juli 2026)</label>
+          <input
+            value={periode}
+            disabled={saving}
+            placeholder="Juli 2026"
+            onChange={(e) => setPeriode(e.target.value)}
+          />
+          <span className="muted" style={{ fontSize: 11 }}>
+            Export Shopee tidak membawa rentang tanggal yang bisa dibaca mesin — label ini yang tercatat sebagai
+            periode referensi baseline.
+          </span>
         </div>
-      </div>
+      ) : (
+        <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label className="row" style={{ gap: 6, fontSize: 13 }}>
+            <input type="checkbox" checked={net} disabled={saving} onChange={(e) => setNet(e.target.checked)} />
+            GMV net (standar MEA)
+          </label>
+          <div className="field" style={{ flex: 1, minWidth: 220 }}>
+            <label style={{ fontSize: 12 }}>Akun TikTok toko sendiri (pisahkan koma) — bantu bedakan toko vs afiliasi</label>
+            <input value={linked} disabled={saving} placeholder="@tokoklien, @tokoklien.id" onChange={(e) => setLinked(e.target.value)} />
+          </div>
+        </div>
+      )}
 
       <div>
         <button type="button" className="btn btnPrimary btnSm" disabled={saving || parsing} onClick={submit}>

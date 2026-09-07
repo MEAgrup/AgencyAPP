@@ -46,7 +46,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { division, ident, interview as iv, money, notification, permission, statemachine, visibility } from '@cdps/core';
+import { baseline as bl, copilot as cp, division, ident, interview as iv, money, notification, permission, statemachine, visibility } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -1923,6 +1923,25 @@ export interface GmvMixRincian {
  * `saveChannels`/`saveBaseline` is the write. That is also why there is no
  * `sumber='riset_awal'` provenance column on `strategi_channel`.
  */
+/**
+ * B-3.3 — one top-SKU row the baseline payload carries. `unitTerjual`,
+ * `hargaJual` and `marginPersen` are deliberately absent: no export carries
+ * them, and they are exactly the three the B-3 margin math needs — so they stay
+ * manual rather than arriving as a plausible-looking zero.
+ */
+export interface TopSkuSuggestion {
+  nama: string;
+  gmv: string | null;
+  klik: number | null;
+  ctorPersen: number | null;
+}
+
+/** B-6.4 — one top-creator row the baseline payload carries. */
+export interface TopKreatorSuggestion {
+  nama: string;
+  gmv: string | null;
+}
+
 export interface ChannelBaselineSuggestion {
   clientPlatformId: number;
   platform: string;
@@ -1955,6 +1974,68 @@ export interface ChannelBaselineSuggestion {
   baselineBulan: BaselineMonthSuggestion[];
   /** RAB-12 — only for the analysed TikTok Shop store; null for every other channel. */
   gmvMix: GmvMixRincian | null;
+
+  // --- B3: the ~15 Section B figures the payload ALREADY carried -----------
+  //
+  // Handoff Gelombang B §4.3/§4.4: `getBaselinePrefill` read the payload but
+  // emitted only four fields, so the AM re-typed ~15 numbers that were sitting
+  // in `riset_awal_analisa.payload` all along. They are read by ONE mapper
+  // (`bl.mapPayloadToSectionB`) that knows no platform branches — it reads the
+  // key paths every baseline schema shares (B2 §6.5 rule #1 makes the Shopee
+  // payload congruent), so a key a platform has no source for arrives `null`.
+  //
+  // `null` here means MANUAL: the field stays empty in Section B, stays in the
+  // Kekurangan panel, and still gates submit. It never means zero.
+  /** `payload.schema`; `null` on payloads written before schemas were stamped. */
+  payloadSchema: string | null;
+  /** false ⇒ old payload (or a manual baseline): only the four legacy fields can
+   *  be inherited, and the page must say so instead of showing empty columns. */
+  payloadTerbaca: boolean;
+  /** The month the period figures describe, e.g. "Agu 2026". */
+  periodeReferensi: string | null;
+  /** B-1.4 — period aggregate, matched to a single baseline month by label.
+   *  TikTok calls it `refund_rate`, Shopee `batal_retur_rate`; the core mapper
+   *  reads both, so this is one field, not two. */
+  refundRatePersen: number | null;
+  // B-4 — Shopee only, by the owner's 2026-09-06 decision (which closed open
+  // question §8 #1): Shopee exports Layanan/Chat + Kesehatan Toko, TikTok
+  // exports neither. `null` for TikTok, and null still means manual + still
+  // gates submit. Rating, jumlah ulasan and % pesanan terlambat have no export
+  // on EITHER platform and are deliberately absent from this contract.
+  chatResponseRatePersen: number | null;
+  chatResponseMenit: number | null;
+  poinPenalti: number | null;
+  pengunjungPerBulan: number | null;
+  conversionRatePersen: number | null;
+  /** B-2.3 — always `null`. Organik as "the rest" is a fabricated number: shares
+   *  may overlap and exceed 100 (DECISIONS 2026-08-22). */
+  trafikOrganikPersen: number | null;
+  trafikIklanPersen: number | null;
+  /** B-2.3 — always `null`: affiliate GMV already sits in the video/LIVE buckets. */
+  trafikAffiliatePersen: number | null;
+  trafikLivePersen: number | null;
+  trafikVideoPersen: number | null;
+  trafikLuarPersen: number | null;
+  skuListed: number | null;
+  skuAktif: number | null;
+  skuPareto80: number | null;
+  skuSlowMoving: number | null;
+  topSku: TopSkuSuggestion[];
+  jumlahKampanyeAktif: number | null;
+  /** Filtered to `CAMPAIGN_TYPES` here — the taxonomy has one home, and it is
+   *  the domain. The engine emits raw keys; anything unrecognised is dropped. */
+  tipeKampanye: CampaignType[];
+  affiliateAktif30Hari: number | null;
+  gmvAffiliate: string | null;
+  gmvAffiliatePersen: number | null;
+  topKreator: TopKreatorSuggestion[];
+  /** B-6.5 count only — who PAYS for the sampling programme is in no export. */
+  sampelTerkirim: number | null;
+  jumlahVideoPerBulan: number | null;
+  totalViews: number | null;
+  gmvVideo: string | null;
+  jamLivePerBulan: number | null;
+  gmvLive: string | null;
 }
 
 export interface StrategiBaselinePrefill {
@@ -2082,6 +2163,13 @@ export async function getBaselinePrefill(
     const adSpendNum = numOrNullLoose(payload.iklan?.belanja);
     const { channel, channelLain } = platformToChannel(a.platform);
 
+    // B3 — one mapper, every schema. It reads only key paths the baseline
+    // payloads share, so it needs no `metode_baseline` branch and no platform
+    // branch: a manual baseline simply has no payload blocks and comes back
+    // `adaIsi: false`, which is the flag the page uses to say "payload versi
+    // lama" rather than render a wall of empty columns.
+    const b = bl.mapPayloadToSectionB(a.payload);
+
     return {
       clientPlatformId: Number(a.client_platform_id),
       platform: a.platform,
@@ -2101,6 +2189,135 @@ export async function getBaselinePrefill(
       aov: aovNum === null ? null : String(aovNum),
       baselineBulan,
       gmvMix,
+      payloadSchema: b.schema,
+      payloadTerbaca: b.adaIsi,
+      periodeReferensi: b.periodeReferensi,
+      refundRatePersen: b.refundRatePersen,
+      chatResponseRatePersen: b.chatResponseRatePersen,
+      chatResponseMenit: b.chatResponseMenit,
+      poinPenalti: b.poinPenalti,
+      pengunjungPerBulan: b.pengunjungPerBulan,
+      conversionRatePersen: b.conversionRatePersen,
+      trafikOrganikPersen: b.trafikOrganikPersen,
+      trafikIklanPersen: b.trafikIklanPersen,
+      trafikAffiliatePersen: b.trafikAffiliatePersen,
+      trafikLivePersen: b.trafikLivePersen,
+      trafikVideoPersen: b.trafikVideoPersen,
+      trafikLuarPersen: b.trafikLuarPersen,
+      skuListed: b.skuListed,
+      skuAktif: b.skuAktif,
+      skuPareto80: b.skuPareto80,
+      skuSlowMoving: b.skuSlowMoving,
+      topSku: b.topSku,
+      jumlahKampanyeAktif: b.jumlahKampanyeAktif,
+      // The engine emits raw material-type keys; the closed taxonomy lives here,
+      // so an unrecognised key is dropped rather than travelling as free text
+      // into a column with a CHECK on it.
+      tipeKampanye: b.tipeKampanye.filter((t): t is CampaignType =>
+        (CAMPAIGN_TYPES as readonly string[]).includes(t),
+      ),
+      affiliateAktif30Hari: b.affiliateAktif30Hari,
+      gmvAffiliate: b.gmvAffiliate,
+      gmvAffiliatePersen: b.gmvAffiliatePersen,
+      topKreator: b.topKreator,
+      sampelTerkirim: b.sampelTerkirim,
+      jumlahVideoPerBulan: b.jumlahVideoPerBulan,
+      totalViews: b.totalViews,
+      gmvVideo: b.gmvVideo,
+      jamLivePerBulan: b.jamLivePerBulan,
+      gmvLive: b.gmvLive,
+    };
+  });
+
+  return { interviewId: chosen.id, channels };
+}
+
+// ---------------------------------------------------------------------------
+// B4 — AM Co-Pilot mengisi Section E dari server
+// ---------------------------------------------------------------------------
+
+/**
+ * Usulan pilar untuk SATU platform yang dianalisa. `channel` sudah dipetakan ke
+ * taksonomi D1 supaya baris pilar yang disimpan nanti punya `channel` yang sama
+ * dengan Section B — pilar tanpa channel adalah pilar yang tidak bisa dilacak
+ * balik ke baseline-nya.
+ */
+export interface CopilotChannelUsulan {
+  clientPlatformId: number;
+  platform: string;
+  channel: Channel;
+  channelLain: string | null;
+  metodeBaseline: string;
+  usulan: cp.UsulanCopilot;
+}
+
+export interface StrategiCopilotUsulan {
+  interviewId: string;
+  channels: CopilotChannelUsulan[];
+}
+
+/**
+ * susunPilarUsulan — Section E disusun di server, tanpa export/tempel JSON.
+ *
+ * Sampai sekarang satu-satunya jalan mengisi E-3…E-10 adalah: ekspor JSON dari
+ * halaman Strategi → buka `/tools/am-copilot` → centang aksi → tempel JSON hasil
+ * kembali (`CockpitImportPanel`). Tiga salin-tempel manual untuk data yang server
+ * sudah punya di `riset_awal_analisa.payload` — dan akibatnya Section E kosong di
+ * hampir semua Strategi (`DECISIONS.md` 2026-09-02), yang mematikan pewarisan
+ * pilar ke baris Plan.
+ *
+ * Karena AM Co-Pilot **bukan AI** melainkan mesin aturan deterministik, seluruh
+ * logikanya bisa dijalankan di sini (`@cdps/core` copilot). Fungsi ini hanya
+ * merangkai: gerbang baca, resolusi interview, lalu satu panggilan ke engine per
+ * platform yang dianalisa.
+ *
+ * Bacaannya SENGAJA meniru `getBaselinePrefill` persis — `db()` + gerbang domain,
+ * bukan `readAsActor`. Dua endpoint bersaudara di halaman yang sama dengan dua
+ * jalur baca berbeda adalah drift yang baru terasa saat salah satunya diubah.
+ * Interview-nya pun diresolusi lewat `latestScoredInterview`, helper yang sama
+ * dengan `getStrategiPrefill` / `getBaselinePrefill`.
+ *
+ * USULAN saja: tidak ada baris `strategi_pillar` yang ditulis di sini. AM
+ * mencentang di Section E dan `savePillars` yang menulis — gerbangnya tetap
+ * submit → approve (mesin #15), tidak ada gerbang kedua.
+ */
+export async function susunPilarUsulan(
+  sql: Queryable,
+  actor: Actor,
+  id: string,
+): Promise<StrategiCopilotUsulan | null> {
+  const head = await loadStrategiRow(sql, id);
+  const ownerAm = await ownerAmOfContract(sql, head.contractId);
+  if (!canReadStrategi(actor, ownerAm)) {
+    throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
+  }
+
+  const chosen = await latestScoredInterview(sql, actor, head.clientId);
+  if (!chosen) return null;
+
+  const analisa = await sql<
+    {
+      client_platform_id: string;
+      platform: string;
+      metode_baseline: string;
+      payload: Record<string, unknown> | null;
+    }[]
+  >`
+    select client_platform_id, platform, metode_baseline, payload
+      from riset_awal_analisa
+     where interview_id = ${chosen.id}
+     order by client_platform_id`;
+  if (analisa.length === 0) return null;
+
+  const channels: CopilotChannelUsulan[] = analisa.map((a) => {
+    const { channel, channelLain } = platformToChannel(a.platform);
+    return {
+      clientPlatformId: Number(a.client_platform_id),
+      platform: a.platform,
+      channel,
+      channelLain,
+      metodeBaseline: a.metode_baseline,
+      usulan: cp.susunUsulan(a.payload),
     };
   });
 

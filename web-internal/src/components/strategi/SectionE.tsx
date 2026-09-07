@@ -31,8 +31,10 @@
  *   needs its consequence).
  */
 
+import CopilotPanel from './CopilotPanel';
 import RepeatList from './RepeatList';
 import { PRIORITAS_LABELS, type StrategiDetail } from '@/lib/strategi';
+import type { CockpitPillarBody } from '@/lib/strategi-cockpit-import';
 
 // ---- Draft types ----------------------------------------------------------
 
@@ -124,6 +126,7 @@ export default function SectionE({
   onNarasi,
   onTidakDikerjakan,
   onKetergantungan,
+  onApplyPillars,
   disabled,
 }: {
   detail: StrategiDetail;
@@ -131,10 +134,20 @@ export default function SectionE({
   onNarasi: (patch: Partial<NarasiDraft>) => void;
   onTidakDikerjakan: (rows: OutOfScopeDraft[]) => void;
   onKetergantungan: (rows: KetergantunganDraft[]) => void;
+  /** B4 — same save path CockpitImportPanel uses (saveStrategiPillars + merge). */
+  onApplyPillars: (pillars: CockpitPillarBody[]) => Promise<void>;
   disabled: boolean;
 }) {
   return (
     <div className="stack">
+      {/* B4 — E-3…E-10 disusun di server dari Riset Awal. Ditaruh di ATAS E-1
+          karena inilah yang mengisi bagian Section E yang selama ini kosong;
+          E-1 (growth thesis) ditulis AM setelah membaca pilar yang diusulkan. */}
+      <CopilotPanel
+        strategiId={detail.id}
+        onApplyPillars={onApplyPillars}
+        disabled={disabled}
+      />
       {/* E-1 --------------------------------------------------------------- */}
       <label className="field" style={{ display: 'block' }}>
         <span style={{ fontWeight: 600 }}>E-1 · Growth Thesis</span>
