@@ -1670,6 +1670,19 @@ export interface Brief {
   stagePipelineCode: string | null;
   /** M16 — tahap aktif mesin tahapan. Ditulis HANYA lewat sm_transition (stage.ts) setelah pengisian awal ini. */
   productionStage: string | null;
+  /**
+   * Klien di balik Brief ini (Creative #3). Lewat `private.brief_client_id`,
+   * BUKAN `join services` — lihat briefCols. '' kalau Service/klien tak ada.
+   */
+  clientId: string;
+  /** Nama toko klien (`clients.toko`). '' kalau klien tak ada. */
+  clientNama: string;
+  /**
+   * Nama PIC yang dipegangi Brief ini. '' kalau `assigned_pic` NULL; kalau
+   * terisi tapi karyawannya hilang, `private.employee_display_name` jatuh ke
+   * employee_id-nya — sebuah id masih lebih berguna daripada kolom kosong.
+   */
+  assignedPicNama: string;
 }
 
 // --- Input validation ---
@@ -1779,6 +1792,14 @@ export async function insertBrief(
     actor: actor.employeeId, division: input.assignedDivision,
   });
 
+  // The three identity fields (Creative #3) are read back through the SAME
+  // `private.*` doors `briefCols` uses, rather than assembled from `input` here.
+  // A second derivation is a second answer waiting to drift: this path knows the
+  // PIC's id but not their name, and knows the Service but not the client — and
+  // a Brief born with `clientNama: ''` would render a blank column on exactly
+  // the screen this was meant to fix.
+  const ident = await briefIdentity(tx, id);
+
   return {
     id, serviceId, strategyId: strategyId ?? '', assignedDivision: input.assignedDivision,
     assignedPic: (input.assignedPic ?? '').trim(), deliverableType: input.deliverableType,
@@ -1788,6 +1809,34 @@ export async function insertBrief(
     referenceAttachments: (input.referenceAttachments ?? '').trim(), title: input.title.trim(), status: birth,
     revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
     stagePipelineCode: pipeline?.code ?? null, productionStage: pipeline?.initialState ?? null,
+    clientId: ident.clientId, clientNama: ident.clientNama, assignedPicNama: ident.assignedPicNama,
+  };
+}
+
+/**
+ * briefIdentity reads the client + PIC identity of one Brief through the same
+ * `private.*` doors `briefCols` projects, for the paths that build a `Brief`
+ * without going through `rowToBrief` (Brief birth). Keeping the expressions in
+ * one place is the point — see briefCols for why they are functions and not
+ * joins (O52).
+ */
+async function briefIdentity(
+  sql: Queryable,
+  briefId: string,
+): Promise<{ clientId: string; clientNama: string; assignedPicNama: string }> {
+  const rows = await sql<{
+    client_id: string | null; client_nama: string | null; assigned_pic_nama: string | null;
+  }[]>`
+    select private.brief_client_id(b.id) as client_id,
+           private.brief_client_toko(b.id) as client_nama,
+           case when b.assigned_pic is null then null
+                else private.employee_display_name(b.assigned_pic) end as assigned_pic_nama
+      from briefs b where b.id = ${briefId}`;
+  const r = rows[0];
+  return {
+    clientId: r?.client_id ?? '',
+    clientNama: r?.client_nama ?? '',
+    assignedPicNama: r?.assigned_pic_nama ?? '',
   };
 }
 
@@ -2146,14 +2195,37 @@ interface BriefRow {
   assigned_am_id?: string | null;
   stage_pipeline_code: string | null;
   production_stage: string | null;
+  client_id: string | null;
+  client_nama: string | null;
+  assigned_pic_nama: string | null;
 }
 
-/** briefCols is the shared Brief column list (nested sql fragment). */
+/**
+ * briefCols is the shared Brief column list (nested sql fragment).
+ *
+ * Feedback OD 2026-09-07 Creative #3: a division leader could not tell which
+ * client a queued Brief belonged to — the column was the bare `service_id`. The
+ * three identity columns are added HERE, to the shared list, rather than to the
+ * one queue that reported it: `Brief` is one shape, and a field present on some
+ * reads and absent on others is the class O43 defect (a MISSING key blanks the
+ * page even though the route answered 200).
+ *
+ * They arrive through `private.*` SECURITY DEFINER functions, NOT through
+ * `join services join clients join employees`. This read runs under RLS
+ * (`readAsActor`) and its readers are the execution divisions, for whom all
+ * three of those policies erase the row outright — O52, decided as option (b)
+ * on 2026-08-07: answer the question through a function, never widen the policy.
+ * Same door `assigned_am_id` already walks through in loadBrief.
+ */
 function briefCols(sql: Queryable) {
   return sql`b.id, b.service_id, b.strategy_id, b.assigned_division, b.assigned_pic, b.deliverable_type,
     b.quantity_target, b.due_date, b.priority, b.recurring, b.recurring_frequency, b.recurring_count,
     b.recurring_end_date, b.instructions, b.reference_attachments, b.title, b.status, b.created_by, b.created_at,
-    b.stage_pipeline_code, b.production_stage`;
+    b.stage_pipeline_code, b.production_stage,
+    private.brief_client_id(b.id) as client_id,
+    private.brief_client_toko(b.id) as client_nama,
+    case when b.assigned_pic is null then null
+         else private.employee_display_name(b.assigned_pic) end as assigned_pic_nama`;
 }
 
 function rowToBrief(r: BriefRow): Brief {
@@ -2166,6 +2238,8 @@ function rowToBrief(r: BriefRow): Brief {
     instructions: r.instructions ?? '', referenceAttachments: r.reference_attachments ?? '', title: r.title,
     status: r.status, revisionCount: 0, revisionFlagged: false, createdBy: r.created_by, createdAt: r.created_at,
     stagePipelineCode: r.stage_pipeline_code, productionStage: r.production_stage,
+    clientId: r.client_id ?? '', clientNama: r.client_nama ?? '',
+    assignedPicNama: r.assigned_pic_nama ?? '',
   };
 }
 

@@ -199,6 +199,9 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
     createdAt: new Date('2026-07-19T02:00:00Z'),
     stagePipelineCode: 'CREATIVE_CONTENT',
     productionStage: 'Script',
+    clientId: 'CLI-202607-0001',
+    clientNama: 'Alpha Digital',
+    assignedPicNama: 'Rian Pratama',
   };
 
   it('maps every Brief field to its snake_case wire key', () => {

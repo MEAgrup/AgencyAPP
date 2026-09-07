@@ -23,7 +23,7 @@ import { permission } from '@cdps/core';
 import { createClient, withClaims, type Sql } from '@cdps/db';
 import { leadsDatabase, poolBoard } from './leads';
 import { listClients } from './client';
-import { getBrief, listStrategies, serviceQueue, type Actor } from './account';
+import { getBrief, listDivisionQueue, listStrategies, serviceQueue, type Actor } from './account';
 import { getAsset } from './creative';
 import { staffLanding } from './portal';
 import { financeQueue, reminderDashboard } from './finance';
@@ -419,6 +419,86 @@ describeDb('read models under RLS (O37)', () => {
     } finally {
       await sql`delete from assets where id = ${AST}`;
       await sql`delete from briefs where id = ${BRF}`;
+      await sql`delete from services where id = ${SVC}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
+  /**
+   * Feedback OD 2026-09-07, Creative #3: a division leader opening their own
+   * queue could not tell WHICH CLIENT a Brief belonged to — the column was the
+   * bare `service_id` — nor who was holding it. F-2 puts the brand and the PIC
+   * name on every Brief read.
+   *
+   * This is the same trap as O52 one table further out, so it is asserted the
+   * same way: through the real read model, under real RLS, as the execution
+   * division. A `join services join clients join employees` here would not blank
+   * the columns — it would DELETE the rows, and the leader's queue would look
+   * empty rather than wrong.
+   *
+   * Both names are asserted BY VALUE. `toBeDefined()` would pass on `''`, which
+   * is exactly the bug being fixed. `employees` is asserted invisible too: the
+   * PIC name cannot come from a join either, since `employees_select` is
+   * self-or-creator only — a leader may not read their own staff's row.
+   */
+  it('names the brand and the PIC on a division’s Brief queue (Creative #3)', async () => {
+    const CLI = 'CLI-ZZR-0F2B';
+    const SVC = 'SVC-ZZR-0F2B';
+    const BRF = 'BRF-ZZR-0F2B';
+    const AM = 'ZZR-AMF2B';
+    const PIC = 'ZZR-PICF2B';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id,
+                           released_to_account_at, created_by)
+      values (${CLI}, 'Brand Antrean Divisi', 'Ibu F2B', 'Surabaya', 'Fashion', 'https://shopee/zzrf2b',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${AM}, now(), ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values (${SVC}, ${CLI}, 'MSV-ZZR-0F2B', 1, 'f2b service', '9000000.00',
+              '10% of standard price', 'Ongoing', ${AM})
+      on conflict (id) do nothing`;
+    // The PIC is a real employee row so the display name has something to find;
+    // it is NOT the reader and NOT the creator, so RLS on `employees` denies it.
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, created_by)
+      values (${PIC}, 'Rian PIC F2B', 'rian.f2b@zzr.test', 'Creative', 'Creative Designer', ${OWNER})
+      on conflict (employee_id) do nothing`;
+    await sql`
+      insert into briefs (id, service_id, title, status, assigned_division, assigned_pic, created_by)
+      values (${BRF}, ${SVC}, 'f2b brief', '[Draft]', 'Creative', ${PIC}, ${AM})
+      on conflict (id) do nothing`;
+
+    const leadClaims = claims({ employeeId: 'ZZR-CRELEADF', division: 'Creative', level: 'lead' });
+    const leadActor = actor('ZZR-CRELEADF', 'Creative', 'lead');
+    try {
+      // Premise: all three joined tables are invisible to this reader, so the
+      // values below can only have arrived through `private.*`.
+      const invisible = await withClaims(sql, leadClaims, (tx) =>
+        tx<{ svc: string; cli: string; emp: string }[]>`
+          select (select count(*) from services  where id = ${SVC}) as svc,
+                 (select count(*) from clients   where id = ${CLI}) as cli,
+                 (select count(*) from employees where employee_id = ${PIC}) as emp`,
+      );
+      expect(
+        Number(invisible[0].svc) + Number(invisible[0].cli) + Number(invisible[0].emp),
+        'premise broken: a join would work here, so this test no longer proves the private.* door is needed',
+      ).toBe(0);
+
+      const queue = await withClaims(sql, leadClaims, (tx) =>
+        listDivisionQueue(tx, leadActor, 'Creative'),
+      );
+      const mine = queue.find((b) => b.id === BRF);
+      expect(mine, 'the queue must still contain the Brief — a join would have erased it').toBeDefined();
+      expect(mine!.clientId).toBe(CLI);
+      expect(mine!.clientNama).toBe('Brand Antrean Divisi');
+      expect(mine!.assignedPicNama).toBe('Rian PIC F2B');
+    } finally {
+      await sql`delete from briefs where id = ${BRF}`;
+      await sql`delete from employees where employee_id = ${PIC}`;
       await sql`delete from services where id = ${SVC}`;
       await sql`delete from contracts where client_id = ${CLI}`;
       await sql`delete from clients where id = ${CLI}`;

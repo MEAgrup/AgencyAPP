@@ -298,6 +298,7 @@ describe('M6 account wire mappers', () => {
       referenceAttachments: '', title: 'Promo', status: '[To Do]', revisionCount: 0, revisionFlagged: false,
       createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
       stagePipelineCode: null, productionStage: null,
+      clientId: 'CLI-202607-0001', clientNama: 'Alpha Digital', assignedPicNama: '',
     };
     expect(briefToWire(b)).toEqual({
       id: 'BRF-202607-0001', service_id: 'SVC-1', assigned_division: 'Creative', deliverable_type: 'Video',
@@ -315,6 +316,7 @@ describe('M6 account wire mappers', () => {
       instructions: 'brief detail', referenceAttachments: 'link', title: 'Ads Q3', status: '[Approved]',
       revisionCount: 3, revisionFlagged: true, createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
       stagePipelineCode: null, productionStage: null,
+      clientId: 'CLI-202607-0002', clientNama: 'Beta Store', assignedPicNama: 'Rian Pratama',
     };
     const w = briefToWire(b);
     expect(w.strategy_id).toBe('STR-1');
