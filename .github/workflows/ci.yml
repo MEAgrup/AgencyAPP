@@ -221,12 +221,20 @@ jobs:
       # keduanya resolver 'explicit' -> pemilik attempt; emitter job
       # leads_unrespon_tick), 67 → 69. Nol mesin baru (L1 hanya menambah
       # sm_edges pada mesin prospect_attempt yang sudah ada — 31 TETAP).
-      - name: Verify migration seed counts (31 machines, 69 events, catalog registry consistent)
+      # Feedback OD F-3 (20260922100100_f3_notif_feedback_od.sql, katalog v15):
+      # +4 event (`m6.brief.siap_review_am`/`m6.brief.selesai`, keduanya resolver
+      # 'explicit' -> AM pemilik klien; `m9.booking.jatuh_tempo`/
+      # `m9.campaign.mendekati_akhir`, keduanya 'explicitOrLeads' -> koordinator
+      # KOL + AM), 69 → 73. SATU bump untuk keempatnya, alasan sama dengan v12:
+      # dua jalur paralel mengerjakan emitternya masing-masing, dan dua bump
+      # terpisah memecahkan invariant dua kali. Nol tabel/prefix/mesin baru ⇒
+      # 146 tabel / 40 prefix / 31 mesin TETAP.
+      - name: Verify migration seed counts (31 machines, 73 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 31 then raise exception 'expected 31 machines'; end if;
-               if (select count(*) from notif_events) <> 69 then raise exception 'expected 69 events'; end if;
+               if (select count(*) from notif_events) <> 73 then raise exception 'expected 73 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;

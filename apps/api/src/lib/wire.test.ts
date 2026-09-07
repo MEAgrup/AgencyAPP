@@ -19,6 +19,7 @@ import {
   attemptStubToWire,
   blockRequestToWire,
   briefToWire,
+  transactionToWire,
   campaignRollupToWire,
   complaintToWire,
   intakeClientToWire,
@@ -300,12 +301,16 @@ describe('M6 account wire mappers', () => {
       referenceAttachments: '', title: 'Promo', status: '[To Do]', revisionCount: 0, revisionFlagged: false,
       createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
       stagePipelineCode: null, productionStage: null,
+      clientId: 'CLI-202607-0001', clientNama: 'Alpha Digital', assignedPicNama: '',
     };
     expect(briefToWire(b)).toEqual({
       id: 'BRF-202607-0001', service_id: 'SVC-1', assigned_division: 'Creative', deliverable_type: 'Video',
       quantity_target: 12, due_date: '2026-08-15', priority: 'High', recurring: false, title: 'Promo',
       status: '[To Do]', revision_count: 0, revision_flagged: false, created_by: 'EMP-SINTA',
       created_at: '2026-07-01T00:00:00.000Z', stage_pipeline_code: null, production_stage: null,
+      // Creative #3 — ketiganya nol omitempty: `assigned_pic_nama` tetap dikirim
+      // sebagai `''` walau Brief ini belum punya PIC.
+      client_id: 'CLI-202607-0001', client_nama: 'Alpha Digital', assigned_pic_nama: '',
     });
   });
 
@@ -317,6 +322,7 @@ describe('M6 account wire mappers', () => {
       instructions: 'brief detail', referenceAttachments: 'link', title: 'Ads Q3', status: '[Approved]',
       revisionCount: 3, revisionFlagged: true, createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
       stagePipelineCode: null, productionStage: null,
+      clientId: 'CLI-202607-0002', clientNama: 'Beta Store', assignedPicNama: 'Rian Pratama',
     };
     const w = briefToWire(b);
     expect(w.strategy_id).toBe('STR-1');
@@ -731,6 +737,46 @@ describe('M0 quote preview wire mapper (C-03 finding)', () => {
     expect('estimasiNilai' in wire).toBe(false);
     expect('totalKomisi' in wire).toBe(false);
     expect(JSON.stringify(wire)).not.toMatch(/7000000|350000(?!,)/);
+  });
+});
+
+/**
+ * Feedback OD 2026-09-07, Finance #1. Rantainya empat mata: kueri domain
+ * (`join clients`, F-2) → aggregate → wire → tipe FE → halaman. Tiga mata sudah
+ * punya penjaganya (tes domain di bawah RLS, dan `shape-parity` yang menolak
+ * kunci wire yang tidak dipunyai tipe FE). Mata wire-nya belum, karena
+ * `transactionToWire` sebelum ini tidak punya tes sama sekali — jadi `toko` bisa
+ * hilang persis di titik yang bentuknya paling mudah salah.
+ */
+describe('M5 transactionToWire (Finance #1 — antrean menyebut nama toko)', () => {
+  const trx: finance.TransactionAggregate = {
+    id: 'TRX-202607-0001',
+    clientId: 'CLI-202607-0001',
+    toko: 'Alpha Digital',
+    scheme: '[Bayar Penuh]',
+    totalAgreedValue: '9000000.00',
+    amountVerified: '4000000.00',
+    amountOutstanding: '5000000.00',
+    paymentStatus: '[Terverifikasi - Sebagian]',
+    bermasalah: false,
+    contractAttachment: null,
+    releasedToAccountAt: null,
+    installments: [],
+  };
+
+  it('carries toko through to the wire, alongside client_id — not instead of it', () => {
+    const w = transactionToWire(trx);
+    expect(w.toko).toBe('Alpha Digital');
+    // `client_id` tetap ada: halaman memakai nama untuk DIBACA dan id untuk
+    // MENAUT + mencocokkan dengan sistem lain. Menggantikannya, bukan
+    // menambahkan, akan mematikan tautannya.
+    expect(w.client_id).toBe('CLI-202607-0001');
+  });
+
+  it('never omits toko — an absent key blanks the column the fix was for', () => {
+    const w = transactionToWire({ ...trx, toko: '' }) as unknown as Record<string, unknown>;
+    expect('toko' in w, 'toko must be sent even when empty').toBe(true);
+    expect(w.toko).toBe('');
   });
 });
 

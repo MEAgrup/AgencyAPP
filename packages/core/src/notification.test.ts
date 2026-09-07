@@ -34,14 +34,41 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 14, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(14);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+  it('is at version 15, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(15);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
       expect(v.decisionRef).toMatch(/DECISIONS/);
     }
+  });
+
+  /**
+   * v15 (Feedback OD 2026-09-07) is registered here, in F, while its emitters
+   * are built by two parallel paths afterwards — so for a while these four
+   * events exist with nothing firing them. That is safe by design (the gate
+   * compares event NAMES, not callers), but it also means nothing else in the
+   * tree references them yet: the usual protection of a compile error does not
+   * apply, and a name or resolver could be changed without anything noticing.
+   *
+   * Asserted by literal string, not via EVENTS.*, for exactly that reason —
+   * `EVENTS.BriefSelesai` would follow a rename silently, and the emitters
+   * being written elsewhere name these events by their wire value.
+   */
+  it('registers the four v15 events by name and recipient', () => {
+    expect(eventsOfVersion(15).sort()).toEqual([
+      'm6.brief.selesai',
+      'm6.brief.siap_review_am',
+      'm9.booking.jatuh_tempo',
+      'm9.campaign.mendekati_akhir',
+    ]);
+    // Recipient shape: the two Brief events go to ONE person (the owning AM),
+    // the two KOL ones fan out to the KOL coordinator as well.
+    expect(CATALOG['m6.brief.siap_review_am'].resolver).toBe('explicit');
+    expect(CATALOG['m6.brief.selesai'].resolver).toBe('explicit');
+    expect(CATALOG['m9.booking.jatuh_tempo'].resolver).toBe('explicitOrLeads');
+    expect(CATALOG['m9.campaign.mendekati_akhir'].resolver).toBe('explicitOrLeads');
   });
 
   // The 15 frozen entries. Anything added past these is a DECISIONS.md-logged

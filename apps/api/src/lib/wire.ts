@@ -472,6 +472,14 @@ export interface BriefWire {
   // berbahaya daripada null. `null` untuk divisi tanpa pipeline (Rule 12).
   stage_pipeline_code: string | null;
   production_stage: string | null;
+  // Feedback OD 2026-09-07 Creative #3 — identitas klien + PIC pada SETIAP baca
+  // Brief. Nol omitempty, sengaja: `''` dikirim eksplisit ketika Brief belum
+  // punya PIC. Sebuah kunci yang hilang membuat kolomnya `undefined` di FE dan
+  // halamannya kosong walau route menjawab 200 (kelas O43) — sedangkan `''`
+  // terbaca sebagai "belum ada" dan bisa dirender jadi `—`.
+  client_id: string;
+  client_nama: string;
+  assigned_pic_nama: string;
 }
 
 export function briefToWire(b: account.Brief): BriefWire {
@@ -499,6 +507,14 @@ export function briefToWire(b: account.Brief): BriefWire {
     created_at: b.createdAt.toISOString(),
     stage_pipeline_code: b.stagePipelineCode,
     production_stage: b.productionStage,
+    client_id: b.clientId,
+    client_nama: b.clientNama,
+    assigned_pic_nama: b.assignedPicNama,
+    // ANCHOR-WIRE-DELIVERY (F-1) — titik sisip field wire Jalur B (Delivery:
+    // Creative/Ads/KOL/tasks). Tambahkan field Brief baru DI SINI, bukan di
+    // tengah blok di atas: anchor Jalur A ada di TransactionWire, ~2.400 baris
+    // jauhnya, supaya dua jalur tidak pernah menyunting hunk yang sama.
+    // Aturannya tetap: nol omitempty, kirim `null`/`''` eksplisit.
   };
 }
 
@@ -2873,6 +2889,11 @@ export interface TransactionWire {
   contract_attachment: string;
   released_to_account_at: string | null;
   installments: InstallmentWire[];
+  // Feedback OD 2026-09-07 Finance #1 — antrean approval menyebut nama toko,
+  // bukan cuma `CLI-…`. Nol omitempty (`transactions.client_id` NOT NULL dan
+  // join-nya inner, jadi ia selalu terisi); dikirim eksplisit supaya FE tidak
+  // pernah menerima kunci yang HILANG.
+  toko: string;
 }
 
 /** Maps the domain Transaction aggregate to the wire shape (Go trxView). */
@@ -2891,6 +2912,11 @@ export function transactionToWire(t: finance.TransactionAggregate): TransactionW
     contract_attachment: t.contractAttachment ?? '',
     released_to_account_at: t.releasedToAccountAt ? t.releasedToAccountAt.toISOString() : null,
     installments: t.installments.map(installmentToWire),
+    toko: t.toko,
+    // ANCHOR-WIRE-KEUANGAN (F-1) — titik sisip field wire Jalur A (Uang &
+    // Klien: finance/permintaan/contracts/sales). Tambahkan field baru DI SINI;
+    // anchor Jalur B ada di briefToWire, ~2.400 baris jauhnya. Aturannya tetap:
+    // nol omitempty, kirim `null`/`''` eksplisit.
   };
 }
 
@@ -6975,6 +7001,14 @@ export interface PermintaanWire {
   hari_terlambat: number;
   created_by: string;
   created_at: string;
+  // A-2 (Finance #2) — antrean Finance menyebut KLIEN, PENGAJU, dan NOMINAL.
+  // Nol omitempty: `''` dan `null` dikirim eksplisit. `nominal` sudah diformat
+  // IDR di sini (`Rp. X.XXX.XXX,00`, aturan rumah #7) dan `null` untuk jenis
+  // yang bukan Creator Payment Approval — halaman merender `—`, bukan `Rp. 0`,
+  // karena nol rupiah dan "tidak ada nominal" bukan hal yang sama.
+  toko: string;
+  diajukan_oleh_nama: string;
+  nominal: string | null;
 }
 
 export function permintaanToWire(p: req.Permintaan): PermintaanWire {
@@ -6990,6 +7024,8 @@ export function permintaanToWire(p: req.Permintaan): PermintaanWire {
     alasan_ditolak: p.alasanDitolak, catatan_proses: p.catatanProses,
     terlambat_berjalan: p.terlambatBerjalan, selesai_terlambat: p.selesaiTerlambat, hari_terlambat: p.hariTerlambat,
     created_by: p.createdBy, created_at: p.createdAt.toISOString(),
+    toko: p.toko, diajukan_oleh_nama: p.diajukanOlehNama,
+    nominal: p.nominal === null ? null : idr(p.nominal),
   };
 }
 

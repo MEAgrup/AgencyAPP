@@ -43,6 +43,7 @@
  *   - Block Task (M12)    `task.pendingBlockRequests`      → `/tasks|assets/{id}/block/{req}/approve|reject`
  *   - Eskalasi KOL        `kol.pendingEscalations`         → `/bookings/{id}/continue|drop`
  *   - Review Strategi     `account.pendingStrategyReviews` → `/strategies/{id}/approve|request-revision|approve-gmv`
+ *   - Permintaan Finance  `req.listPermintaanQueue('Finance')` → `/permintaan/{id}/proses|selesai|tolak`
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
@@ -114,6 +115,13 @@ import StatusBadge from '@/components/StatusBadge';
 import ApprovalCard, { MetaGrid, ReasonBlock } from '@/components/persetujuan/ApprovalCard';
 import DecisionActions, { type DecisionKind } from '@/components/persetujuan/DecisionActions';
 import PriceComparison from '@/components/persetujuan/PriceComparison';
+import {
+  listPermintaanQueue,
+  prosesPermintaan,
+  selesaiPermintaan,
+  tolakPermintaan,
+  type Permintaan,
+} from '@/lib/permintaan';
 
 const ATTEMPT_PENDING = 'Negotiation - Pending Approval';
 const RENEWAL_PENDING = 'Pending Approval';
@@ -1062,6 +1070,94 @@ function StrategyCard({
 }
 
 // ---------------------------------------------------------------------------
+// 9. Permintaan ke Finance (REQ-, M16 §5.5) — A-2
+// ---------------------------------------------------------------------------
+
+/**
+ * Bukan approve/reject dua-arah seperti antrian lain: sebuah Permintaan maju
+ * `[Diajukan] → [Diproses] → [Selesai]`, atau ditolak dengan alasan. Jadi
+ * tombol "maju"-nya BERGANTI LABEL mengikuti status barisnya — seperti
+ * EscalationCard, tidak ada tombol yang berpura-pura jadi "setujui" padahal
+ * mesin statusnya tidak punya edge itu.
+ *
+ * Menampilkan seluruh tombol sekaligus akan membuat separuhnya menjawab 409,
+ * dan tombol yang rutin gagal mengajari orang bahwa error itu normal.
+ */
+function PermintaanCard({
+  row,
+  canDecide,
+  onDone,
+}: {
+  row: Permintaan;
+  canDecide: boolean;
+  onDone: () => void;
+}) {
+  const { busy, error, run } = useDecision(onDone);
+  const belumDiproses = row.status === '[Diajukan]';
+
+  return (
+    <ApprovalCard
+      id={row.id}
+      href={row.cpr_id ? `/kol/payment-requests/${row.cpr_id}` : `/clients/${row.client_id}`}
+      title={row.toko || row.client_id}
+      badge={
+        row.terlambat_berjalan
+          ? <span className="badge badge-red">Terlambat {row.hari_terlambat} hari</span>
+          : <StatusBadge status={row.status} />
+      }
+      meta={[
+        { label: 'Jenis', value: row.jenis },
+        // `—`, bukan `Rp. 0`: nol rupiah dan "jenis ini tidak bernominal"
+        // bukan hal yang sama.
+        { label: 'Nominal', value: row.nominal ?? '—' },
+        { label: 'Diajukan oleh', value: row.diajukan_oleh_nama || row.diajukan_oleh },
+        { label: 'Divisi pengaju', value: row.diajukan_divisi },
+        { label: 'Jatuh tempo', value: row.due_date },
+        { label: 'Klien', value: row.client_id },
+      ]}
+      reason={{ label: 'Isi permintaan', text: row.deskripsi || row.judul }}
+    >
+      {canDecide ? (
+        <DecisionActions
+          fieldId={`req-note-${row.id}`}
+          busy={busy}
+          error={error}
+          approveLabel={belumDiproses ? 'Proses' : 'Selesai'}
+          rejectLabel="Tolak"
+          // Catatan opsional saat menyelesaikan (`catatan_proses`), WAJIB saat
+          // menolak — server memang menolak alasan kosong
+          // (`MSG_REJECT_REASON_REQUIRED`), jadi tombolnya mati sampai terisi
+          // dan kegagalannya terbaca sebelum request dikirim.
+          confirmText={(k) =>
+            k === 'reject'
+              ? `Tolak ${row.id}? Pengaju hanya melihat alasan yang Anda tulis.`
+              : belumDiproses
+                ? ''
+                : `Tandai ${row.id} selesai?`
+          }
+          onDecide={(kind, note) =>
+            run(kind, () =>
+              kind === 'reject'
+                ? tolakPermintaan(row.id, note)
+                : belumDiproses
+                  ? prosesPermintaan(row.id)
+                  : selesaiPermintaan(row.id, note || undefined),
+            )
+          }
+          hint={
+            belumDiproses
+              ? 'Proses = Anda mengambil permintaan ini; jam jatuh temponya tetap berjalan sampai Selesai.'
+              : 'Selesai menutup permintaan. Catatan bersifat opsional di langkah ini.'
+          }
+        />
+      ) : (
+        <WaitingNote who="divisi Finance / Director" />
+      )}
+    </ApprovalCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Halaman
 // ---------------------------------------------------------------------------
 
@@ -1074,6 +1170,11 @@ const SECTION_LABELS = [
   'Eskalasi KOL',
   'Review Strategi & Plan',
   'Permintaan Block Task — M12',
+  // Urutan daftar ini DIPETAKAN POSISI-PER-POSISI ke array `Promise.allSettled`
+  // di bawah (`SECTION_LABELS[i]`), jadi entri baru wajib ditambahkan di ujung
+  // KEDUANYA. Menambah di salah satunya saja membuat pesan galat satu antrian
+  // dilabeli nama antrian lain.
+  'Permintaan ke Finance',
 ] as const;
 
 export default function PerluPersetujuanPage() {
@@ -1086,6 +1187,14 @@ export default function PerluPersetujuanPage() {
   // FE_SMOKE_REPORT_20260719.md` #1), jadi hanya tembak kalau divisinya ada.
   const canViewBlockQueue = Boolean(role?.level === 'lead' || (role?.director && role.division));
 
+  // A-2 — `req.listPermintaanQueue` 403 untuk siapa pun di luar divisi Finance
+  // (dan Director). Digerbangi di sini dengan alasan yang sama seperti
+  // `canViewBlockQueue`: tanpa ini, SETIAP pemakai non-Finance akan melihat
+  // baris galat "Permintaan ke Finance: [anda tidak memiliki akses...]" di
+  // halaman bersama ini — panggilan yang sudah pasti gagal, dan noise yang
+  // mengajari orang mengabaikan area galat.
+  const canViewFinanceReq = Boolean(role?.director || role?.division === 'Finance');
+
   // ---- Gate keputusan per antrian (cermin gate server; server tetap otoritas) ----
   // `isODOnly` (lib/kol) adalah definisi yang sama yang dipakai halaman-halaman
   // M9: OD murni (tanpa lapis Director) read-only di seluruh sistem, Phase 0 §4.
@@ -1096,6 +1205,9 @@ export default function PerluPersetujuanPage() {
   const canDecideTcr = !readOnly && isDirector;
   const canDecideLeadDelete = !readOnly && (isDirector || role?.level === 'lead');
   const canDecideHold = !readOnly && (isAccountLead(role) || isDirector);
+  // Mirror `req.canProcess`: divisi tujuan (Finance) level apa pun, atau
+  // Director. `readOnly` menjaga OD tetap read-only (Phase 0 §4).
+  const canDecideFinanceReq = !readOnly && (isDirector || role?.division === 'Finance');
   const canDecideBlock = !readOnly && canViewBlockQueue;
   const canDecideStrategy = !readOnly && canApproveStrategy(role);
   // Antrian eskalasi SUDAH difilter server ke `canContinueEscalation` — apa pun
@@ -1114,6 +1226,7 @@ export default function PerluPersetujuanPage() {
   const [tcrs, setTcrs] = useState<SchemeChangeRequest[] | null>(null);
   const [deleteRequests, setDeleteRequests] = useState<DeleteRequestQueueRow[] | null>(null);
   const [holdRequests, setHoldRequests] = useState<PendingHoldRequest[] | null>(null);
+  const [financeReqs, setFinanceReqs] = useState<Permintaan[] | null>(null);
   const [blockRequests, setBlockRequests] = useState<PendingBlockRequest[] | null>(null);
   const [escalations, setEscalations] = useState<PendingEscalation[] | null>(null);
   const [strategyReviews, setStrategyReviews] = useState<PendingStrategyReview[] | null>(null);
@@ -1139,8 +1252,12 @@ export default function PerluPersetujuanPage() {
         listPendingEscalations(),
         listPendingStrategyReviews(),
         canViewBlockQueue ? getTeamPortal() : Promise.resolve(null),
+        canViewFinanceReq ? listPermintaanQueue('Finance') : Promise.resolve([]),
       ]);
-      const [attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, strategyRes, blockRes] = results;
+      const [
+        attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, strategyRes, blockRes,
+        financeReqRes,
+      ] = results;
       setAttempts(attemptRes.status === 'fulfilled' ? attemptRes.value.data : []);
       setAttemptsTruncated(attemptRes.status === 'fulfilled' && attemptRes.value.next_cursor !== null);
       setRenewals(renewalRes.status === 'fulfilled' ? renewalRes.value.data : []);
@@ -1153,6 +1270,7 @@ export default function PerluPersetujuanPage() {
       setBlockRequests(
         blockRes.status === 'fulfilled' && blockRes.value ? blockRes.value.block_queue : [],
       );
+      setFinanceReqs(financeReqRes.status === 'fulfilled' ? financeReqRes.value : []);
       setSectionErrors(
         results
           .map((r, i) => (r.status === 'rejected' ? `${SECTION_LABELS[i]}: ${errorMessage(r.reason)}` : null))
@@ -1163,7 +1281,7 @@ export default function PerluPersetujuanPage() {
     } finally {
       setLoading(false);
     }
-  }, [canViewBlockQueue]);
+  }, [canViewBlockQueue, canViewFinanceReq]);
 
   useEffect(() => {
     load();
@@ -1196,6 +1314,7 @@ export default function PerluPersetujuanPage() {
     kol: escalations?.length ?? 0,
     strategy: strategyReviews?.length ?? 0,
     block: blockRequests?.length ?? 0,
+    financeReq: financeReqs?.length ?? 0,
   };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
@@ -1208,6 +1327,7 @@ export default function PerluPersetujuanPage() {
     { id: 'block', label: 'Block Task', count: counts.block },
     { id: 'kol', label: 'Eskalasi KOL', count: counts.kol },
     { id: 'strategy', label: 'Strategi & Plan', count: counts.strategy },
+    { id: 'financeReq', label: 'Permintaan Finance', count: counts.financeReq },
   ].filter((t) => t.count > 0);
 
   return (
@@ -1399,6 +1519,17 @@ export default function PerluPersetujuanPage() {
                 defaultOpen={i < AUTO_OPEN}
                 onDone={load}
               />
+            ))}
+          </Section>
+
+          <Section
+            id="financeReq"
+            title="Permintaan ke Finance"
+            count={counts.financeReq}
+            hint="Diajukan divisi lain lewat Permintaan (REQ-) — termasuk approval pembayaran creator dari KOL. Jatuh tempo 1 hari kerja sejak diajukan."
+          >
+            {financeReqs?.map((r) => (
+              <PermintaanCard key={r.id} row={r} canDecide={canDecideFinanceReq} onDone={load} />
             ))}
           </Section>
         </>
