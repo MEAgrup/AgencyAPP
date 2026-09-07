@@ -2,6 +2,17 @@
 
 **Tanggal:** 2026-09-07 · **Diminta oleh:** Nerissa (COO) · **Diketok oleh:** Yohan
 (Director), sebagian bersama Finance
+> ## ✅ SUDAH DIKETOK 2026-09-07 (Nerissa/COO) — 7 dari 8
+> **C-3 = (b)** izin terpisah per klien · **C-1 = (a) Sales DIBUKA aksesnya** (menyimpang
+> dari rekomendasi (b); empat pagarnya wajib ikut dibangun) · **C-2 = (a) bangun
+> sekarang** · **D-4 = bruto dulu, PPN jadi pilihan Sales/Finance per transaksi** ·
+> **D-2 = (a) ya** · **D-1 = (a) hangus** · **E9-RETENSI = (a)** biarkan AM memilih.
+> **D-3 (kunci tutup buku) BELUM diketok** — butuh konfirmasi satu kata.
+>
+> Dokumen ini **arsip bahan ketokan**. Yang mengikat sekarang: `docs/DECISIONS.md`
+> (baris Decided 2026-09-07 + §Open `C-4` `C-5` `D-3`) dan
+> `docs/handoff/HANDOFF_GELOMBANG_C_20260907.md`.
+
 **Kenapa dokumen ini ada:** Gelombang B sudah tutup dan uji terimanya lunas
 (`UAT_GELOMBANG_B_20260907.md`). Gelombang C dan D **dua-duanya berhenti di meja
 pemilik**, bukan di kode. Delapan pertanyaan di bawah adalah seluruh sisanya —
