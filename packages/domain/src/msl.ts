@@ -255,8 +255,15 @@ export interface ServiceInput {
    * Durasi jasa dalam HARI KALENDER (M16 LT-42 / M17 §5.4). Optional/undefined
    * = tidak berlaku untuk layanan ini (disimpan NULL) — kebanyakan layanan
    * lama tidak mendeklarasikan ini.
+   *
+   * `null` berarti hal yang SAMA dengan undefined, dan itu disengaja: pemanggil
+   * yang membangun payload dari sebuah form (MSL admin) selalu punya kuncinya,
+   * dan memaksanya MENGHILANGKAN kunci saat kosong adalah persis kelas cacat
+   * yang aturan rumah "kunci hilang lebih berbahaya daripada null" lahir untuk
+   * mencegah. Jadi kedua bentuk kekosongan diterima; yang ditolak hanya nilai
+   * yang bukan durasi (0, negatif, pecahan).
    */
-  durasiJasa?: number;
+  durasiJasa?: number | null;
   effectiveFrom: string; // YYYY-MM-DD
 }
 
@@ -391,7 +398,7 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
   // diberikan, wajib bilangan bulat positif (hari kalender) — bukan 0/negatif,
   // yang tidak berarti sebagai durasi.
   let durasiJasa: number | null = null;
-  if (inp.durasiJasa !== undefined) {
+  if (inp.durasiJasa !== undefined && inp.durasiJasa !== null) {
     if (!Number.isInteger(inp.durasiJasa) || inp.durasiJasa <= 0) {
       throw new IncompleteError();
     }

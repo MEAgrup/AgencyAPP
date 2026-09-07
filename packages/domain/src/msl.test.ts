@@ -283,6 +283,70 @@ describeDb('updateService', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// durasi_jasa (M16 LT-42 / M17 §5.4) — the field the accrual engine of Gelombang
+// D reads. It went untested until 2026-09-07, and the gap hid a real defect: the
+// MSL admin form neither showed it nor sent it, so every "Ubah" on a service
+// that HAD a duration wrote a new version with NULL. These tests pin the two
+// halves of that: the value survives an edit that carries it, and both shapes of
+// emptiness (undefined and null) mean the same NULL.
+// ---------------------------------------------------------------------------
+describeDb('durasi_jasa', () => {
+  it('persists on create and reads back as the same whole number of days', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa berdurasi', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, durasiJasa: 30,
+    });
+    expect((await effectiveAt(sql, id, TODAY)).durasiJasa).toBe(30);
+  });
+
+  it('SURVIVES an update that carries it forward — the version 2 that wiped it was the bug', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'AI Video', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, durasiJasa: 30,
+    });
+    await updateService(sql, salesLead(), id, {
+      name: 'AI Video (harga naik)', standardPrice: '1200000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-06-01', active: true, durasiJasa: 30,
+    });
+    const v2 = await effectiveAt(sql, id, TODAY);
+    expect(v2.versionNo).toBe(2);
+    expect(v2.durasiJasa).toBe(30);
+  });
+
+  it('an update that omits it CLEARS it — full-replace semantics, stated so no caller is surprised', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa berdurasi 2', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, durasiJasa: 45,
+    });
+    await updateService(sql, salesLead(), id, {
+      name: 'Jasa berdurasi 2', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-06-01', active: true,
+    });
+    expect((await effectiveAt(sql, id, TODAY)).durasiJasa).toBeNull();
+    // …and version 1 still carries it: history is append-only, never rewritten.
+    const chain = await listVersions(sql, id);
+    expect(chain.find((v) => v.versionNo === 1)!.durasiJasa).toBe(45);
+  });
+
+  it('treats an explicit null exactly like an omitted key — a form payload always has the key', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa tanpa durasi', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, durasiJasa: null,
+    });
+    expect((await effectiveAt(sql, id, TODAY)).durasiJasa).toBeNull();
+  });
+
+  it('rejects a value that is not a duration — 0, negative, and fractional', async () => {
+    for (const bad of [0, -1, 1.5]) {
+      await expect(createService(sql, salesLead(), {
+        name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100',
+        effectiveFrom: '2020-01-01', durasiJasa: bad,
+      })).rejects.toBeInstanceOf(IncompleteError);
+    }
+  });
+});
+
 describeDb('listEffectiveAt', () => {
   it('returns the newest-effective version per service', async () => {
     const a = await createService(sql, salesLead(), {

@@ -28,8 +28,14 @@ interface ServiceBody {
   active?: boolean;
   requires_strategy_plan?: boolean;
   plan_tier?: string;
-  /** M16 LT-42 / M17 §5.4 — hari kalender. Absent/undefined = tidak berlaku. */
-  durasi_jasa?: number;
+  /**
+   * M16 LT-42 / M17 §5.4 — hari kalender. Absent, undefined, ATAU `null` sama
+   * artinya: tidak berlaku untuk layanan ini. `null` diterima karena pengirim
+   * utamanya adalah form MSL admin, yang selalu punya kuncinya; memaksanya
+   * menghilangkan kunci saat kosong adalah cara termudah menghilangkan nilainya
+   * tanpa sadar.
+   */
+  durasi_jasa?: number | null;
   effective_from?: string;
 }
 
