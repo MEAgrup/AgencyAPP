@@ -466,6 +466,19 @@ export const MSG_APPROVE_FORBIDDEN =
 export const MSG_REVISION_NOTES_REQUIRED = '[catatan revisi wajib diisi]';
 /** Divisions Involved contains a value outside the allowed set. */
 export const MSG_INVALID_DIVISIONS = '[divisi yang terlibat tidak valid]';
+
+/**
+ * K-1 (ketokan pemilik 2026-09-07, opsi B): AM memilih DIVISI tujuan, bukan nama
+ * staff. Yang membagi pekerjaan ke PIC adalah lead divisi itu, lewat
+ * `task.assignPic` / `task.assignAssetPic` — pintu yang sudah ada dan sudah
+ * digerbangi `canManageTask` (lead/SPV divisi tujuan atau Director).
+ *
+ * Pesannya menyebut SIAPA yang menetapkannya, bukan cuma "tidak boleh": seorang
+ * AM yang membaca "PIC tidak valid" akan mencoba nama lain. Yang perlu dia tahu
+ * adalah bahwa langkah itu bukan langkahnya lagi.
+ */
+export const MSG_PIC_BUKAN_WEWENANG_AM =
+  '[PIC ditetapkan lead divisi tujuan setelah Brief diterima, bukan saat Brief dibuat]';
 /** Actor may not read this Strategy & Plan (not owner AM / Account lead / OD / Director). */
 export const MSG_STRATEGY_FORBIDDEN = '[anda tidak memiliki akses ke Strategy & Plan ini]';
 /** M6C Rule 1: `ditentukan_am` tier with no recorded G-B decision blocks Brief creation. */
@@ -1623,7 +1636,17 @@ export const MSG_BRIEF_REVIEW_FORBIDDEN =
 
 // --- Types ---
 
-/** The M6 §9.4 Brief fields (mandatory: title, division, deliverableType, quantityTarget, dueDate, priority). */
+/**
+ * The M6 §9.4 Brief fields (mandatory: title, division, deliverableType,
+ * quantityTarget, dueDate, priority).
+ *
+ * ⚠️ `assignedPic` is no longer accepted from this input (K-1, 2026-09-07) —
+ * `validateBrief` rejects a non-empty value with `MSG_PIC_BUKAN_WEWENANG_AM`.
+ * The field is kept because `insertBrief` is shared with the M6B inheritance
+ * path and the column itself is still written, later, by `task.assignPic` (lead
+ * of the target division). Removing it here would only move the same
+ * always-empty value into a positional argument.
+ */
 export interface BriefInput {
   title: string;
   strategyId?: string;
@@ -1708,6 +1731,20 @@ function validateBrief(input: BriefInput): void {
   }
   if (!RE_DATE.test(due) || Number.isNaN(Date.parse(`${due}T00:00:00Z`))) {
     throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  // K-1 — `assignedPic` TIDAK BOLEH datang dari jalur ini lagi. Sebelum ini
+  // `validateBrief` tidak memeriksanya sama sekali, jadi menghapus picker-nya di
+  // UI saja akan menyisakan pintu yang terbuka lebar: `POST /services/{id}/briefs`
+  // dengan `assigned_pic` masih akan diterima dan disimpan, dan K-1 akan berlaku
+  // hanya bagi orang yang memakai form. Ditolak, bukan diabaikan diam-diam —
+  // sebuah field yang dikirim lalu dibuang tanpa kabar adalah cara paling pasti
+  // membuat pemanggil percaya PIC-nya sudah tersimpan.
+  //
+  // Kolomnya sendiri TETAP HIDUP: `task.assignPic` (lead/SPV divisi tujuan, gate
+  // `canManageTask`) yang mengisinya, dan `ads.canFileWeeklyReport` ikut
+  // membacanya. Yang ditutup di sini hanya pintu masuk sisi AM.
+  if ((input.assignedPic ?? '').trim() !== '') {
+    throw new ValidationError(MSG_PIC_BUKAN_WEWENANG_AM);
   }
   // Recurring toggle: when on, its sub-fields become mandatory (§9.4).
   if (input.recurring) {

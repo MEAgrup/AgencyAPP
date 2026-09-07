@@ -100,6 +100,7 @@ nomor; keduanya benar di pohonnya masing-masing.
 |---|---|---|
 | A-T1 | **`join clients` di jalur Finance TIDAK mengulang O52** — `clients_select` yang HIDUP hari ini sudah punya lengan `jwt_division() = 'Finance'`, jauh lebih lebar daripada yang tertulis di `20260723064438_rls_baseline.sql`. Diverifikasi probe sebelum join ditulis, bukan dibaca dari berkas baseline. Pelajaran yang berlaku umum: **baca policy dari DB, jangan dari migrasi baseline** — sudah 190+ migrasi menumpuk di atasnya. | Ditutup di F-2. Dikunci tes (`reads_rls.test.ts` meng-assert premisnya juga, jadi ia gugur kalau policy berubah lagi). |
 | A-T2 | **O57 (b) hanya separuh bisa ditutup K-2.** Bagian durasi: tertutup. Bagian floor GMV: TIDAK — katalog tidak memuat angka GMV dan `contracts` tidak punya kolom GMV sama sekali. Dicatat O76, tidak diputuskan sepihak. | Ditulis di F-6 (`DECISIONS.md` O76). **Butuh ketokan pemilik.** |
+| A-T4 | **`admin.test.ts` "hari libur" tidak tahan dijalankan dua kali** atas DB yang sama: ia meng-assert `count(*) = 1` atas `audit_log` tanpa aktor unik, jadi jalan kedua melihat 7. `audit_log` menolak DELETE, jadi `afterEach` tidak bisa membersihkannya. Bukan bug produksi, dan **bukan** disebabkan A-5 — dibuktikan dengan `db-rebuild` lalu jalan ulang: 1991 lulus. Tapi ia memakan satu siklus dan akan memakan siklus Jalur B juga. Perbaikannya sudah ada polanya di repo: `aktorUnik()` (`showcase.test.ts`). | Belum diperbaiki — **di luar cakupan feedback OD**, dicatat supaya tidak dikira regresi. Kalau muncul: `db-rebuild` dulu, baru cari bug. |
 | A-T3 | **Service tidak punya jalur untuk SELESAI.** `[In Execution] → Done` ada di `sm_edges` tapi nol pemanggil di seluruh domain. | Dicatat O75 di F-6. **Butuh ketokan pemilik.** Di luar cakupan feedback. |
 
 ## Permintaan ke Jalur B (berkas milik B — JANGAN diedit dari sini)
@@ -114,4 +115,28 @@ _(belum ada)_
 | A-2 | Request pembayaran creator sampai ke Finance (+ migrasi RLS `…T10####`) | belum |
 | A-3 | Status CRO mentok `[Awaiting Onboarding]` — jahitan STRG- → gerbang Brief | belum |
 | A-4 | Durasi kerja sama pindah dari CRO ke closing Sales (K-2) | belum |
-| A-5 | AM berhenti memilih nama staff Creative (K-1 sisi AM) — **memblokir B-4** | belum |
+| A-5 | AM berhenti memilih nama staff Creative (K-1 sisi AM) — **memblokir B-4** | ✅ **SELESAI** — lihat di bawah |
+
+### A-5 SUDAH MENDARAT — Jalur B boleh mulai B-4
+
+Sisi AM K-1 sudah tertutup, jadi **B-4 tidak diblokir lagi.** Yang perlu Jalur B
+tahu supaya sisi leader-nya nyambung, bukan bertumbukan:
+
+- **Pintu penetapan PIC yang benar SUDAH ADA dan sudah digerbangi** —
+  `task.assignPic` (Brief) dan `task.assignAssetPic` (Asset), keduanya lewat
+  `canManageTask(actor, division)` = lead/SPV divisi tujuan atau Director, plus
+  `validatePicForDivision` (staff AKTIF divisi itu, lewat `role_mappings`).
+  **Jangan bangun pintu kedua untuk B-4** — itu yang dipakai leader membagi ke
+  PIC per-Asset.
+- **Server MENOLAK `assigned_pic` pada pembuatan Brief**, pesannya
+  `MSG_PIC_BUKAN_WEWENANG_AM` =
+  `[PIC ditetapkan lead divisi tujuan setelah Brief diterima, bukan saat Brief dibuat]`.
+  Ditolak, bukan diabaikan — kalau ada kode Jalur B yang mengirim `assigned_pic`
+  saat membuat Brief (mis. lewat `brief-inherit` atau form mana pun), ia akan
+  GAGAL, bukan diam-diam kehilangan nilainya.
+- **Kolom `briefs.assigned_pic` TETAP HIDUP.** Yang ditutup hanya pintu masuk
+  sisi AM. `ads.canFileWeeklyReport` masih membacanya, dan `brief-inherit`
+  memang tidak pernah mengisinya (diperiksa, bukan diasumsikan).
+- **Brief kini sah lahir tanpa PIC** (`assignedPic === ''`), dan itu keadaan
+  normal sekarang — bukan data yang kurang. Kalau layar Jalur B menampilkan PIC,
+  render `—`, jangan `undefined` dan jangan anggap error.

@@ -6,8 +6,6 @@ import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
 import { createInterview } from '@/lib/interview';
 import { useAuth } from '@/lib/auth-context';
-import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
-import EmployeePicker from '@/components/EmployeePicker';
 import PlanGatePanel from '@/components/PlanGatePanel';
 import {
   BRIEF_DIVISIONS,
@@ -167,7 +165,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // Create Brief form
   const [bTitle, setBTitle] = useState('');
   const [bDivision, setBDivision] = useState<string>(BRIEF_DIVISIONS[0]);
-  const [bPic, setBPic] = useState('');
   const [bDeliverable, setBDeliverable] = useState('');
   const [bQty, setBQty] = useState('');
   const [bDue, setBDue] = useState('');
@@ -182,15 +179,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const [bSubmitting, setBSubmitting] = useState(false);
   const [bError, setBError] = useState<string | null>(null);
   const [bMessage, setBMessage] = useState<string | null>(null);
-
-  // PIC candidates follow the Brief's TARGET DIVISION (§5 Rule 1: the PIC must be
-  // active staff of that division — `task.validatePicForDivision`). This is the
-  // AM's cross-division door: Creative, Ads, KOL, Live Stream.
-  const {
-    employees: picCandidates,
-    loading: picLoading,
-    error: picError,
-  } = useAssignableEmployees(bDivision, LEVEL_STAFF, canWrite);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -415,20 +403,18 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
    * Prefill the Brief form from one approved-Plan task-satuan (QA revisi). The AM
    * should not re-type quotas the Plan already committed to — clicking a task loads
    * its division, a sensible title, the deliverable, and the target quantity, and
-   * the AM only completes what the Plan does not carry (due date, PIC, priority,
-   * instructions). Changing the division clears the PIC (a Creative staffer is not
-   * a valid PIC for an Ads Brief, §5 Rule 1), same as the division <select> does.
+   * the AM only completes what the Plan does not carry (due date, priority,
+   * instructions). PIC is NOT among them since K-1 — see the form below.
    */
   function prefillBriefFromTask(t: DivisionTask) {
     const label = taskLabel(t.divisi, t.jenis);
     setBDivision(t.divisi);
-    setBPic('');
     setBTitle(`${t.divisi} — ${label}`);
     setBDeliverable(label);
     setBQty(t.jumlah);
     setBError(null);
     setBMessage(
-      `Form terisi dari Strategy & Plan (${t.divisi} · ${label}). Lengkapi due date, PIC, dan detail lain, lalu buat Brief.`,
+      `Form terisi dari Strategy & Plan (${t.divisi} · ${label}). Lengkapi due date dan detail lain, lalu buat Brief.`,
     );
   }
 
@@ -444,7 +430,9 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         // ErrBriefStrategyMismatch) — never fall back to a non-approved draft.
         strategy_id: planGated ? (approvedStrategy?.id ?? '') : '',
         assigned_division: bDivision,
-        assigned_pic: bPic || undefined,
+        // K-1: DIVISI saja. PIC-nya ditetapkan lead divisi tujuan sesudah Brief
+        // diterima (`task.assignPic`), dan server MENOLAK `assigned_pic` di sini
+        // — jadi mengirimnya "untuk aman" justru membuat pembuatan Brief gagal.
         deliverable_type: bDeliverable,
         quantity_target: Number(bQty),
         due_date: bDue,
@@ -462,7 +450,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       setBDeliverable('');
       setBQty('');
       setBDue('');
-      setBPic('');
       setBInstructions('');
       setBRefs('');
       setBAddendum(false);
@@ -1184,32 +1171,30 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             <div className="formRow">
               <div className="field">
                 <label htmlFor="b-division">Divisi Tujuan</label>
-                {/* Changing the target division INVALIDATES the chosen PIC: a
-                    Creative staffer is not a valid PIC for an Ads Brief (§5 Rule
-                    1), so it is cleared here rather than sent and rejected. */}
                 <select
                   id="b-division"
                   value={bDivision}
-                  onChange={(e) => {
-                    setBDivision(e.target.value);
-                    setBPic('');
-                  }}
+                  onChange={(e) => setBDivision(e.target.value)}
                 >
                   {BRIEF_DIVISIONS.map((div) => (
                     <option key={div} value={div}>{div}</option>
                   ))}
                 </select>
               </div>
-              <EmployeePicker
-                id="b-pic"
-                label={`PIC divisi ${bDivision}`}
-                employees={picCandidates}
-                loading={picLoading}
-                error={picError}
-                value={bPic}
-                onChange={setBPic}
-                emptyHint={`Belum ada staff aktif di divisi ${bDivision}. Brief tetap bisa dibuat tanpa PIC — SPV/Lead divisi tujuan yang menetapkannya nanti di papan Brief.`}
-              />
+              {/* K-1 (ketokan pemilik 2026-09-07): AM memilih DIVISI, bukan nama
+                  staff. Field PIC-nya dihapus dari sini — tapi TIDAK dihapus
+                  diam-diam. Field yang hilang tanpa penjelasan terbaca seperti
+                  halaman yang rusak, dan AM yang mencarinya akan bertanya ke
+                  lead divisi apakah Brief-nya belum lengkap. Aturan kerja #4:
+                  ketiadaan yang diam tidak bisa dibedakan dari kerusakan — jadi
+                  ketiadaan ini bersuara. */}
+              <div className="field">
+                <label>PIC divisi {bDivision}</label>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Ditetapkan lead divisi {bDivision} setelah Brief diterima, bukan di sini.
+                  Anda memilih divisi tujuannya; pembagian ke orangnya wewenang lead divisi itu.
+                </span>
+              </div>
             </div>
             <div className="formRow">
               <div className="field">
