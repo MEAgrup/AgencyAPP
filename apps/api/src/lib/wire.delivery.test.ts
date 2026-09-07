@@ -571,6 +571,9 @@ describe('M8 campaignToWire (Campaign + derived §5 performance view)', () => {
     status: '[Active]',
     tipeIklan: 'GMV Max Product',
     additionalDays: 0,
+    // B-5/K-3: `''` adalah nilai yang domain benar-benar kirim saat brief setup
+    // kampanye tidak menunjuk Brief Creative sumber — bukan `undefined`.
+    sourceCreativeBriefId: '',
     totalSpend: 8000000,
     totalSpendDisplay: 'Rp. 8.000.000,00',
     totalGmv: 31000000,
@@ -601,6 +604,8 @@ describe('M8 campaignToWire (Campaign + derived §5 performance view)', () => {
       status: '[Active]',
       tipe_iklan: 'GMV Max Product',
       additional_days: 0,
+      // B-5/K-3 — dikirim SELALU, `''` saat brief setup tidak menunjuk sumber.
+      source_creative_brief_id: '',
       total_spend: 8000000,
       total_spend_display: 'Rp. 8.000.000,00',
       total_gmv: 31000000,

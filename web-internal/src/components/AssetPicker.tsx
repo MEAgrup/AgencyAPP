@@ -68,6 +68,20 @@ export default function AssetPicker({
   const [assets, setAssets] = useState<ClientAssetOption[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  /**
+   * Jalan keluar dari penyempitan `sourceBriefId` (K-3).
+   *
+   * Penyempitan itu benar sebagai DEFAULT, tapi ia bisa berujung pada picker
+   * yang kosong total: brief Creative sumbernya sah tapi belum punya satu pun
+   * aset `[Approved]`, atau aset yang dimaksud lahir dari Brief Creative LAIN
+   * milik klien yang sama. Tanpa jalan keluar, Advertiser membaca penjelasan
+   * yang benar lalu tetap tidak bisa menautkan apa pun — dan kembali ke Google
+   * Sheet, yang justru hasil yang perbaikan ini ada untuk mencegah.
+   *
+   * Default `false`: yang dilihat lebih dulu selalu yang disempitkan.
+   */
+  const [abaikanSumber, setAbaikanSumber] = useState(false);
+  const sumberAktif = abaikanSumber ? undefined : sourceBriefId;
 
   const load = useCallback(async () => {
     if (clientId === '') {
@@ -78,14 +92,14 @@ export default function AssetPicker({
     setErr(null);
     setLoading(true);
     try {
-      const res = await listClientApprovedAssets(clientId, sourceBriefId);
+      const res = await listClientApprovedAssets(clientId, sumberAktif);
       setAssets(res.data);
     } catch (e) {
       setErr(errorMessage(e));
     } finally {
       setLoading(false);
     }
-  }, [clientId, sourceBriefId]);
+  }, [clientId, sumberAktif]);
 
   useEffect(() => {
     load();
@@ -127,7 +141,29 @@ export default function AssetPicker({
       )}
       {!err && !loading && assets.length === 0 && (
         <span className="muted" style={{ fontSize: 12 }}>
-          {pesanKosongAset({ adaKlien: clientId !== '', adaSourceBrief: !!sourceBriefId })}
+          {pesanKosongAset({ adaKlien: clientId !== '', adaSourceBrief: !!sumberAktif })}
+          {sumberAktif !== undefined && sumberAktif !== '' && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="btn btnGhost btnSm"
+                style={{ marginLeft: 4 }}
+                onClick={() => setAbaikanSumber(true)}
+              >
+                Tampilkan semua aset klien
+              </button>
+            </>
+          )}
+        </span>
+      )}
+      {!err && abaikanSumber && sourceBriefId && (
+        <span className="muted" style={{ fontSize: 12 }}>
+          Menampilkan SELURUH aset [Approved] klien ini, di luar Brief Creative sumber kampanye
+          ({sourceBriefId}).{' '}
+          <button type="button" className="btn btnGhost btnSm" onClick={() => setAbaikanSumber(false)}>
+            Kembali ke Brief sumber
+          </button>
         </span>
       )}
       {!err && !loading && assets.length > 0 && offered.length === 0 && (

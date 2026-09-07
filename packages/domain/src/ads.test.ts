@@ -206,6 +206,37 @@ afterEach(async () => {
   await sql`delete from clients where created_by like 'ZZ-%'`;
 });
 
+describeDb('B-5 / K-3 — kampanye membawa Brief Creative sumbernya', () => {
+  it('`source_creative_brief_id` diproyeksikan ke Campaign, di kedua jalur baca', async () => {
+    // Diproyeksikan lewat kampanye (bukan `GET /briefs/{id}`) karena
+    // `account.getBrief` milik Jalur A — lihat HANDOFF_FEEDBACK_OD_JALUR_B.md.
+    const { clientId, briefId } = await adsBrief();
+    const creativeBrief = uid('BRF');
+    const svc = uid('SVC');
+    await insertService(svc, clientId);
+    await insertBrief(creativeBrief, svc, 'Creative', '[In Progress]');
+    await sql`update briefs set source_creative_brief_id = ${creativeBrief} where id = ${briefId}`;
+
+    // Jalur 1: hasil createCampaign langsung.
+    const dibuat = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    expect(dibuat.sourceCreativeBriefId).toBe(creativeBrief);
+    // Jalur 2: baca ulang. Kedua jalur harus SETUJU — halaman kampanye memakai
+    // yang kedua, sementara tes lain memakai yang pertama, dan satu yang lupa
+    // memetakan kolomnya tidak akan terlihat tanpa memeriksa keduanya.
+    expect((await getCampaign(sql, adsStaff(), dibuat.id)).sourceCreativeBriefId).toBe(creativeBrief);
+  });
+
+  it('brief setup TANPA sumber memberi `\'\'`, bukan null — dan kampanyenya tetap terbaca', async () => {
+    // `''` (bukan null) supaya kunci wire-nya selalu ada; dan LEFT join-nya
+    // dijaga di sini: kalau seseorang menggantinya dengan inner join, kampanye
+    // yang brief-nya tak terbaca akan 404 demi satu kolom opsional.
+    const { briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    expect(c.sourceCreativeBriefId).toBe('');
+    expect((await getCampaign(sql, adsStaff(), c.id)).sourceCreativeBriefId).toBe('');
+  });
+});
+
 describeDb('createCampaign (§4 Rule 1)', () => {
   it('creates a campaign under an Ads Brief [In Progress], born [Setting] with IDR display', async () => {
     const { briefId } = await adsBrief();

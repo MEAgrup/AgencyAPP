@@ -267,6 +267,21 @@ export interface Campaign {
   tipeIklan: string;
   /** M16 LT-42 (Ads Management Date) — hari tambahan manual (mis. libur Lebaran). */
   additionalDays: number;
+  /**
+   * B-5 / ketokan K-3 — Brief Creative yang menjadi SUMBER brief setup kampanye
+   * ini (`briefs.source_creative_brief_id`, kolom F-4), atau `''` kalau brief
+   * setup-nya tidak menunjuk satu pun.
+   *
+   * Diproyeksikan lewat kampanye, bukan lewat `GET /briefs/{id}`, karena
+   * `account.getBrief` (dan tipe `account.Brief`) milik Jalur A — lihat
+   * `docs/handoff/HANDOFF_FEEDBACK_OD_JALUR_B.md`. Itu juga tempat yang lebih
+   * tepat secara fungsional: yang butuh nilai ini adalah picker aset DI HALAMAN
+   * KAMPANYE, dan halaman itu sudah membaca kampanyenya.
+   *
+   * `''` (bukan `null`) supaya kunci wire-nya selalu ada dan halaman tidak perlu
+   * membedakan "tidak menunjuk" dari "field-nya hilang".
+   */
+  sourceCreativeBriefId: string;
   totalSpend: number;
   totalSpendDisplay: string;
   totalGmv: number;
@@ -356,8 +371,9 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
   const now = new Date();
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const briefRows = await tx<{ assigned_division: string; status: string; client_id: string; assigned_am_id: string | null; gmv_baseline: string; total_sales: string }[]>`
-      select b.assigned_division, b.status, sv.client_id, cl.assigned_am_id, cl.gmv_baseline, cl.total_sales
+    const briefRows = await tx<{ assigned_division: string; status: string; client_id: string; assigned_am_id: string | null; gmv_baseline: string; total_sales: string; source_creative_brief_id: string | null }[]>`
+      select b.assigned_division, b.status, sv.client_id, cl.assigned_am_id, cl.gmv_baseline, cl.total_sales,
+             b.source_creative_brief_id
         from briefs b
         join services sv on sv.id = b.service_id
         join clients cl on cl.id = sv.client_id
@@ -425,6 +441,7 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
       id, briefId, clientId: brief.client_id, platform, objective, budget: Number(budget) / 100,
       budgetDisplay: money.format(budget), startDate: start, endDate: end, targetKpi, status: STATUS_SETTING,
       tipeIklan, additionalDays: 0,
+      sourceCreativeBriefId: brief.source_creative_brief_id ?? '',
       totalSpend: 0, totalSpendDisplay: money.format(0n), totalGmv: 0, totalGmvDisplay: money.format(0n),
       roas: null, roasDisplay: '—', linkedAssetIds: [], metricEntryCount: 0, optimizationCount: 0,
       underperformingStreak: 0, escalationFlagged: false, createdBy: actor.employeeId, createdAt: now,
@@ -999,11 +1016,19 @@ export async function getCampaign(sql: Queryable, actor: Actor, campaignId: stri
   const rows = await sql<
     { id: string; brief_id: string; client_id: string; platform: string; objective: string; budget: string;
       start_date: string | Date; end_date: string | Date; target_kpi: string; status: string; created_by: string;
-      created_at: Date; assigned_am_id: string | null; tipe_iklan: string; additional_days: number }[]
+      created_at: Date; assigned_am_id: string | null; tipe_iklan: string; additional_days: number;
+      source_creative_brief_id: string | null }[]
   >`
     select c.id, c.brief_id, c.client_id, c.platform, c.objective, c.budget, c.start_date, c.end_date,
-           c.target_kpi, c.status, c.created_by, c.created_at, cl.assigned_am_id, c.tipe_iklan, c.additional_days
-      from ad_campaigns c join clients cl on cl.id = c.client_id where c.id = ${campaignId}`;
+           c.target_kpi, c.status, c.created_by, c.created_at, cl.assigned_am_id, c.tipe_iklan, c.additional_days,
+           b.source_creative_brief_id
+      from ad_campaigns c
+      join clients cl on cl.id = c.client_id
+      -- B-5/K-3: brief setup kampanye. LEFT join — sebuah kampanye tanpa brief
+      -- yang bisa dibaca tetap harus terbaca; kehilangan barisnya di sini akan
+      -- membuat halaman kampanye 404 demi satu kolom opsional.
+      left join briefs b on b.id = c.brief_id
+     where c.id = ${campaignId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_CAMPAIGN_NOT_FOUND);
   }
@@ -1017,7 +1042,8 @@ export async function getCampaign(sql: Queryable, actor: Actor, campaignId: stri
     id: row.id, briefId: row.brief_id, clientId: row.client_id, platform: row.platform, objective: row.objective,
     budget: Number(budget) / 100, budgetDisplay: money.format(budget), startDate: dateStr(row.start_date),
     endDate: dateStr(row.end_date), targetKpi: row.target_kpi, status: row.status, createdBy: row.created_by,
-    createdAt: row.created_at, tipeIklan: row.tipe_iklan, additionalDays: Number(row.additional_days), ...derived,
+    createdAt: row.created_at, tipeIklan: row.tipe_iklan, additionalDays: Number(row.additional_days),
+    sourceCreativeBriefId: row.source_creative_brief_id ?? '', ...derived,
   };
 }
 

@@ -457,6 +457,7 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
                 id="link-asset"
                 label="Tautkan Aset (aset [Approved] milik klien kampanye)"
                 clientId={campaign.client_id}
+                sourceBriefId={campaign.source_creative_brief_id}
                 value={linkAssetId}
                 onChange={setLinkAssetId}
                 required
@@ -672,6 +673,7 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
                   id="o-new-asset"
                   label="Aset Baru (aset [Approved] klien kampanye)"
                   clientId={campaign.client_id}
+                  sourceBriefId={campaign.source_creative_brief_id}
                   value={oNewAsset}
                   onChange={setONewAsset}
                   required

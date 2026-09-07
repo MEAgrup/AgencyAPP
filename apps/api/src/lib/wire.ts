@@ -1028,6 +1028,13 @@ export interface CampaignWire {
   tipe_iklan: string;
   /** M16 LT-42 (Ads Management Date) — hari tambahan manual. */
   additional_days: number;
+  /**
+   * B-5 / K-3 — Brief Creative sumber brief setup kampanye ini
+   * (`briefs.source_creative_brief_id`, kolom F-4), atau `''`. Selalu dikirim:
+   * picker aset di halaman kampanye menyaring ke nilai ini, dan kunci yang
+   * HILANG lebih berbahaya daripada string kosong (CLAUDE.md).
+   */
+  source_creative_brief_id: string;
   total_spend: number;
   total_spend_display: string;
   total_gmv: number;
@@ -1048,6 +1055,7 @@ export function campaignToWire(c: ads.Campaign): CampaignWire {
     id: c.id, brief_id: c.briefId, client_id: c.clientId, platform: c.platform, objective: c.objective,
     budget: c.budget, budget_display: c.budgetDisplay, start_date: c.startDate, end_date: c.endDate,
     target_kpi: c.targetKpi, status: c.status, tipe_iklan: c.tipeIklan, additional_days: c.additionalDays,
+    source_creative_brief_id: c.sourceCreativeBriefId,
     total_spend: c.totalSpend, total_spend_display: c.totalSpendDisplay,
     total_gmv: c.totalGmv, total_gmv_display: c.totalGmvDisplay, roas: c.roas, roas_display: c.roasDisplay,
     linked_asset_ids: c.linkedAssetIds, metric_entry_count: c.metricEntryCount, optimization_count: c.optimizationCount,
