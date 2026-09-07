@@ -115,6 +115,18 @@ notifikasi.
 
 ### Jebakan yang masih berlaku
 
+- ⚠️ **`npm run typecheck --workspaces` WAJIB diulang SESUDAH `npm install`
+  selesai — dan keluarannya dibaca, bukan cuma exit code-nya.** Ini menggigit
+  sesi ini dan memerahkan tiga job CI (`core-engines`, `api`,
+  `db-and-migrations`) pada commit pertama. Di container yang `node_modules`-nya
+  belum terpasang, `tsc` membanjiri keluaran dengan *"Cannot find module
+  'vitest'"* dan *"Cannot find name 'node:fs'"* untuk SETIAP berkas tes — dan
+  tiga baris galat yang sungguhan tenggelam di antaranya. Perintah di blok §3
+  sudah berurutan benar (`npm install &&` lebih dulu); yang salah adalah
+  menjalankannya terpisah lalu menganggap yang pertama sudah cukup.
+  **Ketiga job CI itu mengompilasi `@cdps/core`**, jadi satu galat tipe di
+  `packages/core` memerahkan ketiganya sekaligus dengan pesan yang tampak
+  seperti tiga masalah berbeda.
 - **Jalankan `packages/domain` SENDIRIAN sesudah `db-rebuild`** — tanpa itu,
   ~788 kegagalan palsu dari `plan.test.ts` yang menyapu `clients`.
 - **`audit_log` menolak DELETE** (aturan rumah #3). Tes baru yang menghitung
@@ -184,7 +196,27 @@ mengirim materi pitch berisi klien "PERLU PERHATIAN".
 
 ---
 
-## 6. Yang sesi ini TIDAK buktikan — disebut jujur
+## 6. Status CI PR #305
+
+Hijau seluruhnya pada head `a6be7be` — 11 dari 11 check, `mergeable_state:
+clean`, nol review thread terbuka, ketiga preview Vercel Ready. Repo ini
+**tidak** menjalankan check *Claude Approvals*.
+
+Commit pertama (`e6f3c8d`) merah di tiga job karena satu galat tipe di
+`packages/core/src/showcase.ts` (lihat jebakan pertama di §3); `a6be7be`
+memperbaikinya dengan tipe bernama `LaporanBerskor`, **bukan** dengan `!` —
+`!` di situ akan mematikan justru penjagaan yang paling penting di modul itu
+("laporan tanpa skor bukan laporan ber-skor nol").
+
+Satu catatan dari log CI yang layak dibawa: `db-and-migrations` pada commit
+merah itu sudah melewati **seluruh 184 migrasi**, gerbang **146 tabel**,
+`rls_checks: PASS`, dan `auth_claims_checks: PASS` sebelum jatuh di langkah
+typecheck. Jadi migrasi 184 dan gerbang hitungannya memang sudah terbukti hijau
+di CI, bukan hanya di container lokal.
+
+---
+
+## 7. Yang sesi ini TIDAK buktikan — disebut jujur
 
 - **Piksel React.** Halaman `/showcase` lolos `tsc`, `vitest`, dan `next build`,
   dan badan JSON yang ia baca diuji lewat rute — tapi tak ada seorang pun yang
