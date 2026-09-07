@@ -20,10 +20,13 @@
 | **Gelombang C — Showcase Klien Terbaik** | ✅ **SELESAI** — lima langkah §5 handoff sebelumnya, semuanya |
 | **Gelombang D — laporan keuangan accrual** | ⏸️ aturan uangnya lengkap; penghalangnya **hanya DATA** (`durasi_jasa` MSL 0/14) |
 
-**Satu migrasi baru** (184): `20260916010000_c5_izin_pitch_klien.sql`.
-Repo sekarang **184**; live (`egddxfcnrtecheiykhlf`) masih **183** ⇒ **ADA SATU
-MIGRASI YANG BELUM DI-APPLY KE LIVE.** Lihat §5 — ini pekerjaan pertama sesi
-berikutnya, dan sampai ia dikerjakan repo dan live BERBEDA.
+**Dua migrasi baru** (184 · 185): `20260916010000_c5_izin_pitch_klien.sql` dan
+`20260917010000_c5_harden_search_path.sql`.
+
+> ✅ **SUDAH DI-APPLY KE LIVE 2026-09-07** — repo dan `CDPS SG` sama-sama di
+> **185**, 146 tabel, tidak drift. Diverifikasi lewat kueri katalog. Butir §5
+> nomor 1 yang dulu berbunyi "apply migrasi 184 ke live" **sudah lunas**;
+> lihat `HANDOFF_LANJUT_20260907.md` untuk posisi terkini.
 
 ---
 
@@ -169,13 +172,9 @@ mengirim materi pitch berisi klien "PERLU PERHATIAN".
 
 ## 5. Pekerjaan sesi berikutnya, urut
 
-1. **Apply migrasi 184 ke live** — repo 184, live 183. ⛔ **JANGAN
-   `supabase db push`** (ledger versi live berbeda *wholesale* dari nama berkas
-   repo, O65). Pakai `mcp__Supabase__apply_migration` untuk
-   `20260916010000_c5_izin_pitch_klien.sql` saja, lalu verifikasi lewat kueri
-   katalog: 146 tabel, `client_pitch_consents` ada, kedua trigger `frozen`
-   terpasang, policy `client_pitch_consents_sel` ada. **Sampai ini dikerjakan,
-   halaman `/showcase` akan 500 di produksi** — tabelnya belum ada di sana.
+1. ~~**Apply migrasi 184 ke live**~~ — ✅ **SELESAI 2026-09-07**, bersama
+   migrasi 185 (pengerasan `search_path` yang advisor Supabase minta). Live
+   sekarang 146 tabel; prefix/mesin/event tetap 40/31/69.
 2. **Dua pekerjaan operasional dari §7 handoff sebelumnya** — keduanya masih
    memblokir NILAI, bukan kode, dan tidak ada kode yang bisa menggantikannya:
    - **Isi `durasi_jasa` di MSL** (0 dari 14 layanan). Tanpa ini Gelombang D
