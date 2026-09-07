@@ -43,6 +43,14 @@ export interface Brief {
   strategy_id?: string;
   assigned_division: string;
   assigned_pic?: string;
+  // Feedback OD 2026-09-07 Creative #3 (F-1/F-2, dirender B-2) — identitas klien
+  // + nama PIC, ada di SETIAP baca Brief. NON-opsional: server mengirim `''`
+  // eksplisit kalau belum ada PIC, jadi halaman merender `—`, bukan `undefined`.
+  // Kueri yang mengisinya lewat `private.*` (perangkap O52) — jangan menambah
+  // join `services`/`clients` di FE maupun di kueri baru.
+  client_id: string;
+  client_nama: string;
+  assigned_pic_nama: string;
   deliverable_type: string;
   quantity_target: number;
   due_date: string; // "YYYY-MM-DD"

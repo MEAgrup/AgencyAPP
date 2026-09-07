@@ -515,6 +515,36 @@ export function briefToWire(b: account.Brief): BriefWire {
   };
 }
 
+/**
+ * task.BriefRollupDiagnosis → wire (B-1a — kenapa Brief ini belum bergerak).
+ *
+ * SEMUA kunci selalu dikirim, termasuk `blocker` saat nilainya `'selesai'`:
+ * kunci yang HILANG lebih berbahaya daripada `null` (CLAUDE.md), dan halaman
+ * yang harus membedakan "tidak ada penghalang" dari "diagnosisnya tidak
+ * terbaca" tidak boleh menebaknya dari absennya sebuah kunci.
+ */
+export interface BriefRollupDiagnosisWire {
+  brief_id: string;
+  status: string;
+  created: number;
+  target: number;
+  done: number;
+  blocker: string;
+  rollup_target: string;
+}
+
+export function briefRollupDiagnosisToWire(d: task.BriefRollupDiagnosis): BriefRollupDiagnosisWire {
+  return {
+    brief_id: d.briefId,
+    status: d.status,
+    created: d.created,
+    target: d.target,
+    done: d.done,
+    blocker: d.blocker,
+    rollup_target: d.rollupTarget,
+  };
+}
+
 /** Request body → BriefInput (snake_case wire → camelCase domain). */
 export function toBriefInput(b: {
   title?: string;

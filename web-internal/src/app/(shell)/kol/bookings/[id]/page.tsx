@@ -43,7 +43,8 @@ import {
   type Brief,
   type PaymentRequest,
 } from '@/lib/kol';
-import { hitungProgres, labelProgres, pesanRollupTertahan } from '@/lib/brief-progress';
+import { hitungProgres, labelProgres } from '@/lib/brief-progress';
+import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
@@ -419,7 +420,7 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
     brief === null || briefBookingCount === null
       ? null
       : hitungProgres(briefBookingCount, brief.quantity_target);
-  const rollupTertahan = progres === null ? null : pesanRollupTertahan(progres, 'Booking');
+
   const isSourcing = status === '[Sourcing]';
   const isBooked = status === '[Booked]';
   const isContentInProgress = status === '[Content In Progress]';
@@ -507,11 +508,7 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
                 <div>{brief.priority}</div>
               </div>
             </div>
-            {rollupTertahan && (
-              <div className="alert alertInfo" role="status" style={{ marginTop: 12 }}>
-                {rollupTertahan}
-              </div>
-            )}
+            <RollupBlockerPanel briefId={brief.id} satuan="Booking" refreshKey={briefBookingCount ?? 0} />
           </>
         ) : null}
       </section>

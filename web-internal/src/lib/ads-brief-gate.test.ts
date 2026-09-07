@@ -19,6 +19,12 @@ function brief(id: string, status: string): AdsBrief {
     service_id: 'SVC-202608-0002',
     assigned_division: 'Ads',
     assigned_pic: '2602020622',
+    // F-1/F-2 (dirender B-2): non-opsional di wire, jadi fixture-nya ikut
+    // menyediakannya — `''` adalah nilai yang server benar-benar kirim saat
+    // Brief belum punya PIC, bukan `undefined`.
+    client_id: 'CLI-202608-0002',
+    client_nama: 'Alpha Digital Store',
+    assigned_pic_nama: 'Kenny Wijaya',
     deliverable_type: 'Ads spent (Rp)',
     due_date: '2026-09-05',
     priority: 'Medium',

@@ -29,7 +29,7 @@ import { bi, money, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefLeavesToDo } from './account';
 import { ConflictError as BoardConflictError, onBriefReachedTerminal, validateBriefApproval } from './board';
-import { computeMetrics, STATUS_APPROVED, STATUS_BLOCKED, STATUS_IN_PROGRESS, STATUS_IN_REVIEW, STATUS_REVISION_REQ, STATUS_SUBMITTED, type Transition } from './task';
+import { computeMetrics, notifyAmOnRollupEdge, STATUS_APPROVED, STATUS_BLOCKED, STATUS_IN_PROGRESS, STATUS_IN_REVIEW, STATUS_REVISION_REQ, STATUS_SUBMITTED, type Transition } from './task';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -932,6 +932,10 @@ async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId: string
     if (from === '[To Do]') {
       await onBriefLeavesToDo(tx, actor, rows[0].service_id);
     }
+    // B-1b: same two AM handoff events as the Creative/Ads roll-up, through the
+    // SAME function (`task.notifyAmOnRollupEdge`) — a KOL Brief that closes must
+    // not be quieter than a Creative one.
+    await notifyAmOnRollupEdge(tx, actor, briefId, to);
     // M11 §5.5: on reaching terminal, fire EvDependencySatisfied once per sourced Dependency.
     if (to === STATUS_APPROVED) {
       await onBriefReachedTerminal(tx, actor, briefId);

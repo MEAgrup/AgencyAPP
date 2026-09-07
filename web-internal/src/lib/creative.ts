@@ -40,6 +40,14 @@ export interface Brief {
   strategy_id?: string;
   assigned_division: string;
   assigned_pic?: string;
+  // Feedback OD 2026-09-07 Creative #3 (F-1/F-2, dirender B-2) — identitas klien
+  // + nama PIC, ada di SETIAP baca Brief. NON-opsional: server mengirim `''`
+  // eksplisit kalau belum ada PIC, jadi halaman merender `—`, bukan `undefined`.
+  // Kueri yang mengisinya lewat `private.*` (perangkap O52) — jangan menambah
+  // join `services`/`clients` di FE maupun di kueri baru.
+  client_id: string;
+  client_nama: string;
+  assigned_pic_nama: string;
   deliverable_type: string;
   quantity_target: number;
   due_date: string; // YYYY-MM-DD
@@ -252,6 +260,72 @@ export function createAssetBatch(briefId: string, rows: AssetAssignmentInput[]):
 
 export function listBriefAssets(briefId: string): Promise<{ data: Asset[] }> {
   return api.get<{ data: Asset[] }>(`/briefs/${briefId}/assets`);
+}
+
+// ---------------------------------------------------------------------------
+// Diagnosis rollup Brief (B-1a) — kenapa Brief ini belum bergerak.
+//
+// `GET /briefs/{id}/rollup`. Semuanya turunan, nol yang disimpan, dan nol efek
+// samping — aman dipanggil setiap kali halaman dimuat.
+// ---------------------------------------------------------------------------
+
+/** Sebab tunggal yang paling menghalangi rollup sebuah Brief. */
+export type RollupBlocker =
+  | 'selesai'
+  | 'nol_unit'
+  | 'unit_belum_lengkap'
+  | 'di_luar_rantai'
+  | 'menunggu_dependency'
+  | 'menunggu_pekerjaan';
+
+/** Diagnosis rollup satu Brief — setiap kunci selalu ada. */
+export interface BriefRollupDiagnosis {
+  brief_id: string;
+  status: string;
+  created: number;
+  target: number;
+  done: number;
+  blocker: RollupBlocker;
+  rollup_target: string;
+}
+
+export function getBriefRollup(briefId: string): Promise<BriefRollupDiagnosis> {
+  return api.get<BriefRollupDiagnosis>(`/briefs/${briefId}/rollup`);
+}
+
+/**
+ * Kalimat yang dibaca orangnya. Dipisah dari komponen supaya bisa diuji, dan
+ * ditulis SEBAGAI SEBAB + AKIBAT: "belum lengkap" saja tidak memberi tahu
+ * kenapa statusnya tidak bergerak, dan itulah keluhannya (Account #3 & #4).
+ *
+ * `null` untuk `selesai` — supaya pemanggil tidak bisa merender kotak kosong.
+ */
+export function pesanBlocker(d: BriefRollupDiagnosis, satuan = 'unit'): string | null {
+  const sisa = Math.max(0, d.target - d.created);
+  switch (d.blocker) {
+    case 'selesai':
+      return null;
+    case 'nol_unit':
+      return `Belum ada ${satuan} sama sekali untuk Brief ini, jadi statusnya belum bisa bergerak. Target: ${d.target}.`;
+    case 'unit_belum_lengkap':
+      return (
+        `Status Brief tidak akan tertutup sebelum SELURUH ${d.target} ${satuan} dibuat — ` +
+        `${sisa} lagi belum ada (${d.done} dari ${d.created} yang sudah dibuat selesai). ` +
+        `Menyelesaikan yang ada saja tidak menggerakkan statusnya.`
+      );
+    case 'di_luar_rantai':
+      return (
+        `Status Brief (${d.status}) berada di luar rantai rollup, jadi rollup-nya BERHENTI PERMANEN — ` +
+        `tidak ada peristiwa ${satuan} yang akan memperbaikinya. Perlu tindakan AM/SPV.`
+      );
+    case 'menunggu_dependency':
+      return (
+        `Seluruh ${d.target} ${satuan} sudah selesai, tapi Brief ini menunggu Blocking Dependency (M11) ` +
+        `yang sumbernya belum selesai. Statusnya akan menutup sendiri begitu sumbernya tutup.`
+      );
+    case 'menunggu_pekerjaan':
+      return `${d.done} dari ${d.target} ${satuan} selesai — sisanya masih dikerjakan.`;
+  }
 }
 
 // ---------------------------------------------------------------------------

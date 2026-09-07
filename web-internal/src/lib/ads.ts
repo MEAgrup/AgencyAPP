@@ -108,6 +108,12 @@ export interface AdsBrief {
   service_id: string;
   assigned_division: string;
   assigned_pic?: string;
+  // Feedback OD 2026-09-07 Creative #3 (F-1/F-2, dirender B-2) — identitas klien
+  // + nama PIC, ada di SETIAP baca Brief. NON-opsional: server mengirim `''`
+  // eksplisit, jadi halaman merender `—` dan bukan `undefined`.
+  client_id: string;
+  client_nama: string;
+  assigned_pic_nama: string;
   deliverable_type: string;
   due_date: string;
   priority: string;

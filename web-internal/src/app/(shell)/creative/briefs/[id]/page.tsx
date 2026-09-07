@@ -30,6 +30,7 @@ import {
 } from '@/lib/creative';
 import StatusBadge from '@/components/StatusBadge';
 import StageTimelinePanel from '@/components/StageTimelinePanel';
+import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 
 /**
  * "Assign Team untuk Creative Production" — the Brief breakdown of M7 §3 Rule 4 as
@@ -412,6 +413,18 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
           <h2>Detail Brief</h2>
         </div>
         <div className="grid2">
+          {/* B-2 / Creative #3: halaman ini menampilkan `service_id` TELANJANG
+              (`SVC-…`) sebagai satu-satunya petunjuk klien — sebuah ID yang
+              harus dicari di halaman lain untuk tahu ini pekerjaan merek apa. */}
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>Klien</div>
+            <div>
+              {brief.client_nama || '—'}
+              {brief.client_id && (
+                <div className="muted" style={{ fontSize: 11 }}>{brief.client_id}</div>
+              )}
+            </div>
+          </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Layanan</div>
             <div>{brief.service_id}</div>
@@ -422,7 +435,12 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>PIC Brief</div>
-            <div>{brief.assigned_pic || '—'}</div>
+            <div>
+              {brief.assigned_pic_nama || (brief.assigned_pic ? brief.assigned_pic : '—')}
+              {brief.assigned_pic_nama && brief.assigned_pic && (
+                <div className="muted" style={{ fontSize: 11 }}>{brief.assigned_pic}</div>
+              )}
+            </div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Prioritas</div>
@@ -467,6 +485,10 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
         <div className="cardHeader">
           <h2>Asset ({createdCount}/{brief.quantity_target})</h2>
         </div>
+        {/* B-1a: "3/12" di judul mengatakan BERAPA, panel ini mengatakan
+            AKIBATNYA — bahwa rollup TIDAK akan menutup sebelum keduabelasnya
+            dibuat, berapa pun yang selesai. */}
+        <RollupBlockerPanel briefId={brief.id} satuan="Aset" refreshKey={createdCount} />
         {assets && assets.length === 0 ? (
           <div className="emptyState">Belum ada Asset dibuat untuk Brief ini.</div>
         ) : (

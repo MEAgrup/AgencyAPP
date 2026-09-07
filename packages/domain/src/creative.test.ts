@@ -55,6 +55,7 @@ import {
 import {
   approveAssetBlockRequest,
   assetMetrics,
+  diagnoseBriefRollup,
   ForbiddenError as TaskForbiddenError,
   reworkAsset,
   setAssetRevisionSla,
@@ -432,6 +433,129 @@ describeDb('Asset review + revision loop (§6)', () => {
     const flag = await sql<{ n: string }[]>`
       select count(*) as n from notifications where recipient_employee_id='ZZ-CLEAD' and event_type='m12.revision_count.flag' and entity_id=${a.id}`;
     expect(Number(flag[0].n)).toBe(1);
+  });
+});
+
+describeDb('B-1 — rollup yang diam sekarang bersuara, dan AM diberi tahu', () => {
+  /** Brief Creative ber-target `qty` dengan `n` Aset yang seluruhnya [Submitted]. */
+  async function submittedAssets(qty: number, n: number): Promise<{ briefId: string; ids: string[]; staff: Actor }> {
+    const { briefId } = await creativeBrief(qty);
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    await registerStaff('ZZ-CLEAD', 'Creative', 'lead');
+    await registerStaff('ZZ-SINTA', 'Account', 'staff');
+    const staff = creativeStaff('ZZ-C');
+    const ids: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = await createAsset(sql, staff, briefId, { sequenceNo: i + 1 });
+      await startAsset(sql, staff, a.id);
+      await submitAsset(sql, staff, a.id, `https://drive/${a.id}`);
+      ids.push(a.id);
+    }
+    return { briefId, ids, staff };
+  }
+
+  const notifOf = async (event: string, entityId: string): Promise<string[]> =>
+    (await sql<{ recipient_employee_id: string }[]>`
+      select recipient_employee_id from notifications
+       where event_type = ${event} and entity_id = ${entityId}
+       order by recipient_employee_id`).map((r) => r.recipient_employee_id);
+
+  it('B-1a: 3 dari 12 yang SEMUANYA selesai tetap [In Progress] — dan diagnosisnya mengatakan kenapa', async () => {
+    // Keluhan aslinya, apa adanya. `allExist = created >= quantity_target`,
+    // jadi rollup TIDAK AKAN menutup berapa pun yang selesai.
+    const { briefId, ids } = await submittedAssets(12, 3);
+    for (const id of ids) {
+      await reviewAsset(sql, creativeLead(), id);
+      await approveAsset(sql, am(), id);
+    }
+    expect(await briefStatus(briefId)).toBe('[In Progress]');
+    const d = await diagnoseBriefRollup(sql, briefId);
+    expect(d.blocker).toBe('unit_belum_lengkap');
+    expect({ created: d.created, target: d.target, done: d.done }).toEqual({ created: 3, target: 12, done: 3 });
+    // Dan sebabnya BUKAN "masih ada yang dikerjakan": semuanya sudah selesai.
+    expect(d.done).toBe(d.created);
+  });
+
+  it('B-1a: nol unit, unit lengkap-tapi-jalan, dan selesai punya blocker yang BERBEDA', async () => {
+    // Ketiganya kelihatan sama di halaman hari ini (status tidak berubah, nol
+    // galat), jadi yang diuji adalah bahwa ketiganya bisa DIBEDAKAN.
+    const kosong = await creativeBrief(2);
+    expect((await diagnoseBriefRollup(sql, kosong.briefId)).blocker).toBe('nol_unit');
+
+    const { briefId, ids } = await submittedAssets(2, 2);
+    // Dua Aset [Submitted] dari target 2 ⇒ unit lengkap, tapi belum disetujui.
+    expect((await diagnoseBriefRollup(sql, briefId)).blocker).toBe('menunggu_pekerjaan');
+    for (const id of ids) {
+      await reviewAsset(sql, creativeLead(), id);
+      await approveAsset(sql, am(), id);
+    }
+    expect(await briefStatus(briefId)).toBe('[Approved]');
+    const d = await diagnoseBriefRollup(sql, briefId);
+    expect(d.blocker).toBe('selesai');
+    expect(d.done).toBe(2);
+  });
+
+  it('B-1a: Brief di luar rantai 5-state dilaporkan `di_luar_rantai`, bukan didiamkan', async () => {
+    // Rollup mati PERMANEN di sini — tidak ada peristiwa Aset yang bisa
+    // memperbaikinya — jadi ini justru sebab yang paling wajib bersuara.
+    const { briefId } = await submittedAssets(1, 1);
+    await sql`update briefs set status = '[Dispatched to Vendor]' where id = ${briefId}`;
+    const d = await diagnoseBriefRollup(sql, briefId);
+    expect(d.blocker).toBe('di_luar_rantai');
+  });
+
+  it('B-1b: rollup ke [In Review] memberi tahu AM PEMILIK, dan ke [Approved] sekali lagi', async () => {
+    const { briefId, ids } = await submittedAssets(2, 2);
+    // Katalog v15 mendaftarkan keduanya dengan resolver `explicit` — jadi yang
+    // diuji bukan cuma "ada notifikasi", tapi bahwa penerimanya AM pemilik
+    // klien (ZZ-SINTA), bukan aktor yang menjalankan transisinya (lead).
+    //
+    // Pemicunya adalah EDGE Brief-nya, bukan jumlah Aset yang di-review: dengan
+    // kedua Aset sudah dibuat dan tidak ada satu pun yang masih dikerjakan,
+    // `rollupTarget` sudah [In Review] pada QC pass PERTAMA. Itu diturunkan dari
+    // mesin, bukan ditebak — makanya di-expect lewat status Brief-nya dulu.
+    await reviewAsset(sql, creativeLead(), ids[0]);
+    expect(await briefStatus(briefId)).toBe('[In Review]');
+    expect(await notifOf('m6.brief.siap_review_am', briefId)).toEqual(['ZZ-SINTA']);
+    expect(await notifOf('m6.brief.selesai', briefId)).toEqual([]);
+    // QC pass kedua TIDAK menambah notifikasi: edge-nya sudah dilewati, dan
+    // `recomputeBriefRollup` forward-only. Satu handoff = satu notifikasi.
+    await reviewAsset(sql, creativeLead(), ids[1]);
+    expect(await notifOf('m6.brief.siap_review_am', briefId)).toEqual(['ZZ-SINTA']);
+
+    // Tutup Brief-nya DENGAN AM sebagai aktor: `notifyActor` false, jadi AM
+    // TIDAK memberi tahu dirinya sendiri. Ini disengaja — memberi tahu orang
+    // tentang tombol yang baru saja ia klik adalah kebisingan.
+    await approveAsset(sql, am(), ids[0]);
+    await approveAsset(sql, am(), ids[1]);
+    expect(await briefStatus(briefId)).toBe('[Approved]');
+    expect(await notifOf('m6.brief.selesai', briefId)).toEqual([]);
+  });
+
+  it('B-1b: [Approved] yang ditutup aktor LAIN benar-benar sampai ke AM pemilik', async () => {
+    // Pasangan tes di atas, dan yang justru menutup keluhannya: kalau bukan AM
+    // yang menggerakkan edge terakhirnya, AM WAJIB diberi tahu. Di KOL ini
+    // jalur normalnya (QC pass koordinator menutup Brief tanpa AM bertindak);
+    // di Creative dipentaskan lewat Director.
+    const { briefId, ids } = await submittedAssets(2, 2);
+    for (const id of ids) await reviewAsset(sql, creativeLead(), id);
+    for (const id of ids) await approveAsset(sql, director(), id);
+    expect(await briefStatus(briefId)).toBe('[Approved]');
+    expect(await notifOf('m6.brief.selesai', briefId)).toEqual(['ZZ-SINTA']);
+  });
+
+  it('B-1b: Brief yang rollup-nya tidak menutup TIDAK memberi tahu AM apa pun', async () => {
+    // Cabang negatifnya, diturunkan dari data nyata: 3 dari 12 tidak pernah
+    // mencapai edge mana pun yang memancarkan event, jadi inbox AM harus kosong.
+    // Tanpa tes ini, `notifyAmOnRollupEdge` yang salah kondisi akan mengirim
+    // notifikasi "selesai" untuk brief yang justru macet — kebalikan keluhannya.
+    const { briefId, ids } = await submittedAssets(12, 3);
+    for (const id of ids) {
+      await reviewAsset(sql, creativeLead(), id);
+      await approveAsset(sql, am(), id);
+    }
+    expect(await notifOf('m6.brief.selesai', briefId)).toEqual([]);
+    expect(await notifOf('m6.brief.siap_review_am', briefId)).toEqual([]);
   });
 });
 

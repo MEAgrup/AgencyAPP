@@ -568,6 +568,12 @@ async function reviewEdgeTx(
     }
   }
   // M7 §2: recompute the parent Brief's roll-up after every Asset status change.
+  //
+  // The roll-up is ALSO where the AM gets told (B-1b `notifyAmOnRollupEdge`):
+  // a lead's QC pass on the LAST outstanding Asset moves the Brief to
+  // [In Review], and that edge is what fires `BriefSiapReviewAm`. Deliberately
+  // not emitted per-Asset here — twelve QC passes on one Brief is one handoff to
+  // the AM, not twelve notifications.
   if (opts?.propagate ?? true) {
     await recomputeBriefRollup(tx, actor, briefId);
   }
