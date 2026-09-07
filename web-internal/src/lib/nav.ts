@@ -347,6 +347,12 @@ const MEA_AI_TOOLS: NavNode[] = [
   // export yang berbeda, dan menyimpan ke tabel yang berbeda.
   { href: '/ads/screening', label: 'Shopee Screening SKU', access: canUseSkuScreener },
   { href: '/ads/scanner', label: 'TikTok Ads Scanner', access: canUseAdsScanner },
+  // ANCHOR-NAV-DELIVERY (F-1/F-7) — titik sisip entri nav Jalur B (Delivery:
+  // Creative/Ads/KOL/tasks). Tambahkan DI SINI; anchor Jalur A ada di ujung
+  // `KEUANGAN` di bawah, hunk terpisah, supaya dua jalur paralel tidak pernah
+  // menyunting baris yang sama di berkas kecil ini. Setiap entri baru wajib
+  // punya barisnya sendiri di `nav.test.ts` — halaman yang bisa dijangkau tapi
+  // tak punya entri nav adalah halaman yang tidak ada bagi penggunanya.
 ];
 
 // ---------------------------------------------------------------------------
@@ -357,6 +363,10 @@ const KEUANGAN: NavNode[] = [
   // catatan pra-verifikasi "visible to Finance only".
   { href: '/finance', label: 'Finance', access: ownedBy(FINANCE) },
   { href: '/finance/reminders', label: 'Reminder Pembayaran', access: ownedBy(FINANCE) },
+  // ANCHOR-NAV-KEUANGAN (F-1/F-7) — titik sisip entri nav Jalur A (Uang &
+  // Klien: finance/permintaan/contracts/sales, termasuk antrean Permintaan
+  // Finance A-2). Anchor Jalur B ada di ujung `DELIVERY` di atas. Aturan yang
+  // sama: satu baris `nav.test.ts` per entri baru.
 ];
 
 // ---------------------------------------------------------------------------
