@@ -11,7 +11,7 @@
 
 | Apa | Nilai |
 |---|---|
-| **`main`** | `7afe80ec` — *Merge PR #317* |
+| **`main`** | `7e8dff9b` — *Merge PR #320* (sesudah #318 milik berkas ini) |
 | Migrasi | **202** |
 | Gate | **146** tabel · **40** entity_prefix · **31** sm_machines · **73** notif_events |
 | Live | mutakhir **kecuali** `20260922100400` (backfill A-3 — **no-op**, 0 baris; lihat handoff pendahulu §4) |
@@ -156,11 +156,19 @@ langsung membayar utang divisi lain.
 4. **`rls_checks.sql` §43 (ledger O48) akan MERAH** kalau sebuah policy diberi
    lengan lead/divisi tanpa dikeluarkan dari daftar `expected` **di commit yang
    sama**. Itu bukan gangguan, itu gerbangnya bekerja.
-5. **Empat bentuk `Brief` paralel di FE** (`account.ts`, `tasks.ts`,
-   `creative.ts`, `kol.ts`) — hanya `account.ts::Brief` yang diikat
-   `shape-parity`. Kalau Wave 3 menambah field Brief, tambahkan di **dua** tempat
-   minimal atau halamannya `undefined` sementara parity tetap hijau. Menyatukan
-   keempatnya masih utang terbuka.
+5. **~~Empat bentuk `Brief` paralel di FE~~ — SUDAH DISATUKAN (PR #320,
+   2026-09-08).** Rumahnya sekarang `web-internal/src/lib/brief.ts`, satu
+   deklarasi; `account.ts`/`tasks.ts`/`creative.ts`/`kol.ts` **me-re-export**
+   dari sana, jadi `import { type Brief } from '@/lib/kol'` tetap sah.
+   **Aturan barunya: jangan pernah mendeklarasikan `interface Brief` kedua di
+   `src/lib/`** — `shape-parity.test.ts` menghitung deklarasinya dan merah kalau
+   lebih dari satu. Kalau Wave 3 menambah field Brief, tambahkan **DI SITU,
+   sekali**, dan keempat konsumen ikut.
+   > Catatan yang relevan untuk Wave 3: PR itu juga menutup gap yang gw
+   > tinggalkan — A-req-1/2/3 mendarat di `account.ts` + `tasks.ts` dan **tidak
+   > pernah sampai** ke `creative.ts`/`kol.ts`. Jadi kalau halaman Creative/KOL
+   > terlihat "kehilangan" field jendela/budget/jumlah anak sebelum ini, itu
+   > sebabnya, dan itu sudah selesai.
 6. **Tes yang menyeed tabel anak akan merusak SETIAP tes sesudahnya** di berkas
    yang cleanup-nya belum tahu (FK NO ACTION). Sudah kena dua kali:
    `briefs` di `strategi.test.ts`, `assets` di `account.test.ts`. Begitu tabel
@@ -206,7 +214,8 @@ db-rebuild.sh  202 migrasi
 domain            2101 lulus (+1 skip) · 76 file · nol FAIL
 core               983
 db                  53
-apps/api           445 lulus (+48 skip)   route-parity & shape-parity hijau
+apps/api           446 lulus (+48 skip)   route-parity & shape-parity hijau
+                   (445 → 446: gerbang anti-kambuh `Brief` tunggal, PR #320)
 web-internal       684   (+ tsc --noEmit bersih + next build sukses)
 web-client-portal   19
 ```
