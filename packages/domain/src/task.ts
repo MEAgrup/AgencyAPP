@@ -33,7 +33,7 @@
  * Reference: archive/backend-go/internal/module12_task/{source,task,assign,block,metrics}.go.
  */
 
-import { bi, notification, permission, statemachine, tz } from '@cdps/core';
+import { bi, notification, permission, statemachine, storeops, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefLeavesToDo } from './account';
 import { validateBriefSubmit } from './ads';
@@ -1011,15 +1011,73 @@ export async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId:
     throw new NotFoundError();
   }
   const { status, service_id, quantity_target } = rows[0];
-  let cur = chainRank(status);
-  if (cur < 0) {
-    return; // off the roll-up chain (e.g. [Dispatched to Vendor])
-  }
   const statuses = (await tx<{ status: string }[]>`select status from assets where brief_id = ${briefId}`).map((a) => a.status);
   if (statuses.length === 0) {
     return; // no Assets yet
   }
-  const tgt = chainRank(rollupTarget(statuses, quantity_target));
+  await driveRollupChain(tx, actor, briefId, service_id, status, rollupTarget(statuses, quantity_target));
+}
+
+/**
+ * recomputeSkuBriefRollup — padanan Store Operation (M18 §8), anaknya
+ * `store_ops_skus`. Dipanggil sesudah setiap transisi baris SKU.
+ *
+ * Ia hidup DI SINI, bukan di `storeops.ts`, karena `diagnoseBriefRollup` di bawah
+ * harus tahu bentuk rollup ketiga divisi sekaligus dan `storeops` sudah
+ * meng-import modul ini — import balik akan menjadikannya siklus. Presedennya
+ * literal `BKG_TERMINAL_*` di atas, yang ada karena alasan yang persis sama.
+ * Kosakata state-nya diambil dari `@cdps/core` (`storeops.SKU_STATES` dkk),
+ * bukan dieja ulang: core tidak pernah meng-import domain, jadi itu aman.
+ */
+export async function recomputeSkuBriefRollup(tx: Queryable, actor: Actor, briefId: string): Promise<void> {
+  if (briefId === '') {
+    return;
+  }
+  const rows = await tx<{ status: string; service_id: string; quantity_target: number }[]>`
+    select status, service_id, quantity_target from briefs where id = ${briefId} for update`;
+  if (rows.length === 0) {
+    throw new NotFoundError();
+  }
+  const statuses = (await tx<{ status: string }[]>`select status from store_ops_skus where brief_id = ${briefId}`)
+    .map((r) => r.status);
+  if (statuses.length === 0) {
+    return; // belum dipecah jadi baris SKU
+  }
+  await driveRollupChain(
+    tx, actor, briefId, rows[0].service_id, rows[0].status,
+    skuRollupTarget(statuses, rows[0].quantity_target),
+  );
+}
+
+/**
+ * driveRollupChain menjalankan SATU jalan maju di rantai `brief_task`, dari
+ * status Brief sekarang sampai `targetStatus`. Ia adalah bagian yang IDENTIK di
+ * setiap rollup divisi — gerbang Blocking Dependency M11, transisi lewat engine,
+ * `onBriefLeavesToDo` pada edge pertama, notifikasi AM per-edge, dan
+ * `onBriefReachedTerminal` di ujung.
+ *
+ * Diekstrak saat M18 datang: menyalinnya untuk ketiga kalinya berarti tiga
+ * tempat yang harus ingat bahwa `BoardConflictError` di edge terakhir DITELAN
+ * (defer), dan dua di antaranya pasti lupa. Yang berbeda antar divisi cuma dua —
+ * dari tabel anak mana status dibaca, dan bagaimana himpunan status itu dipetakan
+ * ke satu target — dan keduanya tinggal di pemanggilnya.
+ *
+ * Forward-only dan idempoten: target di belakang status sekarang = nol langkah.
+ */
+async function driveRollupChain(
+  tx: Queryable,
+  actor: Actor,
+  briefId: string,
+  serviceId: string,
+  fromStatus: string,
+  targetStatus: string,
+): Promise<void> {
+  let cur = chainRank(fromStatus);
+  if (cur < 0) {
+    return; // off the roll-up chain (e.g. [Dispatched to Vendor])
+  }
+  const tgt = chainRank(targetStatus);
+  const service_id = serviceId;
   const ex = executors(tx);
   while (cur < tgt) {
     const from = ROLLUP_CHAIN[cur];
@@ -1167,9 +1225,10 @@ export interface BriefRollupDiagnosis {
 
 /**
  * diagnoseBriefRollup menjawab "kenapa Brief ini belum bergerak", untuk Brief
- * divisi mana pun — anaknya `assets` (Creative/Ads) ATAU `creator_bookings`
- * (KOL). Sebuah Brief tidak pernah punya keduanya, jadi yang dipakai adalah
- * himpunan yang tidak kosong; kalau dua-duanya kosong, `nol_unit`.
+ * divisi mana pun — anaknya `assets` (Creative/Ads), `creator_bookings` (KOL),
+ * ATAU `store_ops_skus` (Store Operation, M18). Sebuah Brief tidak pernah punya
+ * lebih dari satu jenis, jadi yang dipakai adalah himpunan yang tidak kosong;
+ * kalau ketiganya kosong, `nol_unit`.
  *
  * Urutan pemeriksaan = urutan seberapa menghalangi, bukan urutan kode di
  * `recomputeBriefRollup`: `di_luar_rantai` lebih dulu karena ia mematikan rollup
@@ -1191,15 +1250,26 @@ export async function diagnoseBriefRollup(sql: Queryable, briefId: string): Prom
   const target = Number(rows[0].quantity_target);
   const assets = (await sql<{ status: string }[]>`select status from assets where brief_id = ${briefId}`).map((r) => r.status);
   const bookings = (await sql<{ status: string }[]>`select status from creator_bookings where brief_id = ${briefId}`).map((r) => r.status);
-  const kol = assets.length === 0 && bookings.length > 0;
-  const statuses = kol ? bookings : assets;
+  const skus = (await sql<{ status: string }[]>`select status from store_ops_skus where brief_id = ${briefId}`).map((r) => r.status);
+  // Sebuah Brief tidak pernah punya lebih dari satu jenis anak (divisinya yang
+  // menentukan), jadi yang dipakai adalah himpunan yang tidak kosong.
+  const jenis: 'asset' | 'booking' | 'sku' =
+    assets.length > 0 ? 'asset' : bookings.length > 0 ? 'booking' : skus.length > 0 ? 'sku' : 'asset';
+  const statuses = jenis === 'booking' ? bookings : jenis === 'sku' ? skus : assets;
   const created = statuses.length;
   // "Selesai" per anaknya: Aset di [Approved]; Booking di [QC Passed] atau
-  // [Dropped] (M9 — Dropped dikecualikan dari Speed Score, bukan menggantung).
-  const done = kol
+  // [Dropped] (M9 — Dropped dikecualikan dari Speed Score, bukan menggantung);
+  // baris SKU di [Terupload] ATAU [Dievaluasi] — K-6: gambar sudah naik adalah
+  // selesainya produksi, evaluasi CTR/CVR datang ~30 hari kemudian dan tidak
+  // boleh membuat baris yang sudah tayang terlihat seperti belum dikerjakan.
+  const done = jenis === 'booking'
     ? statuses.filter((st) => st === BKG_TERMINAL_PASSED || st === BKG_TERMINAL_DROPPED).length
-    : statuses.filter((st) => st === STATUS_APPROVED).length;
-  const tgt = created === 0 ? status : rollupTarget(statuses, target);
+    : jenis === 'sku'
+      ? statuses.filter((st) => storeops.produksiSelesai(st)).length
+      : statuses.filter((st) => st === STATUS_APPROVED).length;
+  const tgt = created === 0
+    ? status
+    : jenis === 'sku' ? skuRollupTarget(statuses, target) : rollupTarget(statuses, target);
 
   const blocker: RollupBlocker = status === STATUS_APPROVED
     ? 'selesai'
@@ -1231,6 +1301,42 @@ async function hasUnsatisfiedBlockingDependency(sql: Queryable, briefId: string)
     }
     throw e;
   }
+}
+
+/**
+ * skuRollupTarget memetakan status baris SKU Store Operation ke target Brief-nya
+ * (M18 §8). Bentuknya sama dengan `rollupTarget`, dengan DUA perbedaan yang
+ * keduanya berasal dari ketokan:
+ *
+ * 1. **Selesai berarti `[Terupload]`, bukan `[Dievaluasi]`** (K-6). Menunggu
+ *    evaluasi berarti menahan Brief ~30 hari setelah pekerjaannya betul-betul
+ *    selesai — dan lead time produksi divisi ini akan memuat waktu tunggu pasar.
+ *    `storeops.produksiSelesai` yang memutuskan, satu tempat.
+ * 2. **Nol jalur otomatis ke `[Approved]`.** Baris SKU tidak punya state
+ *    "disetujui AM" seperti Asset; persetujuan terjadi pada BRIEF-nya, lewat
+ *    `account.approveBrief`. Jadi rollup berhenti di `[In Review]` — giliran AM —
+ *    dan tidak pernah menutup Brief atas nama AM.
+ *
+ * `[Gagal Upload]` sengaja tidak diperlakukan istimewa: ia bukan "selesai",
+ * jadi ia MENAHAN rollup dan tetap terlihat sebagai penghambat. Itu memang yang
+ * diinginkan — SKU yang gagal upload belum menghasilkan apa pun untuk klien.
+ */
+function skuRollupTarget(statuses: string[], expected: number): string {
+  const created = statuses.length;
+  let anyStarted = false;
+  let allSelesai = true;
+  for (const st of statuses) {
+    if (st !== storeops.SKU_INITIAL_STATE) anyStarted = true;
+    if (!storeops.produksiSelesai(st)) allSelesai = false;
+  }
+  const allExist = expected > 0 && created >= expected;
+  if (allExist && allSelesai) {
+    return STATUS_IN_REVIEW;
+  }
+  if (anyStarted) {
+    return STATUS_IN_PROGRESS;
+  }
+  return STATUS_TODO;
 }
 
 /** rollupTarget maps the child Asset statuses (+ expected count) to the Brief's target status (M7 §2). */

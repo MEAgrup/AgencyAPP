@@ -221,31 +221,50 @@ UPDATE telanjang tanpa penanda.
 
 ---
 
-## 7. Pipeline tahapan (M16)
+## 7. Pipeline tahapan (M16) — **masih menunggu ketokan LT-2**
 
-Store Operation mendapat pipeline `STORE_OPS` — menutup `LEADTIME_BACKLOG.md`
-LT-2. **Satu migrasi, nol perubahan TS**, persis seperti yang dijanjikan komentar
-di `20260830020000_m16_stage_seed.sql` (M16 Rule 12).
+Store Operation adalah satu-satunya divisi aktif **tanpa** baris `stage_pipeline`,
+dan itu sah: M16 Rule 12 memang membuka "divisi boleh aktif tanpa pipeline". Brief
+tetap bisa didispatch dan rentang AM→divisi tetap terukur.
 
-`Cek Brief AM → Siapkan Materi → Produksi Gambar → QC internal → Upload → Review Dampak`
+**Yang belum ada dan sengaja TIDAK dikarang di sini adalah daftar & urutan tahapan
+kerjanya** — `LEADTIME_BACKLOG.md` **LT-2**, dijawab pemilik dengan *"akan saya
+berikan menyusul"* (2026-08-29) dan sampai hari ini belum masuk. Ketokan 2026-09-08
+menjawab pertanyaan yang **lain**: siapa yang mengisi daftar SKU dan targetnya. Ia
+tidak menyebut satu pun nama tahap.
 
-| Tahap | `sumber` | `gate_pihak` | Isi |
-|---|---|---|---|
-| Cek Brief AM | `stage` | — | Gerbang intake wajib semua divisi (M16 Rule 10): *Terima & proses*, atau *Brief Dikembalikan ke AM* + alasan terstruktur |
-| Siapkan Materi | `stage` | — | Kumpulkan foto produk, spesifikasi, referensi |
-| Produksi Gambar | `stage` | — | Desain cover/pendamping/varian |
-| QC internal | `stage` | — | Pemeriksaan internal divisi |
-| Upload | `stage` | — | Naikkan ke marketplace ⇒ baris SKU `[Terupload]` |
-| Review Dampak | `stage` | — | ±30 hari kemudian ⇒ baris SKU `[Dievaluasi]` |
+Menuliskan enam nama tahap di sini akan membuat PRD ini terbaca seperti keputusan
+pemilik padahal ia tebakan penulisnya — dan tahap yang salah bukan cuma label yang
+salah: `stage_definition.target_hari_kerja` menggantung padanya, jadi tebakan itu
+akan langsung jadi angka lead time yang dilaporkan ke COO.
 
-Target hari kerja per tahap **menyusul dari pemilik**; sampai itu ada, tahap tanpa
-target menghasilkan `N/A` dan tidak pernah di-default diam-diam (M16 Rule 8).
-Tahap `Review Dampak` sengaja **ada di dalam pipeline** meski jam produksinya sudah
-berhenti — supaya langkah evaluasi terlihat sebagai pekerjaan yang tertunggak, bukan
-menghilang dari papan. Durasinya dilaporkan terpisah, tidak dijumlahkan ke lead time
-produksi (perlakuan yang sama dengan gate `KLIEN`, M16 Rule 9).
+**Yang sudah disiapkan supaya jawabannya nanti murah:** slot pipeline-nya kosong
+dengan sengaja sejak `20260830020000_m16_stage_seed.sql`, dan komentarnya sendiri
+menyatakan biayanya — **satu migrasi, nol perubahan TS**. Begitu daftar LT-2 datang,
+yang ditambahkan hanya:
 
----
+1. satu `sm_machines` `stage_store_ops` + `sm_edges` antar tahapnya (**mesin naik
+   32 → 33**, dan gate di `db-rebuild.sh` **dan** `ci.yml` ikut naik di commit yang sama);
+2. satu baris `stage_pipeline` (`STORE_OPS`, `division_code = 'STORE_OPS'`);
+3. `n` baris `stage_definition`, dengan `Cek Brief AM` sebagai checkpoint pertama
+   (M16 Rule 10 — gerbang intake wajib di semua divisi) dan edge balik
+   `Brief Dikembalikan ke AM → Cek Brief AM` (LT-4);
+4. kode alasan pengembalian Store Operation di `REASON_CODES_BY_DIVISION`
+   (`packages/domain/src/stage.ts`) — **LT-8**, yang memang sengaja ditahan agar
+   dijawab bersama LT-2. Sampai itu ada, divisi ini memakai fallback
+   `['Brief kurang jelas']` yang sudah berlaku untuk setiap divisi tanpa daftar
+   sendiri; ia benar, hanya sempit.
+
+Tahap tanpa `target_hari_kerja` menghasilkan `N/A` dan tidak pernah di-default
+diam-diam (M16 Rule 8), jadi daftar tahap boleh datang lebih dulu daripada angka
+targetnya.
+
+**Satu hal yang TIDAK menunggu LT-2:** gerbang intake *Terima & proses* /
+*Brief Dikembalikan ke AM* dijalankan `StageTimelinePanel`, dan panel itu belum
+terpasang di `/tasks/[id]` — halaman yang dipakai divisi tanpa board sendiri.
+Selama itu benar, Store Operation **secara harfiah tidak punya cara menerima
+brief**, dan begitu pula setiap divisi lain yang masuk lewat `/tasks`. Memasang
+panelnya adalah perbaikan lintas divisi yang berdiri sendiri.
 
 ## 8. Rollup ke Brief
 
@@ -298,9 +317,14 @@ katalog berbohong (preseden `internal_tasks` v9). Brief Store Operation sudah ik
 - **Integrasi seller center** untuk menarik CTR/CVR otomatis — angkanya diketik
   Store Operation dari seller center (ketokan: "dia yang memegang datanya").
   Menariknya otomatis adalah modul integrasi tersendiri.
+- **Pipeline tahapan `STORE_OPS`** — §7. Menunggu daftar LT-2 dari pemilik; nama
+  tahapnya tidak dikarang di sini.
+- **Kode alasan pengembalian brief Store Operation** — LT-8, ditahan agar dijawab
+  bersama LT-2. Fallback `['Brief kurang jelas']` berlaku sampai itu ada.
 - **Notifikasi "waktunya evaluasi" H+30** — butuh job terjadwal tersendiri (pola
-  `permintaan_reminder_tick`), tiket terpisah. Sampai itu ada, tahap `Review Dampak`
-  di papan tahapan adalah yang membuatnya terlihat.
+  `permintaan_reminder_tick`), tiket terpisah. Sampai itu ada, yang membuat langkah
+  evaluasi terlihat adalah baris `[Terupload]` yang belum `[Dievaluasi]` pada daftar
+  SKU Brief-nya.
 - **Kuota satuan Plan** — `punyaKuotaSatuan` baru boleh dinyalakan **setelah**
   `account.TASK_CATALOG` punya baris Store Operation, dalam commit yang sama
   (peringatan `division.ts`: membaliknya lebih dulu meng-crash `normalizeTasks`).
