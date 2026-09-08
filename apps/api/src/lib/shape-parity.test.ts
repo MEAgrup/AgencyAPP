@@ -178,9 +178,8 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
 /**
  * The FE data layer, keyed `file.ts::Interface`.
  *
- * File-qualified ON PURPOSE. Six names are reused across files — `Brief` lives
- * in `account.ts`, `kol.ts` AND `creative.ts`; `Metrics` in `tasks.ts`,
- * `creative.ts` AND `marketing.ts`; also `Campaign`, `Card`, `Snapshot`,
+ * File-qualified ON PURPOSE. Several names are reused across files — `Metrics`
+ * lives in `tasks.ts`, `creative.ts` AND `marketing.ts`; also `Campaign`, `Card`, `Snapshot`,
  * `ScanResult`, `PendingBlockRequest`. Pairing by bare name picks whichever file
  * sorts first, which means comparing a converter against an unrelated type and
  * calling the result parity. `PendingBlockRequest` is the live example: the real
@@ -189,7 +188,11 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
  * any route).
  */
 const FE_FILES = [
-  'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
+  // `brief.ts` — rumah TUNGGAL bentuk `Brief` sejak 2026-09-08. Sebelumnya bentuk
+  // itu hidup empat kali (account/tasks/creative/kol) dengan hanya SATU yang
+  // di-anchor di sini; lihat `ONE_BRIEF` di bawah, yang menjaga agar tidak
+  // lahir yang kelima.
+  'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
   'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
@@ -598,7 +601,10 @@ const WIRE_TO_FE: Record<string, string> = {
   PortalHealthWire: 'klien/types.ts::PortalHealthSummary',
   PortalComplaintAckWire: 'klien/types.ts::PortalComplaintAck',
 
-  BriefWire: 'account.ts::Brief',
+  // Dipindahkan dari `account.ts::Brief` ke rumah tunggalnya (2026-09-08).
+  // Empat berkas lib me-re-export dari sana, jadi anchor tunggal ini sekarang
+  // benar-benar menjaga keempat konsumennya — bukan satu dari empat.
+  BriefWire: 'brief.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M6D rekap hasil mingguan (WRR-) — D-09b
   RecapWire: 'recap.ts::Recap',
@@ -915,6 +921,37 @@ describe('FE↔API response-shape parity (O43 c)', () => {
     expect(flatten(wire, 'DemoTaskWire')).toContain('description');
     expect(flattenFe('types.ts::DemoTaskDetailTask')).toContain('description');
     expect(flattenFe('types.ts::DemoTask')).not.toContain('description');
+  });
+
+  it('declares `Brief` exactly ONCE in the FE lib tree (anti-kambuh)', () => {
+    // Utang yang tes ini tutup, dan kenapa ia berupa GERBANG dan bukan catatan:
+    //
+    // Sampai 2026-09-08 bentuk `Brief` hidup EMPAT kali — `account.ts`,
+    // `tasks.ts`, `creative.ts`, `kol.ts` — keempatnya disuapi `BriefWire` yang
+    // SAMA, dan hanya `account.ts` yang di-anchor registry di atas. Artinya
+    // sebuah field baru bisa mendarat di wire + `account.ts`, seluruh berkas ini
+    // hijau, dan halaman Creative/KOL membaca `undefined`.
+    //
+    // Itu bukan hipotesis. A-req-1/2/3 (jendela campaign, sumber aset, jumlah
+    // anak) mendarat di `account.ts` + `tasks.ts` dan TIDAK PERNAH sampai ke
+    // `creative.ts`/`kol.ts`; `stage_pipeline_code`/`production_stage` bahkan
+    // hanya ada di satu dari empat. Tiga bentuk basi, nol tes merah.
+    //
+    // Penyatuannya (satu deklarasi di `brief.ts`, tiga sisanya re-export) hanya
+    // bertahan kalau ada yang menjaganya: menambahkan `interface Brief` kelima
+    // lebih mudah daripada menemukan yang sudah ada. Gerbang inilah penjaganya.
+    const declares = [...fe.keys()].filter((k) => k.endsWith('::Brief'));
+    expect(declares).toEqual(['brief.ts::Brief']);
+
+    // Dan buktikan anchor-nya benar-benar memikul isi yang diperkarakan: field
+    // yang dulu hilang dari tiga bentuk sekarang dijamin ada di satu-satunya
+    // bentuk yang tersisa.
+    const keys = flattenFe('brief.ts::Brief');
+    for (const k of ['tanggal_mulai', 'tanggal_akhir', 'budget',
+                     'source_creative_brief_id', 'jumlah_anak',
+                     'stage_pipeline_code', 'production_stage']) {
+      expect(keys).toContain(k);
+    }
   });
 
   it('keeps the M5 money path exactly as the FE reads it (O41 regression)', () => {
