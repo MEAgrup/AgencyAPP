@@ -17,6 +17,7 @@ import {
   getBrief,
   isAccountRole,
   isCreativeDivision,
+  isCreativeLead,
   isDirector,
   isODOnly,
   listBriefAssets,
@@ -29,6 +30,7 @@ import {
 } from '@/lib/creative';
 import StatusBadge from '@/components/StatusBadge';
 import StageTimelinePanel from '@/components/StageTimelinePanel';
+import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 
 /**
  * "Assign Team untuk Creative Production" — the Brief breakdown of M7 §3 Rule 4 as
@@ -69,6 +71,8 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createMessage, setCreateMessage] = useState<string | null>(null);
+  /** Self-claim quantity (§4 Flow 1) — the staff-side door left open by K-1. */
+  const [selfClaimQty, setSelfClaimQty] = useState('1');
 
   // Submit Output Massal (C3, Revisi Sales/Creative/Performa): satu layar, semua
   // link Asset [In Progress] sekaligus — bukan window.prompt satu per satu.
@@ -113,6 +117,12 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
   }, [load]);
 
   const canCreateAsset = !isODOnly(role) && (isCreativeDivision(role) || isDirector(role));
+  // B-4/K-1: handing units OUT to other PICs is the Leader's call. A staffer keeps
+  // the §4 Flow 1 self-claim, so they still get a door here — just not the
+  // multi-PIC distribution table (the server refuses a foreign PIC with
+  // `[hanya lead divisi Creative yang dapat membagi aset ke PIC lain]`).
+  const canAssignBatch = !isODOnly(role) && (isDirector(role) || isCreativeLead(role));
+  const canSelfClaim = canCreateAsset && !canAssignBatch;
 
   // Asset PIC candidates = active Creative STAFF (`creative.validateCreativeStaff`).
   // Declared above the loading early-return: hooks must run on every render.
@@ -120,7 +130,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
     employees: picCandidates,
     loading: picLoading,
     error: picError,
-  } = useAssignableEmployees(CREATIVE_DIVISION, LEVEL_STAFF, canCreateAsset);
+  } = useAssignableEmployees(CREATIVE_DIVISION, LEVEL_STAFF, canAssignBatch);
 
   function updateRow(key: number, patch: Partial<AssignRow>) {
     setAssignRows((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -190,6 +200,35 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
     }
   }
 
+  /**
+   * Self-claim (§4 Flow 1) — the one Asset-creation door a non-lead Creative
+   * staffer keeps after K-1. Same endpoint as the Lead's fan-out, with the PIC
+   * left empty: the server fills it in with the caller (`resolveAssetPic`), so
+   * this can never become a way to assign someone else.
+   */
+  async function handleSelfClaim(e: FormEvent) {
+    e.preventDefault();
+    setCreateError(null);
+    setCreateMessage(null);
+    const qty = Number(selfClaimQty);
+    if (selfClaimQty.trim() === '' || !Number.isInteger(qty) || qty <= 0) {
+      setCreateError('[jumlah aset yang di-assign harus lebih dari 0]');
+      return;
+    }
+    setCreateSubmitting(true);
+    try {
+      const res = await createAssetBatch(id, [{ quantity: qty }]);
+      const created = res.data;
+      setCreateMessage(`${created.length} Asset diambil (${created.map((a) => a.id).join(', ')}).`);
+      setSelfClaimQty('1');
+      await load();
+    } catch (err) {
+      setCreateError(errorMessage(err));
+    } finally {
+      setCreateSubmitting(false);
+    }
+  }
+
   // Asset yang siap disubmit ([In Progress]), urut sequence_no — sama urutan
   // dengan tabel Asset di atas.
   const submittableAssets = (assets ?? [])
@@ -200,9 +239,13 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
     .sort((a, b) => a.sequence_no - b.sequence_no);
   const pastedLinkCount = pasteText.split(/\r?\n/).map((s) => s.trim()).filter((s) => s.length > 0).length;
 
-  // Review & Approve Massal (C4): owning AM or Director — server decides ownership
-  // per row, this only decides whether the card is worth showing.
-  const canReview = !isODOnly(role) && (isDirector(role) || isAccountRole(role));
+  // Review & Approve Massal (C4), split by door since B-4/K-1 — the two batches
+  // are not the same permission any more:
+  //   Review batch  [Submitted]->[In Review]  QC internal: lead divisi / AM / Director
+  //   Approve batch [In Review]->[Approved]   putusan klien: AM / Director SAJA
+  // Server decides ownership per row; this only decides whether to show the card.
+  const canQcMassal = !isODOnly(role) && (isDirector(role) || isAccountRole(role) || isCreativeLead(role));
+  const canApproveMassal = !isODOnly(role) && (isDirector(role) || isAccountRole(role));
   const reviewableAssets = (assets ?? [])
     .filter((a) => a.status === ASSET_SUBMITTED)
     .sort((a, b) => a.sequence_no - b.sequence_no);
@@ -370,6 +413,18 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
           <h2>Detail Brief</h2>
         </div>
         <div className="grid2">
+          {/* B-2 / Creative #3: halaman ini menampilkan `service_id` TELANJANG
+              (`SVC-…`) sebagai satu-satunya petunjuk klien — sebuah ID yang
+              harus dicari di halaman lain untuk tahu ini pekerjaan merek apa. */}
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>Klien</div>
+            <div>
+              {brief.client_nama || '—'}
+              {brief.client_id && (
+                <div className="muted" style={{ fontSize: 11 }}>{brief.client_id}</div>
+              )}
+            </div>
+          </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Layanan</div>
             <div>{brief.service_id}</div>
@@ -380,7 +435,12 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>PIC Brief</div>
-            <div>{brief.assigned_pic || '—'}</div>
+            <div>
+              {brief.assigned_pic_nama || (brief.assigned_pic ? brief.assigned_pic : '—')}
+              {brief.assigned_pic_nama && brief.assigned_pic && (
+                <div className="muted" style={{ fontSize: 11 }}>{brief.assigned_pic}</div>
+              )}
+            </div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Prioritas</div>
@@ -425,6 +485,10 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
         <div className="cardHeader">
           <h2>Asset ({createdCount}/{brief.quantity_target})</h2>
         </div>
+        {/* B-1a: "3/12" di judul mengatakan BERAPA, panel ini mengatakan
+            AKIBATNYA — bahwa rollup TIDAK akan menutup sebelum keduabelasnya
+            dibuat, berapa pun yang selesai. */}
+        <RollupBlockerPanel briefId={brief.id} satuan="Aset" refreshKey={createdCount} />
         {assets && assets.length === 0 ? (
           <div className="emptyState">Belum ada Asset dibuat untuk Brief ini.</div>
         ) : (
@@ -571,20 +635,24 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
         </section>
       )}
 
-      {canReview && (reviewableAssets.length > 0 || approvableAssets.length > 0) && (
+      {((canQcMassal && reviewableAssets.length > 0) || (canApproveMassal && approvableAssets.length > 0)) && (
         <section className="card">
           <div className="cardHeader">
-            <h2>Review &amp; Approve Massal (AM)</h2>
+            <h2>QC Internal &amp; Approve Massal</h2>
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
-            Centang Asset yang ingin diproses lalu klik tombol — dua tombol terpisah karena Review dan
-            Approve adalah dua langkah berbeda (server menolak jika langkahnya dilompat).
+            Centang Asset yang ingin diproses lalu klik tombol — dua tombol terpisah karena keduanya
+            langkah yang berbeda milik peran yang berbeda: <strong>QC internal</strong> ([Submitted] &rarr;
+            [In Review]) boleh dijalankan <strong>Lead divisi</strong> maupun AM, sedangkan{' '}
+            <strong>Approve</strong> ([In Review] &rarr; [Approved]) hanya AM pemilik klien. Server menolak
+            jika langkahnya dilompat. Menolak hasil QC dilakukan per-Asset (feedback wajib menyebut Asset
+            yang mana) &mdash; buka halaman Asset-nya.
           </p>
 
-          {reviewableAssets.length > 0 && (
+          {canQcMassal && reviewableAssets.length > 0 && (
             <div className="stack" style={{ marginBottom: 20 }}>
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ margin: 0, fontSize: 14 }}>Perlu Review ({reviewableAssets.length})</h3>
+                <h3 style={{ margin: 0, fontSize: 14 }}>Perlu QC Internal ({reviewableAssets.length})</h3>
                 <div className="row" style={{ gap: 8 }}>
                   <button type="button" className="btn btnSecondary btnSm" onClick={() => toggleAll(setReviewChecked, reviewableAssets, true)}>
                     Pilih semua
@@ -652,16 +720,16 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
                 <button type="button" className="btn btnPrimary" disabled={reviewSubmitting} onClick={handleReviewMassal}>
                   {reviewSubmitting
                     ? 'Memproses...'
-                    : `Mulai Review (${reviewableAssets.filter((a) => reviewChecked[a.id]).length} dipilih)`}
+                    : `Loloskan QC \u2192 Review AM (${reviewableAssets.filter((a) => reviewChecked[a.id]).length} dipilih)`}
                 </button>
               </div>
             </div>
           )}
 
-          {approvableAssets.length > 0 && (
+          {canApproveMassal && approvableAssets.length > 0 && (
             <div className="stack">
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ margin: 0, fontSize: 14 }}>Perlu Approve ({approvableAssets.length})</h3>
+                <h3 style={{ margin: 0, fontSize: 14 }}>Perlu Approve AM ({approvableAssets.length})</h3>
                 <div className="row" style={{ gap: 8 }}>
                   <button type="button" className="btn btnSecondary btnSm" onClick={() => toggleAll(setApproveChecked, approvableAssets, true)}>
                     Pilih semua
@@ -737,17 +805,57 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
         </section>
       )}
 
-      {canCreateAsset && (
+      {canSelfClaim && (
         <section className="card">
           <div className="cardHeader">
-            <h2>Assign Team untuk Creative Production</h2>
+            <h2>Ambil Unit Brief Ini (Self-Claim)</h2>
+          </div>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Pembagian unit ke PIC lain sekarang dipegang <strong>Lead divisi Creative</strong> (ketokan
+            K-1). Yang tetap bisa Anda lakukan: mengambil sendiri unit Brief ini. Nomor urut Asset
+            ditetapkan otomatis dari slot yang masih kosong. Sisa slot Brief:{' '}
+            <strong>{remainingSlots}</strong> dari {brief.quantity_target}.
+          </p>
+          {createError && <div className="alert alertError" role="alert">{createError}</div>}
+          {createMessage && <div className="alert alertSuccess" role="status">{createMessage}</div>}
+          <form className="form" onSubmit={handleSelfClaim}>
+            <div className="formRow">
+              <div className="field" style={{ maxWidth: 220 }}>
+                <label htmlFor="selfclaim-qty">Jumlah unit yang diambil</label>
+                <input
+                  id="selfclaim-qty"
+                  type="number"
+                  min={1}
+                  max={remainingSlots}
+                  value={selfClaimQty}
+                  onChange={(e) => setSelfClaimQty(e.target.value)}
+                />
+              </div>
+              <div className="field" style={{ alignSelf: 'flex-end' }}>
+                <button type="submit" className="btn btnPrimary" disabled={createSubmitting || remainingSlots === 0}>
+                  {createSubmitting ? 'Menyimpan...' : 'Ambil Unit'}
+                </button>
+              </div>
+            </div>
+            {remainingSlots === 0 && (
+              <p className="muted" style={{ fontSize: 12 }}>
+                Semua {brief.quantity_target} unit Brief ini sudah dibuat sebagai Asset.
+              </p>
+            )}
+          </form>
+        </section>
+      )}
+
+      {canAssignBatch && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Assign Team untuk Creative Production (Lead)</h2>
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
             Tentukan <strong>berapa unit</strong> yang dikerjakan tiap orang — mis. 10 video ke A, 10 ke
             B, atau seluruhnya ke satu orang. Nomor urut Asset ditetapkan otomatis dari slot yang masih
-            kosong (bukan diisi manual). Kosongkan PIC untuk self-claim (staff Creative) atau untuk
-            melempar ke queue umum Creative (Lead). Sisa slot Brief:{' '}
-            <strong>{remainingSlots}</strong> dari {brief.quantity_target}.
+            kosong (bukan diisi manual). Kosongkan PIC untuk melempar ke queue umum Creative. Sisa slot
+            Brief: <strong>{remainingSlots}</strong> dari {brief.quantity_target}.
           </p>
           <form className="form" onSubmit={handleCreateAssets}>
             {createError && <div className="alert alertError" role="alert">{createError}</div>}

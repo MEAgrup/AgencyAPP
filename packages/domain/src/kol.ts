@@ -29,7 +29,7 @@ import { bi, money, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefLeavesToDo } from './account';
 import { ConflictError as BoardConflictError, onBriefReachedTerminal, validateBriefApproval } from './board';
-import { computeMetrics, STATUS_APPROVED, STATUS_BLOCKED, STATUS_IN_PROGRESS, STATUS_IN_REVIEW, STATUS_REVISION_REQ, STATUS_SUBMITTED, type Transition } from './task';
+import { computeMetrics, notifyAmOnRollupEdge, STATUS_APPROVED, STATUS_BLOCKED, STATUS_IN_PROGRESS, STATUS_IN_REVIEW, STATUS_REVISION_REQ, STATUS_SUBMITTED, type Transition } from './task';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -932,6 +932,10 @@ async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId: string
     if (from === '[To Do]') {
       await onBriefLeavesToDo(tx, actor, rows[0].service_id);
     }
+    // B-1b: same two AM handoff events as the Creative/Ads roll-up, through the
+    // SAME function (`task.notifyAmOnRollupEdge`) — a KOL Brief that closes must
+    // not be quieter than a Creative one.
+    await notifyAmOnRollupEdge(tx, actor, briefId, to);
     // M11 §5.5: on reaching terminal, fire EvDependencySatisfied once per sourced Dependency.
     if (to === STATUS_APPROVED) {
       await onBriefReachedTerminal(tx, actor, briefId);
@@ -1502,4 +1506,42 @@ function normQty(v: number | undefined): number {
 
 function transitionError(res: statemachine.TransitionResult & { ok: false }): Error {
   return res.code === 'role_denied' ? new ForbiddenError(res.message) : new ConflictError(res.message);
+}
+
+// ---------------------------------------------------------------------------
+// Job pengingat harian (B-3)
+// ---------------------------------------------------------------------------
+
+/** Apa yang dipancarkan satu lintasan `kol_reminder_tick`. */
+export interface KolReminderTickResult {
+  /** Pengingat H-1 Booking (jatuh tempo Brief induk besok, Booking belum terminal). */
+  h1: number;
+  /** Pemberitahuan lewat tenggat (jatuh tempo Brief induk sudah lewat). */
+  jatuhTempo: number;
+  /** Campaign yang `tanggal_akhir`-nya dalam 7 hari dan Brief-nya belum [Approved]. */
+  campaignAkhir: number;
+}
+
+/**
+ * runKolReminderTick menjalankan sapuan tenggat harian KOL (keluhan KOL #1).
+ *
+ * Pekerjaannya sendiri ada di fungsi SQL `kol_reminder_tick` (migrasi
+ * `20260922200200`), BUKAN di sini — sengaja, dan dengan alasan yang sama
+ * seperti `internaltask.runReminderTick`: di Supabase pg_cron memanggil SQL-nya
+ * LANGSUNG, jadi salinan kedua aturan seleksinya di TypeScript adalah aturan
+ * yang bisa BERBEDA dari yang benar-benar berjalan di produksi. Ini jalan masuk
+ * manual / cron-eksternal atas fungsi yang identik.
+ *
+ * Idempoten: setiap Booking/Brief diberi tahu paling banyak sekali per cabang,
+ * dijaga kolom penanda `pengingat_h1_terkirim` / `jatuh_tempo_terkirim` /
+ * `campaign_akhir_terkirim` (yang trigger-nya hanya mengizinkan false→true), jadi
+ * memanggilnya dua kali dalam sehari adalah no-op yang kedua. `now` sebuah
+ * parameter supaya tes bisa memancang hari WIB tanpa menyentuh jam dinding.
+ */
+export async function runKolReminderTick(sql: Sql, now?: Date): Promise<KolReminderTickResult> {
+  type R = { r: { h1: number; jatuh_tempo: number; campaign_akhir: number } };
+  const rows = now === undefined
+    ? await sql<R[]>`select kol_reminder_tick() as r`
+    : await sql<R[]>`select kol_reminder_tick(${now}) as r`;
+  return { h1: rows[0].r.h1, jatuhTempo: rows[0].r.jatuh_tempo, campaignAkhir: rows[0].r.campaign_akhir };
 }

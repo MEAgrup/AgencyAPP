@@ -359,6 +359,11 @@ export interface ServiceQueueRowWire {
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
+  /** A-3 — the STRG- (M6A) path, explicit null when the contract carries none. */
+  strategi_id: string | null;
+  strategi_status: string | null;
+  /** A-4 — the agreement covering this Service (O57), explicit null when none. */
+  contract_id: string | null;
   brief_count: number;
   /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
   client_target_gmv: string | null;
@@ -382,6 +387,9 @@ export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueR
     assigned_am_id: r.assignedAmId,
     strategy_id: r.strategyId,
     strategy_status: r.strategyStatus,
+    strategi_id: r.strategiId,
+    strategi_status: r.strategiStatus,
+    contract_id: r.contractId,
     brief_count: r.briefCount,
     client_target_gmv: r.clientTargetGmv,
     released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,
@@ -480,6 +488,16 @@ export interface BriefWire {
   client_id: string;
   client_nama: string;
   assigned_pic_nama: string;
+  // A-req-1/A-req-2 — jendela campaign, budget, dan penunjuk Brief Creative
+  // sumber. Nol omitempty, alasan yang sama dengan blok di atas: `''`/`null`
+  // eksplisit terbaca sebagai "belum diisi", kunci yang hilang jadi `undefined`
+  // dan halamannya kosong walau route menjawab 200.
+  tanggal_mulai: string;
+  tanggal_akhir: string;
+  budget: string | null;
+  source_creative_brief_id: string | null;
+  /** A-req-3 — jumlah unit kerja anak; 0 untuk divisi tanpa tabel anak. */
+  jumlah_anak: number;
 }
 
 export function briefToWire(b: account.Brief): BriefWire {
@@ -515,6 +533,41 @@ export function briefToWire(b: account.Brief): BriefWire {
     // tengah blok di atas: anchor Jalur A ada di TransactionWire, ~2.400 baris
     // jauhnya, supaya dua jalur tidak pernah menyunting hunk yang sama.
     // Aturannya tetap: nol omitempty, kirim `null`/`''` eksplisit.
+    tanggal_mulai: b.tanggalMulai,
+    tanggal_akhir: b.tanggalAkhir,
+    budget: b.budget,
+    source_creative_brief_id: b.sourceCreativeBriefId,
+    jumlah_anak: b.jumlahAnak,
+  };
+}
+
+/**
+ * task.BriefRollupDiagnosis → wire (B-1a — kenapa Brief ini belum bergerak).
+ *
+ * SEMUA kunci selalu dikirim, termasuk `blocker` saat nilainya `'selesai'`:
+ * kunci yang HILANG lebih berbahaya daripada `null` (CLAUDE.md), dan halaman
+ * yang harus membedakan "tidak ada penghalang" dari "diagnosisnya tidak
+ * terbaca" tidak boleh menebaknya dari absennya sebuah kunci.
+ */
+export interface BriefRollupDiagnosisWire {
+  brief_id: string;
+  status: string;
+  created: number;
+  target: number;
+  done: number;
+  blocker: string;
+  rollup_target: string;
+}
+
+export function briefRollupDiagnosisToWire(d: task.BriefRollupDiagnosis): BriefRollupDiagnosisWire {
+  return {
+    brief_id: d.briefId,
+    status: d.status,
+    created: d.created,
+    target: d.target,
+    done: d.done,
+    blocker: d.blocker,
+    rollup_target: d.rollupTarget,
   };
 }
 
@@ -535,6 +588,10 @@ export function toBriefInput(b: {
   instructions?: string;
   reference_attachments?: string;
   is_addendum?: boolean;
+  tanggal_mulai?: string;
+  tanggal_akhir?: string;
+  budget?: string | null;
+  source_creative_brief_id?: string | null;
 }): account.BriefInput {
   return {
     title: b.title ?? '',
@@ -552,6 +609,12 @@ export function toBriefInput(b: {
     instructions: b.instructions ?? '',
     referenceAttachments: b.reference_attachments ?? '',
     isAddendum: b.is_addendum === true,
+    // A-req-1/A-req-2 — diteruskan apa adanya; `''`/`null` berarti "tidak
+    // diisi", dan `validateBrief` yang memutuskan apakah itu sah.
+    tanggalMulai: b.tanggal_mulai ?? '',
+    tanggalAkhir: b.tanggal_akhir ?? '',
+    budget: b.budget ?? null,
+    sourceCreativeBriefId: b.source_creative_brief_id ?? null,
   };
 }
 
@@ -845,6 +908,41 @@ export function myAssetQueueItemToWire(a: creative.MyAssetQueueItem): MyAssetQue
   };
 }
 
+/**
+ * creative.ClientAssetOption → wire (B-5 / K-3 — the Ads Asset picker).
+ *
+ * ⚠️ NOTE FOR THE F-MERGE: Jalur B put this here, ~350 lines below `BriefWire`
+ * and ~2000 above `TransactionWire`, precisely so it sits nowhere near either
+ * F-1 insertion point. It is a Jalur-B addition to an F-owned file — recorded in
+ * `docs/handoff/HANDOFF_FEEDBACK_OD_JALUR_B.md` rather than negotiated, since a
+ * route that returns a raw domain object is an O43-class bug (page blank, route
+ * answers 200).
+ *
+ * `approved_at` is sent as an explicit `null`, never omitted: a MISSING key is
+ * more dangerous than a null one (CLAUDE.md).
+ */
+export interface ClientAssetOptionWire {
+  id: string;
+  brief_id: string;
+  brief_title: string;
+  asset_type: string;
+  sequence_no: number;
+  output_link: string;
+  approved_at: string | null;
+}
+
+export function clientAssetOptionToWire(a: creative.ClientAssetOption): ClientAssetOptionWire {
+  return {
+    id: a.id,
+    brief_id: a.briefId,
+    brief_title: a.briefTitle,
+    asset_type: a.assetType,
+    sequence_no: a.sequenceNo,
+    output_link: a.outputLink,
+    approved_at: a.approvedAt === null ? null : a.approvedAt.toISOString(),
+  };
+}
+
 export function assetToWire(a: creative.Asset): AssetWire {
   return {
     id: a.id,
@@ -966,6 +1064,13 @@ export interface CampaignWire {
   tipe_iklan: string;
   /** M16 LT-42 (Ads Management Date) — hari tambahan manual. */
   additional_days: number;
+  /**
+   * B-5 / K-3 — Brief Creative sumber brief setup kampanye ini
+   * (`briefs.source_creative_brief_id`, kolom F-4), atau `''`. Selalu dikirim:
+   * picker aset di halaman kampanye menyaring ke nilai ini, dan kunci yang
+   * HILANG lebih berbahaya daripada string kosong (CLAUDE.md).
+   */
+  source_creative_brief_id: string;
   total_spend: number;
   total_spend_display: string;
   total_gmv: number;
@@ -986,6 +1091,7 @@ export function campaignToWire(c: ads.Campaign): CampaignWire {
     id: c.id, brief_id: c.briefId, client_id: c.clientId, platform: c.platform, objective: c.objective,
     budget: c.budget, budget_display: c.budgetDisplay, start_date: c.startDate, end_date: c.endDate,
     target_kpi: c.targetKpi, status: c.status, tipe_iklan: c.tipeIklan, additional_days: c.additionalDays,
+    source_creative_brief_id: c.sourceCreativeBriefId,
     total_spend: c.totalSpend, total_spend_display: c.totalSpendDisplay,
     total_gmv: c.totalGmv, total_gmv_display: c.totalGmvDisplay, roas: c.roas, roas_display: c.roasDisplay,
     linked_asset_ids: c.linkedAssetIds, metric_entry_count: c.metricEntryCount, optimization_count: c.optimizationCount,

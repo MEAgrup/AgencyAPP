@@ -202,6 +202,11 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
     clientId: 'CLI-202607-0001',
     clientNama: 'Alpha Digital',
     assignedPicNama: 'Rian Pratama',
+    tanggalMulai: '',
+    tanggalAkhir: '',
+    budget: null,
+    sourceCreativeBriefId: null,
+    jumlahAnak: 0,
   };
 
   it('maps every Brief field to its snake_case wire key', () => {
@@ -232,6 +237,13 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
       client_id: 'CLI-202607-0001',
       client_nama: 'Alpha Digital',
       assigned_pic_nama: 'Rian Pratama',
+      // A-req-1/2/3 — keempatnya nol omitempty (aturan rumah wire.ts), jadi
+      // tes "setiap field" ini adalah tempat yang benar untuk menuntutnya ADA.
+      tanggal_mulai: '',
+      tanggal_akhir: '',
+      budget: null,
+      source_creative_brief_id: null,
+      jumlah_anak: 0,
     });
     expectNoCamelKeys(briefToWire(full));
   });
@@ -244,6 +256,11 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
       // No PIC ⇒ no PIC name. Kept in step with `assignedPic` deliberately: the
       // assertion below is about a key that is PRESENT while empty.
       assignedPicNama: '',
+    tanggalMulai: '',
+    tanggalAkhir: '',
+    budget: null,
+    sourceCreativeBriefId: null,
+    jumlahAnak: 0,
     };
     const wire = briefToWire(bare) as unknown as Record<string, unknown>;
     for (const k of ['strategy_id', 'assigned_pic', 'recurring_frequency',
@@ -571,6 +588,9 @@ describe('M8 campaignToWire (Campaign + derived §5 performance view)', () => {
     status: '[Active]',
     tipeIklan: 'GMV Max Product',
     additionalDays: 0,
+    // B-5/K-3: `''` adalah nilai yang domain benar-benar kirim saat brief setup
+    // kampanye tidak menunjuk Brief Creative sumber — bukan `undefined`.
+    sourceCreativeBriefId: '',
     totalSpend: 8000000,
     totalSpendDisplay: 'Rp. 8.000.000,00',
     totalGmv: 31000000,
@@ -601,6 +621,8 @@ describe('M8 campaignToWire (Campaign + derived §5 performance view)', () => {
       status: '[Active]',
       tipe_iklan: 'GMV Max Product',
       additional_days: 0,
+      // B-5/K-3 — dikirim SELALU, `''` saat brief setup tidak menunjuk sumber.
+      source_creative_brief_id: '',
       total_spend: 8000000,
       total_spend_display: 'Rp. 8.000.000,00',
       total_gmv: 31000000,

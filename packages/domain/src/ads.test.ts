@@ -10,7 +10,7 @@
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { money, permission } from '@cdps/core';
-import { createClient, type Sql } from '@cdps/db';
+import { createClient, withClaims, type Sql } from '@cdps/db';
 import {
   canManageCampaign,
   canViewCampaign,
@@ -204,6 +204,92 @@ afterEach(async () => {
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
+});
+
+describeDb('B-5 / K-3 — kampanye membawa Brief Creative sumbernya', () => {
+  it('`source_creative_brief_id` diproyeksikan ke Campaign, di kedua jalur baca', async () => {
+    // Diproyeksikan lewat kampanye (bukan `GET /briefs/{id}`) karena
+    // `account.getBrief` milik Jalur A — lihat HANDOFF_FEEDBACK_OD_JALUR_B.md.
+    const { clientId, briefId } = await adsBrief();
+    const creativeBrief = uid('BRF');
+    const svc = uid('SVC');
+    await insertService(svc, clientId);
+    await insertBrief(creativeBrief, svc, 'Creative', '[In Progress]');
+    await sql`update briefs set source_creative_brief_id = ${creativeBrief} where id = ${briefId}`;
+
+    // Jalur 1: hasil createCampaign langsung.
+    const dibuat = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    expect(dibuat.sourceCreativeBriefId).toBe(creativeBrief);
+    // Jalur 2: baca ulang. Kedua jalur harus SETUJU — halaman kampanye memakai
+    // yang kedua, sementara tes lain memakai yang pertama, dan satu yang lupa
+    // memetakan kolomnya tidak akan terlihat tanpa memeriksa keduanya.
+    expect((await getCampaign(sql, adsStaff(), dibuat.id)).sourceCreativeBriefId).toBe(creativeBrief);
+  });
+
+  it('DI BAWAH RLS divisi Ads pun kolomnya terbaca — jebakan O52 yang UAT temukan', async () => {
+    // Versi pertama memakai `left join briefs`, dan ia SALAH: rute
+    // `GET /campaigns/{id}` berjalan `readAsActor`, `briefs_select` nol arm
+    // staff divisi, jadi join-nya mengembalikan NULL untuk SATU-SATUNYA divisi
+    // yang memakai field ini. `LEFT` join tidak membuang barisnya — ia
+    // meng-NULL-kan kolomnya, jadi filternya diam-diam tidak berlaku dan
+    // pickernya jatuh ke fallback "semua aset klien".
+    //
+    // Tes lain di berkas ini TIDAK BISA menangkapnya: `sql` di sini BYPASSRLS.
+    // Jadi tes ini sengaja membaca lewat `withClaims` + `SET LOCAL ROLE
+    // authenticated`, sama seperti `creative-asset-scope.rls.test.ts`.
+    const { clientId, briefId } = await adsBrief();
+    const creativeBrief = uid('BRF');
+    const svc = uid('SVC');
+    await insertService(svc, clientId);
+    await insertBrief(creativeBrief, svc, 'Creative', '[In Progress]');
+    await sql`update briefs set source_creative_brief_id = ${creativeBrief} where id = ${briefId}`;
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+
+    // CATATAN SEJARAH — premis tes ini sudah BERUBAH, dan itu memang terdeteksi
+    // di sini alih-alih gagal senyap di tempat lain.
+    //
+    // Versi pertama meng-assert `count = 0`: staff Ads memang TIDAK melihat
+    // baris brief-nya, dan itulah yang membuat `left join briefs`
+    // meng-NULL-kan kolomnya. Migrasi `20260922200400` (arm STAFF divisi pada
+    // `briefs_select` — perbaikan regresi A-5) membuat premis itu tidak benar
+    // lagi, dan baris `expect` di bawahlah yang memberi tahu. Premisnya DIBALIK
+    // menjadi asersi atas keadaan baru alih-alih dihapus: pola sama
+    // `rls_checks.sql` check 25 ketika O48 Grup B membalikkannya.
+    //
+    // Konsekuensi yang jujur dicatat: sesudah arm itu, `left join briefs` pun
+    // akan bekerja untuk staff Ads, jadi tes ini TIDAK lagi menangkap regresi
+    // ke bentuk join. Yang masih ia jaga — dan itu yang penting — adalah bahwa
+    // kolomnya benar-benar terbaca lewat jalur baca yang SESUNGGUHNYA
+    // (`readAsActor`) oleh peran yang sesungguhnya memakainya.
+    // `private.brief_source_creative_id` dipertahankan karena ia tidak
+    // bergantung pada bentuk `briefs_select` sama sekali; alasan lengkapnya di
+    // migrasi `20260922200300`.
+    //
+    // Klaimnya HARUS aktor yang sama dengan yang membuat kampanyenya
+    // (`adsStaff()` = 'ZZ-ADV'): `ad_campaigns_select` membuka baris lewat
+    // `created_by`, jadi klaim aktor lain akan 404 di gerbang kampanyenya dan
+    // tes ini tidak akan pernah sampai ke kolom yang sedang diuji.
+    const klaim = JSON.stringify({
+      app_metadata: { employee_id: 'ZZ-ADV', division: 'Ads', level: 'staff', od: false, director: false },
+    });
+    const terlihat = await withClaims(sql, klaim, (tx) =>
+      tx<{ n: string }[]>`select count(*) as n from briefs where id = ${briefId}`);
+    expect(terlihat[0].n).toBe('1'); // arm staff divisi, migrasi 20260922200400
+
+    // Kolomnya terbaca di bawah RLS lewat jalur `private.*`.
+    const dibaca = await withClaims(sql, klaim, (tx) => getCampaign(tx, adsStaff(), c.id));
+    expect(dibaca.sourceCreativeBriefId).toBe(creativeBrief);
+  });
+
+  it('brief setup TANPA sumber memberi `\'\'`, bukan null — dan kampanyenya tetap terbaca', async () => {
+    // `''` (bukan null) supaya kunci wire-nya selalu ada; dan LEFT join-nya
+    // dijaga di sini: kalau seseorang menggantinya dengan inner join, kampanye
+    // yang brief-nya tak terbaca akan 404 demi satu kolom opsional.
+    const { briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    expect(c.sourceCreativeBriefId).toBe('');
+    expect((await getCampaign(sql, adsStaff(), c.id)).sourceCreativeBriefId).toBe('');
+  });
 });
 
 describeDb('createCampaign (§4 Rule 1)', () => {

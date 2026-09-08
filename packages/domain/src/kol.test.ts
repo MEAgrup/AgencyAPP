@@ -37,6 +37,7 @@ import {
   monthlyKolReport,
   NotFoundError,
   passQC,
+  runKolReminderTick,
   sourcingStallFlagged,
   receiveByFinance,
   recordAttributedGmv,
@@ -508,5 +509,114 @@ describeDb('monthlyKolReport (§9 / C6b)', () => {
     expect(empty.totalBookings).toBe(0);
     expect(empty.qcPassRate).toBeNull();
     expect(empty.qcPassRateDisplay).toBe('—');
+  });
+});
+
+describeDb('B-3 — pengingat tenggat KOL (kol_reminder_tick)', () => {
+  /** Brief KOL dengan due_date & tanggal_akhir yang dipancang, plus 1 Booking. */
+  async function briefDenganTenggat(opts: {
+    dueDate: string | null; tanggalAkhir?: string | null; coord?: string;
+  }): Promise<{ briefId: string; bookingId: string }> {
+    const { briefId } = await kolBrief(2);
+    await sql`update briefs set due_date = ${opts.dueDate}, tanggal_akhir = ${opts.tanggalAkhir ?? null}
+               where id = ${briefId}`;
+    const b = await createBooking(sql, kolStaff('ZZ-COORD'), briefId, goodInput());
+    if (opts.coord !== undefined) {
+      await sql`update creator_bookings set assigned_coordinator = ${opts.coord} where id = ${b.id}`;
+    }
+    return { briefId, bookingId: b.id };
+  }
+
+  const penerima = async (event: string, entityId: string): Promise<string[]> =>
+    (await sql<{ recipient_employee_id: string }[]>`
+      select recipient_employee_id from notifications
+       where event_type = ${event} and entity_id = ${entityId}
+       order by recipient_employee_id`).map((r) => r.recipient_employee_id);
+
+  // Jam dinding dipancang: cabang-cabangnya diturunkan dari `wib_date(p_now)`,
+  // jadi menebak "besok" dari `new Date()` akan membuat tes ini pecah tepat di
+  // pergantian hari WIB.
+  const NOW = new Date('2026-09-10T03:00:00Z'); // 10:00 WIB, 2026-09-10
+  const HARI_INI = '2026-09-10';
+  const BESOK = '2026-09-11';
+  const KEMARIN = '2026-09-09';
+
+  it('cabang H-1: Booking yang Brief-nya jatuh tempo BESOK diberi tahu, sekali', async () => {
+    const { bookingId } = await briefDenganTenggat({ dueDate: BESOK, coord: 'ZZ-COORD' });
+    const r1 = await runKolReminderTick(sql, NOW);
+    expect(r1.h1).toBe(1);
+    expect(r1.jatuhTempo).toBe(0);
+    expect(await penerima('m9.booking.jatuh_tempo', bookingId)).toContain('ZZ-COORD');
+    // AM pemilik klien ikut, lewat private.brief_owner_am — BUKAN join clients.
+    expect(await penerima('m9.booking.jatuh_tempo', bookingId)).toContain('ZZ-SINTA');
+    // Idempoten: lintasan kedua di hari yang sama nol.
+    expect((await runKolReminderTick(sql, NOW)).h1).toBe(0);
+  });
+
+  it('cabang lewat tenggat terpisah dari H-1, dan Booking terminal tidak pernah diingatkan', async () => {
+    const lewat = await briefDenganTenggat({ dueDate: KEMARIN, coord: 'ZZ-COORD' });
+    const r = await runKolReminderTick(sql, NOW);
+    expect(r.jatuhTempo).toBe(1);
+    // Booking yang lahir SUDAH lewat tenggat melompati H-1 — tidak ada yang
+    // perlu diingatkan tentang besok yang sudah kemarin.
+    expect(r.h1).toBe(0);
+    expect(await penerima('m9.booking.jatuh_tempo', lewat.bookingId)).toContain('ZZ-COORD');
+  });
+
+  it('Booking [QC Passed] dan [Dropped] TIDAK diingatkan, walau Brief-nya lewat tenggat', async () => {
+    // Cabang negatifnya diturunkan dari status yang benar-benar terminal di
+    // mesin `creator_booking`, bukan dari daftar tebakan.
+    const { briefId } = await kolBrief(3);
+    await sql`update briefs set due_date = ${KEMARIN} where id = ${briefId}`;
+    const lulus = await toQcPassed(briefId);
+    expect(await bkgStatus(lulus)).toBe('[QC Passed]');
+    const r = await runKolReminderTick(sql, NOW);
+    expect(r.jatuhTempo).toBe(0);
+    expect(await penerima('m9.booking.jatuh_tempo', lulus)).toEqual([]);
+  });
+
+  it('cabang campaign: `tanggal_akhir` dalam 7 hari memberi tahu AM, sekali; di luar 7 hari tidak', async () => {
+    // Jendela H-7 (bukan H-1) adalah keputusan B-3: campaign yang berakhir besok
+    // sudah tidak bisa diselamatkan. Kedua sisi batasnya di-expect.
+    const dekat = await briefDenganTenggat({ dueDate: null, tanggalAkhir: '2026-09-15' }); // H-5
+    const jauh = await briefDenganTenggat({ dueDate: null, tanggalAkhir: '2026-09-30' }); // H-20
+    const r = await runKolReminderTick(sql, NOW);
+    expect(r.campaignAkhir).toBe(1);
+    expect(await penerima('m9.campaign.mendekati_akhir', dekat.briefId)).toContain('ZZ-SINTA');
+    expect(await penerima('m9.campaign.mendekati_akhir', jauh.briefId)).toEqual([]);
+    expect((await runKolReminderTick(sql, NOW)).campaignAkhir).toBe(0); // idempoten
+  });
+
+  it('campaign yang Brief-nya sudah [Approved] tidak diingatkan; hari-H masuk hitungan', async () => {
+    const selesai = await briefDenganTenggat({ dueDate: null, tanggalAkhir: HARI_INI });
+    // Batas atas jendela: hari ini sendiri MASUK (`<= v_today + 7`).
+    expect((await runKolReminderTick(sql, NOW)).campaignAkhir).toBe(1);
+    // Sekarang Brief lain, sudah [Approved] — tidak ada tenggat untuk pekerjaan
+    // yang sudah tutup.
+    const approved = await briefDenganTenggat({ dueDate: null, tanggalAkhir: HARI_INI });
+    await sql`update briefs set status = '[Approved]' where id = ${approved.briefId}`;
+    expect((await runKolReminderTick(sql, NOW)).campaignAkhir).toBe(0);
+    expect(await penerima('m9.campaign.mendekati_akhir', approved.briefId)).toEqual([]);
+    expect(await penerima('m9.campaign.mendekati_akhir', selesai.briefId)).toContain('ZZ-SINTA');
+  });
+
+  it('penanda pengingat TIDAK bisa dikembalikan ke false', async () => {
+    // Penanda yang bisa di-reset = notifikasi yang bisa dikirim ulang setiap
+    // pagi, dan kotak masuk yang berisik adalah kotak masuk yang tidak dibaca.
+    // Kedua penanda harus benar-benar TERPASANG dulu — kalau tidak, UPDATE-nya
+    // nol baris dan tesnya hijau tanpa pernah menguji trigger-nya.
+    const { briefId, bookingId } = await briefDenganTenggat({
+      dueDate: BESOK, tanggalAkhir: HARI_INI, coord: 'ZZ-COORD',
+    });
+    const r = await runKolReminderTick(sql, NOW);
+    expect({ h1: r.h1, campaignAkhir: r.campaignAkhir }).toEqual({ h1: 1, campaignAkhir: 1 });
+    await expect(
+      sql`update creator_bookings set pengingat_h1_terkirim = false where id = ${bookingId}`,
+    ).rejects.toThrow();
+    await expect(
+      sql`update briefs set campaign_akhir_terkirim = false where id = ${briefId}`,
+    ).rejects.toThrow();
+    // …dan maju tetap boleh (false→true), kalau tidak seluruh job-nya mati.
+    await sql`update creator_bookings set jatuh_tempo_terkirim = true where id = ${bookingId}`;
   });
 });

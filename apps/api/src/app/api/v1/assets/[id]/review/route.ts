@@ -1,6 +1,7 @@
 /**
- * POST /api/v1/assets/{id}/review — the AM pulls a [Submitted] Asset into [In
- * Review] (M7 §4 Flow 3). Owning AM or Director. Ports Go's handleReviewAsset.
+ * POST /api/v1/assets/{id}/review — pulls a [Submitted] Asset into [In Review]
+ * (M7 §4 Flow 3), which since B-4/K-1 is the INTERNAL QC pass: the executing
+ * division's lead, the owning AM, or Director. Ports Go's handleReviewAsset.
  */
 import { creative } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';

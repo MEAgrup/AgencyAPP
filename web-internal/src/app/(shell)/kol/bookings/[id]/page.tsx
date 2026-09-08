@@ -27,6 +27,8 @@ import {
   failQC,
   getBooking,
   getBookingMetrics,
+  getBrief,
+  listBriefBookings,
   isODOnly,
   logBookingHours,
   passQC,
@@ -38,8 +40,11 @@ import {
   submitContent,
   type Booking,
   type BookingMetrics,
+  type Brief,
   type PaymentRequest,
 } from '@/lib/kol';
+import { hitungProgres, labelProgres } from '@/lib/brief-progress';
+import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
@@ -137,6 +142,18 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
   const [prSubmitting, setPrSubmitting] = useState(false);
   const [prError, setPrError] = useState<string | null>(null);
   const [prResult, setPrResult] = useState<PaymentRequest | null>(null);
+  /**
+   * B-3: the parent Brief's campaign context. The Booking page carried NONE of
+   * it — no due date, no Quantity/Target — so a Coordinator working a Booking
+   * could not see the deadline they are working toward, nor how many of the
+   * campaign's creators are still missing. That is the KOL #1 complaint: the
+   * numbers exist in `briefs`, they were simply never projected onto this page.
+   * A failed Brief fetch is NOT fatal to the page — the Booking's own actions
+   * must keep working — so it has its own error slot, never `setLoadError`.
+   */
+  const [brief, setBrief] = useState<Brief | null>(null);
+  const [briefBookingCount, setBriefBookingCount] = useState<number | null>(null);
+  const [briefError, setBriefError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -161,10 +178,30 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
     }
   }, [id]);
 
+  /**
+   * The parent Brief + how many Bookings it already has. Keyed on the Booking's
+   * `brief_id`, so it re-runs once the Booking itself has loaded.
+   */
+  const loadBriefContext = useCallback(async (briefId: string) => {
+    setBriefError(null);
+    try {
+      const [b, siblings] = await Promise.all([getBrief(briefId), listBriefBookings(briefId)]);
+      setBrief(b);
+      setBriefBookingCount(siblings.data.length);
+    } catch (err) {
+      setBriefError(errorMessage(err));
+    }
+  }, []);
+
   useEffect(() => {
     load();
     loadMetrics();
   }, [load, loadMetrics]);
+
+  useEffect(() => {
+    if (booking === null) return;
+    loadBriefContext(booking.brief_id);
+  }, [booking, loadBriefContext]);
 
   async function runLifecycle(action: string, fn: () => Promise<unknown>) {
     setLifecycleError(null);
@@ -376,6 +413,14 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
   }
 
   const status = booking.status;
+
+  // Progres "n dari N creator" (B-3 / B-1a). `null` selagi konteks Brief belum
+  // ada: 0 yang belum selesai dimuat terbaca sama seperti 0 yang sungguhan.
+  const progres =
+    brief === null || briefBookingCount === null
+      ? null
+      : hitungProgres(briefBookingCount, brief.quantity_target);
+
   const isSourcing = status === '[Sourcing]';
   const isBooked = status === '[Booked]';
   const isContentInProgress = status === '[Content In Progress]';
@@ -426,6 +471,47 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
           window Brief menuju jatuh tempo (§4 Rule 4). Segera lanjutkan negosiasi atau eskalasi.
         </div>
       )}
+
+      {/* B-3 / KOL #1: konteks campaign dari Brief induk — jatuh tempo dan
+          progres "n dari N creator". Keduanya SUDAH ada di `briefs` sejak awal;
+          halaman ini tidak pernah memproyeksikannya, jadi Coordinator mengerjakan
+          Booking tanpa tahu tenggat yang dituju maupun berapa creator yang masih
+          kurang. Jendela campaign + budget menyusul (menunggu kolom F-4). */}
+      <section className="card">
+        <div className="cardHeader">
+          <h2>Konteks Campaign (dari Brief {booking.brief_id})</h2>
+        </div>
+        {briefError && (
+          <div className="alert alertError" role="alert">
+            Konteks Brief gagal dimuat: {briefError} &mdash; aksi Booking di bawah tetap berfungsi.
+          </div>
+        )}
+        {!briefError && brief === null ? (
+          <p className="muted">Memuat konteks Brief&hellip;</p>
+        ) : brief !== null ? (
+          <>
+            <div className="grid2">
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>Brief</div>
+                <div><Link href={`/kol/briefs/${brief.id}`}>{brief.title}</Link></div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>Jatuh Tempo Campaign (Due Date)</div>
+                <div>{brief.due_date || '—'}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>Progres Creator (Quantity/Target)</div>
+                <div>{progres === null ? '—' : labelProgres(progres, 'creator')}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>Prioritas</div>
+                <div>{brief.priority}</div>
+              </div>
+            </div>
+            <RollupBlockerPanel briefId={brief.id} satuan="Booking" refreshKey={briefBookingCount ?? 0} />
+          </>
+        ) : null}
+      </section>
 
       {/* Detail booking */}
       <section className="card">

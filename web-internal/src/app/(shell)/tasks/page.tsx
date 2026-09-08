@@ -251,8 +251,17 @@ function TasksListPage() {
               <thead>
                 <tr>
                   <th>ID</th>
+                  {/* B-2 / Creative #3 — antrean generik /tasks melayani SETIAP
+                      divisi eksekusi, jadi di sinilah "pekerjaan siapa ini"
+                      paling sering ditanyakan. */}
+                  <th>Klien</th>
                   <th>Judul</th>
                   <th>Deliverable</th>
+                  {/* A-req-3 — sudah dipecah jadi berapa unit kerja. Tanpa ini,
+                      Brief berisi 12 Asset dan Brief nol Asset terlihat sama di
+                      antrean, dan leader harus membuka satu-satu untuk tahu mana
+                      yang belum dikerjakan sama sekali. */}
+                  <th>Unit Kerja</th>
                   <th>PIC</th>
                   <th>Prioritas</th>
                   <th>Status</th>
@@ -264,9 +273,32 @@ function TasksListPage() {
                 {filteredBriefs.map((b) => (
                   <tr key={b.id}>
                     <td><Link href={`/tasks/${b.id}`}>{b.id}</Link></td>
+                    <td>
+                      {b.client_nama || '—'}
+                      {b.client_id && <div className="muted" style={{ fontSize: 11 }}>{b.client_id}</div>}
+                    </td>
                     <td>{b.title}</td>
                     <td>{b.deliverable_type}</td>
-                    <td>{b.assigned_pic || '—'}</td>
+                    <td>
+                      {b.jumlah_anak > 0 ? (
+                        <>
+                          {b.jumlah_anak}
+                          <span className="muted" style={{ fontSize: 11 }}>
+                            {' / target '}{b.quantity_target}
+                          </span>
+                        </>
+                      ) : (
+                        // NOL adalah jawaban, bukan data yang hilang — justru
+                        // baris inilah yang paling perlu dilihat leader.
+                        <span className="badge badge-gray">belum dipecah</span>
+                      )}
+                    </td>
+                    <td>
+                      {b.assigned_pic_nama || (b.assigned_pic ? b.assigned_pic : '—')}
+                      {b.assigned_pic_nama && b.assigned_pic && (
+                        <div className="muted" style={{ fontSize: 11 }}>{b.assigned_pic}</div>
+                      )}
+                    </td>
                     <td>{b.priority || '—'}</td>
                     <td><StatusBadge status={b.status} /></td>
                     <td>{b.due_date || '—'}</td>

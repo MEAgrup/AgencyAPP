@@ -33,6 +33,13 @@ export type Actor = permission.Actor;
 
 export const CREATIVE_DIVISION = 'Creative';
 export const ACCOUNT_DIVISION = 'Account';
+/**
+ * B-5 / K-3: the Ads division reads Creative Assets. Declared here as a literal
+ * for the same reason the two above are — `packages/core/src/division.ts` has no
+ * by-code accessor, and `ads.ADS_DIVISION` cannot be imported without making the
+ * Creative module depend on the Ads module for a permission constant.
+ */
+export const ADS_DIVISION = 'Ads';
 
 // Asset status labels — the canonical brief_task machine (STATE_MACHINES §7), per-row.
 const STATUS_TODO = '[To Do]';
@@ -50,6 +57,8 @@ const ASSET_REVISION_FLAG_THRESHOLD = 3;
 // --- Verbatim BI messages (M7). Each mirrors a Go sentinel 1:1. ---
 
 export const MSG_BRIEF_NOT_FOUND = '[brief tidak ditemukan]';
+/** B-5: the client whose Approved Assets were asked for does not exist. */
+export const MSG_CLIENT_NOT_FOUND = '[klien tidak ditemukan]';
 export const MSG_ASSET_NOT_FOUND = '[aset tidak ditemukan]';
 export const MSG_ASSET_FORBIDDEN = '[anda tidak memiliki akses ke aset ini]';
 export const MSG_NOT_CREATIVE_BRIEF = '[brief ini bukan brief divisi Creative]';
@@ -63,6 +72,18 @@ export const MSG_INVALID_QUANTITY = '[jumlah aset yang di-assign harus lebih dar
 export const MSG_QUANTITY_EXCEEDS_TARGET = '[jumlah aset melebihi sisa target brief]';
 export const MSG_INVALID_PIC = '[PIC tidak valid: harus staff divisi Creative yang aktif]';
 export const MSG_REVIEW_FORBIDDEN = '[hanya Account Manager pemilik klien yang dapat mereview aset ini]';
+/**
+ * B-4 / K-1: `[Submitted]` → `[In Review]` is now the INTERNAL QC pass, so two
+ * roles may drive it. MSG_REVIEW_FORBIDDEN stays on the doors that really are
+ * the AM's alone (approve, and the AM's own revision request) — reusing it here
+ * would tell a Creative lead that only an AM can do what they just did.
+ */
+export const MSG_REVIEW_START_FORBIDDEN =
+  '[hanya lead divisi pelaksana atau Account Manager pemilik klien yang dapat memulai review aset ini]';
+/** B-4 / K-1: `[Submitted]` → `[Revision Requested]` is the lead's internal-QC reject. */
+export const MSG_QC_REJECT_FORBIDDEN = '[hanya lead divisi pelaksana yang dapat menolak aset ini pada QC internal]';
+/** B-4 / K-1: handing units OUT to other PICs is the lead's job; self-claim is not. */
+export const MSG_BATCH_ASSIGN_FORBIDDEN = '[hanya lead divisi Creative yang dapat membagi aset ke PIC lain]';
 export const MSG_REVISION_FEEDBACK_REQUIRED = '[feedback revisi wajib diisi]';
 export const MSG_HOURS_FORBIDDEN = '[anda tidak memiliki akses untuk mencatat Hours Logged aset ini]';
 export const MSG_INVALID_HOURS = '[jumlah Hours Logged harus lebih dari 0]';
@@ -155,7 +176,76 @@ export function canCreateAsset(actor: Actor): boolean {
   );
 }
 
-/** canSeeAsset is the §9.1 read predicate (mirrors account.canSeeBrief). */
+/**
+ * canAssignAssetBatch: only the Creative lead (or Director) hands units OUT.
+ *
+ * K-1 (owner's ruling 2026-09-07, option B): the AM picks the DIVISION, the
+ * LEADER splits the Brief across PICs. `canCreateAsset` stays as it is — it
+ * still guards the §4 Flow 1 self-claim, which any Creative staffer may do —
+ * but the fan-out door (`createAssetBatch`) is the one that decides someone
+ * ELSE's workload, and that is the leader's call now.
+ */
+export function canAssignAssetBatch(actor: Actor): boolean {
+  return permission.isLead(actor, CREATIVE_DIVISION);
+}
+
+/**
+ * canDriveReviewEdge is the per-edge review gate (M7 §4 Flow 3 / §6, widened by
+ * B-4 / K-1). Pure so the three doors can be asserted without a database — the
+ * bug this shape prevents is a UI that shows a button the server then refuses.
+ *
+ *   [Submitted]  → [In Review]           internal QC PASS  · division lead OR owning AM
+ *   [Submitted]  → [Revision Requested]  internal QC FAIL  · division lead ONLY
+ *   [In Review]  → [Approved]            client verdict    · owning AM ONLY
+ *   [In Review]  → [Revision Requested]  client verdict    · owning AM ONLY
+ *
+ * `[In Review] → [Approved]` deliberately does NOT widen: the AM is the client's
+ * proxy, and K-1 says so in as many words ("AM tetap pemegang approval akhir").
+ * A leader who could approve would be signing off on their own division's work.
+ *
+ * `division` is the Brief's `assigned_division`, not a literal 'Creative': the
+ * same three edges carry every division's Assets, so the leader who may QC is
+ * whichever division is actually executing the Brief.
+ */
+export function canDriveReviewEdge(
+  actor: Actor, from: string, to: string, ownerAm: string, division: string,
+): boolean {
+  if (actor.role.director) {
+    return true;
+  }
+  const isOwningAm = ownerAm !== '' && actor.employeeId === ownerAm;
+  const isDivisionLead = permission.isLead(actor, division);
+  if (to === STATUS_IN_REVIEW) {
+    return isOwningAm || isDivisionLead;
+  }
+  if (to === STATUS_REVISION_REQ && from === STATUS_SUBMITTED) {
+    return isDivisionLead;
+  }
+  return isOwningAm;
+}
+
+/** The exact BI refusal for the edge `canDriveReviewEdge` just denied. */
+export function reviewEdgeForbiddenMessage(from: string, to: string): string {
+  if (to === STATUS_IN_REVIEW) {
+    return MSG_REVIEW_START_FORBIDDEN;
+  }
+  if (to === STATUS_REVISION_REQ && from === STATUS_SUBMITTED) {
+    return MSG_QC_REJECT_FORBIDDEN;
+  }
+  return MSG_REVIEW_FORBIDDEN;
+}
+
+/**
+ * canSeeAsset is the §9.1 read predicate (mirrors account.canSeeBrief).
+ *
+ * B-5/K-3 adds the Ads arm. PRD M8 §9.1 already gives the Advertiser the
+ * capability "link Creative Assets" — but this gate was never widened to match,
+ * so an Advertiser who guessed the right `AST-` id still got 403 and the Ads
+ * campaign page shipped a free-text "type the AST- from memory" box instead of a
+ * picker. READ ONLY: nothing in the write paths (`lockAssetOwner`,
+ * `canDriveReviewEdge`, `canLogHours`, `lockAssetableBrief`) consults this
+ * predicate, so opening it cannot let Ads move an Asset's status.
+ */
 export function canSeeAsset(actor: Actor, ownerAm: string, division: string): boolean {
   if (permission.canReadAll(actor)) {
     return true; // OD / Director
@@ -166,6 +256,14 @@ export function canSeeAsset(actor: Actor, ownerAm: string, division: string): bo
   if (actor.employeeId === ownerAm) {
     return true; // owning AM
   }
+  if (isDivisionStaffOrLead(actor, ADS_DIVISION)) {
+    return true; // B-5/K-3: Ads reads the Assets it has to put into campaigns
+  }
+  return isDivisionStaffOrLead(actor, division);
+}
+
+/** The "works in this division, at either level" shape these predicates share. */
+function isDivisionStaffOrLead(actor: Actor, division: string): boolean {
   return (
     actor.role.division === division &&
     (actor.role.level === permission.LevelStaff || actor.role.level === permission.LevelLead)
@@ -247,6 +345,20 @@ export async function createAsset(sql: Sql, actor: Actor, briefId: string, input
  * A line with an empty PIC keeps §4 Flow 1's self-claim (a Creative staffer
  * becomes the PIC of their own rows); a lead may leave it unassigned for the
  * general queue.
+ *
+ * B-4/K-1 narrows WHO may fan out: deciding ANOTHER person's workload is the
+ * leader's job now. A non-lead Creative staffer keeps the §4 Flow 1 self-claim
+ * untouched, which is why this is a shape check on the lines rather than a flat
+ * `canAssignAssetBatch` gate on the whole door.
+ *
+ * The line drawn is "for someone else", NOT "more than one unit". A staffer
+ * taking three of their own Brief's slots in one call is not the complaint K-1
+ * answers (Account #2 — the AM picking staff names), and it is existing tested
+ * behaviour: `createAssetBatch` is the only door that reuses a Sequence # gap,
+ * so capping it at one unit would have quietly cost the self-claimer that. See
+ * `docs/handoff/HANDOFF_FEEDBACK_OD_JALUR_B.md` — the plan's wording ("self-claim
+ * satu aset tetap boleh") reads as the reassurance that the door stays open, and
+ * that reading is flagged there for the owner rather than decided here.
  */
 export async function createAssetBatch(sql: Sql, actor: Actor, briefId: string, lines: AssetAssignment[]): Promise<Asset[]> {
   const now = new Date();
@@ -256,6 +368,18 @@ export async function createAssetBatch(sql: Sql, actor: Actor, briefId: string, 
   for (const line of lines) {
     if (!Number.isInteger(line.quantity) || line.quantity <= 0) {
       throw new ValidationError(MSG_INVALID_QUANTITY);
+    }
+  }
+  if (!canAssignAssetBatch(actor)) {
+    // Checked AFTER the quantity validation on purpose: a malformed line is a
+    // 400 for everybody, and turning it into a 403 for staff would hide the
+    // real complaint behind a permission message.
+    const forOthers = lines.some((line) => {
+      const pic = (line.assignedPic ?? '').trim();
+      return pic !== '' && pic !== actor.employeeId;
+    });
+    if (forOthers) {
+      throw new ForbiddenError(MSG_BATCH_ASSIGN_FORBIDDEN);
     }
   }
   return withTransaction(sql, async (tx) => {
@@ -363,7 +487,11 @@ async function insertAsset(
 
 // --- AM-side review edges (§4 Flow 3 / §6) ---
 
-/** reviewAsset pulls a [Submitted] Asset into [In Review] (§4 Flow 3). Owning AM or Director. */
+/**
+ * reviewAsset pulls a [Submitted] Asset into [In Review] (§4 Flow 3) — the
+ * internal-QC PASS since B-4/K-1. Executing division's lead, owning AM, or
+ * Director.
+ */
 export function reviewAsset(sql: Sql, actor: Actor, assetId: string): Promise<statemachine.TransitionResult> {
   return driveReviewEdge(sql, actor, assetId, STATUS_IN_REVIEW, '');
 }
@@ -374,10 +502,19 @@ export function approveAsset(sql: Sql, actor: Actor, assetId: string): Promise<s
 }
 
 /**
- * requestAssetRevision sends an Asset under review back to the PIC with mandatory
- * feedback ([In Review] → [Revision Requested], §6 Rule 1). Owning AM or Director.
- * The revision count derives from the log; on the exact 3rd revision the per-Asset
- * Team-Leader flag fires (§6 Rule 4).
+ * requestAssetRevision sends an Asset back to the PIC with mandatory feedback
+ * (§6 Rule 1). ONE function, TWO doors since B-4/K-1 — the source state decides
+ * whose call it is:
+ *
+ *   from [In Review]  the AM's client-side verdict (owning AM / Director), and
+ *                     the only one that counts toward Revision Count + the §6
+ *                     Rule 4 flag on the exact 3rd revision;
+ *   from [Submitted]  the executing division lead's internal-QC reject, which
+ *                     never reaches the AM and therefore never counts as a
+ *                     client revision.
+ *
+ * Feedback is mandatory on both — a reject with no reason is the silent failure
+ * house rule 5 exists to prevent.
  */
 export async function requestAssetRevision(sql: Sql, actor: Actor, assetId: string, feedback: string): Promise<statemachine.TransitionResult> {
   const why = (feedback ?? '').trim();
@@ -401,7 +538,7 @@ async function reviewEdgeTx(
   opts?: { propagate?: boolean },
 ): Promise<statemachine.TransitionResult> {
   const ex = executors(tx);
-  const { briefId, division } = await lockAssetOwner(tx, actor, assetId);
+  const { briefId, division, from } = await lockAssetOwner(tx, actor, assetId, to);
   const res = await statemachine.transition(ex.sm, {
     machine: MACHINE_BRIEF_TASK, entityType: 'asset', table: 'assets', entityId: assetId, to, actor,
   });
@@ -409,13 +546,21 @@ async function reviewEdgeTx(
     throw res.code === 'role_denied' ? new ForbiddenError(res.message) : new ConflictError(res.message);
   }
   if (to === STATUS_REVISION_REQ) {
-    // §6 Rule 1: mandatory feedback recorded immutably in the audit log.
+    // §6 Rule 1: mandatory feedback recorded immutably in the audit log. Written
+    // for BOTH doors — the PIC needs to read the leader's QC note as much as the
+    // AM's, and the FE's latestRevisionFeedback() finds it by this one action.
     await ex.audit.insertAudit({
       entityType: 'asset', entityId: assetId, actorEmployeeId: actor.employeeId, action: 'revision_feedback',
       beforeJson: null, afterJson: { feedback }, createdBy: actor.employeeId,
     });
     // §6 Rule 4: fire the per-Asset Quality flag on the exact 3rd revision (once).
-    if (await deriveAssetRevisionCount(tx, assetId) === ASSET_REVISION_FLAG_THRESHOLD) {
+    //
+    // ONLY on the AM door. Revision Count derives from
+    // `transition:[In Review]->[Revision Requested]` alone, so the leader's
+    // internal QC reject leaves the count untouched — running this check after
+    // one would re-fire the flag every time a QC reject happened at count 3,
+    // breaking the "once" that Rule 4 is built on.
+    if (from === STATUS_IN_REVIEW && await deriveAssetRevisionCount(tx, assetId) === ASSET_REVISION_FLAG_THRESHOLD) {
       await notification.emit(ex.notify, {
         event: notification.EVENTS.RevisionCountFlag, entityType: 'asset', entityId: assetId,
         actor: actor.employeeId, division,
@@ -423,6 +568,12 @@ async function reviewEdgeTx(
     }
   }
   // M7 §2: recompute the parent Brief's roll-up after every Asset status change.
+  //
+  // The roll-up is ALSO where the AM gets told (B-1b `notifyAmOnRollupEdge`):
+  // a lead's QC pass on the LAST outstanding Asset moves the Brief to
+  // [In Review], and that edge is what fires `BriefSiapReviewAm`. Deliberately
+  // not emitted per-Asset here — twelve QC passes on one Brief is one handoff to
+  // the AM, not twelve notifications.
   if (opts?.propagate ?? true) {
     await recomputeBriefRollup(tx, actor, briefId);
   }
@@ -435,12 +586,22 @@ function driveReviewEdge(sql: Sql, actor: Actor, assetId: string, to: string, fe
 }
 
 /**
- * lockAssetOwner row-locks an Asset and returns its (parent Brief id, Creative
- * division), enforcing the §4 Flow 3 review gate: owning AM or Director only.
+ * lockAssetOwner row-locks an Asset and returns its (parent Brief id, executing
+ * division, current status), enforcing the §4 Flow 3 / B-4 review gate for the
+ * requested target state via `canDriveReviewEdge`.
+ *
+ * It reads `a.status` because the gate is not the same on both doors into
+ * `[Revision Requested]`: from `[Submitted]` it is the lead's internal QC
+ * reject, from `[In Review]` it is the AM's client-side verdict. The engine
+ * re-reads and re-locks the row itself, so this status is used for the GATE
+ * only — never to decide whether the transition is legal (that stays
+ * `sm_edges`' job, house rule 2).
  */
-async function lockAssetOwner(tx: Queryable, actor: Actor, assetId: string): Promise<{ briefId: string; division: string }> {
-  const rows = await tx<{ brief_id: string; assigned_division: string; assigned_am_id: string | null }[]>`
-    select a.brief_id, b.assigned_division, c.assigned_am_id
+async function lockAssetOwner(
+  tx: Queryable, actor: Actor, assetId: string, to: string,
+): Promise<{ briefId: string; division: string; from: string }> {
+  const rows = await tx<{ brief_id: string; status: string; assigned_division: string; assigned_am_id: string | null }[]>`
+    select a.brief_id, a.status, b.assigned_division, c.assigned_am_id
       from assets a
       join briefs b on b.id = a.brief_id
       join services sv on sv.id = b.service_id
@@ -449,10 +610,11 @@ async function lockAssetOwner(tx: Queryable, actor: Actor, assetId: string): Pro
   if (rows.length === 0) {
     throw new NotFoundError(MSG_ASSET_NOT_FOUND);
   }
-  if (!actor.role.director && rows[0].assigned_am_id !== actor.employeeId) {
-    throw new ForbiddenError(MSG_REVIEW_FORBIDDEN);
+  const r = rows[0];
+  if (!canDriveReviewEdge(actor, r.status, to, r.assigned_am_id ?? '', r.assigned_division)) {
+    throw new ForbiddenError(reviewEdgeForbiddenMessage(r.status, to));
   }
-  return { briefId: rows[0].brief_id, division: rows[0].assigned_division };
+  return { briefId: r.brief_id, division: r.assigned_division, from: r.status };
 }
 
 // ---------------------------------------------------------------------------
@@ -462,15 +624,23 @@ async function lockAssetOwner(tx: Queryable, actor: Actor, assetId: string): Pro
 // edges, and M16 §6 / LT-30 derive waktuAmBelumBukaHours/waktuAmReviewHours
 // from those two timestamps; collapsing them would grind both to ~0 forever.
 // No bulk request-revision: M7 §6 Rule 1 requires feedback tied to one
-// specific Asset, so that edge stays single-Asset (requestAssetRevision).
+// specific Asset, so that edge stays single-Asset (requestAssetRevision) — and
+// B-4's internal-QC reject is the SAME edge, so it stays single-Asset too.
+//
+// B-4/K-1: the first door ([Submitted]->[In Review]) is now the internal QC
+// pass, so the executing division's lead may drive the BATCH as well as the
+// single Asset — the gate is one shared predicate (`canDriveReviewEdge`), never
+// two copies. The second door ([In Review]->[Approved]) stays the AM's alone.
 // ---------------------------------------------------------------------------
 
-/** One locked Asset row, as read for AM-batch verdict + execution. */
+/** One locked Asset row, as read for the batch verdict + execution. */
 interface BatchReviewAssetRow {
   assetId: string;
   sequenceNo: number;
   status: string;
   ownerAm: string;
+  /** The Brief's `assigned_division` — the lead who may QC (B-4) is ITS lead. */
+  division: string;
 }
 
 /**
@@ -488,8 +658,10 @@ async function lockBriefAssetsForReviewBatch(
   if (brief.length === 0) {
     throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
   }
-  const rows = await tx<{ id: string; sequence_no: number; status: string; assigned_am_id: string | null }[]>`
-    select a.id, a.sequence_no, a.status, c.assigned_am_id
+  const rows = await tx<{
+    id: string; sequence_no: number; status: string; assigned_division: string; assigned_am_id: string | null;
+  }[]>`
+    select a.id, a.sequence_no, a.status, b.assigned_division, c.assigned_am_id
       from assets a
       join briefs b on b.id = a.brief_id
       join services sv on sv.id = b.service_id
@@ -499,22 +671,26 @@ async function lockBriefAssetsForReviewBatch(
      for update`;
   const assets = new Map<string, BatchReviewAssetRow>();
   for (const r of rows) {
-    assets.set(r.id, { assetId: r.id, sequenceNo: Number(r.sequence_no), status: r.status, ownerAm: r.assigned_am_id ?? '' });
+    assets.set(r.id, {
+      assetId: r.id, sequenceNo: Number(r.sequence_no), status: r.status,
+      ownerAm: r.assigned_am_id ?? '', division: r.assigned_division,
+    });
   }
   return { briefStatus: brief[0].status, assets };
 }
 
 /** verdictForReview is the pure-read judgment shared by review/approve: does
- *  this Asset (belonging to the Brief) exist, is the actor its owning AM or
- *  Director, and is it in the expected source state? */
+ *  this Asset (belonging to the Brief) exist, may the actor drive THIS edge on
+ *  it (`canDriveReviewEdge` — so the batch and the single-Asset door can never
+ *  disagree), and is it in the expected source state? */
 function verdictForReview(
-  actor: Actor, asset: BatchReviewAssetRow | undefined, requireFrom: string,
+  actor: Actor, asset: BatchReviewAssetRow | undefined, requireFrom: string, to: string,
 ): { ok: true } | { ok: false; reason: string } {
   if (asset === undefined) {
     return { ok: false, reason: MSG_ASSET_NOT_FOUND };
   }
-  if (!actor.role.director && asset.ownerAm !== actor.employeeId) {
-    return { ok: false, reason: MSG_REVIEW_FORBIDDEN };
+  if (!canDriveReviewEdge(actor, requireFrom, to, asset.ownerAm, asset.division)) {
+    return { ok: false, reason: reviewEdgeForbiddenMessage(requireFrom, to) };
   }
   if (asset.status !== requireFrom) {
     return { ok: false, reason: bi.TRANSITION_NOT_ALLOWED };
@@ -539,7 +715,7 @@ async function reviewApproveAssetBatch(
 
     const rows: AssetExecRowResult[] = assetIds.map((assetId, i) => {
       const asset = assets.get(assetId);
-      const verdict = verdictForReview(actor, asset, requireFrom);
+      const verdict = verdictForReview(actor, asset, requireFrom, to);
       return {
         rowNumber: i + 1,
         assetId,
@@ -564,12 +740,14 @@ async function reviewApproveAssetBatch(
   });
 }
 
-/** reviewAssetBatch pulls many [Submitted] Assets of one Brief into [In Review] at once. */
+/** reviewAssetBatch pulls many [Submitted] Assets of one Brief into [In Review]
+ *  at once — the batch internal-QC pass. Division lead, owning AM, or Director. */
 export function reviewAssetBatch(sql: Sql, actor: Actor, briefId: string, assetIds: readonly string[]): Promise<AssetExecBatchReport> {
   return reviewApproveAssetBatch(sql, actor, briefId, STATUS_SUBMITTED, STATUS_IN_REVIEW, assetIds);
 }
 
-/** approveAssetBatch approves many [In Review] Assets of one Brief at once. */
+/** approveAssetBatch approves many [In Review] Assets of one Brief at once.
+ *  Owning AM or Director ONLY — K-1 leaves final approval with the AM. */
 export function approveAssetBatch(sql: Sql, actor: Actor, briefId: string, assetIds: readonly string[]): Promise<AssetExecBatchReport> {
   return reviewApproveAssetBatch(sql, actor, briefId, STATUS_IN_REVIEW, STATUS_APPROVED, assetIds);
 }
@@ -732,6 +910,97 @@ export async function listMyAssets(sql: Queryable, actor: Actor): Promise<MyAsse
     dueDate: r.due_date === null ? null : (r.due_date instanceof Date ? r.due_date.toISOString().slice(0, 10) : String(r.due_date).slice(0, 10)),
     slaTargetHours: numOrNull(r.sla_target_hours), revisionSlaHours: numOrNull(r.revision_sla_target_hours),
     createdAt: r.created_at,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Approved Assets of one client (B-5 / K-3) — what the Ads picker reads.
+//
+// The Ads campaign page used to ask an Advertiser to TYPE `AST-202607-0001`
+// from memory, and there was no way for them to find it: no list endpoint
+// existed, and `canSeeAsset` refused the Ads division outright, so even the
+// right id answered 403. Three locks, opened together (the picker is useless
+// with any one of them still shut).
+//
+// SERVICE-ROLE, like listMyAssets — and for the same O52 reason: `assets` and
+// `briefs` survive RLS on their own, but the `services`→`clients` join needed to
+// scope by client has no execution-division arm and would erase every row for
+// exactly the divisions that need this read. The difference from listMyAssets is
+// that the scope here is a CALLER-SUPPLIED clientId, not the caller's own id, so
+// the permission gate cannot be implicit: `canSeeAsset` is evaluated explicitly
+// against the client's owning AM BEFORE any Asset row is read, and a caller who
+// fails it gets 403 rather than an empty list (an empty list is indistinguishable
+// from "this client has no approved Assets", and that ambiguity is what sends
+// people back to the spreadsheet).
+// ---------------------------------------------------------------------------
+
+/** One selectable Approved Asset of a client — the picker's row (B-5). */
+export interface ClientAssetOption {
+  id: string; // AST-
+  briefId: string; // the Creative Brief it came out of
+  briefTitle: string;
+  assetType: string;
+  sequenceNo: number;
+  outputLink: string;
+  approvedAt: Date | null; // from the immutable log, never stored (house rule 4)
+}
+
+interface ClientAssetRow {
+  id: string;
+  brief_id: string;
+  brief_title: string;
+  asset_type: string;
+  sequence_no: number;
+  output_link: string | null;
+  approved_at: Date | null;
+}
+
+/**
+ * listApprovedAssetsForClient returns every `[Approved]` Asset belonging to a
+ * client, newest approval first, optionally narrowed to ONE source Creative
+ * Brief.
+ *
+ * `sourceBriefId` is how K-3's "the Ads brief points at the Creative brief it
+ * came from" reaches this read: the caller passes the Ads Brief's
+ * `source_creative_brief_id`, and an empty/absent value falls back to ALL of the
+ * client's approved Assets — the fallback is deliberate, because a narrowed
+ * picker that silently shows nothing is worse than a wide one.
+ *
+ * `approvedAt` is derived from the audit log (`transition:…->[Approved]`), not
+ * stored — house rule 4. NULL only for a row approved before the log existed.
+ *
+ * MUST be given the service-role client (see the section header).
+ */
+export async function listApprovedAssetsForClient(
+  sql: Queryable, actor: Actor, clientId: string, sourceBriefId?: string,
+): Promise<ClientAssetOption[]> {
+  const owner = await sql<{ assigned_am_id: string | null }[]>`
+    select assigned_am_id from clients where id = ${clientId}`;
+  if (owner.length === 0) {
+    throw new NotFoundError(MSG_CLIENT_NOT_FOUND);
+  }
+  // The Asset's own division is Creative by construction (`lockAssetableBrief`
+  // refuses to break down a non-Creative Brief), so that is what the division
+  // arm of canSeeAsset is asked about here.
+  if (!canSeeAsset(actor, owner[0].assigned_am_id ?? '', CREATIVE_DIVISION)) {
+    throw new ForbiddenError(MSG_ASSET_FORBIDDEN);
+  }
+  const src = (sourceBriefId ?? '').trim();
+  const rows = await sql<ClientAssetRow[]>`
+    select a.id, a.brief_id, b.title as brief_title, a.asset_type, a.sequence_no, a.output_link,
+           (select max(l.created_at) from audit_log l
+             where l.entity_type = 'asset' and l.entity_id = a.id
+               and l.action like ${'transition:%->' + STATUS_APPROVED}) as approved_at
+      from assets a
+      join briefs b on b.id = a.brief_id
+      join services sv on sv.id = b.service_id
+     where sv.client_id = ${clientId}
+       and a.status = ${STATUS_APPROVED}
+       and (${src}::text = '' or a.brief_id = ${src}::text)
+     order by approved_at desc nulls last, a.brief_id asc, a.sequence_no asc`;
+  return rows.map((r) => ({
+    id: r.id, briefId: r.brief_id, briefTitle: r.brief_title, assetType: r.asset_type,
+    sequenceNo: Number(r.sequence_no), outputLink: r.output_link ?? '', approvedAt: r.approved_at,
   }));
 }
 

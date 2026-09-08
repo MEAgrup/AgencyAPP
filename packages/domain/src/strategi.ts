@@ -9,16 +9,45 @@
  * What this module refuses to do, and why
  * ===========================================================================
  *
- * **It does not unlock Brief dispatch yet.** M6A §5.7 says approval unlocks
- * Brief dispatch for the Service, and it will — but the gate that guards Briefs
- * today (`account.guardBriefCreation`) reads the OLD M6 §4 entity
- * (`strategy_plans`, `STR-`), which is what the Service page still writes. Making
- * `STRG` approval drive the Service status now would create two independent ways
- * to open the same gate while the old form is still the only UI, and "two doors,
- * one lock" is exactly the class of defect this codebase keeps paying for. The
- * swap happens with the form (A-05…A-09). Until then a `STRG` record is complete
- * and audited but inert with respect to the Brief gate — stated here rather than
- * discovered later.
+ * ~~**It does not unlock Brief dispatch yet.**~~ **It does — A-3 (2026-09-07),
+ * and `STRG-` is the CANONICAL path as of the owner's ketokan 2026-09-08.**
+ * `approveStrategi` drives the Service `[Awaiting Onboarding]` → `[Strategy
+ * Approved]` in the approval transaction (M6A §5.7), and
+ * `account.guardBriefCreation` accepts an `Aktif` STRG- as an opener.
+ *
+ * ## The correction worth reading before you trust a "that path is dead" claim
+ *
+ * A-3 first landed on a WRONG premise. The paragraph it replaced had deferred
+ * this swap to avoid "two doors, one lock", and A-3 argued that reasoning had
+ * expired because `SHOW_LEGACY_STR_PATH = false` had killed the STR- path. That
+ * flag only hid the STR- **create** form on the Service hub. The STR- **approve**
+ * path was still fully live on two screens nobody had checked — `/persetujuan`
+ * (an ACTIVE nav entry) and `/account/strategies/{id}` — plus its route. So for
+ * one day this module WAS the second live writer to `services.status`, and the
+ * collision was reachable and measured: approve the STRG- first, and the SPV's
+ * later STR- approval fails with `[transisi status tidak diizinkan]` and rolls
+ * back entirely, locking them out of that Plan permanently. Zero instances in
+ * production (no Service held both records), so it stayed latent.
+ *
+ * The owner then ruled `STRG-` canonical, and the STR- write path was retired
+ * for real in that same commit — route 410 (`apps/api/src/lib/retired-str.ts`),
+ * buttons removed, the misleading flag and its dead blocks deleted. THAT is what
+ * makes this module the only writer. Not the flag.
+ *
+ * The lesson, because it will recur: a feature flag set to `false` proves only
+ * that ONE door is shut. Before concluding a path is dead, grep the routes and
+ * the nav, not one page.
+ *
+ * Two shapes of that swap are worth carrying in your head, because both differ
+ * from the STR- path it was modelled on:
+ *
+ * - **n Services, not one.** Since O57 a Strategi hangs off the CONTRACT, so
+ *   approval drives every plan-gated Service the agreement covers. Direct
+ *   Services are left alone — their path is `[Awaiting Onboarding]` → `[Briefed]`.
+ * - **The gate needs two arms, not one.** A Service attached to the contract
+ *   AFTER approval never sat at the approval moment, so nothing moved its
+ *   status; reading only the status would lock it out permanently. Hence the
+ *   contract-scoped `Aktif` EXISTS in `guardBriefCreation`.
  *
  * **It emits no notifications.** The four M6A events (`strategi_diajukan`,
  * `strategi_disetujui`, `strategi_dikembalikan`, `strategi_revisi_disarankan`)
@@ -52,7 +81,10 @@ import {
   ACCOUNT_DIVISION,
   ConflictError,
   ForbiddenError,
+  MACHINE_SERVICE,
   NotFoundError,
+  SERVICE_STATUS_AWAITING_ONBOARDING,
+  SERVICE_STATUS_STRATEGY_APPROVED,
   ValidationError,
   type Actor,
 } from './account';
@@ -6920,6 +6952,70 @@ export async function submitStrategi(sql: Sql, actor: Actor, id: string): Promis
  * NOTE: this does not touch the parent Service status. See the module header —
  * the Brief gate still reads the old M6 §4 entity until the form swap.
  */
+/**
+ * driveServicesToStrategyApproved is the A-3 seam: `Aktif` STRG- ⇒ every Service
+ * the contract covers leaves [Awaiting Onboarding].
+ *
+ * Three decisions worth stating, because each one is a place a later reader
+ * would reasonably guess differently:
+ *
+ * 1. **Only PLAN-GATED Services move.** A Direct Service has its own edge
+ *    ([Awaiting Onboarding] → [Briefed], STATE_MACHINES §6) and was never
+ *    waiting on a Strategy; parking it at [Strategy Approved] would relabel a
+ *    Service whose path does not include that state. `effectiveGate` is the same
+ *    predicate `guardBriefCreation` uses, so the set that moves is exactly the
+ *    set that was blocked.
+ * 2. **Only Services at [Awaiting Onboarding] move.** Anything further along
+ *    (already [Briefed], voided, on hold) is not the machine's business here —
+ *    filtering in the query rather than letting `sm_transition` reject keeps
+ *    approving a REVISION from failing on Services that are already executing.
+ * 3. **A rejected edge throws.** Not "skip and continue": a plan-gated Service
+ *    at [Awaiting Onboarding] that the machine refuses to move means the machine
+ *    config and this rule disagree, and swallowing that would hand the AM a
+ *    Service still locked out of Brief creation with no trace of why.
+ */
+async function driveServicesToStrategyApproved(
+  tx: TransactionSql,
+  actor: Actor,
+  contractId: string,
+): Promise<void> {
+  const ex = executors(tx);
+  const rows = await tx<
+    {
+      id: string;
+      requires_strategy_plan: boolean;
+      requires_strategy_plan_override: boolean | null;
+      plan_tier: string;
+      keputusan_am: string | null;
+    }[]
+  >`
+    select sv.id, sv.requires_strategy_plan, sv.requires_strategy_plan_override,
+           sv.plan_tier, g.keputusan_am
+      from services sv
+      left join service_plan_gate g on g.service_id = sv.id
+     where sv.contract_id = ${contractId}
+       and sv.status = ${SERVICE_STATUS_AWAITING_ONBOARDING}
+     order by sv.id asc
+       for update of sv`;
+  for (const r of rows) {
+    const gate = effectiveGate({
+      tier: r.plan_tier as PlanTier,
+      override: r.requires_strategy_plan_override,
+      keputusanAm: r.keputusan_am as 'butuh_plan' | 'tanpa_plan' | null,
+    });
+    if (!gate.requiresPlan) continue;
+    const res = await statemachine.transition(ex.sm, {
+      machine: MACHINE_SERVICE,
+      entityType: 'service',
+      table: 'services',
+      entityId: r.id,
+      to: SERVICE_STATUS_STRATEGY_APPROVED,
+      actor,
+    });
+    if (!res.ok) throw transitionError(res);
+  }
+}
+
 export async function approveStrategi(sql: Sql, actor: Actor, id: string): Promise<Strategi> {
   if (!canApproveStrategi(actor)) {
     throw new ForbiddenError(MSG_APPROVE_FORBIDDEN);
@@ -6973,6 +7069,16 @@ export async function approveStrategi(sql: Sql, actor: Actor, id: string): Promi
        where strategi_id = ${id} and nilai_floor is not null
          and sumber_floor = ${FLOOR_INPUT_AM}`;
     await appendEvent(tx, id, head.versiNo, 'disetujui', actor.employeeId, null);
+
+    // A-3 / M6A §5.7 — approval unlocks Brief dispatch, and unlocking it means
+    // MOVING the Service. Same transaction as the approval, so a rejected edge
+    // rolls the approval back with it (the shape `account.approveStrategy` set,
+    // account.ts:1009-1016).
+    //
+    // The one shape that differs from the STR- path: since O57 a Strategi hangs
+    // off the CONTRACT, not one Service, so this drives every Service the
+    // agreement covers — n rows, not one.
+    await driveServicesToStrategyApproved(tx, actor, head.contractId);
 
     // M6B Rule 1: approval is the ONLY thing that generates Plan periods. Runs in
     // this transaction, so a failed generation rolls the approval back with it.

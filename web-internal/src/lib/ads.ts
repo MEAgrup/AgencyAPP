@@ -43,6 +43,12 @@ export interface Campaign {
   status: string; // [Setting] | [Active] | [Paused] | [Ended] (M16 LT-40)
   tipe_iklan: string; // M16 LT-41 — GMV Max Product | GMV Max Live | TTAM
   additional_days: number; // M16 LT-42 (Ads Management Date)
+  // B-5 / K-3 — Brief Creative SUMBER brief setup kampanye ini
+  // (`briefs.source_creative_brief_id`, kolom F-4), atau `''`. `AssetPicker`
+  // menyaring ke nilai ini; `''` ⇒ seluruh aset [Approved] milik klien
+  // (fallback disengaja — picker yang menyempit lalu diam-diam kosong lebih
+  // buruk daripada picker lebar).
+  source_creative_brief_id: string;
   total_spend: number;
   total_spend_display: string;
   total_gmv: number;
@@ -108,6 +114,12 @@ export interface AdsBrief {
   service_id: string;
   assigned_division: string;
   assigned_pic?: string;
+  // Feedback OD 2026-09-07 Creative #3 (F-1/F-2, dirender B-2) — identitas klien
+  // + nama PIC, ada di SETIAP baca Brief. NON-opsional: server mengirim `''`
+  // eksplisit, jadi halaman merender `—` dan bukan `undefined`.
+  client_id: string;
+  client_nama: string;
+  assigned_pic_nama: string;
   deliverable_type: string;
   due_date: string;
   priority: string;

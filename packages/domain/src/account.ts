@@ -34,7 +34,7 @@
  * Reference: archive/backend-go/internal/module6_account/{account,strategy}.go.
  */
 
-import { bi, division, notification, permission, statemachine } from '@cdps/core';
+import { bi, division, money, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { onBriefReachedTerminal, validateBriefApproval } from './board';
 import * as stage from './stage';
@@ -357,12 +357,16 @@ export const STRATEGY_STATUS_DRAFTING = '[Strategy Drafting]';
 export const STRATEGY_STATUS_SUBMITTED = '[Strategy Submitted for Approval]';
 export const STRATEGY_STATUS_APPROVED = '[Strategy Approved]';
 
-const SERVICE_STATUS_AWAITING_ONBOARDING = '[Awaiting Onboarding]';
-const SERVICE_STATUS_STRATEGY_APPROVED = '[Strategy Approved]';
+// A-3: exported because the STRG- path (`strategi.approveStrategi`) drives the
+// SAME two Service states in the SAME transaction. Re-declaring the literals in
+// strategi.ts would be a second copy of a state name — the "two doors, one lock"
+// defect class the STRG- module header warned about, one level down.
+export const SERVICE_STATUS_AWAITING_ONBOARDING = '[Awaiting Onboarding]';
+export const SERVICE_STATUS_STRATEGY_APPROVED = '[Strategy Approved]';
 
 /** State-machine names (mirror the SQL seed / Go config.go). */
 const MACHINE_STRATEGY_PLAN = 'strategy_plan';
-const MACHINE_SERVICE = 'service';
+export const MACHINE_SERVICE = 'service';
 
 /**
  * The M6 §4 "Divisions Involved" multi-select set, in canonical order (used both
@@ -1004,6 +1008,25 @@ export async function approveGmvAdjustment(sql: Sql, actor: Actor, strategyId: s
  * Service is driven [Awaiting Onboarding] → [Strategy Approved] in the SAME
  * transaction (§4 Rule 3); Approved By is recorded. An invalid edge (e.g. the
  * Plan is still Drafting) rolls back everything (ConflictError, nothing moves).
+ *
+ * ## ⛔ UNREACHABLE since 2026-09-08 — the `STR-` write path is retired
+ *
+ * Owner's ketokan: `STRG-` (`strategi.approveStrategi`) is canonical. Every door
+ * to this function was removed in that commit — `POST /strategies/{id}/approve`
+ * answers 410, and the buttons on `/persetujuan` and `/account/strategies/{id}`
+ * are gone. See `apps/api/src/lib/retired-str.ts` for the full reasoning.
+ *
+ * It is kept, not deleted, for two reasons. Its tests document how the two
+ * historical `STR-` records in production reached `[Strategy Approved]`, and
+ * deleting the function would delete that record of how the money path actually
+ * ran. And the second leg below is the exact shape `strategi.ts` had to copy —
+ * reading it is how the next person understands why the STRG- version drives n
+ * Services instead of one.
+ *
+ * Do NOT wire a new route to this. Two live writers to `services.status` is the
+ * defect this retirement closed, and it was measured, not theoretical: with both
+ * paths live, approving the STRG- first made this function fail with
+ * `[transisi status tidak diizinkan]` and roll the whole approval back.
  */
 export async function approveStrategy(sql: Sql, actor: Actor, strategyId: string): Promise<void> {
   if (!canApproveStrategy(actor)) {
@@ -1204,6 +1227,24 @@ export interface ServiceQueueRow {
   assignedAmId: string | null;
   strategyId: string | null;
   strategyStatus: string | null;
+  /**
+   * A-3 — the STRG- (M6A) path, alongside the legacy STR- pair above. Null when
+   * the Service's contract carries no Strategi (or the Service carries no
+   * contract). Explicit null, never omitted: "no Strategi yet" is exactly the
+   * state the onboarding UI has to react to, same reasoning as `strategyId`.
+   *
+   * It is the contract's Strategi, not the Service's — since O57 one STRG-
+   * covers every Service the agreement holds.
+   */
+  strategiId: string | null;
+  strategiStatus: string | null;
+  /**
+   * A-4 — the agreement covering this Service (O57), null when it has none.
+   * Since the closing mints it (`sales.close`), the Service knows it from birth;
+   * exposing it here is what lets the Strategi form show the window as READ-ONLY
+   * instead of asking the AM to retype a number the negotiation already settled.
+   */
+  contractId: string | null;
   briefCount: number;
   /** the client's target GMV — the anchor + ±20% baseline for a new Strategy (QA revisi). */
   clientTargetGmv: string | null;
@@ -1224,6 +1265,9 @@ interface ServiceQueueDbRow {
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
+  strategi_id: string | null;
+  strategi_status: string | null;
+  contract_id: string | null;
   brief_count: string;
   client_target_gmv: string | null;
   released_to_account_at: Date | null;
@@ -1250,19 +1294,34 @@ function rowToServiceQueue(r: ServiceQueueDbRow): ServiceQueueRow {
     assignedAmId: r.assigned_am_id,
     strategyId: r.strategy_id,
     strategyStatus: r.strategy_status,
+    strategiId: r.strategi_id,
+    strategiStatus: r.strategi_status,
+    contractId: r.contract_id,
     briefCount: Number(r.brief_count),
     clientTargetGmv: numOrNull(r.client_target_gmv),
     releasedToAccountAt: r.released_to_account_at,
   };
 }
 
-/** The projection shared by the queue list and the single-Service read. */
+/**
+ * The projection shared by the queue list and the single-Service read.
+ *
+ * A-3 note on the two `strategi_*` columns: they are correlated subqueries and
+ * NOT a join, because a contract accumulates archived versions (Rule 13) and a
+ * join would return the Service once per version — silently multiplying every
+ * queue row. The ordering picks the live one: `Aktif` first, then the highest
+ * version in flight.
+ */
 function serviceQueueCols(sql: Queryable) {
-  return sql`sv.id, sv.client_id, c.toko, c.nama_pic, sv.name, sv.status,
+  return sql`sv.id, sv.client_id, sv.contract_id, c.toko, c.nama_pic, sv.name, sv.status,
     sv.requires_strategy_plan, sv.requires_strategy_plan_override, sv.plan_tier,
     (select g.keputusan_am from service_plan_gate g where g.service_id = sv.id) as gate_decision,
     c.assigned_am_id,
     sp.id as strategy_id, sp.status as strategy_status,
+    (select s.id from strategi s where s.contract_id = sv.contract_id
+      order by (s.status = 'Aktif') desc, s.versi_no desc limit 1) as strategi_id,
+    (select s.status from strategi s where s.contract_id = sv.contract_id
+      order by (s.status = 'Aktif') desc, s.versi_no desc limit 1) as strategi_status,
     (select count(*) from briefs b where b.service_id = sv.id) as brief_count,
     c.target_gmv as client_target_gmv,
     c.released_to_account_at`;
@@ -1350,6 +1409,20 @@ export async function getService(sql: Queryable, actor: Actor, serviceId: string
  * gate, so Brief creation is rejected (ConflictError, MSG_STRATEGY_REQUIRED).
  * Direct Services (flag = No), or plan-gated Services already past [Strategy
  * Approved], pass. A missing Service is NotFoundError.
+ *
+ * ## A-3 — the STRG- arm, and why the Service status alone is not enough
+ *
+ * `strategi.approveStrategi` now drives the same Service edge (M6A §5.7), so in
+ * the normal order of events the status check below already passes. The second
+ * arm — an `Aktif` STRG- on the Service's own contract — covers the order that
+ * ISN'T normal: a Service attached to a contract whose Strategi was approved
+ * EARLIER never sat at the approval moment, so nothing was there to move its
+ * status. Reading only the status would leave that Service locked out of Brief
+ * creation forever with a message telling the AM to get an approval they already
+ * have.
+ *
+ * One Strategi covers n Services through the contract (O57), which is why the
+ * arm is a contract-scoped EXISTS and not a per-Service join.
  */
 export async function guardBriefCreation(sql: Queryable, serviceId: string): Promise<void> {
   const rows = await sql<
@@ -1359,10 +1432,15 @@ export async function guardBriefCreation(sql: Queryable, serviceId: string): Pro
       requires_strategy_plan_override: boolean | null;
       plan_tier: string | null;
       keputusan_am: string | null;
+      strategi_aktif: boolean;
     }[]
   >`
     select sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override,
-           sv.plan_tier, g.keputusan_am
+           sv.plan_tier, g.keputusan_am,
+           exists (
+             select 1 from strategi s
+              where s.contract_id = sv.contract_id and s.status = 'Aktif'
+           ) as strategi_aktif
       from services sv
       left join service_plan_gate g on g.service_id = sv.id
      where sv.id = ${serviceId}`;
@@ -1390,7 +1468,8 @@ export async function guardBriefCreation(sql: Queryable, serviceId: string): Pro
       svc.plan_tier,
       svc.keputusan_am,
     ) &&
-    svc.status === SERVICE_STATUS_AWAITING_ONBOARDING
+    svc.status === SERVICE_STATUS_AWAITING_ONBOARDING &&
+    !svc.strategi_aktif
   ) {
     throw new ConflictError(MSG_STRATEGY_REQUIRED);
   }
@@ -1630,6 +1709,22 @@ export const MSG_INVALID_PRIORITY = '[prioritas tidak valid]';
 export const MSG_BRIEF_STRATEGY_MISMATCH =
   '[Strategy ID brief harus menunjuk Strategy & Plan yang disetujui untuk layanan ini]';
 export const MSG_BRIEF_STRATEGY_NOT_ALLOWED = '[layanan Direct tidak boleh memiliki Strategy ID pada brief]';
+/** A-req-1 — cermin `ck_briefs_jendela_urut`; DB adalah dindingnya, ini pesannya. */
+export const MSG_BRIEF_JENDELA_TIDAK_URUT =
+  '[tanggal mulai brief harus sebelum atau sama dengan tanggal akhir]';
+/** A-req-1 — cermin `ck_briefs_budget_non_negatif`. */
+export const MSG_BRIEF_BUDGET_NEGATIF = '[budget brief tidak boleh negatif]';
+/** A-req-2 — Brief Creative sumber (K-3) tidak ada. */
+export const MSG_BRIEF_SUMBER_TIDAK_ADA = '[brief creative sumber tidak ditemukan]';
+/**
+ * A-req-2 — Brief sumber milik klien lain. BUKAN penolakan kosmetik: sejak B-5
+ * `assets_select` punya lengan `jwt_division() = 'Ads'` yang **buta klien**, jadi
+ * satu-satunya yang mempersempit picker aset adalah kolom ini. Membiarkannya
+ * menunjuk Brief klien lain berarti membuka aset klien itu di picker.
+ */
+export const MSG_BRIEF_SUMBER_KLIEN_LAIN = '[brief creative sumber harus milik klien yang sama]';
+/** A-req-2 — hanya Brief divisi Creative yang punya aset untuk disaring. */
+export const MSG_BRIEF_SUMBER_BUKAN_CREATIVE = '[brief sumber harus brief divisi Creative]';
 export const MSG_QUEUE_FORBIDDEN = '[anda tidak memiliki akses ke antrean brief divisi ini]';
 export const MSG_BRIEF_REVIEW_FORBIDDEN =
   '[hanya Account Manager pemilik klien yang dapat mereview Brief layanan ini]';
@@ -1663,6 +1758,26 @@ export interface BriefInput {
   instructions?: string;
   referenceAttachments?: string;
   isAddendum?: boolean;
+  /**
+   * A-req-1 (KOL #1) — jendela campaign sebagai KOLOM, bukan teks yang nyangkut
+   * di `instructions` (di situ ia tidak bisa diurutkan, dibandingkan, atau jadi
+   * sumber pengingat). Kolomnya sudah ada sejak F-4 (`20260922100200`), jadi ini
+   * murni membuka jalur TS-nya — nol migrasi.
+   *
+   * `''`/undefined = tidak diisi. `brief-inherit.planRowToBriefInput` (M6B)
+   * sudah siap memproyeksikannya dari `plan.tanggal_mulai`/`tanggal_akhir`.
+   */
+  tanggalMulai?: string;
+  tanggalAkhir?: string;
+  /** A-req-1 — budget Brief, string desimal rupiah. Diturunkan `plan_row.budget`. */
+  budget?: string | null;
+  /**
+   * A-req-2 (ketokan K-3) — Brief Creative yang jadi SUMBER aset Brief Ads ini.
+   * Sisi BACA-nya sudah lengkap (`ads.ts` + `wire.ts` + AssetPicker, Jalur B);
+   * ini sisi tulisnya. Begitu kolomnya terisi, filter picker aset hidup tanpa
+   * satu baris pun berubah di jalur baca.
+   */
+  sourceCreativeBriefId?: string | null;
 }
 
 /** A Brief record (BRF-). */
@@ -1701,6 +1816,28 @@ export interface Brief {
   /** Nama toko klien (`clients.toko`). '' kalau klien tak ada. */
   clientNama: string;
   /**
+   * A-req-1 — jendela campaign. `''` kalau tidak diisi (bukan kunci yang
+   * hilang: kunci HILANG lebih berbahaya daripada null, O43).
+   */
+  tanggalMulai: string;
+  tanggalAkhir: string;
+  /** A-req-1 — budget, string desimal rupiah; `null` kalau tidak diisi. */
+  budget: string | null;
+  /** A-req-2 — Brief Creative sumber (K-3); `null` kalau tidak ditunjuk. */
+  sourceCreativeBriefId: string | null;
+  /**
+   * A-req-3 — jumlah unit kerja anak (Asset / Campaign / Booking / Sesi Live),
+   * pada SETIAP baca Brief termasuk baris antrean divisi. Dihitung lewat
+   * `private.brief_jumlah_anak`, BUKAN `count(*)` langsung: `briefCols` dibaca
+   * di bawah RLS, dan subquery yang dipersempit policy pembacanya mengembalikan
+   * angka yang SALAH tanpa galat apa pun (seorang staff Creative akan melihat 1
+   * untuk Brief berisi 12 Asset).
+   *
+   * `0` untuk divisi tanpa tabel anak (mis. Store Operation) — bukan null, biar
+   * pemanggil tidak perlu menebak antara "belum dipecah" dan "tidak punya".
+   */
+  jumlahAnak: number;
+  /**
    * Nama PIC yang dipegangi Brief ini. '' kalau `assigned_pic` NULL; kalau
    * terisi tapi karyawannya hilang, `private.employee_display_name` jatuh ke
    * employee_id-nya — sebuah id masih lebih berguna daripada kolom kosong.
@@ -1709,6 +1846,52 @@ export interface Brief {
 }
 
 // --- Input validation ---
+
+/**
+ * budgetOrNull menormalkan budget ke bentuk desimal yang `numeric(18,2)` terima,
+ * atau `null`. Lewat `money` supaya '5000000' dan '5000000.00' menghasilkan
+ * baris yang identik — dua bentuk dari satu angka adalah cara paling mudah
+ * membuat laporan yang membandingkannya jadi salah.
+ */
+function budgetOrNull(v: string | null | undefined): string | null {
+  const t = (v ?? '').toString().trim();
+  return t === '' ? null : money.decimal(money.parse(t));
+}
+
+/**
+ * guardSourceCreativeBrief menjaga penunjuk K-3: Brief sumber harus ADA, milik
+ * KLIEN YANG SAMA, dan divisi Creative.
+ *
+ * Gerbang klien bukan kosmetik. Sejak B-5, `assets_select` punya lengan
+ * `jwt_division() = 'Ads'` yang **buta klien** — divisi Ads melihat SELURUH
+ * aset. Jadi satu-satunya yang mempersempit picker aset adalah kolom ini, dan
+ * membiarkannya menunjuk Brief klien lain berarti membuka aset klien itu di
+ * picker seorang Ads. Dibaca lewat `private.brief_client_id` dan bukan
+ * `join services` — jalur ini juga dipanggil dari konteks divisi eksekusi, dan
+ * join itu MEMBUANG barisnya (perangkap O52), bukan mengosongkan kolomnya.
+ */
+async function guardSourceCreativeBrief(
+  tx: Queryable,
+  serviceId: string,
+  sourceBriefId: string,
+): Promise<void> {
+  const rows = await tx<{ assigned_division: string; client_id: string | null }[]>`
+    select b.assigned_division, private.brief_client_id(b.id) as client_id
+      from briefs b where b.id = ${sourceBriefId}`;
+  if (rows.length === 0) {
+    throw new ValidationError(MSG_BRIEF_SUMBER_TIDAK_ADA);
+  }
+  if (rows[0].assigned_division !== 'Creative') {
+    throw new ValidationError(MSG_BRIEF_SUMBER_BUKAN_CREATIVE);
+  }
+  const target = await tx<{ client_id: string | null }[]>`
+    select private.service_client_id(${serviceId}) as client_id`;
+  const sumberKlien = rows[0].client_id;
+  const targetKlien = target[0]?.client_id ?? null;
+  if (sumberKlien === null || targetKlien === null || sumberKlien !== targetKlien) {
+    throw new ValidationError(MSG_BRIEF_SUMBER_KLIEN_LAIN);
+  }
+}
 
 /** validateBrief checks the §9.4 mandatory fields BEFORE any id is minted. */
 function validateBrief(input: BriefInput): void {
@@ -1746,6 +1929,31 @@ function validateBrief(input: BriefInput): void {
   if ((input.assignedPic ?? '').trim() !== '') {
     throw new ValidationError(MSG_PIC_BUKAN_WEWENANG_AM);
   }
+  // A-req-1 — cermin `ck_briefs_jendela_urut` + `ck_briefs_budget_non_negatif`.
+  // DB tetap dindingnya; ini yang mengubah pelanggarannya jadi pesan BI alih-alih
+  // galat constraint mentah (kelas cacat sendiri, CLAUDE.md #5). Keduanya
+  // OPSIONAL: satu tanggal saja sah, dan CHECK-nya juga mengizinkannya.
+  const mulai = (input.tanggalMulai ?? '').trim();
+  const akhir = (input.tanggalAkhir ?? '').trim();
+  for (const d of [mulai, akhir]) {
+    if (d !== '' && (!RE_DATE.test(d) || Number.isNaN(Date.parse(`${d}T00:00:00Z`)))) {
+      throw new ValidationError(bi.INCOMPLETE_DATA);
+    }
+  }
+  if (mulai !== '' && akhir !== '' && mulai > akhir) {
+    throw new ValidationError(MSG_BRIEF_JENDELA_TIDAK_URUT);
+  }
+  const budget = (input.budget ?? '').toString().trim();
+  if (budget !== '') {
+    // Dibandingkan lewat `money.parse` (sen-eksak) dan bukan Number, supaya
+    // aturannya sama dengan setiap perbandingan rupiah lain di repo ini.
+    if (Number.isNaN(Number(budget))) {
+      throw new ValidationError(bi.INCOMPLETE_DATA);
+    }
+    if (money.parse(budget) < 0n) {
+      throw new ValidationError(MSG_BRIEF_BUDGET_NEGATIF);
+    }
+  }
   // Recurring toggle: when on, its sub-fields become mandatory (§9.4).
   if (input.recurring) {
     const freq = (input.recurringFrequency ?? '').trim();
@@ -1760,7 +1968,7 @@ function validateBrief(input: BriefInput): void {
 }
 
 /** orNull stores an empty/absent optional string as SQL NULL. */
-function orNull(s: string | undefined): string | null {
+function orNull(s: string | null | undefined): string | null {
   return s && s.trim() !== '' ? s.trim() : null;
 }
 
@@ -1805,12 +2013,15 @@ export async function insertBrief(
       (id, service_id, strategy_id, plan_row_id, assigned_division, assigned_pic, deliverable_type,
        quantity_target, due_date, priority, recurring, recurring_frequency, recurring_count,
        recurring_end_date, instructions, reference_attachments, title, status, created_by,
-       stage_pipeline_code, production_stage)
+       stage_pipeline_code, production_stage,
+       tanggal_mulai, tanggal_akhir, budget, source_creative_brief_id)
     values (${id}, ${serviceId}, ${strategyId}, ${planRowId}, ${input.assignedDivision}, ${orNull(input.assignedPic)},
       ${input.deliverableType}, ${input.quantityTarget}, ${input.dueDate.trim()}, ${input.priority}, ${recurring},
       ${orNull(input.recurringFrequency)}, ${recCount}, ${orNull(input.recurringEndDate)},
       ${orNull(input.instructions)}, ${orNull(input.referenceAttachments)}, ${input.title.trim()}, ${birth},
-      ${actor.employeeId}, ${pipeline?.code ?? null}, ${pipeline?.initialState ?? null})`;
+      ${actor.employeeId}, ${pipeline?.code ?? null}, ${pipeline?.initialState ?? null},
+      ${orNull(input.tanggalMulai)}, ${orNull(input.tanggalAkhir)},
+      ${budgetOrNull(input.budget)}, ${orNull(input.sourceCreativeBriefId)})`;
   await ex.audit.insertAudit({
     entityType: 'brief', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
     beforeJson: null,
@@ -1847,6 +2058,12 @@ export async function insertBrief(
     revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
     stagePipelineCode: pipeline?.code ?? null, productionStage: pipeline?.initialState ?? null,
     clientId: ident.clientId, clientNama: ident.clientNama, assignedPicNama: ident.assignedPicNama,
+    tanggalMulai: (input.tanggalMulai ?? '').trim(),
+    tanggalAkhir: (input.tanggalAkhir ?? '').trim(),
+    budget: budgetOrNull(input.budget),
+    sourceCreativeBriefId: orNull(input.sourceCreativeBriefId),
+    // Brief yang baru lahir belum punya anak — nol, bukan hasil query.
+    jumlahAnak: 0,
   };
 }
 
@@ -1935,6 +2152,13 @@ export async function createBrief(sql: Sql, actor: Actor, serviceId: string, inp
     }
     // §5 Rule 5 gate: plan-gated + still [Awaiting Onboarding] is rejected.
     await guardBriefCreation(tx, serviceId);
+    // A-req-2 (K-3) — di dalam transaksi yang sama, jadi Brief sumber yang tidak
+    // sah membatalkan seluruh pembuatan Brief alih-alih mendarat sebagai baris
+    // yang menunjuk ke tempat yang salah.
+    const sumber = (input.sourceCreativeBriefId ?? '').trim();
+    if (sumber !== '') {
+      await guardSourceCreativeBrief(tx, serviceId, sumber);
+    }
 
     const planGated = effectiveRequiresPlan(svc.requires_strategy_plan, svc.requires_strategy_plan_override);
     const strategyId = await resolveBriefStrategy(tx, serviceId, planGated, (input.strategyId ?? '').trim());
@@ -1968,8 +2192,28 @@ export async function createBrief(sql: Sql, actor: Actor, serviceId: string, inp
 
 /**
  * resolveBriefStrategy returns the strategy_id to store for a new Brief. Direct
- * Service → NULL (a supplied id is rejected); plan-gated Service → must equal the
- * Service's approved Strategy id (§5 Rule 2).
+ * Service → NULL (a supplied id is rejected); plan-gated Service on the legacy
+ * STR- path → must equal the Service's approved Strategy id (§5 Rule 2).
+ *
+ * ## A-3 — the second door, found by the seam test
+ *
+ * The `rows.length === 0` branch below used to read "unreachable past the guard,
+ * defensive", and while `guardBriefCreation` only knew the STR- path that was
+ * true. Opening the gate to an `Aktif` STRG- made it reachable AND load-bearing:
+ * a plan-gated Service whose approval lives on the STRG- path has no
+ * `strategy_plans` row at all, and never will — so the "defensive" throw became
+ * the whole defect one layer down from the gate. Two independent doors on one
+ * lock, exactly as the STRG- module header predicted.
+ *
+ * What a STRG--path Brief stores is NULL, and that is not a shrug: `strategy_id`
+ * FKs to `strategy_plans`, so there is no id to point at. The M6B one-click
+ * inheritance path already settled this convention — `brief-inherit.ts` writes
+ * `strategyId: null` and links through `plan_row_id` instead. A manually created
+ * Brief on the STRG- path has no Plan row either, so it carries neither link;
+ * its provenance is the audit row and its Service's contract.
+ *
+ * Consequently a caller who DOES supply a `strategyId` here is naming an STR-
+ * that does not exist — a mismatch, not an ignorable extra.
  */
 async function resolveBriefStrategy(
   tx: Queryable,
@@ -1986,7 +2230,21 @@ async function resolveBriefStrategy(
   const rows = await tx<{ id: string; status: string }[]>`
     select id, status from strategy_plans where service_id = ${serviceId}`;
   if (rows.length === 0) {
-    throw new ConflictError(MSG_STRATEGY_REQUIRED); // unreachable past the guard, defensive
+    // A-3: no STR- row. Either the approval lives on the STRG- path (fine — the
+    // gate already checked it is `Aktif`), or there is no approval anywhere and
+    // the original defensive throw still applies.
+    const strg = await tx<{ ada: boolean }[]>`
+      select exists (
+        select 1 from services sv join strategi s on s.contract_id = sv.contract_id
+         where sv.id = ${serviceId} and s.status = 'Aktif'
+      ) as ada`;
+    if (!strg[0]?.ada) {
+      throw new ConflictError(MSG_STRATEGY_REQUIRED);
+    }
+    if (inStrategyId !== '') {
+      throw new ValidationError(MSG_BRIEF_STRATEGY_MISMATCH);
+    }
+    return null;
   }
   if (rows[0].status !== STRATEGY_STATUS_APPROVED || inStrategyId !== rows[0].id) {
     throw new ValidationError(MSG_BRIEF_STRATEGY_MISMATCH);
@@ -2235,6 +2493,11 @@ interface BriefRow {
   client_id: string | null;
   client_nama: string | null;
   assigned_pic_nama: string | null;
+  tanggal_mulai: string | Date | null;
+  tanggal_akhir: string | Date | null;
+  budget: string | null;
+  source_creative_brief_id: string | null;
+  jumlah_anak: number | string | null;
 }
 
 /**
@@ -2259,6 +2522,8 @@ function briefCols(sql: Queryable) {
     b.quantity_target, b.due_date, b.priority, b.recurring, b.recurring_frequency, b.recurring_count,
     b.recurring_end_date, b.instructions, b.reference_attachments, b.title, b.status, b.created_by, b.created_at,
     b.stage_pipeline_code, b.production_stage,
+    b.tanggal_mulai, b.tanggal_akhir, b.budget, b.source_creative_brief_id,
+    private.brief_jumlah_anak(b.id) as jumlah_anak,
     private.brief_client_id(b.id) as client_id,
     private.brief_client_toko(b.id) as client_nama,
     case when b.assigned_pic is null then null
@@ -2277,6 +2542,11 @@ function rowToBrief(r: BriefRow): Brief {
     stagePipelineCode: r.stage_pipeline_code, productionStage: r.production_stage,
     clientId: r.client_id ?? '', clientNama: r.client_nama ?? '',
     assignedPicNama: r.assigned_pic_nama ?? '',
+    tanggalMulai: r.tanggal_mulai === null ? '' : dateStr(r.tanggal_mulai),
+    tanggalAkhir: r.tanggal_akhir === null ? '' : dateStr(r.tanggal_akhir),
+    budget: r.budget,
+    sourceCreativeBriefId: r.source_creative_brief_id,
+    jumlahAnak: Number(r.jumlah_anak ?? 0),
   };
 }
 

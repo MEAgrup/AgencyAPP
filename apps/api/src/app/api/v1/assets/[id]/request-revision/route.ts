@@ -1,7 +1,12 @@
 /**
- * POST /api/v1/assets/{id}/request-revision — the AM sends an Asset under review
- * back to the PIC with mandatory feedback ([In Review] → [Revision Requested],
- * M7 §6 Rule 1). Owning AM or Director; the 3rd revision flags the Team Leader.
+ * POST /api/v1/assets/{id}/request-revision — sends an Asset back to its PIC
+ * with mandatory feedback (→ [Revision Requested], M7 §6 Rule 1).
+ *
+ * ONE route, TWO doors since B-4/K-1 — the Asset's current status decides whose
+ * call it is, in the domain (`creative.requestAssetRevision`):
+ *   from [In Review]  owning AM / Director — the client-side verdict, and the
+ *                     only one counted toward Revision Count (3rd flags the lead);
+ *   from [Submitted]  the executing division's LEAD — internal-QC reject.
  * Body: { feedback }. Ports Go's handleRequestAssetRevision.
  */
 import { creative } from '@cdps/domain';

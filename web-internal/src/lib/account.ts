@@ -167,6 +167,21 @@ export interface ServiceQueueRow {
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
+  /**
+   * A-3 — the STRG- (M6A) path, the successor to the `strategy_*` pair above.
+   * It is the CONTRACT's Strategi (O57: one STRG- covers n Services), null when
+   * there is none. `nextOnboardingStep` reads it first, so an AM stops being
+   * told to "Buat Strategy & Plan" for an agreement that already has one.
+   */
+  strategi_id: string | null;
+  strategi_status: string | null;
+  /**
+   * A-4 — the agreement covering this Service (O57), null when it has none
+   * (a deal made only of one-off services, or a Service closed before A-4).
+   * When it is set, the contract window is READ-ONLY on the Strategi form: the
+   * closing already settled it.
+   */
+  contract_id: string | null;
   brief_count: number;
   /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
   client_target_gmv: string | null;
@@ -208,10 +223,33 @@ export interface Brief {
   client_id: string;
   client_nama: string;
   assigned_pic_nama: string;
+  /**
+   * A-req-1 (KOL #1) — jendela campaign + budget sebagai KOLOM, bukan teks di
+   * `instructions`. `''`/`null` = belum diisi (eksplisit, bukan kunci hilang).
+   */
+  tanggal_mulai: string;
+  tanggal_akhir: string;
+  budget: string | null;
+  /** A-req-2 (K-3) — Brief Creative sumber aset Brief Ads ini; null = tidak ditunjuk. */
+  source_creative_brief_id: string | null;
+  /**
+   * A-req-3 — jumlah unit kerja anak (Asset / Campaign / Booking / Sesi Live).
+   * Ada di SETIAP baris antrean divisi, jadi leader bisa membedakan Brief yang
+   * sudah dipecah dari yang belum tanpa membuka satu-satu. `0` untuk divisi
+   * tanpa tabel anak.
+   */
+  jumlah_anak: number;
 }
 
 export interface BriefInput {
   title: string;
+  /** A-req-1 — jendela campaign, "YYYY-MM-DD". Kosongkan kalau tidak dipakai. */
+  tanggal_mulai?: string;
+  tanggal_akhir?: string;
+  /** A-req-1 — budget, string desimal rupiah. */
+  budget?: string | null;
+  /** A-req-2 (K-3) — Brief Creative sumber; picker aset Ads menyaring ke situ. */
+  source_creative_brief_id?: string | null;
   strategy_id: string; // "" for Direct-path service; STR-id for plan-gated
   assigned_division: string;
   assigned_pic?: string;
@@ -419,6 +457,40 @@ export interface OnboardingStep {
   label: string;
 }
 
+/** STRG- (M6A machine #15) states — mirror of the domain constants. */
+export const STRATEGI_DRAFT = 'Draft';
+export const STRATEGI_DIAJUKAN = 'Diajukan';
+export const STRATEGI_AKTIF = 'Aktif';
+export const STRATEGI_DRAFT_REVISI = 'Draft Revisi';
+
+/**
+ * strategiOnboardingStep maps a STRG- status to the AM's next action, the same
+ * three-step shape the STR- path uses (draft → submit → await → brief).
+ *
+ * `Aktif` means the Service has been driven to [Strategy Approved] in the same
+ * transaction (A-3), so a Service still showing [Awaiting Onboarding] next to an
+ * `Aktif` Strategi is the late-attachment case `guardBriefCreation`'s STRG- arm
+ * covers — briefable, and the label says so rather than sending the AM to a form
+ * that is already done.
+ *
+ * The terminal statuses (`Kedaluwarsa`, `Diarsipkan`) land on `draft_strategy`:
+ * an expired or superseded Strategi with the Service still awaiting onboarding
+ * genuinely does need a new one.
+ */
+function strategiOnboardingStep(status: string | null): OnboardingStep {
+  switch (status) {
+    case STRATEGI_DRAFT:
+    case STRATEGI_DRAFT_REVISI:
+      return { kind: 'submit_strategy', label: 'Ajukan Strategi untuk persetujuan' };
+    case STRATEGI_DIAJUKAN:
+      return { kind: 'await_approval', label: 'Menunggu persetujuan SPV' };
+    case STRATEGI_AKTIF:
+      return { kind: 'create_brief', label: 'Buat Brief' };
+    default:
+      return { kind: 'draft_strategy', label: 'Buat Strategi' };
+  }
+}
+
 export function nextOnboardingStep(s: ServiceQueueRow): OnboardingStep {
   if (s.status === SERVICE_VOIDED) {
     return { kind: 'none', label: 'Service di-void' };
@@ -435,6 +507,15 @@ export function nextOnboardingStep(s: ServiceQueueRow): OnboardingStep {
     // Plan-gated (§4): the Plan must exist, be submitted, and be approved before
     // any Brief may be created (§4 Rule 5).
     if (s.requires_strategy_plan) {
+      // A-3 — the STRG- path is read FIRST, and only when there is a STRG- to
+      // read. The two paths coexist while the legacy STR- form is hidden
+      // (SHOW_LEGACY_STR_PATH), and the STRG- record is the one an AM actually
+      // fills today; without this branch the AM is told to "Buat Strategy &
+      // Plan" for an agreement whose Strategi is already `Aktif`, because
+      // `strategy_id` (the STR- row) is null and always will be.
+      if (s.strategi_id !== null) {
+        return strategiOnboardingStep(s.strategi_status);
+      }
       if (s.strategy_id === null) {
         return { kind: 'draft_strategy', label: 'Buat Strategy & Plan' };
       }
@@ -477,30 +558,14 @@ export function getStrategy(id: string): Promise<Strategy> {
   return api.get<Strategy>(`/strategies/${id}`);
 }
 
-export function createStrategy(serviceId: string, input: StrategyInput): Promise<Strategy> {
-  return api.post<Strategy>(`/services/${serviceId}/strategy`, input);
-}
-
-export function updateStrategy(id: string, input: StrategyInput): Promise<{ id: string }> {
-  return api.put<{ id: string }>(`/strategies/${id}`, input);
-}
-
-export function submitStrategy(id: string): Promise<TransitionResult> {
-  return api.post<TransitionResult>(`/strategies/${id}/submit`);
-}
-
-export function approveStrategy(id: string): Promise<{ id: string; status: string }> {
-  return api.post<{ id: string; status: string }>(`/strategies/${id}/approve`);
-}
-
-/** Clear a pending (out-of-tolerance) GMV adjustment — SPV/Head Account/Director (QA revisi). */
-export function approveGmvAdjustment(id: string): Promise<{ id: string; gmv_adjustment_status: string }> {
-  return api.post<{ id: string; gmv_adjustment_status: string }>(`/strategies/${id}/approve-gmv`);
-}
-
-export function requestStrategyRevision(id: string, notes: string): Promise<{ id: string; status: string }> {
-  return api.post<{ id: string; status: string }>(`/strategies/${id}/request-revision`, { notes });
-}
+// Enam pembungkus tulis jalur `STR-` DICABUT 2026-09-08 (ketokan pemilik:
+// `STRG-` yang kanonik): `createStrategy`, `updateStrategy`, `submitStrategy`,
+// `approveStrategy`, `approveGmvAdjustment`, `requestStrategyRevision`.
+// Route-nya menjawab 410 (`apps/api/src/lib/retired-str.ts`), dan pembungkusnya
+// ikut dicabut supaya nol jalan memanggilnya dari FE — sebuah pembungkus yang
+// masih ada adalah undangan untuk memanggilnya lagi.
+// `listStrategies` / `getStrategy` di atas TETAP: dua baris `STR-` di produksi
+// adalah riwayat, dan riwayat tidak dipensiunkan (aturan rumah #3).
 
 // ---------------------------------------------------------------------------
 // Module 6C — Penentuan Kebutuhan Plan (plan-gate determination)
@@ -760,7 +825,7 @@ export interface PendingStrategyReview {
   created_at: string;
 }
 
-/** GET /account/strategy-reviews — every Strategy & Plan Account lead/Director may still decide on, oldest first. */
-export function listPendingStrategyReviews(): Promise<{ data: PendingStrategyReview[] }> {
-  return api.get<{ data: PendingStrategyReview[] }>('/account/strategy-reviews');
-}
+// `listPendingStrategyReviews` DICABUT 2026-09-08 — antrian yang ia isi
+// (`/persetujuan` seksi "Review Strategi & Plan") sudah tidak ada, karena
+// keputusan yang jadi ujungnya sudah dipensiunkan. Tipe `PendingStrategyReview`
+// di atas ditahan: `apps/api` masih memproyeksikannya untuk riwayat.

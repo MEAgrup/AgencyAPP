@@ -98,19 +98,7 @@ import {
   type Booking,
   type PendingEscalation,
 } from '@/lib/kol';
-import {
-  GMV_ADJ_PENDING,
-  STRATEGY_SUBMITTED,
-  approveGmvAdjustment,
-  approveStrategy,
-  canApproveStrategy,
-  isAccountLead,
-  getStrategy,
-  listPendingStrategyReviews,
-  requestStrategyRevision,
-  type PendingStrategyReview,
-  type Strategy,
-} from '@/lib/account';
+import { isAccountLead } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
 import ApprovalCard, { MetaGrid, ReasonBlock } from '@/components/persetujuan/ApprovalCard';
 import DecisionActions, { type DecisionKind } from '@/components/persetujuan/DecisionActions';
@@ -925,149 +913,19 @@ function EscalationCard({
 }
 
 // ---------------------------------------------------------------------------
-// 8. Review Strategi & Plan (M6A §4)
+// 8. (kosong) — Review Strategi & Plan `STR-` DIPENSIUNKAN 2026-09-08
 // ---------------------------------------------------------------------------
-
-function StrategyCard({
-  row,
-  canDecide,
-  defaultOpen,
-  onDone,
-}: {
-  row: PendingStrategyReview;
-  canDecide: boolean;
-  defaultOpen: boolean;
-  onDone: () => void;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const [strategy, setStrategy] = useState<Strategy | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const { busy, error, run } = useDecision(onDone);
-
-  useEffect(() => {
-    if (!open || strategy || detailError) return;
-    let alive = true;
-    getStrategy(row.strategy_id)
-      .then((s) => alive && setStrategy(s))
-      .catch((err) => alive && setDetailError(errorMessage(err)));
-    return () => {
-      alive = false;
-    };
-  }, [open, strategy, detailError, row.strategy_id]);
-
-  const gmvPending = row.gmv_adjustment_status === GMV_ADJ_PENDING;
-  const submitted = row.status === STRATEGY_SUBMITTED;
-
-  return (
-    <ApprovalCard
-      id={row.strategy_id}
-      href={`/account/strategi/${row.strategy_id}`}
-      title={
-        <>
-          {row.toko} &middot; {row.nama_pic}
-        </>
-      }
-      badge={<StatusBadge status={row.status} />}
-      meta={[
-        { label: 'Service', value: <Link href={`/account/services/${row.service_id}`}>{row.service_id}</Link> },
-        { label: 'Disusun oleh', value: row.created_by_nama || row.created_by },
-        { label: 'Tanggal', value: formatDateTime(row.created_at) },
-        {
-          label: 'Yang diminta',
-          value: submitted
-            ? gmvPending
-              ? 'Persetujuan Plan + penyesuaian GMV'
-              : 'Persetujuan Plan'
-            : gmvPending
-              ? 'ACC penyesuaian target GMV (>±20%)'
-              : '—',
-        },
-      ]}
-      detail={
-        <div className="stack" style={{ gap: 8 }}>
-          {detailError && (
-            <div className="alert alertError" role="alert">
-              {detailError}
-            </div>
-          )}
-          {!strategy && !detailError && <p className="muted">Memuat rincian...</p>}
-          {strategy && (
-            <>
-              <MetaGrid
-                items={[
-                  { label: 'Objective', value: strategy.objective || '—' },
-                  { label: 'Target GMV (plan)', value: formatIDR(strategy.target_gmv) },
-                  { label: 'Target GMV (klien)', value: formatIDR(strategy.client_target_gmv) },
-                  { label: 'Target ROAS', value: strategy.target_roas || '—' },
-                  { label: 'Divisi terlibat', value: strategy.divisions_involved.join(', ') || '—' },
-                  { label: 'Timeline', value: `${formatDate(strategy.timeline_start)} – ${formatDate(strategy.timeline_end)}` },
-                  { label: 'Revisi ke', value: String(strategy.revision_count) },
-                ]}
-              />
-              {gmvPending && (
-                <ReasonBlock label="Alasan penyesuaian target GMV" text={strategy.gmv_adjustment_reason} />
-              )}
-              {strategy.planned_brief_outline && (
-                <ReasonBlock label="Rencana brief" text={strategy.planned_brief_outline} />
-              )}
-              {strategy.revision_notes && <ReasonBlock label="Catatan revisi terakhir" text={strategy.revision_notes} />}
-            </>
-          )}
-        </div>
-      }
-      detailLabel="Rincian target & plan"
-      open={open}
-      onToggle={setOpen}
-    >
-      {!canDecide ? (
-        <WaitingNote who="Head of Account / Director" />
-      ) : submitted ? (
-        <DecisionActions
-          fieldId={`stg-note-${row.strategy_id}`}
-          busy={busy}
-          error={error}
-          approveLabel="Setujui Plan"
-          rejectLabel="Minta revisi"
-          noteLabel="Catatan revisi (wajib untuk Minta revisi)"
-          confirmText={(k) =>
-            k === 'approve'
-              ? `Setujui Plan ${row.strategy_id}? Service ${row.service_id} lanjut ke [Strategy Approved] dan Brief boleh dibuat.`
-              : ''
-          }
-          onDecide={(kind, note) =>
-            run(kind, () =>
-              kind === 'approve' ? approveStrategy(row.strategy_id) : requestStrategyRevision(row.strategy_id, note),
-            )
-          }
-          hint="Menyetujui Plan menggerakkan Service-nya dalam satu transaksi — bukan dua langkah terpisah."
-        />
-      ) : gmvPending ? (
-        <div className="stack" style={{ gap: 8 }}>
-          {error && (
-            <div className="alert alertError" role="alert">
-              {error}
-            </div>
-          )}
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="btn btnApprove"
-              disabled={busy !== null}
-              onClick={() => run('approve', () => approveGmvAdjustment(row.strategy_id))}
-            >
-              {busy === 'approve' ? 'Memproses...' : 'ACC penyesuaian GMV'}
-            </button>
-          </div>
-          <p className="muted" style={{ fontSize: 12 }}>
-            Plan ini masih draft, jadi tidak ada tombol tolak: menolak penyesuaian = AM menurunkan
-            target GMV-nya kembali ke dalam toleransi ±20% di halaman Strategy &amp; Plan. Selama belum
-            di-ACC, Plan tidak bisa diajukan.
-          </p>
-        </div>
-      ) : null}
-    </ApprovalCard>
-  );
-}
+//
+// Ketokan pemilik: `STRG-` (M6A) yang kanonik. Antrian ini adalah pintu approve
+// `STR-`, dan sesudah A-3 menyambungkan `STRG-` ke mesin status Service, dua
+// pintu hidup ke satu kunci bisa saling mematikan: STRG- disetujui lebih dulu ⇒
+// persetujuan STR- untuk Service yang sama gagal total dan ter-rollback, SPV
+// terkunci permanen dari Plan itu. Jadi pintunya dicabut, bukan dibiarkan
+// setengah — "setengah pensiun lebih buruk daripada tidak pensiun".
+//
+// Review Strategi sekarang di `/account/strategi/{id}` (jalur `STRG-`), yang
+// punya versioning dan mendorong Service-nya sendiri. Alasan lengkap:
+// `apps/api/src/lib/retired-str.ts` + `docs/DECISIONS.md` 2026-09-08.
 
 // ---------------------------------------------------------------------------
 // 9. Permintaan ke Finance (REQ-, M16 §5.5) — A-2
@@ -1168,7 +1026,6 @@ const SECTION_LABELS = [
   'Permintaan Hapus Lead',
   'Permintaan Hold Service',
   'Eskalasi KOL',
-  'Review Strategi & Plan',
   'Permintaan Block Task — M12',
   // Urutan daftar ini DIPETAKAN POSISI-PER-POSISI ke array `Promise.allSettled`
   // di bawah (`SECTION_LABELS[i]`), jadi entri baru wajib ditambahkan di ujung
@@ -1209,7 +1066,6 @@ export default function PerluPersetujuanPage() {
   // Director. `readOnly` menjaga OD tetap read-only (Phase 0 §4).
   const canDecideFinanceReq = !readOnly && (isDirector || role?.division === 'Finance');
   const canDecideBlock = !readOnly && canViewBlockQueue;
-  const canDecideStrategy = !readOnly && canApproveStrategy(role);
   // Antrian eskalasi SUDAH difilter server ke `canContinueEscalation` — apa pun
   // yang muncul boleh dilanjutkan pemiliknya. Drop punya gate sendiri (lebih
   // sempit: KOL lead / Account lead / Director).
@@ -1229,7 +1085,6 @@ export default function PerluPersetujuanPage() {
   const [financeReqs, setFinanceReqs] = useState<Permintaan[] | null>(null);
   const [blockRequests, setBlockRequests] = useState<PendingBlockRequest[] | null>(null);
   const [escalations, setEscalations] = useState<PendingEscalation[] | null>(null);
-  const [strategyReviews, setStrategyReviews] = useState<PendingStrategyReview[] | null>(null);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1250,12 +1105,11 @@ export default function PerluPersetujuanPage() {
         listDeleteRequests(),
         listPendingHoldRequests(),
         listPendingEscalations(),
-        listPendingStrategyReviews(),
         canViewBlockQueue ? getTeamPortal() : Promise.resolve(null),
         canViewFinanceReq ? listPermintaanQueue('Finance') : Promise.resolve([]),
       ]);
       const [
-        attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, strategyRes, blockRes,
+        attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, blockRes,
         financeReqRes,
       ] = results;
       setAttempts(attemptRes.status === 'fulfilled' ? attemptRes.value.data : []);
@@ -1266,7 +1120,6 @@ export default function PerluPersetujuanPage() {
       setDeleteRequests(deleteRes.status === 'fulfilled' ? deleteRes.value.data : []);
       setHoldRequests(holdRes.status === 'fulfilled' ? holdRes.value.data : []);
       setEscalations(escalationRes.status === 'fulfilled' ? escalationRes.value.data : []);
-      setStrategyReviews(strategyRes.status === 'fulfilled' ? strategyRes.value.data : []);
       setBlockRequests(
         blockRes.status === 'fulfilled' && blockRes.value ? blockRes.value.block_queue : [],
       );
@@ -1312,7 +1165,6 @@ export default function PerluPersetujuanPage() {
     lead: deleteRequests?.length ?? 0,
     hold: holdRequests?.length ?? 0,
     kol: escalations?.length ?? 0,
-    strategy: strategyReviews?.length ?? 0,
     block: blockRequests?.length ?? 0,
     financeReq: financeReqs?.length ?? 0,
   };
@@ -1326,7 +1178,6 @@ export default function PerluPersetujuanPage() {
     { id: 'hold', label: 'Hold Service', count: counts.hold },
     { id: 'block', label: 'Block Task', count: counts.block },
     { id: 'kol', label: 'Eskalasi KOL', count: counts.kol },
-    { id: 'strategy', label: 'Strategi & Plan', count: counts.strategy },
     { id: 'financeReq', label: 'Permintaan Finance', count: counts.financeReq },
   ].filter((t) => t.count > 0);
 
@@ -1499,23 +1350,6 @@ export default function PerluPersetujuanPage() {
                 key={r.booking_id}
                 row={r}
                 canDrop={canDropEscalation}
-                defaultOpen={i < AUTO_OPEN}
-                onDone={load}
-              />
-            ))}
-          </Section>
-
-          <Section
-            id="strategy"
-            title="Review Strategi & Plan"
-            count={counts.strategy}
-            hint="Plan yang diajukan untuk persetujuan, atau penyesuaian target GMV di luar toleransi ±20%."
-          >
-            {strategyReviews?.map((r, i) => (
-              <StrategyCard
-                key={r.strategy_id}
-                row={r}
-                canDecide={canDecideStrategy}
                 defaultOpen={i < AUTO_OPEN}
                 onDone={load}
               />

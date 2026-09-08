@@ -27,6 +27,7 @@ import {
   type TaskSource,
 } from '@/lib/tasks';
 import StatusBadge from '@/components/StatusBadge';
+import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 import { transitionLabel, type TransitionResult } from '@/lib/transition';
 
 // Live Stream briefs skip the M12 engine (dispatched to vendor) — their native
@@ -388,6 +389,18 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
             </>
           ) : brief ? (
             <>
+              {/* B-2 / Creative #3 — halaman ini adalah pintu masuk SETIAP
+                  divisi eksekusi ke Brief-nya, jadi mereknya harus terbaca di
+                  sini sebelum apa pun. */}
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>Klien</div>
+                <div>
+                  {brief.client_nama || '—'}
+                  {brief.client_id && (
+                    <div className="muted" style={{ fontSize: 11 }}>{brief.client_id}</div>
+                  )}
+                </div>
+              </div>
               <div>
                 <div className="muted" style={{ fontSize: 12 }}>Judul</div>
                 <div>{brief.title}</div>
@@ -415,6 +428,10 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
             </>
           ) : null}
         </div>
+        {/* B-1a: antrean generik /tasks melayani SETIAP divisi eksekusi, jadi
+            di sinilah sebab "kenapa statusnya belum bergerak" paling banyak
+            dibaca. Satuannya netral: halaman ini melayani Aset maupun Booking. */}
+        {source === 'brief' && <RollupBlockerPanel briefId={id} satuan="unit" />}
       </section>
 
       {/* Metrik computed (read-only) */}

@@ -30,6 +30,8 @@ import {
   getAttempt,
   getClient,
   IncompleteError,
+  OverrideReasonRequiredError,
+  deriveDuration,
   listAttempts,
   markContacted,
   markLost,
@@ -1311,5 +1313,285 @@ describeDb('read models', () => {
     // silently hiding the engine baseline UI for every client (the bug this fixes).
     expect(client.platforms.map((p) => p.platform).sort()).toEqual(['Shopee', 'TikTok Shop', 'Tokopedia']);
     expect(client.platforms.every((p) => p.active)).toBe(true);
+  });
+});
+
+/**
+ * A-4 (ketokan K-2, 2026-09-07) — durasi kerja sama moves from the AM's Strategi
+ * form to Sales' closing.
+ *
+ * What was wrong: the only UI writing `contracts.durasi_bulan` was the Strategi
+ * form, filled weeks after the deal, by someone who was not in the negotiation.
+ * Every Plan period boundary, every accrual month and every renewal date derives
+ * from that number, and `sales.close` never printed a `contracts` row at all.
+ */
+describeDb('A-4 — the cooperation window at closing (K-2)', () => {
+  /** A catalog service that carries a duration — `seedService` leaves it null. */
+  async function seedDurasiService(id: string, durasiBulan: number | null, price = '9000000.00'): Promise<string> {
+    await seedService(id, price);
+    await sql`
+      update master_service_versions set durasi_bulan = ${durasiBulan}
+       where service_id = ${id} and version_no = 1`;
+    return id;
+  }
+
+  const contractOf = async (clientId: string) =>
+    sql<{ id: string; durasi_bulan: number; tanggal_mulai: string; tanggal_akhir: string; catatan: string | null; jenis: string }[]>`
+      select id, durasi_bulan, tanggal_mulai::text as tanggal_mulai,
+             tanggal_akhir::text as tanggal_akhir, catatan, jenis
+        from contracts where client_id = ${clientId}`;
+
+  const soloParties = {
+    primarySalespersonId: 'ZZ-BUDI',
+    allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }],
+  };
+
+  const status = async (attemptId: string): Promise<string> =>
+    (await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`)[0].status;
+
+  // --- the pure rule, checkable without a database round trip ---------------
+
+  it('deriveDuration takes the MAX, not the sum and not the min', () => {
+    const line = (durasiBulan: number | null) => ({
+      masterServiceId: 'X', proposedPrice: '1.00', commissionRule: 'r', name: 'n',
+      versionNo: 1, requiresStrategyPlan: false, planTier: 'tanpa_plan', durasiBulan,
+    });
+    // 12-month Store Management + 3-month GMV Max is a TWELVE-month agreement.
+    // Summing would say 15 (a window that outlives the deal); taking the min
+    // would say 3 (the longest service's last Plan period would fall outside
+    // its own contract).
+    expect(deriveDuration([line(12), line(3)])).toBe(12);
+    expect(deriveDuration([line(3), line(12)])).toBe(12);
+  });
+
+  it('deriveDuration SKIPS null durations rather than reading them as zero (Q5)', () => {
+    const line = (durasiBulan: number | null) => ({
+      masterServiceId: 'X', proposedPrice: '1.00', commissionRule: 'r', name: 'n',
+      versionNo: 1, requiresStrategyPlan: false, planTier: 'tanpa_plan', durasiBulan,
+    });
+    expect(deriveDuration([line(null), line(6)])).toBe(6);
+    // Every line one-off ⇒ there is no periodic window at all, which is null,
+    // not 0. A 0 would fail ck_contracts_durasi; worse, it would claim a window.
+    expect(deriveDuration([line(null), line(null)])).toBeNull();
+    expect(deriveDuration([])).toBeNull();
+  });
+
+  // --- the derived path, end to end ----------------------------------------
+
+  it('derives the window from the catalog — MAX over the closed services', async () => {
+    const long = await seedDurasiService('SVC-ZZ-A4-LONG', 12);
+    const short = await seedDurasiService('SVC-ZZ-A4-SHORT', 3, '4000000.00');
+    const attemptId = await autoApprovedAttempt(budi(), long);
+    // Bring the second service into the deal so the MAX has something to beat.
+    await reviseServices(sql, budi(), attemptId, [
+      { masterServiceId: long, quantity: 1 },
+      { masterServiceId: short, quantity: 1 },
+    ]);
+
+    const res = await close(sql, budi(), attemptId, {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      managedSince: '2026-09-01',
+    });
+
+    const ct = await contractOf(res.clientId);
+    expect(ct).toHaveLength(1);
+    expect(ct[0].id).toMatch(/^CTR-\d{6}-\d{4}$/);
+    expect(ct[0].durasi_bulan).toBe(12);
+    expect(ct[0].tanggal_mulai).toBe('2026-09-01');
+    expect(ct[0].tanggal_akhir).toBe('2027-09-01');
+    expect(ct[0].jenis).toBe('baru');
+    expect(ct[0].catatan).toBeNull(); // derived, so there is nothing to explain
+  });
+
+  it('hangs EVERY Service born by the closing under that one agreement (O57)', async () => {
+    const a = await seedDurasiService('SVC-ZZ-A4-SVC-A', 6);
+    const b = await seedDurasiService('SVC-ZZ-A4-SVC-B', 6, '5000000.00');
+    const attemptId = await autoApprovedAttempt(budi(), a);
+    await reviseServices(sql, budi(), attemptId, [
+      { masterServiceId: a, quantity: 1 },
+      { masterServiceId: b, quantity: 1 },
+    ]);
+    const res = await close(sql, budi(), attemptId, {
+      parties: soloParties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+
+    const ct = await contractOf(res.clientId);
+    const svcs = await sql<{ contract_id: string | null }[]>`
+      select contract_id from services where client_id = ${res.clientId}`;
+    expect(svcs).toHaveLength(2);
+    expect(svcs.map((r) => r.contract_id)).toEqual([ct[0].id, ct[0].id]);
+  });
+
+  it('mints NO contract when every service is one-off — no window is invented', async () => {
+    const oneOff = await seedDurasiService('SVC-ZZ-A4-ONEOFF', null);
+    const attemptId = await autoApprovedAttempt(budi(), oneOff);
+    const res = await close(sql, budi(), attemptId, {
+      parties: soloParties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    expect(await contractOf(res.clientId)).toHaveLength(0);
+    const svcs = await sql<{ contract_id: string | null }[]>`
+      select contract_id from services where client_id = ${res.clientId}`;
+    expect(svcs[0].contract_id).toBeNull();
+  });
+
+  // --- the override, and the reason that makes it auditable -----------------
+
+  it('the override WINS over the catalog', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-A4-OVR', 12);
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    const res = await close(sql, budi(), attemptId, {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      managedSince: '2026-09-01',
+      durasiBulanOverride: 6,
+      alasanOverride: 'klien minta 6 bulan dulu sebelum perpanjangan',
+    });
+    const ct = await contractOf(res.clientId);
+    expect(ct[0].durasi_bulan).toBe(6); // not the catalog's 12
+    expect(ct[0].tanggal_akhir).toBe('2027-03-01');
+    expect(ct[0].catatan).toContain('klien minta 6 bulan dulu');
+  });
+
+  it('REFUSES an override with no reason — and the whole closing rolls back', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-A4-NOREASON', 12);
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    await expect(close(sql, budi(), attemptId, {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      durasiBulanOverride: 6,
+    })).rejects.toBeInstanceOf(OverrideReasonRequiredError);
+    await expect(close(sql, budi(), attemptId, {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      durasiBulanOverride: 6,
+      alasanOverride: '   ', // whitespace is not a reason
+    })).rejects.toBeInstanceOf(OverrideReasonRequiredError);
+    // Nothing was half-created: the attempt never left its pre-closing state.
+    expect(await status(attemptId)).toBe('Negotiation - Auto Approved');
+    expect(await sql`select id from clients where winning_attempt_id = ${attemptId}`).toHaveLength(0);
+  });
+
+  it('overrides an ALL-ONE-OFF deal into a real window — the escape hatch', async () => {
+    // The `qty_menambah = 'durasi'` case too: proposal lines carry no quantity,
+    // so "beli 3 GMV Max = 3 bulan" is not derivable and the AM states it here.
+    const oneOff = await seedDurasiService('SVC-ZZ-A4-OVR-ONEOFF', null);
+    const attemptId = await autoApprovedAttempt(budi(), oneOff);
+    const res = await close(sql, budi(), attemptId, {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      managedSince: '2026-09-01',
+      durasiBulanOverride: 3,
+      alasanOverride: 'beli 3x GMV Max, durasinya jadi 3 bulan',
+    });
+    const ct = await contractOf(res.clientId);
+    expect(ct[0].durasi_bulan).toBe(3);
+    expect(ct[0].tanggal_akhir).toBe('2026-12-01');
+  });
+
+  it('rejects an out-of-band duration with the house BI message, not a raw constraint error', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-A4-BAND', 12);
+    for (const bad of [0, -1, 37, 1.5]) {
+      const attemptId = await autoApprovedAttempt(budi(), svc);
+      await expect(close(sql, budi(), attemptId, {
+        parties: soloParties,
+        paymentScheme: PAYMENT_SCHEME_LUNAS,
+        durasiBulanOverride: bad,
+        alasanOverride: 'sengaja di luar rentang',
+      })).rejects.toBeInstanceOf(IncompleteError);
+    }
+  });
+
+  // --- the calendar, which is the part a naive +30 days gets wrong ----------
+
+  it('ends the window by CALENDAR month, clamping 31 Jan + 1 bulan to 28 Feb', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-A4-CAL', 1);
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    const res = await close(sql, budi(), attemptId, {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      managedSince: '2027-01-31',
+    });
+    const ct = await contractOf(res.clientId);
+    // `+ 30 hari` would say 2027-03-02 — three days into the wrong month, and
+    // every Plan period boundary after it inherits the drift.
+    expect(ct[0].tanggal_akhir).toBe('2027-02-28');
+  });
+
+  it('clamps into a LEAP February too — 31 Jan 2028 + 1 bulan = 29 Feb', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-A4-LEAP', 1);
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    const res = await close(sql, budi(), attemptId, {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      managedSince: '2028-01-31',
+    });
+    expect((await contractOf(res.clientId))[0].tanggal_akhir).toBe('2028-02-29');
+  });
+
+  it('falls back to the CLOSING date (WIB) when managedSince is not given', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-A4-NOSTART', 6);
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    // 23:30 UTC on the 8th is already the 9th in WIB (+07). Slicing the UTC
+    // instant would record the window as starting a day early.
+    const res = await close(sql, budi(), attemptId, {
+      parties: soloParties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    }, new Date('2026-09-08T23:30:00Z'));
+    const ct = await contractOf(res.clientId);
+    expect(ct[0].tanggal_mulai).toBe('2026-09-09');
+    expect(ct[0].tanggal_akhir).toBe('2027-03-09');
+  });
+
+  // --- the audit row, which is where the provenance has to survive ----------
+
+  it('records WHICH answer it used, and why, in the audit log (house rule #3)', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-A4-AUDIT', 12);
+    const derived = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties: soloParties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    const ctD = (await contractOf(derived.clientId))[0];
+    const rowsD = await sql<{ after_json: { sumber_durasi: string; alasan_override: string | null } }[]>`
+      select after_json from audit_log
+       where entity_type = 'contract' and entity_id = ${ctD.id} and action = 'create'`;
+    expect(rowsD).toHaveLength(1);
+    expect(rowsD[0].after_json.sumber_durasi).toBe('katalog');
+    expect(rowsD[0].after_json.alasan_override).toBeNull();
+
+    const overridden = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      durasiBulanOverride: 6,
+      alasanOverride: 'budget klien hanya 6 bulan',
+    });
+    const ctO = (await contractOf(overridden.clientId))[0];
+    const rowsO = await sql<{ after_json: { sumber_durasi: string; alasan_override: string | null } }[]>`
+      select after_json from audit_log
+       where entity_type = 'contract' and entity_id = ${ctO.id} and action = 'create'`;
+    expect(rowsO[0].after_json.sumber_durasi).toBe('override');
+    expect(rowsO[0].after_json.alasan_override).toBe('budget klien hanya 6 bulan');
+  });
+
+  it('names the contract on the closing audit row — explicit null when there is none', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-A4-CLOSEAUDIT', 6);
+    const res = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties: soloParties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    const ct = (await contractOf(res.clientId))[0];
+    const rows = await sql<{ after_json: { contract_id: string | null; durasi_bulan: number | null } }[]>`
+      select after_json from audit_log where entity_id = ${res.clientId} and action = 'closing'`;
+    expect(rows[0].after_json.contract_id).toBe(ct.id);
+    expect(rows[0].after_json.durasi_bulan).toBe(6);
+
+    const oneOff = await seedDurasiService('SVC-ZZ-A4-CLOSEAUDIT-NULL', null);
+    const res2 = await close(sql, budi(), await autoApprovedAttempt(budi(), oneOff), {
+      parties: soloParties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    const rows2 = await sql<{ after_json: { contract_id: string | null; durasi_bulan: number | null } }[]>`
+      select after_json from audit_log where entity_id = ${res2.clientId} and action = 'closing'`;
+    // The KEY is present and null — a missing key is the O43 failure mode, and
+    // "no window" has to be readable as an answer rather than an omission.
+    expect(rows2[0].after_json).toHaveProperty('contract_id');
+    expect(rows2[0].after_json.contract_id).toBeNull();
+    expect(rows2[0].after_json.durasi_bulan).toBeNull();
   });
 });

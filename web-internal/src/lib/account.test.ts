@@ -45,6 +45,9 @@ function svc(over: Partial<ServiceQueueRow> = {}): ServiceQueueRow {
     assigned_am_id: 'EMP-0002',
     strategy_id: null,
     strategy_status: null,
+    strategi_id: null,
+    strategi_status: null,
+    contract_id: null,
     brief_count: 0,
     client_target_gmv: '20000000.00',
     released_to_account_at: '2026-08-01T00:00:00Z',
@@ -205,5 +208,67 @@ describe('canEditClientProfile (mirrors domain client.canEditProfile — M4-OA-4
   it('denies Account staff (non-lead) and null', () => {
     expect(canEditClientProfile(role({ division: 'Account', level: 'staff' }))).toBe(false);
     expect(canEditClientProfile(null)).toBe(false);
+  });
+});
+
+/**
+ * A-3 — the STRG- path in the queue label.
+ *
+ * The defect these guard: `strategy_id` (the legacy STR- row) is null on the
+ * decided path and always will be, so reading it alone made the queue tell the
+ * AM to "Buat Strategy & Plan" for an agreement whose Strategi was already
+ * `Aktif` — every visit, forever. The label is the AM's whole instruction on
+ * that screen; getting it wrong sends them to a form that is done.
+ */
+describe('A-3 — STRG- path (nextOnboardingStep)', () => {
+  const strg = (status: string) =>
+    svc({ strategi_id: 'STRG-202609-0001', strategi_status: status });
+
+  it('asks the AM to submit a Draft (and a Draft Revisi) — not to create one', () => {
+    expect(nextOnboardingStep(strg('Draft')).kind).toBe('submit_strategy');
+    expect(nextOnboardingStep(strg('Draft')).label).toContain('Strategi');
+    expect(nextOnboardingStep(strg('Draft Revisi')).kind).toBe('submit_strategy');
+  });
+
+  it('waits on the SPV while Diajukan', () => {
+    expect(nextOnboardingStep(strg('Diajukan')).kind).toBe('await_approval');
+  });
+
+  it('THE FIX: an Aktif Strategi reads as briefable, never as "buat Strategy"', () => {
+    expect(nextOnboardingStep(strg('Aktif')).kind).toBe('create_brief');
+  });
+
+  it('takes precedence over the legacy STR- pair — which stays null on this path', () => {
+    // Both records present is the transition state; the STRG- is the live one.
+    const both = svc({
+      strategi_id: 'STRG-202609-0001',
+      strategi_status: 'Aktif',
+      strategy_id: 'STR-202608-0001',
+      strategy_status: STRATEGY_DRAFTING,
+    });
+    expect(nextOnboardingStep(both).kind).toBe('create_brief');
+  });
+
+  it('falls back to the STR- path when there is no Strategi at all', () => {
+    expect(nextOnboardingStep(svc({ strategi_id: null })).kind).toBe('draft_strategy');
+  });
+
+  it('asks for a new one when the Strategi is expired or superseded', () => {
+    expect(nextOnboardingStep(strg('Kedaluwarsa')).kind).toBe('draft_strategy');
+    expect(nextOnboardingStep(strg('Diarsipkan')).kind).toBe('draft_strategy');
+  });
+
+  it('still puts the M6C determination FIRST — an unanswered tier is not "buat Strategi"', () => {
+    expect(
+      nextOnboardingStep(
+        svc({
+          plan_tier: 'ditentukan_am',
+          plan_determination_pending: true,
+          requires_strategy_plan: false,
+          strategi_id: 'STRG-202609-0001',
+          strategi_status: 'Aktif',
+        }),
+      ).kind,
+    ).toBe('determine_plan');
   });
 });
