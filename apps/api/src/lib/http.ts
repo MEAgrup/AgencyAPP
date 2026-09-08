@@ -109,6 +109,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   StoreOpsValidationError: 400, // storeops.ValidationError
   TaskValidationError: 400, // task.ValidationError
   TooManySalespeopleError: 400, // sales.TooManySalespeopleError
+  TutupBukuValidationError: 400, // tutupbuku.ValidationError
   ValidationError: 400, // notification.ValidationError
   // 401 — OldPasswordError is 401 like Go's handleChangePassword: the request
   // was well-formed, the CURRENT password just did not match.
@@ -142,6 +143,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   StageForbiddenError: 403, // stage.ForbiddenError
   StoreOpsForbiddenError: 403, // storeops.ForbiddenError
   TaskForbiddenError: 403, // task.ForbiddenError
+  TutupBukuForbiddenError: 403, // tutupbuku.ForbiddenError
   // 404
   AccountNotFoundError: 404, // account.NotFoundError
   AdminNotFoundError: 404, // admin.NotFoundError
@@ -168,6 +170,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   StageNotFoundError: 404, // stage.NotFoundError
   StoreOpsNotFoundError: 404, // storeops.NotFoundError
   TaskNotFoundError: 404, // task.NotFoundError
+  TutupBukuNotFoundError: 404, // tutupbuku.NotFoundError
   // 409 — lifecycle conflicts: a dedup block, an un-closable attempt, a lead
   // whose win was already resolved, or a full-verification blocked on a
   // missing contract. 409 with the verbatim message where BI applies.
@@ -199,6 +202,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   StageConflictError: 409, // stage.ConflictError
   StoreOpsConflictError: 409, // storeops.ConflictError
   TaskConflictError: 409, // task.ConflictError
+  TutupBukuConflictError: 409, // tutupbuku.ConflictError
   // 429 — the two app-level throttles: login (all realms) and the Client
   // Portal complaint form (spec §5.2). Both carry a BI `[...]` message.
   AuthRateLimitedError: 429, // auth.RateLimitedError

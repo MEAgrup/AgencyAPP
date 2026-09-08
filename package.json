@@ -10,6 +10,12 @@
     "build": "npm run build -w @cdps/api",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "db:rebuild": "scripts/db-rebuild.sh"
+    "db:rebuild": "scripts/db-rebuild.sh",
+    "tour:seed": "tsx scripts/seed-browser-tour.ts",
+    "tour:jwt": "node scripts/dev-jwt.mjs",
+    "tour:run": "node scripts/browser-tour.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
   }
 }

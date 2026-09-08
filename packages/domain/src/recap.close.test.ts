@@ -80,7 +80,7 @@ async function seedBlocker(recapId: string): Promise<void> {
 function smTransition(id: string, to: string, actor = OWNER_AM) {
   return sql<{ r: { ok: boolean; to?: string; code?: string } }[]>`
     select sm_transition('weekly_result_recap','weekly_result_recap','weekly_result_recap',
-                         'id','status', ${id}, ${to}, ${actor}, false, false) as r`;
+                         'id','status', ${id}, ${to}, ${actor}, false, false, 'Account') as r`;
 }
 
 afterEach(async () => {

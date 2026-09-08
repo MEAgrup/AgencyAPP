@@ -226,6 +226,11 @@ export default function PerformancePage() {
                     <th>Staff ID</th>
                     <th>Role</th>
                     <th style={{ textAlign: 'right' }}>Skor Akhir</th>
+                    {rollup.division === 'Account' && (
+                      <th style={{ textAlign: 'right' }} title="X-12: informasional, tidak memengaruhi Skor Akhir">
+                        Realisasi Belum Lengkap
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -240,11 +245,23 @@ export default function PerformancePage() {
                       <td style={{ textAlign: 'right' }}>
                         <strong>{member.score_display}</strong>
                       </td>
+                      {rollup.division === 'Account' && (
+                        <td style={{ textAlign: 'right', color: 'var(--color-text-muted)' }}>
+                          {member.realisasi_belum_lengkap_count ?? '—'}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            {rollup.division === 'Account' && (
+              <p className="muted" style={{ fontSize: '12px', marginTop: '8px' }}>
+                "Realisasi Belum Lengkap" = jumlah insiden GMV manual belum diisi 5 hari
+                setelah periode Plan ditutup (X-07/X-12). Informasional — belum memengaruhi
+                Skor Akhir.
+              </p>
+            )}
           </>
         )}
       </section>

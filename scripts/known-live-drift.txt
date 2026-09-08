@@ -1,0 +1,25 @@
+# Allowlist untuk `scripts/check-live-drift.sh` — slug migrasi yang ADA di
+# ledger live `CDPS SG` tapi TIDAK punya berkas yang cocok di
+# `supabase/migrations/**` pada `main`, dan SUDAH dicatat di DECISIONS.md
+# (bukan didiamkan diam-diam). Satu slug per baris, `#` untuk komentar.
+#
+# Menambah baris di sini TANPA entri DECISIONS.md yang menjelaskannya adalah
+# bug kelasnya sendiri — allowlist ini bukan tempat menyembunyikan drift baru,
+# hanya tempat MENAHAN NOISE dari drift lama yang sudah diverifikasi jinak.
+
+# m6a_section_d — dua baris ledger untuk satu berkas repo
+# (20260808020000_m6a_section_d + 20260808000000_m6a_section_d), sisa apply
+# ganda LAMA (bukan skema berlebih). Diverifikasi + dicatat DECISIONS.md
+# 2026-09-06 (audit drift SCR-UI-1) sebelum A2/B3 ada. CATATAN: gerbang ini
+# mencocokkan per-SLUG UNIK, jadi dua baris live yang sama-sama melucuti ke
+# "m6a_section_d" TIDAK PERNAH muncul sebagai EXTRA (repo juga punya slug itu)
+# — baris di bawah ini nol efek pada perilaku gerbang, murni riwayat.
+m6a_section_d
+
+# d3_tutup_buku_pulihkan_komentar_jaga_transisi — migrasi jalur D-3 (sesi lain,
+# paralel dengan A2) yang belum di-back-port ke supabase/migrations/** pada
+# main. Dicatat sebagai baris Open A2-DRIFT, DECISIONS.md 2026-09-08 — BUKAN
+# milik tiket ini untuk diperbaiki. Hapus baris allowlist ini begitu berkasnya
+# muncul di main DAN baris A2-DRIFT ditutup, supaya kalau sesi lain
+# menambahkan drift lain dengan nama serupa, itu tetap tertangkap sebagai baru.
+d3_tutup_buku_pulihkan_komentar_jaga_transisi

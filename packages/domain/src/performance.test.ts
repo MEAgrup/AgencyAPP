@@ -444,6 +444,8 @@ afterEach(async () => {
   // catatan. Both before `clients` (weekly_result_recap FK-references clients).
   await sql`truncate table wrr_catatan_divisi`;
   await sql`delete from weekly_result_recap where created_by like 'ZZ-%'`;
+  // X-12 fixture (fk_plan_client references clients) — before `clients` below.
+  await sql`delete from plan where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from employees where created_by like 'ZZ-%'`;
   await sql`delete from role_mappings where created_by like 'ZZ-%'`;
@@ -743,6 +745,48 @@ describeDb('team rollup (Rule 5 simple average, derived on read)', () => {
     const creativeLead: Actor = { employeeId: 'ZZ-CL', divisi: 'Creative', role: permission.makeRole({ division: 'Creative', level: 'lead' }) };
     await expect(teamRollup(sql, creativeLead, 'Ads', JUNE)).rejects.toBeInstanceOf(ForbiddenError);
   });
+
+  // X-12 Opsi B (pemilik, 2026-09-08): hitungan insiden "realisasi belum
+  // lengkap" per AM di rollup Account, informasional — TIDAK memengaruhi
+  // finalScore (batas eksplisit M6ABC_BACKLOG.md X-12).
+  it('X-12: Account rollup carries realisasiBelumLengkapCount per AM, unaffected finalScore; null for non-AM divisions', async () => {
+    const am = uid('EMP-RBL');
+    const client = uid('CLI-RBL');
+    const plan = uid('PLAN-RBL');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    await insClient(client, am);
+    await sql`
+      insert into plan (id, client_id, contract_id, lingkup, status, periode_no,
+                        tanggal_mulai, tanggal_akhir, jumlah_minggu, created_by)
+      values (${plan}, ${client}, null, 'klien', 'Ditutup', 1, '2026-06-01', '2026-06-30', 4, 'ZZ-TEST')`;
+    // Dua insiden di Juni — B-09 (`sweepRealisasiBelumLengkap`) menjaga satu per
+    // periode via audit_log lookup, tapi tes ini hanya membuktikan HITUNGANNYA,
+    // bukan meniru idempotency job itu sendiri.
+    await insAudit('plan', plan, 'realisasi_belum_lengkap', new Date('2026-06-20T00:00:00Z'));
+    await insAudit('plan', plan, 'realisasi_belum_lengkap', new Date('2026-06-25T00:00:00Z'));
+
+    const am2 = uid('EMP-RBL2'); // AM lain di Juni yang sama, nol insiden — hitungan tidak bocor antar-AM.
+    await insEmployee(am2, 'Account', 'ZZ-AM-Jab');
+    await sql`insert into performance_snapshots (id, staff_id, role_type, period_start, period_end, profile_score, modifier_value, final_score, components_json, computed_by)
+      values (${'PERF-202606-RBL1'}, ${am}, 'AM', '2026-06-01', '2026-06-30', 80, 0, 80, '{"components":[]}'::jsonb, 'system'),
+             (${'PERF-202606-RBL2'}, ${am2}, 'AM', '2026-06-01', '2026-06-30', 90, 0, 90, '{"components":[]}'::jsonb, 'system')`;
+
+    const roll = await teamRollup(sql, director(), 'Account', JUNE);
+    const mine = roll.members.find((m) => m.staffId === am);
+    const other = roll.members.find((m) => m.staffId === am2);
+    expect(mine).toBeDefined();
+    expect(mine!.realisasiBelumLengkapCount).toBe(2);
+    expect(mine!.finalScore).toBe(80); // unaffected — X-12 belum diberi bobot skor
+    expect(other).toBeDefined();
+    expect(other!.realisasiBelumLengkapCount).toBe(0); // nol insiden, bukan undefined/null (Map lookup miss ⇒ nol via ?? tidak salah dibaca "tidak berlaku")
+
+    // Divisi non-Account (mis. Ads): metrik ini AM-only (Plan AM-owned) — selalu null.
+    const adsRoll = await teamRollup(sql, director(), 'Ads', JUNE);
+    for (const m of adsRoll.members) {
+      expect(m.realisasiBelumLengkapCount).toBeNull();
+    }
+  });
 });
 
 describeDb('config: Σ≠100 rejected; gate Director-only', () => {
@@ -878,18 +922,25 @@ describeDb('LT-32: kecepatan_review_am wiring (AM)', () => {
     const kra = compByName(snap.components, 'kecepatan_review_am');
     expect(kra).toBeDefined();
     // LT-1 (pemilik/COO 2026-08-29, migrasi 20260901010000): weight carved from
-    // 0 to a real 10%, and the (placeholder) 24h target seeded in the same
-    // migration — without that target row the component would still be silently
-    // excluded and the whole decision would be a no-op.
+    // 0 to a real 10%, and the 24h target seeded in the same migration —
+    // without that target row the component would still be silently excluded
+    // and the whole decision would be a no-op.
     expect(kra!.baseWeight).toBe(10);
     expect(kra!.included).toBe(true);
     // 48h actual against a 24h target = 200% ⇒ OA-1 transform 200−200 = 0.
     // This is exactly the PRD §6.1 scenario the module was built for: the AM
     // who opens the brief two days late now carries that themselves.
     expect(kra!.raw).toBe(0);
-    // The target is a PLACEHOLDER (O9 still open) and the snapshot says so
-    // rather than passing 24h off as a confirmed business figure.
-    expect(snap.targetsPlaceholder).toBe(true);
+    // LT-1 sisa (pemilik, 2026-09-08: "buat 1 hari kerja", migrasi
+    // 20260925060000): target dikonfirmasi bukan placeholder lagi — angkanya
+    // (24) tidak berubah, "1 hari kerja" MENGONFIRMASI angka yang sudah ada
+    // (seed asalnya sendiri sudah menyamakan keduanya, lihat komentar migrasi
+    // itu), bukan menghitung ulang. Snapshot ini tidak punya komponen
+    // placeholder lain yang included (chr_average/revision_escalation_rate
+    // tidak butuh target; recap_discipline & complaint_resolution_speed tidak
+    // included tanpa data recap/komplain), jadi targetsPlaceholder sekarang
+    // false secara menyeluruh.
+    expect(snap.targetsPlaceholder).toBe(false);
     // Revision Escalation Rate now also has a real portfolio Task to fold —
     // proof `amPortfolioApprovedInPeriod` (shared with kecepatan_review_am) did
     // not break the existing component's own math.

@@ -151,6 +151,12 @@ export * as salesperf from './salesperf';
 // Parallel to `sales.ts`'s attempt-anchored negotiation/closing, not a reuse
 // of it (nol LEAD-/PRSP- palsu). See renewal.ts's header + STATE_MACHINES §20.
 export * as renewal from './renewal';
+// D-3 (Gelombang D) — kunci tutup buku per bulan: angka beku BERVERSI, dua
+// gerbang peran yang sengaja asimetris (menutup = Finance lead ATAU Director,
+// membuka = Director SAJA), dan jurnal koreksi sebagai satu-satunya jalan sah
+// memperbaiki bulan yang sudah dikunci. Juga pemanggil PERTAMA mesin accrual
+// `@cdps/core`. Penegakannya ada di DB (20260925010000..40000), bukan di sini.
+export * as tutupbuku from './tutupbuku';
 // M18 — Store Operation: baris SKU (`SKU-`) sebagai unit kerja divisi. DUA
 // penulis pada satu baris (AM menulis cakupan + target, Store Operation menulis
 // hasil lalu dampak), dan dindingnya di DB — modul ini hanya wajib

@@ -51,7 +51,35 @@ describe('transition wrapper — arg mapping', () => {
       actorEmployeeId: 'EMP-1',
       roleDirector: false,
       roleLead: false,
+      roleDivision: 'Creative',
     });
+  });
+
+  it('carries the actor division through, so an edge can narrow its lead branch', async () => {
+    // Migration 20260925010000 lets an edge say "lead of THIS division". The
+    // wrapper is the only thing that knows which division the actor writes
+    // from, so a Finance lead and a Creative lead must not arrive at
+    // `sm_transition` looking identical.
+    const { exec, calls } = fakeExec({ ok: true, from: '[Terbuka]', to: '[Tertutup]' });
+    await transition(exec, {
+      machine: 'book_period', entityType: 'book_period', table: 'book_periods',
+      idColumn: 'periode', entityId: '2026-08-01', to: '[Tertutup]',
+      actor: actor('EMP-FIN', { division: 'Finance', level: 'lead' }),
+    });
+    expect(calls[0].roleDivision).toBe('Finance');
+    expect(calls[0].roleLead).toBe(true);
+  });
+
+  it('sends an empty division for an unmapped actor rather than omitting it', async () => {
+    // `role.division` is '' when the HRIS jabatan has no mapping. That must
+    // travel as '' — an omitted field would let an edge requiring 'Finance'
+    // read "nobody said" as "close enough".
+    const { exec, calls } = fakeExec({ ok: true, from: 'a', to: 'b' });
+    await transition(exec, {
+      machine: 'm', entityType: 'e', table: 't', entityId: '1', to: 'b',
+      actor: actor('EMP-X', {}),
+    });
+    expect(calls[0]).toHaveProperty('roleDivision', '');
   });
 
   it('derives roleLead=true for a lead, roleDirector=true for a director', async () => {

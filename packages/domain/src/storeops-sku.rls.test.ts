@@ -102,7 +102,7 @@ async function tulis(
 async function transisi(id: string, ke: string): Promise<{ ok: boolean; message?: string }> {
   const rows = await sql<{ r: { ok: boolean; message?: string } }[]>`
     select sm_transition('store_ops_sku', 'store_ops_sku', 'store_ops_skus', 'id', 'status',
-                         ${id}, ${ke}, ${PIC}, false, false) as r`;
+                         ${id}, ${ke}, ${PIC}, false, false, 'Store Operation') as r`;
   return rows[0].r;
 }
 

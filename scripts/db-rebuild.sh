@@ -175,11 +175,11 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "148"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "150"
 check "entity_prefix"    "select count(*) from entity_prefix"    "41"
-check "sm_machines"      "select count(*) from sm_machines"      "32"
+check "sm_machines"      "select count(*) from sm_machines"      "33"
 check "notif_events"     "select count(*) from notif_events"     "73"
-# FS-6 (20260925040000_fs6_msl_opsi_durasi.sql): 148 = 147 +
+# FS-6 (20260925040000_fs6_msl_opsi_durasi.sql): 150 = 149 +
 #       `master_service_duration_options` — pilihan tenor per VERSI layanan
 #       (1/3/6/12 bulan dengan harga PAKET berbeda), supaya satu layanan tidak
 #       lagi dipecah jadi tiga baris katalog. Nol prefix (anak ber-identity,
@@ -216,6 +216,18 @@ check "notif_events"     "select count(*) from notif_events"     "73"
 #      20260911050000_m1_unrespon_notif.sql. Nol tabel/prefix/mesin baru ⇒
 #      145 tabel/40 prefix/31 mesin TETAP. Lihat
 #      docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md L2.
+# 149 = 147 + 2 tabel Gelombang D / kunci tutup buku D-3
+#       (20260925020000_d3_tutup_buku.sql): `book_periods` (satu baris per
+#       bulan, kunci utamanya BULAN itu sendiri — "Agustus 2026" hanya ada
+#       satu, jadi ID surrogate hanya akan membuat duplikat "tidak seharusnya
+#       terjadi" alih-alih mustahil) dan `book_period_snapshots` (angka beku
+#       BERVERSI, immutable tanpa jalur UPDATE/DELETE — buka-ulang tidak
+#       menghapus versi lama, tutup-ulang menambah versi baru).
+#       Nol prefix baru (kunci alami `date`, tak pernah disebut manusia lewat
+#       ID — pola sama `client_reports`) ⇒ entity_prefix TETAP 40.
+#       +1 mesin `book_period` (32→33, STATE_MACHINES.md §23) — DUA gerbang
+#       yang sengaja berbeda: menutup = Finance lead ATAU Director, membuka
+#       kembali = Director SAJA. Nol event katalog baru ⇒ notif_events TETAP 73.
 # 146 = 145 + 1 tabel Gelombang C / gerbang C-5
 #       (20260916010000_c5_izin_pitch_klien.sql): `client_pitch_consents` —
 #       ledger append-only izin pemakaian angka klien di materi pitch (satu

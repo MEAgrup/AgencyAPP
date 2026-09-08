@@ -28,7 +28,8 @@ export function smExecutor(sql: Queryable): statemachine.SmExecutor {
       const rows = await sql<{ r: statemachine.TransitionResult }[]>`
         select sm_transition(
           ${args.machine}, ${args.entityType}, ${args.table}, ${args.idCol}, ${args.statusCol},
-          ${args.entityId}, ${args.to}, ${args.actorEmployeeId}, ${args.roleDirector}, ${args.roleLead}
+          ${args.entityId}, ${args.to}, ${args.actorEmployeeId}, ${args.roleDirector}, ${args.roleLead},
+          ${args.roleDivision}
         ) as r`;
       return rows[0].r;
     },

@@ -10,7 +10,7 @@
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, showcase, skuscreener, stage, storeops, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -1524,6 +1524,8 @@ export interface PerfTeamMemberWire {
   role_type: string;
   final_score: number | null;
   score_display: string;
+  /** X-12 Opsi B (pemilik 2026-09-08) — insiden "realisasi belum lengkap", informasional, null untuk selain AM. */
+  realisasi_belum_lengkap_count: number | null;
 }
 
 export interface PerfTeamRollupWire {
@@ -1543,6 +1545,7 @@ export function perfTeamRollupToWire(r: performance.TeamRollup): PerfTeamRollupW
       role_type: m.roleType,
       final_score: m.finalScore,
       score_display: m.scoreDisplay,
+      realisasi_belum_lengkap_count: m.realisasiBelumLengkapCount,
     })),
     team_average: r.teamAverage,
     average_display: r.averageDisplay,
@@ -7678,6 +7681,157 @@ export function izinPeristiwaToWire(p: showcase.IzinPeristiwa): IzinPeristiwaWir
 
 export function izinPanelToWire(s: showcase.IzinStatus, riwayat: showcase.IzinPeristiwa[]): IzinPanelWire {
   return { status: izinStatusToWire(s), riwayat: riwayat.map(izinPeristiwaToWire) };
+}
+
+// ---------------------------------------------------------------------------
+// D-3 — kunci tutup buku
+// ---------------------------------------------------------------------------
+
+export interface PeriodeWire {
+  periode: string;
+  status: string;
+  versi_terakhir: number;
+  dibuka_pada: string | null;
+  dibuka_oleh: string | null;
+  alasan_buka: string | null;
+}
+
+export function periodeToWire(p: tutupbuku.Periode): PeriodeWire {
+  return {
+    periode: p.periode,
+    status: p.status,
+    versi_terakhir: p.versiTerakhir,
+    dibuka_pada: p.dibukaPada,
+    dibuka_oleh: p.dibukaOleh,
+    alasan_buka: p.alasanBuka,
+  };
+}
+
+export interface BarisAngkaWire {
+  service_id: string;
+  client_id: string;
+  nama: string;
+  jumlah: string;
+  jumlah_idr: string;
+  hangus: string;
+}
+
+export interface LayananTidakTerhitungWire {
+  service_id: string;
+  nama: string;
+  sebab: string;
+}
+
+export interface AngkaPeriodeWire {
+  periode: string;
+  penghitung: string;
+  total_diakui: string;
+  total_diakui_idr: string;
+  total_hangus: string;
+  jumlah_layanan: number;
+  baris: BarisAngkaWire[];
+  tidak_terhitung: LayananTidakTerhitungWire[];
+}
+
+export function angkaPeriodeToWire(a: tutupbuku.AngkaPeriode): AngkaPeriodeWire {
+  return {
+    periode: a.periode,
+    penghitung: a.penghitung,
+    total_diakui: a.totalDiakui,
+    total_diakui_idr: a.totalDiakuiIdr,
+    total_hangus: a.totalHangus,
+    jumlah_layanan: a.jumlahLayanan,
+    baris: a.baris.map((b) => ({
+      service_id: b.serviceId, client_id: b.clientId, nama: b.nama,
+      jumlah: b.jumlah, jumlah_idr: b.jumlahIdr, hangus: b.hangus,
+    })),
+    // Daftar ini SELALU dikirim, termasuk saat kosong. Halaman yang
+    // menampilkannya harus bisa membedakan "tidak ada yang terlewat" dari
+    // "field-nya tidak ada" — kunci yang HILANG lebih berbahaya daripada
+    // array kosong (CLAUDE.md, batas wire).
+    tidak_terhitung: a.tidakTerhitung.map((t) => ({
+      service_id: t.serviceId, nama: t.nama, sebab: t.sebab,
+    })),
+  };
+}
+
+export interface SnapshotVersiWire {
+  periode: string;
+  versi: number;
+  ditutup_oleh: string;
+  ditutup_pada: string;
+  penghitung: string;
+  angka: AngkaPeriodeWire;
+}
+
+export function snapshotVersiToWire(s: tutupbuku.SnapshotVersi): SnapshotVersiWire {
+  return {
+    periode: s.periode, versi: s.versi, ditutup_oleh: s.ditutupOleh,
+    ditutup_pada: s.ditutupPada, penghitung: s.penghitung,
+    angka: angkaPeriodeToWire(s.angka),
+  };
+}
+
+export interface SelisihBarisWire {
+  service_id: string;
+  nama: string;
+  /** null = layanan ini TIDAK ADA di versi tersebut, bukan bernilai nol. */
+  sebelum: string | null;
+  sesudah: string | null;
+  selisih: string;
+  selisih_idr: string;
+}
+
+export interface SelisihVersiWire {
+  periode: string;
+  versi_sebelum: number;
+  versi_sesudah: number;
+  total_sebelum: string;
+  total_sesudah: string;
+  total_selisih: string;
+  total_selisih_idr: string;
+  baris: SelisihBarisWire[];
+}
+
+export function selisihVersiToWire(s: tutupbuku.SelisihVersi): SelisihVersiWire {
+  return {
+    periode: s.periode,
+    versi_sebelum: s.versiSebelum,
+    versi_sesudah: s.versiSesudah,
+    total_sebelum: s.totalSebelum,
+    total_sesudah: s.totalSesudah,
+    total_selisih: s.totalSelisih,
+    total_selisih_idr: s.totalSelisihIdr,
+    baris: s.baris.map((b) => ({
+      service_id: b.serviceId, nama: b.nama,
+      sebelum: b.sebelum, sesudah: b.sesudah,
+      selisih: b.selisih, selisih_idr: b.selisihIdr,
+    })),
+  };
+}
+
+export interface JurnalKoreksiWire {
+  periode_dikoreksi: string;
+  periode_catat: string;
+  keterangan: string;
+  nilai: string | null;
+  nilai_idr: string | null;
+  dicatat_oleh: string;
+  dicatat_pada: string;
+}
+
+export function jurnalKoreksiToWire(j: tutupbuku.JurnalKoreksi): JurnalKoreksiWire {
+  return {
+    periode_dikoreksi: j.periodeDikoreksi,
+    periode_catat: j.periodeCatat,
+    keterangan: j.keterangan,
+    // `nilai` null berarti "catatan tanpa angka", BUKAN nol. Dikirim eksplisit
+    // supaya halaman bisa menampilkan bedanya.
+    nilai: j.nilai,
+    nilai_idr: j.nilaiIdr,
+    dicatat_oleh: j.dicatatOleh,
+    dicatat_pada: j.dicatatPada,
+  };
 }
 
 // ---------------------------------------------------------------------------
