@@ -37,16 +37,18 @@ describe('identExecutor', () => {
 });
 
 describe('smExecutor', () => {
-  it('passes all ten params to sm_transition and returns the jsonb result', async () => {
+  it('passes all eleven params to sm_transition and returns the jsonb result', async () => {
     const sink: Captured[] = [];
     const result = await smExecutor(fakeSql([{ r: { ok: true, from: '[To Do]', to: '[In Progress]' } }], sink)).smTransition({
       machine: 'brief_task', entityType: 'demo_task', table: 'demo_tasks', idCol: 'id', statusCol: 'status',
       entityId: 'DEMO-1', to: '[In Progress]', actorEmployeeId: 'EMP-1', roleDirector: false, roleLead: true,
+      roleDivision: 'Creative',
     });
     expect(result).toEqual({ ok: true, from: '[To Do]', to: '[In Progress]' });
     expect(sink[0].text).toContain('sm_transition');
     expect(sink[0].values).toEqual([
       'brief_task', 'demo_task', 'demo_tasks', 'id', 'status', 'DEMO-1', '[In Progress]', 'EMP-1', false, true,
+      'Creative',
     ]);
   });
 });

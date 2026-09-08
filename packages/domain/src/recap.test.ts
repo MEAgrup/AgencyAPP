@@ -152,7 +152,7 @@ async function seedRecap(
 function smTransition(id: string, to: string, actor = 'ZZ-AM', director = false, lead = false) {
   return sql<{ r: { ok: boolean; to?: string; code?: string; message?: string } }[]>`
     select sm_transition('weekly_result_recap','weekly_result_recap','weekly_result_recap',
-                         'id','status', ${id}, ${to}, ${actor}, ${director}, ${lead}) as r`;
+                         'id','status', ${id}, ${to}, ${actor}, ${director}, ${lead}, 'Account') as r`;
 }
 
 describeDb('machine #18 (weekly_result_recap)', () => {

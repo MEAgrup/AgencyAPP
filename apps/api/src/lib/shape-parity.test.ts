@@ -195,7 +195,7 @@ const FE_FILES = [
   'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
-  'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
   // web-client-portal (M15-C2) — the external realm's own app, see FE_LIB_PORTAL.
   'klien/types.ts',
 ];
@@ -357,6 +357,15 @@ function walkPairs(): { pairs: Pair[]; unfollowed: Unfollowed[] } {
  * next endpoint cannot quietly ship an unchecked shape.
  */
 const WIRE_TO_FE: Record<string, string> = {
+  // D-3 tutup buku (Gelombang D) — tutupbuku.ts
+  PeriodeWire: 'tutupbuku.ts::Periode',
+  BarisAngkaWire: 'tutupbuku.ts::BarisAngka',
+  LayananTidakTerhitungWire: 'tutupbuku.ts::LayananTidakTerhitung',
+  AngkaPeriodeWire: 'tutupbuku.ts::AngkaPeriode',
+  SnapshotVersiWire: 'tutupbuku.ts::SnapshotVersi',
+  SelisihVersiWire: 'tutupbuku.ts::SelisihVersi',
+  SelisihBarisWire: 'tutupbuku.ts::SelisihBaris',
+  JurnalKoreksiWire: 'tutupbuku.ts::JurnalKoreksi',
   // Kinerja Sales (M0 §7.1) — salesperf.ts
   SalesPerfRowWire: 'salesperf.ts::SalesPerfRow',
   SalesPerfMonthRowWire: 'salesperf.ts::SalesPerfMonthRow',

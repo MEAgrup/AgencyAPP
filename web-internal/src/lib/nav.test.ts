@@ -95,6 +95,7 @@ describe('visibleNav — Sales', () => {
       '/livestream',
       '/finance',
       '/finance/reminders',
+      '/finance/tutup-buku',
       '/marketing',
       '/marketing/performance',
       '/health',
@@ -504,10 +505,25 @@ describe('visibleNav — Marketing & Finance', () => {
     expect(seen).not.toContain('/finance');
   });
 
+  it('D-3 Tutup Buku muncul untuk Finance LEAD, dan untuk OD/Director', () => {
+    // Satu baris per entri nav baru, sesuai ANCHOR-NAV-KEUANGAN di nav.ts.
+    // Yang diuji bukan kosmetik: menu ini menunjuk ke satu-satunya halaman
+    // yang bisa mengunci angka keuangan, jadi siapa yang MELIHATnya harus
+    // sesengaja siapa yang boleh menekannya.
+    expect(hrefs(role('Finance', 'lead'))).toContain('/finance/tutup-buku');
+    expect(hrefs(role('Finance', 'staff'))).not.toContain('/finance/tutup-buku');
+    // Lead divisi lain tidak — `require_division = 'Finance'` di sm_edges.
+    expect(hrefs(role('Creative', 'lead'))).not.toContain('/finance/tutup-buku');
+    expect(hrefs(role('Sales', 'lead'))).not.toContain('/finance/tutup-buku');
+  });
+
   it('Finance staff sees the payment queue + reminders + clients only', () => {
     const seen = hrefs(role('Finance', 'staff'));
     expect(seen).toContain('/finance');
     expect(seen).toContain('/finance/reminders');
+    // D-3: TIDAK untuk staf. RLS `book_periods` hanya membuka bacaan untuk
+    // read-all atau lead, jadi menu di sini akan menjanjikan halaman kosong.
+    expect(seen).not.toContain('/finance/tutup-buku');
     expect(seen).toContain('/clients');
     expect(seen).not.toContain('/leads');
     expect(seen).not.toContain('/creative');
@@ -772,7 +788,7 @@ describe('perilaku rail (Sidebar IA v3 §5)', () => {
     it('judul grup yang cocok mempertahankan SELURUH isinya', () => {
       // Mencari nama grup harus memperlihatkan isinya, bukan grup kosong.
       expect(titles('keuangan')).toEqual(['Keuangan']);
-      expect(labels('keuangan')).toEqual(['Finance', 'Reminder Pembayaran']);
+      expect(labels('keuangan')).toEqual(['Finance', 'Reminder Pembayaran', 'Tutup Buku']);
     });
 
     it('mencari ke DALAM sub-grup, dan judul sub-grup yang cocok membawa seluruh papannya', () => {

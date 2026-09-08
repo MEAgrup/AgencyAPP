@@ -63,12 +63,12 @@ d('sm_transition', () => {
       const ok = await ex.sm.smTransition({
         machine: 'brief_task', entityType: 'demo_task', table: 'demo_tasks',
         idCol: 'id', statusCol: 'status', entityId: id, to: '[In Progress]',
-        actorEmployeeId: 'EMP-1', roleDirector: false, roleLead: false,
+        actorEmployeeId: 'EMP-1', roleDirector: false, roleLead: false, roleDivision: 'Creative',
       });
       const blocked = await ex.sm.smTransition({
         machine: 'brief_task', entityType: 'demo_task', table: 'demo_tasks',
         idCol: 'id', statusCol: 'status', entityId: id, to: '[Approved]',
-        actorEmployeeId: 'EMP-1', roleDirector: false, roleLead: false,
+        actorEmployeeId: 'EMP-1', roleDirector: false, roleLead: false, roleDivision: 'Creative',
       });
       const audit = await tx<{ n: number }[]>`
         select count(*)::int as n from audit_log where entity_id = ${id}`;
@@ -90,8 +90,8 @@ d('sm_transition', () => {
         machine: 'brief_task', entityType: 'demo_task', table: 'demo_tasks',
         idCol: 'id', statusCol: 'status', entityId: id, to: '[Blocked]', actorEmployeeId: 'EMP-1',
       };
-      const staff = await ex.sm.smTransition({ ...base, roleDirector: false, roleLead: false });
-      const lead = await ex.sm.smTransition({ ...base, roleDirector: false, roleLead: true });
+      const staff = await ex.sm.smTransition({ ...base, roleDirector: false, roleLead: false, roleDivision: 'Creative' });
+      const lead = await ex.sm.smTransition({ ...base, roleDirector: false, roleLead: true, roleDivision: 'Creative' });
       return { staff, lead };
     });
     expect(staff.ok).toBe(false);

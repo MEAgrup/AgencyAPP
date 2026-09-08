@@ -239,11 +239,18 @@ jobs:
       # notif_events TETAP 73: event Store Ops didaftarkan bersama emitternya
       # (preseden v9 `internal_tasks`), dan Brief-nya sudah ikut
       # BriefSiapReviewAm/BriefSelesai (B-1).
-      - name: Verify migration seed counts (32 machines, 73 events, catalog registry consistent)
+      # D-3 tutup buku (20260925020000_d3_tutup_buku.sql, Gelombang D): +1 mesin
+      # `book_period` (32 → 33, STATE_MACHINES.md §23) — DUA gerbang yang sengaja
+      # berbeda: menutup = Finance lead ATAU Director, membuka kembali = Director
+      # SAJA. Nol event katalog baru ⇒ notif_events TETAP 73 (kunci tutup buku
+      # bukan sesuatu yang butuh inbox; ia dilihat saat orang membuka layarnya).
+      # +2 tabel (`book_periods`, `book_period_snapshots`) — TIDAK digerbang di
+      # sini, hanya di scripts/db-rebuild.sh. Nol prefix baru.
+      - name: Verify migration seed counts (33 machines, 73 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 32 then raise exception 'expected 32 machines'; end if;
+               if (select count(*) from sm_machines) <> 33 then raise exception 'expected 33 machines'; end if;
                if (select count(*) from notif_events) <> 73 then raise exception 'expected 73 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
@@ -428,12 +435,16 @@ jobs:
       #       Brief (ketokan K-5, pola AST-/ADC-/BKG-/LSS-). Dua kelompok kolom
       #       dengan dua penulis — cakupan+target milik AM, hasil+dampak milik
       #       Store Ops — didindingi trigger, bukan cuma TS.
-      - name: Verify table count (expect 147)
+      # 149 = 147 + 2 tabel Gelombang D / kunci tutup buku D-3
+      #       (20260925020000_d3_tutup_buku.sql): `book_periods` (kunci alami =
+      #       BULAN) dan `book_period_snapshots` (angka beku berversi, immutable).
+      #       Nol prefix baru ⇒ entity_prefix TETAP 41 (SKU dari M18).
+      - name: Verify table count (expect 149)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 147
+          test "$n" -eq 149
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

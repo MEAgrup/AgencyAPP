@@ -1114,7 +1114,7 @@ describeDb('closing', () => {
     // still sitting in New Lead — a real sibling state, not a hypothetical one.
     const aged = await sql<{ ok: boolean }[]>`
       select (sm_transition('prospect_attempt', 'prospect_attempt', 'prospect_attempts',
-        'id', 'status', ${andiReg.attempt.id}, '[Unrespon]', 'SISTEM', true, false)->>'ok')::boolean as ok`;
+        'id', 'status', ${andiReg.attempt.id}, '[Unrespon]', 'SISTEM', true, false, 'Sales')->>'ok')::boolean as ok`;
     expect(aged[0].ok).toBe(true);
     expect(await status(andiReg.attempt.id)).toBe('[Unrespon]');
 

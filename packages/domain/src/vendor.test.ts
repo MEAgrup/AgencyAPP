@@ -285,7 +285,7 @@ describeDb('setVendorStatus — the machine, not an UPDATE', () => {
     const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
     const res = await sql<{ r: { ok: boolean; code?: string } }[]>`
       select sm_transition('vendor', 'vendor', 'vendors', 'id', 'status',
-                           ${v.id}, 'Blacklist', 'ZZ-AM', false, false) as r`;
+                           ${v.id}, 'Blacklist', 'ZZ-AM', false, false, 'Account') as r`;
     expect(res[0].r.ok).toBe(false);
     expect(res[0].r.code).toBe('role_denied');
   });

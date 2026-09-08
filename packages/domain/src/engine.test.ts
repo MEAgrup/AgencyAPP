@@ -120,7 +120,7 @@ describeDb('allowedTransitions', () => {
         const res = await sql<{ ok: boolean; code: string }[]>`
           select (r->>'ok')::boolean as ok, r->>'code' as code from (
             select sm_transition('prospect_attempt', 'prospect_attempt', 'prospect_attempts',
-              'id', 'status', ${attemptId}, 'Qualified', 'SISTEM', true, true) as r
+              'id', 'status', ${attemptId}, 'Qualified', 'SISTEM', true, true, 'Sales') as r
           ) s`;
         expect(res[0].ok).toBe(false);
         expect(res[0].code).toBe('blocked');
@@ -141,13 +141,53 @@ describeDb('allowedTransitions', () => {
         const res = await sql<{ ok: boolean; code: string; message: string }[]>`
           select (r->>'ok')::boolean as ok, r->>'code' as code, r->>'message' as message from (
             select sm_transition('prospect_attempt', 'prospect_attempt', 'prospect_attempts',
-              'id', 'status', ${attemptId}, '[Unrespon]', 'ZZ-STAFF', false, false) as r
+              'id', 'status', ${attemptId}, '[Unrespon]', 'ZZ-STAFF', false, false, 'Sales') as r
           ) s`;
         expect(res[0].ok).toBe(false);
         expect(res[0].code).toBe('role_denied');
         expect(res[0].message).toBe('[anda tidak memiliki akses untuk melakukan transisi ini]');
       } finally {
         await cleanupAttempt(attemptId, leadId);
+      }
+    });
+  });
+  describe('tanda tangan sm_transition — satu, dan hanya satu', () => {
+    it('has exactly one overload, taking eleven arguments', async () => {
+      // Migrasi 20260925010000 MEMBUANG versi 10-argumen alih-alih membiarkannya
+      // hidup berdampingan. Alasannya bukan kerapian: PL/pgSQL me-resolve nama
+      // fungsi saat EKSEKUSI, jadi sebuah job SQL yang masih memanggil versi
+      // 10-argumen tidak gagal saat migrasi di-apply — ia gagal berbulan-bulan
+      // kemudian, di dalam cron, pada baris yang tidak ada yang lihat. Persis
+      // itu yang terjadi sesi ini: `wrr_monday_job` dan `leads_unrespon_tick`
+      // patah tanpa satu pun migrasi menolak.
+      //
+      // Selama hanya ada SATU overload, panggilan 10-argumen mustahil menjadi
+      // sah diam-diam — ia langsung ditolak sebagai "function does not exist".
+      const rows = await sql<{ pronargs: number }[]>`
+        select p.pronargs from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.proname = 'sm_transition'`;
+      expect(rows.map((r) => r.pronargs)).toEqual([11]);
+    });
+
+    it('is SECURITY DEFINER and executable by service_role only, like its two siblings', async () => {
+      // `DROP FUNCTION` membuang ACL bersama fungsinya, dan `CREATE OR REPLACE`
+      // membuang SECURITY DEFINER yang tidak disebut ulang. Dua cara berbeda
+      // untuk melonggarkan mesin transisi tanpa satu baris pun yang terlihat
+      // seperti perubahan keamanan — dan `rls_checks` tidak memeriksa fungsi.
+      const rows = await sql<{ proname: string; prosecdef: boolean; acl: string | null }[]>`
+        select p.proname, p.prosecdef, p.proacl::text as acl from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public'
+           and p.proname in ('sm_transition', 'ident_next', 'notify_emit')
+         order by p.proname`;
+      expect(rows).toHaveLength(3);
+      for (const r of rows) {
+        expect(r.prosecdef, `${r.proname} harus SECURITY DEFINER`).toBe(true);
+        expect(r.acl ?? '', `${r.proname} tidak boleh bisa dipanggil anon/authenticated`)
+          .not.toMatch(/\b(anon|authenticated)=/);
+        expect(r.acl ?? '', `${r.proname} harus bisa dipanggil service_role`)
+          .toMatch(/service_role=/);
       }
     });
   });
