@@ -104,14 +104,19 @@ Bukan dari `success: true` — setiap langkah diadu ke katalog:
 - Sebelum DROP: katalog dipindai untuk pemanggil `sm_transition` yang tersisa.
   Hanya dua job itu, dan keduanya sudah 11-argumen.
 
-### Yang MASIH belum di live, dan itu bukan pekerjaan sesi ini
+### Selisih M18 yang sempat ada — SUDAH TUTUP (diperbarui 2026-09-08 sore)
 
-- **dua migrasi M18 Store Operation** (`20260924010000`, `20260924020000`).
-  Kodenya sudah di `main`, migrasinya belum diterapkan. Karena itu live
-  **148 tabel / 32 mesin**, sedangkan repo `db-rebuild` menghasilkan
-  **149 / 33** — selisihnya persis M18, dan itu **bukan drift**, itu utang
-  jalur lain. Pemilik menginstruksikan sesi ini tidak menyentuh migrasi di
-  luar pekerjaannya.
+Saat §3 ini pertama ditulis, live **148 tabel / 32 mesin** sedangkan repo
+`db-rebuild` menghasilkan **149 / 33**. Selisihnya persis dua migrasi **M18
+Store Operation** yang kodenya sudah di `main` tapi migrasinya belum
+diterapkan — utang jalur lain, dan sesi ini tidak menyentuhnya sesuai
+instruksi pemilik.
+
+**Jalur itu sudah menerapkannya sendiri.** Diverifikasi ulang lewat kueri:
+live sekarang **212 migrasi · 149 tabel · 33 mesin · 41 prefix · 73
+notif_events** — cocok PERSIS dengan hasil `db-rebuild.sh` dari `main`.
+Selisihnya nol; kalimat "148/32" di atas sudah **basi** dan dibiarkan hanya
+sebagai jejak urutan, bukan sebagai keadaan sekarang.
 
 ⛔ **JANGAN `supabase db push`** (ledger live memakai stempel APPLY — O65).
 ⛔ **Jangan percaya `success: true`.** Verifikasi lewat kueri.
