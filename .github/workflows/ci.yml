@@ -420,12 +420,16 @@ jobs:
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 146)
+      # 148 = 146 + 2 tabel Gelombang D / kunci tutup buku D-3
+      #       (20260924020000_d3_tutup_buku.sql): `book_periods` (kunci alami =
+      #       BULAN) dan `book_period_snapshots` (angka beku berversi, immutable).
+      #       Nol prefix baru ⇒ entity_prefix TETAP 40.
+      - name: Verify table count (expect 148)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 146
+          test "$n" -eq 148
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
