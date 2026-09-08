@@ -61,6 +61,25 @@ describe('M16 Rule 10 — cakupan StageTimelinePanel', () => {
     expect(src.slice(Math.max(0, i - 400), i)).toContain("source === 'brief'");
   });
 
+  it('gerbang intake tidak mati untuk divisi TANPA pipeline (M16 Rule 12)', () => {
+    // Ini setengah kedua dari cacat yang sama. Memasang panelnya di `/tasks`
+    // belum cukup: kondisi yang memunculkan tombol "Terima & Proses" dulu hanya
+    // `production_stage === 'Cek Brief AM'`, dan kolom itu NULL untuk divisi
+    // yang belum punya pipeline (Rule 12 — hari ini Store Operation, LT-2).
+    // Jadi panelnya muncul, tombolnya tidak, dan gerbang yang PRD sebut "wajib
+    // di semua divisi" tetap mati justru di divisi yang paling butuh.
+    //
+    // Sisi server sudah benar lebih dulu: `stage.reviewBrief` mencatat baris
+    // `brief_review` lalu melewati transisi tahapan saat pipeline-nya null (ada
+    // tesnya di `stage.test.ts`). Yang diuji di sini bahwa sisi FE ikut.
+    const src = readFileSync(
+      join(ROOT, 'src', 'components', 'StageTimelinePanel.tsx'), 'utf8',
+    );
+    const i = src.indexOf('const pendingReview');
+    expect(i).toBeGreaterThan(-1);
+    expect(src.slice(i, i + 300)).toContain('stage_pipeline_code === null');
+  });
+
   it('setiap halaman meneruskan assigned_division, bukan label divisi yang dihardcode', () => {
     // `assignedDivision` memilih daftar kode alasan pengembalian. Sebuah literal
     // di sini akan menawarkan alasan divisi lain — dan pada `/tasks` ia akan

@@ -80,8 +80,9 @@ export default function StoreOpsBoardPage() {
           terlihat kosong, dan orang berhak tahu itu keadaan yang diketahui. */}
       <div className="alert alertInfo" role="status">
         Daftar tahapan produksi divisi ini belum ditetapkan (LT-2), jadi panel
-        &quot;Tahapan Produksi&quot; pada Brief masih kosong. Gerbang <em>Cek Brief AM</em>,
-        baris SKU, dan leadtime-nya tetap berjalan.
+        &quot;Tahapan Produksi&quot; pada Brief masih kosong. Yang tetap berjalan:
+        gerbang <em>Cek Brief AM</em> (keputusan &amp; alasannya tercatat walau tidak
+        menggerakkan tahap apa pun), baris SKU, dan rentang AM&nbsp;&rarr;&nbsp;divisi.
       </div>
 
       <section className="card">
