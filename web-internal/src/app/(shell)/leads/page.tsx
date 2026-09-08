@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import StatusBadge from '@/components/StatusBadge';
+import WaButton from '@/components/WaButton';
 import {
   DELETED_RECORD_STATUS,
   MINE_MODES,
@@ -372,7 +373,7 @@ function MineTab({ canRequestDelete }: { canRequestDelete: boolean }) {
                       <Link href={`/leads/${r.id}`}>{r.id}</Link>
                     </td>
                     <td>{r.lead_name}</td>
-                    <td>{r.phone_number}</td>
+                    <td><WaButton phone={r.phone_number} nama={r.lead_name} /></td>
                     <td>{r.source}</td>
                     <td>{r.origin_campaign_id || '—'}</td>
                     <td>{peran || '—'}</td>
@@ -600,7 +601,7 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
               {rows.map((r) => (
                 <tr key={r.id} className={r.stale ? 'flaggedRow' : ''}>
                   <td>{r.lead_name}</td>
-                  <td>{r.phone_number}</td>
+                  <td><WaButton phone={r.phone_number} nama={r.lead_name} /></td>
                   <td>{r.source}</td>
                   <td>{r.origin_campaign_id || '—'}</td>
                   <td>{formatDate(r.created_at)}</td>
@@ -858,7 +859,7 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
                       <Link href={`/leads/${r.id}`}>{r.id}</Link>
                     </td>
                     <td>{r.lead_name}</td>
-                    <td>{r.phone_number}</td>
+                    <td><WaButton phone={r.phone_number} nama={r.lead_name} /></td>
                     <td>{r.email || '—'}</td>
                     <td>{r.source}</td>
                     <td>{r.origin_division}</td>

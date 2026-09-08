@@ -44,6 +44,7 @@ import {
 import { ACTIVITY_TYPES, type ActivityRow, type EffortSummary } from '@/lib/leads';
 import { PLATFORM_OPTIONS } from '@/lib/clients';
 import StatusBadge from '@/components/StatusBadge';
+import WaButton from '@/components/WaButton';
 
 // Status literals mirrored from ATTEMPT_STATUSES (module0_sales/sales.go).
 const S_NEW = 'New Lead';
@@ -938,7 +939,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Telepon</div>
-            <div>{lead.phone_number}</div>
+            <div><WaButton phone={lead.phone_number} nama={lead.lead_name} /></div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Email</div>

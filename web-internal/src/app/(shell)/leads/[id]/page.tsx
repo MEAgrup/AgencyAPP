@@ -21,6 +21,7 @@ import { listLeadActivities, type ActivityRow } from '@/lib/leads';
 import { isTerminalAttempt, leadProgress, nextStepLabel } from '@/lib/lead-progress';
 import StatusBadge from '@/components/StatusBadge';
 import { extractStatusLabel, summarizeJson } from '@/lib/audit';
+import WaButton from '@/components/WaButton';
 
 interface AuditEntry {
   actor_employee_id: string;
@@ -150,7 +151,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             <div className="muted" style={{ fontSize: 12 }}>
               Nomor Telepon
             </div>
-            <div>{lead.phone_number || '—'}</div>
+            <div><WaButton phone={lead.phone_number} nama={lead.lead_name} /></div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>
