@@ -153,7 +153,7 @@ describeDb('allowedTransitions', () => {
   });
   describe('tanda tangan sm_transition — satu, dan hanya satu', () => {
     it('has exactly one overload, taking eleven arguments', async () => {
-      // Migrasi 20260924010000 MEMBUANG versi 10-argumen alih-alih membiarkannya
+      // Migrasi 20260925010000 MEMBUANG versi 10-argumen alih-alih membiarkannya
       // hidup berdampingan. Alasannya bukan kerapian: PL/pgSQL me-resolve nama
       // fungsi saat EKSEKUSI, jadi sebuah job SQL yang masih memanggil versi
       // 10-argumen tidak gagal saat migrasi di-apply — ia gagal berbulan-bulan

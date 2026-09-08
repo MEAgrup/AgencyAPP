@@ -18,9 +18,9 @@
  * Modul ini BUKAN penjaganya. Penjaganya ada di DB, dan itu disengaja:
  *
  *   * gerbang peran   → `sm_edges.require_director` / `require_division`,
- *                        dievaluasi di dalam `sm_transition` (20260924010000)
- *   * syarat transisi → trigger `trg_bp_jaga_transisi` (20260924020000)
- *   * pagar tulisan   → trigger `jaga_periode_tertutup` (20260924030000)
+ *                        dievaluasi di dalam `sm_transition` (20260925010000)
+ *   * syarat transisi → trigger `trg_bp_jaga_transisi` (20260925020000)
+ *   * pagar tulisan   → trigger `jaga_periode_tertutup` (20260925030000)
  *
  * Yang ada DI SINI adalah urutan tulis yang sah, pesan Bahasa Indonesia yang
  * bisa dibaca orang, dan penolakan lebih awal supaya pengguna tidak menunggu
@@ -331,7 +331,7 @@ export async function hitungAngkaPeriode(sql: Queryable, periode: string): Promi
     // Satu-satunya tebakan yang DITOLAK secara eksplisit. Untuk layanan yang
     // qty-nya MENGGANDAKAN durasi, menganggap qty = 1 memendekkan masa
     // layanan — pendapatan yang seharusnya tersebar 36 bulan akan dipadatkan
-    // ke 6, dan setiap bulan di antaranya salah. Lihat 20260924040000.
+    // ke 6, dan setiap bulan di antaranya salah. Lihat 20260925040000.
     if (qtyMenambah === 'durasi' && (qty === null || !Number.isFinite(qty) || qty <= 0)) {
       tidakTerhitung.push({
         serviceId: l.id,

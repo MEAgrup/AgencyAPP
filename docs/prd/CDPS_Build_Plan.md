@@ -6,7 +6,13 @@
 
 ---
 
-## 1. Package manifest — the complete PRD set (18 documents)
+## 1. Package manifest — the complete PRD set (18 documents at v1; 21 as-built)
+
+> **Catatan 2026-09-08.** Manifest ini dibekukan pada 18 dokumen saat v1 ditulis, lalu
+> tiga modul lahir dari interview pemilik sesudahnya (M16, M17, M18) dan sempat tidak
+> tercatat di sini sama sekali. Ketiganya ditambahkan ke tabel di bawah. Nomor modul
+> **tidak pernah dipakai ulang**; "18 documents" dipertahankan sebagai catatan sejarah
+> paket aslinya, bukan sebagai hitungan berkas hari ini.
 
 | # | Document | Version status |
 |---|---|---|
@@ -28,6 +34,9 @@
 | 13 | `CDPS_Module13_Client_Health_Report.md` | Final, unchanged — *use your existing copy* |
 | 14 | `CDPS_Module14_Team_Performance.md` | Final, unchanged — *use your existing copy* |
 | 15 | `CDPS_Module15_Client_Team_Portal.md` | Final, unchanged — *use your existing copy* |
+| 16 | `CDPS_Module16_Lead_Time.md` | **New — added 2026-08-28** (lead time per tahapan divisi: `brief_stage`, pipeline per divisi, gerbang intake *Cek Brief AM*). Owner interview, `docs/DECISIONS.md` 2026-08-28 M16. |
+| 17 | `CDPS_Module17_AI_Optimizer.md` | **New — added 2026-08-28** (divisi eksekusi AI Optimizer: optimasi SKU + AI video, dengan jalur balik bernomor ke STRG). |
+| 18 | `CDPS_Module18_Store_Ops.md` | **New — added 2026-09-08** (divisi Store Operation: baris SKU `SKU-` sebagai unit kerja, mesin #32, dinding dua penulis AM↔Store Ops). Ketokan pemilik K-4/K-5/K-6 (2026-09-07) + pembagian peran (2026-09-08), `docs/DECISIONS.md`. |
 | — | `CDPS_Build_Plan.md` (this file) | New |
 
 *"Use your existing copy" = the file from the original batch is already final; no content changed, so no regenerated version is issued (avoids accidental drift). This manifest supersedes README v2's file list.*

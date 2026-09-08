@@ -56,7 +56,7 @@ describe('transition wrapper — arg mapping', () => {
   });
 
   it('carries the actor division through, so an edge can narrow its lead branch', async () => {
-    // Migration 20260924010000 lets an edge say "lead of THIS division". The
+    // Migration 20260925010000 lets an edge say "lead of THIS division". The
     // wrapper is the only thing that knows which division the actor writes
     // from, so a Finance lead and a Creative lead must not arrive at
     // `sm_transition` looking identical.

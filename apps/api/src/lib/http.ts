@@ -106,6 +106,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   SalesTooManyServicesError: 400, // sales.TooManyServicesError
   ScheduleTotalError: 400, // finance.ScheduleTotalError
   StageValidationError: 400, // stage.ValidationError
+  StoreOpsValidationError: 400, // storeops.ValidationError
   TaskValidationError: 400, // task.ValidationError
   TooManySalespeopleError: 400, // sales.TooManySalespeopleError
   TutupBukuValidationError: 400, // tutupbuku.ValidationError
@@ -140,6 +141,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   SalesForbiddenError: 403, // sales.ForbiddenError
   SalesPerfForbiddenError: 403, // salesperf.ForbiddenError
   StageForbiddenError: 403, // stage.ForbiddenError
+  StoreOpsForbiddenError: 403, // storeops.ForbiddenError
   TaskForbiddenError: 403, // task.ForbiddenError
   TutupBukuForbiddenError: 403, // tutupbuku.ForbiddenError
   // 404
@@ -166,6 +168,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   SalesNotFoundError: 404, // sales.NotFoundError
   ServiceNotFoundError: 404, // msl.ServiceNotFoundError
   StageNotFoundError: 404, // stage.NotFoundError
+  StoreOpsNotFoundError: 404, // storeops.NotFoundError
   TaskNotFoundError: 404, // task.NotFoundError
   TutupBukuNotFoundError: 404, // tutupbuku.NotFoundError
   // 409 — lifecycle conflicts: a dedup block, an un-closable attempt, a lead
@@ -197,6 +200,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   SchemeNoScheduleError: 409, // finance.SchemeNoScheduleError
   ServiceStateError: 409, // client.ServiceStateError
   StageConflictError: 409, // stage.ConflictError
+  StoreOpsConflictError: 409, // storeops.ConflictError
   TaskConflictError: 409, // task.ConflictError
   TutupBukuConflictError: 409, // tutupbuku.ConflictError
   // 429 — the two app-level throttles: login (all realms) and the Client

@@ -433,6 +433,21 @@ export const TASK_CATALOG: Record<
     { jenis: 'sku_optimize_ai', label: 'Jumlah SKU optimize (AI)' },
     { jenis: 'ai_video', label: 'Jumlah AI video' },
   ],
+  // M18 — tiga pekerjaan Store Operation, DIRATIFIKASI pemilik 2026-09-02 dan
+  // sudah jadi jenis baris Plan sejak itu (`plantask.PLAN_TASK_CATALOG`). Yang
+  // ditambahkan di sini adalah sisi KOMITMEN-nya: kuota yang AM janjikan di
+  // Strategi, dijoin ke baris Plan lewat `jenis` yang SAMA (jembatan
+  // `division.test.ts`) — jadi tiga nama ini tidak boleh menyimpang seurut pun.
+  //
+  // Urutannya penting: entri ini WAJIB ada sebelum `punyaKuotaSatuan` dibalik,
+  // dan keduanya di commit yang sama. Membalik flag lebih dulu meng-crash
+  // comparator `normalizeTasks` di `TASK_CATALOG[a.divisi].findIndex(...)` atas
+  // `undefined` — peringatannya sudah ditulis di `packages/core/src/division.ts`.
+  'Store Operation': [
+    { jenis: 'banding_pelanggaran', label: 'Jumlah banding pelanggaran' },
+    { jenis: 'setup_promo_toko', label: 'Jumlah setup promo toko' },
+    { jenis: 'qc_konten_toko', label: 'Jumlah QC konten toko' },
+  ],
 };
 
 /** One planned unit-of-work quota for a division (jumlah is exact numeric-as-string). */

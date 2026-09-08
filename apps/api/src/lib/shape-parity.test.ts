@@ -195,7 +195,7 @@ const FE_FILES = [
   'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
-  'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
   // web-client-portal (M15-C2) — the external realm's own app, see FE_LIB_PORTAL.
   'klien/types.ts',
 ];
@@ -392,6 +392,17 @@ const WIRE_TO_FE: Record<string, string> = {
   IzinStatusWire: 'showcase.ts::IzinStatus',
   IzinPeristiwaWire: 'showcase.ts::IzinPeristiwa',
   IzinPanelWire: 'showcase.ts::IzinPanel',
+
+  // M18 — baris SKU Store Operation. Diikat ke `storeops.ts` (bukan salinan
+  // paralel): pelajaran empat bentuk `Brief` di FE — field baru yang hanya
+  // ditambahkan di satu sisi membuat halaman melihat `undefined` sementara
+  // parity tetap hijau. Modul ini lahir dengan SATU bentuk, dan tes ini yang
+  // menjaganya tetap satu.
+  SkuWire: 'storeops.ts::SkuRow',
+  SkuSummaryWire: 'storeops.ts::SkuSummary',
+  // Badan permintaan cakupan+target, sama alasannya dengan ProposalLineBody di
+  // bawah: arah berbalik (FE yang mengirim), assertion kesetaraan kunci sama.
+  SkuScopeBody: 'storeops.ts::SkuScopeInput',
 
   RenewalWire: 'renewal.ts::Renewal',
   RenewalLineWire: 'renewal.ts::RenewalLine',

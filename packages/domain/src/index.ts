@@ -155,5 +155,11 @@ export * as renewal from './renewal';
 // gerbang peran yang sengaja asimetris (menutup = Finance lead ATAU Director,
 // membuka = Director SAJA), dan jurnal koreksi sebagai satu-satunya jalan sah
 // memperbaiki bulan yang sudah dikunci. Juga pemanggil PERTAMA mesin accrual
-// `@cdps/core`. Penegakannya ada di DB (20260924010000..40000), bukan di sini.
+// `@cdps/core`. Penegakannya ada di DB (20260925010000..40000), bukan di sini.
 export * as tutupbuku from './tutupbuku';
+// M18 — Store Operation: baris SKU (`SKU-`) sebagai unit kerja divisi. DUA
+// penulis pada satu baris (AM menulis cakupan + target, Store Operation menulis
+// hasil lalu dampak), dan dindingnya di DB — modul ini hanya wajib
+// mendeklarasikan sisinya. Rollup Brief-nya tinggal di `task.ts` bersama
+// saudara Creative/KOL-nya. Lihat `docs/prd/CDPS_Module18_Store_Ops.md`.
+export * as storeops from './storeops';

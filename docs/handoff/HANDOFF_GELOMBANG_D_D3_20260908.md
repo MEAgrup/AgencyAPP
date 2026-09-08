@@ -29,11 +29,11 @@ Lima migrasi (satu di antaranya **pasca-deploy**), satu modul domain, enam rute,
 
 | Migrasi | Isi |
 |---|---|
-| `20260924010000_d3_gerbang_edge_bertingkat` | `sm_edges.require_director` + `require_division`; `sm_transition` parameter ke-11 `p_role_division`; versi 10-argumen **dibuang**; `wrr_monday_job` & `leads_unrespon_tick` ditulis ulang; ACL + `SECURITY DEFINER` dipulihkan |
-| `20260924020000_d3_tutup_buku` | `book_periods` (PK = bulan) + `book_period_snapshots` (berversi, immutable) + mesin **#32** `book_period` + `periode_tertutup(date)` + `bulan_indonesia(date)` + trigger `trg_bp_jaga_transisi` |
-| `20260924030000_d3_pagar_bulan_tertutup` | `jaga_periode_tertutup()` dipasang di `payment_verifications.received_date` & `installments.verified_date` — menolak **tiga** arah |
-| `20260924040000_d3_services_qty` | `services.qty` NULLABLE + backfill yang hanya menyentuh yang bisa dibuktikan |
-| `20260924050000_d3_buang_sm_transition_lama` | **Diterapkan SESUDAH deploy kode.** Membuang `sm_transition` 10-argumen |
+| `20260925010000_d3_gerbang_edge_bertingkat` | `sm_edges.require_director` + `require_division`; `sm_transition` parameter ke-11 `p_role_division`; versi 10-argumen **dibuang**; `wrr_monday_job` & `leads_unrespon_tick` ditulis ulang; ACL + `SECURITY DEFINER` dipulihkan |
+| `20260925020000_d3_tutup_buku` | `book_periods` (PK = bulan) + `book_period_snapshots` (berversi, immutable) + mesin **#33** `book_period` + `periode_tertutup(date)` + `bulan_indonesia(date)` + trigger `trg_bp_jaga_transisi` |
+| `20260925030000_d3_pagar_bulan_tertutup` | `jaga_periode_tertutup()` dipasang di `payment_verifications.received_date` & `installments.verified_date` — menolak **tiga** arah |
+| `20260925040000_d3_services_qty` | `services.qty` NULLABLE + backfill yang hanya menyentuh yang bisa dibuktikan |
+| `20260925050000_d3_buang_sm_transition_lama` | **Diterapkan SESUDAH deploy kode.** Membuang `sm_transition` 10-argumen |
 
 Kode: `packages/domain/src/tutupbuku.ts` (+ tes 29 kasus), rute di
 `apps/api/src/app/api/v1/finance/tutup-buku/**`, halaman
@@ -51,13 +51,14 @@ Kode: `packages/domain/src/tutupbuku.ts` (+ tes 29 kasus), rute di
 
 ## 3. ⛔ BELUM DI LIVE — dan urutan menerapkannya
 
-Live masih **192 migrasi**. Repo sekarang **200**. Yang belum:
+Live sekarang **201 migrasi** (empat Feedback OD + lima Jalur B sudah diterapkan pihak lain 2026-09-08 — utang §2.3 handoff sebelumnya LUNAS, bukan oleh sesi ini). Repo **209**. Yang belum:
 
-- **empat migrasi Feedback OD** (`20260922100000`…`20260922100300`) — **BUKAN
-  pekerjaan sesi ini**, pemilik melarang eksplisit 2026-09-08. Kodenya sudah
-  ter-deploy di `1fee983` sementara migrasinya belum — kebalikan dari yang
-  handoff mereka rencanakan, dan **itu perlu diberitahukan ke pemiliknya**.
-- **lima migrasi D-3** (`20260924010000`…`20260924040000`, lalu `20260924050000`
+- ~~empat migrasi Feedback OD~~ — **sudah diterapkan pihak lain** (terlihat di
+  ledger live sebagai `f2_`/`f3_`/`f4_`/`a2_`, plus lima migrasi Jalur B).
+  Utang itu tidak lagi terbuka.
+- **dua migrasi M18 Store Operation** (`20260924010000`, `20260924020000`) —
+  milik jalur lain, di luar cakupan sesi ini.
+- **lima migrasi D-3** (`20260925010000`…`20260925040000`, lalu `20260925050000`
   **sesudah deploy** — lihat di bawah) — pekerjaan sesi ini.
 
 Urutan yang terbukti dan wajib diulang:
@@ -71,18 +72,18 @@ Urutan yang terbukti dan wajib diulang:
 
 ### ⚠️ Yang KHUSUS pada rilis D-3: DUA fase, dan urutannya mengikat
 
-`20260924010000` menambah `sm_transition` **11-argumen** di samping yang
+`20260925010000` menambah `sm_transition` **11-argumen** di samping yang
 10-argumen. Tanda tangan baru = fungsi baru, jadi keduanya sengaja hidup
 berdampingan untuk satu rilis. Pembuangan yang lama ada di migrasi
-**terpisah**, `20260924050000`.
+**terpisah**, `20260925050000`.
 
 Urutannya:
 
 | # | Langkah | Kenapa |
 |---|---|---|
-| 1 | apply `20260924010000`…`20260924040000` | **Aditif semua.** Kode lama masih memanggil `sm_transition` 10-argumen, yang masih ada ⇒ nol yang patah |
+| 1 | apply `20260925010000`…`20260925040000` | **Aditif semua.** Kode lama masih memanggil `sm_transition` 10-argumen, yang masih ada ⇒ nol yang patah |
 | 2 | merge → tunggu **tiga** deploy Vercel produksi `READY` | Kode baru memanggil yang 11-argumen, yang sudah ada sejak langkah 1 |
-| 3 | apply `20260924050000` | Membuang yang 10-argumen. Sudah tidak ada yang memanggilnya |
+| 3 | apply `20260925050000` | Membuang yang 10-argumen. Sudah tidak ada yang memanggilnya |
 
 **Versi pertama migrasi ini membuang yang lama dalam napas yang sama dengan
 menambah yang baru, dan itu SALAH** — ia menciptakan jendela di mana *setiap
@@ -117,13 +118,13 @@ cd ../web-client-portal && npx vitest run
 | Suite | Angka acuan |
 |---|---|
 | core | **985** |
-| db | 53 |
-| domain | **2047** (+1 skip) |
-| apps/api | **492** |
-| web-internal | **651** |
+| db | 64 |
+| domain | **2188** (+1 skip) |
+| apps/api | **494** |
+| web-internal | **695** |
 | web-client-portal | 19 |
-| migrasi `db-rebuild` | **200** |
-| tabel public | **148** · sm_machines **32** · entity_prefix 40 · notif_events 73 |
+| migrasi `db-rebuild` | **209** |
+| tabel public | **149** · sm_machines **33** · entity_prefix 41 · notif_events 73 |
 | migrasi **live** | **192** (kurang 4 Feedback OD + 5 D-3) |
 
 ### Jebakan — yang paling mahal lebih dulu

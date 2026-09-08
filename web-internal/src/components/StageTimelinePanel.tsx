@@ -175,7 +175,19 @@ export default function StageTimelinePanel({
   }
 
   const reasons = REASON_CODES[assignedDivision] ?? ['Brief kurang jelas'];
-  const pendingReview = overview.review === null && overview.production_stage === 'Cek Brief AM';
+  // Gerbang intake M16 Rule 10 — "wajib di SEMUA divisi", termasuk yang belum
+  // punya pipeline tahapan (Rule 12; hari ini Store Operation, LT-2).
+  //
+  // Menguncinya pada `production_stage === 'Cek Brief AM'` SAJA membuatnya mati
+  // untuk divisi tanpa pipeline: kolom itu NULL bagi mereka, jadi tombolnya
+  // tidak pernah muncul dan "wajib di semua divisi" tidak berlaku justru di
+  // divisi yang paling butuh. Sisi server sudah lebih dulu benar —
+  // `stage.reviewBrief` mencatat baris `brief_review` (keputusan + alasan) lalu
+  // MELEWATI transisi tahapan ketika `stagePipelineCode` null. Yang tertinggal
+  // hanya kondisi di sini.
+  const pendingReview =
+    overview.review === null
+    && (overview.production_stage === 'Cek Brief AM' || overview.stage_pipeline_code === null);
   // LT-4: the only stage an AM drives out of. Everything else stays on the
   // division gate the caller passed.
   const mayAdvance = canAdvance || (isAmOwner && overview.production_stage === STAGE_RETURNED);

@@ -76,11 +76,17 @@ export const DIVISIONS: readonly Division[] = [
   // M17 — optimasi SKU klien + pembuatan AI video. `punyaKuotaSatuan: true`
   // hanya sah karena `TASK_CATALOG` mendapat barisnya di migrasi yang sama.
   { code: 'AI_OPT',    nama: 'AI Optimizer',   aktif: true, briefAssignable: true, dispatchTarget: true,  punyaKuotaSatuan: true,  vendorManaged: false, urutan: 7 },
-  // M16 — daftar pekerjaan menyusul (DECISIONS.md LT-2). Sengaja TANPA kuota
-  // satuan: `TASK_CATALOG` belum punya barisnya, dan menyalakan flag ini tanpa
-  // itu akan meng-crash `normalizeTasks`. Brief tetap bisa didispatch dan
-  // `Cek Brief AM` tetap terukur — itulah gunanya flag dipisah.
-  { code: 'STORE_OPS', nama: 'Store Operation', aktif: true, briefAssignable: true, dispatchTarget: true, punyaKuotaSatuan: false, vendorManaged: false, urutan: 8 },
+  // M16 → M18. `punyaKuotaSatuan` dinyalakan di M18, bukan sebelumnya, dan
+  // ketiga prasyaratnya dipasang di commit yang sama: entri `TASK_CATALOG`
+  // (tanpa itu comparator `normalizeTasks` jatuh di `undefined`), CHECK
+  // constraint `wrr_divisi`/`wrr_catatan_divisi` yang tadinya hardcode lima
+  // nama, dan cabang `wrr_aggregate` yang menghitung baris SKU `[Terupload]`.
+  // Yang terakhir itu yang tidak bisa dijawab sebelum M18: sebelum ada
+  // `store_ops_skus`, rekap mingguan akan melaporkan produksi 0 untuk divisi
+  // yang bekerja — angka nol yang salah, bukan angka yang belum ada.
+  // Pipeline tahapannya masih kosong (LT-2), dan itu URUSAN LAIN: `dispatchTarget`
+  // dan `punyaKuotaSatuan` tidak menuntut `stage_pipeline` sama sekali.
+  { code: 'STORE_OPS', nama: 'Store Operation', aktif: true, briefAssignable: true, dispatchTarget: true, punyaKuotaSatuan: true,  vendorManaged: false, urutan: 8 },
 ];
 
 /** Urutan tampil, hanya yang aktif. */

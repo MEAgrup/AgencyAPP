@@ -60,7 +60,7 @@ export interface SmTransitionArgs {
    *
    * Required, never optional: an edge carrying `require_division` must be able
    * to tell "this actor is a Finance lead" apart from "nobody said" — and an
-   * optional field makes those two the same value. Migration 20260924010000
+   * optional field makes those two the same value. Migration 20260925010000
    * dropped the ten-argument `sm_transition` for the same reason.
    */
   roleDivision: string;
@@ -98,7 +98,7 @@ export interface TransitionRequest {
  * column. Role booleans are derived exactly as Go's engine did: the requireLead
  * gate passes for a Director OR anyone at lead level.
  *
- * Since migration 20260924010000 an edge may ALSO carry `require_director`
+ * Since migration 20260925010000 an edge may ALSO carry `require_director`
  * (Director only) or narrow the lead branch to one `require_division`. That is
  * why `roleDivision` travels with every call. The engine still holds no
  * business rule — the edge row states its own gate, as data, exactly like

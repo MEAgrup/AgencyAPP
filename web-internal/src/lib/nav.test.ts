@@ -127,22 +127,30 @@ describe('visibleNav — the delivery divisions (symmetry)', () => {
     { division: 'Live Stream', own: '/livestream', foreign: ['/creative', '/ads', '/kol'] },
   ];
 
-  it('AI Optimizer / Store Operation staff see their own filtered Task Execution link, not the bespoke boards', () => {
-    for (const [division, own] of [
-      ['AI Optimizer', '/tasks?division=AI+Optimizer'],
-      ['Store Operation', '/tasks?division=Store+Operation'],
-    ] as const) {
-      const seen = hrefs(role(division, 'staff'));
-      expect(seen, `${division} staff should see ${own}`).toContain(own);
-      expect(seen, `${division} staff should still see /tasks`).toContain('/tasks');
-      for (const href of ['/creative', '/ads', '/kol', '/livestream']) {
-        expect(seen, `${division} must not see ${href}`).not.toContain(href);
-      }
+  it('AI Optimizer staff sees its own filtered Task Execution link, not the bespoke boards', () => {
+    // AI Optimizer masih memakai antrean generik ber-filter; Store Operation
+    // TIDAK lagi — M18 memberinya papan sendiri, karena unit kerjanya (baris
+    // SKU) tidak punya tempat di `/tasks`.
+    const seen = hrefs(role('AI Optimizer', 'staff'));
+    expect(seen).toContain('/tasks?division=AI+Optimizer');
+    expect(seen).toContain('/tasks');
+    for (const href of ['/creative', '/ads', '/kol', '/livestream', '/store-ops']) {
+      expect(seen, `AI Optimizer must not see ${href}`).not.toContain(href);
     }
   });
 
-  it('AI Optimizer and Store Operation do not see each other\'s filtered link', () => {
-    expect(hrefs(role('AI Optimizer', 'staff'))).not.toContain('/tasks?division=Store+Operation');
+  it('Store Operation staff sees /store-ops, and no longer the filtered /tasks link (M18)', () => {
+    const seen = hrefs(role('Store Operation', 'staff'));
+    expect(seen).toContain('/store-ops');
+    expect(seen).toContain('/tasks');
+    expect(seen).not.toContain('/tasks?division=Store+Operation');
+    for (const href of ['/creative', '/ads', '/kol', '/livestream']) {
+      expect(seen, `Store Operation must not see ${href}`).not.toContain(href);
+    }
+  });
+
+  it('AI Optimizer and Store Operation do not see each other\'s board', () => {
+    expect(hrefs(role('AI Optimizer', 'staff'))).not.toContain('/store-ops');
     expect(hrefs(role('Store Operation', 'staff'))).not.toContain('/tasks?division=AI+Optimizer');
   });
 
@@ -548,7 +556,7 @@ describe('visibleNav — layered OD / Director', () => {
       '/admin/vendor-accounts',
       '/portal/management',
       '/tasks?division=AI+Optimizer',
-      '/tasks?division=Store+Operation',
+      '/store-ops',
     ]) {
       expect(seen, `OD should see ${href}`).toContain(href);
     }
@@ -642,7 +650,7 @@ describe('Sidebar IA v3 — struktur 9 grup', () => {
       '/master-services', '/sales/kalkulator',
       '/clients', '/portal/management', '/health', '/showcase',
       '/tasks', '/account/rekap', '/account', '/ads', '/creative', '/kol', '/livestream',
-      '/tasks?division=AI+Optimizer', '/tasks?division=Store+Operation',
+      '/tasks?division=AI+Optimizer', '/store-ops',
       '/ads/screening', '/ads/scanner',
       '/tools/video-factory', '/tools/am-copilot',
       '/finance', '/finance/reminders',

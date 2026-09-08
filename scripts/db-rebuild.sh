@@ -175,10 +175,27 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "148"
-check "entity_prefix"    "select count(*) from entity_prefix"    "40"
-check "sm_machines"      "select count(*) from sm_machines"      "32"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "149"
+check "entity_prefix"    "select count(*) from entity_prefix"    "41"
+check "sm_machines"      "select count(*) from sm_machines"      "33"
 check "notif_events"     "select count(*) from notif_events"     "73"
+# --- M18 Store Operation (20260924010000_m18_store_ops_sku.sql) --------------
+# 147 = 146 + `store_ops_skus` — unit kerja divisi Store Operation, satu baris
+#       per SKU di bawah satu Brief (ketokan K-5, pola AST-/ADC-/BKG-/LSS-).
+#  41 =  40 + prefix `SKU` (M6A §7; dual-home dengan PREFIXES di ident.ts).
+#  32 =  31 + mesin #32 `store_ops_sku`
+#       ([Menunggu Eksekusi] -> [Dikerjakan] -> [Terupload] -> [Dievaluasi],
+#       plus [Gagal Upload] dua arah dari [Dikerjakan]). [Terupload] SELESAI
+#       produksi dan sengaja bukan terminal — K-6 memisahkan angka dampak dari
+#       "selesai" supaya leadtime produksi tidak ternoda tunggu pasar ~30 hari.
+#  73 TETAP — event Store Ops didaftarkan BERSAMA emitternya (preseden v9
+#       `internal_tasks`); Brief-nya sudah ikut BriefSiapReviewAm/BriefSelesai
+#       (B-1). Mendaftarkan event yang tak pernah diemisikan membuat katalog
+#       berbohong.
+# M18 butir 8 (20260924020000_m18_store_ops_kuota_satuan.sql): KEEMPATNYA TETAP
+#       147/41/32/73. Ia hanya memperluas dua CHECK constraint WRR, membalik
+#       `division_registry.punya_kuota_satuan`, dan meredefinisi `wrr_aggregate`
+#       — nol tabel, nol prefix, nol mesin, nol event baru.
 # 73 = 69 + 4 event Feedback OD 2026-09-07 (katalog v15,
 #      20260922100100_f3_notif_feedback_od.sql): `m6.brief.siap_review_am` dan
 #      `m6.brief.selesai` (resolver 'explicit' -> AM pemilik klien, menutup
@@ -194,8 +211,8 @@ check "notif_events"     "select count(*) from notif_events"     "73"
 #      20260911050000_m1_unrespon_notif.sql. Nol tabel/prefix/mesin baru ⇒
 #      145 tabel/40 prefix/31 mesin TETAP. Lihat
 #      docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md L2.
-# 148 = 146 + 2 tabel Gelombang D / kunci tutup buku D-3
-#       (20260924020000_d3_tutup_buku.sql): `book_periods` (satu baris per
+# 149 = 147 + 2 tabel Gelombang D / kunci tutup buku D-3
+#       (20260925020000_d3_tutup_buku.sql): `book_periods` (satu baris per
 #       bulan, kunci utamanya BULAN itu sendiri — "Agustus 2026" hanya ada
 #       satu, jadi ID surrogate hanya akan membuat duplikat "tidak seharusnya
 #       terjadi" alih-alih mustahil) dan `book_period_snapshots` (angka beku
@@ -203,7 +220,7 @@ check "notif_events"     "select count(*) from notif_events"     "73"
 #       menghapus versi lama, tutup-ulang menambah versi baru).
 #       Nol prefix baru (kunci alami `date`, tak pernah disebut manusia lewat
 #       ID — pola sama `client_reports`) ⇒ entity_prefix TETAP 40.
-#       +1 mesin `book_period` (31→32, STATE_MACHINES.md §22) — DUA gerbang
+#       +1 mesin `book_period` (32→33, STATE_MACHINES.md §23) — DUA gerbang
 #       yang sengaja berbeda: menutup = Finance lead ATAU Director, membuka
 #       kembali = Director SAJA. Nol event katalog baru ⇒ notif_events TETAP 73.
 # 146 = 145 + 1 tabel Gelombang C / gerbang C-5

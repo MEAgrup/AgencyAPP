@@ -85,7 +85,7 @@ COMMENT ON COLUMN sm_edges.require_division IS
 -- Aturan rilis rumah ini sudah menyebutnya: migrasi ADITIF boleh mendahului
 -- kode, migrasi DROP wajib MENGIKUTI deploy kode. Jadi keduanya hidup
 -- berdampingan di sini, dan pembuangannya ada di migrasi TERPISAH
--- `20260924050000_d3_buang_sm_transition_lama.sql` yang diterapkan SESUDAH
+-- `20260925050000_d3_buang_sm_transition_lama.sql` yang diterapkan SESUDAH
 -- kode baru mendarat.
 --
 -- Tidak ada ambiguitas selama keduanya hidup: panggilan 10-argumen cocok persis
