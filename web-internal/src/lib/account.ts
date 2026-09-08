@@ -192,54 +192,13 @@ export interface ServiceQueueRow {
 // Cluster 3 — Brief breakdown & dispatch (brief.go)
 // ---------------------------------------------------------------------------
 
-export interface Brief {
-  id: string;
-  service_id: string;
-  strategy_id?: string;
-  assigned_division: string;
-  assigned_pic?: string;
-  deliverable_type: string;
-  quantity_target: number;
-  due_date: string; // YYYY-MM-DD
-  priority: string;
-  recurring: boolean;
-  recurring_frequency?: string;
-  recurring_count?: number;
-  recurring_end_date?: string;
-  instructions?: string;
-  reference_attachments?: string;
-  title: string;
-  status: string;
-  revision_count: number; // only accurate on GetBrief (detail)
-  revision_flagged: boolean; // only accurate on GetBrief (detail)
-  created_by: string;
-  created_at: string;
-  // M16 — null untuk divisi tanpa pipeline tahapan (mis. Store Operation).
-  stage_pipeline_code: string | null;
-  production_stage: string | null;
-  // Feedback OD 2026-09-07 Creative #3 — identitas klien + PIC, ada di SETIAP
-  // baca Brief. Non-opsional: `''` dikirim eksplisit kalau Brief belum punya
-  // PIC, supaya halaman bisa merender `—` alih-alih `undefined`.
-  client_id: string;
-  client_nama: string;
-  assigned_pic_nama: string;
-  /**
-   * A-req-1 (KOL #1) — jendela campaign + budget sebagai KOLOM, bukan teks di
-   * `instructions`. `''`/`null` = belum diisi (eksplisit, bukan kunci hilang).
-   */
-  tanggal_mulai: string;
-  tanggal_akhir: string;
-  budget: string | null;
-  /** A-req-2 (K-3) — Brief Creative sumber aset Brief Ads ini; null = tidak ditunjuk. */
-  source_creative_brief_id: string | null;
-  /**
-   * A-req-3 — jumlah unit kerja anak (Asset / Campaign / Booking / Sesi Live).
-   * Ada di SETIAP baris antrean divisi, jadi leader bisa membedakan Brief yang
-   * sudah dipecah dari yang belum tanpa membuka satu-satu. `0` untuk divisi
-   * tanpa tabel anak.
-   */
-  jumlah_anak: number;
-}
+// Rumahnya `@/lib/brief` sejak 2026-09-08. Sebelumnya bentuk ini hidup EMPAT
+// kali (account/tasks/creative/kol) dan hanya YANG INI yang diikat
+// `shape-parity.test.ts` — jadi field baru bisa mendarat di sini, parity hijau,
+// dan halaman divisi lain melihat `undefined`. Re-export supaya pemanggil lama
+// (`import { type Brief } from '@/lib/account'`) tidak berubah sedikit pun.
+import type { Brief } from '@/lib/brief';
+export type { Brief };
 
 export interface BriefInput {
   title: string;

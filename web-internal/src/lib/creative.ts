@@ -34,37 +34,12 @@ import type { AuditEntry, Role } from '@/lib/types';
 // bar, since that field lives on Brief, not Asset). Shape mirrors lib/account.ts's
 // Brief / lib/tasks.ts's Brief (same backend struct), duplicated locally per
 // house convention rather than cross-importing another module's lib file.
-export interface Brief {
-  id: string;
-  service_id: string;
-  strategy_id?: string;
-  assigned_division: string;
-  assigned_pic?: string;
-  // Feedback OD 2026-09-07 Creative #3 (F-1/F-2, dirender B-2) — identitas klien
-  // + nama PIC, ada di SETIAP baca Brief. NON-opsional: server mengirim `''`
-  // eksplisit kalau belum ada PIC, jadi halaman merender `—`, bukan `undefined`.
-  // Kueri yang mengisinya lewat `private.*` (perangkap O52) — jangan menambah
-  // join `services`/`clients` di FE maupun di kueri baru.
-  client_id: string;
-  client_nama: string;
-  assigned_pic_nama: string;
-  deliverable_type: string;
-  quantity_target: number;
-  due_date: string; // YYYY-MM-DD
-  priority: string;
-  recurring: boolean;
-  recurring_frequency?: string;
-  recurring_count?: number;
-  recurring_end_date?: string;
-  instructions?: string;
-  reference_attachments?: string;
-  title: string;
-  status: string;
-  revision_count: number;
-  revision_flagged: boolean;
-  created_by: string;
-  created_at: string;
-}
+// Rumahnya `@/lib/brief` sejak 2026-09-08. Bentuk lama di berkas ini KETINGGALAN
+// tujuh field (A-req-1/2/3 + dua kolom tahapan M16): halaman Creative membacanya
+// sebagai `undefined` sementara `shape-parity` tetap hijau, karena parity hanya
+// mengenal bentuk `account.ts`. Itu persis kelas cacat yang penyatuan ini tutup.
+import type { Brief } from '@/lib/brief';
+export type { Brief };
 
 // module7_creative.Asset (asset.go:141-156). Pointer/omitempty fields are
 // optional — they can be ABSENT from JSON (not null) when unset.
