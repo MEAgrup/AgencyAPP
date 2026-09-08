@@ -556,12 +556,12 @@ describeDb('machine #16 (plan)', () => {
     const f = await seedContractStrategi();
     const id = await seedPeriod(f, { status: 'Terjadwal' });
     const ok = await sql<{ r: { ok: boolean; to: string } }[]>`
-      select sm_transition('plan','plan','plan','id','status', ${id}, 'Draft', 'ZZ-AM', false, false) as r`;
+      select sm_transition('plan','plan','plan','id','status', ${id}, 'Draft', 'ZZ-AM', false, false, 'Account') as r`;
     expect(ok[0].r.ok).toBe(true);
     expect(ok[0].r.to).toBe('Draft');
     // Terjadwal → Ditutup is not an edge: blocked, not silently applied.
     const bad = await sql<{ r: { ok: boolean; code: string } }[]>`
-      select sm_transition('plan','plan','plan','id','status', ${id}, 'Ditutup', 'ZZ-AM', false, false) as r`;
+      select sm_transition('plan','plan','plan','id','status', ${id}, 'Ditutup', 'ZZ-AM', false, false, 'Account') as r`;
     expect(bad[0].r.ok).toBe(false);
     expect(bad[0].r.code).toBe('blocked');
   });

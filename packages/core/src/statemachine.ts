@@ -55,6 +55,15 @@ export interface SmTransitionArgs {
   actorEmployeeId: string;
   roleDirector: boolean;
   roleLead: boolean;
+  /**
+   * Division the actor writes from (`role.division`, `''` when unmapped).
+   *
+   * Required, never optional: an edge carrying `require_division` must be able
+   * to tell "this actor is a Finance lead" apart from "nobody said" — and an
+   * optional field makes those two the same value. Migration 20260924010000
+   * dropped the ten-argument `sm_transition` for the same reason.
+   */
+  roleDivision: string;
 }
 
 /**
@@ -86,9 +95,16 @@ export interface TransitionRequest {
 /**
  * transition validates + applies + audits a status change via `sm_transition`,
  * inside the caller's transaction. It is the ONLY path that writes a status
- * column. Role booleans are derived exactly as Go's engine does: the requireLead
- * gate passes for a Director OR anyone at lead level (division-specific checks,
- * where a machine needs them, live in the module layer — not the engine).
+ * column. Role booleans are derived exactly as Go's engine did: the requireLead
+ * gate passes for a Director OR anyone at lead level.
+ *
+ * Since migration 20260924010000 an edge may ALSO carry `require_director`
+ * (Director only) or narrow the lead branch to one `require_division`. That is
+ * why `roleDivision` travels with every call. The engine still holds no
+ * business rule — the edge row states its own gate, as data, exactly like
+ * `require_lead` always did. D-3 needed both: closing a month is Finance lead
+ * OR Director, reopening one is Director alone, and a single gate for both
+ * would erase the asymmetry that makes the lock mean anything.
  *
  * Invariant: call only AFTER mandatory-field validation has passed (the SQL
  * function performs NO business validation — the BI `[...]` messages for that
@@ -106,6 +122,7 @@ export async function transition(exec: SmExecutor, req: TransitionRequest): Prom
     actorEmployeeId: req.actor.employeeId,
     roleDirector: req.actor.role.director,
     roleLead: req.actor.role.level === LevelLead,
+    roleDivision: req.actor.role.division,
   });
 }
 
