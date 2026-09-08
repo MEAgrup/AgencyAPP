@@ -363,6 +363,17 @@ const KEUANGAN: NavNode[] = [
   // catatan pra-verifikasi "visible to Finance only".
   { href: '/finance', label: 'Finance', access: ownedBy(FINANCE) },
   { href: '/finance/reminders', label: 'Reminder Pembayaran', access: ownedBy(FINANCE) },
+  // D-3 tutup buku. Gerbangnya SENGAJA lebih sempit dari `ownedBy(FINANCE)`:
+  // RLS `book_periods` hanya membuka bacaan untuk read-all atau LEAD, jadi
+  // staf Finance yang melihat menunya akan mendarat di halaman kosong — menu
+  // yang menjanjikan sesuatu yang tidak ada lebih buruk daripada tidak ada
+  // menu. Wewenang MENULIS lebih sempit lagi lagi (lead Finance ATAU Director
+  // untuk menutup, Director saja untuk membuka) dan ditegakkan di DB.
+  {
+    href: '/finance/tutup-buku',
+    label: 'Tutup Buku',
+    access: (role) => canReadAll(role) || isLead(role, FINANCE),
+  },
   // ANCHOR-NAV-KEUANGAN (F-1/F-7) — titik sisip entri nav Jalur A (Uang &
   // Klien: finance/permintaan/contracts/sales, termasuk antrean Permintaan
   // Finance A-2). Anchor Jalur B ada di ujung `DELIVERY` di atas. Aturan yang

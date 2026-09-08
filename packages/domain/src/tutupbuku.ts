@@ -29,7 +29,7 @@
  */
 
 import { accrual, money, permission, statemachine, tz, type audit as auditCore } from '@cdps/core';
-import { executors, withTransaction, type Sql } from '@cdps/db';
+import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 // ---------------------------------------------------------------------------
 // Kosakata
@@ -52,25 +52,45 @@ export const PENGHITUNG = 'cdps.accrual.v1';
 export class ValidationError extends Error {
   constructor(msg: string) {
     super(msg);
-    this.name = 'ValidationError';
+    // Nama BER-MODUL, bukan `ValidationError` telanjang: `apps/api/src/lib/http.ts`
+    // memetakan error ke status HTTP lewat `Error.name` supaya tidak perlu
+    // mengimpor barrel domain, jadi dua modul yang berbagi satu nama akan
+    // berbagi satu status — diam-diam, dan baru terasa saat salah satunya
+    // butuh status lain.
+    this.name = 'TutupBukuValidationError';
   }
 }
 export class ForbiddenError extends Error {
   constructor(msg: string) {
     super(msg);
-    this.name = 'ForbiddenError';
+    // Nama BER-MODUL, bukan `ForbiddenError` telanjang: `apps/api/src/lib/http.ts`
+    // memetakan error ke status HTTP lewat `Error.name` supaya tidak perlu
+    // mengimpor barrel domain, jadi dua modul yang berbagi satu nama akan
+    // berbagi satu status — diam-diam, dan baru terasa saat salah satunya
+    // butuh status lain.
+    this.name = 'TutupBukuForbiddenError';
   }
 }
 export class NotFoundError extends Error {
   constructor(msg: string) {
     super(msg);
-    this.name = 'NotFoundError';
+    // Nama BER-MODUL, bukan `NotFoundError` telanjang: `apps/api/src/lib/http.ts`
+    // memetakan error ke status HTTP lewat `Error.name` supaya tidak perlu
+    // mengimpor barrel domain, jadi dua modul yang berbagi satu nama akan
+    // berbagi satu status — diam-diam, dan baru terasa saat salah satunya
+    // butuh status lain.
+    this.name = 'TutupBukuNotFoundError';
   }
 }
 export class ConflictError extends Error {
   constructor(msg: string) {
     super(msg);
-    this.name = 'ConflictError';
+    // Nama BER-MODUL, bukan `ConflictError` telanjang: `apps/api/src/lib/http.ts`
+    // memetakan error ke status HTTP lewat `Error.name` supaya tidak perlu
+    // mengimpor barrel domain, jadi dua modul yang berbagi satu nama akan
+    // berbagi satu status — diam-diam, dan baru terasa saat salah satunya
+    // butuh status lain.
+    this.name = 'TutupBukuConflictError';
   }
 }
 
@@ -272,7 +292,7 @@ function pertamaKe(transisi: BarisTransisi[], ke: string): string | null {
  * yang sama — dan kalau BERBEDA, itu berarti datanya yang berubah, yang persis
  * merupakan pertanyaan yang ingin dijawab saat membandingkan versi.
  */
-export async function hitungAngkaPeriode(sql: Sql, periode: string): Promise<AngkaPeriode> {
+export async function hitungAngkaPeriode(sql: Queryable, periode: string): Promise<AngkaPeriode> {
   const p = (periode ?? '').trim();
   if (!PERIODE_RE.test(p)) throw new ValidationError(MSG_PERIODE_TIDAK_VALID);
 
@@ -386,7 +406,7 @@ export async function hitungAngkaPeriode(sql: Sql, periode: string): Promise<Ang
 const MACHINE_BOOK_PERIOD = 'book_period';
 
 /** Baca satu periode; null kalau belum pernah disentuh sama sekali. */
-export async function getPeriode(sql: Sql, periode: string): Promise<Periode | null> {
+export async function getPeriode(sql: Queryable, periode: string): Promise<Periode | null> {
   const tanggal = periodeKeTanggal(periode);
   const rows = await sql<Record<string, unknown>[]>`
     select periode, status, versi_terakhir, dibuka_pada, dibuka_oleh, alasan_buka
@@ -402,7 +422,7 @@ export async function getPeriode(sql: Sql, periode: string): Promise<Periode | n
  * membuat baris untuk semua bulan sejak awal waktu hanya akan menyimpan
  * ketiadaan dalam bentuk yang lebih mahal.
  */
-export async function listPeriode(sql: Sql, limit = 24): Promise<Periode[]> {
+export async function listPeriode(sql: Queryable, limit = 24): Promise<Periode[]> {
   const n = Number.isFinite(limit) && limit > 0 ? Math.min(Math.trunc(limit), 240) : 24;
   const rows = await sql<Record<string, unknown>[]>`
     select periode, status, versi_terakhir, dibuka_pada, dibuka_oleh, alasan_buka
@@ -620,7 +640,7 @@ export interface SelisihVersi {
   baris: SelisihBaris[];
 }
 
-async function ambilSnapshot(sql: Sql, tanggal: string, versi: number): Promise<SnapshotVersi> {
+async function ambilSnapshot(sql: Queryable, tanggal: string, versi: number): Promise<SnapshotVersi> {
   const rows = await sql<Record<string, unknown>[]>`
     select periode, versi, ditutup_oleh, ditutup_pada, penghitung, angka
       from book_period_snapshots
@@ -638,7 +658,7 @@ async function ambilSnapshot(sql: Sql, tanggal: string, versi: number): Promise<
 }
 
 /** Semua versi angka beku sebuah bulan, tertua dulu. */
-export async function listVersi(sql: Sql, periode: string): Promise<SnapshotVersi[]> {
+export async function listVersi(sql: Queryable, periode: string): Promise<SnapshotVersi[]> {
   const tanggal = periodeKeTanggal(periode);
   const rows = await sql<Record<string, unknown>[]>`
     select periode, versi, ditutup_oleh, ditutup_pada, penghitung, angka
@@ -663,7 +683,7 @@ export async function listVersi(sql: Sql, periode: string): Promise<SnapshotVers
  * "apa yang bergeser", bukan seluruh isi bulan itu untuk kedua kalinya.
  */
 export async function bandingkanVersi(
-  sql: Sql,
+  sql: Queryable,
   periode: string,
   versiSebelum: number,
   versiSesudah: number,
@@ -805,7 +825,7 @@ export async function catatJurnalKoreksi(
 }
 
 /** Semua jurnal koreksi atas sebuah bulan tertutup, terlama dulu. */
-export async function listJurnalKoreksi(sql: Sql, periodeDikoreksi: string): Promise<JurnalKoreksi[]> {
+export async function listJurnalKoreksi(sql: Queryable, periodeDikoreksi: string): Promise<JurnalKoreksi[]> {
   const tanggal = periodeKeTanggal(periodeDikoreksi);
   const rows = await sql<Record<string, unknown>[]>`
     select entity_id, actor_employee_id, after_json, created_at
