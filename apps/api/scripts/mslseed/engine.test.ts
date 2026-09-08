@@ -39,6 +39,7 @@ function view(over: Partial<msl.ServiceView> = {}): msl.ServiceView {
     pricingMode: 'flat', applyPPN: false, frequency: 'Monthly', priceNote: 'catatan',
     description: 'desc', active: true, requiresStrategyPlan: false, planTier: 'tanpa_plan', durasiBulan: null, qtyMenambah: 'volume',
     pengakuan: 'saat_selesai',
+    durasiOptions: [],
     versionNo: 1,
     effectiveFrom: '2026-07-16', ...over,
   };

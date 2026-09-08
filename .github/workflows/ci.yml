@@ -428,12 +428,19 @@ jobs:
       #       Brief (ketokan K-5, pola AST-/ADC-/BKG-/LSS-). Dua kelompok kolom
       #       dengan dua penulis — cakupan+target milik AM, hasil+dampak milik
       #       Store Ops — didindingi trigger, bukan cuma TS.
-      - name: Verify table count (expect 147)
+      # FS-6 (20260925040000_fs6_msl_opsi_durasi.sql): 148 = 147 +
+      #       `master_service_duration_options` — pilihan tenor per VERSI
+      #       layanan (1/3/6/12 bulan, harga PAKET berbeda). Invarian "opsi
+      #       terpendek = standard_price + durasi_bulan versinya" ditegakkan
+      #       CONSTRAINT TRIGGER, bukan hanya TS, supaya setiap pembaca lama
+      #       (deriveDuration, Ads Management Date, accrual) terus membaca
+      #       angka yang sah. Nol prefix/mesin/event ⇒ 41/32/73 TETAP.
+      - name: Verify table count (expect 148)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 147
+          test "$n" -eq 148
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

@@ -35,6 +35,8 @@ export interface MasterServiceWire {
   qty_menambah: string;
   /** 'per_periode' | 'saat_selesai' | 'bulan_berikutnya' (D-KOM). */
   pengakuan: string;
+  /** FS-6: pilihan tenor, terurut dari yang TERPENDEK. `[]` = tenor tunggal. */
+  durasi_options: { durasi_bulan: number; harga: string }[];
   version_no: number;
   effective_from: string;
 }
@@ -60,6 +62,10 @@ export function masterServiceToWire(v: msl.ServiceView): MasterServiceWire {
     durasi_bulan: v.durasiBulan,
     qty_menambah: v.qtyMenambah,
     pengakuan: v.pengakuan,
+    durasi_options: v.durasiOptions.map((o) => ({
+      durasi_bulan: o.durasiBulan,
+      harga: o.harga,
+    })),
     version_no: v.versionNo,
     effective_from: v.effectiveFrom,
   };

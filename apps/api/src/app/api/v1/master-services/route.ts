@@ -45,6 +45,13 @@ interface ServiceBody {
    * ada sisi yang aman untuk ditebak (lihat msl.ts).
    */
   pengakuan?: string;
+  /**
+   * FS-6: pilihan tenor (1/3/6/12 bulan dengan harga berbeda). Absent atau `[]`
+   * sama artinya: layanan tenor tunggal. Bila diisi, opsi TERPENDEK wajib sama
+   * dengan `standard_price` + `durasi_bulan` — ditolak `msl.normalizeInput` DAN
+   * trigger DB `trg_msdo_terpendek`.
+   */
+  durasi_options?: { durasi_bulan?: number; harga?: string }[];
   effective_from?: string;
 }
 
@@ -67,6 +74,10 @@ function toInput(b: ServiceBody): msl.ServiceInput {
     durasiBulan: b.durasi_bulan,
     qtyMenambah: b.qty_menambah as msl.ServiceInput['qtyMenambah'],
     pengakuan: b.pengakuan as msl.ServiceInput['pengakuan'],
+    durasiOptions: (b.durasi_options ?? []).map((o) => ({
+      durasiBulan: Number(o.durasi_bulan ?? 0),
+      harga: o.harga ?? '',
+    })),
     effectiveFrom: b.effective_from ?? '',
   };
 }

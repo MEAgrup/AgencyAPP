@@ -45,6 +45,13 @@ export interface MslFormState {
    * `'saat_selesai'` for a brand-new one (see `EMPTY_FORM`).
    */
   pengakuan: Pengakuan;
+  /**
+   * FS-6 — baris pilihan tenor, dipegang sebagai STRING mentah seperti yang
+   * diketik (alasan yang sama dengan `durasi_bulan`): admin yang sedang
+   * mengosongkan kotak di tengah pengeditan tidak boleh membuatnya jadi 0.
+   * Kosong = layanan tenor tunggal.
+   */
+  durasi_options: { durasi_bulan: string; harga: string }[];
   effective_from: string;
 }
 
@@ -73,6 +80,13 @@ export interface MslPayload {
    * `[data tidak lengkap, ...]` on a form the admin thought was complete.
    */
   pengakuan: Pengakuan;
+  /**
+   * FS-6. Kunci SELALU dikirim (array kosong bila tenor tunggal), tidak pernah
+   * dihilangkan — `updateService` ber-semantik FULL REPLACE, jadi payload yang
+   * tidak membawanya akan MENGHAPUS opsi di versi baru tanpa peringatan. Itu
+   * persis cacat yang pernah menghilangkan `durasi_bulan` diam-diam.
+   */
+  durasi_options: { durasi_bulan: number; harga: string }[];
   effective_from: string;
 }
 
@@ -106,6 +120,7 @@ export const EMPTY_MSL_FORM: MslFormState = {
   // yang punya arti. Begitu admin mengisi durasi, dropdown-nya yang harus
   // mengatakan sisanya — bukan tebakan dari nilai durasi itu.
   pengakuan: 'saat_selesai' as Pengakuan,
+  durasi_options: [],
   effective_from: todayISO(),
 };
 
@@ -135,6 +150,10 @@ export function serviceToForm(service: MasterService): MslFormState {
     durasi_bulan: service.durasi_bulan === null ? '' : String(service.durasi_bulan),
     qty_menambah: service.qty_menambah,
     pengakuan: service.pengakuan,
+    durasi_options: (service.durasi_options ?? []).map((o) => ({
+      durasi_bulan: String(o.durasi_bulan),
+      harga: String(o.harga),
+    })),
     effective_from: todayISO(),
   };
 }
@@ -178,6 +197,14 @@ export function formToPayload(form: MslFormState): MslPayload {
     durasi_bulan: parseDurasiBulan(form.durasi_bulan),
     qty_menambah: form.qty_menambah,
     pengakuan: form.pengakuan,
+    // Baris yang benar-benar KOSONG dibuang di sini — sebuah baris yang baru
+    // ditambahkan lalu ditinggalkan adalah niat "batal", bukan tenor 0 rupiah.
+    // Baris yang setengah terisi TIDAK dibuang: ia dikirim apa adanya supaya
+    // server menolaknya dengan pesan BI, bukan supaya form diam-diam
+    // membuangnya dan admin mengira tenornya tersimpan.
+    durasi_options: form.durasi_options
+      .filter((o) => o.durasi_bulan.trim() !== '' || o.harga.trim() !== '')
+      .map((o) => ({ durasi_bulan: Number(o.durasi_bulan), harga: o.harga })),
     effective_from: form.effective_from,
   };
 }
@@ -194,6 +221,20 @@ export function formToPayload(form: MslFormState): MslPayload {
 export function formatDurasiBulan(months: number | null | undefined): string {
   if (months === null || months === undefined) return '—';
   return `${months} bulan`;
+}
+
+/**
+ * FS-6 — ringkasan pilihan tenor untuk kolom tabel: "3 / 6 / 12 bulan".
+ *
+ * Em dash untuk layanan tenor tunggal, mengikuti aturan rumah #7 — dan bukan
+ * "0 pilihan", yang terbaca seperti kesalahan data padahal tenor tunggal adalah
+ * bentuk normal seluruh katalog hari ini.
+ */
+export function formatOpsiDurasi(
+  options: { durasi_bulan: number; harga: string }[] | null | undefined,
+): string {
+  if (!options || options.length === 0) return '—';
+  return `${options.map((o) => o.durasi_bulan).join(' / ')} bulan`;
 }
 
 /** Human labels for the qty rule — used by the form and the table alike. */

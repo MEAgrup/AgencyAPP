@@ -79,6 +79,7 @@ describe('masterServiceToWire', () => {
       durasiBulan: 6,
       qtyMenambah: 'durasi',
       pengakuan: 'per_periode',
+      durasiOptions: [],
       versionNo: 3,
       effectiveFrom: '2026-07-01',
     };
@@ -101,6 +102,7 @@ describe('masterServiceToWire', () => {
       durasi_bulan: 6,
       qty_menambah: 'durasi',
       pengakuan: 'per_periode',
+      durasi_options: [],
       version_no: 3,
       effective_from: '2026-07-01',
     });
@@ -178,7 +180,10 @@ describe('leads wire mappers', () => {
     expect(wire.lead).not.toHaveProperty('open_attempt_count');
     expect(wire.lead.created_at).toBe('2026-07-01T00:00:00.000Z');
     expect(wire.attempts).toEqual([
-      { id: 'PRSP-1', owner_employee_id: 'EMP-1', owner_nama: 'Budi', status: 'New Lead', claimed_at: '2026-07-02T00:00:00.000Z' },
+      {
+        id: 'PRSP-1', owner_employee_id: 'EMP-1', owner_nama: 'Budi', status: 'New Lead',
+        claimed_at: '2026-07-02T00:00:00.000Z', bersama_dengan_attempt_id: null,
+      },
     ]);
   });
 });

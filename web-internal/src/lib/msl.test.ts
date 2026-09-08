@@ -46,6 +46,14 @@ function fixture(over: Partial<MasterService> = {}): MasterService {
     durasi_bulan: 6,
     qty_menambah: 'durasi',
     pengakuan: 'per_periode',
+    // FS-6: fixture-nya BERISI opsi, bukan array kosong — mapping yang
+    // menjatuhkan field ini tetap "lolos" kalau nilai yang dijatuhkan
+    // kebetulan sama dengan nilai kosongnya. Prinsip yang sama dengan
+    // seluruh fixture ini.
+    durasi_options: [
+      { durasi_bulan: 6, harga: '1500000' },
+      { durasi_bulan: 12, harga: '2700000' },
+    ],
     version_no: 1,
     effective_from: '2026-08-31',
     ...over,
@@ -74,6 +82,10 @@ const RECOVERED_FROM: { [K in keyof MslPayload]: (s: MasterService) => MslPayloa
   durasi_bulan: (s) => s.durasi_bulan,
   qty_menambah: (s) => s.qty_menambah,
   pengakuan: (s) => s.pengakuan,
+  durasi_options: (s) => s.durasi_options.map((o) => ({
+    durasi_bulan: Number(o.durasi_bulan),
+    harga: String(o.harga),
+  })),
   effective_from: () => 'SKIP',
 };
 
@@ -154,5 +166,40 @@ describe('formatDurasiBulan', () => {
   it('names the unit — this column used to hold DAYS, so a bare number is ambiguous', () => {
     expect(formatDurasiBulan(6)).toBe('6 bulan');
     expect(formatDurasiBulan(1)).toBe('1 bulan');
+  });
+});
+
+describe('opsi durasi (FS-6)', () => {
+  it('membawa opsi melewati sebuah edit — kelas cacat yang sama dengan durasi_bulan', () => {
+    const payload = formToPayload(serviceToForm(fixture()));
+    expect(payload.durasi_options).toEqual([
+      { durasi_bulan: 6, harga: '1500000' },
+      { durasi_bulan: 12, harga: '2700000' },
+    ]);
+  });
+
+  it('mengirim array KOSONG, bukan kunci yang hilang, untuk layanan tenor tunggal', () => {
+    const payload = formToPayload(serviceToForm(fixture({ durasi_options: [] })));
+    expect(payload.durasi_options).toEqual([]);
+    expect('durasi_options' in payload).toBe(true);
+  });
+
+  it('membuang baris yang BENAR-BENAR kosong, tapi tidak yang setengah terisi', () => {
+    // Baris kosong = admin menekan "+ Tambah" lalu berubah pikiran.
+    // Baris setengah terisi = kekeliruan yang harus DITOLAK SERVER dengan pesan
+    // BI, bukan dibuang diam-diam sampai admin mengira tenornya tersimpan.
+    const form = {
+      ...serviceToForm(fixture({ durasi_options: [] })),
+      durasi_options: [
+        { durasi_bulan: '', harga: '' },
+        { durasi_bulan: '3', harga: '' },
+      ],
+    };
+    const payload = formToPayload(form);
+    expect(payload.durasi_options).toEqual([{ durasi_bulan: 3, harga: '' }]);
+  });
+
+  it('form layanan baru yang kosong mengirim array kosong', () => {
+    expect(formToPayload(EMPTY_MSL_FORM).durasi_options).toEqual([]);
   });
 });

@@ -227,6 +227,18 @@ export interface MasterService {
   qty_menambah: QtyMenambah;
   /** Kapan pendapatannya diakui (D-KOM). */
   pengakuan: Pengakuan;
+  /**
+   * FS-6: pilihan tenor (1/3/6/12 bulan dengan harga berbeda), terurut dari
+   * yang TERPENDEK. `[]` = layanan tenor tunggal — bentuk seluruh katalog
+   * sebelum FS-6, jadi setiap halaman yang membacanya harus tetap benar untuk
+   * array kosong.
+   *
+   * Opsi pertama SELALU sama dengan `standard_price` + `durasi_bulan` di atas
+   * (invarian trigger DB `trg_msdo_terpendek`), jadi kode lama yang hanya
+   * membaca kedua field itu tidak pernah membaca angka yang tidak mewakili
+   * apa pun.
+   */
+  durasi_options: { durasi_bulan: number; harga: string }[];
   version_no: number;
   effective_from: string;
 }
