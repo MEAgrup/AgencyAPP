@@ -469,7 +469,10 @@ export function applyCockpitToTargets(
     }
   }
 
-  return { draft: { gmv, pendukung, assumptions }, filled };
+  // O76 — impor cockpit tidak pernah mengarang alasan simpangan: ia bukan angka
+  // yang bisa diturunkan dari berkas, dan alasan kosong yang benar-benar
+  // dibutuhkan akan ditolak server dengan pesan BI-nya.
+  return { draft: { gmv, pendukung, assumptions, gmv_adjustment_reason: '' }, filled };
 }
 
 /**

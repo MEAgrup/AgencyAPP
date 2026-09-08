@@ -49,6 +49,12 @@ export interface Renewal {
   decision_note: string | null;
   contract_id: string | null;
   transaction_id: string | null;
+  /**
+   * O76 — target GMV yang disepakati ULANG untuk periode perpanjangan ini;
+   * `null` = tidak diubah, anchor lama tetap berlaku. Baru dipindahkan ke
+   * `clients.target_gmv` saat renewal dieksekusi.
+   */
+  target_gmv_baru: string | null;
   created_at: string;
   created_by: string;
 }
@@ -115,8 +121,16 @@ export function proposeRenewal(
   jenis: string,
   lines: ProposalLineInput[],
   noNego: boolean,
+  /**
+   * O76 — target GMV yang disepakati ULANG untuk periode ini. Form-nya
+   * memasang angka LAMA sebagai default, jadi mengirimnya apa adanya berarti
+   * "tidak berubah" sebagai pilihan sadar. String kosong = tidak diubah.
+   */
+  targetGmvBaru = '',
 ): Promise<Renewal> {
-  return api.post<Renewal>(`/clients/${clientId}/renewals`, { jenis, lines, no_nego: noNego });
+  return api.post<Renewal>(`/clients/${clientId}/renewals`, {
+    jenis, lines, no_nego: noNego, target_gmv_baru: targetGmvBaru,
+  });
 }
 
 /** POST /clients/{id}/renewals/{rid}/resubmit — after a Reject, a fresh proposal version. */

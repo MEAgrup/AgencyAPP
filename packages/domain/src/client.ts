@@ -13,8 +13,11 @@
  *   - Profile (Nama PIC, Toko, Kota, Link Toko, Kategori): Account Lead / OD /
  *     Director — correction only, logged (M4-OA-4).
  *   - GMV baseline: OD / Director only (exceptional correction), logged.
- *   - Target GMV, Marketing Budget: Account (staff or lead) / Director — revisable
- *     during the engagement, logged (M4-OA-6).
+ *   - Marketing Budget: Account (staff or lead) / Director — revisable during
+ *     the engagement, logged (M4-OA-6).
+ *   - Target GMV: Account **lead** / Director only — stricter than M4-OA-6 since
+ *     O76 (2026-09-08), because this field is now the ANCHOR the M6A floor GMV is
+ *     measured against (see `canEditClientTargetGmv`).
  *   - Sales PIC, Commission & Payment PIC: Sales Lead / Director — reassign, logged.
  *   - Client ID, Origin Campaign, Sales Allocation, Total Sales, Service List:
  *     NOT editable here (immutable / system-computed / Void-Service path M4-OA-5).
@@ -139,9 +142,30 @@ export function canEditBaseline(actor: Actor): boolean {
   return actor.role.director || actor.role.od;
 }
 
-/** Target GMV / Marketing Budget: Account (any level) or Director (M4-OA-6). */
+/** Marketing Budget: Account (any level) or Director (M4-OA-6). */
 export function canEditAccountRevisable(actor: Actor): boolean {
   return actor.role.director || actor.role.division === ACCOUNT_DIVISION;
+}
+
+/**
+ * Target GMV: Account **lead** (Head of Account) atau Director — LEBIH KETAT
+ * daripada M4-OA-6, dan itu keputusan O76 (2026-09-08), bukan pengetatan iseng.
+ *
+ * Sejak O76 `clients.target_gmv` bukan lagi sekadar catatan: ia ANCHOR floor
+ * GMV di M6A (`strategi.client_target_gmv`), dan gerbang ±20% mengukur janji AM
+ * terhadapnya. Selama staff AM boleh mengeditnya, jalurnya begini — geser
+ * anchor-nya dulu, lalu ketik floor yang cocok, dan seluruh rantai penegak
+ * tetap hijau. **Anchor yang bisa digeser oleh orang yang dibatasinya bukan
+ * anchor**, dan D-7 Sanggahan Target kembali kehilangan artinya.
+ *
+ * Yang HILANG karena ini: AM staff tidak lagi bisa merevisi Target GMV sendiri
+ * — ia sekarang minta Head of Account. Itu memang yang diminta O76, dan
+ * penyimpangannya dari matriks M4 §4 dicatat di `docs/DECISIONS.md` (O76).
+ * `marketingBudget` TIDAK ikut diketatkan: ia bukan anchor apa pun.
+ */
+export function canEditClientTargetGmv(actor: Actor): boolean {
+  return actor.role.director ||
+    (actor.role.division === ACCOUNT_DIVISION && actor.role.level === permission.LevelLead);
 }
 
 /** Sales / Commission PIC reassign: Sales Lead or Director. */
@@ -170,7 +194,7 @@ const FIELDS: Record<string, FieldSpec> = {
   linkToko: { column: 'link_toko', kind: 'text', authorize: canEditProfile },
   kategori: { column: 'kategori', kind: 'text', authorize: canEditProfile },
   gmvBaseline: { column: 'gmv_baseline', kind: 'money', authorize: canEditBaseline },
-  targetGmv: { column: 'target_gmv', kind: 'money', authorize: canEditAccountRevisable },
+  targetGmv: { column: 'target_gmv', kind: 'money', authorize: canEditClientTargetGmv },
   marketingBudget: { column: 'marketing_budget', kind: 'money', authorize: canEditAccountRevisable },
   salesPicId: { column: 'sales_pic_id', kind: 'employee', authorize: canReassignPic },
   commissionPaymentPicId: { column: 'commission_payment_pic_id', kind: 'employee', authorize: canReassignPic },

@@ -525,12 +525,19 @@ function RenewalRow({
 }
 
 export default function RenewalPanel({
-  clientId, salesPicId, role, employeeId,
+  clientId, salesPicId, role, employeeId, clientTargetGmv,
 }: {
   clientId: string;
   salesPicId: string;
   role: Role | null;
   employeeId: string | null;
+  /**
+   * O76 — `clients.target_gmv` yang berlaku sekarang. Dipasang sebagai DEFAULT
+   * field "target GMV periode ini": angka lama tidak boleh diwarisi diam-diam,
+   * tapi juga tidak boleh memaksa Sales mengetik ulang sesuatu yang tidak
+   * berubah. Sejak O76 angka inilah anchor floor GMV di Strategi (M6A).
+   */
+  clientTargetGmv: string;
 }) {
   const [rows, setRows] = useState<Renewal[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -540,6 +547,7 @@ export default function RenewalPanel({
   const [jenis, setJenis] = useState<string>(JENIS_PERPANJANGAN);
   const [noNego, setNoNego] = useState(true);
   const [lines, setLines] = useState<LineRow[]>([emptyLineRow()]);
+  const [targetGmvBaru, setTargetGmvBaru] = useState<string>(clientTargetGmv);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -570,9 +578,17 @@ export default function RenewalPanel({
     setSubmitError(null);
     setSubmitting(true);
     try {
-      await proposeRenewal(clientId, jenis, toProposalLineInputs(lines), noNego);
+      // Kirim hanya kalau BERUBAH dari angka lama: mengirim angka yang sama
+      // akan menulis baris audit "target berubah" untuk perubahan yang tidak
+      // terjadi, dan riwayat yang memuat perubahan palsu lebih buruk daripada
+      // riwayat yang lebih pendek.
+      const berubah = targetGmvBaru.trim() !== clientTargetGmv.trim();
+      await proposeRenewal(
+        clientId, jenis, toProposalLineInputs(lines), noNego, berubah ? targetGmvBaru : '',
+      );
       setShowPropose(false);
       setLines([emptyLineRow()]);
+      setTargetGmvBaru(clientTargetGmv);
       await load();
     } catch (err) {
       setSubmitError(errorMessage(err));
@@ -601,6 +617,20 @@ export default function RenewalPanel({
           {submitError && <div className="alert alertError" role="alert">{submitError}</div>}
           <div className="formRow">
             <div className="field">
+              <label htmlFor="rnw-target-gmv">Target GMV periode ini (anchor)</label>
+              <input
+                id="rnw-target-gmv"
+                type="text"
+                inputMode="numeric"
+                value={targetGmvBaru}
+                onChange={(e) => setTargetGmvBaru(e.target.value)}
+                aria-describedby="rnw-target-gmv-hint"
+              />
+              <p id="rnw-target-gmv-hint" className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                Terisi angka periode sebelumnya. Ubah kalau perpanjangan ini menyepakati target
+                baru — angka inilah yang jadi pembanding floor GMV di Strategi (AM tidak bisa
+                menurunkannya sendiri). Berlaku saat renewal dieksekusi, bukan saat diusulkan.
+              </p>
               <label htmlFor="rnw-jenis">Jenis</label>
               <select id="rnw-jenis" value={jenis} onChange={(e) => setJenis(e.target.value)}>
                 <option value={JENIS_PERPANJANGAN}>Perpanjangan</option>

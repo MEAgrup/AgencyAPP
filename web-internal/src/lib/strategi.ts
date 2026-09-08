@@ -535,6 +535,20 @@ export interface Strategi {
   sanggahan_target_realistis: string | null;
   sanggahan_diajukan_pada: string | null;
   sanggahan_diajukan_oleh: string | null;
+  // --- O76: anchor floor GMV (kesepakatan Sales) + gerbang toleransi ±20% ---
+  /**
+   * `clients.target_gmv` seperti berlakunya saat matriks target disimpan —
+   * angka yang Sales sepakati dengan klien di form Qualified. Inilah pembanding
+   * yang membuat floor bukan lagi angka yang AM ukur terhadap dirinya sendiri.
+   * `null` = Strategi lahir sebelum O76 (bukan nol).
+   */
+  client_target_gmv: string | null;
+  /** `dalam_toleransi` | `menunggu_persetujuan` | `disetujui`. */
+  gmv_adjustment_status: string;
+  /** Alasan wajib saat Σ floor per bulan menyimpang > 20% dari anchor. */
+  gmv_adjustment_reason: string | null;
+  /** Head/Director yang menyetujui simpangan itu. */
+  gmv_adjustment_approved_by: string | null;
 
   // Section E/H narrative (A-09a). The rest of E/H are child rows: E-3…E-11 in
   // `pillars`, H-1 in `risks`. `E-1`/`E-13`/`H-3` are `W` and appear in
@@ -1235,8 +1249,18 @@ export function saveStrategiBaseline(
   return api.put<StrategiDetail>(`/strategi/${id}/channels/${channelId}/baseline`, { months });
 }
 
-export function saveStrategiTargets(id: string, targets: unknown[]): Promise<StrategiDetail> {
-  return api.put<StrategiDetail>(`/strategi/${id}/targets`, { targets });
+export function saveStrategiTargets(
+  id: string,
+  targets: unknown[],
+  gmvAdjustmentReason = '',
+): Promise<StrategiDetail> {
+  // O76 — `gmv_adjustment_reason` menyertai matriksnya. Wajib atau tidak
+  // diputuskan server (Σ floor GMV per bulan vs `clients.target_gmv`), jadi
+  // form-nya tidak pernah memblokir tombol simpan sendiri.
+  return api.put<StrategiDetail>(`/strategi/${id}/targets`, {
+    targets,
+    gmv_adjustment_reason: gmvAdjustmentReason,
+  });
 }
 
 export function saveStrategiAssumptions(id: string, assumptions: unknown[]): Promise<StrategiDetail> {

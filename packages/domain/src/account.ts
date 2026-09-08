@@ -715,8 +715,15 @@ function normalizeAndValidate(input: StrategyInput): NormalizedStrategy {
  * recorded no expectation, so there is no baseline and any figure is in tolerance
  * (no gate — division-by-zero is never surfaced, house rule #7). Out of tolerance
  * requires a reason, thrown here when absent.
+ *
+ * EXPORTED since O76 (2026-09-08) so the M6A floor gate (`strategi.saveTargets`)
+ * runs THIS engine rather than a second copy of the same arithmetic. Two
+ * tolerance engines are two answers waiting to disagree, and the number they
+ * disagree about is the one promised to the client. The M6A caller passes Σ floor
+ * per month as `targetGmv` and the `strategi.client_target_gmv` snapshot as
+ * `clientTargetGmv`.
  */
-function gmvGate(
+export function gmvGate(
   targetGmv: string | null,
   clientTargetGmv: string | null,
   reason: string,

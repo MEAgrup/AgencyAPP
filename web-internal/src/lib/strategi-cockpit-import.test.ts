@@ -41,6 +41,7 @@ function blankTargets(channel = CHANNEL): TargetDraft {
     gmv: [{ channel, month_index: 1, nilai_floor: '', nilai_stretch: '' }],
     pendukung: [],
     assumptions: [],
+    gmv_adjustment_reason: '',
   };
 }
 

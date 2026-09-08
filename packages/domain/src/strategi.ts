@@ -81,11 +81,16 @@ import {
   ACCOUNT_DIVISION,
   ConflictError,
   ForbiddenError,
+  GMV_ADJ_APPROVED,
+  GMV_ADJ_IN_TOLERANCE,
+  GMV_ADJ_PENDING,
+  GMV_TOLERANCE,
   MACHINE_SERVICE,
   NotFoundError,
   SERVICE_STATUS_AWAITING_ONBOARDING,
   SERVICE_STATUS_STRATEGY_APPROVED,
   ValidationError,
+  gmvGate,
   type Actor,
 } from './account';
 import * as contract from './contract';
@@ -945,6 +950,22 @@ export interface Strategi extends StrategiKonteks {
   sanggahanDiajukanPada: string | null;
   sanggahanDiajukanOleh: string | null;
 
+  // --- O76: anchor floor GMV + gerbang toleransi ±20% -----------------------
+  //
+  // Ini yang membuat D-7 punya penegak: floor tidak lagi diukur terhadap
+  // dirinya sendiri, tapi terhadap `clients.target_gmv` — angka yang Sales
+  // sepakati dengan klien di form Qualified. Empat field ini SELALU dikirim
+  // (null eksplisit, bukan hilang): halaman yang menampilkan floor tanpa
+  // menampilkan anchor-nya kembali ke keadaan sebelum O76.
+  /** Snapshot anchor saat matriks disimpan; null = Strategi lahir sebelum O76. */
+  clientTargetGmv: string | null;
+  /** `dalam_toleransi` | `menunggu_persetujuan` | `disetujui`. */
+  gmvAdjustmentStatus: string;
+  /** Alasan WAJIB saat Σ floor per bulan menyimpang > 20% dari anchor. */
+  gmvAdjustmentReason: string | null;
+  /** Head/Director yang menyetujui simpangan itu (diisi saat approveStrategi). */
+  gmvAdjustmentApprovedBy: string | null;
+
   // --- Section E/H narrative header fields (A-09a). The rest of E and H are
   // child rows: E-3…E-11 in `strategi_pillar`, H-1 in `strategi_risk`. These four
   // are the paragraphs those rows cannot hold.
@@ -1485,6 +1506,11 @@ interface StrategiRow {
   sanggahan_target_realistis: string | null;
   sanggahan_diajukan_pada: string | Date | null;
   sanggahan_diajukan_oleh: string | null;
+  // O76 — anchor floor GMV (`select s.*` membawanya otomatis).
+  client_target_gmv: string | null;
+  gmv_adjustment_status: string;
+  gmv_adjustment_reason: string | null;
+  gmv_adjustment_approved_by: string | null;
   // Section E/H narrative (A-09a).
   growth_thesis: string | null;
   urutan_eksekusi_alasan: string | null;
@@ -1566,6 +1592,10 @@ function rowToStrategi(r: StrategiRow): Strategi {
     sanggahanTargetRealistis: r.sanggahan_target_realistis,
     sanggahanDiajukanPada: tsOrNull(r.sanggahan_diajukan_pada),
     sanggahanDiajukanOleh: r.sanggahan_diajukan_oleh,
+    clientTargetGmv: r.client_target_gmv,
+    gmvAdjustmentStatus: r.gmv_adjustment_status,
+    gmvAdjustmentReason: r.gmv_adjustment_reason,
+    gmvAdjustmentApprovedBy: r.gmv_adjustment_approved_by,
     // Section E/H narrative (A-09a)
     growthThesis: r.growth_thesis,
     urutanEksekusiAlasan: r.urutan_eksekusi_alasan,
@@ -4363,6 +4393,47 @@ export interface TargetInput {
 }
 
 /**
+ * O76 — the floor's ANCHOR: `clients.target_gmv`, the GMV target Sales agreed
+ * with the client on the Qualified form and carried into `clients` at closing
+ * (`sales.ts:1637`). `NOT NULL` there, so every client has one.
+ *
+ * Why this is the anchor and not a new field at closing: it already IS the
+ * number the client agreed to, and the ±20% gate over it is already built and
+ * tested on the older M6 path (`strategy_plans`). Rule 7's "floor is read-only,
+ * pulled from the agreement" only becomes true once the floor is measured
+ * against something the AM did not type — which is also the only way D-7
+ * Sanggahan Target stops being "the AM disputing their own number".
+ */
+export interface FloorAnchorState {
+  /** Snapshot of `clients.target_gmv` at the moment the matrix was saved; null pre-O76. */
+  clientTargetGmv: string | null;
+  /** `dalam_toleransi` | `menunggu_persetujuan` | `disetujui`. */
+  gmvAdjustmentStatus: string;
+  gmvAdjustmentReason: string | null;
+  gmvAdjustmentApprovedBy: string | null;
+}
+
+/**
+ * Σ floor GMV per `month_index`, across channels — what the gate measures.
+ *
+ * Per-month, not per-row: the anchor is one monthly figure while the matrix
+ * splits it across channels (Shopee + TikTok + Tokopedia), so comparing each
+ * channel row to the whole-store target would flag every sane matrix. Per-month
+ * totals also let the AM shift weight between channels freely, which is the part
+ * of the plan that is genuinely theirs.
+ */
+export function sumFloorPerMonth(targets: TargetInput[]): Map<number, number> {
+  const per = new Map<number, number>();
+  for (const t of targets) {
+    if (t.metric !== 'gmv') continue;
+    const v = Number(t.nilaiFloor ?? 0);
+    if (!Number.isFinite(v)) continue;
+    per.set(t.monthIndex, (per.get(t.monthIndex) ?? 0) + v);
+  }
+  return per;
+}
+
+/**
  * saveTargets replaces the target matrix.
  *
  * Rule 7 lives in the CHECK (`stretch >= floor` for GMV), not here — a stretch
@@ -4384,10 +4455,11 @@ export async function saveTargets(
   actor: Actor,
   id: string,
   targets: TargetInput[],
+  gmvAdjustmentReason = '',
 ): Promise<StrategiDetail> {
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    await requireDraftAndWriter(tx, actor, id);
+    const strategiRow = await requireDraftAndWriter(tx, actor, id);
     for (const t of targets) {
       if (!TARGET_METRICS.includes(t.metric)) {
         throw new ValidationError(MSG_INCOMPLETE);
@@ -4418,13 +4490,68 @@ export async function saveTargets(
           (${id}, ${t.channel}, ${t.monthIndex}, ${t.metric}, ${floor}, ${t.nilaiStretch},
            ${floor === null ? null : FLOOR_INPUT_AM}, ${actor.employeeId})`;
     }
+    // --- O76: floor GMV diukur terhadap angka yang disepakati Sales ---------
+    //
+    // Anchor-nya `clients.target_gmv` (NOT NULL sejak Wave 1), di-snapshot ke
+    // baris `strategi` di sini supaya laporan mana pun bisa membandingkan floor
+    // dengan angka yang berlaku SAAT matriks disimpan — bukan dengan anchor
+    // hidup yang mungkin sudah bergerak sejak itu.
+    //
+    // Mesinnya `account.gmvGate`, dipakai ULANG (bukan disalin): ia yang sudah
+    // menjaga jalur M6 lama dengan ambang yang sama, dan dua mesin toleransi
+    // adalah dua jawaban yang menunggu bertentangan. Yang diukur adalah Σ floor
+    // PER BULAN terhadap anchor — lihat `sumFloorPerMonth`.
+    //
+    // Bulan yang paling menyimpang yang menentukan status: satu bulan yang
+    // dijanjikan jauh di bawah kesepakatan tetap perlu dijawab, walau sebelas
+    // bulan lainnya pas.
+    const anchorRows = await tx<{ target_gmv: string | null }[]>`
+      select c.target_gmv from clients c where c.id = ${strategiRow.clientId}`;
+    const anchor = anchorRows[0]?.target_gmv ?? null;
+    const perMonth = sumFloorPerMonth(targets);
+    let worst: { status: string; reason: string | null } = { status: GMV_ADJ_IN_TOLERANCE, reason: null };
+    let worstDeviation = -1;
+    const anchorNum = anchor === null ? 0 : Number(anchor);
+    // Catatan untuk UPDATE di bawah: `gmv_adjustment_approved_by` di-null-kan
+    // di sini karena stempel persetujuan milik `approveStrategi`. Matriks yang
+    // berubah sesudah di-ACC adalah matriks yang belum di-ACC, dan
+    // `ck_strategi_gmv_adj_approval` menolak stempel yang masih menempel pada
+    // status selain `disetujui`.
+    for (const [, sum] of perMonth) {
+      // `gmvGate` melempar sendiri kalau di luar toleransi tanpa alasan — pesan
+      // BI-nya `[penyesuaian target GMV di luar toleransi 20% wajib disertai
+      // alasan]`, string yang sama yang sudah dipakai jalur M6 lama.
+      const g = gmvGate(String(sum), anchor, gmvAdjustmentReason);
+      const dev = anchorNum > 0 ? Math.abs(sum - anchorNum) / anchorNum : 0;
+      if (dev > worstDeviation) {
+        worstDeviation = dev;
+        worst = g;
+      }
+    }
+    await tx`
+      update strategi
+         set client_target_gmv = ${anchor},
+             gmv_adjustment_status = ${worst.status},
+             gmv_adjustment_reason = ${worst.reason},
+             -- Stempel persetujuan MILIK approveStrategi; menyimpan target lagi
+             -- mencabutnya (penjelasan lengkap di komentar TS di atas -- JANGAN
+             -- pakai backtick di komentar SQL, ia memutus template literal).
+             gmv_adjustment_approved_by = null
+       where id = ${id}`;
     await ex.audit.insertAudit({
       entityType: ENTITY_STRATEGI,
       entityId: id,
       actorEmployeeId: actor.employeeId,
       action: 'save_targets',
       beforeJson: null,
-      afterJson: { count: targets.length },
+      afterJson: {
+        count: targets.length,
+        // Angka yang menentukan statusnya, terbaca belakangan tanpa dihitung
+        // ulang dari matriks yang sudah diganti versi berikutnya.
+        client_target_gmv: anchor,
+        gmv_adjustment_status: worst.status,
+        toleransi: GMV_TOLERANCE,
+      },
       createdBy: actor.employeeId,
     });
     return loadDetail(tx, await loadStrategiRow(tx, id));
@@ -7068,6 +7195,19 @@ export async function approveStrategi(sql: Sql, actor: Actor, id: string): Promi
              floor_disetujui_pada = now()
        where strategi_id = ${id} and nilai_floor is not null
          and sumber_floor = ${FLOOR_INPUT_AM}`;
+    // O76 — dan simpangan Σ floor dari anchor kesepakatan (kalau ada) ikut
+    // MENDAPAT stempelnya di momen yang sama. Head yang menyetujui Strategi
+    // adalah Head yang menyetujui bahwa floor-nya boleh menyimpang sejauh itu
+    // dari angka yang dijanjikan Sales ke klien — satu keputusan, bukan dua,
+    // karena alasannya sudah ada di depannya saat me-review (D-7 + kartu
+    // `/persetujuan`). Baris `dalam_toleransi` tidak disentuh: tidak ada
+    // simpangan untuk disetujui, dan `ck_strategi_gmv_adj_approval` menolak
+    // stempel tanpa status `disetujui`.
+    await tx`
+      update strategi
+         set gmv_adjustment_status = ${GMV_ADJ_APPROVED},
+             gmv_adjustment_approved_by = ${actor.employeeId}
+       where id = ${id} and gmv_adjustment_status = ${GMV_ADJ_PENDING}`;
     await appendEvent(tx, id, head.versiNo, 'disetujui', actor.employeeId, null);
 
     // A-3 / M6A §5.7 — approval unlocks Brief dispatch, and unlocking it means

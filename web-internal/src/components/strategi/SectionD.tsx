@@ -111,6 +111,14 @@ export interface TargetDraft {
   pendukung: SupportTargetRow[];
   /** D-8 assumptions, each carrying its D-9 mapping. */
   assumptions: AssumptionRow[];
+  /**
+   * O76 — alasan WAJIB kalau Σ floor GMV per bulan menyimpang lebih dari 20%
+   * dari `client_target_gmv` (angka yang Sales sepakati dengan klien). Dikirim
+   * bersama matriks target; server yang memutuskan apakah ia wajib, jadi form
+   * ini tidak pernah memblokir tombol simpan sendiri (pola yang sama dengan
+   * `stretch >= floor`).
+   */
+  gmv_adjustment_reason: string;
 }
 
 export function kpiDraftOf(d: StrategiDetail): KpiDraft {
@@ -126,6 +134,7 @@ export function targetDraftOf(d: StrategiDetail): TargetDraft {
   return {
     gmv: gmvGridOf(d.channels, d.durasi_kontrak_bulan, d.targets),
     pendukung: supportRowsOf(d.targets),
+    gmv_adjustment_reason: d.gmv_adjustment_reason ?? '',
     assumptions: d.assumptions.map((a) => ({
       kode: a.kode,
       asumsi: a.asumsi,
@@ -287,6 +296,58 @@ export default function SectionD({
           itu ditegakkan database, dan kalau menurut Anda floor-nya tidak realistis jalurnya
           adalah D-7 Sanggahan Target di bawah, bukan menurunkan angkanya.
         </p>
+
+        {/* O76 — ANCHOR-nya, terlihat di sebelah kolom yang diukurnya.
+            Sebelum ini floor diketik tanpa pembanding apa pun, jadi "floor
+            read-only sesuai Rule 7" tidak punya penegak: AM menyanggah (D-7)
+            angka yang AM sendiri ketik. Sekarang pembandingnya `target_gmv`
+            klien — angka yang Sales sepakati di form Qualified. */}
+        <div
+          className="card"
+          style={{ background: 'var(--surface-2, #fafafa)', padding: 12, marginBottom: 12 }}
+        >
+          <div className="row" style={{ gap: 16, flexWrap: 'wrap', alignItems: 'baseline' }}>
+            <div>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Target GMV yang disepakati Sales dengan klien (anchor)
+              </span>
+              <div style={{ fontWeight: 600 }}>
+                {detail.client_target_gmv === null
+                  ? '— (Strategi ini dibuat sebelum anchor dicatat)'
+                  : formatIDR(detail.client_target_gmv)}
+              </div>
+            </div>
+            <div>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Status penyesuaian
+              </span>
+              <div>
+                {detail.gmv_adjustment_status === 'menunggu_persetujuan' ? (
+                  <span className="badge badge-amber">Menunggu persetujuan Head</span>
+                ) : detail.gmv_adjustment_status === 'disetujui' ? (
+                  <span className="badge badge-green">
+                    Disetujui{detail.gmv_adjustment_approved_by ? ` · ${detail.gmv_adjustment_approved_by}` : ''}
+                  </span>
+                ) : (
+                  <span className="badge">Dalam toleransi 20%</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <label className="field" style={{ marginTop: 8 }}>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Alasan kalau jumlah floor sebulan menyimpang lebih dari 20% dari anchor (wajib saat
+              menyimpang; disetujui Head of Account bersamaan dengan Strategi-nya)
+            </span>
+            <textarea
+              rows={2}
+              value={targets.gmv_adjustment_reason}
+              onChange={(e) => onTargets({ gmv_adjustment_reason: e.target.value })}
+              disabled={disabled}
+              placeholder="mis. baseline 3 bulan terakhir flat di 180jt; anchor 400jt butuh budget iklan 2x yang belum disetujui klien"
+            />
+          </label>
+        </div>
 
         {detail.channels.length > 0 && months > 0 && (
           <div

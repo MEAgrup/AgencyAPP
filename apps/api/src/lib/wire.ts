@@ -2545,6 +2545,12 @@ export interface RenewalWire {
   decision_note: string | null;
   contract_id: string | null;
   transaction_id: string | null;
+  /**
+   * O76 — target GMV yang disepakati ulang untuk periode ini; `null` = tidak
+   * diubah. Dikirim SELALU: panel renewal yang tidak menampilkannya membuat
+   * "anchor floor GMV bergeser" jadi perubahan tak terlihat.
+   */
+  target_gmv_baru: string | null;
   created_at: string;
   created_by: string;
 }
@@ -2553,6 +2559,7 @@ export function renewalToWire(r: renewal.RenewalRequest): RenewalWire {
   return {
     id: r.id, client_id: r.clientId, jenis: r.jenis, proposed_by: r.proposedBy, status: r.status,
     decision_note: r.decisionNote, contract_id: r.contractId, transaction_id: r.transactionId,
+    target_gmv_baru: r.targetGmvBaru,
     created_at: r.createdAt.toISOString(), created_by: r.createdBy,
   };
 }
@@ -4393,6 +4400,13 @@ export interface StrategiWire {
   sanggahan_target_realistis: string | null;
   sanggahan_diajukan_pada: string | null;
   sanggahan_diajukan_oleh: string | null;
+  // O76 — anchor floor GMV + gerbang toleransi. Dikirim SELALU (null eksplisit):
+  // halaman yang menampilkan floor tanpa anchor-nya kembali ke keadaan sebelum
+  // O76, dan kunci yang HILANG lebih berbahaya daripada null (kelas O43).
+  client_target_gmv: string | null;
+  gmv_adjustment_status: string;
+  gmv_adjustment_reason: string | null;
+  gmv_adjustment_approved_by: string | null;
   // Section E/H narrative header fields (A-09a). The rest of E/H are child rows:
   // E-3…E-11 in `pillars`, H-1 in `risks`.
   growth_thesis: string | null;
@@ -4465,6 +4479,10 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     sanggahan_target_realistis: s.sanggahanTargetRealistis,
     sanggahan_diajukan_pada: s.sanggahanDiajukanPada,
     sanggahan_diajukan_oleh: s.sanggahanDiajukanOleh,
+    client_target_gmv: s.clientTargetGmv,
+    gmv_adjustment_status: s.gmvAdjustmentStatus,
+    gmv_adjustment_reason: s.gmvAdjustmentReason,
+    gmv_adjustment_approved_by: s.gmvAdjustmentApprovedBy,
     growth_thesis: s.growthThesis,
     urutan_eksekusi_alasan: s.urutanEksekusiAlasan,
     skenario_mundur: s.skenarioMundur,

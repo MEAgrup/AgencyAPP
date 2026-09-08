@@ -322,10 +322,14 @@ describeDb('decideRenewal / resubmitRenewal', () => {
 
 describeDb('executeRenewal', () => {
   it('births CTR-/SVC-/TRX- on the existing client; a second perpanjangan chains contract_sebelumnya_id to the first', async () => {
-    // sales.close() never mints a Contract (that's the AM's separate M6A door,
-    // contract.ensureContractForService) — so right after closing, this client
-    // has NO contracts row yet. The FIRST renewal therefore has nothing to
-    // chain to; a SECOND renewal is what actually proves the chain forms.
+    // Sejak A-4 (K-2) `sales.close()` MENCETAK `contracts` — tapi HANYA kalau
+    // ada jendela periodik untuk dicatat (`resolveClosingWindow`), yaitu kalau
+    // salah satu baris katalognya punya `durasi_bulan`. Fixture ini sekali-jadi
+    // (durasi null), jadi klien ini memang belum punya kontrak, dan assertion di
+    // bawah mengukur ITU — bukan klaim lama "close() tidak pernah mencetak
+    // Contract", yang sudah tidak benar sejak A-4. Renewal PERTAMA karena itu
+    // tidak punya apa pun untuk dirantai; renewal KEDUA yang membuktikan
+    // rantainya terbentuk.
     const svc = await seedService('SVC-ZZ-RN-EXEC');
     const clientId = await closedClient(budi(), svc);
     const noContractYet = await sql<{ n: number }[]>`select count(*)::int as n from contracts where client_id = ${clientId}`;
@@ -576,5 +580,88 @@ describeDb('reads', () => {
     expect(money.parse(after.lines[0].proposedPrice)).toBe(money.parse('7200000'));
 
     await expect(getRenewalDetail(sql, andi(), rn.id)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+
+describeDb('O76 — anchor target GMV di-refresh saat perpanjangan', () => {
+  const targetOf = async (clientId: string): Promise<string> =>
+    (await sql<{ target_gmv: string }[]>`select target_gmv from clients where id = ${clientId}`)[0]
+      .target_gmv;
+
+  it('target baru berlaku saat DIEKSEKUSI, bukan saat diusulkan', async () => {
+    const svc = await seedService('SVC-ZZ-RN-ANCHOR1');
+    const clientId = await closedClient(budi(), svc);
+    const lama = await targetOf(clientId);
+
+    const rn = await proposeRenewal(
+      sql, budi(), clientId, JENIS_PERPANJANGAN, [standardLine(svc)], true, new Date(), '900000000',
+    );
+    expect(rn.targetGmvBaru).toBe('900000000.00');
+    // Usulan yang belum dieksekusi TIDAK boleh menggeser anchor yang sedang
+    // mengukur Strategi berjalan.
+    expect(await targetOf(clientId)).toBe(lama);
+
+    await executeRenewal(sql, budi(), rn.id, {
+      durasiBulan: 12, ...nextYearWindow(),
+      parties: { primarySalespersonId: budi().employeeId, allocations: [{ salespersonId: budi().employeeId, basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    expect(await targetOf(clientId)).toBe('900000000.00');
+  });
+
+  it('perubahan anchor menulis audit before→after pada entitas client, dengan sumbernya', async () => {
+    const svc = await seedService('SVC-ZZ-RN-ANCHOR2');
+    const clientId = await closedClient(budi(), svc);
+    const lama = await targetOf(clientId);
+    const rn = await proposeRenewal(
+      sql, budi(), clientId, JENIS_PERPANJANGAN, [standardLine(svc)], true, new Date(), '750000000',
+    );
+    const res = await executeRenewal(sql, budi(), rn.id, {
+      durasiBulan: 12, ...nextYearWindow(),
+      parties: { primarySalespersonId: budi().employeeId, allocations: [{ salespersonId: budi().employeeId, basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    const audit = await sql<{
+      before_json: { target_gmv: string | null };
+      after_json: { target_gmv: string; sumber: string; renewal_request_id: string; contract_id: string };
+    }[]>`
+      select before_json, after_json from audit_log
+       where entity_type = 'client' and entity_id = ${clientId} and action = 'update'
+         and after_json->>'sumber' = 'renewal'
+       order by id desc limit 1`;
+    expect(audit[0].before_json.target_gmv).toBe(lama);
+    expect(audit[0].after_json.target_gmv).toBe('750000000.00');
+    // KENAPA angkanya berubah, bukan cuma bahwa ia berubah.
+    expect(audit[0].after_json.renewal_request_id).toBe(rn.id);
+    expect(audit[0].after_json.contract_id).toBe(res.contractId);
+  });
+
+  it('tanpa target baru: anchor lama TIDAK disentuh dan nol baris audit palsu', async () => {
+    const svc = await seedService('SVC-ZZ-RN-ANCHOR3');
+    const clientId = await closedClient(budi(), svc);
+    const lama = await targetOf(clientId);
+    const rn = await proposeRenewal(sql, budi(), clientId, JENIS_PERPANJANGAN, [standardLine(svc)], true);
+    expect(rn.targetGmvBaru).toBeNull(); // null = tidak diubah, BUKAN nol
+    await executeRenewal(sql, budi(), rn.id, {
+      durasiBulan: 12, ...nextYearWindow(),
+      parties: { primarySalespersonId: budi().employeeId, allocations: [{ salespersonId: budi().employeeId, basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    expect(await targetOf(clientId)).toBe(lama);
+    const n = await sql<{ n: string }[]>`
+      select count(*) as n from audit_log
+       where entity_type = 'client' and entity_id = ${clientId}
+         and after_json->>'sumber' = 'renewal'`;
+    expect(Number(n[0].n)).toBe(0);
+  });
+
+  it('DB menolak target baru negatif', async () => {
+    const svc = await seedService('SVC-ZZ-RN-ANCHOR4');
+    const clientId = await closedClient(budi(), svc);
+    const rn = await proposeRenewal(sql, budi(), clientId, JENIS_PERPANJANGAN, [standardLine(svc)], true);
+    await expect(
+      sql`update renewal_requests set target_gmv_baru = -1 where id = ${rn.id}`,
+    ).rejects.toThrow();
   });
 });

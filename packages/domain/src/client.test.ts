@@ -15,6 +15,7 @@ import { account, finance, leads, sales } from './index';
 import {
   addPlatform,
   canEditAccountRevisable,
+  canEditClientTargetGmv,
   canEditBaseline,
   canEditProfile,
   canApproveHold,
@@ -88,12 +89,22 @@ describe('lock-matrix predicates', () => {
     expect(canEditBaseline(director())).toBe(true);
     expect(canEditBaseline(accountLead())).toBe(false);
   });
-  it('Target GMV / Marketing Budget: any Account or Director', () => {
+  it('Marketing Budget: any Account or Director', () => {
     expect(canEditAccountRevisable(accountStaff())).toBe(true);
     expect(canEditAccountRevisable(accountLead())).toBe(true);
     expect(canEditAccountRevisable(director())).toBe(true);
     expect(canEditAccountRevisable(budi())).toBe(false);
     expect(canEditAccountRevisable(od())).toBe(false);
+  });
+  it('Target GMV: Account LEAD / Director only — ia anchor floor GMV (O76)', () => {
+    // Diketatkan 2026-09-08: sejak O76 field ini jadi anchor yang mengukur
+    // janji AM (`strategi.client_target_gmv`). Kalau staff AM boleh
+    // menggesernya, ia bisa memindahkan garis yang membatasi dirinya sendiri.
+    expect(canEditClientTargetGmv(accountStaff())).toBe(false);
+    expect(canEditClientTargetGmv(accountLead())).toBe(true);
+    expect(canEditClientTargetGmv(director())).toBe(true);
+    expect(canEditClientTargetGmv(budi())).toBe(false);
+    expect(canEditClientTargetGmv(od())).toBe(false);
   });
   it('PIC reassign: Sales Lead / Director only', () => {
     expect(canReassignPic(salesLead())).toBe(true);
@@ -151,7 +162,10 @@ describe('updateClient gate (no DB)', () => {
   });
   it('rejects a bad value (empty string / unparseable money)', async () => {
     await expect(updateClient(noSql, accountLead(), 'CLI-x', { toko: '  ' })).rejects.toBeInstanceOf(IncompleteError);
-    await expect(updateClient(noSql, accountStaff(), 'CLI-x', { targetGmv: 'abc' })).rejects.toBeInstanceOf(IncompleteError);
+    // Aktornya HARUS yang berwenang atas field-nya, kalau tidak yang diuji
+    // jadi gerbang role dan bukan parsing angkanya (sejak O76 targetGmv =
+    // Account lead / Director).
+    await expect(updateClient(noSql, accountLead(), 'CLI-x', { targetGmv: 'abc' })).rejects.toBeInstanceOf(IncompleteError);
   });
 });
 
@@ -290,11 +304,15 @@ describeDb('updateClient (lock matrix, M4 §4)', () => {
     expect(audit[0].after_json.value).toBe('Alpha Digital (koreksi)');
   });
 
-  it('Account (staff) revises Target GMV + Marketing Budget', async () => {
+  it('Account (staff) revises Marketing Budget; Target GMV butuh Head of Account (O76)', async () => {
     const id = await closedClient();
-    await updateClient(sql, accountStaff(), id, { targetGmv: '120000000', marketingBudget: '15000000' });
-    expect(await field(id, 'target_gmv')).toBe('120000000.00');
+    await updateClient(sql, accountStaff(), id, { marketingBudget: '15000000' });
     expect(await field(id, 'marketing_budget')).toBe('15000000.00');
+    // Anchor floor GMV: staff AM ditolak, Head of Account boleh.
+    await expect(updateClient(sql, accountStaff(), id, { targetGmv: '120000000' }))
+      .rejects.toBeInstanceOf(ForbiddenError);
+    await updateClient(sql, accountLead(), id, { targetGmv: '120000000' });
+    expect(await field(id, 'target_gmv')).toBe('120000000.00');
   });
 
   it('only OD/Director may correct the GMV baseline', async () => {

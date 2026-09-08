@@ -14,6 +14,12 @@ import { strategiDetailToWire, strategiTargetsFromWire } from '@/lib/wire';
 
 interface Body {
   targets?: unknown;
+  /**
+   * O76 — alasan WAJIB kalau Σ floor GMV per bulan menyimpang > 20% dari
+   * `clients.target_gmv` (angka yang Sales sepakati dengan klien). Domain yang
+   * memutuskan apakah ia wajib; di dalam toleransi ia diabaikan.
+   */
+  gmv_adjustment_reason?: string;
 }
 
 export async function PUT(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
@@ -21,7 +27,9 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     const actor = requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<Body>(request);
-    const saved = await strategi.saveTargets(db(), actor, id, strategiTargetsFromWire(b.targets ?? []));
+    const saved = await strategi.saveTargets(
+      db(), actor, id, strategiTargetsFromWire(b.targets ?? []), b.gmv_adjustment_reason ?? '',
+    );
     return json(strategiDetailToWire(saved));
   });
 }

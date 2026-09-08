@@ -25,6 +25,12 @@ interface Body {
   jenis?: string;
   no_nego?: boolean;
   lines?: ProposalLineBody[];
+  /**
+   * O76 — target GMV yang disepakati ULANG untuk periode ini. Kosong = tidak
+   * diubah (form mengisinya dengan angka lama sebagai default). Baru berlaku
+   * saat `executeRenewal`, bukan saat diusulkan.
+   */
+  target_gmv_baru?: string | null;
 }
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
@@ -32,7 +38,10 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     const actor = requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<Body>(request);
-    const rn = await renewal.proposeRenewal(db(), actor, id, b.jenis ?? '', toProposalLines(b.lines), b.no_nego === true);
+    const rn = await renewal.proposeRenewal(
+      db(), actor, id, b.jenis ?? '', toProposalLines(b.lines), b.no_nego === true,
+      new Date(), b.target_gmv_baru ?? null,
+    );
     return json(renewalToWire(rn), 201);
   });
 }

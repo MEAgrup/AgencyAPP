@@ -433,10 +433,14 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
         //    visible cause.
         next = await saveStrategiKpi(id, drafts.kpi);
         const { rows: gmvRows } = gmvCellsToBody(drafts.targets.gmv);
-        next = await saveStrategiTargets(id, [
-          ...gmvRows,
-          ...supportRowsToBody(drafts.targets.pendukung),
-        ]);
+        next = await saveStrategiTargets(
+          id,
+          [...gmvRows, ...supportRowsToBody(drafts.targets.pendukung)],
+          // O76 — dikirim bersama matriksnya, satu transaksi. Server yang
+          // memutuskan apakah alasan ini wajib (Σ floor per bulan vs anchor
+          // `client_target_gmv`); di dalam toleransi ia diabaikan.
+          drafts.targets.gmv_adjustment_reason,
+        );
         next = await saveStrategiAssumptions(
           id,
           pruneTargetTerkait(

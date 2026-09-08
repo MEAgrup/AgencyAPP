@@ -155,6 +155,7 @@ import {
   updateHeader,
   type ChannelInput,
 } from './strategi';
+import { MSG_GMV_ADJUSTMENT_REASON_REQUIRED } from './account';
 
 const am = (id = 'ZZ-AM') => ({
   employeeId: id,
@@ -334,6 +335,33 @@ async function seedService(tier = 'plan_wajib'): Promise<string> {
             'Full Store Management', '40000000.00', '10%', '[Awaiting Onboarding]',
             ${tier === 'plan_wajib'}, ${tier}, 'ZZ-AM')`;
   return serviceId;
+}
+
+/**
+ * O76 — `seedSubmittable` versi ber-anchor: klien punya `target_gmv` sungguhan
+ * dan matriks target ditulis dengan floor yang kita pilih, supaya gerbang ±20%
+ * benar-benar terlibat. `seedSubmittable` sendiri memakai anchor 0 (tidak ada
+ * ekspektasi Sales), jadi ia melewati gerbang ini sepenuhnya.
+ */
+async function seedSubmittableWithAnchor(
+  anchor: string,
+  floor: string,
+): Promise<{ serviceId: string; strategiId: string }> {
+  const seeded = await seedSubmittable();
+  await sql`
+    update clients set target_gmv = ${anchor}
+     where id = (select client_id from services where id = ${seeded.serviceId})`;
+  await saveTargets(
+    sql,
+    am(),
+    seeded.strategiId,
+    [
+      { channel: 'Shopee', monthIndex: 1, metric: 'gmv', nilaiFloor: floor, nilaiStretch: floor },
+      { channel: 'Shopee', monthIndex: 1, metric: 'cr', nilaiFloor: null, nilaiStretch: '2.80' },
+    ],
+    'alasan simpangan (fixture O76)',
+  );
+  return seeded;
 }
 
 const HEADER = {
@@ -4802,5 +4830,149 @@ describeDb('A-3 — approval → Brief, the seam (Account #5)', () => {
     // throwing and rolling the whole revision approval back.
     await approveStrategi(sql, spv(), v2.id);
     expect(await statusOf(serviceId)).toBe('[Briefed]');
+  });
+});
+
+describeDb('O76 — floor GMV ber-anchor pada kesepakatan Sales + gerbang ±20%', () => {
+  /** Anchor = `clients.target_gmv`, angka yang Sales sepakati di form Qualified. */
+  async function seedServiceWithAnchor(anchor: string): Promise<string> {
+    const serviceId = await seedService();
+    await sql`
+      update clients set target_gmv = ${anchor}
+       where id = (select client_id from services where id = ${serviceId})`;
+    return serviceId;
+  }
+
+  const anchorStateOf = async (strategiId: string) =>
+    (
+      await sql<
+        {
+          client_target_gmv: string | null;
+          gmv_adjustment_status: string;
+          gmv_adjustment_reason: string | null;
+          gmv_adjustment_approved_by: string | null;
+        }[]
+      >`select client_target_gmv, gmv_adjustment_status, gmv_adjustment_reason,
+               gmv_adjustment_approved_by from strategi where id = ${strategiId}`
+    )[0];
+
+  const gmvRow = (channel: string, floor: string, stretch: string) => ({
+    channel,
+    monthIndex: 1,
+    metric: 'gmv' as const,
+    nilaiFloor: floor,
+    nilaiStretch: stretch,
+  });
+
+  it('floor yang sepadan anchor: status dalam_toleransi + anchor DI-SNAPSHOT', async () => {
+    const serviceId = await seedServiceWithAnchor('400000000.00');
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveTargets(sql, am(), s.id, [gmvRow('Shopee', '400000000.00', '460000000.00')]);
+    const st = await anchorStateOf(s.id);
+    expect(st.client_target_gmv).toBe('400000000.00');
+    expect(st.gmv_adjustment_status).toBe('dalam_toleransi');
+    expect(st.gmv_adjustment_reason).toBeNull();
+  });
+
+  it('DI LUAR toleransi tanpa alasan DITOLAK dengan pesan BI-nya', async () => {
+    const serviceId = await seedServiceWithAnchor('400000000.00');
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    // Rp 250jt terhadap anchor Rp 400jt = simpangan 37,5% — inilah contoh yang
+    // sebelum O76 lolos seluruh pagar: floor beku, stretch >= floor, semua
+    // hijau, dan angkanya 150jt di bawah yang dijanjikan ke klien.
+    await expect(
+      saveTargets(sql, am(), s.id, [gmvRow('Shopee', '250000000.00', '260000000.00')]),
+    ).rejects.toThrow(MSG_GMV_ADJUSTMENT_REASON_REQUIRED);
+    // Dan matriksnya TIDAK tersimpan separuh: satu transaksi.
+    const rows = await sql<{ n: string }[]>`
+      select count(*) as n from strategi_target where strategi_id = ${s.id}`;
+    expect(Number(rows[0].n)).toBe(0);
+  });
+
+  it('DI LUAR toleransi DENGAN alasan → menunggu_persetujuan, alasannya tersimpan', async () => {
+    const serviceId = await seedServiceWithAnchor('400000000.00');
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveTargets(
+      sql,
+      am(),
+      s.id,
+      [gmvRow('Shopee', '250000000.00', '260000000.00')],
+      'baseline 3 bulan terakhir flat di 180jt; 400jt butuh budget iklan 2x yang belum disetujui klien',
+    );
+    const st = await anchorStateOf(s.id);
+    expect(st.gmv_adjustment_status).toBe('menunggu_persetujuan');
+    expect(st.gmv_adjustment_reason).toContain('baseline 3 bulan terakhir flat');
+    expect(st.gmv_adjustment_approved_by).toBeNull(); // belum ada yang ACC
+  });
+
+  it('diukur PER BULAN, bukan per baris channel: dua channel yang menjumlah pas = dalam toleransi', async () => {
+    const serviceId = await seedServiceWithAnchor('400000000.00');
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    // Masing-masing channel setengah anchor. Kalau gerbangnya membandingkan
+    // PER BARIS, keduanya menyimpang 50% dan matriks yang benar-benar sehat
+    // akan ditolak — itu sebabnya yang dibandingkan Σ per bulan.
+    await saveTargets(sql, am(), s.id, [
+      gmvRow('Shopee', '200000000.00', '230000000.00'),
+      gmvRow('TikTok Shop', '200000000.00', '230000000.00'),
+    ]);
+    expect((await anchorStateOf(s.id)).gmv_adjustment_status).toBe('dalam_toleransi');
+  });
+
+  it('anchor nol (Sales tidak mencatat ekspektasi) = tidak ada gerbang, bukan galat', async () => {
+    // Aturan rumah #7: pembagian dengan nol tidak pernah muncul sebagai error.
+    const serviceId = await seedService(); // target_gmv = 0
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveTargets(sql, am(), s.id, [gmvRow('Shopee', '400000000.00', '460000000.00')]);
+    const st = await anchorStateOf(s.id);
+    expect(st.gmv_adjustment_status).toBe('dalam_toleransi');
+    expect(st.client_target_gmv).toBe('0.00');
+  });
+
+  it('ACC Head men-stempel simpangannya, di transaksi yang sama dengan beku floor', async () => {
+    const { strategiId } = await seedSubmittableWithAnchor('400000000.00', '250000000.00');
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const st = await anchorStateOf(strategiId);
+    expect(st.gmv_adjustment_status).toBe('disetujui');
+    expect(st.gmv_adjustment_approved_by).toBe('ZZ-SPV');
+    // Dan penegak O57 tetap jalan: floor-nya sekarang beku.
+    const floor = await sql<{ sumber_floor: string }[]>`
+      select sumber_floor from strategi_target
+       where strategi_id = ${strategiId} and metric = 'gmv' limit 1`;
+    expect(floor[0].sumber_floor).toBe('disetujui_head');
+  });
+
+  it('snapshot ≠ anchor hidup: menggeser clients.target_gmv sesudahnya TIDAK menggeser floor mana pun', async () => {
+    const { strategiId } = await seedSubmittableWithAnchor('400000000.00', '400000000.00');
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const before = await anchorStateOf(strategiId);
+    // Head of Account menaikkan anchor-nya (jalur `client.updateClient`, sejak
+    // O76 lead-only). Snapshot yang sudah membeku tidak ikut, dan floor yang
+    // sudah di-ACC dijaga `guard_floor_disetujui` — jadi selisihnya KELIHATAN
+    // alih-alih diam-diam mengubah arti angka lama.
+    await sql`
+      update clients set target_gmv = '900000000.00'
+       where id = (select client_id from strategi where id = ${strategiId})`;
+    const after = await anchorStateOf(strategiId);
+    expect(after.client_target_gmv).toBe(before.client_target_gmv);
+    const floor = await sql<{ nilai_floor: string }[]>`
+      select nilai_floor from strategi_target
+       where strategi_id = ${strategiId} and metric = 'gmv' limit 1`;
+    expect(floor[0].nilai_floor).toBe('400000000.00');
+  });
+
+  it('DB menolak status menyimpang tanpa alasan, dan stempel tanpa status disetujui', async () => {
+    // Belt & braces: dua CHECK yang mencerminkan validasi TS. Kalau ada jalur
+    // tulis kedua yang lahir nanti, DB tetap menolaknya.
+    const serviceId = await seedServiceWithAnchor('400000000.00');
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      sql`update strategi set gmv_adjustment_status = 'menunggu_persetujuan',
+              gmv_adjustment_reason = null where id = ${s.id}`,
+    ).rejects.toThrow();
+    await expect(
+      sql`update strategi set gmv_adjustment_approved_by = 'ZZ-SPV' where id = ${s.id}`,
+    ).rejects.toThrow();
   });
 });

@@ -928,6 +928,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         salesPicId={client.sales_pic_id}
         role={role}
         employeeId={employee?.employee_id ?? null}
+        clientTargetGmv={client.target_gmv}
       />
 
       <section className="card">

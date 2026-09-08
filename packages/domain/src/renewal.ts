@@ -17,9 +17,12 @@
  * gate), `validateShape`/`validateScheduleTotal`/`validateParties` (the exact
  * M0 §6 allocation + payment-schedule rules), `resolvePIC`. Execution births
  * `SVC-`/`TRX-`/`INST-` with the SAME status constants and table shapes
- * `sales.close()` births them with. `CTR-` is the one exception: `close()`
- * never mints a Contract at all (Services stay contract-less until the AM
- * groups them via `contract.ensureContractForService`, M6A) — a renewal has
+ * `sales.close()` births them with. `CTR-` is the one exception — and that
+ * exception CHANGED SHAPE with A-4 (K-2, 2026-09-07): `close()` now DOES mint a
+ * Contract, but only when the closing has a periodic window to record (a line
+ * carrying `durasi_bulan`; `sales.resolveClosingWindow` returns null for an
+ * all-one-off deal, and only those Services stay contract-less until the AM
+ * groups them via `contract.ensureContractForService`, M6A). A renewal has
  * exactly one natural grouping (this request's own lines), so execution
  * mints the Contract directly and pre-attaches the Services to it. This is
  * also how R-03 sidesteps the GARIS STOP `DECISIONS.md` Kinerja Sales #4
@@ -113,6 +116,14 @@ export interface RenewalRequest {
   decisionNote: string | null;
   contractId: string | null;
   transactionId: string | null;
+  /**
+   * O76 (2026-09-08) — target GMV yang disepakati ULANG untuk periode ini.
+   * `null` = penyaji tidak mengubahnya, anchor lama tetap berlaku (berbeda dari
+   * nol). Dipindahkan ke `clients.target_gmv` oleh `executeRenewal`, bukan saat
+   * diusulkan: usulan yang belum disetujui tidak boleh menggeser anchor yang
+   * sedang mengukur Strategi berjalan.
+   */
+  targetGmvBaru: string | null;
   createdAt: Date;
   createdBy: string;
 }
@@ -126,6 +137,7 @@ interface RenewalRow {
   decision_note: string | null;
   contract_id: string | null;
   transaction_id: string | null;
+  target_gmv_baru: string | null;
   created_at: Date;
   created_by: string;
 }
@@ -134,6 +146,7 @@ function rowToRenewal(r: RenewalRow): RenewalRequest {
   return {
     id: r.id, clientId: r.client_id, jenis: r.jenis, proposedBy: r.proposed_by, status: r.status,
     decisionNote: r.decision_note, contractId: r.contract_id, transactionId: r.transaction_id,
+    targetGmvBaru: r.target_gmv_baru,
     createdAt: r.created_at, createdBy: r.created_by,
   };
 }
@@ -388,6 +401,12 @@ export async function proposeRenewal(
   lines: RenewalLine[],
   noNego: boolean,
   now: Date = new Date(),
+  /**
+   * O76 — target GMV yang disepakati ULANG untuk periode perpanjangan ini.
+   * Kosong/undefined = tidak diubah (form mengisinya dengan angka lama sebagai
+   * default, jadi "tidak diubah" adalah pilihan sadar, bukan kelalaian).
+   */
+  targetGmvBaru?: string | null,
 ): Promise<RenewalRequest> {
   if (jenis !== JENIS_PERPANJANGAN && jenis !== JENIS_CROSS_SELL) {
     throw new IncompleteError();
@@ -406,12 +425,21 @@ export async function proposeRenewal(
     }
     const id = await ex.ident.identNext('RNW', now);
     const status = noNego ? STATUS_AUTO_APPROVED : STATUS_PENDING;
+    // O76: angka rupiah lewat @cdps/core money, seperti setiap rupiah lain di
+    // batas ini — string kosong jadi null, bukan 0 (aturan rumah #4).
+    const targetBaru = nullString(targetGmvBaru ?? undefined);
+    const targetBaruDecimal = targetBaru === null ? null : money.decimal(money.parse(targetBaru));
     await tx`
-      insert into renewal_requests (id, client_id, jenis, proposed_by, status, created_by)
-      values (${id}, ${clientId}, ${jenis}, ${actor.employeeId}, ${status}, ${actor.employeeId})`;
+      insert into renewal_requests
+        (id, client_id, jenis, proposed_by, status, target_gmv_baru, created_by)
+      values
+        (${id}, ${clientId}, ${jenis}, ${actor.employeeId}, ${status}, ${targetBaruDecimal},
+         ${actor.employeeId})`;
     await ex.audit.insertAudit({
       entityType: ENTITY, entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
-      beforeJson: null, afterJson: { client_id: clientId, jenis, status }, createdBy: actor.employeeId,
+      beforeJson: null,
+      afterJson: { client_id: clientId, jenis, status, target_gmv_baru: targetBaruDecimal },
+      createdBy: actor.employeeId,
     });
     await writeRenewalProposal(tx, ex, actor, id, lines, now);
     if (status === STATUS_PENDING) {
@@ -643,6 +671,37 @@ export async function executeRenewal(
     await tx`
       update clients set sales_pic_id = ${primary}, commission_payment_pic_id = ${pic}
        where id = ${row.client_id}`;
+
+    // 5b) O76 — ANCHOR floor GMV di-refresh, kalau perpanjangan ini menyepakati
+    //     angka baru. Momen inilah yang benar: kontraknya baru saja lahir di
+    //     langkah 1, jadi janji yang mengikat periode berikutnya berlaku dari
+    //     sini — bukan dari saat usulannya diketik.
+    //
+    //     Ini jalur tulis KEDUA ke `clients.target_gmv`, dan itu disengaja.
+    //     Yang pertama (`client.updateClient`) sejak O76 lead-only: ia untuk
+    //     KOREKSI oleh Account. Yang ini untuk angka yang baru DISEPAKATI, dan
+    //     yang menyepakatinya Sales — logika yang sama dengan K-2 menaruh durasi
+    //     kerja sama di closing Sales, bukan di form AM. Keduanya menulis baris
+    //     audit before->after pada entitas `client`, jadi riwayatnya satu.
+    if (row.target_gmv_baru !== null) {
+      const beforeTarget = await tx<{ target_gmv: string }[]>`
+        select target_gmv from clients where id = ${row.client_id}`;
+      await tx`
+        update clients set target_gmv = ${row.target_gmv_baru} where id = ${row.client_id}`;
+      await ex.audit.insertAudit({
+        entityType: 'client', entityId: row.client_id, actorEmployeeId: actor.employeeId,
+        action: 'update',
+        beforeJson: { target_gmv: beforeTarget[0]?.target_gmv ?? null },
+        afterJson: {
+          target_gmv: row.target_gmv_baru,
+          // KENAPA angkanya berubah, bukan cuma bahwa ia berubah.
+          sumber: 'renewal',
+          renewal_request_id: id,
+          contract_id: contractId,
+        },
+        createdBy: actor.employeeId,
+      });
+    }
 
     // 6) Link the renewal request to what it produced, transition to Executed.
     await tx`update renewal_requests set contract_id = ${contractId}, transaction_id = ${trxId} where id = ${id}`;
