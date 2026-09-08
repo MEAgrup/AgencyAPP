@@ -66,15 +66,32 @@ COMMENT ON COLUMN sm_edges.require_division IS
 
 -- --- 2. sm_transition: parameter divisi aktor ------------------------------
 --
--- Parameter ke-11 TANPA DEFAULT, dan versi 10-parameter DIBUANG. Sengaja:
--- sebuah default akan membuat pemanggil lama tetap kompilasi sambil diam-diam
--- mengirim "divisi tidak diketahui", dan edge ber-divisi akan menolak mereka
--- dengan pesan yang menyesatkan. Menghapus overload lama memaksa setiap
--- pemanggil menyebut divisi aktornya — kegagalannya keras dan di tempat yang
--- benar. (Overload berdampingan juga akan membuat panggilan 10-argumen
--- ambigu: "function is not unique".)
-
-DROP FUNCTION IF EXISTS sm_transition(text, text, text, text, text, text, text, text, boolean, boolean);
+-- Parameter ke-11 TANPA DEFAULT. Sengaja: sebuah default akan membuat
+-- pemanggil lama tetap kompilasi sambil diam-diam mengirim "divisi tidak
+-- diketahui", dan edge ber-divisi akan menolak mereka dengan pesan yang
+-- menyesatkan. Tanpa default, setiap pemanggil WAJIB menyebut divisi aktornya
+-- dan kegagalannya keras di tempat yang benar.
+--
+-- ── Kenapa versi 10-argumen TIDAK dibuang DI SINI ─────────────────────────
+--
+-- Versi pertama migrasi ini membuangnya, dan itu salah. Tanda tangan baru =
+-- fungsi baru, jadi membuang yang lama dalam napas yang sama menciptakan
+-- jendela di mana **setiap transisi status di seluruh sistem gagal** — bukan
+-- cuma tutup buku:
+--
+--   kode lama + fungsi baru saja  ⇒ "function sm_transition(...) does not exist"
+--   kode baru + fungsi lama saja  ⇒ galat yang sama, arah sebaliknya
+--
+-- Aturan rilis rumah ini sudah menyebutnya: migrasi ADITIF boleh mendahului
+-- kode, migrasi DROP wajib MENGIKUTI deploy kode. Jadi keduanya hidup
+-- berdampingan di sini, dan pembuangannya ada di migrasi TERPISAH
+-- `20260924050000_d3_buang_sm_transition_lama.sql` yang diterapkan SESUDAH
+-- kode baru mendarat.
+--
+-- Tidak ada ambiguitas selama keduanya hidup: panggilan 10-argumen cocok persis
+-- dengan yang 10-argumen, panggilan 11-argumen dengan yang 11 — "function is
+-- not unique" hanya muncul kalau salah satunya punya DEFAULT, dan tidak ada
+-- yang punya.
 
 CREATE OR REPLACE FUNCTION sm_transition(
     p_machine           text,
