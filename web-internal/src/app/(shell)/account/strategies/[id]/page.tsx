@@ -287,8 +287,8 @@ export default function StrategyDetailPage({ params }: { params: Promise<{ id: s
         </div>
         <div className="alert alertInfo" role="status">
           <p style={{ margin: 0 }}>
-            <strong>Strategy &amp; Plan (<code>STR-</code>) sudah dipensiunkan</strong> sejak
-            2026-09-08. Halaman ini hanya untuk membaca riwayat &mdash; nol tombol yang
+            <strong>Strategy &amp; Plan (<code>STR-</code>) sudah dipensiunkan</strong>{' '}
+            sejak 2026-09-08. Halaman ini hanya untuk membaca riwayat &mdash; nol tombol yang
             memajukan statusnya, karena persetujuannya memang sudah tidak ada.
           </p>
           <p style={{ marginBottom: 0 }}>
