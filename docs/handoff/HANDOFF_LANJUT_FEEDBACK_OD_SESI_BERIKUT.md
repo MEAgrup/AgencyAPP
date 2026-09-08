@@ -86,6 +86,62 @@ yang bisa maju sampai A-req mendarat.
 Urutan termurah yang disarankan ke A: **A-req-1 → A-req-2 → A-req-3 → A-3 → A-4**
 (tiga A-req masing-masing membuka satu sisa Jalur B yang fondasinya sudah mendarat).
 
+### 2c. ⛔ TEMUAN yang membatalkan premis ketokan A-3 (2026-09-08)
+
+Pemilik mengetok: *"STR- lama sudah pensiun, kodenya mungkin masih ada tapi semua
+jalurnya tidak ada di web."* **Premis itu tidak cocok dengan kodenya, dan
+ketokannya karena itu BELUM bisa dipakai.** Terukur di `main`:
+
+```
+web-internal/src/lib/nav.ts:153
+  { href: '/persetujuan', label: 'Persetujuan',
+    access: ownedBy(SALES, ACCOUNT, FINANCE, KOL) }        ← menu AKTIF
+
+web-internal/src/app/(shell)/persetujuan/page.tsx:1039
+  kind === 'approve' ? approveStrategy(row.strategy_id) : ...
+  confirmText: "Setujui Plan …? Service … lanjut ke [Strategy Approved]
+                dan Brief boleh dibuat."                    ← efeknya DIIKLANKAN
+
+web-internal/src/app/(shell)/account/strategies/[id]/page.tsx:200
+  const res = await approveStrategy(id);                    ← tombol kedua
+
+apps/api/src/app/api/v1/strategies/[id]/approve/route.ts:17
+  await account.approveStrategy(db(), actor, id);            ← rutenya ada
+```
+
+Jadi keadaan sebenarnya **bukan** "satu jalur punya jahitan, satu tidak".
+Keadaannya: **ada DUA fitur Strategy yang dua-duanya hidup di web**, dan hanya
+satu yang membuka gerbang Brief.
+
+| | STR- (`account.ts`) | STRG- (`strategi.ts`) |
+|---|---|---|
+| Layar | `/persetujuan` (menu aktif) + `/account/strategies/[id]` | `/strategi/[id]` |
+| Rute approve | `/api/v1/strategies/[id]/approve` | `/api/v1/strategi/[id]/approve` |
+| Menggerakkan Service ke `[Strategy Approved]` | **YA** (`account.ts:1025-1026`) | **TIDAK** |
+| Versioning (`versiNo`, `disetujui_pada`) | tidak | ya |
+
+**Konsekuensinya untuk keluhan Account #5 ("CRO mentok di
+`[Awaiting Onboarding]`"):** kemungkinan besar sebabnya bukan jahitan yang
+hilang, melainkan **orang memakai layar STRG- padahal yang membuka gerbang
+adalah layar STR-**. Kalau itu benar, A-3 bukan "sambungkan STRG- ke Service"
+melainkan **"tentukan mana dari dua fitur ini yang kanonik, lalu pensiunkan yang
+satunya sungguh-sungguh"** — dan itu keputusan produk, bukan pekerjaan tukang.
+
+⛔ **JANGAN sambungkan STRG- → Service sebelum ini diketok.** Menyambungkannya
+sementara `/persetujuan` masih hidup menghasilkan **dua penulis hidup** ke status
+yang sama — persisnya yang ketokan tadi ingin dihindari. Aturan rumah #2: kalau
+dua modul berkonflik, STOP dan tandai.
+
+Yang dibutuhkan dari pemilik, dengan fakta yang benar kali ini:
+1. **Mana yang kanonik — STR- atau STRG-?**
+2. Kalau STRG- yang kanonik: pensiunkan STR- **sungguhan** (cabut baris
+   `nav.ts:153` untuk jalur itu, cabut tombol di kedua halaman, cabut/410 rutenya)
+   **dalam commit yang sama** dengan penyambungan STRG- → Service. Semuanya
+   berkas Jalur A.
+3. Kalau STR- yang kanonik: A-3 selesai tanpa kode apa pun — cukup arahkan orang
+   ke layar yang benar, dan keluhan Account #5 adalah masalah navigasi/pelatihan,
+   bukan bug mesin status.
+
 ### 3. Sesudah A-req-1..3 mendarat — sisa Jalur B, kecil dan sudah dipetakan
 Ketiganya **satu-dua baris per tempat**, bukan pekerjaan baru: fondasinya sudah
 ada di PR #312.

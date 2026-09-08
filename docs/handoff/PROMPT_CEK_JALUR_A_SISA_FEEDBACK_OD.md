@@ -239,3 +239,65 @@ memulangkan tiga keluhan divisi dengan usaha paling kecil.
 Aturan yang tidak berubah: stempel migrasi `…T10####`; **jangan naikkan counter**
 (146/40/31/73 — absolut, bukan delta); `docs/DECISIONS.md` jangan disentuh dari
 dalam jalur; berkas Jalur B jangan diedit — tulis permintaannya di handoff-mu.
+
+
+---
+
+# RONDE 2b — KOREKSI PENTING atas Koreksi 1 (2026-09-08, sesudah ketokan pemilik)
+
+Pemilik menjawab pertanyaan "STR- lama masih hidup atau sudah pensiun?" dengan:
+*"sudah pensiun, kodenya mungkin masih ada tapi semua jalurnya tidak ada di web."*
+
+**Jalur B memverifikasi premis itu dan ia TIDAK BENAR.** Jangan bangun A-3 di
+atasnya. Terukur di `main`:
+
+```
+web-internal/src/lib/nav.ts:153
+  { href: '/persetujuan', label: 'Persetujuan',
+    access: ownedBy(SALES, ACCOUNT, FINANCE, KOL) }      ← menu AKTIF, bukan mati
+
+web-internal/src/app/(shell)/persetujuan/page.tsx:1039
+  kind === 'approve' ? approveStrategy(row.strategy_id) : ...
+  confirmText: "Setujui Plan …? Service … lanjut ke [Strategy Approved]
+                dan Brief boleh dibuat."                  ← efeknya diiklankan ke user
+
+web-internal/src/app/(shell)/account/strategies/[id]/page.tsx:200
+  const res = await approveStrategy(id);                  ← tombol Setujui kedua
+
+apps/api/src/app/api/v1/strategies/[id]/approve/route.ts:17
+  await account.approveStrategy(db(), actor, id);          ← rutenya melayani
+```
+
+Jadi bentuk masalahnya berubah lagi, dan ini bentuk yang sebenarnya: **ada DUA
+fitur Strategy, dua-duanya hidup di web, dan hanya satu membuka gerbang Brief.**
+
+| | STR- (`account.ts`) | STRG- (`strategi.ts`) |
+|---|---|---|
+| Layar | `/persetujuan` (menu aktif) + `/account/strategies/[id]` | `/strategi/[id]` |
+| Rute approve | `/api/v1/strategies/[id]/approve` | `/api/v1/strategi/[id]/approve` |
+| Service → `[Strategy Approved]` | **YA** (`account.ts:1025-1026`) | **TIDAK** |
+| Versioning | tidak | ya (`versiNo`, `disetujui_pada`) |
+
+**Hipotesis yang harus kamu uji lebih dulu, sebelum menulis kode apa pun:**
+keluhan Account #5 ("CRO mentok di `[Awaiting Onboarding]`") mungkin **bukan**
+jahitan yang hilang, tapi orang memakai layar **STRG-** padahal yang membuka
+gerbang adalah layar **STR-**. Cara mengujinya murah: di DB, untuk Service yang
+dikeluhkan, lihat apakah ada baris `strategi` (STRG-) yang `Aktif` sementara
+`services.status` masih `[Awaiting Onboarding]`, dan apakah ada baris STR- untuk
+Service yang sama. Kalau pola itu yang muncul, A-3 adalah masalah
+navigasi/kanonikalisasi, bukan mesin status.
+
+⛔ **JANGAN sambungkan STRG- → Service sebelum pemilik mengetok mana yang
+kanonik.** Menyambungkannya sementara `/persetujuan` masih hidup menghasilkan
+**dua penulis hidup** ke status yang sama. Aturan rumah #2: dua modul
+berkonflik ⇒ STOP dan tandai di `DECISIONS.md`, jangan pilih tafsir sendiri.
+
+Kalau nanti diketok **STRG- yang kanonik**, maka pensiunkan STR- **sungguhan
+dalam commit yang sama**: cabut baris `nav.ts:153` untuk jalur itu, cabut tombol
+di `/persetujuan` dan `/account/strategies/[id]`, cabut atau 410-kan
+`/api/v1/strategies/[id]/approve`. Setengah pensiun lebih buruk daripada tidak
+pensiun — ia meninggalkan tombol yang menjanjikan hal yang tidak lagi terjadi.
+
+**A-req-1, A-req-2, A-req-3 tidak tersentuh temuan ini** dan tetap urutan
+pertama. Ketiganya masing-masing membuka satu sisa Jalur B dan nol di antaranya
+menunggu ketokan apa pun.
