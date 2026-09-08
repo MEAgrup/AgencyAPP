@@ -301,3 +301,51 @@ pensiun — ia meninggalkan tombol yang menjanjikan hal yang tidak lagi terjadi.
 **A-req-1, A-req-2, A-req-3 tidak tersentuh temuan ini** dan tetap urutan
 pertama. Ketiganya masing-masing membuka satu sisa Jalur B dan nol di antaranya
 menunggu ketokan apa pun.
+
+
+---
+
+# RONDE 3 — sesudah PR #315 & #312 merge (2026-09-08). Ini yang tersisa dari A.
+
+**A-3 dan A-4 SELESAI, dan RONDE 2b sudah kedaluwarsa — jangan dikirim lagi.**
+Peringatan ⛔-nya ("jangan sambungkan STRG- → Service") tidak berlaku, karena A
+tidak melakukannya: mereka mengubah **gerbangnya**, bukan penulisnya.
+`guardBriefCreation` sekarang lolos kalau Service `[Strategy Approved]` **atau**
+ada STRG- ber-status `Aktif`. Nol penulis kedua ke `services.status` — desain itu
+lebih baik daripada port yang Jalur B usulkan. Diverifikasi di `main` `a78f12be`.
+
+Satu hal yang masih hidup, **bukan bloker**: dua layar Strategy tetap ada
+berdampingan (`/persetujuan` + `/account/strategies/[id]` untuk STR-, dan
+`/strategi/[id]` untuk STRG-). Pertanyaan produk untuk pemilik: mana yang
+dipertahankan sebagai satu-satunya pintu. Tidak mendesak.
+
+## Yang MASIH ditunggu dari Jalur A — hanya tiga, dan ketiganya kecil
+
+Diukur di `main` `a78f12be`: nol `tanggalMulai`/`tanggalAkhir`/`budget` di
+`account.ts`, nol `source_creative_brief_id`, nol `created_count`.
+
+| | Yang dilakukan | Membuka |
+|---|---|---|
+| **A-req-1** | `BriefInput` + `insertBrief` menerima `tanggalMulai`/`tanggalAkhir`/`budget`; `Brief` + `briefToWire` memproyeksikannya. Kolomnya SUDAH ada dari F-4 ⇒ nol migrasi. `brief-inherit.planRowToBriefInput` sudah siap mengisinya — jangan sentuh berkas itu | sisa **B-3**: jendela campaign + budget di layar KOL |
+| **A-req-2** | `account.createBrief` mengisi `briefs.source_creative_brief_id` saat AM membuat Brief Ads + picker-nya di form AM. **Sisi BACA sudah lengkap di main** (`ads.Campaign.sourceCreativeBriefId` → `AssetPicker`) — jangan bangun ulang, jangan sentuh `ads.ts`/`AssetPicker` | **B-5** menyaring sungguhan di produksi |
+| **A-req-3** | satu field jumlah anak (mis. `created_count`) di baris `account.listDivisionQueue` + `wire.ts`. Bukan rute baru — `GET /briefs/{id}/rollup` per baris antrean itu N+1 | **B-1a** progres "n dari N" di ANTREAN divisi |
+
+Ketiganya satu-dua baris per tempat, dan masing-masing memulangkan satu keluhan
+divisi yang sisi seberangnya sudah mendarat dan sudah teruji di `main`.
+
+## Aturan yang masih berlaku
+
+- Mulai dari `main` terbaru (`a78f12be`). Branch Jalur A yang lama sudah merge.
+- **JANGAN naikkan counter** — 146 tabel / 40 prefix / 31 mesin / 73 event.
+  Absolut, bukan delta. Angka acuan lain di `main`: 201 migrasi, `core` 983 ·
+  `db` 53 · `api` 493 · `domain` 2085 (+1 skip) · `web-internal` 684 · `portal` 19.
+- Berkas Jalur B (`creative.ts`, `task.ts`, `kol.ts`, `ads.ts`, `brief-inherit.ts`,
+  halaman `creative`/`ads`/`tasks`/`kol`) — jangan diedit; tulis permintaannya di
+  handoff.
+- Kalau menambah jalur baca lintas-tabel: tulis tesnya dengan `withClaims` +
+  `SET LOCAL ROLE authenticated` (pola `packages/domain/src/brief-scope.rls.test.ts`).
+  Suite domain BYPASSRLS, jadi ia tidak bisa menangkap kelas cacat "predikat TS
+  meloloskan, RLS mengosongkan barisnya, halaman 404 bukan 403" — tiga kali kena
+  di sesi Jalur B.
+- Ranjau: `audit_log` menolak DELETE, jadi menjalankan suite `packages/domain`
+  dua kali atas DB yang sama memerahkan beberapa tes berhitung-baris. Rebuild dulu.

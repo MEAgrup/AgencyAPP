@@ -6,6 +6,17 @@
 >
 > Rencana induk: `docs/handoff/PARALEL_FEEDBACK_OD_DUA_AKUN.md`.
 >
+> ## Angka terverifikasi di `main` gabungan (`a78f12be`), 2026-09-08
+>
+> Dijalankan SESUDAH kedua PR merge, bukan diwarisi dari salah satu PR:
+> **201 migrasi**, gerbang **146 tabel · 40 entity_prefix · 31 sm_machines ·
+> 73 notif_events** (tidak bergeser), keempat invariant SQL hijau. Suite:
+> `core` **983** · `db` **53** · `api` **493** · `domain` **2085** (+1 skip) ·
+> `web-internal` **684** · `portal` **19**. **Nol bentrok semantik** antara #315
+> dan #312 — yang sempat kucurigai (`reads_rls.test.ts` milik A meng-exercise
+> `getBrief`/`listDivisionQueue` sementara migrasiku menulis ulang
+> `briefs_select`) ternyata tidak terjadi.
+>
 > ## Mulai dari mana, dalam satu paragraf
 >
 > Kelima tiket Jalur B (B-1…B-5) **sudah di `main`**. Yang tersisa untuk Jalur B
@@ -24,8 +35,12 @@ main                : PR #312 MERGE 2026-09-08 (atas perintah pemilik).
                       accrual (PR #309) + SELURUH Jalur B (B-1..B-5).
 Branch Jalur B      : claude/cdps-user-feedback-70vbho-b — SUDAH MERGE, jangan
                       dipakai lagi. Pekerjaan lanjutan = branch BARU dari `main`.
-Branch Jalur A      : claude/cdps-user-feedback-account-a-igix3n
-                      A-3, A-4, A-req-1..3 SEMUA belum (dikonfirmasi A 2026-09-08)
+Jalur A             : A-3 + A-4 SUDAH MERGE (PR #315, commit 9484656a — tepat
+                      SEBELUM #312, jadi keduanya ada di main bersama).
+                      A-req-1, A-req-2, A-req-3 MASIH BELUM — diukur di
+                      a78f12be: nol `tanggalMulai`/`tanggalAkhir`/`budget` di
+                      account.ts, nol `source_creative_brief_id`, nol
+                      `created_count`. INI yang masih mengunci sisa Jalur B.
 ```
 
 > ⚠️ **PR #312 sudah merge, jadi ia tidak bisa menampung pekerjaan baru.** Mulai
@@ -48,8 +63,8 @@ Branch Jalur A      : claude/cdps-user-feedback-account-a-igix3n
 | Ads (tak bisa temukan aset) | B-5 | ✅ sisi baca; PENGISIAN kolom butuh A-req-2 |
 | KOL #1 (deadline/budget/pengingat) | B-3 | ⚠️ tick + jatuh tempo + progres ✅; **jendela + budget butuh A-req-1** |
 | Finance #1 & #2 | A-1, A-2 | ✅ sudah di `main` |
-| Account #5 (CRO mentok) | A-3 | ⛔ **BELUM** — dikonfirmasi A 2026-09-08 |
-| Account #1 (durasi dari CRO) | A-4 | ⛔ **BELUM** — dikonfirmasi A 2026-09-08 |
+| Account #5 (CRO mentok) | A-3 | ✅ **SELESAI** — PR #315, lewat gerbang baca-ganda (lihat §2c) |
+| Account #1 (durasi dari CRO) | A-4 | ✅ **SELESAI** — PR #315 |
 | Store Ops (K-4/K-5/K-6) | Wave 3 | ⛔ belum mulai — sesudah A & B tergabung |
 
 ## Yang harus dikerjakan berikutnya, berurutan
@@ -77,8 +92,8 @@ yang bisa maju sampai A-req mendarat.
 
 | Butir | Status | Verifikasi Jalur B atas bukti A |
 |---|---|---|
-| A-3 (CRO mentok) | belum | Benar — dua `transition` di `strategi.ts:approveStrategi` keduanya `table: 'strategi'`. **TAPI** lihat koreksi di bawah |
-| A-4 (durasi dari CRO) | belum | Benar — `grep -c contracts` di `sales.ts` `origin/main` = **0** |
+| A-3 (CRO mentok) | ~~belum~~ **SELESAI** PR #315 | Bukan dengan menulis `services`, tapi dengan gerbang baca-ganda — §2c |
+| A-4 (durasi dari CRO) | ~~belum~~ **SELESAI** PR #315 | `sales.ts` +199, `sales.test.ts` +282 |
 | A-req-1 (jendela+budget) | belum | Benar. Keempat kolom F-4 memang sudah ada ⇒ murni jalur TS, nol migrasi |
 | A-req-2 (isi kolom sumber) | belum | Benar untuk `main`. **Sisi BACA sudah 100% di #312** — grep A nol karena #312 belum ada di branch-nya |
 | A-req-3 (jumlah anak) | belum | Benar substansinya. `createdCount` ADA tapi variabel FE lokal (`creative/briefs/[id]/page.tsx:335`), bukan field antrean |
@@ -101,61 +116,44 @@ yang bisa maju sampai A-req mendarat.
 Urutan termurah yang disarankan ke A: **A-req-1 → A-req-2 → A-req-3 → A-3 → A-4**
 (tiga A-req masing-masing membuka satu sisa Jalur B yang fondasinya sudah mendarat).
 
-### 2c. ⛔ TEMUAN yang membatalkan premis ketokan A-3 (2026-09-08)
+### 2c. A-3 & A-4 SELESAI lewat PR #315 — dan A memilih desain yang LEBIH BAIK
 
-Pemilik mengetok: *"STR- lama sudah pensiun, kodenya mungkin masih ada tapi semua
-jalurnya tidak ada di web."* **Premis itu tidak cocok dengan kodenya, dan
-ketokannya karena itu BELUM bisa dipakai.** Terukur di `main`:
+**Diperbarui 2026-09-08 sesudah merge.** Bagian ini sebelumnya memasang
+peringatan ⛔ "jangan sambungkan STRG- → Service, nanti ada dua penulis".
+**Peringatan itu sudah tidak berlaku, dan usulan port-ku memang bukan yang
+seharusnya dikerjakan.** Diukur di `main` (`a78f12be`):
 
+`approveStrategi` di `strategi.ts` **tidak** menggerakkan `services` sama sekali.
+A tidak mem-port jahitan `account.ts:1025`. Yang mereka ubah adalah
+**gerbangnya**, bukan penulisnya — `account.guardBriefCreation` sekarang membaca
+DUA sumber:
+
+```sql
+exists (select 1 from strategi s
+          where s.contract_id = sv.contract_id and s.status = 'Aktif')
+        as strategi_aktif
+...
+if (effectiveRequiresPlan(...) &&
+    svc.status === SERVICE_STATUS_AWAITING_ONBOARDING &&
+    !svc.strategi_aktif) throw new ConflictError(MSG_STRATEGY_REQUIRED);
 ```
-web-internal/src/lib/nav.ts:153
-  { href: '/persetujuan', label: 'Persetujuan',
-    access: ownedBy(SALES, ACCOUNT, FINANCE, KOL) }        ← menu AKTIF
 
-web-internal/src/app/(shell)/persetujuan/page.tsx:1039
-  kind === 'approve' ? approveStrategy(row.strategy_id) : ...
-  confirmText: "Setujui Plan …? Service … lanjut ke [Strategy Approved]
-                dan Brief boleh dibuat."                    ← efeknya DIIKLANKAN
+Jadi Brief boleh dibuat kalau **salah satu** terpenuhi: Service sudah
+`[Strategy Approved]` (jalur STR- lama, yang memang menulis status), **atau** ada
+STRG- ber-status `Aktif` (jalur baru, yang tidak menulis status apa pun).
 
-web-internal/src/app/(shell)/account/strategies/[id]/page.tsx:200
-  const res = await approveStrategy(id);                    ← tombol kedua
+**Ini lebih baik daripada usulanku.** Port yang kusarankan akan menambah penulis
+kedua ke `services.status`; bacaan-ganda A menambah **nol** penulis. Gerbangnya
+satu, sumbernya dua. Ditambah migrasi backfill
+`20260922100400_a3_backfill_service_strategy_approved.sql` untuk Service yang
+sudah tersangkut.
 
-apps/api/src/app/api/v1/strategies/[id]/approve/route.ts:17
-  await account.approveStrategy(db(), actor, id);            ← rutenya ada
-```
-
-Jadi keadaan sebenarnya **bukan** "satu jalur punya jahitan, satu tidak".
-Keadaannya: **ada DUA fitur Strategy yang dua-duanya hidup di web**, dan hanya
-satu yang membuka gerbang Brief.
-
-| | STR- (`account.ts`) | STRG- (`strategi.ts`) |
-|---|---|---|
-| Layar | `/persetujuan` (menu aktif) + `/account/strategies/[id]` | `/strategi/[id]` |
-| Rute approve | `/api/v1/strategies/[id]/approve` | `/api/v1/strategi/[id]/approve` |
-| Menggerakkan Service ke `[Strategy Approved]` | **YA** (`account.ts:1025-1026`) | **TIDAK** |
-| Versioning (`versiNo`, `disetujui_pada`) | tidak | ya |
-
-**Konsekuensinya untuk keluhan Account #5 ("CRO mentok di
-`[Awaiting Onboarding]`"):** kemungkinan besar sebabnya bukan jahitan yang
-hilang, melainkan **orang memakai layar STRG- padahal yang membuka gerbang
-adalah layar STR-**. Kalau itu benar, A-3 bukan "sambungkan STRG- ke Service"
-melainkan **"tentukan mana dari dua fitur ini yang kanonik, lalu pensiunkan yang
-satunya sungguh-sungguh"** — dan itu keputusan produk, bukan pekerjaan tukang.
-
-⛔ **JANGAN sambungkan STRG- → Service sebelum ini diketok.** Menyambungkannya
-sementara `/persetujuan` masih hidup menghasilkan **dua penulis hidup** ke status
-yang sama — persisnya yang ketokan tadi ingin dihindari. Aturan rumah #2: kalau
-dua modul berkonflik, STOP dan tandai.
-
-Yang dibutuhkan dari pemilik, dengan fakta yang benar kali ini:
-1. **Mana yang kanonik — STR- atau STRG-?**
-2. Kalau STRG- yang kanonik: pensiunkan STR- **sungguhan** (cabut baris
-   `nav.ts:153` untuk jalur itu, cabut tombol di kedua halaman, cabut/410 rutenya)
-   **dalam commit yang sama** dengan penyambungan STRG- → Service. Semuanya
-   berkas Jalur A.
-3. Kalau STR- yang kanonik: A-3 selesai tanpa kode apa pun — cukup arahkan orang
-   ke layar yang benar, dan keluhan Account #5 adalah masalah navigasi/pelatihan,
-   bukan bug mesin status.
+**Yang MASIH terbuka, tapi turun dari ⛔ jadi catatan produk:** dua layar
+Strategy tetap hidup bersamaan — `/persetujuan` + `/account/strategies/[id]`
+(STR-, `nav.ts:153` masih aktif, rutenya masih ada) dan `/strategi/[id]` (STRG-).
+Itu bukan lagi bahaya korupsi status, cuma dua pintu untuk pekerjaan yang mirip.
+Pertanyaan untuk pemilik tinggal: **mana yang mau dipertahankan sebagai satu-satunya
+pintu?** Tidak mendesak, tidak memblokir apa pun.
 
 ### 3. Sesudah A-req-1..3 mendarat — sisa Jalur B, kecil dan sudah dipetakan
 Ketiganya **satu-dua baris per tempat**, bukan pekerjaan baru: fondasinya sudah
