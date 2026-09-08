@@ -122,8 +122,11 @@ COMMENT ON COLUMN book_periods.versi_terakhir IS
   'Nomor versi angka beku terakhir di book_period_snapshots. 0 = belum pernah '
   'ditutup. Naik satu setiap kali ditutup, TIDAK pernah turun saat dibuka.';
 COMMENT ON COLUMN book_periods.alasan_buka IS
-  'Alasan buka-ulang TERAKHIR, wajib (ck_bp_buka_ulang_lengkap). Riwayat semua '
-  'buka-ulang ada di audit_log action=''buka_ulang_tutup_buku''.';
+  'Alasan buka-ulang TERAKHIR. Wajib pada transisi [Tertutup]->[Terbuka] dan '
+  'ditegakkan trg_bp_jaga_transisi, BUKAN oleh CHECK — CHECK tidak melihat '
+  'arah perpindahan. ck_bp_jejak_buka_utuh hanya menjaga jejaknya utuh atau '
+  'tidak ada sama sekali. Riwayat semua buka-ulang ada di audit_log '
+  'action=''buka_ulang_tutup_buku''.';
 
 -- ---------------------------------------------------------------------------
 -- 2. book_period_snapshots — angka beku, BERVERSI dan IMMUTABLE
