@@ -1,22 +1,36 @@
-# Handoff — titik lanjut Feedback OD sesudah Jalur B (PR #312)
+# Handoff — lanjut Jalur B sesudah PR #312 MERGE
 
-> Dibuat sesi Jalur B, 2026-09-07. **Baca ini lebih dulu di chat berikutnya**,
-> lalu `HANDOFF_FEEDBACK_OD_JALUR_B.md` untuk detail per keputusan.
+> Dibuat sesi Jalur B, 2026-09-07, diperbarui 2026-09-08 saat PR #312 di-merge
+> atas perintah pemilik. **Baca ini lebih dulu di chat berikutnya**, lalu
+> `HANDOFF_FEEDBACK_OD_JALUR_B.md` untuk detail per keputusan.
 >
 > Rencana induk: `docs/handoff/PARALEL_FEEDBACK_OD_DUA_AKUN.md`.
+>
+> ## Mulai dari mana, dalam satu paragraf
+>
+> Kelima tiket Jalur B (B-1…B-5) **sudah di `main`**. Yang tersisa untuk Jalur B
+> cuma **tiga serpihan**, dan ketiganya menunggu `A-req-1/2/3` di `account.ts`
+> (berkas Jalur A) — lihat §3. Kalau A-req belum mendarat saat chat baru dimulai,
+> **tidak ada pekerjaan Jalur B yang bisa maju**; yang produktif adalah §5 (UAT
+> keenam divisi) dan §4 (langkah penggabungan: B-D1..B-D10 → `DECISIONS.md`,
+> apply lima migrasi ke Supabase live). Jangan mulai Wave 3 (§6) sebelum A
+> tergabung.
 
 ## Posisi, sejujurnya
 
 ```
-main                : 1fee9839  (F + A-1 + A-2 + A-5 lewat PR #310/#311,
-                                 lalu PR #309 Gelombang D accrual lewat merge)
-PR Jalur B          : #312  claude/cdps-user-feedback-70vbho-b -> main
-                      8 commit · 52 berkas · SUDAH di-merge dengan main 1fee9839
-Branch Jalur A      : claude/cdps-user-feedback-account-a-igix3n  (A-3, A-4 belum)
-Pekerjaan lain      : PR #309 SUDAH MERGE (2026-09-07). Irisannya dengan Jalur B
-                      cuma `apps/api/src/lib/wire.ts` + `wire.test.ts`, dan
-                      keduanya auto-merge bersih — nol konflik.
+main                : PR #312 MERGE 2026-09-08 (atas perintah pemilik).
+                      Isi: F + A-1 + A-2 + A-5 (PR #310/#311) + Gelombang D
+                      accrual (PR #309) + SELURUH Jalur B (B-1..B-5).
+Branch Jalur B      : claude/cdps-user-feedback-70vbho-b — SUDAH MERGE, jangan
+                      dipakai lagi. Pekerjaan lanjutan = branch BARU dari `main`.
+Branch Jalur A      : claude/cdps-user-feedback-account-a-igix3n
+                      A-3, A-4, A-req-1..3 SEMUA belum (dikonfirmasi A 2026-09-08)
 ```
+
+> ⚠️ **PR #312 sudah merge, jadi ia tidak bisa menampung pekerjaan baru.** Mulai
+> dari `main` terbaru dengan nama branch baru; jangan menumpuk commit di atas
+> history yang sudah tergabung.
 
 > **Kenapa merge, bukan rebase.** Branch ini sudah terbit di PR #312 sejak
 > commit `3f8e1a25`; §4 rencana minta "rebase harian", tapi rebase atas branch
@@ -40,13 +54,14 @@ Pekerjaan lain      : PR #309 SUDAH MERGE (2026-09-07). Irisannya dengan Jalur B
 
 ## Yang harus dikerjakan berikutnya, berurutan
 
-### 1. Tunggu / dorong PR #312 sampai hijau lalu merge
-Sesi ini sudah `subscribe_pr_activity` ke #312. Kalau CI merah saat chat
-berikutnya mulai: baca check run-nya, perbaiki, push. Jangan buka PR baru.
+### 1. ~~Dorong PR #312 sampai hijau lalu merge~~ — SELESAI 2026-09-08
 
-PR #309 sudah masuk dan sudah di-merge ke branch ini, jadi tidak ada lagi
-pekerjaan lain yang menggantung di atas `wire.ts`. Kalau `main` bergerak lagi:
-**merge**, jangan rebase (branch-nya sudah terbit).
+Merge-nya sudah dilakukan. Keadaan terakhir sebelum merge: **sebelas check run
+success** di head `ec81a5e7`, `mergeable_state: clean`, `main` sudah di-merge
+masuk lewat `07b6338b` (PR #309). Nol review manusia — pemilik memerintahkan
+merge langsung.
+
+Kalau ada yang perlu diperbaiki dari isi #312: **PR baru dari branch baru.**
 
 ### 2. Kirim prompt cek ke Akun A
 `docs/handoff/PROMPT_CEK_JALUR_A_SISA_FEEDBACK_OD.md` — tempel apa adanya ke
@@ -157,10 +172,32 @@ ada di PR #312.
   `HANDOFF_FEEDBACK_OD_JALUR_B.md` ke `docs/DECISIONS.md`. Aturan emas #3
   melarang jalur menyentuh DECISIONS; **langkah inilah** yang memindahkannya.
 - **Satu di antaranya butuh ketokan pemilik: `B-D2`** — batas "batch assign"
-  dibaca sebagai *"untuk orang lain"*, BUKAN *"lebih dari satu unit"*. Kalau
-  pemilik memaksudkan cap literal satu unit, itu satu baris di
-  `creative.createAssetBatch` + satu penyesuaian tes. Alasan lengkap di
-  handoff §"B-D2 rinci".
+  dibaca sebagai *"untuk orang lain"*, BUKAN *"lebih dari satu unit"*. **Masih
+  TERBUKA per 2026-09-08** (ditanyakan, belum dijawab).
+
+  Yang dibangun hari ini (`creative.ts:373-384`): non-lead boleh membuat batch
+  **selama setiap barisnya untuk dirinya sendiri atau tanpa PIC**; begitu ada satu
+  baris ber-PIC orang lain → `403 [hanya lead divisi Creative yang dapat membagi
+  aset ke PIC lain]`.
+
+  | Skenario (Budi = staff Creative, bukan lead) | Bacaan sekarang | Bacaan "satu unit" |
+  |---|---|---|
+  | Budi ambil **3 slot untuk dirinya** dalam satu klik | ✅ boleh | ❌ 403 — harus 3× klik |
+  | Budi buat 2 baris **untuk Sari** | ❌ 403 | ❌ 403 |
+  | Budi buat 1 baris **tanpa PIC** (masuk antrean umum) | ✅ boleh | ✅ boleh |
+  | **Lead** Creative bagi 5 slot ke 5 orang | ✅ boleh | ✅ boleh |
+
+  Kenapa dipilih bacaan "untuk orang lain": keluhan K-1 adalah **AM memilih nama
+  staff**, bukan staff mengambil pekerjaannya sendiri banyak-banyak. Dan
+  `createAssetBatch` adalah **satu-satunya pintu yang memakai ulang celah
+  `sequence_no`** — mengecapnya di satu unit diam-diam mencabut itu dari
+  self-claimer. Tes yang sudah ada ("reuses the freed slot of a sequence gap")
+  memang memakai staff yang mengambil 2 unit sekaligus; bacaan "satu unit"
+  memerahkannya.
+
+  Kalau pemilik memaksudkan cap literal satu unit: satu baris di
+  `creative.createAssetBatch` (tolak `total !== 1` untuk non-lead) + penyesuaian
+  tes itu. Alasan lengkap di `HANDOFF_FEEDBACK_OD_JALUR_B.md` §"B-D2 rinci".
 - **Apply migrasi ke Supabase live `CDPS SG` PER BERKAS lewat `apply_migration`,
   dalam urutan nama**, lalu **verifikasi dengan kueri katalog** — jangan percaya
   `success: true` saja. ⛔ **JANGAN `supabase db push`** (ledger live berbeda
