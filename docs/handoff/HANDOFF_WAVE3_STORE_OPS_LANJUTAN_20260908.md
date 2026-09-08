@@ -3,6 +3,11 @@
 > **Ditulis 2026-09-08**, sesudah empat commit di branch
 > `claude/handoff-store-ops-lanjutan-ovk4sh`. Ini titik mulai chat berikutnya.
 >
+> **➡️ PENERUSNYA: `HANDOFF_PENUTUP_REVISI_OD_20260908.md`** — langkah penutup
+> program (apply migrasi ke live + entri DECISIONS) lalu utang teknis. Baca itu
+> kalau Anda datang untuk MELANJUTKAN; berkas ini untuk tahu apa yang sudah
+> dibangun dan kenapa.
+>
 > Pendahulunya: `HANDOFF_WAVE3_STORE_OPS_20260908.md` (rencana sepuluh butir) dan
 > `HANDOFF_LANJUT_20260908_JALUR_A_TUTUP.md` §2 + §7 (**kesalahan yang sudah
 > dibayar mahal + sembilan jebakan — masih berlaku, baca dulu**).
