@@ -229,11 +229,18 @@ jobs:
       # dua jalur paralel mengerjakan emitternya masing-masing, dan dua bump
       # terpisah memecahkan invariant dua kali. Nol tabel/prefix/mesin baru ⇒
       # 146 tabel / 40 prefix / 31 mesin TETAP.
-      - name: Verify migration seed counts (31 machines, 73 events, catalog registry consistent)
+      # D-3 tutup buku (20260924020000_d3_tutup_buku.sql, Gelombang D): +1 mesin
+      # `book_period` (31 → 32, STATE_MACHINES.md §22) — DUA gerbang yang sengaja
+      # berbeda: menutup = Finance lead ATAU Director, membuka kembali = Director
+      # SAJA. Nol event katalog baru ⇒ notif_events TETAP 73 (kunci tutup buku
+      # bukan sesuatu yang butuh inbox; ia dilihat saat orang membuka layarnya).
+      # +2 tabel (`book_periods`, `book_period_snapshots`) — TIDAK digerbang di
+      # sini, hanya di scripts/db-rebuild.sh (146 → 148). Nol prefix baru.
+      - name: Verify migration seed counts (32 machines, 73 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 31 then raise exception 'expected 31 machines'; end if;
+               if (select count(*) from sm_machines) <> 32 then raise exception 'expected 32 machines'; end if;
                if (select count(*) from notif_events) <> 73 then raise exception 'expected 73 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
