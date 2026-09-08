@@ -49,54 +49,83 @@ Kode: `packages/domain/src/tutupbuku.ts` (+ tes 29 kasus), rute di
 
 ---
 
-## 3. ⛔ BELUM DI LIVE — dan urutan menerapkannya
+## 3. ✅ SUDAH DI LIVE — rilis D-3 dieksekusi 2026-09-08
 
-Live sekarang **201 migrasi** (empat Feedback OD + lima Jalur B sudah diterapkan pihak lain 2026-09-08 — utang §2.3 handoff sebelumnya LUNAS, bukan oleh sesi ini). Repo **209**. Yang belum:
+**Selesai.** PR #313 merged sebagai `be1877b`; kelima migrasi D-3 ada di live.
+Ledger live sekarang **207 migrasi**.
 
-- ~~empat migrasi Feedback OD~~ — **sudah diterapkan pihak lain** (terlihat di
-  ledger live sebagai `f2_`/`f3_`/`f4_`/`a2_`, plus lima migrasi Jalur B).
-  Utang itu tidak lagi terbuka.
-- **dua migrasi M18 Store Operation** (`20260924010000`, `20260924020000`) —
-  milik jalur lain, di luar cakupan sesi ini.
-- **lima migrasi D-3** (`20260925010000`…`20260925040000`, lalu `20260925050000`
-  **sesudah deploy** — lihat di bawah) — pekerjaan sesi ini.
+### Yang benar-benar dijalankan, berurutan
 
-Urutan yang terbukti dan wajib diulang:
+| # | Langkah | Hasil |
+|---|---|---|
+| 1 | apply `20260925010000` | dua overload `sm_transition` hidup berdampingan (10 **dan** 11 argumen) |
+| 2 | apply `20260925020000` | 146→148 tabel, 31→32 mesin |
+| 3 | apply `20260925030000` | dua trigger pagar terpasang — **inert** sampai ada bulan ditutup |
+| 4 | apply `20260925040000` | 18 dari 21 layanan terisi qty |
+| 5 | merge PR #313 → tiga deploy produksi `READY` di `be1877b` | api, web-internal (`app.meagency.co.id`), portal |
+| 6 | apply `20260925050000` | overload 10-argumen dibuang; tersisa **tepat satu**, 11 argumen |
 
-> **merge → tunggu TIGA deploy Vercel PRODUKSI `READY` di commit merge →
-> `apply_migration` per berkas, berurutan → verifikasi lewat KUERI → baru
-> simpulkan.**
+Jendela merahnya **nol**: selama langkah 1–5 kode lama tetap menemukan fungsi
+10-argumennya, dan sejak langkah 5 kode baru menemukan yang 11.
+
+### Yang diverifikasi, dan caranya
+
+Bukan dari `success: true` — setiap langkah diadu ke katalog:
+
+- **Badan fungsi disamakan byte-per-byte dengan berkas repo.** `md5(prosrc)`
+  live vs DB lokal hasil `db-rebuild` cocok persis untuk kelima fungsi D-3
+  (`sm_transition` 11-arg `3b04c492…`, `jaga_transisi_book_period`
+  `28d5fd9c…`, `jaga_periode_tertutup`, `periode_tertutup`,
+  `bulan_indonesia`). Ini yang menangkap satu penyimpangan nyata: transkripsi
+  pertama `jaga_transisi_book_period` **memangkas komentar di dalam badannya**.
+  Logikanya identik (md5 tanpa komentar sama di kedua sisi) tapi sumbernya
+  beda — dipulihkan lewat migrasi tambahan, karena komentar itulah yang
+  menjelaskan kenapa yang dibandingkan **waktunya**, bukan nomor versinya.
+  Perbaikan itu **tidak menambah berkas di repo**: `20260925020000` memang
+  sudah memuat versi ber-komentar, jadi `db-rebuild` menghasilkan fungsi yang
+  identik. Yang bertambah hanya satu entri di ledger live — dan ledger itu
+  sudah lama tidak sejajar dengan nama berkas (O65).
+- **Menimpa dua job SQL tidak mengubur pekerjaan siapa pun.** `wrr_monday_job`
+  dan `leads_unrespon_tick` versi live diadu dengan versi repo SESUDAH argumen
+  ke-11 dicabut kembali: cocok persis (`0de0d523…`, `bc44c472…`). Yang berbeda
+  hanya komentar — salinan live-nya memang tersimpan tanpa komentar.
+- **Keamanan.** `sm_transition` sekarang `prosecdef = true` dengan
+  `proacl = {postgres=X, service_role=X}` — `anon` dan `authenticated` **tidak**
+  bisa memanggilnya.
+- **Uji-kering backfill qty dijalankan ke live SEBELUM apply, dan yang
+  diperiksa invariannya, bukan jumlah barisnya.** Ketiga nilai non-1 cocok
+  persis dengan rasio harganya (21↔21, 99↔99, 6↔6). Dari 14 layanan `durasi`,
+  **satu** sengaja dibiarkan NULL: `SVC-202609-0003`, layanan nego berasio 0,8
+  — persis kasus yang membuktikan rumus harga tidak aman.
+- **Asap sesudah DROP.** `sm_transition` dipanggil dengan entity id yang
+  sengaja tidak ada; ia menjawab `not_found`, artinya fungsi 11-argumen
+  ter-resolve dan berjalan melewati lookup mesin, tipe kolom id, dan row lock.
+  Nol tulisan.
+- Sebelum DROP: katalog dipindai untuk pemanggil `sm_transition` yang tersisa.
+  Hanya dua job itu, dan keduanya sudah 11-argumen.
+
+### Yang MASIH belum di live, dan itu bukan pekerjaan sesi ini
+
+- **dua migrasi M18 Store Operation** (`20260924010000`, `20260924020000`).
+  Kodenya sudah di `main`, migrasinya belum diterapkan. Karena itu live
+  **148 tabel / 32 mesin**, sedangkan repo `db-rebuild` menghasilkan
+  **149 / 33** — selisihnya persis M18, dan itu **bukan drift**, itu utang
+  jalur lain. Pemilik menginstruksikan sesi ini tidak menyentuh migrasi di
+  luar pekerjaannya.
 
 ⛔ **JANGAN `supabase db push`** (ledger live memakai stempel APPLY — O65).
 ⛔ **Jangan percaya `success: true`.** Verifikasi lewat kueri.
 
-### ⚠️ Yang KHUSUS pada rilis D-3: DUA fase, dan urutannya mengikat
+### Yang BELUM diverifikasi, dan jujur disebut
 
-`20260925010000` menambah `sm_transition` **11-argumen** di samping yang
-10-argumen. Tanda tangan baru = fungsi baru, jadi keduanya sengaja hidup
-berdampingan untuk satu rilis. Pembuangan yang lama ada di migrasi
-**terpisah**, `20260925050000`.
-
-Urutannya:
-
-| # | Langkah | Kenapa |
-|---|---|---|
-| 1 | apply `20260925010000`…`20260925040000` | **Aditif semua.** Kode lama masih memanggil `sm_transition` 10-argumen, yang masih ada ⇒ nol yang patah |
-| 2 | merge → tunggu **tiga** deploy Vercel produksi `READY` | Kode baru memanggil yang 11-argumen, yang sudah ada sejak langkah 1 |
-| 3 | apply `20260925050000` | Membuang yang 10-argumen. Sudah tidak ada yang memanggilnya |
-
-**Versi pertama migrasi ini membuang yang lama dalam napas yang sama dengan
-menambah yang baru, dan itu SALAH** — ia menciptakan jendela di mana *setiap
-transisi status di seluruh sistem* gagal, bukan cuma tutup buku (kode lama +
-fungsi baru ⇒ `function does not exist`; kode baru + fungsi lama ⇒ galat yang
-sama, arah sebaliknya). Dipisah supaya jendela itu **tidak ada sama sekali**,
-bukan sekadar dipersempit. Aturan rilis rumah ini memang sudah menyebutnya:
-aditif boleh mendahului kode, DROP wajib mengikutinya.
-
-Nol ambiguitas selama keduanya hidup: panggilan 10-argumen cocok persis dengan
-yang 10-argumen, 11 dengan yang 11. `"function is not unique"` hanya muncul
-kalau salah satunya punya `DEFAULT`, dan tidak ada yang punya — itu sebabnya
-parameter ke-11 sengaja tanpa default.
+- **Halaman `/finance/tutup-buku` belum pernah dibuka di peramban.**
+- **Gerbang dua tingkat belum pernah diuji di live.** Ia butuh baris
+  `book_periods` yang nyata untuk sampai ke pemeriksaan gerbangnya, dan
+  menanam baris uji di tabel keuangan produksi bukan harga yang pantas
+  dibayar. Yang sudah ada: 29 tes domain hijau (gerbangnya dibuktikan bisa
+  merah lewat mutasi) + data edge di live diverifikasi lewat kueri
+  (`[Terbuka]→[Tertutup]` = lead+Finance, `[Tertutup]→[Terbuka]` = director).
+- **Angka D-3 belum pernah dihitung atas data live.**
 
 ---
 
