@@ -206,7 +206,7 @@ $$;
 COMMENT ON FUNCTION sm_transition(text, text, text, text, text, text, text, text, boolean, boolean, text) IS
   'Engine transisi status: row lock + validasi edge + gerbang role BERTINGKAT + '
   'baris audit dalam SATU transaksi. Satu-satunya penulis kolom status. Sadar '
-  'tipe kolom id (20260908020000). Gerbang bertingkat (20260924010000): '
+  'tipe kolom id (20260908020000). Gerbang bertingkat (20260925010000): '
   'require_director = Director saja; require_lead + require_division = Director '
   'atau lead divisi itu.';
 

@@ -44,7 +44,7 @@ ALTER TABLE services ADD CONSTRAINT ck_services_qty_positif
 
 COMMENT ON COLUMN services.qty IS
   'Berapa unit layanan ini dibeli. NULL = tidak pernah dicatat (baris lahir '
-  'sebelum 20260924040000) — BUKAN 1. Mesin accrual menolak menghitung '
+  'sebelum 20260925040000) — BUKAN 1. Mesin accrual menolak menghitung '
   'layanan qty_menambah=''durasi'' yang qty-nya NULL, karena menebak 1 di situ '
   'memendekkan masa layanan tanpa ada yang tahu.';
 

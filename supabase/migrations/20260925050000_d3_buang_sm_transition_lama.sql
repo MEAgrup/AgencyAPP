@@ -4,7 +4,7 @@
 --
 -- ⚠️ MIGRASI INI DITERAPKAN **SESUDAH** KODE BARU MENDARAT DI PRODUKSI.
 --
--- `20260924010000` sengaja membiarkan versi 10-argumen hidup berdampingan
+-- `20260925010000` sengaja membiarkan versi 10-argumen hidup berdampingan
 -- dengan yang 11-argumen, karena tanda tangan baru = fungsi baru: membuang
 -- yang lama sebelum kode baru ter-deploy akan membuat SETIAP transisi status
 -- di seluruh sistem gagal, bukan cuma tutup buku. Aturan rilis rumah ini:
@@ -12,7 +12,7 @@
 --
 -- Sesudah kode baru berjalan, tidak ada lagi yang memanggil versi 10-argumen —
 -- dua pemanggil SQL-nya (`wrr_monday_job`, `leads_unrespon_tick`) sudah
--- ditulis ulang di `20260924010000`, dan sisanya lewat `packages/db`.
+-- ditulis ulang di `20260925010000`, dan sisanya lewat `packages/db`.
 --
 -- ── Kenapa dibuang sama sekali, bukan dibiarkan ───────────────────────────
 --
