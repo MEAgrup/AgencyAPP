@@ -28,6 +28,7 @@ import {
 } from '@/lib/tasks';
 import StatusBadge from '@/components/StatusBadge';
 import RollupBlockerPanel from '@/components/RollupBlockerPanel';
+import StageTimelinePanel from '@/components/StageTimelinePanel';
 import { transitionLabel, type TransitionResult } from '@/lib/transition';
 
 // Live Stream briefs skip the M12 engine (dispatched to vendor) — their native
@@ -433,6 +434,40 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
             dibaca. Satuannya netral: halaman ini melayani Aset maupun Booking. */}
         {source === 'brief' && <RollupBlockerPanel briefId={id} satuan="unit" />}
       </section>
+
+      {/* M16 Rule 10 — gerbang intake "Cek Brief AM" (Terima & proses / Brief
+          Dikembalikan ke AM) hidup HANYA di panel ini, dan sampai sekarang panel
+          ini cuma terpasang di empat halaman detail Brief milik divisi yang punya
+          board sendiri: Account, Creative, KOL, Live Stream.
+
+          Akibatnya bukan kosmetik. `/tasks` adalah antrean generik yang melayani
+          SETIAP divisi eksekusi yang TIDAK punya halaman sendiri — dan bagi
+          mereka, gerbang intake yang PRD sebut "wajib di semua divisi" secara
+          harfiah tidak punya tombol. Store Operation adalah kasus yang
+          menyingkapnya (Feedback OD, keluhan ke-10: "tidak punya cara menerima
+          brief"), tapi perbaikannya lintas divisi: siapa pun yang masuk lewat
+          `/tasks` mendapatkannya sekaligus.
+
+          Hanya untuk `source === 'brief'`: tahapan menempel pada BRIEF, bukan
+          pada Aset (M16 Rule 1). Brief divisi yang belum punya pipeline (Rule 12)
+          tetap aman — panelnya sendiri merender "Divisi ini belum punya pipeline
+          tahapan" alih-alih gagal. */}
+      {source === 'brief' && (
+        <StageTimelinePanel
+          briefId={id}
+          assignedDivision={taskDivision}
+          // Gerbang DIVISI, sengaja tidak memakai `canExecute`: `canExecute`
+          // mengecualikan Brief yang di-dispatch ke vendor karena tidak ada edge
+          // M12 yang bisa jalan untuknya — sedangkan checkpoint intake justru
+          // sengaja diberikan ke Live Stream juga (LT-5), supaya rentang AM→divisi
+          // terukur di sana. Dua gerbang berbeda untuk dua mesin berbeda.
+          canReview={!isODonly && (isDirector || inDivision)}
+          // LT-4: keluar dari `Brief Dikembalikan ke AM` adalah edge gate_pihak='AM'.
+          // Server memeriksa kepemilikan sesungguhnya, jadi AM yang bukan pemilik
+          // mendapat 403 BI, bukan tombol yang disembunyikan diam-diam.
+          isAmOwner={!isODonly && (isAM || isDirector)}
+        />
+      )}
 
       {/* Metrik computed (read-only) */}
       <section className="card">
