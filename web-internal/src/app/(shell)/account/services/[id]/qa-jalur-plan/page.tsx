@@ -133,9 +133,9 @@ const COMPARE: CompareRow[] = [
   },
   {
     aspek: '⛔ Membuka gerbang Brief',
-    str: 'YA — approveStrategy menggerakkan Service → [Strategy Approved] dalam transaksi yang sama',
-    strg: 'TIDAK — approveStrategi tidak menyentuh tabel services sama sekali',
-    unggul: 'str',
+    str: 'TIDAK LAGI — jalur tulisnya dipensiunkan 2026-09-08 (route 410, tombolnya dicabut)',
+    strg: 'YA — approveStrategi menggerakkan setiap Service tergerbang-Plan pada kontraknya, satu transaksi (A-3)',
+    unggul: 'strg',
   },
   {
     aspek: '⛔ Pintu "buat" di UI',
@@ -315,21 +315,31 @@ export default function QaJalurPlanPage({ params }: { params: Promise<{ id: stri
             <tbody>
               <tr>
                 <td>Setujui <code>STR-</code> (<code>account.approveStrategy</code>)</td>
-                <td>[Awaiting Onboarding] &rarr; [Strategy Approved], satu transaksi</td>
-                <td><span className="badge badge-green">Ya</span></td>
+                <td>
+                  DIPENSIUNKAN 2026-09-08 &mdash; route 410, tombolnya dicabut dari
+                  <code>/persetujuan</code> dan halaman detailnya
+                </td>
+                <td><span className="badge badge-red">Tidak ada lagi</span></td>
               </tr>
               <tr>
                 <td>Setujui <code>STRG-</code> (<code>strategi.approveStrategi</code>)</td>
-                <td>Tidak menyentuh tabel <code>services</code>; hanya generate periode PLAN</td>
-                <td><span className="badge badge-red">Tidak</span></td>
+                <td>
+                  [Awaiting Onboarding] &rarr; [Strategy Approved] untuk SETIAP Service
+                  tergerbang-Plan pada kontraknya, satu transaksi, + generate periode PLAN
+                </td>
+                <td><span className="badge badge-green">Ya</span></td>
               </tr>
             </tbody>
           </table>
         </div>
         <p className="muted" style={{ fontSize: 12 }}>
-          Ini deviasi yang sudah tercatat: <code>DECISIONS.md</code> 2026-08-06 butir (4) &mdash;
-          <em>&ldquo;Persetujuan STRG BELUM menggerakkan Service… Penyambungan ikut penggantian
-          form&rdquo;</em>. Penggantian form itu belum pernah terjadi.
+          <strong>SELESAI 2026-09-08.</strong> Deviasi yang dulu tercatat di{' '}
+          <code>DECISIONS.md</code> 2026-08-06 butir (4) &mdash;{' '}
+          <em>&ldquo;Persetujuan STRG BELUM menggerakkan Service… Penyambungan ikut
+          penggantian form&rdquo;</em> &mdash; sudah ditutup A-3, dan penggantian formnya
+          diketok pemilik: <code>STRG-</code> kanonik, jalur tulis <code>STR-</code>{' '}
+          dipensiunkan sungguhan di commit yang sama. Halaman ini sekarang catatan
+          riwayat, bukan daftar perbandingan yang menunggu keputusan.
         </p>
       </section>
 

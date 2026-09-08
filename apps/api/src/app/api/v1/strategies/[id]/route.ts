@@ -3,15 +3,19 @@
  *
  * GET: one Strategy with its derived revision count, if the actor may read it
  * (owning AM / Account lead / OD / Director). Ports Go's handleGetStrategy.
+ * **Tetap hidup** — dua baris `STR-` di produksi adalah riwayat kesepakatan
+ * sungguhan, dan riwayat tidak dipensiunkan (aturan rumah #3).
  *
- * PUT: a draft-only content edit — owning AM (or Director), only in [Strategy
- * Drafting] (M6 §4). Ports Go's handleUpdateStrategy.
+ * PUT: **DIPENSIUNKAN 2026-09-08.** Menyunting draft `STR-` menjanjikan kemajuan
+ * menuju persetujuan yang sudah dicabut — persis "tombol yang menjanjikan hal
+ * yang tidak lagi terjadi". Alasan lengkap: `@/lib/retired-str`.
  */
 import { account } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db, readAsActor } from '@/lib/db';
-import { handle, json, readJson } from '@/lib/http';
-import { strategyToWire, toStrategyInput } from '@/lib/wire';
+import { readAsActor } from '@/lib/db';
+import { handle, json } from '@/lib/http';
+import { strPensiun } from '@/lib/retired-str';
+import { strategyToWire } from '@/lib/wire';
 
 export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
@@ -22,12 +26,6 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   });
 }
 
-export async function PUT(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
-  return handle(async () => {
-    const actor = requireActor(request);
-    const { id } = await ctx.params;
-    const b = await readJson<Parameters<typeof toStrategyInput>[0]>(request);
-    await account.updateDraft(db(), actor, id, toStrategyInput(b));
-    return json({ id });
-  });
+export async function PUT(): Promise<Response> {
+  return handle(async () => strPensiun());
 }

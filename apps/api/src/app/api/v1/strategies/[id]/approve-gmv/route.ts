@@ -1,19 +1,12 @@
 /**
- * POST /api/v1/strategies/{id}/approve-gmv — clear a pending (out-of-tolerance)
- * GMV adjustment (QA revisi 2026-08-12). Account lead (SPV / Head of Account) or
- * Director only — the "ACC Head/SPV" gate. Audited; a Plan whose GMV is not
- * awaiting approval → 409.
+ * POST /api/v1/strategies/{id}/approve-gmv — **DIPENSIUNKAN 2026-09-08.**
+ *
+ * Jalur `STR-` sudah tidak kanonik; `STRG-` (M6A) yang membuka gerbang Brief.
+ * Alasan lengkap + kenapa 410 dan bukan penghapusan: `@/lib/retired-str`.
  */
-import { account } from '@cdps/domain';
-import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { handle, json } from '@/lib/http';
+import { handle } from '@/lib/http';
+import { strPensiun } from '@/lib/retired-str';
 
-export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
-  return handle(async () => {
-    const actor = requireActor(request);
-    const { id } = await ctx.params;
-    await account.approveGmvAdjustment(db(), actor, id);
-    return json({ id, gmv_adjustment_status: account.GMV_ADJ_APPROVED });
-  });
+export async function POST(): Promise<Response> {
+  return handle(async () => strPensiun());
 }

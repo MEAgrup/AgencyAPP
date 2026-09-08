@@ -1,19 +1,12 @@
 /**
- * POST /api/v1/strategies/{id}/submit — move the Plan [Strategy Drafting] →
- * [Strategy Submitted for Approval] (M6 §4 Rule 3). Owning AM (or Director).
- * Driven through the transition engine; an invalid edge → 409 (nothing written).
- * Ports Go's handleSubmitStrategy.
+ * POST /api/v1/strategies/{id}/submit — **DIPENSIUNKAN 2026-09-08.**
+ *
+ * Jalur `STR-` sudah tidak kanonik; `STRG-` (M6A) yang membuka gerbang Brief.
+ * Alasan lengkap + kenapa 410 dan bukan penghapusan: `@/lib/retired-str`.
  */
-import { account } from '@cdps/domain';
-import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { handle, transitionResponse } from '@/lib/http';
+import { handle } from '@/lib/http';
+import { strPensiun } from '@/lib/retired-str';
 
-export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
-  return handle(async () => {
-    const actor = requireActor(request);
-    const { id } = await ctx.params;
-    const result = await account.submitStrategy(db(), actor, id);
-    return transitionResponse(result);
-  });
+export async function POST(): Promise<Response> {
+  return handle(async () => strPensiun());
 }

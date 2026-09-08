@@ -17,9 +17,7 @@ import {
   STRATEGY_APPROVED,
   TASK_CATALOG,
   TIER_LABELS,
-  approveGmvAdjustment,
   createBrief,
-  createStrategy,
   getService,
   isAccountLead,
   isAccountStaff,
@@ -28,7 +26,6 @@ import {
   listStrategies,
   nextOnboardingStep,
   setStrategyRequirement,
-  submitStrategy,
   type Brief,
   type DivisionTask,
   type ServiceQueueRow,
@@ -54,7 +51,6 @@ import PlanPeriodsPanel from '@/components/strategi/PlanPeriodsPanel';
  * again (e.g. to QA the manual Brief path on a service that already has an
  * approved STR-). Retiring STR- for real is a separate DECISIONS.md entry.
  */
-const SHOW_LEGACY_STR_PATH = false;
 
 /**
  * QA(SESI31): the Service hub carries TWO "Kelola Klien" cards — the primary one
@@ -292,48 +288,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     return tasks;
   }
 
-  async function handleCreateStrategy(e: FormEvent) {
-    e.preventDefault();
-    setSError(null);
-    setSMessage(null);
-    setSSubmitting(true);
-    try {
-      const res = await createStrategy(id, {
-        objective: sObjective,
-        target_kpi: sKpiNote,
-        target_gmv: sGmv.trim() === '' ? null : sGmv.trim(),
-        target_roas: sRoas.trim() === '' ? null : sRoas.trim(),
-        target_ctr: sCtr.trim() === '' ? null : sCtr.trim(),
-        target_cvr: sCvr.trim() === '' ? null : sCvr.trim(),
-        gmv_adjustment_reason: sGmvReason.trim() === '' ? null : sGmvReason.trim(),
-        division_tasks: collectTasks(),
-        divisions_involved: sDivisions,
-        planned_brief_outline: sOutline,
-        timeline_start: sStart,
-        timeline_end: sEnd,
-      });
-      setStrategy(res);
-      // Saving IS submitting (QA revisi): the AM no longer clicks a separate
-      // "Ajukan" button. The one exception is an out-of-tolerance GMV adjustment,
-      // which the submit gate blocks until Head/SPV ACCs it — there the Plan stays
-      // a draft and the AM is told why, rather than firing a submit the server
-      // would reject with [penyesuaian target GMV … menunggu persetujuan Head/SPV].
-      if (res.gmv_adjustment_status === GMV_ADJ_PENDING) {
-        setSMessage(
-          `Strategy & Plan ${res.id} disimpan sebagai draft. Penyesuaian target GMV di luar ±20% ` +
-            'menunggu ACC Head/SPV — setelah di-ACC, ajukan dari halaman Strategy & Plan.',
-        );
-      } else {
-        await submitStrategy(res.id);
-        setSMessage(`Strategy & Plan ${res.id} disimpan dan diajukan untuk persetujuan.`);
-      }
-      await loadStrategy();
-    } catch (err) {
-      setSError(errorMessage(err));
-    } finally {
-      setSSubmitting(false);
-    }
-  }
 
   async function handleCreateStrategi(e: FormEvent) {
     e.preventDefault();
@@ -358,19 +312,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     }
   }
 
-  async function handleApproveGmv() {
-    if (!strategy) return;
-    setGmvApproveError(null);
-    setGmvApproving(true);
-    try {
-      await approveGmvAdjustment(strategy.id);
-      await loadStrategy();
-    } catch (err) {
-      setGmvApproveError(errorMessage(err));
-    } finally {
-      setGmvApproving(false);
-    }
-  }
 
   async function handleOverride(e: FormEvent) {
     e.preventDefault();
@@ -405,7 +346,12 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // AM never has to retype kuota/divisi/hasil that Plan already holds. Only an
   // Aktif Strategi has generated periods, so this stays null until then.
   const strgActiveContractId = strategiList.find((st) => st.status === 'Aktif')?.contract_id ?? null;
-  // The two §4 write doors are only open at [Awaiting Onboarding] (createStrategy /
+  // Pensiunnya `STR-` (ketokan 2026-09-08) membuat `approvedStrategy` selamanya
+  // null di jalur yang diputuskan, jadi gerbang form Brief di bawah harus
+  // membaca STRG- — kalau tidak, satu-satunya jalur yang hidup justru yang
+  // tidak pernah membuka formnya.
+  const strgAktif = strategiList.some((st) => st.status === 'Aktif');
+  // The §4 write door is only open at [Awaiting Onboarding] (
   // setStrategyRequirement both reject otherwise, MSG_SERVICE_NOT_AWAITING). When
   // the Service read is unavailable, fall back to permissive and let the server
   // answer — hiding a control that would have worked is the worse failure.
@@ -529,13 +475,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         {/* The QA compare page (STR- vs STRG-) stays reachable only while the
             legacy STR- path is exposed — for everyone else it is noise that
             invites picking the retired-in-practice entity. */}
-        {SHOW_LEGACY_STR_PATH && (
-          <p className="muted" style={{ fontSize: 12 }}>
-            <Link href={`/account/services/${encodeURIComponent(id)}/qa-jalur-plan`}>
-              QA · bandingkan jalur Strategy &amp; Plan (STR-) vs Strategi M6A (STRG-)
-            </Link>
-          </p>
-        )}
       </div>
 
       {/* Orientation: the decided delivery path (SESI31). Keeps a QA user on the
@@ -658,92 +597,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         />
       )}
 
-      {SHOW_LEGACY_STR_PATH && (
-      <section className="card">
-        <div className="cardHeader">
-          <h2>Strategy &amp; Plan</h2>
-        </div>
-        {strategyError && <div className="alert alertError" role="alert">{strategyError}</div>}
-        {strategy ? (
-          <div className="stack" style={{ gap: 10 }}>
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <div>
-                <Link href={`/account/strategies/${strategy.id}`}>{strategy.id}</Link>
-                <div className="muted" style={{ fontSize: 12 }}>{strategy.objective || '—'}</div>
-              </div>
-              <StatusBadge status={strategy.status} />
-            </div>
-
-            {/* Structured Target KPI (QA revisi) — the four fixed points. */}
-            <div className="grid2">
-              <div>
-                <div className="muted" style={{ fontSize: 12 }}>Target GMV</div>
-                <div>{formatIDR(strategy.target_gmv)}</div>
-              </div>
-              <div>
-                <div className="muted" style={{ fontSize: 12 }}>Target ROAS</div>
-                <div>{strategy.target_roas ?? '—'}</div>
-              </div>
-              <div>
-                <div className="muted" style={{ fontSize: 12 }}>Target CTR (%)</div>
-                <div>{strategy.target_ctr ?? '—'}</div>
-              </div>
-              <div>
-                <div className="muted" style={{ fontSize: 12 }}>Target CVR (%)</div>
-                <div>{strategy.target_cvr ?? '—'}</div>
-              </div>
-            </div>
-
-            {/* GMV adjustment gate (±20% vs the client's expectation). */}
-            {strategy.gmv_adjustment_status !== 'dalam_toleransi' && (
-              <div
-                className={`alert ${strategy.gmv_adjustment_status === GMV_ADJ_APPROVED ? 'alertSuccess' : 'alertInfo'}`}
-                role="status"
-              >
-                <div>
-                  Penyesuaian target GMV di luar toleransi 20% (klien: {formatIDR(strategy.client_target_gmv)}) &mdash;{' '}
-                  {strategy.gmv_adjustment_status === GMV_ADJ_APPROVED
-                    ? `disetujui oleh ${strategy.gmv_adjustment_approved_by || 'Head/SPV'}.`
-                    : 'menunggu ACC Head/SPV. Plan belum bisa diajukan.'}
-                </div>
-                {strategy.gmv_adjustment_reason && (
-                  <div className="muted" style={{ fontSize: 12 }}>Alasan: {strategy.gmv_adjustment_reason}</div>
-                )}
-                {gmvApproveError && <div className="alert alertError" role="alert">{gmvApproveError}</div>}
-                {canApproveGmv && strategy.gmv_adjustment_status === GMV_ADJ_PENDING && (
-                  <button
-                    type="button"
-                    className="btn btnSecondary"
-                    disabled={gmvApproving}
-                    onClick={handleApproveGmv}
-                    style={{ marginTop: 6 }}
-                  >
-                    {gmvApproving ? 'Menyetujui…' : 'ACC penyesuaian GMV (Head/SPV)'}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Task-satuan per division — what the AM turns into Briefs (M6B P3). */}
-            {strategy.division_tasks.length > 0 && (
-              <div>
-                <div className="muted" style={{ fontSize: 12 }}>Strategi &mdash; task satuan per divisi</div>
-                <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 13 }}>
-                  {strategy.division_tasks.map((t) => (
-                    <li key={`${t.divisi}::${t.jenis}`}>
-                      {t.divisi} &middot; {taskLabel(t.divisi, t.jenis)}:{' '}
-                      <strong>{taskIsMoney(t.divisi, t.jenis) ? formatIDR(t.jumlah) : t.jumlah}</strong>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="muted">Belum ada Strategy &amp; Plan untuk layanan ini.</p>
-        )}
-      </section>
-      )}
 
       {/* M6A Strategi (STRG-) — the DECIDED strategy entity (SESI31 keputusan #6).
           This is the canonical card; the M6 §4 STR- "Strategy & Plan" card above
@@ -947,190 +800,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
-      {/* §4 Rule 1/6 + createStrategy's own gates: plan-gated only, no Plan yet,
-          Service still [Awaiting Onboarding]. A Direct service has no Plan, ever.
-          Hidden by default (SESI31): the decided create door is Strategi (STRG-)
-          above; this legacy STR- form only shows with SHOW_LEGACY_STR_PATH on. */}
-      {SHOW_LEGACY_STR_PATH && !strategy && canWrite && planGated && awaitingOnboarding && !service?.plan_determination_pending && (
-        <section className="card">
-          <div className="cardHeader">
-            <h2>Buat Strategy &amp; Plan</h2>
-          </div>
-          <p className="muted" style={{ fontSize: 13 }}>
-            Layanan ini plan-gated: Plan wajib dibuat, diajukan, dan disetujui SPV sebelum Brief bisa dibuat
-            (M6 §4 Rule 5). Menyimpan Plan otomatis mengajukannya untuk persetujuan &mdash; tidak perlu langkah
-            &ldquo;ajukan&rdquo; terpisah.
-          </p>
-          <form className="form" onSubmit={handleCreateStrategy}>
-            {sError && <div className="alert alertError" role="alert">{sError}</div>}
-            {sMessage && <div className="alert alertSuccess" role="status">{sMessage}</div>}
-            <div className="field">
-              <label htmlFor="cs-objective">Objective</label>
-              <textarea id="cs-objective" required value={sObjective} onChange={(e) => setSObjective(e.target.value)} />
-            </div>
-
-            {/* Target KPI — the four fixed points (QA revisi). GMV anchors on the
-                client's expectation and may move within ±20% freely. */}
-            <fieldset style={{ border: '1px solid var(--border, #ddd)', padding: 12 }}>
-              <legend style={{ fontSize: 13 }}>Target KPI</legend>
-              <div className="formRow">
-                <div className="field">
-                  <label htmlFor="cs-gmv">Target GMV (Rp)</label>
-                  <input
-                    id="cs-gmv"
-                    type="number"
-                    min="0"
-                    step="1"
-                    required
-                    value={sGmv}
-                    onChange={(e) => setSGmv(e.target.value)}
-                  />
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    {clientGmv > 0
-                      ? `Target klien (dari Sales): ${formatIDR(service?.client_target_gmv ?? null)}`
-                      : 'Klien belum menetapkan target GMV — tidak ada batas toleransi.'}
-                  </span>
-                </div>
-                <div className="field">
-                  <label htmlFor="cs-roas">Target ROAS</label>
-                  <input id="cs-roas" type="number" min="0" step="0.01" value={sRoas} onChange={(e) => setSRoas(e.target.value)} />
-                </div>
-              </div>
-              <div className="formRow">
-                <div className="field">
-                  <label htmlFor="cs-ctr">Target CTR (%)</label>
-                  <input id="cs-ctr" type="number" min="0" step="0.001" value={sCtr} onChange={(e) => setSCtr(e.target.value)} />
-                </div>
-                <div className="field">
-                  <label htmlFor="cs-cvr">Target CVR (%)</label>
-                  <input id="cs-cvr" type="number" min="0" step="0.001" value={sCvr} onChange={(e) => setSCvr(e.target.value)} />
-                </div>
-              </div>
-              {clientGmv > 0 && sGmv.trim() !== '' && (
-                <p className="muted" style={{ fontSize: 12 }}>
-                  Penyesuaian GMV: {gmvDeviation >= 0 ? '+' : ''}
-                  {(gmvDeviation * 100).toFixed(1)}% dari target klien.
-                </p>
-              )}
-              {gmvOutOfTolerance && (
-                <div className="field">
-                  <label htmlFor="cs-gmv-reason">
-                    Alasan penyesuaian GMV di luar ±20% (wajib — perlu ACC Head/SPV)
-                  </label>
-                  <textarea
-                    id="cs-gmv-reason"
-                    required
-                    value={sGmvReason}
-                    onChange={(e) => setSGmvReason(e.target.value)}
-                  />
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    Di luar toleransi 20%: Plan tidak bisa diajukan sampai Head/SPV meng-ACC. Semua tercatat di log.
-                  </span>
-                </div>
-              )}
-              <div className="field">
-                <label htmlFor="cs-kpi-note">Catatan KPI (opsional)</label>
-                <textarea id="cs-kpi-note" value={sKpiNote} onChange={(e) => setSKpiNote(e.target.value)} />
-              </div>
-            </fieldset>
-
-            <div className="field">
-              <label>Divisi Terlibat (min. 1)</label>
-              <div className="stack" style={{ gap: 6 }}>
-                {BRIEF_DIVISIONS.map((div) => (
-                  <label key={div} className="row" style={{ gap: 8, fontSize: 13 }}>
-                    <input type="checkbox" checked={sDivisions.includes(div)} onChange={() => toggleSDivision(div)} />
-                    {div}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* Strategi — task satuan per involved division (QA revisi). These
-                become Briefs to the execution side (M6B P3). */}
-            {sDivisions.some((d) => (TASK_CATALOG[d] ?? []).length > 0) && (
-              <fieldset style={{ border: '1px solid var(--border, #ddd)', padding: 12 }}>
-                <legend style={{ fontSize: 13 }}>Strategi &mdash; Task Satuan per Divisi</legend>
-                {sDivisions.map((divisi) =>
-                  (TASK_CATALOG[divisi] ?? []).length === 0 ? null : (
-                    <div key={divisi} className="stack" style={{ gap: 6, marginBottom: 8 }}>
-                      <div className="muted" style={{ fontSize: 12 }}>{divisi}</div>
-                      <div className="formRow">
-                        {(TASK_CATALOG[divisi] ?? []).map((t) => {
-                          const key = `${divisi}::${t.jenis}`;
-                          return (
-                            <div key={key} className="field">
-                              <label htmlFor={`cs-task-${key}`}>{t.label}</label>
-                              <input
-                                id={`cs-task-${key}`}
-                                type="number"
-                                min="0"
-                                step={t.money ? '1' : '1'}
-                                value={sTasks[key] ?? ''}
-                                onChange={(e) => setSTasks((prev) => ({ ...prev, [key]: e.target.value }))}
-                              />
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ),
-                )}
-              </fieldset>
-            )}
-
-            <div className="field">
-              <label htmlFor="cs-outline">Outline Brief Terencana</label>
-              <textarea id="cs-outline" required value={sOutline} onChange={(e) => setSOutline(e.target.value)} />
-            </div>
-            <div className="formRow">
-              <div className="field">
-                <label htmlFor="cs-start">Timeline Mulai</label>
-                <input id="cs-start" type="date" required value={sStart} onChange={(e) => setSStart(e.target.value)} />
-              </div>
-              <div className="field">
-                <label htmlFor="cs-end">Timeline Selesai</label>
-                <input id="cs-end" type="date" required value={sEnd} onChange={(e) => setSEnd(e.target.value)} />
-              </div>
-            </div>
-            <div>
-              <button type="submit" className="btn btnPrimary" disabled={sSubmitting}>
-                {sSubmitting ? 'Menyimpan & mengajukan...' : 'Simpan & Ajukan Strategy & Plan'}
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
-
-      {SHOW_LEGACY_STR_PATH && !strategy && canWrite && awaitingOnboarding && !service?.plan_determination_pending && (
-        <section className="card">
-          <div className="cardHeader">
-            <h2>Override Kebutuhan Strategy &amp; Plan</h2>
-          </div>
-          <p className="muted" style={{ fontSize: 13 }}>
-            Hanya bisa saat belum ada Strategy &amp; Plan dan layanan masih [Awaiting Onboarding]. Alasan wajib.
-            Pin Master Service List tidak berubah &mdash; override ini berlaku untuk engagement ini saja
-            (M6-OA-1).
-          </p>
-          <form className="form" onSubmit={handleOverride}>
-            {reqError && <div className="alert alertError" role="alert">{reqError}</div>}
-            {reqMessage && <div className="alert alertSuccess" role="status">{reqMessage}</div>}
-            <label className="row" style={{ gap: 8, fontSize: 13 }}>
-              <input type="checkbox" checked={reqValue} onChange={(e) => setReqValue(e.target.checked)} />
-              Wajib memiliki Strategy &amp; Plan
-            </label>
-            <div className="field">
-              <label htmlFor="req-reason">Alasan</label>
-              <input id="req-reason" required value={reqReason} onChange={(e) => setReqReason(e.target.value)} />
-            </div>
-            <div>
-              <button type="submit" className="btn btnSecondary" disabled={reqSubmitting}>
-                {reqSubmitting ? 'Menyimpan...' : 'Simpan Override'}
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
 
       {/* A voided Service (M4-OA-5) has no live path left — createBrief rejects it
           with [brief tidak dapat dibuat untuk layanan pada status ini]. */}
@@ -1161,8 +830,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
               Layanan plan-gated: pada alur yang diputuskan, Brief <strong>diwarisi satu-klik dari
               Plan</strong> setelah Strategi (STRG-) disetujui &amp; Plan diaktifkan (M6B). Mulai dari{' '}
               <strong>Strategi (STRG-)</strong> di atas.
-              {SHOW_LEGACY_STR_PATH &&
-                ' (Jalur lama STR-: Brief manual baru bisa dibuat setelah Strategy & Plan disetujui SPV/Head Account, M6 §4 Rule 5.)'}
             </div>
           )}
 
@@ -1207,14 +874,14 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
           )}
-          {/* QA (2026-08-26): for a plan-gated service under the decided flow,
-              `approvedStrategy` (the legacy STR- entity) is always null — this
-              form's "Strategy ID" locks to it, so it can never actually submit
-              (button below is disabled) and only invites the AM to fill a dead
-              form instead of using the Plan panel above. Legacy STR- keeps its
-              escape hatch (SHOW_LEGACY_STR_PATH); everything else (Direct-path
-              services, which need no Strategy ID) is unaffected. */}
-          {(!planGated || approvedStrategy || SHOW_LEGACY_STR_PATH) && (
+          {/* Gerbang form Brief. `approvedStrategy` (entitas lama `STR-`) SELAMANYA
+              null sejak jalur itu dipensiunkan (ketokan 2026-09-08), jadi kondisi
+              ini membaca `strgAktif` — Strategi `STRG-` yang aktif pada kontrak
+              layanan ini. Tanpa itu, layanan tergerbang-Plan tidak akan pernah
+              melihat formnya, karena satu-satunya syarat yang tersisa mengacu ke
+              record yang tidak lagi pernah dibuat. Layanan Direct (nol Strategy
+              ID) tidak terpengaruh. */}
+          {(!planGated || approvedStrategy || strgAktif) && (
           <form className="form" onSubmit={handleCreateBrief}>
             {bError && <div className="alert alertError" role="alert">{bError}</div>}
             {bMessage && <div className="alert alertSuccess" role="status">{bMessage}</div>}

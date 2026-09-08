@@ -9,20 +9,34 @@
  * What this module refuses to do, and why
  * ===========================================================================
  *
- * ~~**It does not unlock Brief dispatch yet.**~~ **Resolved by A-3, 2026-09-07.**
- * It does now: `approveStrategi` drives the Service `[Awaiting Onboarding]` →
- * `[Strategy Approved]` in the approval transaction (M6A §5.7), and
- * `account.guardBriefCreation` accepts an `Aktif` STRG- as an opener alongside
- * the legacy `STR-` path.
+ * ~~**It does not unlock Brief dispatch yet.**~~ **It does — A-3 (2026-09-07),
+ * and `STRG-` is the CANONICAL path as of the owner's ketokan 2026-09-08.**
+ * `approveStrategi` drives the Service `[Awaiting Onboarding]` → `[Strategy
+ * Approved]` in the approval transaction (M6A §5.7), and
+ * `account.guardBriefCreation` accepts an `Aktif` STRG- as an opener.
  *
- * The paragraph this replaces deferred the swap to avoid "two doors, one lock"
- * while the old STR- form was the only UI. That reasoning expired from BOTH
- * ends: the STR- form is now hidden (`SHOW_LEGACY_STR_PATH = false`), so it is
- * no longer a competing door — and in the meantime the lock had NO working door
- * at all. `services.status` never moved, so every Brief on the decided path was
- * refused with `[layanan ini wajib memiliki Strategy & Plan yang disetujui
- * sebelum dibuatkan Brief]` while the STRG- sat `Aktif` (feedback OD, keluhan
- * Account #5). Waiting cost more than the duplication it was avoiding.
+ * ## The correction worth reading before you trust a "that path is dead" claim
+ *
+ * A-3 first landed on a WRONG premise. The paragraph it replaced had deferred
+ * this swap to avoid "two doors, one lock", and A-3 argued that reasoning had
+ * expired because `SHOW_LEGACY_STR_PATH = false` had killed the STR- path. That
+ * flag only hid the STR- **create** form on the Service hub. The STR- **approve**
+ * path was still fully live on two screens nobody had checked — `/persetujuan`
+ * (an ACTIVE nav entry) and `/account/strategies/{id}` — plus its route. So for
+ * one day this module WAS the second live writer to `services.status`, and the
+ * collision was reachable and measured: approve the STRG- first, and the SPV's
+ * later STR- approval fails with `[transisi status tidak diizinkan]` and rolls
+ * back entirely, locking them out of that Plan permanently. Zero instances in
+ * production (no Service held both records), so it stayed latent.
+ *
+ * The owner then ruled `STRG-` canonical, and the STR- write path was retired
+ * for real in that same commit — route 410 (`apps/api/src/lib/retired-str.ts`),
+ * buttons removed, the misleading flag and its dead blocks deleted. THAT is what
+ * makes this module the only writer. Not the flag.
+ *
+ * The lesson, because it will recur: a feature flag set to `false` proves only
+ * that ONE door is shut. Before concluding a path is dead, grep the routes and
+ * the nav, not one page.
  *
  * Two shapes of that swap are worth carrying in your head, because both differ
  * from the STR- path it was modelled on:

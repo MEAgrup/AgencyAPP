@@ -1008,6 +1008,25 @@ export async function approveGmvAdjustment(sql: Sql, actor: Actor, strategyId: s
  * Service is driven [Awaiting Onboarding] → [Strategy Approved] in the SAME
  * transaction (§4 Rule 3); Approved By is recorded. An invalid edge (e.g. the
  * Plan is still Drafting) rolls back everything (ConflictError, nothing moves).
+ *
+ * ## ⛔ UNREACHABLE since 2026-09-08 — the `STR-` write path is retired
+ *
+ * Owner's ketokan: `STRG-` (`strategi.approveStrategi`) is canonical. Every door
+ * to this function was removed in that commit — `POST /strategies/{id}/approve`
+ * answers 410, and the buttons on `/persetujuan` and `/account/strategies/{id}`
+ * are gone. See `apps/api/src/lib/retired-str.ts` for the full reasoning.
+ *
+ * It is kept, not deleted, for two reasons. Its tests document how the two
+ * historical `STR-` records in production reached `[Strategy Approved]`, and
+ * deleting the function would delete that record of how the money path actually
+ * ran. And the second leg below is the exact shape `strategi.ts` had to copy —
+ * reading it is how the next person understands why the STRG- version drives n
+ * Services instead of one.
+ *
+ * Do NOT wire a new route to this. Two live writers to `services.status` is the
+ * defect this retirement closed, and it was measured, not theoretical: with both
+ * paths live, approving the STRG- first made this function fail with
+ * `[transisi status tidak diizinkan]` and roll the whole approval back.
  */
 export async function approveStrategy(sql: Sql, actor: Actor, strategyId: string): Promise<void> {
   if (!canApproveStrategy(actor)) {
