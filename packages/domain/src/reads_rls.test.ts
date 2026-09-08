@@ -1060,6 +1060,54 @@ describeDb('read models under RLS (O37)', () => {
       expect(view.attempts.find((a) => a.id === S_PRSP_ID)?.ownerNama).toBe(S_OWNER_NAMA);
     });
 
+    /**
+     * FS-5. `contracts_select` sebelum migrasi 20260925010000 tidak punya
+     * lengan Sales lead — `clients_select` punya sejak S-01, `contracts_select`
+     * dilewati karena saat itu kontraknya belum punya UI mana pun. Akibatnya
+     * Head Sales melihat KLIEN se-divisinya tapi tidak DURASI kontraknya.
+     *
+     * Diuji lewat RLS sungguhan meski route `GET /clients/{id}/contracts`
+     * hari ini berjalan service-role: policy-nya adalah pernyataan resmi siapa
+     * boleh melihat apa (CLAUDE.md — penegakan ada di DB), dan gate TS-nya
+     * dibentuk sebagai cerminnya.
+     */
+    it('contracts: Head Sales membaca jendela kontrak se-divisinya (FS-5)', async () => {
+      await seedSales();
+      const CLI = 'CLI-ZZR-0003';
+      const CTR = 'CTR-ZZR-0003';
+      await sql`
+        insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, payment_intent, created_by)
+        values (${CLI}, 'Toko Kontrak', 'Ibu ZZR', 'Bandung', 'Fashion', 'https://shopee/zzr3',
+                '1000000.00', '2000000.00', ${S_OWNER}, ${S_OWNER}, '[Termin]', ${S_OWNER})
+        on conflict (id) do nothing`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir,
+                               jenis, created_by)
+        values (${CTR}, ${CLI}, 6, current_date, current_date + 180, 'baru', ${S_OWNER})
+        on conflict (id) do nothing`;
+      try {
+        const asHead = await withClaims(
+          sql,
+          claims({ employeeId: S_LEAD, division: 'Sales', level: 'lead' }),
+          (tx) => tx`select id, durasi_bulan, jenis from contracts where id = ${CTR}`,
+        );
+        expect(asHead.length, 'Head Sales harus melihat kontrak se-divisinya').toBe(1);
+        expect(Number(asHead[0].durasi_bulan)).toBe(6);
+
+        // Tetap ter-scope: divisi eksekusi tidak punya lengan apa pun di sini.
+        const asCreative = await withClaims(
+          sql,
+          claims({ employeeId: 'ZZR-CRE', division: 'Creative', level: 'lead' }),
+          (tx) => tx`select id from contracts where id = ${CTR}`,
+        );
+        expect(asCreative.length).toBe(0);
+      } finally {
+        await sql`delete from contracts where id = ${CTR}`;
+        await sql`delete from clients where id = ${CLI}`;
+      }
+    });
+
     it('listClients: Head Sales melihat nama Sales PIC klien, bukan id', async () => {
       await seedSales();
       const CLI = 'CLI-ZZR-0002';

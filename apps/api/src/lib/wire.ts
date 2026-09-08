@@ -4152,6 +4152,9 @@ export interface ContractWire {
   tanggal_mulai: string;
   tanggal_akhir: string;
   catatan: string | null;
+  /** R-01: `baru` | `perpanjangan` | `cross_sell`. */
+  jenis: string;
+  contract_sebelumnya_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -4165,6 +4168,8 @@ export function contractToWire(c: contract.Contract): ContractWire {
     tanggal_mulai: c.tanggalMulai,
     tanggal_akhir: c.tanggalAkhir,
     catatan: c.catatan,
+    jenis: c.jenis,
+    contract_sebelumnya_id: c.contractSebelumnyaId,
     created_by: c.createdBy,
     created_at: c.createdAt,
     updated_at: c.updatedAt,
