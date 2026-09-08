@@ -178,6 +178,13 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const [bInstructions, setBInstructions] = useState('');
   const [bRefs, setBRefs] = useState('');
   const [bAddendum, setBAddendum] = useState(false);
+  // A-req-1 (KOL #1) — jendela campaign + budget sebagai FIELD, bukan kalimat
+  // yang diselipkan ke `instructions`. Kolomnya sudah ada sejak F-4.
+  const [bMulai, setBMulai] = useState('');
+  const [bAkhir, setBAkhir] = useState('');
+  const [bBudget, setBBudget] = useState('');
+  // A-req-2 (K-3) — Brief Creative sumber aset untuk Brief Ads.
+  const [bSumber, setBSumber] = useState('');
   const [bSubmitting, setBSubmitting] = useState(false);
   const [bError, setBError] = useState<string | null>(null);
   const [bMessage, setBMessage] = useState<string | null>(null);
@@ -423,6 +430,13 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         instructions: bInstructions || undefined,
         reference_attachments: bRefs || undefined,
         is_addendum: planGated ? bAddendum : undefined,
+        // Dikirim hanya kalau diisi: '' berarti "tidak dipakai", dan mengirim
+        // string kosong ke kolom tanggal akan ditolak server.
+        tanggal_mulai: bMulai || undefined,
+        tanggal_akhir: bAkhir || undefined,
+        budget: bBudget || undefined,
+        // K-3 hanya berlaku untuk Brief Ads; divisi lain nol penunjuk sumber.
+        source_creative_brief_id: bDivision === 'Ads' && bSumber ? bSumber : undefined,
       });
       setBMessage(`Brief ${res.id} berhasil dibuat.`);
       setBTitle('');
@@ -432,6 +446,10 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       setBInstructions('');
       setBRefs('');
       setBAddendum(false);
+      setBMulai('');
+      setBAkhir('');
+      setBBudget('');
+      setBSumber('');
       await load();
     } catch (err) {
       setBError(errorMessage(err));
@@ -976,6 +994,60 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                   <label htmlFor="b-recur-end">Tanggal Berakhir</label>
                   <input id="b-recur-end" type="date" required value={bEnd} onChange={(e) => setBEnd(e.target.value)} />
                 </div>
+              </div>
+            )}
+            {/* A-req-1 (keluhan KOL #1) — jendela campaign + budget. Dulu ini
+                cuma bisa dititipkan sebagai kalimat di "Instruksi", jadi ia
+                tidak bisa diurutkan, dibandingkan, atau jadi sumber pengingat
+                `m9.campaign.mendekati_akhir`. Sekarang kolom sungguhan (F-4).
+                Opsional: divisi selain KOL/Ads sering tidak punya jendela. */}
+            <div className="formRow">
+              <div className="field">
+                <label htmlFor="b-mulai">Mulai Campaign (opsional)</label>
+                <input id="b-mulai" type="date" value={bMulai} onChange={(e) => setBMulai(e.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="b-akhir">Akhir Campaign (opsional)</label>
+                <input id="b-akhir" type="date" value={bAkhir} onChange={(e) => setBAkhir(e.target.value)} />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Dipakai pengingat otomatis H-7 sebelum campaign berakhir.
+                </span>
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="b-budget">Budget Brief (Rp, opsional)</label>
+              <input
+                id="b-budget"
+                type="number"
+                min="0"
+                step="0.01"
+                value={bBudget}
+                onChange={(e) => setBBudget(e.target.value)}
+              />
+            </div>
+            {/* A-req-2 (ketokan K-3) — Brief Ads MENUNJUK Brief Creative
+                sumbernya, dan picker aset di sisi Ads menyaring ke situ. Sisi
+                bacanya sudah jalan; ini yang mengisi kolomnya. Hanya muncul
+                untuk Brief Ads: divisi lain nol aset untuk disaring.
+                Pilihannya diambil dari Brief yang SUDAH dimuat halaman ini —
+                nol endpoint baru, nol N+1. Server-nya lebih longgar (satu
+                klien, bukan satu Service), jadi pilihan di sini selalu sah. */}
+            {bDivision === 'Ads' && (
+              <div className="field">
+                <label htmlFor="b-sumber">Brief Creative sumber aset (opsional)</label>
+                <select id="b-sumber" value={bSumber} onChange={(e) => setBSumber(e.target.value)}>
+                  <option value="">— seluruh aset klien yang sudah Approved —</option>
+                  {(briefs ?? [])
+                    .filter((b) => b.assigned_division === 'Creative')
+                    .map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.id} · {b.title}
+                      </option>
+                    ))}
+                </select>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Kosongkan kalau iklan ini boleh memakai aset mana pun milik klien.
+                </span>
               </div>
             )}
             <div className="field">

@@ -34,7 +34,7 @@
  * Reference: archive/backend-go/internal/module6_account/{account,strategy}.go.
  */
 
-import { bi, division, notification, permission, statemachine } from '@cdps/core';
+import { bi, division, money, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { onBriefReachedTerminal, validateBriefApproval } from './board';
 import * as stage from './stage';
@@ -1709,6 +1709,22 @@ export const MSG_INVALID_PRIORITY = '[prioritas tidak valid]';
 export const MSG_BRIEF_STRATEGY_MISMATCH =
   '[Strategy ID brief harus menunjuk Strategy & Plan yang disetujui untuk layanan ini]';
 export const MSG_BRIEF_STRATEGY_NOT_ALLOWED = '[layanan Direct tidak boleh memiliki Strategy ID pada brief]';
+/** A-req-1 — cermin `ck_briefs_jendela_urut`; DB adalah dindingnya, ini pesannya. */
+export const MSG_BRIEF_JENDELA_TIDAK_URUT =
+  '[tanggal mulai brief harus sebelum atau sama dengan tanggal akhir]';
+/** A-req-1 — cermin `ck_briefs_budget_non_negatif`. */
+export const MSG_BRIEF_BUDGET_NEGATIF = '[budget brief tidak boleh negatif]';
+/** A-req-2 — Brief Creative sumber (K-3) tidak ada. */
+export const MSG_BRIEF_SUMBER_TIDAK_ADA = '[brief creative sumber tidak ditemukan]';
+/**
+ * A-req-2 — Brief sumber milik klien lain. BUKAN penolakan kosmetik: sejak B-5
+ * `assets_select` punya lengan `jwt_division() = 'Ads'` yang **buta klien**, jadi
+ * satu-satunya yang mempersempit picker aset adalah kolom ini. Membiarkannya
+ * menunjuk Brief klien lain berarti membuka aset klien itu di picker.
+ */
+export const MSG_BRIEF_SUMBER_KLIEN_LAIN = '[brief creative sumber harus milik klien yang sama]';
+/** A-req-2 — hanya Brief divisi Creative yang punya aset untuk disaring. */
+export const MSG_BRIEF_SUMBER_BUKAN_CREATIVE = '[brief sumber harus brief divisi Creative]';
 export const MSG_QUEUE_FORBIDDEN = '[anda tidak memiliki akses ke antrean brief divisi ini]';
 export const MSG_BRIEF_REVIEW_FORBIDDEN =
   '[hanya Account Manager pemilik klien yang dapat mereview Brief layanan ini]';
@@ -1742,6 +1758,26 @@ export interface BriefInput {
   instructions?: string;
   referenceAttachments?: string;
   isAddendum?: boolean;
+  /**
+   * A-req-1 (KOL #1) — jendela campaign sebagai KOLOM, bukan teks yang nyangkut
+   * di `instructions` (di situ ia tidak bisa diurutkan, dibandingkan, atau jadi
+   * sumber pengingat). Kolomnya sudah ada sejak F-4 (`20260922100200`), jadi ini
+   * murni membuka jalur TS-nya — nol migrasi.
+   *
+   * `''`/undefined = tidak diisi. `brief-inherit.planRowToBriefInput` (M6B)
+   * sudah siap memproyeksikannya dari `plan.tanggal_mulai`/`tanggal_akhir`.
+   */
+  tanggalMulai?: string;
+  tanggalAkhir?: string;
+  /** A-req-1 — budget Brief, string desimal rupiah. Diturunkan `plan_row.budget`. */
+  budget?: string | null;
+  /**
+   * A-req-2 (ketokan K-3) — Brief Creative yang jadi SUMBER aset Brief Ads ini.
+   * Sisi BACA-nya sudah lengkap (`ads.ts` + `wire.ts` + AssetPicker, Jalur B);
+   * ini sisi tulisnya. Begitu kolomnya terisi, filter picker aset hidup tanpa
+   * satu baris pun berubah di jalur baca.
+   */
+  sourceCreativeBriefId?: string | null;
 }
 
 /** A Brief record (BRF-). */
@@ -1780,6 +1816,28 @@ export interface Brief {
   /** Nama toko klien (`clients.toko`). '' kalau klien tak ada. */
   clientNama: string;
   /**
+   * A-req-1 — jendela campaign. `''` kalau tidak diisi (bukan kunci yang
+   * hilang: kunci HILANG lebih berbahaya daripada null, O43).
+   */
+  tanggalMulai: string;
+  tanggalAkhir: string;
+  /** A-req-1 — budget, string desimal rupiah; `null` kalau tidak diisi. */
+  budget: string | null;
+  /** A-req-2 — Brief Creative sumber (K-3); `null` kalau tidak ditunjuk. */
+  sourceCreativeBriefId: string | null;
+  /**
+   * A-req-3 — jumlah unit kerja anak (Asset / Campaign / Booking / Sesi Live),
+   * pada SETIAP baca Brief termasuk baris antrean divisi. Dihitung lewat
+   * `private.brief_jumlah_anak`, BUKAN `count(*)` langsung: `briefCols` dibaca
+   * di bawah RLS, dan subquery yang dipersempit policy pembacanya mengembalikan
+   * angka yang SALAH tanpa galat apa pun (seorang staff Creative akan melihat 1
+   * untuk Brief berisi 12 Asset).
+   *
+   * `0` untuk divisi tanpa tabel anak (mis. Store Operation) — bukan null, biar
+   * pemanggil tidak perlu menebak antara "belum dipecah" dan "tidak punya".
+   */
+  jumlahAnak: number;
+  /**
    * Nama PIC yang dipegangi Brief ini. '' kalau `assigned_pic` NULL; kalau
    * terisi tapi karyawannya hilang, `private.employee_display_name` jatuh ke
    * employee_id-nya — sebuah id masih lebih berguna daripada kolom kosong.
@@ -1788,6 +1846,52 @@ export interface Brief {
 }
 
 // --- Input validation ---
+
+/**
+ * budgetOrNull menormalkan budget ke bentuk desimal yang `numeric(18,2)` terima,
+ * atau `null`. Lewat `money` supaya '5000000' dan '5000000.00' menghasilkan
+ * baris yang identik — dua bentuk dari satu angka adalah cara paling mudah
+ * membuat laporan yang membandingkannya jadi salah.
+ */
+function budgetOrNull(v: string | null | undefined): string | null {
+  const t = (v ?? '').toString().trim();
+  return t === '' ? null : money.decimal(money.parse(t));
+}
+
+/**
+ * guardSourceCreativeBrief menjaga penunjuk K-3: Brief sumber harus ADA, milik
+ * KLIEN YANG SAMA, dan divisi Creative.
+ *
+ * Gerbang klien bukan kosmetik. Sejak B-5, `assets_select` punya lengan
+ * `jwt_division() = 'Ads'` yang **buta klien** — divisi Ads melihat SELURUH
+ * aset. Jadi satu-satunya yang mempersempit picker aset adalah kolom ini, dan
+ * membiarkannya menunjuk Brief klien lain berarti membuka aset klien itu di
+ * picker seorang Ads. Dibaca lewat `private.brief_client_id` dan bukan
+ * `join services` — jalur ini juga dipanggil dari konteks divisi eksekusi, dan
+ * join itu MEMBUANG barisnya (perangkap O52), bukan mengosongkan kolomnya.
+ */
+async function guardSourceCreativeBrief(
+  tx: Queryable,
+  serviceId: string,
+  sourceBriefId: string,
+): Promise<void> {
+  const rows = await tx<{ assigned_division: string; client_id: string | null }[]>`
+    select b.assigned_division, private.brief_client_id(b.id) as client_id
+      from briefs b where b.id = ${sourceBriefId}`;
+  if (rows.length === 0) {
+    throw new ValidationError(MSG_BRIEF_SUMBER_TIDAK_ADA);
+  }
+  if (rows[0].assigned_division !== 'Creative') {
+    throw new ValidationError(MSG_BRIEF_SUMBER_BUKAN_CREATIVE);
+  }
+  const target = await tx<{ client_id: string | null }[]>`
+    select private.service_client_id(${serviceId}) as client_id`;
+  const sumberKlien = rows[0].client_id;
+  const targetKlien = target[0]?.client_id ?? null;
+  if (sumberKlien === null || targetKlien === null || sumberKlien !== targetKlien) {
+    throw new ValidationError(MSG_BRIEF_SUMBER_KLIEN_LAIN);
+  }
+}
 
 /** validateBrief checks the §9.4 mandatory fields BEFORE any id is minted. */
 function validateBrief(input: BriefInput): void {
@@ -1825,6 +1929,31 @@ function validateBrief(input: BriefInput): void {
   if ((input.assignedPic ?? '').trim() !== '') {
     throw new ValidationError(MSG_PIC_BUKAN_WEWENANG_AM);
   }
+  // A-req-1 — cermin `ck_briefs_jendela_urut` + `ck_briefs_budget_non_negatif`.
+  // DB tetap dindingnya; ini yang mengubah pelanggarannya jadi pesan BI alih-alih
+  // galat constraint mentah (kelas cacat sendiri, CLAUDE.md #5). Keduanya
+  // OPSIONAL: satu tanggal saja sah, dan CHECK-nya juga mengizinkannya.
+  const mulai = (input.tanggalMulai ?? '').trim();
+  const akhir = (input.tanggalAkhir ?? '').trim();
+  for (const d of [mulai, akhir]) {
+    if (d !== '' && (!RE_DATE.test(d) || Number.isNaN(Date.parse(`${d}T00:00:00Z`)))) {
+      throw new ValidationError(bi.INCOMPLETE_DATA);
+    }
+  }
+  if (mulai !== '' && akhir !== '' && mulai > akhir) {
+    throw new ValidationError(MSG_BRIEF_JENDELA_TIDAK_URUT);
+  }
+  const budget = (input.budget ?? '').toString().trim();
+  if (budget !== '') {
+    // Dibandingkan lewat `money.parse` (sen-eksak) dan bukan Number, supaya
+    // aturannya sama dengan setiap perbandingan rupiah lain di repo ini.
+    if (Number.isNaN(Number(budget))) {
+      throw new ValidationError(bi.INCOMPLETE_DATA);
+    }
+    if (money.parse(budget) < 0n) {
+      throw new ValidationError(MSG_BRIEF_BUDGET_NEGATIF);
+    }
+  }
   // Recurring toggle: when on, its sub-fields become mandatory (§9.4).
   if (input.recurring) {
     const freq = (input.recurringFrequency ?? '').trim();
@@ -1839,7 +1968,7 @@ function validateBrief(input: BriefInput): void {
 }
 
 /** orNull stores an empty/absent optional string as SQL NULL. */
-function orNull(s: string | undefined): string | null {
+function orNull(s: string | null | undefined): string | null {
   return s && s.trim() !== '' ? s.trim() : null;
 }
 
@@ -1884,12 +2013,15 @@ export async function insertBrief(
       (id, service_id, strategy_id, plan_row_id, assigned_division, assigned_pic, deliverable_type,
        quantity_target, due_date, priority, recurring, recurring_frequency, recurring_count,
        recurring_end_date, instructions, reference_attachments, title, status, created_by,
-       stage_pipeline_code, production_stage)
+       stage_pipeline_code, production_stage,
+       tanggal_mulai, tanggal_akhir, budget, source_creative_brief_id)
     values (${id}, ${serviceId}, ${strategyId}, ${planRowId}, ${input.assignedDivision}, ${orNull(input.assignedPic)},
       ${input.deliverableType}, ${input.quantityTarget}, ${input.dueDate.trim()}, ${input.priority}, ${recurring},
       ${orNull(input.recurringFrequency)}, ${recCount}, ${orNull(input.recurringEndDate)},
       ${orNull(input.instructions)}, ${orNull(input.referenceAttachments)}, ${input.title.trim()}, ${birth},
-      ${actor.employeeId}, ${pipeline?.code ?? null}, ${pipeline?.initialState ?? null})`;
+      ${actor.employeeId}, ${pipeline?.code ?? null}, ${pipeline?.initialState ?? null},
+      ${orNull(input.tanggalMulai)}, ${orNull(input.tanggalAkhir)},
+      ${budgetOrNull(input.budget)}, ${orNull(input.sourceCreativeBriefId)})`;
   await ex.audit.insertAudit({
     entityType: 'brief', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
     beforeJson: null,
@@ -1926,6 +2058,12 @@ export async function insertBrief(
     revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
     stagePipelineCode: pipeline?.code ?? null, productionStage: pipeline?.initialState ?? null,
     clientId: ident.clientId, clientNama: ident.clientNama, assignedPicNama: ident.assignedPicNama,
+    tanggalMulai: (input.tanggalMulai ?? '').trim(),
+    tanggalAkhir: (input.tanggalAkhir ?? '').trim(),
+    budget: budgetOrNull(input.budget),
+    sourceCreativeBriefId: orNull(input.sourceCreativeBriefId),
+    // Brief yang baru lahir belum punya anak — nol, bukan hasil query.
+    jumlahAnak: 0,
   };
 }
 
@@ -2014,6 +2152,13 @@ export async function createBrief(sql: Sql, actor: Actor, serviceId: string, inp
     }
     // §5 Rule 5 gate: plan-gated + still [Awaiting Onboarding] is rejected.
     await guardBriefCreation(tx, serviceId);
+    // A-req-2 (K-3) — di dalam transaksi yang sama, jadi Brief sumber yang tidak
+    // sah membatalkan seluruh pembuatan Brief alih-alih mendarat sebagai baris
+    // yang menunjuk ke tempat yang salah.
+    const sumber = (input.sourceCreativeBriefId ?? '').trim();
+    if (sumber !== '') {
+      await guardSourceCreativeBrief(tx, serviceId, sumber);
+    }
 
     const planGated = effectiveRequiresPlan(svc.requires_strategy_plan, svc.requires_strategy_plan_override);
     const strategyId = await resolveBriefStrategy(tx, serviceId, planGated, (input.strategyId ?? '').trim());
@@ -2348,6 +2493,11 @@ interface BriefRow {
   client_id: string | null;
   client_nama: string | null;
   assigned_pic_nama: string | null;
+  tanggal_mulai: string | Date | null;
+  tanggal_akhir: string | Date | null;
+  budget: string | null;
+  source_creative_brief_id: string | null;
+  jumlah_anak: number | string | null;
 }
 
 /**
@@ -2372,6 +2522,8 @@ function briefCols(sql: Queryable) {
     b.quantity_target, b.due_date, b.priority, b.recurring, b.recurring_frequency, b.recurring_count,
     b.recurring_end_date, b.instructions, b.reference_attachments, b.title, b.status, b.created_by, b.created_at,
     b.stage_pipeline_code, b.production_stage,
+    b.tanggal_mulai, b.tanggal_akhir, b.budget, b.source_creative_brief_id,
+    private.brief_jumlah_anak(b.id) as jumlah_anak,
     private.brief_client_id(b.id) as client_id,
     private.brief_client_toko(b.id) as client_nama,
     case when b.assigned_pic is null then null
@@ -2390,6 +2542,11 @@ function rowToBrief(r: BriefRow): Brief {
     stagePipelineCode: r.stage_pipeline_code, productionStage: r.production_stage,
     clientId: r.client_id ?? '', clientNama: r.client_nama ?? '',
     assignedPicNama: r.assigned_pic_nama ?? '',
+    tanggalMulai: r.tanggal_mulai === null ? '' : dateStr(r.tanggal_mulai),
+    tanggalAkhir: r.tanggal_akhir === null ? '' : dateStr(r.tanggal_akhir),
+    budget: r.budget,
+    sourceCreativeBriefId: r.source_creative_brief_id,
+    jumlahAnak: Number(r.jumlah_anak ?? 0),
   };
 }
 

@@ -11,7 +11,7 @@
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { permission, statemachine } from '@cdps/core';
-import { createClient, executors, type Sql } from '@cdps/db';
+import { createClient, executors, withClaims, type Sql } from '@cdps/db';
 import {
   approveBrief,
   approveStrategy,
@@ -57,6 +57,11 @@ import {
   ValidationError,
   workload,
   type Actor,
+  MSG_BRIEF_BUDGET_NEGATIF,
+  MSG_BRIEF_JENDELA_TIDAK_URUT,
+  MSG_BRIEF_SUMBER_BUKAN_CREATIVE,
+  MSG_BRIEF_SUMBER_KLIEN_LAIN,
+  MSG_BRIEF_SUMBER_TIDAK_ADA,
   MSG_PIC_BUKAN_WEWENANG_AM,
   type BriefInput,
   type StrategyInput,
@@ -177,6 +182,10 @@ afterEach(async () => {
   // NOTE: notifications + audit_log are append-only (no-delete triggers), so they
   // are never cleaned here — test assertions filter by the unique per-test entity id.
   await sql`delete from complaints where created_by like 'ZZ-%'`;
+  // A-req-3: tes jumlah anak menyeed `assets` sungguhan, dan `fk_assets_brief`
+  // NO ACTION — satu Asset yang tertinggal membuat `delete from briefs` gagal
+  // untuk SETIAP tes sesudahnya di berkas ini, bukan cuma tesnya sendiri.
+  await sql`delete from assets where created_by like 'ZZ-%'`;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from strategy_plans where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
@@ -1139,5 +1148,263 @@ describe('brief/complaint read predicates', () => {
     expect(canManageComplaint(director(), 'ZZ-SINTA')).toBe(true);
     expect(canManageComplaint(accountStaff('ZZ-OTHER'), 'ZZ-SINTA')).toBe(false);
     expect(canManageComplaint(od(), 'ZZ-SINTA')).toBe(false);
+  });
+});
+
+/**
+ * A-req-1 (keluhan KOL #1) + A-req-2 (ketokan K-3) — jendela campaign, budget,
+ * dan penunjuk Brief Creative sumber.
+ *
+ * Keempat kolomnya sudah ada sejak F-4 (`20260922100200`), jadi ini murni jalur
+ * TS — nol migrasi. Sebelum ini jendela dan budget hanya bisa dititipkan sebagai
+ * kalimat di `instructions`, tempat mereka tidak bisa diurutkan, dibandingkan,
+ * atau dibaca job pengingat.
+ */
+describeDb('A-req-1/A-req-2 — jendela, budget, dan Brief Creative sumber', () => {
+  const readBrief = async (id: string) =>
+    (await sql<{
+      tanggal_mulai: string | null; tanggal_akhir: string | null;
+      budget: string | null; source_creative_brief_id: string | null;
+    }[]>`
+      select tanggal_mulai::text as tanggal_mulai, tanggal_akhir::text as tanggal_akhir,
+             budget::text as budget, source_creative_brief_id
+        from briefs where id = ${id}`)[0];
+
+  it('menyimpan jendela + budget sebagai KOLOM, dan mengembalikannya di bentuk Brief', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(),
+      tanggalMulai: '2026-09-01',
+      tanggalAkhir: '2026-09-30',
+      budget: '15000000',
+    });
+    // Bentuk yang dikembalikan `insertBrief` …
+    expect(b.tanggalMulai).toBe('2026-09-01');
+    expect(b.tanggalAkhir).toBe('2026-09-30');
+    // … dinormalkan lewat `money`, jadi '15000000' dan '15000000.00' menghasilkan
+    // baris identik. Dua bentuk dari satu angka adalah cara termudah membuat
+    // laporan yang membandingkannya jadi salah.
+    expect(b.budget).toBe('15000000.00');
+    // … dan yang benar-benar mendarat di DB.
+    const row = await readBrief(b.id);
+    expect(row.tanggal_mulai).toBe('2026-09-01');
+    expect(row.tanggal_akhir).toBe('2026-09-30');
+    expect(row.budget).toBe('15000000.00');
+  });
+
+  it('membaca ketiganya kembali lewat jalur baca (briefCols), bukan cuma dari insert', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), tanggalMulai: '2026-10-01', tanggalAkhir: '2026-10-31', budget: '9000000.00',
+    });
+    // Jahitannya: `insertBrief` menyusun nilai baliknya dari `input`, sementara
+    // `getBrief` memproyeksikannya dari kolom. Dua tempat, dan hanya tes yang
+    // memanggil KEDUANYA membuktikan mereka sepakat.
+    const read = await getBrief(sql, accountStaff(amId), b.id);
+    expect(read.tanggalMulai).toBe('2026-10-01');
+    expect(read.tanggalAkhir).toBe('2026-10-31');
+    expect(read.budget).toBe('9000000.00');
+  });
+
+  it('mengirim ketiganya sebagai KOSONG eksplisit ketika tidak diisi — bukan undefined', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, goodBrief());
+    // Kunci yang HILANG adalah kelas cacat O43: halamannya kosong walau route
+    // menjawab 200. `''`/`null` terbaca sebagai "belum diisi" dan bisa dirender.
+    expect(b.tanggalMulai).toBe('');
+    expect(b.tanggalAkhir).toBe('');
+    expect(b.budget).toBeNull();
+    expect(b.sourceCreativeBriefId).toBeNull();
+    const read = await getBrief(sql, accountStaff(amId), b.id);
+    expect(read).toHaveProperty('tanggalMulai');
+    expect(read).toHaveProperty('budget');
+    expect(read.budget).toBeNull();
+  });
+
+  it('menolak jendela yang tidak urut dengan pesan BI, bukan galat constraint mentah', async () => {
+    const { svcId, amId } = await directFixture();
+    await expect(createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), tanggalMulai: '2026-09-30', tanggalAkhir: '2026-09-01',
+    })).rejects.toThrow(MSG_BRIEF_JENDELA_TIDAK_URUT);
+  });
+
+  it('menerima SATU tanggal saja — CHECK-nya juga mengizinkannya', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), tanggalMulai: '2026-09-01',
+    });
+    expect((await readBrief(b.id)).tanggal_mulai).toBe('2026-09-01');
+    expect((await readBrief(b.id)).tanggal_akhir).toBeNull();
+  });
+
+  it('menolak budget negatif dengan pesan BI', async () => {
+    const { svcId, amId } = await directFixture();
+    await expect(createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), budget: '-1',
+    })).rejects.toThrow(MSG_BRIEF_BUDGET_NEGATIF);
+  });
+
+  it('menerima budget nol — nol bukan negatif, dan sebuah Brief tanpa biaya itu sah', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, { ...goodBrief(), budget: '0' });
+    expect((await readBrief(b.id)).budget).toBe('0.00');
+  });
+
+  // --- A-req-2 — penunjuk Brief Creative sumber (K-3) ---------------------
+
+  it('menyimpan penunjuk ke Brief Creative sumber pada klien yang SAMA', async () => {
+    const { svcId, amId } = await directFixture();
+    const creative = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), title: 'Aset Lebaran', assignedDivision: 'Creative',
+    });
+    const ads = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), title: 'GMV Max Lebaran', assignedDivision: 'Ads',
+      sourceCreativeBriefId: creative.id,
+    });
+    expect(ads.sourceCreativeBriefId).toBe(creative.id);
+    expect((await readBrief(ads.id)).source_creative_brief_id).toBe(creative.id);
+    // Dan `private.brief_source_creative_id` (jalur baca Jalur B, sudah mendarat
+    // di #312) menemukannya — kolom yang terisi tanpa pembacanya sepakat adalah
+    // separuh fitur.
+    const viaFn = await sql<{ v: string | null }[]>`
+      select private.brief_source_creative_id(${ads.id}) as v`;
+    expect(viaFn[0].v).toBe(creative.id);
+  });
+
+  it('menolak Brief sumber yang tidak ada', async () => {
+    const { svcId, amId } = await directFixture();
+    await expect(createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), assignedDivision: 'Ads', sourceCreativeBriefId: 'BRF-000000-9999',
+    })).rejects.toThrow(MSG_BRIEF_SUMBER_TIDAK_ADA);
+  });
+
+  it('menolak Brief sumber yang bukan divisi Creative', async () => {
+    const { svcId, amId } = await directFixture();
+    const kol = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), title: 'Nano KOL', assignedDivision: 'KOL',
+    });
+    await expect(createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), assignedDivision: 'Ads', sourceCreativeBriefId: kol.id,
+    })).rejects.toThrow(MSG_BRIEF_SUMBER_BUKAN_CREATIVE);
+  });
+
+  /**
+   * Gerbang paling penting dari ketiganya, dan bukan kosmetik: sejak B-5
+   * `assets_select` punya lengan `jwt_division() = 'Ads'` yang BUTA KLIEN, jadi
+   * satu-satunya yang mempersempit picker aset adalah kolom ini. Menunjuk Brief
+   * klien lain berarti membuka aset klien itu di picker seorang Ads.
+   */
+  it('menolak Brief sumber milik KLIEN LAIN — kalau tidak, picker aset membocorkan aset klien itu', async () => {
+    const a = await directFixture();
+    const b = await directFixture();
+    const creativeMilikB = await createBrief(sql, accountStaff(b.amId), b.svcId, {
+      ...goodBrief(), title: 'Aset klien lain', assignedDivision: 'Creative',
+    });
+    await expect(createBrief(sql, accountStaff(a.amId), a.svcId, {
+      ...goodBrief(), assignedDivision: 'Ads', sourceCreativeBriefId: creativeMilikB.id,
+    })).rejects.toThrow(MSG_BRIEF_SUMBER_KLIEN_LAIN);
+  });
+
+  it('membatalkan SELURUH pembuatan Brief kalau sumbernya tidak sah — nol baris menggantung', async () => {
+    const { svcId, amId } = await directFixture();
+    const sebelum = await sql<{ n: number }[]>`
+      select count(*)::int as n from briefs where service_id = ${svcId}`;
+    await expect(createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), assignedDivision: 'Ads', sourceCreativeBriefId: 'BRF-000000-9999',
+    })).rejects.toThrow(MSG_BRIEF_SUMBER_TIDAK_ADA);
+    const sesudah = await sql<{ n: number }[]>`
+      select count(*)::int as n from briefs where service_id = ${svcId}`;
+    expect(sesudah[0].n).toBe(sebelum[0].n);
+  });
+});
+
+/**
+ * A-req-3 — jumlah unit kerja anak pada BARIS ANTREAN divisi.
+ *
+ * Keluhannya: Brief berisi 12 Asset dan Brief nol Asset terlihat sama di
+ * antrean, jadi leader harus membuka satu-satu untuk tahu mana yang belum
+ * dikerjakan sama sekali.
+ *
+ * Tes terakhir di blok ini adalah yang paling penting: ia membuktikan KENAPA
+ * angkanya harus lewat pintu `private.*` dan bukan `count(*)` biasa.
+ */
+describeDb('A-req-3 — jumlah unit kerja anak di baris antrean', () => {
+  it('nol untuk Brief yang baru lahir — nol adalah jawaban, bukan data hilang', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, goodBrief());
+    expect(b.jumlahAnak).toBe(0);
+    const read = await getBrief(sql, accountStaff(amId), b.id);
+    expect(read.jumlahAnak).toBe(0);
+  });
+
+  it('menghitung Asset untuk Brief Creative, dan ikut di BARIS ANTREAN divisi', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), assignedDivision: 'Creative',
+    });
+    for (const n of [1, 2, 3]) {
+      await sql`
+        insert into assets (id, brief_id, asset_type, sequence_no, status, created_by)
+        values (${`AST-ZZ-AREQ3-${n}`}, ${b.id}, 'Video', ${n}, '[Draft]', 'ZZ-C')`;
+    }
+    // Jalur baca satuan …
+    expect((await getBrief(sql, accountStaff(amId), b.id)).jumlahAnak).toBe(3);
+    // … DAN baris antrean divisi, yang justru layar yang dikeluhkan.
+    const queue = await listDivisionQueue(sql, divisionStaff('Creative', 'ZZ-C'), 'Creative');
+    expect(queue.find((r) => r.id === b.id)?.jumlahAnak).toBe(3);
+  });
+
+  it('nol untuk divisi tanpa tabel anak (Store Operation) — bukan null', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), assignedDivision: 'Store Operation', deliverableType: 'SKU',
+    });
+    const read = await getBrief(sql, accountStaff(amId), b.id);
+    // `0` supaya pemanggil tidak perlu menebak antara "belum dipecah" dan
+    // "divisi ini tidak punya unit kerja" — dua-duanya benar dirender 0.
+    expect(read.jumlahAnak).toBe(0);
+    expect(read.jumlahAnak).not.toBeNull();
+  });
+
+  /**
+   * ⛔ INI alasan fungsinya SECURITY DEFINER.
+   *
+   * `briefCols` dipakai `listDivisionQueue`, yang di produksi dibaca lewat
+   * `readAsActor` — RLS MENYALA. `assets_select` punya lengan
+   * `jwt_employee_id() = assigned_pic`, jadi `count(*)` biasa akan dihitung DI
+   * BAWAH policy pembacanya: seorang STAFF Creative melihat "1" untuk Brief
+   * berisi 3 Asset, tanpa galat apa pun, dengan halaman menjawab 200.
+   *
+   * Tes ini menjalankan pembacaan yang SAMA di bawah RLS sungguhan dan menuntut
+   * angkanya tetap 3. Kalau seseorang nanti "menyederhanakan" fungsi itu jadi
+   * subquery biasa, tes inilah yang merah.
+   */
+  it('TETAP BENAR di bawah RLS — staff yang memegang 1 dari 3 Asset tetap melihat 3', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, {
+      ...goodBrief(), assignedDivision: 'Creative',
+    });
+    // Tiga Asset; HANYA yang pertama dipegang ZZ-CRLS.
+    await sql`
+      insert into assets (id, brief_id, asset_type, sequence_no, status, assigned_pic, created_by)
+      values ('AST-ZZ-RLS-1', ${b.id}, 'Video', 1, '[Draft]', 'ZZ-CRLS', 'ZZ-LEAD')`;
+    for (const n of [2, 3]) {
+      await sql`
+        insert into assets (id, brief_id, asset_type, sequence_no, status, assigned_pic, created_by)
+        values (${`AST-ZZ-RLS-${n}`}, ${b.id}, 'Video', ${n}, '[Draft]', 'ZZ-LAIN', 'ZZ-LEAD')`;
+    }
+
+    const claims = JSON.stringify({
+      app_metadata: {
+        employee_id: 'ZZ-CRLS', division: 'Creative', level: 'staff', od: false, director: false,
+      },
+    });
+    const queue = await withClaims(sql, claims, (tx) =>
+      listDivisionQueue(tx, divisionStaff('Creative', 'ZZ-CRLS'), 'Creative'),
+    );
+    const row = queue.find((r) => r.id === b.id);
+    expect(row, 'staff divisi harus melihat Brief-nya sendiri (lengan B-1)').toBeDefined();
+    // 3, bukan 1. Kalau ini 1, fungsinya sudah kehilangan SECURITY DEFINER-nya.
+    expect(row?.jumlahAnak).toBe(3);
   });
 });

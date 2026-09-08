@@ -223,10 +223,33 @@ export interface Brief {
   client_id: string;
   client_nama: string;
   assigned_pic_nama: string;
+  /**
+   * A-req-1 (KOL #1) — jendela campaign + budget sebagai KOLOM, bukan teks di
+   * `instructions`. `''`/`null` = belum diisi (eksplisit, bukan kunci hilang).
+   */
+  tanggal_mulai: string;
+  tanggal_akhir: string;
+  budget: string | null;
+  /** A-req-2 (K-3) — Brief Creative sumber aset Brief Ads ini; null = tidak ditunjuk. */
+  source_creative_brief_id: string | null;
+  /**
+   * A-req-3 — jumlah unit kerja anak (Asset / Campaign / Booking / Sesi Live).
+   * Ada di SETIAP baris antrean divisi, jadi leader bisa membedakan Brief yang
+   * sudah dipecah dari yang belum tanpa membuka satu-satu. `0` untuk divisi
+   * tanpa tabel anak.
+   */
+  jumlah_anak: number;
 }
 
 export interface BriefInput {
   title: string;
+  /** A-req-1 — jendela campaign, "YYYY-MM-DD". Kosongkan kalau tidak dipakai. */
+  tanggal_mulai?: string;
+  tanggal_akhir?: string;
+  /** A-req-1 — budget, string desimal rupiah. */
+  budget?: string | null;
+  /** A-req-2 (K-3) — Brief Creative sumber; picker aset Ads menyaring ke situ. */
+  source_creative_brief_id?: string | null;
   strategy_id: string; // "" for Direct-path service; STR-id for plan-gated
   assigned_division: string;
   assigned_pic?: string;

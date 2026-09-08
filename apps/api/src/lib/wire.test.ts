@@ -302,6 +302,11 @@ describe('M6 account wire mappers', () => {
       createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
       stagePipelineCode: null, productionStage: null,
       clientId: 'CLI-202607-0001', clientNama: 'Alpha Digital', assignedPicNama: '',
+    tanggalMulai: '',
+    tanggalAkhir: '',
+    budget: null,
+    sourceCreativeBriefId: null,
+    jumlahAnak: 0,
     };
     expect(briefToWire(b)).toEqual({
       id: 'BRF-202607-0001', service_id: 'SVC-1', assigned_division: 'Creative', deliverable_type: 'Video',
@@ -311,6 +316,10 @@ describe('M6 account wire mappers', () => {
       // Creative #3 — ketiganya nol omitempty: `assigned_pic_nama` tetap dikirim
       // sebagai `''` walau Brief ini belum punya PIC.
       client_id: 'CLI-202607-0001', client_nama: 'Alpha Digital', assigned_pic_nama: '',
+      // A-req-1/2/3 — nol omitempty di sini, jadi keempatnya SELALU terkirim:
+      // `''`/`null`/`0` adalah jawaban ("belum diisi"), kunci yang hilang bukan.
+      tanggal_mulai: '', tanggal_akhir: '', budget: null,
+      source_creative_brief_id: null, jumlah_anak: 0,
     });
   });
 
@@ -323,6 +332,11 @@ describe('M6 account wire mappers', () => {
       revisionCount: 3, revisionFlagged: true, createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
       stagePipelineCode: null, productionStage: null,
       clientId: 'CLI-202607-0002', clientNama: 'Beta Store', assignedPicNama: 'Rian Pratama',
+    tanggalMulai: '',
+    tanggalAkhir: '',
+    budget: null,
+    sourceCreativeBriefId: null,
+    jumlahAnak: 0,
     };
     const w = briefToWire(b);
     expect(w.strategy_id).toBe('STR-1');
@@ -338,6 +352,9 @@ describe('M6 account wire mappers', () => {
       title: 'T', strategyId: '', assignedDivision: 'Creative', assignedPic: '', deliverableType: 'Video',
       quantityTarget: 5, dueDate: '2026-08-15', priority: 'High', recurring: false, recurringFrequency: '',
       recurringCount: 0, recurringEndDate: '', instructions: '', referenceAttachments: '', isAddendum: false,
+      // A-req-1/2 — default aman: '' / null berarti "tidak diisi", dan
+      // `validateBrief` yang memutuskan apakah itu sah untuk Brief ini.
+      tanggalMulai: '', tanggalAkhir: '', budget: null, sourceCreativeBriefId: null,
     });
   });
 

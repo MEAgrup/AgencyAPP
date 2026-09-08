@@ -157,7 +157,42 @@ select count(*) from services sv
 
 ---
 
-## 4. Sisa pekerjaan — urutan dari Jalur B, masih berlaku
+## 4. A-req-1 · A-req-2 · A-req-3 — SELESAI di sesi ini
+
+Ketiganya dikerjakan sesudah pensiun STR-, urutan sesuai Jalur B. Ringkasnya di
+`DECISIONS.md` 2026-09-08; yang perlu dipegang penerus:
+
+- **A-req-1** — `BriefInput`/`Brief` membuka `tanggalMulai`/`tanggalAkhir`/`budget`.
+  Nol migrasi (kolom F-4). `validateBrief` mencerminkan kedua CHECK-nya jadi
+  pesan BI; budget dinormalkan `money.decimal`.
+- **A-req-2** — sisi TULIS saja. `createBrief` mengisi
+  `source_creative_brief_id` + picker di form Brief AM (hanya untuk Brief Ads).
+  **Nol baris disentuh** di `ads.ts` / AssetPicker / `wire.ts` bagian Campaign.
+  Gerbangnya **tiga**: ada, divisi Creative, dan **klien yang sama** — yang
+  terakhir mencegah kebocoran, karena `assets_select` lengan Ads-nya **buta
+  klien** sehingga kolom inilah satu-satunya yang mempersempit picker.
+- **A-req-3** — `jumlahAnak` pada baris antrean, lewat migrasi
+  `20260922100500` (`private.brief_jumlah_anak`). Dirender di `/tasks` sebagai
+  kolom "Unit Kerja"; `0` ⇒ badge "belum dipecah".
+  **Jangan "sederhanakan" jadi `count(*)`.** `briefCols` dibaca di bawah RLS;
+  `assets_select` punya lengan `assigned_pic`, jadi staff akan melihat angka
+  yang SALAH tanpa galat. Ada tes yang menjalankannya di bawah RLS dan menuntut
+  angka penuh.
+
+### ⚠️ Utang yang DITEMUKAN sesi ini, belum dibayar
+
+**Ada EMPAT bentuk `Brief` paralel di FE** — `lib/account.ts`, `lib/tasks.ts`,
+`lib/creative.ts`, `lib/kol.ts` — dan hanya `account.ts::Brief` yang diikat
+`shape-parity.test.ts` ke `BriefWire`. Keempatnya disuapi wire yang **sama**,
+jadi setiap field Brief baru harus ditambahkan di **dua** tempat minimal, atau
+halaman yang membaca bentuk tak-ber-anchor itu melihat `undefined` **sementara
+parity tetap hijau**. Sesi ini menambahkannya ke `account.ts` + `tasks.ts`
+(yang dirender); `creative.ts` dan `kol.ts` belum. Menyatukannya adalah
+pekerjaan tersendiri.
+
+---
+
+## 4b. (riwayat) Rincian ketiga A-req sebagaimana Jalur B menuliskannya
 
 Ketiganya **tidak** tersentuh temuan STR-/STRG- dan nol di antaranya menunggu
 ketokan. Masing-masing satu-dua baris per tempat, dan masing-masing membuka satu
@@ -188,11 +223,11 @@ pada baris antrean. Jangan tertipu dan berhenti.
 ## 5. Angka acuan — naik, tidak pernah turun
 
 ```
-db-rebuild.sh  201 migrasi
+db-rebuild.sh  202 migrasi
   gate: 146 tabel · 40 entity_prefix · 31 sm_machines · 73 notif_events  ← TETAP
   invariant: ident_checks · immutability_checks · rls_checks · auth_claims_checks
 
-domain            2085 lulus (+1 skip) · 76 file · nol FAIL   (dari 2039)
+domain            2101 lulus (+1 skip) · 76 file · nol FAIL   (dari 2039)
 core               983
 db                  53
 apps/api           445 lulus (+48 skip)   route-parity & shape-parity hijau

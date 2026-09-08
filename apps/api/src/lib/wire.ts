@@ -488,6 +488,16 @@ export interface BriefWire {
   client_id: string;
   client_nama: string;
   assigned_pic_nama: string;
+  // A-req-1/A-req-2 — jendela campaign, budget, dan penunjuk Brief Creative
+  // sumber. Nol omitempty, alasan yang sama dengan blok di atas: `''`/`null`
+  // eksplisit terbaca sebagai "belum diisi", kunci yang hilang jadi `undefined`
+  // dan halamannya kosong walau route menjawab 200.
+  tanggal_mulai: string;
+  tanggal_akhir: string;
+  budget: string | null;
+  source_creative_brief_id: string | null;
+  /** A-req-3 — jumlah unit kerja anak; 0 untuk divisi tanpa tabel anak. */
+  jumlah_anak: number;
 }
 
 export function briefToWire(b: account.Brief): BriefWire {
@@ -523,6 +533,11 @@ export function briefToWire(b: account.Brief): BriefWire {
     // tengah blok di atas: anchor Jalur A ada di TransactionWire, ~2.400 baris
     // jauhnya, supaya dua jalur tidak pernah menyunting hunk yang sama.
     // Aturannya tetap: nol omitempty, kirim `null`/`''` eksplisit.
+    tanggal_mulai: b.tanggalMulai,
+    tanggal_akhir: b.tanggalAkhir,
+    budget: b.budget,
+    source_creative_brief_id: b.sourceCreativeBriefId,
+    jumlah_anak: b.jumlahAnak,
   };
 }
 
@@ -573,6 +588,10 @@ export function toBriefInput(b: {
   instructions?: string;
   reference_attachments?: string;
   is_addendum?: boolean;
+  tanggal_mulai?: string;
+  tanggal_akhir?: string;
+  budget?: string | null;
+  source_creative_brief_id?: string | null;
 }): account.BriefInput {
   return {
     title: b.title ?? '',
@@ -590,6 +609,12 @@ export function toBriefInput(b: {
     instructions: b.instructions ?? '',
     referenceAttachments: b.reference_attachments ?? '',
     isAddendum: b.is_addendum === true,
+    // A-req-1/A-req-2 — diteruskan apa adanya; `''`/`null` berarti "tidak
+    // diisi", dan `validateBrief` yang memutuskan apakah itu sah.
+    tanggalMulai: b.tanggal_mulai ?? '',
+    tanggalAkhir: b.tanggal_akhir ?? '',
+    budget: b.budget ?? null,
+    sourceCreativeBriefId: b.source_creative_brief_id ?? null,
   };
 }
 
