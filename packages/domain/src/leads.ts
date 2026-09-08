@@ -951,10 +951,9 @@ export async function get(sql: Queryable, id: string): Promise<LeadDetail> {
     { id: string; owner_employee_id: string; owner_nama: string; status: string; claimed_at: Date }[]
   >`
     select pa.id, pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           private.employee_display_name(pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at
     from prospect_attempts pa
-    left join employees e on e.employee_id = pa.owner_employee_id
     where pa.lead_id = ${id}
     order by pa.created_at, pa.id`;
   return {
@@ -1286,10 +1285,9 @@ export async function leadDetailView(sql: Queryable, id: string): Promise<LeadDe
     { id: string; owner_employee_id: string; owner_nama: string; status: string; claimed_at: Date }[]
   >`
     select pa.id, pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           private.employee_display_name(pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at
     from prospect_attempts pa
-    left join employees e on e.employee_id = pa.owner_employee_id
     where pa.lead_id = ${id}
     order by pa.created_at, pa.id`;
   return {
@@ -1834,12 +1832,10 @@ export async function deleteRequestQueue(
     select r.id, r.lead_id, r.reason, r.status, r.decision_note,
            r.requested_by, r.resolved_by, r.resolved_at, r.created_at,
            l.lead_name, l.phone_number, l.record_status, l.origin_division,
-           coalesce(req.nama, r.requested_by) as requested_by_nama,
-           coalesce(res.nama, r.resolved_by)  as resolved_by_nama
+           private.employee_display_name(r.requested_by) as requested_by_nama,
+           private.employee_display_name(r.resolved_by)  as resolved_by_nama
     from lead_delete_requests r
     join leads l on l.id = r.lead_id
-    left join employees req on req.employee_id = r.requested_by
-    left join employees res on res.employee_id = r.resolved_by
     where (${status} = '' or r.status = ${status})
       and (${leadId} = '' or r.lead_id = ${leadId})
     order by r.created_at desc, r.id desc`;

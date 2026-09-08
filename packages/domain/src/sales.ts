@@ -1936,11 +1936,10 @@ export async function listAttempts(
   const b = page.sqlBounds(filter.page);
   const rows = await sql<AttemptRow[]>`
     select pa.id, pa.lead_id, l.lead_name, l.phone_number, l.source, pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           private.employee_display_name(pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at, pa.created_at
     from prospect_attempts pa
     join leads l on l.id = pa.lead_id
-    left join employees e on e.employee_id = pa.owner_employee_id
     where (${status} = '' or pa.status = ${status})
       and (pa.created_at, pa.id) < (${b.at}, ${b.id})
     order by pa.created_at desc, pa.id desc
@@ -2055,10 +2054,9 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
     status: string; claimed_at: Date; created_at: Date;
   }[]>`
     select pa.id, pa.lead_id, pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           private.employee_display_name(pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at, pa.created_at
     from prospect_attempts pa
-    left join employees e on e.employee_id = pa.owner_employee_id
     where pa.id = ${id}`;
   if (rows.length === 0) {
     throw new NotFoundError();
@@ -2109,10 +2107,9 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
       decision_note: string | null; created_at: Date;
     }[]>`
       select np.id, np.version_no, np.proposed_by,
-             coalesce(e.nama, np.proposed_by) as proposed_by_nama,
+             private.employee_display_name(np.proposed_by) as proposed_by_nama,
              np.decision_note, np.created_at
       from negotiation_proposals np
-      left join employees e on e.employee_id = np.proposed_by
       where np.attempt_id = ${id}
       order by np.version_no asc`,
 
@@ -2309,11 +2306,10 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
   >`
     select c.id, c.lead_id, c.winning_attempt_id, c.nama_pic, c.toko, c.kota, c.link_toko,
            c.kategori, c.gmv_baseline, c.target_gmv, c.marketing_budget, c.origin_campaign_id,
-           c.sales_pic_id, coalesce(e.nama, c.sales_pic_id) as sales_pic_nama,
+           c.sales_pic_id, private.employee_display_name(c.sales_pic_id) as sales_pic_nama,
            c.commission_payment_pic_id, c.payment_intent, c.total_sales, c.transaction_id,
            c.released_to_account_at, c.created_at
     from clients c
-    left join employees e on e.employee_id = c.sales_pic_id
     where c.id = ${id}`;
   if (rows.length === 0) {
     throw new NotFoundError();
@@ -2335,10 +2331,10 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
     sql<
       { salesperson_id: string; salesperson_nama: string; basis_points: number }[]
     >`
-      select csa.salesperson_id, coalesce(e.nama, csa.salesperson_id) as salesperson_nama,
+      select csa.salesperson_id,
+             private.employee_display_name(csa.salesperson_id) as salesperson_nama,
              csa.basis_points
       from client_sales_allocations csa
-      left join employees e on e.employee_id = csa.salesperson_id
       where csa.client_id = ${id} order by csa.id`,
 
     sql<

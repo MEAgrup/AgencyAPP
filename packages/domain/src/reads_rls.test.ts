@@ -21,14 +21,14 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { permission } from '@cdps/core';
 import { createClient, withClaims, type Sql } from '@cdps/db';
-import { leadsDatabase, poolBoard } from './leads';
+import { leadDetailView, leadsDatabase, poolBoard } from './leads';
 import { listClients } from './client';
 import { getBrief, getService, listDivisionQueue, listStrategies, serviceQueue, type Actor } from './account';
 import { getAsset } from './creative';
 import { staffLanding } from './portal';
 import { financeQueue, reminderDashboard } from './finance';
 import { allowedTransitions } from './engine';
-import { getAttempt } from './sales';
+import { getAttempt, listAttempts } from './sales';
 import { getStageOverview } from './stage';
 
 const URL = process.env.DATABASE_URL;
@@ -966,5 +966,119 @@ describeDb('read models under RLS (O37)', () => {
       await sql`delete from contracts where client_id = ${CLI}`;
       await sql`delete from clients where id = ${CLI}`;
     }
+  });
+
+  /**
+   * FEEDBACK SALES 2026-09-08 #2 — "Tampilan ownernya no id, buat supaya bisa
+   * menjadi nama sales", dilaporkan dari layar Head Sales.
+   *
+   * Bukan query yang salah. `listAttempts` SUDAH menulis
+   * `coalesce(e.nama, pa.owner_employee_id)` atas `left join employees` — tapi
+   * ia dibaca lewat `readAsActor`, jadi `employees_select` yang berlaku
+   * (`20260723064438_rls_baseline.sql`) berbunyi
+   * `jwt_can_read_all() OR self OR created_by`.
+   *
+   * Seorang Head Sales BUKAN `jwt_can_read_all()` (itu OD/Director), jadi
+   * join-nya mengembalikan NULL untuk setiap orang selain dirinya dan
+   * `coalesce` jatuh ke ID. Itulah kenapa gejalanya HANYA terlihat di layar
+   * Head Sales: kolom Owner memang cuma dirender untuk lead/OD/Director, dan
+   * OD/Director melihat nama karena mereka lolos `jwt_can_read_all()`.
+   *
+   * Kelas cacatnya sama dengan `private.brief_jumlah_anak` (A-req-3) dan
+   * `client_milestones`: join yang dipersempit RLS tidak melempar dan tidak
+   * membuang barisnya — ia diam-diam mengembalikan nilai yang salah, dengan
+   * halaman menjawab 200. Tes service-role di suite lain BUTA terhadapnya.
+   *
+   * Jawabannya `private.employee_display_name` (SECURITY DEFINER, sudah ada
+   * sejak 20260724134427, fallback ke id) — bukan melebarkan `employees_select`.
+   */
+  describe('nama karyawan di bawah RLS (Feedback Sales #2)', () => {
+    const S_LEAD = 'ZZR-SALESLEAD';
+    const S_OWNER = 'ZZR-SALESOWNER';
+    const S_OWNER_NAMA = 'Budi Prospek';
+    const S_LEAD_ID = 'LEAD-ZZR-0002';
+    const S_PRSP_ID = 'PRSP-ZZR-0002';
+
+    async function seedSales(): Promise<void> {
+      await sql`
+        insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+        values (${S_OWNER}, ${S_OWNER_NAMA}, 'zzr-owner@example.test', 'Sales', 'Sales Executive', true, 'SYSTEM'),
+               (${S_LEAD}, 'Head Sales ZZR', 'zzr-lead@example.test', 'Sales', 'Head Sales', true, 'SYSTEM')
+        on conflict (employee_id) do nothing`;
+      await sql`
+        insert into leads (id, lead_name, phone_number, phone_norm, source, origin_division,
+                           record_status, created_by)
+        values (${S_LEAD_ID}, 'Toko Prospek Bersama', '0899000222', '62899000222', 'Scouting',
+                'Sales', 'active', ${S_OWNER})
+        on conflict (id) do nothing`;
+      await sql`
+        insert into prospect_attempts (id, lead_id, owner_employee_id, status, claimed_at, created_by)
+        values (${S_PRSP_ID}, ${S_LEAD_ID}, ${S_OWNER}, 'New Lead', now(), ${S_OWNER})
+        on conflict (id) do nothing`;
+    }
+
+    afterAll(async () => {
+      if (!sql) return;
+      await sql`delete from prospect_attempts where id = ${S_PRSP_ID}`;
+      await sql`delete from leads where id = ${S_LEAD_ID}`;
+      await sql`delete from employees where employee_id in (${S_OWNER}, ${S_LEAD})`;
+    });
+
+    it('listAttempts: Head Sales melihat NAMA sales lain, bukan EMP- id', async () => {
+      await seedSales();
+      const rows = await withClaims(
+        sql,
+        claims({ employeeId: S_LEAD, division: 'Sales', level: 'lead' }),
+        (tx) => listAttempts(tx, {}).then((p) => p.rows),
+      );
+      const row = rows.find((r) => r.id === S_PRSP_ID);
+      expect(row, 'Head Sales harus melihat attempt se-divisinya (arm S-01)').toBeDefined();
+      expect(row?.ownerNama).toBe(S_OWNER_NAMA);
+      // Dinyatakan terpisah supaya kegagalannya menyebut GEJALA yang dilaporkan,
+      // bukan cuma "string tidak sama".
+      expect(row?.ownerNama, 'owner tampil sebagai ID mentah — ini keluhan aslinya')
+        .not.toBe(S_OWNER);
+    });
+
+    it('getAttempt: nama owner ikut benar di halaman detail', async () => {
+      await seedSales();
+      const detail = await withClaims(
+        sql,
+        claims({ employeeId: S_LEAD, division: 'Sales', level: 'lead' }),
+        (tx) => getAttempt(tx, S_PRSP_ID),
+      );
+      expect(detail.attempt.ownerNama).toBe(S_OWNER_NAMA);
+    });
+
+    it('leadDetailView: tabel kontes menyebut nama tiap pemilik attempt', async () => {
+      await seedSales();
+      const view = await withClaims(
+        sql,
+        claims({ employeeId: S_LEAD, division: 'Sales', level: 'lead' }),
+        (tx) => leadDetailView(tx, S_LEAD_ID),
+      );
+      expect(view.attempts.find((a) => a.id === S_PRSP_ID)?.ownerNama).toBe(S_OWNER_NAMA);
+    });
+
+    it('listClients: Head Sales melihat nama Sales PIC klien, bukan id', async () => {
+      await seedSales();
+      const CLI = 'CLI-ZZR-0002';
+      await sql`
+        insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, payment_intent, created_by)
+        values (${CLI}, 'Toko Nama PIC', 'Ibu ZZR', 'Bandung', 'Fashion', 'https://shopee/zzr2',
+                '1000000.00', '2000000.00', ${S_OWNER}, ${S_OWNER}, '[Termin]', ${S_OWNER})
+        on conflict (id) do nothing`;
+      try {
+        const page = await withClaims(
+          sql,
+          claims({ employeeId: S_LEAD, division: 'Sales', level: 'lead' }),
+          (tx) => listClients(tx),
+        );
+        expect(page.rows.find((r) => r.id === CLI)?.salesPicNama).toBe(S_OWNER_NAMA);
+      } finally {
+        await sql`delete from clients where id = ${CLI}`;
+      }
+    });
   });
 });

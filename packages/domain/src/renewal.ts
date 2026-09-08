@@ -244,10 +244,10 @@ export async function listRenewals(
   const status = filter.status?.trim() ?? '';
   const b = page.sqlBounds(filter.page);
   const rows = await sql<RenewalListSqlRow[]>`
-    select r.*, c.toko, c.nama_pic, coalesce(e.nama, r.proposed_by) as proposed_by_nama
+    select r.*, c.toko, c.nama_pic,
+           private.employee_display_name(r.proposed_by) as proposed_by_nama
     from renewal_requests r
     join clients c on c.id = r.client_id
-    left join employees e on e.employee_id = r.proposed_by
     where (${status} = '' or r.status = ${status})
       and (r.created_at, r.id) < (${b.at}, ${b.id})
     order by r.created_at desc, r.id desc

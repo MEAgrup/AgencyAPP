@@ -257,9 +257,8 @@ function toActivity(r: ActivityRow): Activity {
 export async function listByAttempt(sql: Queryable, attemptId: string): Promise<Activity[]> {
   const rows = await sql<ActivityRow[]>`
     select a.id, a.attempt_id, a.lead_id, a.activity_type, a.occurred_at, a.summary,
-           a.created_by, coalesce(e.nama, a.created_by) as created_by_nama, a.created_at
+           a.created_by, private.employee_display_name(a.created_by) as created_by_nama, a.created_at
     from prospect_activities a
-    left join employees e on e.employee_id = a.created_by
     where a.attempt_id = ${attemptId}
     order by a.occurred_at desc, a.id desc`;
   return rows.map(toActivity);
@@ -273,9 +272,8 @@ export async function listByAttempt(sql: Queryable, attemptId: string): Promise<
 export async function listByLead(sql: Queryable, leadId: string): Promise<Activity[]> {
   const rows = await sql<ActivityRow[]>`
     select a.id, a.attempt_id, a.lead_id, a.activity_type, a.occurred_at, a.summary,
-           a.created_by, coalesce(e.nama, a.created_by) as created_by_nama, a.created_at
+           a.created_by, private.employee_display_name(a.created_by) as created_by_nama, a.created_at
     from prospect_activities a
-    left join employees e on e.employee_id = a.created_by
     where a.lead_id = ${leadId}
     order by a.occurred_at desc, a.id desc`;
   return rows.map(toActivity);
