@@ -981,6 +981,13 @@ export async function pendingBlockRequests(sql: Queryable, actor: Actor): Promis
 /** The forward brief_task path the roll-up walks (Brief-level revision is per-Asset, so excluded). */
 const ROLLUP_CHAIN = [STATUS_TODO, STATUS_IN_PROGRESS, STATUS_SUBMITTED, STATUS_IN_REVIEW, STATUS_APPROVED];
 
+// Status terminal seorang Booking KOL (creator_booking, STATE_MACHINES §8) —
+// dibutuhkan `diagnoseBriefRollup` untuk menghitung "n selesai" pada Brief KOL.
+// Literal, bukan import dari `kol.ts`: `kol` sudah meng-import modul ini, dan
+// import balik akan menjadikannya siklus.
+const BKG_TERMINAL_PASSED = '[QC Passed]';
+const BKG_TERMINAL_DROPPED = '[Dropped]';
+
 function chainRank(status: string): number {
   return ROLLUP_CHAIN.indexOf(status);
 }
@@ -1046,11 +1053,183 @@ export async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId:
     if (from === STATUS_TODO) {
       await onBriefLeavesToDo(tx, actor, service_id); // §5 Flow 3
     }
+    // B-1b / katalog v15: beri tahu AM pemilik klien. Sampai sekarang katalog
+    // memberi tahu AM saat divisi MENERIMA atau MENGEMBALIKAN brief — dan tidak
+    // pernah lagi. Divisi bilang "sudah beres", AM melihat status yang tidak
+    // pernah berubah, dan keduanya benar (keluhan Account #3 & #4).
+    //
+    // Dipancarkan DI DALAM loop, per-edge, bukan sekali di akhir: rollup bisa
+    // melompati beberapa edge dalam satu pemanggilan (mis. [To Do] langsung ke
+    // [In Review] ketika seluruh Aset di-submit massal), dan AM tetap berhak
+    // tahu bahwa gilirannya sudah datang.
+    await notifyAmOnRollupEdge(tx, actor, briefId, to);
     // M11 §5.5: on reaching terminal, fire EvDependencySatisfied once per sourced Dependency.
     if (to === STATUS_APPROVED) {
       await onBriefReachedTerminal(tx, actor, briefId);
     }
     cur++;
+  }
+}
+
+/**
+ * notifyAmOnRollupEdge fires the two B-1b events as a Brief's roll-up crosses
+ * the edges the AM actually cares about (katalog v15, terdaftar di F-3):
+ *
+ *   -> [In Review]  `BriefSiapReviewAm`  "lolos QC internal divisi, giliranmu"
+ *   -> [Approved]   `BriefSelesai`       "rollup-nya menutup, brief ini selesai"
+ *
+ * Only those two. The intermediate edges ([To Do]->[In Progress]->[Submitted])
+ * are the division's own progress and would be noise in the AM's inbox — the
+ * complaint was silence at the HANDOFF points, not a missing activity feed.
+ *
+ * Recipient resolution: both events use the `explicit` resolver, so the owning
+ * AM is passed in — read through `private.brief_owner_am`, NOT a
+ * `join services join clients`. That join has no execution-division RLS arm and
+ * would return zero rows for the very divisions whose transitions trigger this
+ * (the O52 trap; same door `creative.assetSelect` uses). A Brief with no
+ * resolvable owner emits nothing rather than emitting to nobody.
+ *
+ * `notifyActor` stays false (the default): when the AM is the one driving the
+ * edge, telling them what they just did is noise.
+ *
+ * Exported so `kol.recomputeBriefRollup` uses the SAME function rather than a
+ * second copy — two rollups that notify differently is precisely the drift that
+ * made this bug hard to see in the first place.
+ */
+export async function notifyAmOnRollupEdge(tx: Queryable, actor: Actor, briefId: string, to: string): Promise<void> {
+  const event = to === STATUS_IN_REVIEW
+    ? notification.EVENTS.BriefSiapReviewAm
+    : to === STATUS_APPROVED
+      ? notification.EVENTS.BriefSelesai
+      : '';
+  if (event === '') {
+    return;
+  }
+  const owner = await tx<{ owner_am: string | null }[]>`
+    select private.brief_owner_am(${briefId}) as owner_am`;
+  const ownerAm = owner[0]?.owner_am ?? '';
+  if (ownerAm === '') {
+    return; // no resolvable owning AM — emit nothing rather than to nobody
+  }
+  await notification.emit(executors(tx).notify, {
+    event, entityType: 'brief', entityId: briefId, actor: actor.employeeId,
+    explicitRecipients: [ownerAm],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Diagnosis roll-up (B-1a) — kenapa Brief ini BELUM bergerak.
+//
+// Aturan kerja: **ketiadaan yang diam tidak bisa dibedakan dari kerusakan.**
+// `recomputeBriefRollup` punya EMPAT jalan keluar yang tidak meninggalkan jejak
+// apa pun, dan ketiganya terlihat identik dari halaman: status Brief tidak
+// berubah, tanpa galat, tanpa penjelasan.
+//
+//   1. `statuses.length === 0`          — belum ada Aset/Booking sama sekali
+//   2. `created < quantity_target`      — `rollupTarget`'s `allExist` gagal, jadi
+//                                          Brief "12 video" dengan 3 Aset yang
+//                                          SEMUANYA selesai tetap [In Progress]
+//                                          SELAMANYA (kandidat terkuat keluhan
+//                                          Account #3 & #4)
+//   3. `chainRank(status) < 0`          — status Brief keluar dari rantai
+//                                          5-state ⇒ rollup mati PERMANEN
+//   4. `BoardConflictError` yang ditelan — Blocking Dependency M11 belum puas
+//
+// Yang dibangun BUKAN perubahan semantik rollup-nya (itu keputusan yang belum
+// diketok; mengubah `allExist` diam-diam akan menggeser setiap metrik turunan
+// yang bergantung padanya). Yang dibangun adalah **membuat keempat sebab itu
+// bisa dibaca**, diturunkan on-demand dan nol yang disimpan (aturan rumah #4).
+// ---------------------------------------------------------------------------
+
+/** Kenapa roll-up sebuah Brief belum menutup — satu sebab, yang paling menghalangi. */
+export type RollupBlocker =
+  | 'selesai'              // sudah di [Approved]; tidak ada yang menghalangi
+  | 'nol_unit'             // belum ada Aset/Booking satu pun
+  | 'unit_belum_lengkap'   // created < quantity_target ⇒ rollup TIDAK AKAN menutup
+  | 'di_luar_rantai'       // status Brief di luar rantai 5-state ⇒ rollup mati permanen
+  | 'menunggu_dependency'  // Blocking Dependency M11 belum puas
+  | 'menunggu_pekerjaan';  // unit lengkap, tapi masih ada yang dikerjakan
+
+/** Diagnosis roll-up satu Brief (B-1a). Semuanya turunan; nol yang disimpan. */
+export interface BriefRollupDiagnosis {
+  briefId: string;
+  status: string;
+  /** Aset/Booking yang sudah dibuat. */
+  created: number;
+  /** Quantity/Target Brief. */
+  target: number;
+  /** Unit yang sudah mencapai status terminalnya. */
+  done: number;
+  blocker: RollupBlocker;
+  /** Status yang AKAN dicapai rollup dari unit yang ada sekarang. */
+  rollupTarget: string;
+}
+
+/**
+ * diagnoseBriefRollup menjawab "kenapa Brief ini belum bergerak", untuk Brief
+ * divisi mana pun — anaknya `assets` (Creative/Ads) ATAU `creator_bookings`
+ * (KOL). Sebuah Brief tidak pernah punya keduanya, jadi yang dipakai adalah
+ * himpunan yang tidak kosong; kalau dua-duanya kosong, `nol_unit`.
+ *
+ * Urutan pemeriksaan = urutan seberapa menghalangi, bukan urutan kode di
+ * `recomputeBriefRollup`: `di_luar_rantai` lebih dulu karena ia mematikan rollup
+ * PERMANEN (tidak ada peristiwa Aset yang bisa memperbaikinya), lalu
+ * `unit_belum_lengkap` karena ia tidak akan pernah sembuh sendiri tanpa ada yang
+ * membuat unit sisanya, baru `menunggu_dependency` (sembuh saat Source-nya
+ * tutup) dan `menunggu_pekerjaan` (sembuh sendiri).
+ *
+ * Murni-baca: nol transisi, nol audit, nol notifikasi. Aman dipanggil dari
+ * jalur GET.
+ */
+export async function diagnoseBriefRollup(sql: Queryable, briefId: string): Promise<BriefRollupDiagnosis> {
+  const rows = await sql<{ status: string; quantity_target: number }[]>`
+    select status, quantity_target from briefs where id = ${briefId}`;
+  if (rows.length === 0) {
+    throw new NotFoundError();
+  }
+  const status = rows[0].status;
+  const target = Number(rows[0].quantity_target);
+  const assets = (await sql<{ status: string }[]>`select status from assets where brief_id = ${briefId}`).map((r) => r.status);
+  const bookings = (await sql<{ status: string }[]>`select status from creator_bookings where brief_id = ${briefId}`).map((r) => r.status);
+  const kol = assets.length === 0 && bookings.length > 0;
+  const statuses = kol ? bookings : assets;
+  const created = statuses.length;
+  // "Selesai" per anaknya: Aset di [Approved]; Booking di [QC Passed] atau
+  // [Dropped] (M9 — Dropped dikecualikan dari Speed Score, bukan menggantung).
+  const done = kol
+    ? statuses.filter((st) => st === BKG_TERMINAL_PASSED || st === BKG_TERMINAL_DROPPED).length
+    : statuses.filter((st) => st === STATUS_APPROVED).length;
+  const tgt = created === 0 ? status : rollupTarget(statuses, target);
+
+  const blocker: RollupBlocker = status === STATUS_APPROVED
+    ? 'selesai'
+    : chainRank(status) < 0
+      ? 'di_luar_rantai'
+      : created === 0
+        ? 'nol_unit'
+        : !(target > 0 && created >= target)
+          ? 'unit_belum_lengkap'
+          : await hasUnsatisfiedBlockingDependency(sql, briefId)
+            ? 'menunggu_dependency'
+            : 'menunggu_pekerjaan';
+  return { briefId, status, created, target, done, blocker, rollupTarget: tgt };
+}
+
+/**
+ * hasUnsatisfiedBlockingDependency mengulangi pertanyaan `validateBriefApproval`
+ * TANPA melemparkan apa pun — jalur diagnosis tidak boleh punya efek samping,
+ * dan `validateBriefApproval` hanya bisa menjawab lewat exception. Ia hanya
+ * ditanya ketika unitnya sudah lengkap, jadi ini bukan jalur panas.
+ */
+async function hasUnsatisfiedBlockingDependency(sql: Queryable, briefId: string): Promise<boolean> {
+  try {
+    await validateBriefApproval(sql, briefId);
+    return false;
+  } catch (e) {
+    if (e instanceof BoardConflictError) {
+      return true;
+    }
+    throw e;
   }
 }
 

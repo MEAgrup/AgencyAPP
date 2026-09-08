@@ -603,6 +603,10 @@ const WIRE_TO_FE: Record<string, string> = {
   // M7 creative
   AssetWire: 'creative.ts::Asset',
   MyAssetQueueItemWire: 'creative.ts::MyAssetQueueItem',
+  // B-5/K-3 — the Ads Asset picker's rows (GET /clients/{id}/assets).
+  ClientAssetOptionWire: 'creative.ts::ClientAssetOption',
+  // B-1a — kenapa Brief ini belum bergerak (GET /briefs/{id}/rollup).
+  BriefRollupDiagnosisWire: 'creative.ts::BriefRollupDiagnosis',
   // A REQUEST body (same reasoning as ProposalLineBody above): the fan-out batch
   // line the FE sends per PIC, mapped by `toAssetAssignments`.
   AssetAssignmentWire: 'creative.ts::AssetAssignmentInput',

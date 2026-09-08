@@ -526,6 +526,36 @@ export function briefToWire(b: account.Brief): BriefWire {
   };
 }
 
+/**
+ * task.BriefRollupDiagnosis → wire (B-1a — kenapa Brief ini belum bergerak).
+ *
+ * SEMUA kunci selalu dikirim, termasuk `blocker` saat nilainya `'selesai'`:
+ * kunci yang HILANG lebih berbahaya daripada `null` (CLAUDE.md), dan halaman
+ * yang harus membedakan "tidak ada penghalang" dari "diagnosisnya tidak
+ * terbaca" tidak boleh menebaknya dari absennya sebuah kunci.
+ */
+export interface BriefRollupDiagnosisWire {
+  brief_id: string;
+  status: string;
+  created: number;
+  target: number;
+  done: number;
+  blocker: string;
+  rollup_target: string;
+}
+
+export function briefRollupDiagnosisToWire(d: task.BriefRollupDiagnosis): BriefRollupDiagnosisWire {
+  return {
+    brief_id: d.briefId,
+    status: d.status,
+    created: d.created,
+    target: d.target,
+    done: d.done,
+    blocker: d.blocker,
+    rollup_target: d.rollupTarget,
+  };
+}
+
 /** Request body → BriefInput (snake_case wire → camelCase domain). */
 export function toBriefInput(b: {
   title?: string;
@@ -853,6 +883,41 @@ export function myAssetQueueItemToWire(a: creative.MyAssetQueueItem): MyAssetQue
   };
 }
 
+/**
+ * creative.ClientAssetOption → wire (B-5 / K-3 — the Ads Asset picker).
+ *
+ * ⚠️ NOTE FOR THE F-MERGE: Jalur B put this here, ~350 lines below `BriefWire`
+ * and ~2000 above `TransactionWire`, precisely so it sits nowhere near either
+ * F-1 insertion point. It is a Jalur-B addition to an F-owned file — recorded in
+ * `docs/handoff/HANDOFF_FEEDBACK_OD_JALUR_B.md` rather than negotiated, since a
+ * route that returns a raw domain object is an O43-class bug (page blank, route
+ * answers 200).
+ *
+ * `approved_at` is sent as an explicit `null`, never omitted: a MISSING key is
+ * more dangerous than a null one (CLAUDE.md).
+ */
+export interface ClientAssetOptionWire {
+  id: string;
+  brief_id: string;
+  brief_title: string;
+  asset_type: string;
+  sequence_no: number;
+  output_link: string;
+  approved_at: string | null;
+}
+
+export function clientAssetOptionToWire(a: creative.ClientAssetOption): ClientAssetOptionWire {
+  return {
+    id: a.id,
+    brief_id: a.briefId,
+    brief_title: a.briefTitle,
+    asset_type: a.assetType,
+    sequence_no: a.sequenceNo,
+    output_link: a.outputLink,
+    approved_at: a.approvedAt === null ? null : a.approvedAt.toISOString(),
+  };
+}
+
 export function assetToWire(a: creative.Asset): AssetWire {
   return {
     id: a.id,
@@ -974,6 +1039,13 @@ export interface CampaignWire {
   tipe_iklan: string;
   /** M16 LT-42 (Ads Management Date) — hari tambahan manual. */
   additional_days: number;
+  /**
+   * B-5 / K-3 — Brief Creative sumber brief setup kampanye ini
+   * (`briefs.source_creative_brief_id`, kolom F-4), atau `''`. Selalu dikirim:
+   * picker aset di halaman kampanye menyaring ke nilai ini, dan kunci yang
+   * HILANG lebih berbahaya daripada string kosong (CLAUDE.md).
+   */
+  source_creative_brief_id: string;
   total_spend: number;
   total_spend_display: string;
   total_gmv: number;
@@ -994,6 +1066,7 @@ export function campaignToWire(c: ads.Campaign): CampaignWire {
     id: c.id, brief_id: c.briefId, client_id: c.clientId, platform: c.platform, objective: c.objective,
     budget: c.budget, budget_display: c.budgetDisplay, start_date: c.startDate, end_date: c.endDate,
     target_kpi: c.targetKpi, status: c.status, tipe_iklan: c.tipeIklan, additional_days: c.additionalDays,
+    source_creative_brief_id: c.sourceCreativeBriefId,
     total_spend: c.totalSpend, total_spend_display: c.totalSpendDisplay,
     total_gmv: c.totalGmv, total_gmv_display: c.totalGmvDisplay, roas: c.roas, roas_display: c.roasDisplay,
     linked_asset_ids: c.linkedAssetIds, metric_entry_count: c.metricEntryCount, optimization_count: c.optimizationCount,

@@ -21,6 +21,8 @@ import {
   type Brief,
   type CreatorList,
 } from '@/lib/kol';
+import { hitungProgres, labelProgres } from '@/lib/brief-progress';
+import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 import StatusBadge from '@/components/StatusBadge';
 import StageTimelinePanel from '@/components/StageTimelinePanel';
 
@@ -271,6 +273,11 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
     (eligibleSet.size !== includedSet.size || [...eligibleSet].some((x) => !includedSet.has(x)));
   const newEligibleCount = creatorList ? creatorList.eligible_bookings.filter((x) => !includedSet.has(x)).length : 0;
 
+  // B-3 / B-1a: progres "n dari N". `bookings` masih `null` selama fetch, dan 0
+  // yang belum selesai dimuat terbaca sama seperti 0 yang sungguhan — jadi
+  // pesannya baru dirender setelah daftarnya ada.
+  const progres = hitungProgres(bookings?.length ?? 0, brief.quantity_target);
+
   return (
     <div className="stack">
       <div>
@@ -300,6 +307,17 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
           <h2>Detail Brief</h2>
         </div>
         <div className="grid2">
+          {/* B-2 / Creative #3 — sama seperti halaman Brief Creative: klien
+              dulu, `SVC-` sesudahnya. */}
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>Klien</div>
+            <div>
+              {brief.client_nama || '—'}
+              {brief.client_id && (
+                <div className="muted" style={{ fontSize: 11 }}>{brief.client_id}</div>
+              )}
+            </div>
+          </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Layanan</div>
             <div>{brief.service_id}</div>
@@ -310,28 +328,46 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>PIC Brief</div>
-            <div>{brief.assigned_pic || '—'}</div>
+            <div>
+              {brief.assigned_pic_nama || (brief.assigned_pic ? brief.assigned_pic : '—')}
+              {brief.assigned_pic_nama && brief.assigned_pic && (
+                <div className="muted" style={{ fontSize: 11 }}>{brief.assigned_pic}</div>
+              )}
+            </div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Prioritas</div>
             <div>{brief.priority}</div>
           </div>
           <div>
-            <div className="muted" style={{ fontSize: 12 }}>Due Date</div>
+            <div className="muted" style={{ fontSize: 12 }}>Jatuh Tempo (Due Date)</div>
             <div>{brief.due_date || '—'}</div>
+          </div>
+          <div>
+            {/* B-3: `quantity_target` MENGUNCI roll-up Brief tapi sampai sekarang
+                tidak dirender di satu halaman pun. Itulah kenapa divisi bisa
+                bilang "sudah beres" sementara status Brief tidak bergerak
+                (keluhan Account #3 & #4) — angkanya ada, orangnya tidak pernah
+                melihatnya. */}
+            <div className="muted" style={{ fontSize: 12 }}>Progres Booking (Quantity/Target)</div>
+            <div>{labelProgres(progres, 'creator')}</div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Instruksi</div>
             <div style={{ whiteSpace: 'pre-wrap' }}>{brief.instructions || '—'}</div>
           </div>
         </div>
+        {/* B-1a: sebab rollup-nya datang dari SERVER — dua dari empat sebabnya
+            (dependency M11, status di luar rantai) tidak bisa diturunkan dari
+            data yang halaman ini punya. */}
+        <RollupBlockerPanel briefId={brief.id} satuan="Booking" refreshKey={bookings?.length ?? 0} />
       </section>
 
       <StageTimelinePanel briefId={brief.id} assignedDivision={brief.assigned_division} canReview={canCreate} />
 
       <section className="card">
         <div className="cardHeader">
-          <h2>Booking ({bookings?.length ?? 0})</h2>
+          <h2>Booking &mdash; {labelProgres(progres, 'creator')}</h2>
         </div>
         {bookings && bookings.length === 0 ? (
           <div className="emptyState">Belum ada Booking untuk Brief ini.</div>

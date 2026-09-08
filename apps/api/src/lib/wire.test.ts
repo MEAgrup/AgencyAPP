@@ -445,6 +445,7 @@ describe('M8 ads wire mappers', () => {
       id: 'ADC-202607-0001', briefId: 'BRF-1', clientId: 'CLI-1', platform: 'Shopee Ads', objective: 'Sales',
       budget: 8000000, budgetDisplay: 'Rp. 8.000.000,00', startDate: '2026-07-01', endDate: '2026-08-31',
       targetKpi: 'ROAS ≥ 4x', status: '[Active]', tipeIklan: 'GMV Max Product', additionalDays: 0,
+      sourceCreativeBriefId: 'BRF-202607-0009', // B-5/K-3
       totalSpend: 1000000, totalSpendDisplay: 'Rp. 1.000.000,00',
       totalGmv: 4000000, totalGmvDisplay: 'Rp. 4.000.000,00', roas: 4, roasDisplay: '4x', linkedAssetIds: ['AST-1'],
       metricEntryCount: 1, optimizationCount: 0, underperformingStreak: 0, escalationFlagged: false,

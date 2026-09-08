@@ -227,6 +227,11 @@ export default function CreativeWorkspacePage() {
               <thead>
                 <tr>
                   <th>ID</th>
+                  {/* B-2 / Creative #3: Leader melihat MEREK, bukan cuma BRF-.
+                      Sebelum ini antrean divisi tidak menyebut klien sama
+                      sekali, jadi Leader harus membuka tiap Brief satu-satu
+                      untuk tahu pekerjaan siapa yang sedang ia bagi. */}
+                  <th>Klien</th>
                   <th>Judul</th>
                   <th>Deliverable</th>
                   <th>Target Qty</th>
@@ -240,10 +245,21 @@ export default function CreativeWorkspacePage() {
                 {briefs.map((b) => (
                   <tr key={b.id}>
                     <td><Link href={`/creative/briefs/${b.id}`}>{b.id}</Link></td>
+                    <td>
+                      {b.client_nama || '—'}
+                      {b.client_id && <div className="muted" style={{ fontSize: 11 }}>{b.client_id}</div>}
+                    </td>
                     <td>{b.title}</td>
                     <td>{b.deliverable_type}</td>
                     <td>{b.quantity_target}</td>
-                    <td>{b.assigned_pic || '—'}</td>
+                    {/* Nama dulu, ID di baris kedua: yang orang kenali adalah
+                        namanya, dan ID-nya yang tercatat di jejak audit. */}
+                    <td>
+                      {b.assigned_pic_nama || (b.assigned_pic ? b.assigned_pic : '—')}
+                      {b.assigned_pic_nama && b.assigned_pic && (
+                        <div className="muted" style={{ fontSize: 11 }}>{b.assigned_pic}</div>
+                      )}
+                    </td>
                     <td>{b.priority}</td>
                     <td><StatusBadge status={b.status} /></td>
                     <td>{b.due_date || '—'}</td>

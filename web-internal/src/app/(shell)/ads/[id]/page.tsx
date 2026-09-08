@@ -26,6 +26,7 @@ import {
   type MetricEntry,
   type Optimization,
 } from '@/lib/ads';
+import AssetPicker from '@/components/AssetPicker';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
@@ -449,16 +450,19 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
           <form className="form" onSubmit={handleLink} style={{ marginTop: 12 }}>
             {linkError && <div className="alert alertError" role="alert">{linkError}</div>}
             <div className="formRow">
-              <div className="field">
-                <label htmlFor="link-asset">Tautkan Aset (Asset ID [Approved] milik klien yang sama)</label>
-                <input
-                  id="link-asset"
-                  placeholder="AST-202607-0001"
-                  required
-                  value={linkAssetId}
-                  onChange={(e) => setLinkAssetId(e.target.value)}
-                />
-              </div>
+              {/* B-5/K-3: dulu kolom teks "ketik AST-… dari ingatan". Server tetap
+                  penentu akhir (aset harus [Approved] dan milik klien yang sama);
+                  picker ini hanya membuat pilihannya BISA DITEMUKAN. */}
+              <AssetPicker
+                id="link-asset"
+                label="Tautkan Aset (aset [Approved] milik klien kampanye)"
+                clientId={campaign.client_id}
+                sourceBriefId={campaign.source_creative_brief_id}
+                value={linkAssetId}
+                onChange={setLinkAssetId}
+                required
+                excludeIds={campaign.linked_asset_ids}
+              />
             </div>
             <div>
               <button type="submit" className="btn btnPrimary" disabled={linkSubmitting}>
@@ -662,16 +666,19 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
                     ))}
                   </select>
                 </div>
-                <div className="field">
-                  <label htmlFor="o-new-asset">Aset Baru (Asset ID [Approved] klien yang sama)</label>
-                  <input
-                    id="o-new-asset"
-                    placeholder="AST-202607-0002"
-                    required
-                    value={oNewAsset}
-                    onChange={(e) => setONewAsset(e.target.value)}
-                  />
-                </div>
+                {/* Creative Swap: aset BARU juga dipilih dari daftar. Yang sudah
+                    tertaut dikecualikan — menukar aset dengan dirinya sendiri
+                    adalah satu-satunya pilihan yang pasti bukan yang dimaksud. */}
+                <AssetPicker
+                  id="o-new-asset"
+                  label="Aset Baru (aset [Approved] klien kampanye)"
+                  clientId={campaign.client_id}
+                  sourceBriefId={campaign.source_creative_brief_id}
+                  value={oNewAsset}
+                  onChange={setONewAsset}
+                  required
+                  excludeIds={campaign.linked_asset_ids}
+                />
               </div>
             ) : (
               <div className="formRow">
