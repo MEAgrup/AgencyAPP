@@ -1515,6 +1515,8 @@ export interface PerfTeamMemberWire {
   role_type: string;
   final_score: number | null;
   score_display: string;
+  /** X-12 Opsi B (pemilik 2026-09-08) — insiden "realisasi belum lengkap", informasional, null untuk selain AM. */
+  realisasi_belum_lengkap_count: number | null;
 }
 
 export interface PerfTeamRollupWire {
@@ -1534,6 +1536,7 @@ export function perfTeamRollupToWire(r: performance.TeamRollup): PerfTeamRollupW
       role_type: m.roleType,
       final_score: m.finalScore,
       score_display: m.scoreDisplay,
+      realisasi_belum_lengkap_count: m.realisasiBelumLengkapCount,
     })),
     team_average: r.teamAverage,
     average_display: r.averageDisplay,

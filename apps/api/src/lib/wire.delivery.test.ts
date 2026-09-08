@@ -1199,7 +1199,7 @@ describe('M14 perfTeamRollupToWire (division roll-up, §2 Rule 5)', () => {
   const full: performance.TeamRollup = {
     division: 'Creative',
     period: '202607',
-    members: [{ staffId: '2409230432', roleType: 'Creative', finalScore: 88.4, scoreDisplay: '88.40' }],
+    members: [{ staffId: '2409230432', roleType: 'Creative', finalScore: 88.4, scoreDisplay: '88.40', realisasiBelumLengkapCount: null }],
     teamAverage: 88.4,
     averageDisplay: '88.40',
   };
@@ -1208,7 +1208,7 @@ describe('M14 perfTeamRollupToWire (division roll-up, §2 Rule 5)', () => {
     expect(perfTeamRollupToWire(full)).toEqual({
       division: 'Creative',
       period: '202607',
-      members: [{ staff_id: '2409230432', role_type: 'Creative', final_score: 88.4, score_display: '88.40' }],
+      members: [{ staff_id: '2409230432', role_type: 'Creative', final_score: 88.4, score_display: '88.40', realisasi_belum_lengkap_count: null }],
       team_average: 88.4,
       average_display: '88.40',
     });
@@ -1218,11 +1218,21 @@ describe('M14 perfTeamRollupToWire (division roll-up, §2 Rule 5)', () => {
   it('sends team_average:null and member final_score:null when no member has a score', () => {
     const wire = perfTeamRollupToWire({
       ...full,
-      members: [{ staffId: '2409230432', roleType: 'Creative', finalScore: null, scoreDisplay: '—' }],
+      members: [{ staffId: '2409230432', roleType: 'Creative', finalScore: null, scoreDisplay: '—', realisasiBelumLengkapCount: null }],
       teamAverage: null, averageDisplay: '—',
     });
     expect(wire.team_average).toBeNull();
     expect(wire.members[0].final_score).toBeNull();
+  });
+
+  it('X-12: maps a non-null realisasiBelumLengkapCount for an AM member', () => {
+    const wire = perfTeamRollupToWire({
+      division: 'Account',
+      period: '202607',
+      members: [{ staffId: 'EMP-AM01', roleType: 'AM', finalScore: 80, scoreDisplay: '80.00', realisasiBelumLengkapCount: 2 }],
+      teamAverage: 80, averageDisplay: '80.00',
+    });
+    expect(wire.members[0].realisasi_belum_lengkap_count).toBe(2);
   });
 });
 

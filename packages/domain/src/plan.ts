@@ -455,6 +455,40 @@ export async function ownerAmOfClient(sql: Queryable, clientId: string): Promise
   return rows[0].assigned_am_id;
 }
 
+/**
+ * realisasiBelumLengkapCountsByAm (X-12 Opsi B, pemilik 2026-09-08) — hitungan
+ * insiden "realisasi belum lengkap" per AM dalam rentang `[startUTC, endUTC)`,
+ * MURNI informasional. Sumbernya `audit_log` `action='realisasi_belum_lengkap'`
+ * (ditulis `sweepRealisasiBelumLengkap`/B-09 sejak 2026-08-11), diatribusi ke
+ * AM lewat `plan.client_id -> clients.assigned_am_id` — aktor baris audit itu
+ * sendiri SELALU `PLAN_JOB_ACTOR_ID` (sistem), bukan AM, jadi atribusi tidak
+ * bisa lewat `actor_employee_id`.
+ *
+ * TIDAK memengaruhi Performance Score (M14) — X-12 belum memberi bobotnya;
+ * batas eksplisit `docs/backlog/M6ABC_BACKLOG.md` X-12: B-09 "boleh mencatat
+ * keterlambatan ke audit log, TIDAK BOLEH mengklaim ia memengaruhi Performance
+ * Score, dan tidak boleh mengarang bobotnya". Fungsi ini dipanggil
+ * `performance.teamRollup` sebagai kolom TAMBAHAN di luar `components`/skor,
+ * bukan dilebur ke dalamnya. Nol tabel/kolom baru — baca murni dari
+ * `audit_log` yang sudah ada.
+ */
+export async function realisasiBelumLengkapCountsByAm(
+  sql: Queryable,
+  startUTC: Date,
+  endUTC: Date,
+): Promise<Map<string, number>> {
+  const rows = await sql<{ am_employee_id: string; incident_count: string }[]>`
+    select c.assigned_am_id as am_employee_id, count(*)::text as incident_count
+      from audit_log a
+      join plan p on p.id = a.entity_id and a.entity_type = ${ENTITY_PLAN}
+      join clients c on c.id = p.client_id
+     where a.action = 'realisasi_belum_lengkap'
+       and a.created_at >= ${startUTC} and a.created_at < ${endUTC}
+       and c.assigned_am_id is not null
+     group by c.assigned_am_id`;
+  return new Map(rows.map((r) => [r.am_employee_id, Number(r.incident_count)]));
+}
+
 async function loadPlan(sql: Queryable, id: string): Promise<Plan> {
   const rows = await sql<PlanRowDb[]>`select * from plan where id = ${id}`;
   if (rows.length === 0) throw new NotFoundError(MSG_PLAN_NOT_FOUND);
