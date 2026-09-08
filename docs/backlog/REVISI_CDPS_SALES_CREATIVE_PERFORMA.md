@@ -464,6 +464,27 @@ semua tes lain; di produksi ia hanya muncul sebagai halaman lambat.
   (header `x-vercel-id`) dan pengaruhnya ke p95 tidak bisa diukur dari sesi
   ini** — sandbox ini tidak punya akses deploy/dashboard Vercel produksi.
   Perlu diverifikasi sesudah deploy berikutnya.
+
+- **UPDATE 2026-09-08 (sesi B3/B4):** Sesi ini PUNYA akses `mcp__Vercel__*`
+  sungguhan ke proyek produksi (`agency-app-api`, tim `meagency`) —
+  dikonfirmasi lewat `list_teams`/`list_projects`/`get_project` real, deploy
+  produksi terbaru (`dpl_4ssv…`, target `production`) cocok dengan tip `main`
+  saat ini. Region `"regions":["sin1"]` sudah live sejak deploy P1. **Tapi
+  p95 tetap TIDAK terukur — bukan lagi soal akses, melainkan tooling yang
+  di-grant tidak punya metrik durasi fungsi sama sekali:** dicoba
+  `get_runtime_logs` (production, 24h) — baris lognya cuma `method path
+  status [level/source]` + `dep`/`branch`/`cache`, **nol field durasi/timing**;
+  `get_web_analytics` mengukur pageview/visitor sisi klien, bukan latensi
+  fungsi serverless; `get_runtime_errors` mengelompokkan error, bukan durasi.
+  Tidak ada tool `get_function_duration`/`get_speed_insights` di daftar yang
+  di-grant. p95 sungguhan cuma ada di Vercel Dashboard → Observability →
+  Functions (atau Speed Insights, add-on terpisah) — **di luar permukaan MCP
+  yang tersedia di sesi mana pun sejauh ini.** Kesimpulan tidak berubah dari
+  2026-09-04 (langkah 5 tetap `⬜`), tapi alasannya sekarang presisi: bukan
+  "sandbox tanpa akses Vercel", melainkan "akses Vercel ada, tapi metrik p95
+  bukan bagian dari permukaan tool yang di-grant". Kalau sesi berikutnya
+  ingin p95 nyata: minta pemilik membuka Vercel Dashboard langsung (bukan
+  lewat MCP) dan menempelkan angkanya, atau nyalakan Speed Insights.
 - **Indeks:** `20260911030000_p1_perf_indexes.sql` diterapkan bersih di
   `db-rebuild.sh --yes` (173 migrasi, gate tetap 145/40/31/67). Kolom & urutan
   indeks dicocokkan ke `ORDER BY` yang benar-benar dipakai (`leads.ts:936`

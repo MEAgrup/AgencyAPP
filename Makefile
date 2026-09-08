@@ -9,7 +9,7 @@
 # lokal via `scripts/db-rebuild.sh`; migrasi live HANYA lewat `apply_migration`
 # per berkas — JANGAN `supabase db push` (O65).
 
-.PHONY: install db-rebuild typecheck test test-domain test-core test-db test-api \
+.PHONY: install db-rebuild check-live-drift typecheck test test-domain test-core test-db test-api \
         build lint dev-api dev-web dev-portal
 
 ## install: install semua dependency workspace (root + web-internal + web-client-portal)
@@ -22,6 +22,14 @@ install:
 ##   Butuh DATABASE_URL, mis. postgres://postgres:postgres@127.0.0.1:5432/cdps
 db-rebuild:
 	bash scripts/db-rebuild.sh --yes
+
+## check-live-drift: bandingkan supabase/migrations/** vs ledger live per-slug (B3)
+##   Butuh LIVE_DATABASE_URL, atau SUPABASE_ACCESS_TOKEN + SUPABASE_PROJECT_REF —
+##   lihat kepala scripts/check-live-drift.sh. TIDAK berfungsi dari sandbox Claude
+##   Code (egress ke Supabase diblok kebijakan organisasi) — jalankan dari operator
+##   atau CI runner dengan akses jaringan nyata ke Supabase.
+check-live-drift:
+	bash scripts/check-live-drift.sh
 
 ## typecheck: tsc --noEmit di seluruh workspace root, plus kedua app frontend
 typecheck:
