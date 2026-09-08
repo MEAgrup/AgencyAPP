@@ -16,7 +16,7 @@
  * quietly disappears the next time someone edits a price.
  */
 import { api } from './api';
-import type { MasterService, PlanTier, QtyMenambah } from './types';
+import type { MasterService, Pengakuan, PlanTier, QtyMenambah } from './types';
 
 export interface MslFormState {
   name: string;
@@ -39,6 +39,12 @@ export interface MslFormState {
    */
   durasi_bulan: string;
   qty_menambah: QtyMenambah;
+  /**
+   * Held as a Pengakuan, never as '' — the catalog must always SAY when its
+   * revenue is recognized. The form seeds it from the service being edited, and
+   * `'saat_selesai'` for a brand-new one (see `EMPTY_FORM`).
+   */
+  pengakuan: Pengakuan;
   effective_from: string;
 }
 
@@ -60,6 +66,13 @@ export interface MslPayload {
   /** null = sekali jadi. The key is ALWAYS present — see the note above. */
   durasi_bulan: number | null;
   qty_menambah: QtyMenambah;
+  /**
+   * ALWAYS sent, never omitted. The server refuses a service that has a
+   * `durasi_bulan` but no `pengakuan` (both meanings are possible and neither
+   * is safe to guess), so a missing key here would surface as
+   * `[data tidak lengkap, ...]` on a form the admin thought was complete.
+   */
+  pengakuan: Pengakuan;
   effective_from: string;
 }
 
@@ -89,6 +102,10 @@ export const EMPTY_MSL_FORM: MslFormState = {
   // under-stating a duration shows up fast, over-stating it spreads revenue
   // across years without anyone noticing.
   qty_menambah: 'volume',
+  // Layanan baru mulai TANPA durasi, dan tanpa durasi hanya 'saat_selesai'
+  // yang punya arti. Begitu admin mengisi durasi, dropdown-nya yang harus
+  // mengatakan sisanya — bukan tebakan dari nilai durasi itu.
+  pengakuan: 'saat_selesai' as Pengakuan,
   effective_from: todayISO(),
 };
 
@@ -117,6 +134,7 @@ export function serviceToForm(service: MasterService): MslFormState {
     plan_tier: service.plan_tier,
     durasi_bulan: service.durasi_bulan === null ? '' : String(service.durasi_bulan),
     qty_menambah: service.qty_menambah,
+    pengakuan: service.pengakuan,
     effective_from: todayISO(),
   };
 }
@@ -159,6 +177,7 @@ export function formToPayload(form: MslFormState): MslPayload {
     plan_tier: form.plan_tier,
     durasi_bulan: parseDurasiBulan(form.durasi_bulan),
     qty_menambah: form.qty_menambah,
+    pengakuan: form.pengakuan,
     effective_from: form.effective_from,
   };
 }
@@ -181,6 +200,13 @@ export function formatDurasiBulan(months: number | null | undefined): string {
 export const QTY_MENAMBAH_LABELS: Record<QtyMenambah, string> = {
   durasi: 'Durasi (qty = jumlah bulan)',
   volume: 'Volume (qty = jumlah keluaran)',
+};
+
+/** Label kolom & dropdown "Kapan Pendapatan Diakui" (D-KOM). */
+export const PENGAKUAN_LABELS: Record<Pengakuan, string> = {
+  per_periode: 'Rata sepanjang durasi',
+  saat_selesai: 'Sekaligus saat selesai',
+  bulan_berikutnya: 'Bulan berikutnya (komisi)',
 };
 
 /**

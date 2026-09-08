@@ -18,6 +18,7 @@ import {
   buildQuote,
   close,
   computeCommission,
+  computePPN,
   computeSubtotal,
   type Actor,
   CustomTermRequiresNegotiationError,
@@ -82,7 +83,7 @@ const salesLead = (): Actor => ({
 describe('computeSubtotal', () => {
   const base = (over: Partial<PriceParams>): PriceParams => ({
     mode: PRICING_FLAT, unitPrice: rp('100000'), quantity: 1n, minQty: 0n,
-    inputAmount: 0n, applyPPN: false, ...over,
+    inputAmount: 0n, ...over,
   });
 
   it('flat: qty × unit_price', () => {
@@ -103,9 +104,11 @@ describe('computeSubtotal', () => {
     expect(computeSubtotal(base({ mode: PRICING_PASSTHROUGH, inputAmount: rp('777000') }))).toBe(rp('777000'));
   });
 
-  it('apply_ppn adds 11% (half-up)', () => {
-    // 1,000,000 + 11% = 1,110,000
-    expect(computeSubtotal(base({ quantity: 10n, applyPPN: true }))).toBe(rp('1110000'));
+  it('the subtotal is ALWAYS non-PPN — there is no tax input to give it (D-4)', () => {
+    // Until 2026-09-08 this same call returned 1.110.000 when the catalog entry
+    // was flagged: the 11% was folded in. `PriceParams` no longer carries a PPN
+    // flag at all, so this function cannot fold tax back in even by accident.
+    expect(computeSubtotal(base({ quantity: 10n }))).toBe(rp('1000000'));
   });
 
   it('rejects qty < 1, missing min_qty, non-positive passthrough, bad mode', () => {
@@ -115,6 +118,86 @@ describe('computeSubtotal', () => {
     expect(() => computeSubtotal(base({ mode: 'weird' }))).toThrow(IncompleteError);
   });
 });
+
+// ---------------------------------------------------------------------------
+// D-4 (diketok 2026-09-08) — PPN adalah PENAMBAHAN di sebelah nilai, bukan
+// bagian dari nilai. Nilai disimpan SEBELUM PPN.
+// ---------------------------------------------------------------------------
+describe('computePPN (D-4)', () => {
+  it('11% half-up to whole rupiah, or nothing at all', () => {
+    expect(computePPN(rp('1000000'), true)).toBe(rp('110000'));
+    expect(computePPN(rp('1000000'), false)).toBe(0n);
+    expect(computePPN(0n, true)).toBe(0n);
+  });
+
+  it('base + ppn is exactly what the old fold-it-in subtotal used to be', () => {
+    // The billed rupiah did not move — only its decomposition. That is what
+    // makes migration 20260923010000 safe over deals that are already [Lunas].
+    const b = rp('52000000');
+    expect(b + computePPN(b, true)).toBe(rp('57720000'));
+  });
+});
+
+describe('buildQuote — PPN adalah tombol per INVOICE (D-4)', () => {
+  const line = (serviceId = 'MSV-1'): ServiceLine => ({
+    serviceId, versionNo: 1, name: 'Jasa', unit: 'paket', mode: PRICING_FLAT,
+    quantity: 1n, minQty: 0n, inputAmount: 0n, standardPrice: rp('10000000'),
+    rule: parseCommissionRule('10% of standard price'),
+  });
+
+  it('komisi dihitung dari NILAI NON-PPN — tidak pernah dari uang pajak', () => {
+    // Cacat yang melahirkan seluruh perubahan ini. Sebelum D-4, invoice ber-PPN
+    // membayar komisi Rp 1.110.000 untuk deal yang sama: 11% dari pajak ikut
+    // keluar sebagai komisi atas uang yang milik negara.
+    const tanpa = buildQuote([line()], false);
+    const dengan = buildQuote([line()], true);
+    expect(tanpa.totalKomisi).toBe(rp('1000000'));
+    expect(dengan.totalKomisi).toBe(rp('1000000'));
+    expect(dengan.totalKomisi).toBe(tanpa.totalKomisi);
+  });
+
+  it('PPN mengubah yang DITAGIH, tidak pernah yang diakui sebagai pendapatan', () => {
+    const dengan = buildQuote([line()], true);
+    expect(dengan.estimasiNilai).toBe(rp('10000000'));
+    expect(dengan.totalPPN).toBe(rp('1100000'));
+    expect(dengan.nilaiDitagih).toBe(rp('11100000'));
+    expect(dengan.nilaiDitagih).toBe(dengan.estimasiNilai + dengan.totalPPN);
+  });
+
+  it('tanpa menekan tombolnya, nol PPN — dan nolnya eksplisit', () => {
+    const q = buildQuote([line()]);
+    expect(q.totalPPN).toBe(0n);
+    expect(q.totalPPNIdr).toBe('Rp. 0,00');
+    expect(q.nilaiDitagih).toBe(q.estimasiNilai);
+  });
+
+  it('LAYANAN yang sama bisa ber-PPN di satu invoice dan tidak di invoice lain', () => {
+    // Inilah kenapa penandanya di invoice, bukan di katalog: baris yang identik
+    // menghasilkan tagihan berbeda, dan keduanya benar.
+    const l = [line()];
+    expect(buildQuote(l, true).nilaiDitagih).toBe(rp('11100000'));
+    expect(buildQuote(l, false).nilaiDitagih).toBe(rp('10000000'));
+  });
+
+  it('PPN dihitung SEKALI atas total, bukan per baris lalu dijumlah', () => {
+    // Angka yang membelah: 11% dari 5.000.005 dua kali membulat berbeda dari
+    // 11% dari 10.000.010 sekali. Yang benar adalah yang sekali, karena invoice
+    // yang dibayar klien, bukan barisnya.
+    const ganjil = (id: string): ServiceLine => ({ ...line(id), standardPrice: rp('5000005') });
+    const q = buildQuote([ganjil('MSV-1'), ganjil('MSV-2')], true);
+    expect(q.estimasiNilai).toBe(rp('10000010'));
+    expect(q.totalPPN).toBe(computePPN(rp('10000010'), true));
+    expect(q.nilaiDitagih).toBe(q.estimasiNilai + q.totalPPN);
+  });
+
+  it('tidak ada angka PPN per baris — kalau ada, ia sumber kebenaran kedua', () => {
+    const q = buildQuote([line()], true);
+    expect(Object.keys(q.lines[0])).not.toContain('ppnIdr');
+    expect(Object.keys(q.lines[0])).not.toContain('totalIdr');
+  });
+});
+
+
 
 // ---------------------------------------------------------------------------
 // Unit: commission rule grammar.
@@ -196,7 +279,7 @@ describe('parseCommissionRule', () => {
 describe('buildQuote', () => {
   const line = (id: string, price: string, rule: string): ServiceLine => ({
     serviceId: id, versionNo: 1, name: id, standardPrice: rp(price), unit: '',
-    mode: PRICING_FLAT, quantity: 1n, minQty: 0n, inputAmount: 0n, applyPPN: false,
+    mode: PRICING_FLAT, quantity: 1n, minQty: 0n, inputAmount: 0n,
     rule: parseCommissionRule(rule),
   });
 
@@ -357,6 +440,115 @@ afterEach(async () => {
   await sql`delete from leads where created_by like 'ZZ-%'`;
   await sql`delete from master_service_versions where created_by like 'ZZ-%'`;
   await sql`delete from master_services where created_by like 'ZZ-%'`;
+});
+
+// ---------------------------------------------------------------------------
+// D-4 seam — aturan kerja #1: satu tes yang memanggil KEDUA sisi sungguhan.
+//
+// `computePPN` hijau di unit test dan `close()` hijau di unit test bisa terjadi
+// bersamaan sementara jahitannya putus, karena masing-masing memakai fixture-nya
+// sendiri. Yang di bawah menempuh jalur penuh — katalog ber-`apply_ppn` ->
+// Qualified Form -> proposal -> closing -> TRX + INST -> baris DB sungguhan —
+// dan memeriksa rupiah yang benar-benar tersimpan.
+//
+// Yang dijaga di sini bukan kerapian angka, tapi satu risiko konkret: kalau PPN
+// berhenti mengalir di salah satu sambungan, klien DITAGIH KURANG 11% dan tidak
+// ada satu baris pun yang terlihat janggal, karena semuanya konsisten sendiri.
+// ---------------------------------------------------------------------------
+describeDb('D-4 — tombol Include PPN mengalir sampai tagihan', () => {
+  it('tombol MATI: invoice non-PPN, dan nolnya tersimpan eksplisit', async () => {
+    const svc = await seedService('SVC-ZZ-PPN1', '10000000.00');
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    const res = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    const t = await sql<{ total_agreed_value: string; include_ppn: boolean; total_ppn: string }[]>`
+      select total_agreed_value, include_ppn, total_ppn from transactions where id = ${res.transactionId}`;
+    expect(t[0].total_agreed_value).toBe('10000000.00');
+    expect(t[0].include_ppn).toBe(false);
+    expect(t[0].total_ppn).toBe('0.00');
+  });
+
+  it('tombol NYALA: dasar tetap non-PPN, pajaknya di kolom sendiri', async () => {
+    const svc = await seedService('SVC-ZZ-PPN2', '10000000.00');
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    const res = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      includePPN: true,
+    });
+    const t = await sql<{ total_agreed_value: string; include_ppn: boolean; total_ppn: string }[]>`
+      select total_agreed_value, include_ppn, total_ppn from transactions where id = ${res.transactionId}`;
+    expect(t[0].total_agreed_value).toBe('10000000.00');
+    expect(t[0].include_ppn).toBe(true);
+    expect(t[0].total_ppn).toBe('1100000.00');
+    expect(money.parse(t[0].total_agreed_value) + money.parse(t[0].total_ppn)).toBe(rp('11100000'));
+  });
+
+  it('LAYANAN yang sama, dua invoice, dua hasil — dan keduanya benar', async () => {
+    // Pembuktian bahwa penandanya benar-benar per invoice: satu katalog, satu
+    // harga, dua keputusan Sales yang berbeda.
+    const svc = await seedService('SVC-ZZ-PPN3', '10000000.00');
+    const parties = { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] };
+    const a = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties, paymentScheme: PAYMENT_SCHEME_LUNAS, includePPN: true,
+    });
+    const b = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties, paymentScheme: PAYMENT_SCHEME_LUNAS, includePPN: false,
+    });
+    const rows = await sql<{ id: string; total_ppn: string }[]>`
+      select id, total_ppn from transactions where id in (${a.transactionId}, ${b.transactionId})`;
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r.total_ppn]));
+    expect(byId[a.transactionId]).toBe('1100000.00');
+    expect(byId[b.transactionId]).toBe('0.00');
+  });
+
+  it('SERVICE menyimpan harga non-PPN — pajak tidak pernah bocor ke baris layanan', async () => {
+    const svc = await seedService('SVC-ZZ-PPN4', '10000000.00');
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    const res = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      includePPN: true,
+    });
+    const rows = await sql<{ standard_price: string }[]>`
+      select standard_price from services where client_id = ${res.clientId}`;
+    expect(rows[0].standard_price).toBe('10000000.00');
+  });
+
+  it('CICILAN harus berjumlah DASAR + PPN — menagih dasarnya saja ditolak', async () => {
+    // Inti pagarnya. Skedul yang hanya menjumlah Rp 10 juta terlihat benar dari
+    // segala arah — ia cocok dengan `total_agreed_value` — dan tetap menagih
+    // klien 11% kurang dari fakturnya.
+    const svc = await seedService('SVC-ZZ-PPN5', '10000000.00');
+    const parties = { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] };
+    await expect(close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties, paymentScheme: PAYMENT_SCHEME_TERMIN, includePPN: true,
+      installments: [{ amount: '5000000', dueDate: '2026-08-01' }, { amount: '5000000', dueDate: '2026-09-01' }],
+    })).rejects.toBeInstanceOf(IncompleteError);
+
+    const res = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties, paymentScheme: PAYMENT_SCHEME_TERMIN, includePPN: true,
+      installments: [{ amount: '5550000', dueDate: '2026-08-01' }, { amount: '5550000', dueDate: '2026-09-01' }],
+    });
+    const inst = await sql<{ amount: string }[]>`
+      select amount from installments where transaction_id = ${res.transactionId} order by installment_no`;
+    expect(inst.map((i) => i.amount)).toEqual(['5550000.00', '5550000.00']);
+  });
+
+  it('DB menolak rupiah PPN pada invoice yang tombolnya mati', async () => {
+    // Dua lapis, seperti `ck_msv_qty_durasi_butuh_durasi_bulan`: route bukan
+    // satu-satunya penulis tabel ini.
+    const svc = await seedService('SVC-ZZ-PPN6', '10000000.00');
+    const res = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    await expect(sql`
+      update transactions set total_ppn = 1 where id = ${res.transactionId}`,
+    ).rejects.toThrow(/ck_trx_ppn_butuh_penanda/);
+  });
 });
 
 describeDb('previewQuote', () => {

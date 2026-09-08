@@ -45,6 +45,7 @@ function fixture(over: Partial<MasterService> = {}): MasterService {
     plan_tier: 'ditentukan_am',
     durasi_bulan: 6,
     qty_menambah: 'durasi',
+    pengakuan: 'per_periode',
     version_no: 1,
     effective_from: '2026-08-31',
     ...over,
@@ -72,6 +73,7 @@ const RECOVERED_FROM: { [K in keyof MslPayload]: (s: MasterService) => MslPayloa
   plan_tier: (s) => s.plan_tier,
   durasi_bulan: (s) => s.durasi_bulan,
   qty_menambah: (s) => s.qty_menambah,
+  pengakuan: (s) => s.pengakuan,
   effective_from: () => 'SKIP',
 };
 

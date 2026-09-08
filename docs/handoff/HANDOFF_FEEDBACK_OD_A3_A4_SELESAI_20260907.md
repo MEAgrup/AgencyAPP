@@ -184,17 +184,41 @@ select count(*) from services sv
 
 ---
 
+## 4a. Gelombang D sudah masuk `main` lebih dulu — dan konfliknya EMPAT, bukan satu
+
+Handoff pendahulu memprediksi satu konflik dengan pekerjaan Finance:
+`docs/DECISIONS.md`. Waktu PR #309 (Gelombang D accrual + D-4 PPN) ter-merge ke
+`main` dan sesi ini membawanya masuk, konfliknya **empat**:
+
+| Berkas | Kenapa |
+|---|---|
+| `docs/DECISIONS.md` | Diprediksi. Penyisipan murni di anchor yang sama ⇒ **simpan keduanya**, nol baris dibuang: 10 baris Gelombang D (09-08) di atas, 2 baris A-3/A-4 (09-07) di bawah — konvensi terbaru-di-atas |
+| `packages/domain/src/sales.ts` | **TIDAK diprediksi.** D-4 menambah `ClosingInput.includePPN` di blok yang sama dengan `durasiBulanOverride`/`alasanOverride` milik A-4 |
+| `apps/api/.../attempts/[id]/close/route.ts` | idem — `include_ppn` di body yang sama |
+| `web-internal/src/lib/sales.ts` | idem — tipe `ClosingInput` FE |
+
+Keempatnya **penyisipan murni di dua sisi**, jadi resolusinya seragam: simpan
+keduanya. **Pelajarannya buat penggabungan Jalur B:** pemetaan per-berkas di
+handoff pendahulu memetakan `wire.ts`/`wire.test.ts`/`db-rebuild.sh`/`ci.yml`
+dan menyimpulkan Gelombang D "tidak menyentuh" jalur closing — padahal D-4
+menyentuhnya di tiga berkas. **Jangan percaya pemetaan konflik yang tidak
+disimulasikan ulang.**
+
+Sesudah merge: **196 migrasi**, seluruh gate TETAP (146/40/31/73). A-3
+`20260922100400` menyortir **sebelum** D `20260923010000` — nol tabrakan stempel.
+
+---
+
 ## 5. Sisa pekerjaan
 
-1. **Penggabungan Jalur B** — §4 handoff pendahulu masih akurat: satu konflik,
-   dan itu dokumen (`HANDOFF_FEEDBACK_OD_JALUR_B.md`). **Satu koreksi:** simulasi
-   di sana dijalankan terhadap `main` `b309e3bc`; sesi ini menambah hunk di
-   `wire.ts` (`ServiceQueueRowWire`, ~sekitar anchor `ANCHOR-WIRE-...` yang mana
-   pun tidak dipakai — penyisipannya di blok `ServiceQueueRowWire` sendiri) dan
-   di `packages/domain/src/account.ts`. Jalur B menyentuh
-   `ANCHOR-WIRE-DELIVERY` (~446) ⇒ **masih berjauhan, tetap nol konflik**, tapi
-   **simulasikan ulang** (`git merge-tree`) sebelum merge; jangan pakai hasil
-   simulasi lama.
+1. **Penggabungan Jalur B** — §4 handoff pendahulu **sudah tidak bisa dipakai apa
+   adanya**: simulasinya dijalankan terhadap `main` `b309e3bc`, dan `main`
+   sekarang `1fee9839` (PR #309) **plus** merge sesi ini. Sesi ini menambah hunk
+   di `wire.ts` (blok `ServiceQueueRowWire`), `packages/domain/src/account.ts`,
+   `sales.ts`, dan FE `sales.ts`. Jalur B menyentuh `ANCHOR-WIRE-DELIVERY` (~446)
+   ⇒ penilaian gw masih nol konflik di `wire.ts`, **tapi itu penilaian, bukan
+   hasil**. **Simulasikan ulang `git merge-tree` sebelum merge** — §4a di atas
+   adalah bukti bahwa pemetaan yang tidak disimulasikan ulang salah.
 2. **Utang 6 layar yang belum pernah dilihat mata** (§5 handoff pendahulu) —
    **belum dibayar, dan sesi ini menambah dua**: form closing Sales (field durasi
    + kotak alasan yang muncul bersyarat) dan form Strategi dalam keadaan

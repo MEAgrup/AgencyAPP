@@ -62,6 +62,7 @@ import {
   MAX_SERVICES,
   NotClosableError,
   NotFoundError,
+  computePPN,
   resolveProposalLine,
   resolvePIC,
   SALES_DIVISION,
@@ -320,7 +321,10 @@ async function writeRenewalProposal(
 }
 
 /** loadLatestLines reads the newest proposal version's priced lines. */
-async function loadLatestLines(sql: Queryable, renewalRequestId: string): Promise<{ masterServiceId: string; proposedPrice: string; commissionRule: string }[]> {
+async function loadLatestLines(
+  sql: Queryable,
+  renewalRequestId: string,
+): Promise<{ masterServiceId: string; proposedPrice: string; commissionRule: string }[]> {
   const rows = await sql<{ master_service_id: string; proposed_price: string; commission_rule: string }[]>`
     select l.master_service_id, l.proposed_price, l.commission_rule
       from renewal_proposal_lines l
@@ -328,7 +332,10 @@ async function loadLatestLines(sql: Queryable, renewalRequestId: string): Promis
      where p.renewal_request_id = ${renewalRequestId}
        and p.version_no = (select max(version_no) from renewal_proposals where renewal_request_id = ${renewalRequestId})
      order by l.id`;
-  return rows.map((r) => ({ masterServiceId: r.master_service_id, proposedPrice: r.proposed_price, commissionRule: r.commission_rule }));
+  return rows.map((r) => ({
+    masterServiceId: r.master_service_id, proposedPrice: r.proposed_price,
+    commissionRule: r.commission_rule,
+  }));
 }
 
 async function renewalTransition(sm: statemachine.SmExecutor, id: string, to: string, actor: Actor): Promise<statemachine.TransitionResult> {
@@ -495,6 +502,8 @@ export interface ExecuteRenewalInput {
   parties: ClosingParties;
   paymentScheme: string;
   installments?: InstallmentInput[];
+  /** "Include PPN" for this renewal's invoice — same rule as `sales.ClosingInput`. */
+  includePPN?: boolean;
 }
 
 export interface ExecuteRenewalResult {
@@ -551,11 +560,17 @@ export async function executeRenewal(
     if (lines.length === 0) {
       throw new IncompleteError();
     }
+    // Same split as `sales.close()` (D-4): `total` is the BASE that becomes
+    // `total_agreed_value` and feeds accrual + commission; `totalPPN` is the tax
+    // in its own column. The instalment schedule is validated against the BILLED
+    // figure — base + PPN — because that is what the client pays.
     let total = 0n;
     for (const l of lines) {
       total += money.parse(l.proposedPrice);
     }
-    validateScheduleTotal({ parties: input.parties, paymentScheme: input.paymentScheme, installments: input.installments }, total);
+    const includePPN = input.includePPN ?? false;
+    const totalPPN = computePPN(total, includePPN);
+    validateScheduleTotal({ parties: input.parties, paymentScheme: input.paymentScheme, installments: input.installments }, total + totalPPN);
 
     const primary = input.parties.primarySalespersonId;
     const pic = resolvePIC(input.parties);
@@ -597,9 +612,11 @@ export async function executeRenewal(
     const trxId = await ex.ident.identNext('TRX', now);
     await tx`
       insert into transactions
-        (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_by)
+        (id, client_id, payment_intent_scheme, total_agreed_value, include_ppn, total_ppn,
+         payment_status, created_by)
       values
-        (${trxId}, ${row.client_id}, ${input.paymentScheme}, ${money.decimal(total)}, ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
+        (${trxId}, ${row.client_id}, ${input.paymentScheme}, ${money.decimal(total)}, ${includePPN},
+         ${money.decimal(totalPPN)}, ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
 
     // 4) Installments (INST-) for scheduled schemes.
     const installments = input.installments ?? [];
@@ -640,6 +657,7 @@ export async function executeRenewal(
       beforeJson: { allocations: before },
       afterJson: {
         contract_id: contractId, transaction_id: trxId, total_agreed_value: money.decimal(total),
+        total_ppn: money.decimal(totalPPN), ditagih: money.decimal(total + totalPPN),
         payment_scheme: input.paymentScheme, allocations: input.parties.allocations,
       },
       createdBy: actor.employeeId,
