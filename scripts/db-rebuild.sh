@@ -175,9 +175,9 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "146"
-check "entity_prefix"    "select count(*) from entity_prefix"    "40"
-check "sm_machines"      "select count(*) from sm_machines"      "31"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "147"
+check "entity_prefix"    "select count(*) from entity_prefix"    "41"
+check "sm_machines"      "select count(*) from sm_machines"      "32"
 check "notif_events"     "select count(*) from notif_events"     "73"
 # 73 = 69 + 4 event Feedback OD 2026-09-07 (katalog v15,
 #      20260922100100_f3_notif_feedback_od.sql): `m6.brief.siap_review_am` dan
@@ -194,6 +194,17 @@ check "notif_events"     "select count(*) from notif_events"     "73"
 #      20260911050000_m1_unrespon_notif.sql. Nol tabel/prefix/mesin baru ⇒
 #      145 tabel/40 prefix/31 mesin TETAP. Lihat
 #      docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md L2.
+# 147 = 146 + 1 tabel Wave 3 M18 Store Operation
+#       (20260924010000_w3_store_ops_sku.sql): `sku_optimizations` — unit kerja
+#       per SKU di bawah satu Brief Store Ops (K-5, pola persis `assets`/
+#       `creator_bookings`). Ketokan pemilik (COO) 2026-09-08: cakupan + target
+#       diisi AM, hasil + dampak diisi Store Ops — dua penulis pada satu baris,
+#       dindingnya trigger `trg_sku_dinding` (bersyarat-STATE, preseden
+#       `trg_strategi_target_guard_floor` O57 (b)). +1 prefix SKU (40→41);
+#       +1 mesin `store_ops_sku` (31→32, mesin #32 STATE_MACHINES §22). Nol
+#       event katalog baru ⇒ notif_events TETAP 73 — notifikasi rollup menyusul
+#       bersama mesin rollup-nya (Wave 3 PR 2), dan mendaftarkan event tanpa
+#       emitter lebih dulu tidak membantu siapa pun di sini.
 # 146 = 145 + 1 tabel Gelombang C / gerbang C-5
 #       (20260916010000_c5_izin_pitch_klien.sql): `client_pitch_consents` —
 #       ledger append-only izin pemakaian angka klien di materi pitch (satu

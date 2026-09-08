@@ -1,7 +1,7 @@
 # CLAUDE.md — CDPS (Client Delivery & Performance System), MEA Agency
 
 ## What this project is
-Standalone internal system covering MEA Agency's full client lifecycle: lead intake → sales closing → payment gate → delivery execution (Creative/Ads/KOL/Live-Stream-vendor) → client health scoring → team performance → client/team portals. It is NOT an HRIS — MEA's HRIS (employee/attendance/leave) is a separate existing system we integrate with (read-only employee sync only; CDPS auth is local — see `docs/DECISIONS.md` 2026-07-19). See `docs/prd/CDPS_Build_Plan.md` for waves and `docs/prd/` for the 18 PRD documents.
+Standalone internal system covering MEA Agency's full client lifecycle: lead intake → sales closing → payment gate → delivery execution (Creative/Ads/KOL/Live-Stream-vendor/AI-Optimizer/Store-Operation) → client health scoring → team performance → client/team portals. It is NOT an HRIS — MEA's HRIS (employee/attendance/leave) is a separate existing system we integrate with (read-only employee sync only; CDPS auth is local — see `docs/DECISIONS.md` 2026-07-19). See `docs/prd/CDPS_Build_Plan.md` for waves and `docs/prd/` for the PRD documents (the original 18, plus M6A/6B/6C/6D/Interview and M16/M17/M18 added since).
 
 ## Stack & architecture (decided — do not change without a logged decision)
 
@@ -58,7 +58,7 @@ Standalone internal system covering MEA Agency's full client lifecycle: lead int
 8. **Notifications:** in-app only (v1), derived from the audit log, event catalog in Phase 0 v2 §9. Never deletable, only read/unread.
 
 ## Where truth lives
-- `docs/prd/` — the 18 PRD files. **The PRD is the spec.** If code and PRD disagree, the PRD wins; if the PRD is ambiguous or two modules conflict, STOP and flag it in `docs/DECISIONS.md` as an open question — do not silently pick an interpretation.
+- `docs/prd/` — the PRD files (M18 Store Operation is the newest: `CDPS_Module18_Store_Ops.md`). **The PRD is the spec.** If code and PRD disagree, the PRD wins; if the PRD is ambiguous or two modules conflict, STOP and flag it in `docs/DECISIONS.md` as an open question — do not silently pick an interpretation.
 - `docs/DATA_MODEL.md` — entity registry, relations, key fields.
 - `docs/STATE_MACHINES.md` — consolidated transition tables (source for the transition-engine config).
 - `docs/DECISIONS.md` — decision log. Any deviation from the PRD requires an entry (date, decision, reason, approved by).

@@ -136,6 +136,12 @@ export const PREFIXES = {
   // tool with no Client Portal surface (O69, and the long "kenapa bukan
   // client_reports" note in the Gelombang 4 migration).
   ASR: { entity: 'Ads Scanner run (TikTok Ads Scanner)', module: 'Gelombang 4 (TikTok Ads Scanner)' },
+  // M18 Store Operation (Wave 3) — satu baris per SKU yang dioptimasi, anak
+  // `briefs` (K-5, pola persis `AST-`/`BKG-`). `SKU` diverifikasi bebas
+  // terhadap 40 prefix terdaftar sebelum dipakai. Dua kelompok kolom dengan
+  // dua penulis (cakupan+target milik AM, hasil+dampak milik Store Ops,
+  // ketokan pemilik 2026-09-08); dindingnya trigger DB, bukan konvensi.
+  SKU: { entity: 'Baris SKU (unit kerja Store Operation)', module: 'M18' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

@@ -28,9 +28,12 @@
 | 13 | `CDPS_Module13_Client_Health_Report.md` | Final, unchanged — *use your existing copy* |
 | 14 | `CDPS_Module14_Team_Performance.md` | Final, unchanged — *use your existing copy* |
 | 15 | `CDPS_Module15_Client_Team_Portal.md` | Final, unchanged — *use your existing copy* |
+| 16 | `CDPS_Module16_Lead_Time.md` | **New — added 2026-08-28** (Lead Time: pipeline tahapan per divisi, gerbang intake `Cek Brief AM`, target hari kerja). Owner request, `docs/DECISIONS.md` 2026-08-28. |
+| 17 | `CDPS_Module17_AI_Optimizer.md` | **New — added 2026-08-28** (AI Optimizer: Optimasi SKU + AI Video, dua pipeline, sinkronisasi balik ke STRG sebagai revisi bernomor). |
+| 18 | `CDPS_Module18_Store_Ops.md` | **New — added 2026-09-08** (Store Operation: 1 Brief → n baris SKU `SKU-`, produksi & upload gambar SKU. **Dua penulis pada satu baris** — cakupan+target milik AM, hasil+dampak milik Store Ops; ketokan pemilik/COO 2026-09-08. `[Terupload]` = selesai, evaluasi CTR/CVR langkah terpisah — K-6). Menutup keluhan divisi Store Ops K-4/K-5/K-6. |
 | — | `CDPS_Build_Plan.md` (this file) | New |
 
-*"Use your existing copy" = the file from the original batch is already final; no content changed, so no regenerated version is issued (avoids accidental drift). This manifest supersedes README v2's file list.*
+*Baris 16/17/18 ditambahkan belakangan dan tidak berasal dari batch asli: manifest ini sempat berhenti di 15 sementara ketiga PRD-nya sudah ada di `docs/prd/`. "Use your existing copy" = the file from the original batch is already final; no content changed, so no regenerated version is issued (avoids accidental drift). This manifest supersedes README v2's file list.*
 
 **Remaining open items (do not block ticketing):** Phase 0 OA-6 CSAT capture (Phase 2); Module 12 Task-SLA-vs-Brief-SLA validation + revision-threshold retuning (post-live-data); Ads benchmark numbers (operational data entry, Phase 0 OA-5); detailed Portal security spec (write before Wave 3, minimums already in Phase 0 v2 §11); `mea-client-reporting` embeddability check (before Wave 3); data-migration spec (write during Wave 1, §6 risk R4).
 

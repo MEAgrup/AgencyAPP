@@ -360,7 +360,7 @@ Menulis transisi tahapan sebagai `entity_type='brief'` membuat baris tahapan **i
 | Live Stream | — | `Cek Brief AM` (label "Terima Brief AM", LT-5) → `Terima Sampel` → `Briefing Klien Live` → `Live Start` |
 | AI Optimizer | Optimasi SKU | `Cek Brief AM` → `Ambil SKU` → `Riset` → `Perbaikan` → `QC` → `Approve` (gate AM) → `Terapkan` |
 | AI Optimizer | AI Video | `Cek Brief AM` → `Script` → `Generate AI` → `Edit` → `QC` → `Jadwal Posting` |
-| Store Operation | — | **pipeline kosong** — divisi aktif, daftar pekerjaan menyusul (`DECISIONS.md` LT-2) |
+| Store Operation | — | **pipeline masih kosong** (LT-2) — unit kerjanya sudah ada sejak M18 (`SKU-`, mesin #32 §22); pipeline tahapannya menyusul di Wave 3 PR 2 |
 
 Ads **tidak punya mesin tahapan sendiri**: status `Setting`/`Running`/`Hold`/`End` dipetakan ke mesin `ADC-` (§14) supaya tidak ada dua sumber kebenaran untuk "iklan lagi jalan".
 
@@ -437,3 +437,19 @@ Jenis: `Top-up Saldo` (Ads → **Finance**, LT-11), `Contract Creator` (KOL → 
 - **Mesin pertama berkunci surrogate `bigint`.** Semua entitas CDPS lain berkunci `PREFIX-YYYYMM-NNNN`; laporan bukan entitas ber-prefix (`client_reports.id` bigint identity). Ini menyingkap keterbatasan `sm_transition` yang selama ini tak terlihat — predikatnya `WHERE %I = $1` dengan `$1 text` ⇒ `operator does not exist: bigint = text`. Diperbaiki migrasi `20260908020000_sm_transition_id_type_aware.sql`: tipe kolom dibaca dari katalog dan **parameternya** yang di-cast (`$1::<tipe>`), bukan kolomnya — cast di kolom akan mengeluarkannya dari indeks. Nol perubahan perilaku untuk 30 mesin lain.
 - **Nol prefix baru** (`entity_prefix` tetap 37) dan **nol event katalog baru** (`notif_events` tetap 67 — komplain portal memakai event komplain yang sudah ada).
 - Teks insight sendiri hidup di `client_report_insight`, **append-only** (revisi 0 = snapshot mesin) dan **bukan** mesin status.
+
+## 22. Baris SKU Store Operation `store_ops_sku` (`SKU-`, M18) — mesin #32 (`sm_machines` 31→32)
+`[Belum Dikerjakan]` → `[Dikerjakan]` → `[Terupload]` → `[Dievaluasi]`; `[Belum Dikerjakan]` | `[Dikerjakan]` → `[Dibatalkan]`. Terminal: `[Dievaluasi]`, `[Dibatalkan]`. Migrasi `20260924010000_w3_store_ops_sku.sql`.
+
+| From | To | Who | Effect |
+|---|---|---|---|
+| `[Belum Dikerjakan]` | `[Dikerjakan]` | PIC Store Ops (`require_lead=false`) | Pekerjaan produksi gambar mulai. **Sejak titik ini cakupan + target BEKU** (trigger `trg_sku_dinding`) |
+| `[Dikerjakan]` | `[Terupload]` | PIC Store Ops | **SELESAI** untuk leadtime produksi (K-6). Menuntut `link_output` + jangkar `terupload_pada` — dan **nol angka dampak** |
+| `[Terupload]` | `[Dievaluasi]` | Store Ops (langkah ±30 hari kemudian) | CTR/CVR sebelum & sesudah wajib (`ck_sku_dievaluasi`), jangkar `dievaluasi_pada` |
+| `[Belum Dikerjakan]` \| `[Dikerjakan]` | `[Dibatalkan]` | **lead divisi** (`require_lead=true`) | Baris dicabut dari hitungan `%Ontime`; alasan + jangkar wajib |
+
+- **`[Terupload]` adalah "selesai", dan ia sengaja BUKAN terminal.** Ketokan K-6: SKU selesai saat gambar ter-upload; angka dampak wajib tapi di langkah review kemudian, supaya leadtime **produksi** tidak ternoda waktu tunggu pasar — angka yang mengukur dua hal sekaligus tidak mengukur apa pun. Karena itu **rollup "selesai" wajib membaca `[Terupload]` ATAU `[Dievaluasi]`**; rollup yang hanya membaca `sm_terminal_states` akan memperlihatkan produksi Store Ops mandek sebulan penuh setiap kali. Ini pelajaran B-1a dalam bentuk lain: progres yang mati diam lebih buruk daripada nol progres.
+- **`require_lead=true` pada kedua edge `[Dibatalkan]`.** Membatalkan baris SKU mencabutnya dari penyebut `%Ontime` divisi, dan orang yang sedang diukur tidak boleh bisa mencabut ukurannya sendiri — gerbang yang sama persis dengan alasan M12 §5.3a mengunci `[Blocked]` ke SPV/Lead dan mesin #21 `internal_task` mengunci pembatalannya.
+- **Nol edge "buka kembali" dari `[Dievaluasi]`**: ia akan memindahkan `dievaluasi_pada` dan angka dampak yang sudah dilaporkan ke klien. **Nol edge `[Terupload]` → `[Dikerjakan]`**: `terupload_pada` beku, jadi mundur ke sana menghasilkan baris yang jangkar produksinya sudah lewat tapi statusnya bilang belum. Salah upload ⇒ baris SKU baru; salah angka ⇒ keputusan pemilik lebih dulu (pola mesin #20/#21).
+- **Nol loop revisi per baris.** `Shopee Revision`/`Tiktok Revision` adalah **jenis permintaan** (baris SKU tersendiri), bukan putaran review di dalam satu baris — worksheet Store Ops tidak mengenal putaran itu, dan mengarangnya berarti menambah transisi yang tidak ada spesifikasinya.
+- **Dinding dua penulis bukan bagian mesin ini, dan itu disengaja.** `sm_transition` menggerbang SIAPA berdasarkan seniority (`require_lead`), bukan berdasarkan KOLOM MANA. Pembagian AM-vs-Store Ops dipikul trigger `trg_sku_dinding` yang bersyarat-STATE (preseden `trg_strategi_target_guard_floor`, O57 (b)) — bukan bersyarat-aktor, karena setiap tulisan domain lewat koneksi service-role yang nol klaim JWT dan trigger bersyarat-aktor akan diam persis di jalur yang ia klaim jaga.
