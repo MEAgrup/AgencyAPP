@@ -161,7 +161,14 @@ login**.
 - **Rugi:** nol fitur baru. Dan menegakkan auth + API + dev server itu pekerjaan
   tersendiri, bukan tempelan.
 
-### (c) Satukan empat bentuk `Brief` paralel di FE
+### (c) ~~Satukan empat bentuk `Brief` paralel di FE~~ — SUDAH DIKERJAKAN (PR #320)
+
+> **SELESAI 2026-09-08 oleh sesi lain.** Rumahnya sekarang
+> `web-internal/src/lib/brief.ts` (satu deklarasi, keempat berkas lama
+> me-re-export), dengan gerbang anti-kambuh di `shape-parity.test.ts` yang merah
+> kalau ada deklarasi `Brief` kedua di `src/lib/`. `apps/api` 445 → 446.
+> Aturan barunya: field Brief baru ditambahkan di `brief.ts`, **sekali**.
+> Uraian di bawah ditahan sebagai catatan kenapa utang itu ada.
 `lib/account.ts`, `lib/tasks.ts`, `lib/creative.ts`, `lib/kol.ts` — dan **hanya
 `account.ts::Brief` yang diikat `shape-parity.test.ts`** ke `BriefWire`.
 Keempatnya disuapi wire yang **sama**.
