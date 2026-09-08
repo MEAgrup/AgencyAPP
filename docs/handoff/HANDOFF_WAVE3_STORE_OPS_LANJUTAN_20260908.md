@@ -96,12 +96,23 @@ dinilai. Preseden: M16 Rule 4 dan `internal_tasks` ("NOL kolom keterlambatan").
 
 ## 4. Dua butir yang TIDAK dikerjakan, dan kenapa
 
+> ### ✅ SUDAH DITANYAKAN 2026-09-08 — jawabannya "biarkan terbuka dulu"
+>
+> Keduanya diajukan ke pemilik di akhir sesi ini, dengan opsi konkret (termasuk
+> tawaran memasang pipeline minimal ber-`Cek Brief AM` saja, dan tawaran
+> menetapkan bobot KPI sekarang). **Pemilik memilih menahan dua-duanya.**
+>
+> Jadi **jangan tanyakan ulang** di sesi berikutnya, dan jangan pula
+> menganggapnya lupa: menahan keduanya adalah pilihan sadar. Yang berubah dari
+> keadaan sebelumnya hanya kepastiannya — ini bukan lagi "belum sempat dijawab",
+> ini "diputuskan menunggu". Bangunkan lagi hanya kalau pemilik yang membawanya.
+
 ### LT-2 + LT-8 — daftar & urutan tahapan Store Operation
 
-**Ini yang perlu ditanyakan ke pemilik.** Ketokan 2026-09-08 menjawab *siapa yang
-mengisi daftar SKU dan targetnya* — ia **tidak** menyebut satu pun nama tahap.
-Daftar & urutan kerja divisi adalah LT-2, dijawab *"akan saya berikan menyusul"*
-(2026-08-29) dan masih terbuka.
+Ketokan 2026-09-08 menjawab *siapa yang mengisi daftar SKU dan targetnya* — ia
+**tidak** menyebut satu pun nama tahap. Daftar & urutan kerja divisi adalah LT-2,
+dijawab *"akan saya berikan menyusul"* (2026-08-29) dan **tetap ditahan** pada
+pengecekan 2026-09-08.
 
 > ⚠️ Handoff pendahulunya (§4 butir 5) menulis "Pipeline STORE_OPS (menutup
 > LT-2)" seolah ketokan itu menutupnya. Tidak. Dan draf pertama PRD §7 sempat
@@ -129,6 +140,12 @@ seperti kerusakan.
 
 Tetap `0`, jadi performa divisi ini selalu `—`. Angkanya milik COO; menebaknya
 berarti mengarang skor performa orang. `20260830040000_m16_perf_weights_zero.sql`.
+
+Ditahan sadar pada pengecekan 2026-09-08, dengan alasan yang sama yang membuat
+Sales dan AI Optimizer juga masuk berbobot 0 lebih dulu: bobot M14 §9
+ditandatangani 2026-08-13 dan tiap profil peran pas 100, jadi menyisipkan
+komponen berbobot sekarang berarti memotong ulang bobot itu **tanpa satu bulan
+pun data nyata** dari divisi ini.
 
 ---
 
@@ -195,8 +212,10 @@ di manifest rute — itu membuktikan ia merender, bukan bahwa tata letaknya bena
 
 ## 8. Masih menunggu ketokan pemilik — tidak memblokir apa pun
 
-- **LT-2 / LT-8** — §4. Satu-satunya yang menahan butir 5.
-- **LT-1** — bobot KPI. Menahan butir 9.
+- **LT-2 / LT-8** — §4. Menahan butir 5. **Ditanyakan 2026-09-08, pemilik memilih
+  menahan.** Jangan tanyakan ulang.
+- **LT-1** — bobot KPI. Menahan butir 9. **Ditanyakan 2026-09-08, pemilik memilih
+  menahan.** Jangan tanyakan ulang.
 - **O75** — Service nol jalur untuk SELESAI. Edge `[In Execution] → Done` ada di
   `sm_edges` tapi **nol pemanggil**.
 - **O76** — dari mana floor GMV bulanan datang; selama itu terbuka, Sanggahan
