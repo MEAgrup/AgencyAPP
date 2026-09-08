@@ -1,20 +1,12 @@
 /**
- * POST /api/v1/strategies/{id}/request-revision — send a submitted Plan back to
- * [Strategy Drafting] (M6 §4 Rule 4). Account lead / Director only; revision
- * notes mandatory. The revision count derives from the audit log. Body: { notes }.
- * Ports Go's handleRequestStrategyRevision.
+ * POST /api/v1/strategies/{id}/request-revision — **DIPENSIUNKAN 2026-09-08.**
+ *
+ * Jalur `STR-` sudah tidak kanonik; `STRG-` (M6A) yang membuka gerbang Brief.
+ * Alasan lengkap + kenapa 410 dan bukan penghapusan: `@/lib/retired-str`.
  */
-import { account } from '@cdps/domain';
-import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { handle, json, readJson } from '@/lib/http';
+import { handle } from '@/lib/http';
+import { strPensiun } from '@/lib/retired-str';
 
-export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
-  return handle(async () => {
-    const actor = requireActor(request);
-    const { id } = await ctx.params;
-    const b = await readJson<{ notes?: string }>(request);
-    await account.requestRevision(db(), actor, id, b.notes ?? '');
-    return json({ id, status: account.STRATEGY_STATUS_DRAFTING });
-  });
+export async function POST(): Promise<Response> {
+  return handle(async () => strPensiun());
 }

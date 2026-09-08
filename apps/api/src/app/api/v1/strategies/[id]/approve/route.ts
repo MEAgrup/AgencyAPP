@@ -1,20 +1,12 @@
 /**
- * POST /api/v1/strategies/{id}/approve — approve a submitted Plan (M6 §4 Rule 4).
- * Account lead / Director only. Flips the STR- to [Strategy Approved] AND drives
- * the parent Service [Awaiting Onboarding] → [Strategy Approved] in one
- * transaction; records Approved By. An invalid edge → 409 (nothing moves). Ports
- * Go's handleApproveStrategy.
+ * POST /api/v1/strategies/{id}/approve — **DIPENSIUNKAN 2026-09-08.**
+ *
+ * Jalur `STR-` sudah tidak kanonik; `STRG-` (M6A) yang membuka gerbang Brief.
+ * Alasan lengkap + kenapa 410 dan bukan penghapusan: `@/lib/retired-str`.
  */
-import { account } from '@cdps/domain';
-import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { handle, json } from '@/lib/http';
+import { handle } from '@/lib/http';
+import { strPensiun } from '@/lib/retired-str';
 
-export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
-  return handle(async () => {
-    const actor = requireActor(request);
-    const { id } = await ctx.params;
-    await account.approveStrategy(db(), actor, id);
-    return json({ id, status: account.STRATEGY_STATUS_APPROVED });
-  });
+export async function POST(): Promise<Response> {
+  return handle(async () => strPensiun());
 }

@@ -44,6 +44,26 @@ export interface Brief {
   client_id: string;
   client_nama: string;
   assigned_pic_nama: string;
+  /**
+   * A-req-1 (KOL #1) — jendela campaign + budget sebagai KOLOM. `''`/`null`
+   * berarti belum diisi (eksplisit, bukan kunci hilang).
+   */
+  tanggal_mulai: string;
+  tanggal_akhir: string;
+  budget: string | null;
+  /** A-req-2 (K-3) — Brief Creative sumber aset; null = tidak ditunjuk. */
+  source_creative_brief_id: string | null;
+  /**
+   * A-req-3 — jumlah unit kerja anak (Asset / Campaign / Booking / Sesi Live).
+   * `0` = belum dipecah, dan itu justru baris yang paling perlu dilihat leader.
+   *
+   * ⚠️ Bentuk ini adalah SALINAN PARALEL dari `account.ts::Brief`, dan hanya yang
+   * di `account.ts` yang diikat `shape-parity.test.ts` ke `BriefWire`. Keduanya
+   * disuapi wire yang SAMA, jadi field baru harus ditambahkan di dua tempat —
+   * kalau tidak, halaman yang membaca bentuk ini melihat `undefined` sementara
+   * parity tetap hijau. Dicatat di handoff sebagai utang yang perlu disatukan.
+   */
+  jumlah_anak: number;
   deliverable_type: string;
   quantity_target: number;
   due_date: string; // "YYYY-MM-DD"
