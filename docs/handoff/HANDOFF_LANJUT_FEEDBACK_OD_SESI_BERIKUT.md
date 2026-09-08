@@ -34,8 +34,8 @@ Pekerjaan lain      : PR #309 SUDAH MERGE (2026-09-07). Irisannya dengan Jalur B
 | Ads (tak bisa temukan aset) | B-5 | ✅ sisi baca; PENGISIAN kolom butuh A-req-2 |
 | KOL #1 (deadline/budget/pengingat) | B-3 | ⚠️ tick + jatuh tempo + progres ✅; **jendela + budget butuh A-req-1** |
 | Finance #1 & #2 | A-1, A-2 | ✅ sudah di `main` |
-| Account #5 (CRO mentok) | A-3 | ⛔ **BELUM** |
-| Account #1 (durasi dari CRO) | A-4 | ⛔ **BELUM** |
+| Account #5 (CRO mentok) | A-3 | ⛔ **BELUM** — dikonfirmasi A 2026-09-08 |
+| Account #1 (durasi dari CRO) | A-4 | ⛔ **BELUM** — dikonfirmasi A 2026-09-08 |
 | Store Ops (K-4/K-5/K-6) | Wave 3 | ⛔ belum mulai — sesudah A & B tergabung |
 
 ## Yang harus dikerjakan berikutnya, berurutan
@@ -52,6 +52,39 @@ pekerjaan lain yang menggantung di atas `wire.ts`. Kalau `main` bergerak lagi:
 `docs/handoff/PROMPT_CEK_JALUR_A_SISA_FEEDBACK_OD.md` — tempel apa adanya ke
 sesi Akun A. Isinya enam pertanyaan berbukti (A-3, A-4, A-req-1..3, utang UAT
 A-1) plus dua hal yang wajib A ketahui dari Jalur B.
+
+### 2b. Jawaban Akun A sudah masuk (2026-09-08) — keenam butir `belum`
+
+A menjawab prompt ronde 1 dengan bukti berkas+baris. **Keenamnya `belum`**, dan
+Jalur B sudah memverifikasi keenamnya sendiri terhadap `origin/main` — substansinya
+benar semua. Artinya **ketiga sisa Jalur B masih terkunci**; nol pekerjaan Jalur B
+yang bisa maju sampai A-req mendarat.
+
+| Butir | Status | Verifikasi Jalur B atas bukti A |
+|---|---|---|
+| A-3 (CRO mentok) | belum | Benar — dua `transition` di `strategi.ts:approveStrategi` keduanya `table: 'strategi'`. **TAPI** lihat koreksi di bawah |
+| A-4 (durasi dari CRO) | belum | Benar — `grep -c contracts` di `sales.ts` `origin/main` = **0** |
+| A-req-1 (jendela+budget) | belum | Benar. Keempat kolom F-4 memang sudah ada ⇒ murni jalur TS, nol migrasi |
+| A-req-2 (isi kolom sumber) | belum | Benar untuk `main`. **Sisi BACA sudah 100% di #312** — grep A nol karena #312 belum ada di branch-nya |
+| A-req-3 (jumlah anak) | belum | Benar substansinya. `createdCount` ADA tapi variabel FE lokal (`creative/briefs/[id]/page.tsx:335`), bukan field antrean |
+| Utang UAT A-1 | belum dibayar | Diterima apa adanya — tak bisa diverifikasi dari luar |
+
+**Tiga koreksi sudah ditulis lengkap di `PROMPT_CEK_JALUR_A_SISA_FEEDBACK_OD.md`
+§"RONDE 2"** (tempel ke sesi A). Yang paling mengubah bentuk pekerjaan:
+
+> **A-3 bukan pekerjaan desain, ia PORT.** Jalur STR- lama di `account.ts:1025-1026`
+> SUDAH menggerakkan Service ke `[Strategy Approved]` dalam transaksi yang sama, dan
+> header `account.ts:16-18` sudah menuliskannya sebagai perilaku yang ada. Yang tidak
+> pernah mewarisi jahitan itu adalah modul **STRG-** baru di `strategi.ts` — dan itulah
+> yang K-2/A-3 maksud. Gerbangnya sudah menerima hasilnya (`guardBriefCreation`
+> `account.ts:1354`, lolos pada `[Strategy Approved]` di `:1606`).
+>
+> Satu pertanyaan tersisa yang BUTUH ketokan, jangan dipilih diam-diam: **STR- lama
+> masih hidup atau sudah pensiun?** Kalau dua-duanya hidup, dua jalur berbeda bisa
+> menggerakkan satu Service ke `[Strategy Approved]`.
+
+Urutan termurah yang disarankan ke A: **A-req-1 → A-req-2 → A-req-3 → A-3 → A-4**
+(tiga A-req masing-masing membuka satu sisa Jalur B yang fondasinya sudah mendarat).
 
 ### 3. Sesudah A-req-1..3 mendarat — sisa Jalur B, kecil dan sudah dipetakan
 Ketiganya **satu-dua baris per tempat**, bukan pekerjaan baru: fondasinya sudah
