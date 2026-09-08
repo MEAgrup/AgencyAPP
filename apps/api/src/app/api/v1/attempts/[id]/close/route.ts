@@ -23,6 +23,9 @@ interface Body {
   payment_scheme?: string;
   installments?: { amount?: string; due_date?: string }[];
   managed_since?: string;
+  /** A-4 (K-2) — override the catalog-derived contract duration; reason mandatory. */
+  durasi_bulan_override?: number | null;
+  alasan_override?: string | null;
   /**
    * "Include PPN" — the one button that decides whether 11% is added to this
    * invoice (D-4). Read strictly as `=== true` so a missing key, `null`, or a
@@ -48,6 +51,11 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       paymentScheme: b.payment_scheme ?? '',
       installments: (b.installments ?? []).map((i) => ({ amount: i.amount ?? '', dueDate: i.due_date ?? '' })),
       managedSince: b.managed_since,
+      // Passed through as-is: `undefined` means "derive from the catalog", and
+      // coercing it to null here would erase that distinction before the domain
+      // ever sees it.
+      durasiBulanOverride: b.durasi_bulan_override,
+      alasanOverride: b.alasan_override,
       includePPN: b.include_ppn === true,
     });
     return json({ client_id: result.clientId, transaction_id: result.transactionId }, 201);

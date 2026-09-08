@@ -136,6 +136,19 @@ export class TooManySalespeopleError extends Error {
   }
 }
 
+/**
+ * A-4 (K-2): the closing overrode the catalog-derived contract duration without
+ * saying why. The override is the whole point of the field — an AM's number that
+ * beats the catalog — so it is the reason that makes it auditable. Without one
+ * there is nothing to compare next quarter's renewal against.
+ */
+export class OverrideReasonRequiredError extends Error {
+  constructor() {
+    super('[alasan wajib diisi jika durasi kerja sama diubah dari katalog]');
+    this.name = 'OverrideReasonRequiredError';
+  }
+}
+
 /** The attempt is not in an Approved/Auto-Approved state, so it cannot close (→ 409). */
 export class NotClosableError extends Error {
   constructor() {
@@ -1300,6 +1313,15 @@ export interface ClosingInput {
   installments?: InstallmentInput[];
   managedSince?: string; // optional YYYY-MM-DD
   /**
+   * A-4 (ketokan K-2) — the cooperation duration in months, moved here from the
+   * AM's Strategi form. Normally DERIVED from the catalog (see `deriveDuration`)
+   * and left unset; supply it only to override, and then `alasanOverride` is
+   * mandatory. 1…36, the same band `contracts` enforces.
+   */
+  durasiBulanOverride?: number | null;
+  /** Mandatory when `durasiBulanOverride` is set. Free text, audited. */
+  alasanOverride?: string | null;
+  /**
    * The "Include PPN" button Sales presses at closing (ketokan D-4 2026-09-08).
    * Every price in the system is non-PPN; this is the ONE place that decides
    * whether 11% is added to the invoice, and it is stored on the transaction so
@@ -1418,6 +1440,13 @@ interface ApprovedLine {
   versionNo: number;
   requiresStrategyPlan: boolean;
   planTier: string;
+  /**
+   * A-4 — the catalog's duration for this line, in months. `null` is NOT
+   * "unfilled": per the Q5 ketokan (2026-09-07) it means the service is one-off
+   * and has no period at all, which is why `deriveDuration` skips those rows
+   * rather than treating them as zero.
+   */
+  durasiBulan: number | null;
 }
 
 interface QualifiedFormRow {
@@ -1431,6 +1460,117 @@ interface QualifiedFormRow {
   gmv_baseline: string;
   target_gmv: string;
   marketing_budget: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// A-4 — the cooperation window (ketokan K-2, 2026-09-07)
+// ---------------------------------------------------------------------------
+
+/**
+ * deriveDuration resolves the contract duration in months for a closing.
+ *
+ * ## Why this moved out of the Strategi form
+ *
+ * Until A-4 the ONLY UI that wrote `contracts.durasi_bulan` was the AM's
+ * Strategi form, which runs weeks after the money is agreed. So the number that
+ * every Plan period boundary, every accrual month and every renewal date derive
+ * from was typed by someone who was not in the negotiation, from memory. K-2
+ * moves it to the moment it is actually known: closing.
+ *
+ * ## The rule, and the two things it is not
+ *
+ * `MAX(durasi_bulan)` over the closed lines. Not the sum — a twelve-month Store
+ * Management bought alongside a three-month GMV Max is a twelve-month
+ * agreement, not fifteen. And not the min either: the agreement has to still be
+ * open on the last day the longest service runs, or its final Plan period falls
+ * outside its own contract window.
+ *
+ * `null` lines are SKIPPED, not counted as zero (Q5 ketokan): a null duration
+ * means the service is one-off and has no period at all. A deal made up
+ * entirely of one-off services therefore derives NO window, and this returns
+ * null — there is nothing periodic to bound. `close` mints no contract in that
+ * case rather than inventing a one-month one.
+ *
+ * Per-line quantity does not enter into it: `negotiation_proposal_lines` carries
+ * no qty column, so the `qty_menambah = 'durasi'` scaling the MSL describes
+ * (buy 3 GMV Max ⇒ 3 months) is not derivable here. An AM who negotiated that
+ * uses the override, with a reason — which is exactly what the override is for.
+ */
+export function deriveDuration(lines: ApprovedLine[]): number | null {
+  let max: number | null = null;
+  for (const l of lines) {
+    if (l.durasiBulan === null) continue;
+    if (max === null || l.durasiBulan > max) max = l.durasiBulan;
+  }
+  return max;
+}
+
+/**
+ * resolveClosingWindow picks the window a closing writes, override over
+ * derivation, and validates the pair.
+ *
+ * The `> 36` clamp is not defensive noise: `ck_contracts_durasi` refuses it at
+ * the DB, and a rejection surfacing as a raw constraint violation instead of the
+ * house BI message is a bug of its own class. Deriving above 36 should be
+ * impossible (the catalog is bounded the same way) but the closing can still be
+ * overridden by hand, so the check has to live here.
+ */
+export function resolveClosingWindow(
+  lines: ApprovedLine[],
+  input: ClosingInput,
+  now: Date,
+): { durasiBulan: number; tanggalMulai: string; tanggalAkhir: string; alasan: string | null } | null {
+  const override = input.durasiBulanOverride;
+  const alasan = (input.alasanOverride ?? '').trim();
+  let durasi: number | null;
+  if (override !== undefined && override !== null) {
+    if (!Number.isInteger(override) || override < 1 || override > CONTRACT_DURATION_MAX) {
+      throw new IncompleteError();
+    }
+    if (alasan === '') {
+      throw new OverrideReasonRequiredError();
+    }
+    durasi = override;
+  } else {
+    durasi = deriveDuration(lines);
+    if (durasi === null) {
+      return null; // every line is one-off — no periodic window to bound.
+    }
+    if (durasi > CONTRACT_DURATION_MAX) {
+      throw new IncompleteError();
+    }
+  }
+  // `managedSince` is the date the client says the engagement starts; absent
+  // that, the engagement starts when it was closed. Both are WIB calendar dates
+  // (tz.dateString), never a UTC instant sliced — the difference is a whole day
+  // for anything closed after 17:00 WIB.
+  const mulai = (input.managedSince ?? '').trim() !== ''
+    ? (input.managedSince as string).trim()
+    : tz.dateString(now);
+  return {
+    durasiBulan: durasi,
+    tanggalMulai: mulai,
+    // CALENDAR months, clamped (tz.addMonthsToDate) — never `+ 30 days`. A deal
+    // starting 31 January for one month ends 28 February; +30 days would end it
+    // 2 March, and every Plan period after it would inherit the drift.
+    tanggalAkhir: tz.addMonthsToDate(mulai, durasi),
+    alasan: override !== undefined && override !== null ? alasan : null,
+  };
+}
+
+/** `ck_contracts_durasi` upper bound, mirrored so the BI message wins. */
+const CONTRACT_DURATION_MAX = 36;
+
+/** `ck_contracts_jenis` — a closing is always a NEW agreement (renewals: M14). */
+const CONTRACT_JENIS_BARU = 'baru';
+
+/**
+ * contractCatatan puts the override reason where an AM will actually read it —
+ * on the agreement — labelled, so it does not read as a stray note. The
+ * structured copy lives in the audit row; this is the human-facing one.
+ */
+function contractCatatan(alasan: string | null): string | null {
+  return alasan === null ? null : `Durasi diubah dari katalog saat closing: ${alasan}`;
 }
 
 /**
@@ -1528,16 +1668,53 @@ export async function close(
     //    back to the `plan_tier` column default (`tanpa_plan`), skipping the G-B
     //    determination gate entirely instead of leaving it pending (the exact
     //    class of bug M6C Rule 1 warns about — see `nextOnboardingStep`).
+    // 4a) A-4 (K-2) — the cooperation window (CTR-), minted HERE and not weeks
+    //     later in the AM's Strategi form. One agreement per closing: O57 says a
+    //     client who buys three services in one deal gets ONE Strategi, so they
+    //     get one contract, and every Service born below hangs under it.
+    //     `null` means every line is one-off — no periodic window exists to
+    //     record, so none is invented (the AM can still group them later through
+    //     `contract.createContract`).
+    const window = resolveClosingWindow(lines, input, now);
+    let contractId: string | null = null;
+    if (window !== null) {
+      contractId = await ex.ident.identNext('CTR', now);
+      await tx`
+        insert into contracts
+          (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, catatan, jenis, created_by)
+        values
+          (${contractId}, ${clientId}, ${window.durasiBulan}, ${window.tanggalMulai},
+           ${window.tanggalAkhir}, ${contractCatatan(window.alasan)}, ${CONTRACT_JENIS_BARU},
+           ${actor.employeeId})`;
+      await ex.audit.insertAudit({
+        entityType: 'contract', entityId: contractId, actorEmployeeId: actor.employeeId,
+        action: 'create',
+        beforeJson: null,
+        afterJson: {
+          client_id: clientId,
+          attempt_id: attemptId,
+          durasi_bulan: window.durasiBulan,
+          tanggal_mulai: window.tanggalMulai,
+          tanggal_akhir: window.tanggalAkhir,
+          // Which of the two answers this was, and why — the whole point of
+          // making the reason mandatory is that it is readable HERE later.
+          sumber_durasi: window.alasan === null ? 'katalog' : 'override',
+          alasan_override: window.alasan,
+        },
+        createdBy: actor.employeeId,
+      });
+    }
+
     for (const l of lines) {
       const svcId = await ex.ident.identNext('SVC', now);
       await tx`
         insert into services
-          (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule,
-           status, requires_strategy_plan, plan_tier, created_by)
+          (id, client_id, contract_id, master_service_id, master_version_no, name, standard_price,
+           commission_rule, status, requires_strategy_plan, plan_tier, created_by)
         values
-          (${svcId}, ${clientId}, ${l.masterServiceId}, ${l.versionNo}, ${l.name}, ${l.proposedPrice},
-           ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING}, ${l.requiresStrategyPlan}, ${l.planTier},
-           ${actor.employeeId})`;
+          (${svcId}, ${clientId}, ${contractId}, ${l.masterServiceId}, ${l.versionNo}, ${l.name},
+           ${l.proposedPrice}, ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING},
+           ${l.requiresStrategyPlan}, ${l.planTier}, ${actor.employeeId})`;
     }
 
     // 5) Transaction (TRX-) born awaiting Finance verification.
@@ -1579,6 +1756,11 @@ export async function close(
       afterJson: {
         transaction_id: trxId, attempt_id: attemptId,
         total_agreed_value: money.decimal(total), payment_scheme: input.paymentScheme,
+        // A-4: explicit null when every line was one-off, so a later reader can
+        // tell "no window exists" from "the key was forgotten" (O43's lesson,
+        // applied to the audit trail).
+        contract_id: contractId,
+        durasi_bulan: window === null ? null : window.durasiBulan,
       },
       createdBy: actor.employeeId,
     });
@@ -1639,6 +1821,7 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
     {
       master_service_id: string; proposed_price: string; commission_rule: string;
       name: string; master_version_no: number; requires_strategy_plan: boolean; plan_tier: string;
+      durasi_bulan: number | null;
     }[]
   >`
     select npl.master_service_id, npl.proposed_price, npl.commission_rule,
@@ -1646,7 +1829,8 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
            coalesce(qfs.master_version_no, at_proposal.version_no, 0) as master_version_no,
            coalesce(pinned.requires_strategy_plan, at_proposal.requires_strategy_plan, false)
              as requires_strategy_plan,
-           coalesce(pinned.plan_tier, at_proposal.plan_tier, 'tanpa_plan') as plan_tier
+           coalesce(pinned.plan_tier, at_proposal.plan_tier, 'tanpa_plan') as plan_tier,
+           coalesce(pinned.durasi_bulan, at_proposal.durasi_bulan) as durasi_bulan
     from negotiation_proposal_lines npl
     join negotiation_proposals np on np.id = npl.proposal_id
     left join qualified_form_services qfs
@@ -1654,7 +1838,7 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
     left join master_service_versions pinned
            on pinned.service_id = npl.master_service_id and pinned.version_no = qfs.master_version_no
     left join lateral (
-      select msv.version_no, msv.name, msv.requires_strategy_plan, msv.plan_tier
+      select msv.version_no, msv.name, msv.requires_strategy_plan, msv.plan_tier, msv.durasi_bulan
       from master_service_versions msv
       where msv.service_id = npl.master_service_id
         and msv.effective_from <= (np.created_at at time zone 'Asia/Jakarta')::date
@@ -1669,6 +1853,7 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
     commissionRule: r.commission_rule,
     name: r.name, versionNo: r.master_version_no, requiresStrategyPlan: r.requires_strategy_plan,
     planTier: r.plan_tier,
+    durasiBulan: r.durasi_bulan === null ? null : Number(r.durasi_bulan),
   }));
 }
 

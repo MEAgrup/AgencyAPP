@@ -23,7 +23,7 @@ import { permission } from '@cdps/core';
 import { createClient, withClaims, type Sql } from '@cdps/db';
 import { leadsDatabase, poolBoard } from './leads';
 import { listClients } from './client';
-import { getBrief, listDivisionQueue, listStrategies, serviceQueue, type Actor } from './account';
+import { getBrief, getService, listDivisionQueue, listStrategies, serviceQueue, type Actor } from './account';
 import { getAsset } from './creative';
 import { staffLanding } from './portal';
 import { financeQueue, reminderDashboard } from './finance';
@@ -342,6 +342,85 @@ describeDb('read models under RLS (O37)', () => {
       await sql`delete from strategy_plans where id = ${STR}`;
       await sql`delete from services where id = ${SVC}`;
       await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
+  /**
+   * A-3 — the `strategi_*` columns on the Service queue, read UNDER RLS.
+   *
+   * `serviceQueueCols` gained two correlated subqueries over `strategi`, and
+   * `strategi_select` is NARROWER than the policy governing `services`. A
+   * subquery blocked by RLS does not raise and does not drop the row — it
+   * quietly yields NULL. That failure mode is worse than the O52 404: the page
+   * answers 200, the Service is listed, and `nextOnboardingStep` reads the null
+   * as "no Strategi yet" and tells the AM to create one that already exists.
+   * The exact bug A-3 was written to remove, reintroduced for whichever roles
+   * the policy happens to exclude.
+   *
+   * Every role that can reach this read must therefore see the Strategi:
+   * an Account-staff AM (`private.jwt_is_am_of_contract`), an Account lead
+   * (`jwt_is_lead() AND jwt_division() = 'Account'`), OD and Director
+   * (`jwt_can_read_all()`). `serviceQueue` forbids everyone else outright, so
+   * that is the whole set — asserted here rather than reasoned about, because
+   * reasoning from `rls_baseline.sql` is what nearly derailed F-2.
+   */
+  it('carries strategi_id/status to EVERY role that may read the queue (A-3)', async () => {
+    const CLI = 'CLI-ZZR-0A3';
+    const CTR = 'CTR-ZZR-0A3';
+    const SVC = 'SVC-ZZR-0A3';
+    const STG = 'STRG-ZZR-0A3';
+    const AM = 'ZZR-AMA3';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id,
+                           released_to_account_at, created_by)
+      values (${CLI}, 'RLS A-3 Fixture', 'Ibu RLS', 'Jakarta', 'Fashion', 'https://shopee/zzra3',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${AM}, now(), ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_by)
+      values (${CTR}, ${CLI}, 6, '2026-09-01', '2027-03-01', 'baru', ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, contract_id, master_service_id, master_version_no, name,
+                            standard_price, commission_rule, status, requires_strategy_plan,
+                            plan_tier, created_by)
+      values (${SVC}, ${CLI}, ${CTR}, 'MSV-ZZR', 1, 'TikTok Shop Full Management', '9000000.00',
+              'rule', '[Strategy Approved]', true, 'plan_wajib', ${OWNER})
+      on conflict (id) do nothing`;
+    // `created_by` is the AM, so the AM would also pass the creator arm — the
+    // point is the OTHER three roles, who match neither creator nor approver.
+    await sql`
+      insert into strategi (id, client_id, contract_id, versi_no, status, created_by)
+      values (${STG}, ${CLI}, ${CTR}, 1, 'Aktif', ${AM})
+      on conflict (id) do nothing`;
+
+    try {
+      const readers: [string, Actor, string][] = [
+        ['Account staff (owning AM)', actor(AM, 'Account', 'staff'),
+         claims({ employeeId: AM, division: 'Account', level: 'staff' })],
+        ['Account lead', actor('ZZR-ALEADA3', 'Account', 'lead'),
+         claims({ employeeId: 'ZZR-ALEADA3', division: 'Account', level: 'lead' })],
+        ['OD', { employeeId: 'ZZR-ODA3', role: permission.makeRole({ od: true }) },
+         claims({ employeeId: 'ZZR-ODA3', od: true })],
+        ['Director', { employeeId: 'ZZR-DIRA3', role: permission.makeRole({ director: true }) },
+         claims({ employeeId: 'ZZR-DIRA3', director: true })],
+      ];
+      for (const [label, who, jwt] of readers) {
+        const row = await withClaims(sql, jwt, (tx) => getService(tx, who, SVC));
+        expect(row.strategiId, `${label} must see the Strategi id`).toBe(STG);
+        expect(row.strategiStatus, `${label} must see the Strategi status`).toBe('Aktif');
+        expect(row.contractId, `${label} must see the contract`).toBe(CTR);
+
+        const queue = await withClaims(sql, jwt, (tx) => serviceQueue(tx, who));
+        const inQueue = queue.find((r) => r.serviceId === SVC);
+        expect(inQueue?.strategiId, `${label} queue row must carry the Strategi`).toBe(STG);
+      }
+    } finally {
+      await sql`delete from strategi where id = ${STG}`;
+      await sql`delete from services where id = ${SVC}`;
+      await sql`delete from contracts where id = ${CTR}`;
       await sql`delete from clients where id = ${CLI}`;
     }
   });

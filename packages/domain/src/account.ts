@@ -357,12 +357,16 @@ export const STRATEGY_STATUS_DRAFTING = '[Strategy Drafting]';
 export const STRATEGY_STATUS_SUBMITTED = '[Strategy Submitted for Approval]';
 export const STRATEGY_STATUS_APPROVED = '[Strategy Approved]';
 
-const SERVICE_STATUS_AWAITING_ONBOARDING = '[Awaiting Onboarding]';
-const SERVICE_STATUS_STRATEGY_APPROVED = '[Strategy Approved]';
+// A-3: exported because the STRG- path (`strategi.approveStrategi`) drives the
+// SAME two Service states in the SAME transaction. Re-declaring the literals in
+// strategi.ts would be a second copy of a state name — the "two doors, one lock"
+// defect class the STRG- module header warned about, one level down.
+export const SERVICE_STATUS_AWAITING_ONBOARDING = '[Awaiting Onboarding]';
+export const SERVICE_STATUS_STRATEGY_APPROVED = '[Strategy Approved]';
 
 /** State-machine names (mirror the SQL seed / Go config.go). */
 const MACHINE_STRATEGY_PLAN = 'strategy_plan';
-const MACHINE_SERVICE = 'service';
+export const MACHINE_SERVICE = 'service';
 
 /**
  * The M6 §4 "Divisions Involved" multi-select set, in canonical order (used both
@@ -1204,6 +1208,24 @@ export interface ServiceQueueRow {
   assignedAmId: string | null;
   strategyId: string | null;
   strategyStatus: string | null;
+  /**
+   * A-3 — the STRG- (M6A) path, alongside the legacy STR- pair above. Null when
+   * the Service's contract carries no Strategi (or the Service carries no
+   * contract). Explicit null, never omitted: "no Strategi yet" is exactly the
+   * state the onboarding UI has to react to, same reasoning as `strategyId`.
+   *
+   * It is the contract's Strategi, not the Service's — since O57 one STRG-
+   * covers every Service the agreement holds.
+   */
+  strategiId: string | null;
+  strategiStatus: string | null;
+  /**
+   * A-4 — the agreement covering this Service (O57), null when it has none.
+   * Since the closing mints it (`sales.close`), the Service knows it from birth;
+   * exposing it here is what lets the Strategi form show the window as READ-ONLY
+   * instead of asking the AM to retype a number the negotiation already settled.
+   */
+  contractId: string | null;
   briefCount: number;
   /** the client's target GMV — the anchor + ±20% baseline for a new Strategy (QA revisi). */
   clientTargetGmv: string | null;
@@ -1224,6 +1246,9 @@ interface ServiceQueueDbRow {
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
+  strategi_id: string | null;
+  strategi_status: string | null;
+  contract_id: string | null;
   brief_count: string;
   client_target_gmv: string | null;
   released_to_account_at: Date | null;
@@ -1250,19 +1275,34 @@ function rowToServiceQueue(r: ServiceQueueDbRow): ServiceQueueRow {
     assignedAmId: r.assigned_am_id,
     strategyId: r.strategy_id,
     strategyStatus: r.strategy_status,
+    strategiId: r.strategi_id,
+    strategiStatus: r.strategi_status,
+    contractId: r.contract_id,
     briefCount: Number(r.brief_count),
     clientTargetGmv: numOrNull(r.client_target_gmv),
     releasedToAccountAt: r.released_to_account_at,
   };
 }
 
-/** The projection shared by the queue list and the single-Service read. */
+/**
+ * The projection shared by the queue list and the single-Service read.
+ *
+ * A-3 note on the two `strategi_*` columns: they are correlated subqueries and
+ * NOT a join, because a contract accumulates archived versions (Rule 13) and a
+ * join would return the Service once per version — silently multiplying every
+ * queue row. The ordering picks the live one: `Aktif` first, then the highest
+ * version in flight.
+ */
 function serviceQueueCols(sql: Queryable) {
-  return sql`sv.id, sv.client_id, c.toko, c.nama_pic, sv.name, sv.status,
+  return sql`sv.id, sv.client_id, sv.contract_id, c.toko, c.nama_pic, sv.name, sv.status,
     sv.requires_strategy_plan, sv.requires_strategy_plan_override, sv.plan_tier,
     (select g.keputusan_am from service_plan_gate g where g.service_id = sv.id) as gate_decision,
     c.assigned_am_id,
     sp.id as strategy_id, sp.status as strategy_status,
+    (select s.id from strategi s where s.contract_id = sv.contract_id
+      order by (s.status = 'Aktif') desc, s.versi_no desc limit 1) as strategi_id,
+    (select s.status from strategi s where s.contract_id = sv.contract_id
+      order by (s.status = 'Aktif') desc, s.versi_no desc limit 1) as strategi_status,
     (select count(*) from briefs b where b.service_id = sv.id) as brief_count,
     c.target_gmv as client_target_gmv,
     c.released_to_account_at`;
@@ -1350,6 +1390,20 @@ export async function getService(sql: Queryable, actor: Actor, serviceId: string
  * gate, so Brief creation is rejected (ConflictError, MSG_STRATEGY_REQUIRED).
  * Direct Services (flag = No), or plan-gated Services already past [Strategy
  * Approved], pass. A missing Service is NotFoundError.
+ *
+ * ## A-3 — the STRG- arm, and why the Service status alone is not enough
+ *
+ * `strategi.approveStrategi` now drives the same Service edge (M6A §5.7), so in
+ * the normal order of events the status check below already passes. The second
+ * arm — an `Aktif` STRG- on the Service's own contract — covers the order that
+ * ISN'T normal: a Service attached to a contract whose Strategi was approved
+ * EARLIER never sat at the approval moment, so nothing was there to move its
+ * status. Reading only the status would leave that Service locked out of Brief
+ * creation forever with a message telling the AM to get an approval they already
+ * have.
+ *
+ * One Strategi covers n Services through the contract (O57), which is why the
+ * arm is a contract-scoped EXISTS and not a per-Service join.
  */
 export async function guardBriefCreation(sql: Queryable, serviceId: string): Promise<void> {
   const rows = await sql<
@@ -1359,10 +1413,15 @@ export async function guardBriefCreation(sql: Queryable, serviceId: string): Pro
       requires_strategy_plan_override: boolean | null;
       plan_tier: string | null;
       keputusan_am: string | null;
+      strategi_aktif: boolean;
     }[]
   >`
     select sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override,
-           sv.plan_tier, g.keputusan_am
+           sv.plan_tier, g.keputusan_am,
+           exists (
+             select 1 from strategi s
+              where s.contract_id = sv.contract_id and s.status = 'Aktif'
+           ) as strategi_aktif
       from services sv
       left join service_plan_gate g on g.service_id = sv.id
      where sv.id = ${serviceId}`;
@@ -1390,7 +1449,8 @@ export async function guardBriefCreation(sql: Queryable, serviceId: string): Pro
       svc.plan_tier,
       svc.keputusan_am,
     ) &&
-    svc.status === SERVICE_STATUS_AWAITING_ONBOARDING
+    svc.status === SERVICE_STATUS_AWAITING_ONBOARDING &&
+    !svc.strategi_aktif
   ) {
     throw new ConflictError(MSG_STRATEGY_REQUIRED);
   }
@@ -1968,8 +2028,28 @@ export async function createBrief(sql: Sql, actor: Actor, serviceId: string, inp
 
 /**
  * resolveBriefStrategy returns the strategy_id to store for a new Brief. Direct
- * Service → NULL (a supplied id is rejected); plan-gated Service → must equal the
- * Service's approved Strategy id (§5 Rule 2).
+ * Service → NULL (a supplied id is rejected); plan-gated Service on the legacy
+ * STR- path → must equal the Service's approved Strategy id (§5 Rule 2).
+ *
+ * ## A-3 — the second door, found by the seam test
+ *
+ * The `rows.length === 0` branch below used to read "unreachable past the guard,
+ * defensive", and while `guardBriefCreation` only knew the STR- path that was
+ * true. Opening the gate to an `Aktif` STRG- made it reachable AND load-bearing:
+ * a plan-gated Service whose approval lives on the STRG- path has no
+ * `strategy_plans` row at all, and never will — so the "defensive" throw became
+ * the whole defect one layer down from the gate. Two independent doors on one
+ * lock, exactly as the STRG- module header predicted.
+ *
+ * What a STRG--path Brief stores is NULL, and that is not a shrug: `strategy_id`
+ * FKs to `strategy_plans`, so there is no id to point at. The M6B one-click
+ * inheritance path already settled this convention — `brief-inherit.ts` writes
+ * `strategyId: null` and links through `plan_row_id` instead. A manually created
+ * Brief on the STRG- path has no Plan row either, so it carries neither link;
+ * its provenance is the audit row and its Service's contract.
+ *
+ * Consequently a caller who DOES supply a `strategyId` here is naming an STR-
+ * that does not exist — a mismatch, not an ignorable extra.
  */
 async function resolveBriefStrategy(
   tx: Queryable,
@@ -1986,7 +2066,21 @@ async function resolveBriefStrategy(
   const rows = await tx<{ id: string; status: string }[]>`
     select id, status from strategy_plans where service_id = ${serviceId}`;
   if (rows.length === 0) {
-    throw new ConflictError(MSG_STRATEGY_REQUIRED); // unreachable past the guard, defensive
+    // A-3: no STR- row. Either the approval lives on the STRG- path (fine — the
+    // gate already checked it is `Aktif`), or there is no approval anywhere and
+    // the original defensive throw still applies.
+    const strg = await tx<{ ada: boolean }[]>`
+      select exists (
+        select 1 from services sv join strategi s on s.contract_id = sv.contract_id
+         where sv.id = ${serviceId} and s.status = 'Aktif'
+      ) as ada`;
+    if (!strg[0]?.ada) {
+      throw new ConflictError(MSG_STRATEGY_REQUIRED);
+    }
+    if (inStrategyId !== '') {
+      throw new ValidationError(MSG_BRIEF_STRATEGY_MISMATCH);
+    }
+    return null;
   }
   if (rows[0].status !== STRATEGY_STATUS_APPROVED || inStrategyId !== rows[0].id) {
     throw new ValidationError(MSG_BRIEF_STRATEGY_MISMATCH);

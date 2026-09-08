@@ -37,6 +37,7 @@ import {
 import StatusBadge from '@/components/StatusBadge';
 import { formatIDR } from '@/lib/money';
 import { createStrategi, listStrategi, type Strategi } from '@/lib/strategi';
+import { getContract, type Contract } from '@/lib/contract';
 import { isEditable as isStrategiEditable } from '@/lib/strategi-sections';
 import PlanPeriodsPanel from '@/components/strategi/PlanPeriodsPanel';
 
@@ -124,6 +125,11 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const [stgAkhir, setStgAkhir] = useState('');
   const [stgSiklus, setStgSiklus] = useState('');
   const [stgToleransi, setStgToleransi] = useState('20');
+  // A-4 (K-2) — the agreement the closing already minted, when there is one.
+  // Its window is the authority: durasi + both dates render read-only and are
+  // sent back verbatim (`ensureContractForService` refuses a mismatched window
+  // with MSG_WINDOW_MISMATCH, so retyping them could only ever go wrong).
+  const [contract, setContract] = useState<Contract | null>(null);
   const [stgSubmitting, setStgSubmitting] = useState(false);
   const [stgError, setStgError] = useState<string | null>(null);
 
@@ -236,6 +242,33 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     loadStrategy();
     loadStrategi();
   }, [load, loadService, loadStrategy, loadStrategi]);
+
+  // A-4: once the Service read lands, pull the agreement it hangs under and
+  // prefill the window from it. Failure is deliberately SILENT and leaves the
+  // fields editable — the AM falls back to typing the window, which is strictly
+  // better than a Strategi they cannot create at all.
+  useEffect(() => {
+    const contractId = service?.contract_id ?? null;
+    if (contractId === null) {
+      setContract(null);
+      return;
+    }
+    let live = true;
+    getContract(contractId)
+      .then((c) => {
+        if (!live) return;
+        setContract(c);
+        setStgDurasi(String(c.durasi_bulan));
+        setStgMulai(c.tanggal_mulai);
+        setStgAkhir(c.tanggal_akhir);
+      })
+      .catch(() => {
+        if (live) setContract(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [service?.contract_id]);
 
   function toggleSDivision(div: string) {
     setSDivisions((prev) => (prev.includes(div) ? prev.filter((d) => d !== div) : [...prev, div]));
@@ -557,10 +590,24 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
               <div>{service.assigned_am_id || 'Belum ditugaskan'}</div>
             </div>
           </div>
+          {/* A-3: the two paths reach `await_approval` from different records, so
+              the copy names the right one. Both are approved by SPV/Head
+              Account; sending the AM to look for a "Plan" when what is pending
+              is their STRG- is the kind of small mismatch that makes them ask
+              whether they submitted anything at all. */}
           {step?.kind === 'await_approval' && (
             <p className="muted" style={{ fontSize: 13 }}>
-              Plan sudah diajukan. Persetujuan ada di SPV/Head Account (M6 §4 Rule 4) &mdash; Brief baru bisa
-              dibuat setelah Plan disetujui.
+              {service.strategi_id !== null ? (
+                <>
+                  Strategi <strong>{service.strategi_id}</strong> sudah diajukan. Persetujuan ada di
+                  SPV/Head Account (M6A §5.7) &mdash; Brief baru bisa dibuat setelah Strategi disetujui.
+                </>
+              ) : (
+                <>
+                  Plan sudah diajukan. Persetujuan ada di SPV/Head Account (M6 §4 Rule 4) &mdash; Brief baru bisa
+                  dibuat setelah Plan disetujui.
+                </>
+              )}
             </p>
           )}
         </section>
@@ -781,6 +828,22 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                 Section A→J di halaman Strategi setelah ini. Perlu ACC Head/SPV sebelum aktif.
               </div>
               {stgError && <div className="alert alertError" role="alert">{stgError}</div>}
+              {/* A-4 (ketokan K-2, 2026-09-07) — durasi + jendela kontrak TIDAK
+                  lagi diketik di sini kalau kontraknya sudah ada. Sales
+                  menetapkannya saat closing (dari katalog, atau override
+                  ber-alasan), dan angka itulah yang jadi acuan setiap batas
+                  periode Plan. Kolomnya tetap ditampilkan — AM perlu melihat
+                  jendela yang dia pakai — tapi dibaca saja. Kalau layanan ini
+                  belum bernaung kontrak (deal isinya layanan sekali jadi saja,
+                  atau closing sebelum A-4), kolomnya tetap bisa diisi: mengunci
+                  di situ berarti AM tidak bisa membuat Strategi sama sekali. */}
+              {contract !== null && (
+                <div className="alert alertInfo" role="status">
+                  Jendela kontrak diambil dari <strong>{contract.id}</strong> yang dibuat saat closing
+                  &mdash; durasi dan kedua tanggal di bawah hanya bisa dibaca. Perubahan jendela
+                  dilakukan di kontraknya, bukan di sini.
+                </div>
+              )}
               <div className="formRow">
                 <div className="field">
                   <label htmlFor="stg-durasi">Durasi kontrak (bulan)</label>
@@ -789,11 +852,15 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                     type="number"
                     min="1"
                     required
+                    readOnly={contract !== null}
+                    disabled={contract !== null}
                     value={stgDurasi}
                     onChange={(e) => setStgDurasi(e.target.value)}
                   />
                   <span className="muted" style={{ fontSize: 12 }}>
-                    Menentukan berapa periode Plan lahir saat Strategi disetujui (M6B Rule 1).
+                    {contract !== null
+                      ? 'Ditetapkan saat closing (K-2). Menentukan berapa periode Plan lahir saat Strategi disetujui (M6B Rule 1).'
+                      : 'Menentukan berapa periode Plan lahir saat Strategi disetujui (M6B Rule 1).'}
                   </span>
                 </div>
                 <div className="field">
@@ -816,6 +883,8 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                     id="stg-mulai"
                     type="date"
                     required
+                    readOnly={contract !== null}
+                    disabled={contract !== null}
                     value={stgMulai}
                     onChange={(e) => setStgMulai(e.target.value)}
                   />
@@ -826,6 +895,8 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                     id="stg-akhir"
                     type="date"
                     required
+                    readOnly={contract !== null}
+                    disabled={contract !== null}
                     value={stgAkhir}
                     onChange={(e) => setStgAkhir(e.target.value)}
                   />
