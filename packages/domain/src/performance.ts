@@ -32,6 +32,7 @@ import { computeMetrics, type Transition } from './task';
 import { loadTransitions, transitionsOf } from './transitions';
 import { computeBookingMetrics, BKG_QC_FAILED, BKG_ESCALATED } from './kol';
 import { parseRoasTarget } from './ads';
+import { realisasiBelumLengkapCountsByAm } from './plan';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -1842,6 +1843,14 @@ export interface TeamRow {
   roleType: string;
   finalScore: number | null;
   scoreDisplay: string;
+  /**
+   * realisasiBelumLengkapCount (X-12 Opsi B, pemilik 2026-09-08) — hitungan
+   * insiden "realisasi belum lengkap" AM ini pada periode yang sama, MURNI
+   * informasional. `null` untuk role_type selain AM (metrik ini hanya berlaku
+   * pada Plan, yang AM-owned). TIDAK termasuk `finalScore`/`components` —
+   * lihat `plan.realisasiBelumLengkapCountsByAm` untuk batas X-12.
+   */
+  realisasiBelumLengkapCount: number | null;
 }
 
 /**
@@ -1880,6 +1889,15 @@ export async function teamRollup(sql: Queryable, actor: Actor, division: string,
       from performance_snapshots
      where role_type = ${roleType} and to_char(period_start, 'YYYYMM') = ${periodID}
      order by staff_id`;
+  // X-12 Opsi B (pemilik 2026-09-08): hitungan insiden "realisasi belum
+  // lengkap" per AM, informasional — HANYA untuk roleType AM (Plan AM-owned).
+  // Tidak masuk components/finalScore; lihat TeamRow.realisasiBelumLengkapCount.
+  let amCounts: Map<string, number> | null = null;
+  if (roleType === ROLE_AM) {
+    const anchor = new Date(Date.UTC(Number(periodID.slice(0, 4)), Number(periodID.slice(4, 6)) - 1, 15));
+    const per = monthPeriod(anchor);
+    amCounts = await realisasiBelumLengkapCountsByAm(sql, per.startUTC, per.endUTC);
+  }
   const members: TeamRow[] = [];
   let sum = 0;
   let scored = 0;
@@ -1889,7 +1907,13 @@ export async function teamRollup(sql: Queryable, actor: Actor, division: string,
       sum += final;
       scored++;
     }
-    members.push({ staffId: r.staff_id, roleType: r.role_type, finalScore: final, scoreDisplay: scoreDisplay(final) });
+    members.push({
+      staffId: r.staff_id, roleType: r.role_type, finalScore: final, scoreDisplay: scoreDisplay(final),
+      // null = "tidak berlaku" (bukan AM); 0 = "berlaku, nol insiden" — DUA
+      // hal berbeda, bukan sama-sama null (AM tanpa insiden bukan "AM tanpa
+      // metrik ini").
+      realisasiBelumLengkapCount: amCounts === null ? null : (amCounts.get(r.staff_id) ?? 0),
+    });
   }
   const teamAverage = scored > 0 ? sum / scored : null;
   return { division, period: periodID, members, teamAverage, averageDisplay: scoreDisplay(teamAverage) };

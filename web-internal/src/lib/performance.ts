@@ -87,6 +87,10 @@ export interface TeamMember {
   role_type: string; // Creative | Ads | KOL | AM
   final_score: number | null;
   score_display: string;
+  // X-12 Opsi B (pemilik 2026-09-08): insiden "realisasi belum lengkap",
+  // informasional — null untuk role_type selain AM. TIDAK memengaruhi
+  // final_score/score_display (X-12 belum memberi bobot skornya).
+  realisasi_belum_lengkap_count: number | null;
 }
 
 // KPI Weight config
