@@ -28,6 +28,9 @@ import {
   requestHoldService,
   approveHoldService,
   rejectHoldService,
+  requestServiceCompletion,
+  approveServiceCompletion,
+  rejectServiceCompletion,
   resumeService,
   setPaymentIntent,
   updatePlatform,
@@ -54,6 +57,9 @@ const VOIDED_STATUS = '[Cancelled — Service Voided]';
 const ON_HOLD_STATUS = '[On Hold]';
 const HOLD_REQUESTED_STATUS = '[Hold Requested]';
 const IN_EXECUTION_STATUS = '[In Execution]';
+/** O75 — menunggu ACC Head of Account untuk DITUTUP (bukan untuk dijeda). */
+const COMPLETION_REQUESTED_STATUS = '[Completion Requested]';
+const DONE_STATUS = 'Done';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
@@ -214,6 +220,45 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   async function handleResume(serviceId: string, serviceName: string) {
     if (!window.confirm(`Lanjutkan (resume) service "${serviceName}" dari On Hold?`)) return;
     await runHold(serviceId, () => resumeService(serviceId), `Service "${serviceName}" dilanjutkan (In Execution).`);
+  }
+
+  // --- O75: tutup Service, dua langkah (ketokan pemilik 2026-09-08) ---
+  // Gate-nya SAMA dengan hold — AM pemilik / lead / Director mengajukan, Head of
+  // Account / Director memutuskan — jadi `canRequestHold`/`canApproveHold`
+  // dipakai ulang apa adanya, bukan disalin jadi dua kebenaran. Server tetap
+  // otoritas terakhir: gerbang kontrak dan cek pemilik ada di sana (dan di DB).
+  async function handleRequestCompletion(serviceId: string, serviceName: string) {
+    const reason = window.prompt(`Alasan ajukan SELESAI untuk service "${serviceName}"? (wajib)`);
+    if (reason === null) return; // dibatalkan
+    if (reason.trim() === '') {
+      setVoidError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+    await runHold(
+      serviceId,
+      () => requestServiceCompletion(serviceId, reason),
+      `Pengajuan selesai "${serviceName}" dikirim — menunggu ACC Head of Account.`,
+    );
+  }
+
+  async function handleApproveCompletion(serviceId: string, serviceName: string) {
+    // Konfirmasi menyebut ketidakbisadibatalkannya, karena `Done` terminal.
+    if (!window.confirm(`Nyatakan service "${serviceName}" SELESAI (Done)? Tidak bisa dibatalkan.`)) return;
+    await runHold(
+      serviceId,
+      () => approveServiceCompletion(serviceId),
+      `Service "${serviceName}" dinyatakan selesai (Done).`,
+    );
+  }
+
+  async function handleRejectCompletion(serviceId: string, serviceName: string) {
+    const reason = window.prompt(`Alasan tolak pengajuan selesai "${serviceName}"? (opsional)`);
+    if (reason === null) return; // dibatalkan
+    await runHold(
+      serviceId,
+      () => rejectServiceCompletion(serviceId, reason),
+      `Pengajuan selesai "${serviceName}" ditolak (kembali In Execution).`,
+    );
   }
 
   async function handleSetIntent(e: FormEvent) {
@@ -673,6 +718,48 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                             {holdPendingId === s.id ? 'Memproses...' : 'Ajukan Hold'}
                           </button>
                         )}
+                        {/* O75 — jalur SELESAI, di samping jalur jeda. Tombolnya
+                            hanya muncul di [In Execution]; kalau kontraknya
+                            belum berakhir, server (dan DB) menolak dengan
+                            [service belum boleh ditutup sebelum kontraknya
+                            berakhir] dan pesan itu ditampilkan apa adanya. */}
+                        {canRequestHold && s.status === IN_EXECUTION_STATUS && (
+                          <button
+                            type="button"
+                            className="btn btnSecondary btnSm"
+                            disabled={holdPendingId !== null}
+                            onClick={() => handleRequestCompletion(s.id, s.name)}
+                          >
+                            {holdPendingId === s.id ? 'Memproses...' : 'Ajukan Selesai'}
+                          </button>
+                        )}
+                        {s.status === COMPLETION_REQUESTED_STATUS && (
+                          <>
+                            <span className="badge badge-amber" title="Menunggu ACC Head of Account untuk ditutup">
+                              Menunggu ACC Selesai
+                            </span>
+                            {canApproveHold && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btnPrimary btnSm"
+                                  disabled={holdPendingId !== null}
+                                  onClick={() => handleApproveCompletion(s.id, s.name)}
+                                >
+                                  {holdPendingId === s.id ? '...' : 'Setujui Selesai'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btnGhost btnSm"
+                                  disabled={holdPendingId !== null}
+                                  onClick={() => handleRejectCompletion(s.id, s.name)}
+                                >
+                                  {holdPendingId === s.id ? '...' : 'Tolak'}
+                                </button>
+                              </>
+                            )}
+                          </>
+                        )}
                         {s.status === HOLD_REQUESTED_STATUS && (
                           <>
                             <span className="badge badge-amber" title="Menunggu ACC Head of Account">Menunggu ACC</span>
@@ -708,7 +795,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                             {holdPendingId === s.id ? 'Memproses...' : 'Resume Service'}
                           </button>
                         )}
-                        {s.status !== VOIDED_STATUS && (
+                        {/* `voidService` menolak Service terminal dengan
+                            LockedFieldError (409). Sebelum O75 nol Service
+                            pernah `Done`, jadi menyaring VOIDED saja cukup;
+                            sekarang tidak — tombol yang pasti 409 hanya
+                            mengajari orang mengabaikan pesan galat. */}
+                        {s.status !== VOIDED_STATUS && s.status !== DONE_STATUS && (
                           <button
                             type="button"
                             className="btn btnDanger btnSm"

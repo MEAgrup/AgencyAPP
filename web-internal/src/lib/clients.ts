@@ -168,6 +168,49 @@ export function resumeService(serviceId: string, reason?: string): Promise<{ ok:
   return api.post<{ ok: boolean }>(`/services/${serviceId}/resume`, { reason: reason ?? '' });
 }
 
+// client.PendingCompletionRequest — satu Service di [Completion Requested],
+// untuk antrean "Perlu Persetujuan Saya" (GET /services/completion-requests).
+// O75, ketokan pemilik 2026-09-08.
+export interface PendingCompletionRequest {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  service_name: string;
+  owner_am: string | null;
+  owner_am_nama: string;
+  /** Waktu tutup DIMINTA (dari audit `service_completion_requested`). */
+  updated_at: string;
+  /** Alasan WAJIB yang diketik AM saat mengajukan; '' kalau baris auditnya tak terbaca. */
+  reason: string;
+  requested_by: string;
+  requested_by_nama: string;
+  /** Kontrak yang jendelanya jadi gerbang; null = Service sekali-jadi tanpa kontrak. */
+  contract_id: string | null;
+  /** `YYYY-MM-DD` akhir kontrak, atau null — jawaban atas "kenapa boleh SEKARANG". */
+  contract_end: string | null;
+}
+
+/** GET /services/completion-requests — Service yang menunggu ACC tutup (Head of Account / Director). */
+export function listPendingCompletionRequests(): Promise<{ data: PendingCompletionRequest[] }> {
+  return api.get<{ data: PendingCompletionRequest[] }>('/services/completion-requests');
+}
+
+/** O75: AM MENGAJUKAN Service selesai ([In Execution] → [Completion Requested]); alasan wajib. */
+export function requestServiceCompletion(serviceId: string, reason: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/completion`, { reason });
+}
+
+/** O75: Head of Account MENYETUJUI ([Completion Requested] → Done). Tidak bisa dibatalkan. */
+export function approveServiceCompletion(serviceId: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/completion/approve`);
+}
+
+/** O75: Head of Account MENOLAK ([Completion Requested] → [In Execution]); alasan opsional. */
+export function rejectServiceCompletion(serviceId: string, reason?: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/completion/reject`, { reason: reason ?? '' });
+}
+
 export function setPaymentIntent(clientId: string, paymentIntent: string): Promise<{ client: Client }> {
   return api.post<{ client: Client }>(`/clients/${clientId}/payment-intent`, {
     payment_intent: paymentIntent,

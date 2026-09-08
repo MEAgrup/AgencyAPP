@@ -196,6 +196,15 @@ export const EVENTS = {
   BookingJatuhTempo: 'm9.booking.jatuh_tempo',         // -> koordinator KOL + AM
   CampaignMendekatiAkhir: 'm9.campaign.mendekati_akhir', // -> koordinator KOL + AM
 
+  // ----- catalog v16 (O75 — tutup Service dua-langkah) — 3 event -----
+  // Namanya TIDAK ber-prefix `mN.`, dan itu disengaja: ketiganya menyusul
+  // langsung v8 (`service_hold_requested`/`service_held`/...) yang memakai
+  // bentuk telanjang, dan sebuah alur persetujuan pada entitas yang sama
+  // sebaiknya tidak punya dua konvensi nama.
+  ServiceCompletionRequested: 'service_completion_requested', // -> Head of Account
+  ServiceCompleted: 'service_completed',                      // -> AM pemilik
+  ServiceCompletionRejected: 'service_completion_rejected',    // -> AM pemilik
+
 } as const;
 
 /** A cataloged event type. */
@@ -319,6 +328,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
     eventCount: 4,
     decisionRef:
       'docs/DECISIONS.md 2026-09-07 (K-1..K-7) + docs/handoff/PARALEL_FEEDBACK_OD_DUA_AKUN.md §1 F-3',
+  },
+  {
+    version: 16,
+    description:
+      'O75 tutup Service dua-langkah — 3 event (service_completion_requested → Head of Account; service_completed / service_completion_rejected → AM pemilik)',
+    eventCount: 3,
+    decisionRef: 'docs/DECISIONS.md 2026-09-08 (O75 — siapa yang menutup Service + gerbangnya)',
   },
 ] as const;
 
@@ -481,6 +497,15 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.BriefSelesai]: { description: 'Rollup Brief mencapai selesai — ke AM pemilik klien', resolver: 'explicit', version: 15 },
   [EVENTS.BookingJatuhTempo]: { description: 'Booking KOL mendekati (H-1) atau melewati jatuh tempo — ke koordinator KOL + AM pemilik klien', resolver: 'explicitOrLeads', version: 15 },
   [EVENTS.CampaignMendekatiAkhir]: { description: 'Campaign KOL mendekati tanggal akhir — ke koordinator KOL + AM pemilik klien', resolver: 'explicitOrLeads', version: 15 },
+
+  // --- v16 (O75) — tutup Service dua-langkah. Deskripsi + resolver WAJIB sama
+  // dengan `20260925010000_o75_service_tutup.sql` §4; `notif_catalog.reals.test.ts`
+  // membandingkan TS ≡ DB. Resolver-nya menyalin v8: pengajuan ke lead divisi
+  // (`leadsOfDivision` + `division: 'Account'`), keputusan ke AM pemilik
+  // (`explicit`).
+  [EVENTS.ServiceCompletionRequested]: { description: 'AM mengajukan Service selesai — ke Head of Account', resolver: 'leadsOfDivision', version: 16 },
+  [EVENTS.ServiceCompleted]: { description: 'Service dinyatakan selesai oleh Head of Account — ke AM pemilik', resolver: 'explicit', version: 16 },
+  [EVENTS.ServiceCompletionRejected]: { description: 'Pengajuan Service selesai ditolak — ke AM pemilik', resolver: 'explicit', version: 16 },
 };
 
 /** All registered event types (introspection / tests). */

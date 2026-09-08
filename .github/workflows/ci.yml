@@ -229,12 +229,19 @@ jobs:
       # dua jalur paralel mengerjakan emitternya masing-masing, dan dua bump
       # terpisah memecahkan invariant dua kali. Nol tabel/prefix/mesin baru ⇒
       # 146 tabel / 40 prefix / 31 mesin TETAP.
-      - name: Verify migration seed counts (31 machines, 73 events, catalog registry consistent)
+      # O75 tutup Service (20260925010000_o75_service_tutup.sql, katalog v16):
+      # +3 event (`service_completion_requested`, resolver 'leadsOfDivision' ->
+      # Head of Account; `service_completed`/`service_completion_rejected`,
+      # 'explicit' -> AM pemilik), 73 -> 76. Menyalin bentuk v8 (T-2c Hold)
+      # karena alur persetujuannya pada entitas yang SAMA. Satu state
+      # `[Completion Requested]` + tiga edge `sm_edges` BUKAN mesin baru, jadi
+      # 146 tabel / 40 prefix / 31 mesin TETAP. docs/DECISIONS.md 2026-09-08.
+      - name: Verify migration seed counts (31 machines, 76 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 31 then raise exception 'expected 31 machines'; end if;
-               if (select count(*) from notif_events) <> 73 then raise exception 'expected 73 events'; end if;
+               if (select count(*) from notif_events) <> 76 then raise exception 'expected 76 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;

@@ -40,6 +40,7 @@
  *   - Finance TCR         `finance.schemeChangeRequests`   → `/transaction-changes/{id}/approve|reject`
  *   - Hapus Lead          `leads.deleteRequestQueue`       → `/leads/delete-requests/{id}/approve|reject`
  *   - Hold Service        `client.pendingHoldRequests`     → `/services/{id}/hold/approve|reject`
+ *   - Tutup Service (O75) `client.pendingCompletionRequests` → `/services/{id}/completion/approve|reject`
  *   - Block Task (M12)    `task.pendingBlockRequests`      → `/tasks|assets/{id}/block/{req}/approve|reject`
  *   - Eskalasi KOL        `kol.pendingEscalations`         → `/bookings/{id}/continue|drop`
  *   - Review Strategi     `account.pendingStrategyReviews` → `/strategies/{id}/approve|request-revision|approve-gmv`
@@ -78,8 +79,12 @@ import {
 } from '@/lib/leads';
 import {
   approveHoldService,
+  approveServiceCompletion,
+  listPendingCompletionRequests,
   listPendingHoldRequests,
   rejectHoldService,
+  rejectServiceCompletion,
+  type PendingCompletionRequest,
   type PendingHoldRequest,
 } from '@/lib/clients';
 import {
@@ -709,6 +714,76 @@ function HoldCard({
 }
 
 // ---------------------------------------------------------------------------
+// 5b. Permintaan Tutup Service (O75, ketokan pemilik 2026-09-08)
+// ---------------------------------------------------------------------------
+
+function CompletionCard({
+  row,
+  canDecide,
+  onDone,
+}: {
+  row: PendingCompletionRequest;
+  canDecide: boolean;
+  onDone: () => void;
+}) {
+  const { busy, error, run } = useDecision(onDone);
+  return (
+    <ApprovalCard
+      id={row.service_id}
+      href={`/clients/${row.client_id}`}
+      title={
+        <>
+          {row.toko} &middot; {row.service_name}
+        </>
+      }
+      badge={<span className="badge badge-amber">Menunggu ACC Selesai</span>}
+      meta={[
+        { label: 'PIC klien', value: row.nama_pic || '—' },
+        { label: 'AM pemilik', value: row.owner_am_nama || row.owner_am || '—' },
+        { label: 'Diajukan oleh', value: row.requested_by_nama || row.requested_by || '—' },
+        { label: 'Diminta pada', value: formatDateTime(row.updated_at) },
+        // Gerbang wajibnya, terlihat tanpa membuka tab lain: inilah yang
+        // membuat "kenapa boleh ditutup sekarang" bisa dijawab di kartu ini.
+        {
+          label: 'Kontrak berakhir',
+          value: row.contract_end
+            ? `${row.contract_end}${row.contract_id ? ` (${row.contract_id})` : ''}`
+            : 'tanpa kontrak (layanan sekali-jadi)',
+        },
+      ]}
+      reason={{ label: 'Alasan pengajuan selesai', text: row.reason }}
+    >
+      {canDecide ? (
+        <DecisionActions
+          fieldId={`completion-note-${row.service_id}`}
+          busy={busy}
+          error={error}
+          approveLabel="Setujui selesai"
+          rejectLabel="Tolak"
+          noteLabel="Catatan (opsional; tercatat di audit saat menolak)"
+          noteRequiredForReject={false}
+          confirmText={(k) =>
+            k === 'approve'
+              ? `Nyatakan ${row.service_name} untuk ${row.toko} SELESAI (Done)? Tidak bisa dibatalkan.`
+              : `Tolak pengajuan selesai ${row.service_name}? Service kembali ke [In Execution].`
+          }
+          onDecide={(kind, note) =>
+            run(kind, () =>
+              kind === 'approve'
+                ? approveServiceCompletion(row.service_id)
+                : rejectServiceCompletion(row.service_id, note),
+            )
+          }
+          hint="Done adalah TERMINAL — tidak ada jalan kembali. Tanggal persetujuan inilah yang dipakai sebagai tanggal selesai layanan pada laporan pendapatan."
+        />
+      ) : (
+        <WaitingNote who="Head of Account / Director" />
+      )}
+    </ApprovalCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 6. Permintaan Block Task (M12)
 // ---------------------------------------------------------------------------
 
@@ -1032,6 +1107,7 @@ const SECTION_LABELS = [
   // KEDUANYA. Menambah di salah satunya saja membuat pesan galat satu antrian
   // dilabeli nama antrian lain.
   'Permintaan ke Finance',
+  'Permintaan Tutup Service',
 ] as const;
 
 export default function PerluPersetujuanPage() {
@@ -1082,6 +1158,7 @@ export default function PerluPersetujuanPage() {
   const [tcrs, setTcrs] = useState<SchemeChangeRequest[] | null>(null);
   const [deleteRequests, setDeleteRequests] = useState<DeleteRequestQueueRow[] | null>(null);
   const [holdRequests, setHoldRequests] = useState<PendingHoldRequest[] | null>(null);
+  const [completionRequests, setCompletionRequests] = useState<PendingCompletionRequest[] | null>(null);
   const [financeReqs, setFinanceReqs] = useState<Permintaan[] | null>(null);
   const [blockRequests, setBlockRequests] = useState<PendingBlockRequest[] | null>(null);
   const [escalations, setEscalations] = useState<PendingEscalation[] | null>(null);
@@ -1107,10 +1184,11 @@ export default function PerluPersetujuanPage() {
         listPendingEscalations(),
         canViewBlockQueue ? getTeamPortal() : Promise.resolve(null),
         canViewFinanceReq ? listPermintaanQueue('Finance') : Promise.resolve([]),
+        listPendingCompletionRequests(),
       ]);
       const [
         attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, blockRes,
-        financeReqRes,
+        financeReqRes, completionRes,
       ] = results;
       setAttempts(attemptRes.status === 'fulfilled' ? attemptRes.value.data : []);
       setAttemptsTruncated(attemptRes.status === 'fulfilled' && attemptRes.value.next_cursor !== null);
@@ -1124,6 +1202,7 @@ export default function PerluPersetujuanPage() {
         blockRes.status === 'fulfilled' && blockRes.value ? blockRes.value.block_queue : [],
       );
       setFinanceReqs(financeReqRes.status === 'fulfilled' ? financeReqRes.value : []);
+      setCompletionRequests(completionRes.status === 'fulfilled' ? completionRes.value.data : []);
       setSectionErrors(
         results
           .map((r, i) => (r.status === 'rejected' ? `${SECTION_LABELS[i]}: ${errorMessage(r.reason)}` : null))
@@ -1167,6 +1246,7 @@ export default function PerluPersetujuanPage() {
     kol: escalations?.length ?? 0,
     block: blockRequests?.length ?? 0,
     financeReq: financeReqs?.length ?? 0,
+    completion: completionRequests?.length ?? 0,
   };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
@@ -1179,6 +1259,7 @@ export default function PerluPersetujuanPage() {
     { id: 'block', label: 'Block Task', count: counts.block },
     { id: 'kol', label: 'Eskalasi KOL', count: counts.kol },
     { id: 'financeReq', label: 'Permintaan Finance', count: counts.financeReq },
+    { id: 'completion', label: 'Tutup Service', count: counts.completion },
   ].filter((t) => t.count > 0);
 
   return (
@@ -1325,6 +1406,17 @@ export default function PerluPersetujuanPage() {
           >
             {holdRequests?.map((r) => (
               <HoldCard key={r.service_id} row={r} canDecide={canDecideHold} onDone={load} />
+            ))}
+          </Section>
+
+          <Section
+            id="completion"
+            title="Permintaan Tutup Service"
+            count={counts.completion}
+            hint="AM mengajukan setelah kontraknya berakhir, Head of Account memutuskan (O75). Done adalah terminal; tanggal ACC inilah tanggal selesai yang dipakai laporan pendapatan."
+          >
+            {completionRequests?.map((r) => (
+              <CompletionCard key={r.service_id} row={r} canDecide={canDecideHold} onDone={load} />
             ))}
           </Section>
 

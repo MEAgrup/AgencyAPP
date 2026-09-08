@@ -3247,6 +3247,44 @@ export function pendingHoldRequestToWire(r: client.PendingHoldRequest): PendingH
   };
 }
 
+/**
+ * O75 — satu Service di `[Completion Requested]`, untuk antrean "Perlu
+ * Persetujuan Saya" (GET /services/completion-requests).
+ *
+ * Dua field terakhir tidak ada di kembarannya `PendingHoldRequestWire`, dan
+ * itulah gunanya: `contract_end` adalah jawaban atas "kenapa boleh ditutup
+ * SEKARANG", dan tanpa ia terlihat, Head hanya bisa mempercayai bahwa
+ * gerbangnya jalan. `null` dikirim EKSPLISIT untuk Service sekali-jadi
+ * (kunci yang hilang lebih berbahaya daripada null — kelas O43).
+ */
+export interface PendingCompletionRequestWire {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  service_name: string;
+  owner_am: string | null;
+  owner_am_nama: string;
+  updated_at: string;
+  /** Alasan wajib yang diketik AM (dari audit `service_completion_requested`). */
+  reason: string;
+  requested_by: string;
+  requested_by_nama: string;
+  /** Kontrak yang jendelanya jadi gerbang; null = Service sekali-jadi tanpa kontrak. */
+  contract_id: string | null;
+  /** `YYYY-MM-DD` akhir kontrak, atau null. */
+  contract_end: string | null;
+}
+
+export function pendingCompletionRequestToWire(r: client.PendingCompletionRequest): PendingCompletionRequestWire {
+  return {
+    service_id: r.serviceId, client_id: r.clientId, toko: r.toko, nama_pic: r.namaPic, service_name: r.serviceName,
+    owner_am: r.ownerAm, owner_am_nama: r.ownerAmNama, updated_at: r.updatedAt.toISOString(),
+    reason: r.reason, requested_by: r.requestedBy, requested_by_nama: r.requestedByNama,
+    contract_id: r.contractId, contract_end: r.contractEnd,
+  };
+}
+
 // --- M4 service void (Go module4_client.VoidResult) ---
 
 /** The void cascade result as web-internal's `VoidResult` (lib/clients.ts) expects it. */

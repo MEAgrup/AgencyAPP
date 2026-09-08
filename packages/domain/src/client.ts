@@ -29,7 +29,7 @@
  * Reference: archive/backend-go/internal/module4_client/{edit,locks,reads,intent}.go.
  */
 
-import { bi, money, notification, page, permission, statemachine } from '@cdps/core';
+import { bi, money, notification, page, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import * as finance from './finance';
 
@@ -747,6 +747,296 @@ export async function resumeService(sql: Sql, actor: Actor, serviceId: string, r
       explicitRecipients: svc.ownerAm === '' ? [] : [svc.ownerAm],
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Tutup Service — DUA LANGKAH (O75, ketokan pemilik 2026-09-08).
+//
+// Sampai hari ini mesin `service` punya edge `[In Execution] → Done` dengan NOL
+// pemanggil: satu-satunya cara sebuah Service keluar dari peredaran adalah
+// DIBATALKAN (`voidService`). Tidak ada cara "selesai dengan baik", dan tiga hal
+// membayar akibatnya — pendapatan `pengakuan = 'saat_selesai'` tidak punya
+// sumber `tanggalSelesai` untuk mesin accrual, "klien aktif" (D-06) jadi abadi,
+// dan perpanjangan R-03 menumpuk generasi Service yang semuanya tampak jalan.
+//
+// Bentuknya menyalin Hold T-2b baris per baris, dengan alasan: menutup Service
+// TIDAK bisa dibatalkan (`Done` terminal), jadi ia layak mendapat gerbang yang
+// setidaknya sama ketat dengan menjeda-nya. AM pemilik MENGAJUKAN
+// ([In Execution] → [Completion Requested]), Head of Account MENYETUJUI (→ Done)
+// atau MENOLAK (→ kembali [In Execution]). Edge langsung `[In Execution] → Done`
+// dicabut migrasi `20260925010000`.
+//
+// `[Completion Requested]` masih DIANGGAP AKTIF: ia bukan terminal, jadi klien
+// tetap dibuka rekap mingguan dan tetap dihitung Client Health sampai Head
+// benar-benar menyetujui — perlakuan yang sama yang `[Hold Requested]` dapat.
+// Ia juga otomatis TIDAK briefable, karena `account.isServiceBriefable` adalah
+// daftar-putih (bukan daftar-hitam), jadi tidak ada Brief baru yang bisa lahir
+// pada Service yang sedang menunggu ditutup — tanpa satu baris pun di sana.
+//
+// Tanggal selesainya TIDAK disimpan sebagai kolom: ia dibaca dari baris
+// `audit_log` transisinya lewat `private.service_tanggal_selesai`
+// (`completionDate` di bawah). Alasannya aturan rumah #4 — sebuah kolom kedua
+// yang memuat fakta yang sama bisa berbeda dari log-nya, dan log-nya yang
+// menolak UPDATE.
+// ---------------------------------------------------------------------------
+
+export const SERVICE_COMPLETION_REQUESTED = '[Completion Requested]';
+
+/**
+ * Gerbang WAJIB O75, sisi TS. Kembarannya ada di DB sebagai
+ * `trg_service_tutup_butuh_kontrak_berakhir` (migrasi `20260925010000` §2) —
+ * belt & braces, pola yang sama dengan `ck_strategy_gmv_adj_*`.
+ *
+ * BUKAN string PRD (alur ini tidak ada di PRD mana pun sebelum O75 diketok);
+ * ditulis mengikuti preseden BI-yang-diarang-engineering yang sudah disetujui
+ * (`MSG_INTENT_LOCKED`, DECISIONS 2026-07-10 W1-13).
+ */
+export const MSG_SERVICE_TUTUP_KONTRAK_BELUM_BERAKHIR =
+  '[service belum boleh ditutup sebelum kontraknya berakhir]';
+
+/** canRequestCompletion: AM pemilik, Account lead, atau Director — MENGAJUKAN. */
+export function canRequestCompletion(actor: Actor, ownerAm: string): boolean {
+  return canRequestHold(actor, ownerAm);
+}
+
+/** canApproveCompletion: Head of Account (Account Lead) atau Director — ACC/tolak. */
+export function canApproveCompletion(actor: Actor): boolean {
+  return canApproveHold(actor);
+}
+
+/**
+ * Satu Service + AM pemiliknya + jendela kontraknya, di-lock untuk jalur tutup.
+ *
+ * Kenapa tidak memakai `lockServiceWithOwner` yang sudah ada: gerbang O75
+ * butuh `contract_id` dan `contracts.tanggal_akhir`, dan menambahkannya ke
+ * fungsi hold berarti setiap jalur hold ikut membayar join yang tidak dipakainya.
+ *
+ * ⚠️ `join contracts` di sini AMAN karena seluruh jalur ini dijalankan sebagai
+ * penulis (transaksi domain, bukan `readAsActor`) — bukan pola baca antrean
+ * divisi yang kena perangkap O52.
+ */
+async function lockServiceForCompletion(
+  tx: Queryable,
+  serviceId: string,
+): Promise<{ status: string; ownerAm: string; contractId: string | null; contractEnd: string | null }> {
+  const rows = await tx<{
+    status: string; owner_am: string | null; contract_id: string | null; tanggal_akhir: string | Date | null;
+  }[]>`
+    select s.status, c.assigned_am_id as owner_am, s.contract_id, ctr.tanggal_akhir
+      from services s
+      join clients c on c.id = s.client_id
+      left join contracts ctr on ctr.id = s.contract_id and ctr.client_id = s.client_id
+     where s.id = ${serviceId} for update of s`;
+  if (rows.length === 0) throw new NotFoundError('service not found');
+  const r = rows[0];
+  const end = r.tanggal_akhir === null
+    ? null
+    : (r.tanggal_akhir instanceof Date ? tz.dateString(r.tanggal_akhir) : String(r.tanggal_akhir).slice(0, 10));
+  return { status: r.status, ownerAm: r.owner_am ?? '', contractId: r.contract_id, contractEnd: end };
+}
+
+/**
+ * requestServiceCompletion memindahkan Service `[In Execution]` →
+ * `[Completion Requested]` (O75). AM pemilik / Account lead / Director, alasan
+ * WAJIB, ter-audit; memberi tahu Head of Account.
+ *
+ * Gerbang wajibnya: `contracts.tanggal_akhir` sudah LEWAT. Kontrak yang berakhir
+ * HARI INI belum lewat — hari terakhir kontrak adalah hari kerja.
+ *
+ * Service TANPA kontrak (`contract_id` null — seluruh baris closing-nya
+ * sekali-jadi, jadi `sales.resolveClosingWindow` tidak mencetak jendela apa pun)
+ * LOLOS gerbang tanggal: "kontraknya sudah berakhir" di situ bukan syarat yang
+ * belum terpenuhi, ia syarat yang tidak ada. Justru layanan sekali-jadi itulah
+ * yang ber-`pengakuan = 'saat_selesai'`, jadi memblokirnya sampai ada kontrak
+ * akan membiarkan O75 terbuka tepat pada baris yang paling membutuhkannya.
+ * Persetujuan Head of Account tetap wajib. Asumsi ini dicatat eksplisit di
+ * `docs/DECISIONS.md` (O75) supaya bisa dibalik dengan satu `if`.
+ */
+export async function requestServiceCompletion(
+  sql: Sql, actor: Actor, serviceId: string, reason: string, now: Date = new Date(),
+): Promise<void> {
+  const why = (reason ?? '').trim();
+  if (why === '') throw new IncompleteError();
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await lockServiceForCompletion(tx, serviceId);
+    if (!canRequestCompletion(actor, svc.ownerAm)) throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+    if (svc.status !== SERVICE_IN_EXECUTION) throw new ServiceStateError();
+    if (svc.contractEnd !== null && svc.contractEnd >= tz.dateString(now)) {
+      throw new ServiceStateError(MSG_SERVICE_TUTUP_KONTRAK_BELUM_BERAKHIR);
+    }
+    await moveService(ex, serviceId, SERVICE_COMPLETION_REQUESTED, actor);
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_completion_requested', beforeJson: { status: svc.status },
+      afterJson: {
+        status: SERVICE_COMPLETION_REQUESTED, reason: why,
+        // Gerbang mana yang dilewati, terbaca belakangan tanpa menghitung ulang
+        // tanggal: 'kontrak_berakhir' atau 'tanpa_kontrak'.
+        gerbang: svc.contractId === null ? 'tanpa_kontrak' : 'kontrak_berakhir',
+        contract_id: svc.contractId,
+        contract_tanggal_akhir: svc.contractEnd,
+      },
+      createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.ServiceCompletionRequested,
+      entityType: 'service', entityId: serviceId, actor: actor.employeeId, division: ACCOUNT_DIVISION,
+    });
+  });
+}
+
+/**
+ * approveServiceCompletion memindahkan Service `[Completion Requested]` → `Done`
+ * (O75). Head of Account / Director. Ter-audit; memberi tahu AM pemilik.
+ *
+ * Ini transisi yang TIDAK bisa dibatalkan: `Done` terdaftar di
+ * `sm_terminal_states`, jadi tidak ada edge keluar darinya. Tanggal baris audit
+ * inilah yang dibaca `completionDate` sebagai `accrual.tanggalSelesai`.
+ */
+export async function approveServiceCompletion(sql: Sql, actor: Actor, serviceId: string): Promise<void> {
+  if (!canApproveCompletion(actor)) throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await lockServiceForCompletion(tx, serviceId);
+    if (svc.status !== SERVICE_COMPLETION_REQUESTED) throw new ServiceStateError();
+    await moveService(ex, serviceId, SERVICE_DONE, actor);
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_completed', beforeJson: { status: svc.status },
+      afterJson: { status: SERVICE_DONE }, createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.ServiceCompleted,
+      entityType: 'service', entityId: serviceId, actor: actor.employeeId,
+      explicitRecipients: svc.ownerAm === '' ? [] : [svc.ownerAm],
+    });
+  });
+}
+
+/**
+ * rejectServiceCompletion memindahkan Service `[Completion Requested]` →
+ * `[In Execution]` (O75) — Head menilai pekerjaannya belum tuntas. Head of
+ * Account / Director, alasan opsional (cermin `rejectHold`), ter-audit; memberi
+ * tahu AM pemilik.
+ */
+export async function rejectServiceCompletion(
+  sql: Sql, actor: Actor, serviceId: string, reason: string,
+): Promise<void> {
+  if (!canApproveCompletion(actor)) throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+  const why = (reason ?? '').trim();
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await lockServiceForCompletion(tx, serviceId);
+    if (svc.status !== SERVICE_COMPLETION_REQUESTED) throw new ServiceStateError();
+    await moveService(ex, serviceId, SERVICE_IN_EXECUTION, actor);
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_completion_rejected', beforeJson: { status: svc.status },
+      afterJson: { status: SERVICE_IN_EXECUTION, reason: why === '' ? null : why },
+      createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.ServiceCompletionRejected,
+      entityType: 'service', entityId: serviceId, actor: actor.employeeId,
+      explicitRecipients: svc.ownerAm === '' ? [] : [svc.ownerAm],
+    });
+  });
+}
+
+/**
+ * completionDate — tanggal (WIB, `YYYY-MM-DD`) sebuah Service mencapai `Done`,
+ * atau null kalau belum pernah.
+ *
+ * INILAH sumber `accrual.AccrualInput.tanggalSelesai` untuk layanan
+ * ber-`pengakuan = 'saat_selesai'` (ketokan O75 butir 3). Ia membaca
+ * `private.service_tanggal_selesai`, bukan `audit_log` langsung: di bawah RLS
+ * sebuah subquery atas `audit_log` mengembalikan NULL dan bukan galat untuk
+ * pembaca yang tidak memegang baris auditnya — dan NULL di sini tidak bisa
+ * dibedakan dari "belum selesai", yaitu selisih antara pendapatan yang diakui
+ * dan yang tidak.
+ */
+export async function completionDate(sql: Queryable, serviceId: string): Promise<string | null> {
+  const rows = await sql<{ tanggal: string | Date | null }[]>`
+    select private.service_tanggal_selesai(${serviceId}) as tanggal`;
+  const v = rows[0]?.tanggal ?? null;
+  if (v === null) return null;
+  return v instanceof Date ? tz.dateString(v) : String(v).slice(0, 10);
+}
+
+/** Satu Service di `[Completion Requested]`, menunggu keputusan Head of Account. */
+export interface PendingCompletionRequest {
+  serviceId: string;
+  clientId: string;
+  toko: string;
+  namaPic: string;
+  serviceName: string;
+  ownerAm: string | null;
+  ownerAmNama: string;
+  /** Waktu tutup DIMINTA (audit `service_completion_requested`; fallback lahirnya Service). */
+  updatedAt: Date;
+  /** Alasan WAJIB yang diketik AM. Hanya ada di baris audit — `services` tak punya kolomnya. */
+  reason: string;
+  requestedBy: string;
+  requestedByNama: string;
+  /** Kontrak yang jendelanya jadi gerbang; null = Service sekali-jadi tanpa kontrak. */
+  contractId: string | null;
+  /** `YYYY-MM-DD` akhir kontrak, atau null — yang membuat "kenapa sekarang" terbaca. */
+  contractEnd: string | null;
+}
+
+/**
+ * pendingCompletionRequests mendaftar setiap Service di `[Completion Requested]`,
+ * tertua dulu — antrean "Perlu Persetujuan Saya" untuk Head of Account /
+ * Director (set yang sama dengan `canApproveCompletion`).
+ *
+ * Digerbangi eksplisit, persis alasan `pendingHoldRequests`: AM pemilik JUGA
+ * lolos lengan RLS `services_select` untuk kliennya sendiri, dan ini antrean
+ * keputusan — bukan daftar visibilitas.
+ */
+export async function pendingCompletionRequests(sql: Queryable, actor: Actor): Promise<PendingCompletionRequest[]> {
+  if (!canApproveCompletion(actor)) return [];
+  const rows = await sql<{
+    id: string; client_id: string; toko: string; nama_pic: string; name: string;
+    assigned_am_id: string | null; owner_am_nama: string | null; updated_at: Date;
+    reason: string | null; requested_by: string | null; requested_by_nama: string | null;
+    contract_id: string | null; tanggal_akhir: string | Date | null;
+  }[]>`
+    select s.id, s.client_id, c.toko, c.nama_pic, s.name, c.assigned_am_id,
+           coalesce(am.nama, c.assigned_am_id) as owner_am_nama,
+           coalesce(req.created_at, s.created_at) as updated_at,
+           req.reason, req.actor_employee_id as requested_by,
+           coalesce(reqe.nama, req.actor_employee_id) as requested_by_nama,
+           s.contract_id, ctr.tanggal_akhir
+      from services s
+      join clients c on c.id = s.client_id
+      left join contracts ctr on ctr.id = s.contract_id and ctr.client_id = s.client_id
+      left join employees am on am.employee_id = c.assigned_am_id
+      -- LATERAL + limit 1 = pengajuan TERAKHIR: sebuah Service bisa diajukan,
+      -- ditolak, lalu diajukan lagi, dan yang harus dibaca Head adalah alasan
+      -- pengajuan yang ada di depannya (pola sama pendingHoldRequests -- JANGAN
+      -- pakai backtick di komentar SQL: ia memutus template literal-nya).
+      left join lateral (
+        select a.after_json->>'reason' as reason, a.actor_employee_id, a.created_at
+          from audit_log a
+         where a.entity_type = 'service' and a.entity_id = s.id
+           and a.action = 'service_completion_requested'
+         order by a.created_at desc, a.id desc
+         limit 1
+      ) req on true
+      left join employees reqe on reqe.employee_id = req.actor_employee_id
+     where s.status = ${SERVICE_COMPLETION_REQUESTED}
+     order by coalesce(req.created_at, s.created_at) asc, s.id asc`;
+  return rows.map((r) => ({
+    serviceId: r.id, clientId: r.client_id, toko: r.toko, namaPic: r.nama_pic, serviceName: r.name,
+    ownerAm: r.assigned_am_id, ownerAmNama: r.owner_am_nama ?? '', updatedAt: r.updated_at,
+    reason: r.reason ?? '', requestedBy: r.requested_by ?? '',
+    requestedByNama: r.requested_by_nama ?? '',
+    contractId: r.contract_id,
+    contractEnd: r.tanggal_akhir === null
+      ? null
+      : (r.tanggal_akhir instanceof Date ? tz.dateString(r.tanggal_akhir) : String(r.tanggal_akhir).slice(0, 10)),
+  }));
 }
 
 // ---------------------------------------------------------------------------

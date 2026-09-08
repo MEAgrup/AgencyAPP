@@ -178,7 +178,15 @@ check() { # nama · sql · harapan
 check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "146"
 check "entity_prefix"    "select count(*) from entity_prefix"    "40"
 check "sm_machines"      "select count(*) from sm_machines"      "31"
-check "notif_events"     "select count(*) from notif_events"     "73"
+check "notif_events"     "select count(*) from notif_events"     "76"
+# 76 = 73 + 3 event O75 tutup Service dua-langkah (katalog v16,
+#      20260925010000_o75_service_tutup.sql): `service_completion_requested`
+#      (resolver 'leadsOfDivision' -> Head of Account) dan
+#      `service_completed` / `service_completion_rejected` (resolver 'explicit'
+#      -> AM pemilik). Bentuknya menyalin v8 (T-2c Hold) karena alur
+#      persetujuannya pada entitas yang SAMA. Nol tabel/prefix/mesin baru ⇒
+#      146 tabel/40 prefix/31 mesin TETAP (satu state + tiga edge `sm_edges`
+#      bukan mesin baru). Lihat docs/DECISIONS.md 2026-09-08 (O75).
 # 73 = 69 + 4 event Feedback OD 2026-09-07 (katalog v15,
 #      20260922100100_f3_notif_feedback_od.sql): `m6.brief.siap_review_am` dan
 #      `m6.brief.selesai` (resolver 'explicit' -> AM pemilik klien, menutup

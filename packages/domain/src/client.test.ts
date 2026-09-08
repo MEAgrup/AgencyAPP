@@ -9,9 +9,9 @@
  *   pipeline. Ids namespaced `ZZ-`; afterEach deletes what it made.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { money, page, permission } from '@cdps/core';
+import { money, page, permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
-import { finance, leads, sales } from './index';
+import { account, finance, leads, sales } from './index';
 import {
   addPlatform,
   canEditAccountRevisable,
@@ -27,6 +27,15 @@ import {
   requestHold,
   approveHold,
   rejectHold,
+  approveServiceCompletion,
+  canApproveCompletion,
+  canRequestCompletion,
+  completionDate,
+  MSG_SERVICE_TUTUP_KONTRAK_BELUM_BERAKHIR,
+  pendingCompletionRequests,
+  rejectServiceCompletion,
+  requestServiceCompletion,
+  SERVICE_COMPLETION_REQUESTED,
   IncompleteError,
   INTENT_DI_BELAKANG,
   INTENT_LUNAS,
@@ -452,6 +461,7 @@ describeDb('voidService (M4-OA-5)', () => {
 });
 
 describeDb('Hold Service two-step (T-2b / RM-2)', () => {
+  const HOLD_RUN = Math.random().toString(36).slice(2, 8);
   const serviceOf = async (clientId: string): Promise<string> =>
     (await sql<{ id: string }[]>`select id from services where client_id = ${clientId} limit 1`)[0].id;
   const statusOf = async (svc: string): Promise<string> =>
@@ -460,7 +470,11 @@ describeDb('Hold Service two-step (T-2b / RM-2)', () => {
   /** A fresh [In Execution] service on the client, whose AM is set to ZZ-AM (the accountStaff owner). */
   async function inExecService(clientId: string): Promise<string> {
     await sql`update clients set assigned_am_id = 'ZZ-AM' where id = ${clientId}`;
-    const id = `SVC-HOLD-${seq++}`;
+    // Token per-jalan: lihat catatan RUN di blok O75 di bawah. Tanpa ini tes
+    // "notifies owner AM" di bawah gagal PALSU di jalan kedua atas DB yang sama
+    // — `audit_log`/`notifications` menolak DELETE, jadi barisnya menumpuk pada
+    // id Service yang sama (jebakan A-T4, sudah dua kali memakan waktu).
+    const id = `SVC-HOLD-${HOLD_RUN}-${seq++}`;
     await sql`insert into services (id, client_id, master_service_id, master_version_no, name,
         standard_price, commission_rule, status, requires_strategy_plan, created_by)
       values (${id}, ${clientId}, 'MSV-X', 1, 'Full Mgmt', '10000000.00', 'rule', '[In Execution]', false, 'ZZ-ADMIN')`;
@@ -536,6 +550,177 @@ describeDb('Hold Service two-step (T-2b / RM-2)', () => {
     await approveHold(sql, accountLead(), svc);
     const b = await sql<{ status: string }[]>`select status from briefs where id = ${brief}`;
     expect(b[0].status).toBe('[To Do]'); // untouched by the hold
+  });
+});
+
+describeDb('Tutup Service dua-langkah (O75, ketokan pemilik 2026-09-08)', () => {
+  const statusOf = async (svc: string): Promise<string> =>
+    (await sql<{ status: string }[]>`select status from services where id = ${svc}`)[0].status;
+
+  /**
+   * Token unik PER JALAN. `audit_log` dan `notifications` menolak DELETE
+   * (aturan rumah #3), jadi `afterEach` tidak bisa membersihkannya — dan id
+   * Service yang berulang antar-jalan membuat tes yang MENGHITUNG baris audit
+   * gagal palsu di jalan kedua (jebakan A-T4; itu yang terjadi pada tes Hold
+   * di berkas ini). Pola `aktorUnik()` di showcase.test.ts.
+   */
+  const RUN = Math.random().toString(36).slice(2, 8);
+
+  /** A fresh [In Execution] service owned by ZZ-AM, optionally under a contract window. */
+  async function inExecService(clientId: string, contractEnd?: string): Promise<string> {
+    await sql`update clients set assigned_am_id = 'ZZ-AM' where id = ${clientId}`;
+    const id = `SVC-DONE-${RUN}-${seq++}`;
+    let contractId: string | null = null;
+    if (contractEnd !== undefined) {
+      contractId = `CTR-ZZ-${RUN}-${seq++}`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_by)
+        values (${contractId}, ${clientId}, 3, '2020-01-01', ${contractEnd}, 'baru', 'ZZ-ADMIN')`;
+    }
+    await sql`insert into services (id, client_id, contract_id, master_service_id, master_version_no, name,
+        standard_price, commission_rule, status, requires_strategy_plan, created_by)
+      values (${id}, ${clientId}, ${contractId}, 'MSV-X', 1, 'Full Mgmt', '10000000.00', 'rule',
+        '[In Execution]', false, 'ZZ-ADMIN')`;
+    return id;
+  }
+
+  /** WIB today ± n days as YYYY-MM-DD — the gate is a date comparison, so build dates, not clocks. */
+  const wibDay = (offset: number): string =>
+    tz.addDaysToDate(tz.dateString(new Date()), offset);
+
+  it('AM mengajukan → [Completion Requested]: gate pemilik + alasan wajib + audit + gerbang tercatat', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    // Sales tidak boleh mengajukan; alasan wajib.
+    await expect(requestServiceCompletion(sql, budi(), svc, 'selesai')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(requestServiceCompletion(sql, accountStaff(), svc, '  ')).rejects.toBeInstanceOf(IncompleteError);
+    await requestServiceCompletion(sql, accountStaff(), svc, 'pekerjaan tuntas, semua brief closed');
+    expect(await statusOf(svc)).toBe(SERVICE_COMPLETION_REQUESTED);
+    const audit = await sql<{ after_json: { status: string; reason: string; gerbang: string } }[]>`
+      select after_json from audit_log
+       where entity_id = ${svc} and action = 'service_completion_requested' order by id desc limit 1`;
+    expect(audit[0].after_json.status).toBe(SERVICE_COMPLETION_REQUESTED);
+    expect(audit[0].after_json.reason).toBe('pekerjaan tuntas, semua brief closed');
+    // Tanpa kontrak, gerbang tanggal TIDAK ADA — dan itu tercatat, bukan disamarkan.
+    expect(audit[0].after_json.gerbang).toBe('tanpa_kontrak');
+  });
+
+  it('GERBANG WAJIB: kontrak yang belum berakhir menolak pengajuan dengan pesan BI-nya', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId, wibDay(30));
+    await expect(requestServiceCompletion(sql, accountStaff(), svc, 'mau tutup')).rejects.toThrow(
+      MSG_SERVICE_TUTUP_KONTRAK_BELUM_BERAKHIR,
+    );
+    expect(await statusOf(svc)).toBe('[In Execution]'); // tidak bergerak
+  });
+
+  it('GERBANG WAJIB, batasnya: kontrak yang berakhir HARI INI belum lewat; kemarin lewat', async () => {
+    const clientId = await closedClient();
+    const hariIni = await inExecService(clientId, wibDay(0));
+    await expect(requestServiceCompletion(sql, accountStaff(), hariIni, 'x')).rejects.toThrow(
+      MSG_SERVICE_TUTUP_KONTRAK_BELUM_BERAKHIR,
+    );
+    const kemarin = await inExecService(clientId, wibDay(-1));
+    await requestServiceCompletion(sql, accountStaff(), kemarin, 'kontrak habis kemarin');
+    expect(await statusOf(kemarin)).toBe(SERVICE_COMPLETION_REQUESTED);
+    const audit = await sql<{ after_json: { gerbang: string; contract_tanggal_akhir: string } }[]>`
+      select after_json from audit_log
+       where entity_id = ${kemarin} and action = 'service_completion_requested' order by id desc limit 1`;
+    expect(audit[0].after_json.gerbang).toBe('kontrak_berakhir');
+    expect(audit[0].after_json.contract_tanggal_akhir).toBe(wibDay(-1));
+  });
+
+  it('GERBANG WAJIB ada di DB, bukan cuma TS: UPDATE mentah pun ditolak trigger', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId, wibDay(30));
+    // Menembus lapisan domain sepenuhnya — inilah yang membedakan dinding dari janji.
+    await expect(
+      sql`update services set status = ${SERVICE_COMPLETION_REQUESTED} where id = ${svc}`,
+    ).rejects.toThrow(MSG_SERVICE_TUTUP_KONTRAK_BELUM_BERAKHIR);
+    expect(await statusOf(svc)).toBe('[In Execution]');
+  });
+
+  it('Head menyetujui [Completion Requested] → Done; staff tidak boleh; notif ke AM pemilik', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    await requestServiceCompletion(sql, accountStaff(), svc, 'tuntas');
+    await expect(approveServiceCompletion(sql, accountStaff(), svc)).rejects.toBeInstanceOf(ForbiddenError);
+    await approveServiceCompletion(sql, accountLead(), svc);
+    expect(await statusOf(svc)).toBe('Done');
+    const notif = await sql<{ n: string }[]>`
+      select count(*) as n from notifications
+       where entity_id = ${svc} and event_type = 'service_completed' and recipient_employee_id = 'ZZ-AM'`;
+    expect(Number(notif[0].n)).toBe(1);
+  });
+
+  it('Head menolak → kembali [In Execution], dan boleh diajukan lagi', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    await requestServiceCompletion(sql, accountStaff(), svc, 'tuntas');
+    await rejectServiceCompletion(sql, director(), svc, 'brief KOL belum closed');
+    expect(await statusOf(svc)).toBe('[In Execution]');
+    await requestServiceCompletion(sql, accountStaff(), svc, 'sekarang benar-benar tuntas');
+    expect(await statusOf(svc)).toBe(SERVICE_COMPLETION_REQUESTED);
+  });
+
+  it('transisi salah-state ditolak 409: ACC tanpa pengajuan, dan pengajuan dari [Awaiting Onboarding]', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    await expect(approveServiceCompletion(sql, accountLead(), svc)).rejects.toBeInstanceOf(ServiceStateError);
+    await expect(rejectServiceCompletion(sql, accountLead(), svc, '')).rejects.toBeInstanceOf(ServiceStateError);
+    const fresh = (await sql<{ id: string }[]>`
+      select id from services where client_id = ${clientId} and status = '[Awaiting Onboarding]' limit 1`)[0].id;
+    await expect(requestServiceCompletion(sql, accountStaff(), fresh, 'x')).rejects.toBeInstanceOf(ServiceStateError);
+  });
+
+  it('completionDate: null sebelum selesai, tanggal transisi Done sesudahnya — sumber accrual.tanggalSelesai', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    expect(await completionDate(sql, svc)).toBeNull();
+    await requestServiceCompletion(sql, accountStaff(), svc, 'tuntas');
+    expect(await completionDate(sql, svc)).toBeNull(); // menunggu ACC bukan selesai
+    await approveServiceCompletion(sql, accountLead(), svc);
+    expect(await completionDate(sql, svc)).toBe(tz.dateString(new Date()));
+  });
+
+  it('antrean Head: pendangkalan digerbangi eksplisit, dan barisnya membawa alasan + jendela kontrak', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId, wibDay(-2));
+    await requestServiceCompletion(sql, accountStaff(), svc, 'kontrak habis, semua brief approved');
+    // AM pemilik lolos RLS untuk kliennya sendiri, tapi ini antrean KEPUTUSAN.
+    expect(await pendingCompletionRequests(sql, accountStaff())).toEqual([]);
+    const rows = await pendingCompletionRequests(sql, accountLead());
+    const mine = rows.find((r) => r.serviceId === svc);
+    expect(mine).toBeDefined();
+    expect(mine!.reason).toBe('kontrak habis, semua brief approved');
+    expect(mine!.contractEnd).toBe(wibDay(-2));
+    expect(mine!.ownerAm).toBe('ZZ-AM');
+  });
+
+  it('jalur satu-langkah lama SUDAH DICABUT: nol edge [In Execution] → Done di sm_edges', async () => {
+    // Kalau edge ini hidup lagi, ada dua penulis ke `services.status` yang menuju
+    // terminal — kelas cacat yang sama dengan STR-/STRG- (handoff Jalur A §2).
+    const rows = await sql<{ n: string }[]>`
+      select count(*) as n from sm_edges
+       where machine = 'service' and from_state = '[In Execution]' and to_state = 'Done'`;
+    expect(Number(rows[0].n)).toBe(0);
+    const dua = await sql<{ from_state: string; to_state: string; require_lead: boolean }[]>`
+      select from_state, to_state, require_lead from sm_edges
+       where machine = 'service' and (from_state = ${SERVICE_COMPLETION_REQUESTED}
+          or to_state = ${SERVICE_COMPLETION_REQUESTED})
+       order by from_state, to_state`;
+    // Urutannya mengikuti collation DB (`Done` sebelum `[In Execution]`), bukan
+    // urutan yang enak dibaca manusia — jangan "rapikan" jadi urutan alfabet ASCII.
+    expect(dua).toEqual([
+      { from_state: SERVICE_COMPLETION_REQUESTED, to_state: 'Done', require_lead: true },
+      { from_state: SERVICE_COMPLETION_REQUESTED, to_state: '[In Execution]', require_lead: true },
+      { from_state: '[In Execution]', to_state: SERVICE_COMPLETION_REQUESTED, require_lead: false },
+    ]);
+  });
+
+  it('Service yang menunggu ditutup TIDAK bisa dibuatkan Brief baru (daftar-putih account.isServiceBriefable)', async () => {
+    expect(account.isServiceBriefable(SERVICE_COMPLETION_REQUESTED)).toBe(false);
+    expect(account.isServiceBriefable('[In Execution]')).toBe(true);
   });
 });
 
