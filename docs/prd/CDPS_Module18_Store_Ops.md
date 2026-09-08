@@ -313,7 +313,6 @@ katalog berbohong (preseden `internal_tasks` v9). Brief Store Operation sudah ik
 
 ## 11. Yang SENGAJA tidak dibangun
 
-- **Bobot KPI M14** — Rule 9; menunggu COO (LT-1).
 - **Integrasi seller center** untuk menarik CTR/CVR otomatis — angkanya diketik
   Store Operation dari seller center (ketokan: "dia yang memegang datanya").
   Menariknya otomatis adalah modul integrasi tersendiri.
@@ -325,6 +324,36 @@ katalog berbohong (preseden `internal_tasks` v9). Brief Store Operation sudah ik
   `permintaan_reminder_tick`), tiket terpisah. Sampai itu ada, yang membuat langkah
   evaluasi terlihat adalah baris `[Terupload]` yang belum `[Dievaluasi]` pada daftar
   SKU Brief-nya.
-- **Kuota satuan Plan** — `punyaKuotaSatuan` baru boleh dinyalakan **setelah**
-  `account.TASK_CATALOG` punya baris Store Operation, dalam commit yang sama
-  (peringatan `division.ts`: membaliknya lebih dulu meng-crash `normalizeTasks`).
+- **Bobot KPI M14** tetap `0` — Rule 9, menunggu COO (LT-1). Lead time divisi ini
+  terukur dan terlihat, tapi belum menggerakkan skor siapa pun.
+
+---
+
+## 12. Kuota satuan & Rekap Mingguan — terpasang, dan kenapa bertiga sekaligus
+
+`punyaKuotaSatuan` untuk Store Operation dinyalakan di modul ini, bukan sebelumnya.
+Flag itu paling mudah dinyalakan dan paling mahal kalau dinyalakan sendirian: ia
+menarik **tiga** hal, dan ketiganya dipasang dalam commit yang sama.
+
+1. **`account.TASK_CATALOG`** mendapat tiga baris Store Operation —
+   `banding_pelanggaran` · `setup_promo_toko` · `qc_konten_toko`, `jenis` yang
+   **identik** dengan `plantask.PLAN_TASK_CATALOG` (diratifikasi pemilik
+   2026-09-02). Kuota yang AM janjikan di Strategi dijoin ke baris Plan lewat
+   `jenis` itu, tanpa tabel pemetaan — satu huruf beda memutus join-nya diam-diam.
+   Tanpa entri ini, comparator `normalizeTasks` jatuh di `undefined`.
+2. **CHECK constraint `wrr_divisi` / `wrr_catatan_divisi`** diperluas dari lima
+   nama jadi enam. Tanpa itu, divisi diakui di TS tapi barisnya ditolak DB.
+3. **`wrr_aggregate`** mendapat cabangnya: produksi Store Operation minggu ini =
+   jumlah baris SKU yang mencapai `[Terupload]`, diturunkan dari `audit_log`
+   seperti setiap angka produksi divisi lain. `[Dievaluasi]` dilaporkan **terpisah**
+   di `rincian`, tidak dijumlahkan ke headline — peristiwanya ~30 hari kemudian,
+   dan menjumlahkannya membuat satu SKU terhitung di dua minggu berbeda.
+
+Butir 3 adalah alasan sebenarnya flag ini menunggu sampai M18: sebelum ada
+`store_ops_skus`, tidak ada apa pun untuk dihitung, dan Rekap Mingguan akan
+melaporkan produksi **0** untuk divisi yang bekerja. **Angka nol yang salah lebih
+buruk daripada tidak ada angka** — ia terbaca sebagai "tim ini tidak menghasilkan
+apa-apa minggu ini".
+
+Ini **tidak** menuntut pipeline tahapan: `dispatchTarget` dan `punyaKuotaSatuan`
+tidak pernah membaca `stage_pipeline`. LT-2 (§7) tetap terbuka.

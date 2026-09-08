@@ -192,6 +192,10 @@ check "notif_events"     "select count(*) from notif_events"     "73"
 #       `internal_tasks`); Brief-nya sudah ikut BriefSiapReviewAm/BriefSelesai
 #       (B-1). Mendaftarkan event yang tak pernah diemisikan membuat katalog
 #       berbohong.
+# M18 butir 8 (20260924020000_m18_store_ops_kuota_satuan.sql): KEEMPATNYA TETAP
+#       147/41/32/73. Ia hanya memperluas dua CHECK constraint WRR, membalik
+#       `division_registry.punya_kuota_satuan`, dan meredefinisi `wrr_aggregate`
+#       — nol tabel, nol prefix, nol mesin, nol event baru.
 # 73 = 69 + 4 event Feedback OD 2026-09-07 (katalog v15,
 #      20260922100100_f3_notif_feedback_od.sql): `m6.brief.siap_review_am` dan
 #      `m6.brief.selesai` (resolver 'explicit' -> AM pemilik klien, menutup
