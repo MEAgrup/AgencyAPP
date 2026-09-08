@@ -351,3 +351,26 @@ COMMENT ON FUNCTION private.brief_jumlah_anak(text) IS
   'langsung akan dipersempit policy pembacanya dan seorang staff melihat angka '
   'yang SALAH tanpa galat apa pun. Divisi tanpa tabel anak mengembalikan 0, '
   'bukan NULL.';
+
+-- Permukaan EXECUTE ditegakkan ULANG di sini, bukan diwariskan.
+--
+-- `CREATE OR REPLACE` memang MEMPERTAHANKAN grant fungsi yang sudah ada — dan
+-- itulah asumsi yang dipakai saat blok ini semula dihilangkan. Asumsi itu hanya
+-- benar kalau `20260922100500` sudah lebih dulu mendarat. Pada 2026-09-08
+-- ternyata migrasi itu BELUM di-apply ke live: kalau berkas ini yang jalan
+-- duluan, fungsinya LAHIR BARU — dan fungsi baru di Postgres lahir dengan
+-- EXECUTE untuk PUBLIC, bukan dengan daftar eksplisit. Untuk sebuah fungsi
+-- SECURITY DEFINER itu bukan detail: `rls_checks` §44 memeriksa permukaan
+-- EXECUTE-nya, dan yang menahan `anon` cuma USAGE schema `private` — satu
+-- lapis, bukan dua.
+--
+-- Mengulang empat baris ini membuat berkasnya berdiri sendiri: urutan apply
+-- tetap wajib urut nama, tapi kalau suatu saat tidak, hasilnya tetap benar.
+REVOKE EXECUTE ON FUNCTION private.brief_jumlah_anak(text) FROM public;
+REVOKE EXECUTE ON FUNCTION private.brief_jumlah_anak(text) FROM anon;
+GRANT  EXECUTE ON FUNCTION private.brief_jumlah_anak(text) TO authenticated;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION private.brief_jumlah_anak(text) TO service_role;
+  END IF;
+END $$;
