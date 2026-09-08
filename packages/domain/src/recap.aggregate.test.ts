@@ -41,11 +41,15 @@ const AM = `ZZG-${RUN}-AM`;
 const CLI = `ZZG-CLI-${RUN}`;
 const SVC = `ZZG-SVC-${RUN}`;
 const RECAP = `ZZG-WRR-${RUN}`;
-const BRF = { creative: `ZZG-BC-${RUN}`, ads: `ZZG-BA-${RUN}`, kol: `ZZG-BK-${RUN}`, live: `ZZG-BL-${RUN}` };
+const BRF = { creative: `ZZG-BC-${RUN}`, ads: `ZZG-BA-${RUN}`, kol: `ZZG-BK-${RUN}`, live: `ZZG-BL-${RUN}`, ops: `ZZG-BO-${RUN}` };
 const AST = { video: `ZZG-AV-${RUN}`, gambar: `ZZG-AG-${RUN}` };
 const BKG = `ZZG-BKG-${RUN}`;
 const LSS = `ZZG-LSS-${RUN}`;
 const ADC = `ZZG-ADC-${RUN}`;
+// M18 — tiga baris SKU: satu terupload (dan kemudian dievaluasi), satu terupload
+// SETELAH gagal sekali, satu masih dikerjakan. Ketiganya diperlukan untuk
+// membedakan tiga hal yang mudah tertukar di headline produksi divisi ini.
+const SKU = { naik: `ZZG-SK1-${RUN}`, ulang: `ZZG-SK2-${RUN}`, jalan: `ZZG-SK3-${RUN}` };
 
 // A weekday instant inside the recap's WIB week (24–30 Aug 2026): 05:00Z → 12:00 WIB, 26 Aug.
 const IN_WEEK = '2026-08-26T05:00:00Z';
@@ -80,6 +84,9 @@ async function seed(): Promise<void> {
             on conflict (id) do nothing`;
   await sql`insert into briefs (id, service_id, title, status, assigned_division, created_by)
             values (${BRF.live}, ${SVC}, 'live brief', '[Draft]', 'Live Stream', ${OWNER})
+            on conflict (id) do nothing`;
+  await sql`insert into briefs (id, service_id, title, status, assigned_division, created_by)
+            values (${BRF.ops}, ${SVC}, 'store ops brief', '[Draft]', 'Store Operation', ${OWNER})
             on conflict (id) do nothing`;
 
   // Creative: two assets reaching [Approved] this week — 1 Video (headline), 1 Gambar.
@@ -123,6 +130,26 @@ async function seed(): Promise<void> {
             values (${`ZZG-OPT-${RUN}`}, ${ADC}, 'Budget', '1', '2', 'scale', ${OWNER}, ${OWNER}, ${IN_WEEK})
             on conflict (id) do nothing`;
 
+  // Store Operation (M18): tiga baris SKU dengan tiga riwayat berbeda.
+  const sku = async (id: string): Promise<void> => {
+    await sql`insert into store_ops_skus (id, brief_id, nama_produk, request_type, jenis_gambar,
+                                          total_req_picture, created_by)
+              values (${id}, ${BRF.ops}, ${'Produk ' + id}, 'Shopee New', 'Cover Only', 1, ${OWNER})
+              on conflict (id) do nothing`;
+  };
+  await sku(SKU.naik);
+  await sku(SKU.ulang);
+  await sku(SKU.jalan);
+  await audit('store_ops_sku', SKU.naik, '[Terupload]');
+  await audit('store_ops_sku', SKU.naik, '[Dievaluasi]');
+  // Gagal lalu berhasil dalam minggu yang sama: yang dihitung tetap SATU SKU
+  // tayang. `[Gagal Upload]` tidak boleh ikut menaikkan headline — kalau filter
+  // `[Terupload]`-nya dilonggarkan jadi "ada transisi minggu ini", baris inilah
+  // yang membuat angkanya salah.
+  await audit('store_ops_sku', SKU.ulang, '[Gagal Upload]');
+  await audit('store_ops_sku', SKU.ulang, '[Terupload]');
+  // SKU.jalan tidak pernah menyentuh [Terupload] — ia tidak boleh terhitung.
+
   // The recap for this client + WIB week 24–30 Aug 2026.
   await sql`insert into weekly_result_recap
               (id, client_id, plan_id, iso_year, iso_week, minggu_mulai, minggu_akhir, status, created_by)
@@ -154,6 +181,7 @@ afterAll(async () => {
   await sql`delete from assets where brief_id = ${BRF.creative}`;
   await sql`delete from creator_bookings where id = ${BKG}`;
   await sql`delete from live_stream_sessions where id = ${LSS}`;
+  await sql`delete from store_ops_skus where brief_id = ${BRF.ops}`;
   await sql`delete from wrr_metrik where recap_id = ${RECAP}`;
   await sql`delete from wrr_divisi where recap_id = ${RECAP}`;
   await sql`delete from weekly_result_recap where id = ${RECAP}`;
@@ -242,6 +270,30 @@ describeDb('wrr_aggregate — auto figures from M7/M8/M9/M10 (D-03)', () => {
     // Ads headline = # campaigns with a metric entry = 1; 1 optimization action.
     expect(d.Ads.jumlah_produksi).toBe(1);
     expect((d.Ads.rincian as { optimasi: number }).optimasi).toBe(1);
+  });
+
+  it('M18 — headline Store Operation = SKU yang TERUPLOAD minggu ini, evaluasi terpisah', async () => {
+    // Tiga hal yang mudah tertukar, dan ketiganya diuji sekaligus:
+    //
+    //   1. "Selesai" = [Terupload] (ketokan K-6), bukan [Dievaluasi]. Dua dari
+    //      tiga baris tayang minggu ini ⇒ headline 2.
+    //   2. `[Gagal Upload]` tidak menaikkan headline: SKU.ulang gagal lalu
+    //      berhasil di minggu yang sama dan tetap terhitung satu. (`DISTINCT`
+    //      pada fungsinya bersifat defensif — mesin #32 tidak punya jalan
+    //      kembali dari `[Terupload]`, jadi satu baris tidak bisa tayang dua
+    //      kali; yang diuji di sini filternya, bukan dedup-nya.)
+    //   3. [Dievaluasi] dilaporkan di `rincian`, TIDAK dijumlahkan ke headline:
+    //      peristiwanya ~30 hari sesudah upload, dan menjumlahkannya membuat satu
+    //      SKU terhitung di dua minggu berbeda.
+    //
+    // Sebelum M18 blok ini tidak ada sama sekali dan divisi ini akan dilaporkan
+    // berproduksi NOL setiap minggu — angka nol yang salah, yang terbaca sebagai
+    // "tim ini tidak menghasilkan apa-apa".
+    await sql`select wrr_aggregate(${RECAP})`;
+    const d = await divisi();
+    expect(d['Store Operation'].jumlah_produksi).toBe(2);
+    expect((d['Store Operation'].rincian as { sku_terupload: number }).sku_terupload).toBe(2);
+    expect((d['Store Operation'].rincian as { sku_dievaluasi: number }).sku_dievaluasi).toBe(1);
   });
 
   it('is idempotent and never clobbers a Sengketa note on re-run', async () => {

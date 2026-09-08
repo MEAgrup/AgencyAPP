@@ -229,11 +229,21 @@ jobs:
       # dua jalur paralel mengerjakan emitternya masing-masing, dan dua bump
       # terpisah memecahkan invariant dua kali. Nol tabel/prefix/mesin baru ⇒
       # 146 tabel / 40 prefix / 31 mesin TETAP.
-      - name: Verify migration seed counts (31 machines, 73 events, catalog registry consistent)
+      #
+      # M18 Store Operation (20260924010000_m18_store_ops_sku.sql): +1 mesin
+      # (31 → 32) `store_ops_sku`, mesin #32 — [Menunggu Eksekusi] → [Dikerjakan]
+      # → [Terupload] → [Dievaluasi], plus [Gagal Upload] dua arah dari
+      # [Dikerjakan]. [Terupload] = SELESAI produksi dan sengaja BUKAN terminal
+      # (ketokan K-6: angka dampak dipisah dari "selesai" supaya leadtime
+      # produksi tidak ternoda tunggu pasar ~30 hari). Nol event katalog baru ⇒
+      # notif_events TETAP 73: event Store Ops didaftarkan bersama emitternya
+      # (preseden v9 `internal_tasks`), dan Brief-nya sudah ikut
+      # BriefSiapReviewAm/BriefSelesai (B-1).
+      - name: Verify migration seed counts (32 machines, 73 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 31 then raise exception 'expected 31 machines'; end if;
+               if (select count(*) from sm_machines) <> 32 then raise exception 'expected 32 machines'; end if;
                if (select count(*) from notif_events) <> 73 then raise exception 'expected 73 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
@@ -413,12 +423,17 @@ jobs:
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 146)
+      # 147 = 146 + `store_ops_skus` (M18, 20260924010000_m18_store_ops_sku.sql):
+      #       unit kerja divisi Store Operation, satu baris per SKU di bawah satu
+      #       Brief (ketokan K-5, pola AST-/ADC-/BKG-/LSS-). Dua kelompok kolom
+      #       dengan dua penulis — cakupan+target milik AM, hasil+dampak milik
+      #       Store Ops — didindingi trigger, bukan cuma TS.
+      - name: Verify table count (expect 147)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 146
+          test "$n" -eq 147
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
@@ -434,11 +449,15 @@ jobs:
       #
       # ⚠️ GATE KEDUA untuk angka yang sama — `scripts/db-rebuild.sh` punya
       # `check "entity_prefix"` sendiri. Naikkan KEDUANYA dalam satu commit.
-      - name: Verify entity_prefix registry (expect 40)
+      # 41 = 40 + SKU (M18, 20260924010000_m18_store_ops_sku.sql: baris SKU Store
+      #      Operation). Sengaja BUKAN memakai ulang SCR-/ADL- (Gelombang 3 SKU
+      #      Screener): keduanya run screening Ads atas sebuah ekspor, tanpa
+      #      induk Brief dan tanpa lifecycle sendiri.
+      - name: Verify entity_prefix registry (expect 41)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          test "$n" -eq 40
+          test "$n" -eq 41
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)

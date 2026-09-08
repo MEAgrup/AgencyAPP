@@ -10,7 +10,7 @@
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, showcase, skuscreener, stage, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, showcase, skuscreener, stage, storeops, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -7659,4 +7659,167 @@ export function izinPeristiwaToWire(p: showcase.IzinPeristiwa): IzinPeristiwaWir
 
 export function izinPanelToWire(s: showcase.IzinStatus, riwayat: showcase.IzinPeristiwa[]): IzinPanelWire {
   return { status: izinStatusToWire(s), riwayat: riwayat.map(izinPeristiwaToWire) };
+}
+
+// ---------------------------------------------------------------------------
+// M18 — baris SKU Store Operation (`SKU-`).
+//
+// Kolomnya dikirim DALAM DUA KELOMPOK yang namanya menyebut pemiliknya, bukan
+// diratakan jadi satu daftar: halaman yang merendernya harus tahu mana yang
+// read-only bagi si pembaca, dan menebaknya dari nama kolom adalah cara aturan
+// dua-penulis itu bocor pelan-pelan di FE.
+//
+// Enam angka turunan (`actual_done`, `leadtime`, `pernah_gagal_upload`, dua
+// `achievement_*`, `verdict`) dikirim EKSPLISIT, bukan dihitung ulang halaman.
+// Kalau halaman menghitungnya sendiri, "apakah SKU ini on time" punya dua
+// implementasi yang berbeda begitu salah satunya lupa bahwa pembandingnya
+// kalender WIB — dan yang dilihat pelaksananya bukan yang dihitung laporannya.
+//
+// Kunci yang HILANG lebih berbahaya daripada `null` (kelas O43): setiap field
+// opsional dikirim sebagai `null` eksplisit.
+// ---------------------------------------------------------------------------
+
+export interface SkuWire {
+  id: string;
+  brief_id: string;
+  // Kelompok 1 — cakupan + target (AM).
+  nama_produk: string;
+  link_sku: string | null;
+  request_type: string;
+  jenis_gambar: string;
+  total_req_picture: number;
+  expected_done: string | null;
+  target_ctr: number | null;
+  target_cvr: number | null;
+  target_rating: number | null;
+  catatan_am: string | null;
+  // Kelompok 2 — hasil + dampak (Store Operation).
+  assigned_pic: string | null;
+  link_output: string | null;
+  catatan_ops: string | null;
+  ctr_sebelum: number | null;
+  cvr_sebelum: number | null;
+  rating_sebelum: number | null;
+  ctr_sesudah: number | null;
+  cvr_sesudah: number | null;
+  rating_sesudah: number | null;
+  status: string;
+  created_at: string;
+  created_by: string;
+  // Turunan — read-only, tidak pernah disimpan.
+  actual_done: string | null;
+  leadtime: string | null;
+  pernah_gagal_upload: boolean;
+  achievement_ctr_pct: number | null;
+  achievement_cvr_pct: number | null;
+  verdict: string | null;
+}
+
+export interface SkuSummaryWire {
+  brief_id: string;
+  total: number;
+  selesai: number;
+  dievaluasi: number;
+  dinilai_ontime: number;
+  ontime: number;
+  ontime_pct: number | null;
+  pernah_gagal_upload: number;
+  gagal_upload_pct: number | null;
+}
+
+export function skuToWire(r: storeops.SkuRow): SkuWire {
+  return {
+    id: r.id,
+    brief_id: r.briefId,
+    nama_produk: r.namaProduk,
+    link_sku: r.linkSku,
+    request_type: r.requestType,
+    jenis_gambar: r.jenisGambar,
+    total_req_picture: r.totalReqPicture,
+    expected_done: r.expectedDone,
+    target_ctr: r.targetCtr,
+    target_cvr: r.targetCvr,
+    target_rating: r.targetRating,
+    catatan_am: r.catatanAm,
+    assigned_pic: r.assignedPic,
+    link_output: r.linkOutput,
+    catatan_ops: r.catatanOps,
+    ctr_sebelum: r.ctrSebelum,
+    cvr_sebelum: r.cvrSebelum,
+    rating_sebelum: r.ratingSebelum,
+    ctr_sesudah: r.ctrSesudah,
+    cvr_sesudah: r.cvrSesudah,
+    rating_sesudah: r.ratingSesudah,
+    status: r.status,
+    created_at: r.createdAt.toISOString(),
+    created_by: r.createdBy,
+    actual_done: r.actualDone,
+    leadtime: r.leadtime,
+    pernah_gagal_upload: r.pernahGagalUpload,
+    achievement_ctr_pct: r.achievementCtrPct,
+    achievement_cvr_pct: r.achievementCvrPct,
+    verdict: r.verdict,
+  };
+}
+
+export function skuSummaryToWire(s: storeops.BriefSkuSummary): SkuSummaryWire {
+  return {
+    brief_id: s.briefId,
+    total: s.total,
+    selesai: s.selesai,
+    dievaluasi: s.dievaluasi,
+    dinilai_ontime: s.dinilaiOntime,
+    ontime: s.ontime,
+    ontime_pct: s.ontimePct,
+    pernah_gagal_upload: s.pernahGagalUpload,
+    gagal_upload_pct: s.gagalUploadPct,
+  };
+}
+
+/**
+ * Badan permintaan cakupan+target (FE → server). Interface bernama, bukan objek
+ * inline, supaya `shape-parity` bisa mengikatnya ke `storeops.ts::SkuScopeInput`
+ * — arah berbalik (FE yang mengirim) tapi assertion kesetaraan kuncinya sama,
+ * dan itulah yang mencegah rute membaca kunci dengan nama yang tidak pernah
+ * dikirim halaman (kelas cacat `no_nego`).
+ */
+export interface SkuScopeBody {
+  nama_produk: string;
+  link_sku: string | null;
+  request_type: string;
+  jenis_gambar: string;
+  total_req_picture: number;
+  expected_done: string | null;
+  target_ctr: number | null;
+  target_cvr: number | null;
+  target_rating: number | null;
+  catatan_am: string | null;
+}
+
+export function toSkuScopeInput(b: Partial<SkuScopeBody> & {
+  total_req_picture?: number | string;
+  target_ctr?: number | string | null;
+  target_cvr?: number | string | null;
+  target_rating?: number | string | null;
+}): storeops.SkuScopeInput {
+  // Angka yang datang sebagai string kosong berarti "tidak diisi", bukan 0 —
+  // dan 0 pada sebuah target BUKAN hal yang sama dengan tidak punya target
+  // (yang pertama membuat % Achievement mustahil, yang kedua membuatnya '—').
+  const angka = (v: number | string | null | undefined): number | null => {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'string' && v.trim() === '') return null;
+    return Number(v);
+  };
+  return {
+    namaProduk: b.nama_produk ?? '',
+    linkSku: b.link_sku ?? null,
+    requestType: b.request_type ?? '',
+    jenisGambar: b.jenis_gambar ?? '',
+    totalReqPicture: Number(b.total_req_picture ?? 0),
+    expectedDone: b.expected_done ?? null,
+    targetCtr: angka(b.target_ctr),
+    targetCvr: angka(b.target_cvr),
+    targetRating: angka(b.target_rating),
+    catatanAm: b.catatan_am ?? null,
+  };
 }

@@ -437,3 +437,23 @@ Jenis: `Top-up Saldo` (Ads → **Finance**, LT-11), `Contract Creator` (KOL → 
 - **Mesin pertama berkunci surrogate `bigint`.** Semua entitas CDPS lain berkunci `PREFIX-YYYYMM-NNNN`; laporan bukan entitas ber-prefix (`client_reports.id` bigint identity). Ini menyingkap keterbatasan `sm_transition` yang selama ini tak terlihat — predikatnya `WHERE %I = $1` dengan `$1 text` ⇒ `operator does not exist: bigint = text`. Diperbaiki migrasi `20260908020000_sm_transition_id_type_aware.sql`: tipe kolom dibaca dari katalog dan **parameternya** yang di-cast (`$1::<tipe>`), bukan kolomnya — cast di kolom akan mengeluarkannya dari indeks. Nol perubahan perilaku untuk 30 mesin lain.
 - **Nol prefix baru** (`entity_prefix` tetap 37) dan **nol event katalog baru** (`notif_events` tetap 67 — komplain portal memakai event komplain yang sudah ada).
 - Teks insight sendiri hidup di `client_report_insight`, **append-only** (revisi 0 = snapshot mesin) dan **bukan** mesin status.
+
+## 22. Baris SKU Store Operation `store_ops_sku` (`SKU-`, M18) — mesin #32 (`sm_machines` 31→32)
+
+`[Menunggu Eksekusi]` → `[Dikerjakan]` → `[Terupload]` → `[Dievaluasi]`, plus `[Dikerjakan]` ⇄ `[Gagal Upload]`. Terminal: `[Dievaluasi]`. Migrasi `20260924010000_m18_store_ops_sku.sql`. PRD `docs/prd/CDPS_Module18_Store_Ops.md` §4.
+
+| From | To | `require_lead` | Effect |
+|---|---|---|---|
+| `[Menunggu Eksekusi]` | `[Dikerjakan]` | `false` | PIC mulai. **Sejak titik ini seluruh kolom cakupan + target BEKU** — dijaga trigger, bukan hanya domain |
+| `[Dikerjakan]` | `[Terupload]` | `false` | **SELESAI PRODUKSI** (ketokan K-6). `link_output` wajib (gerbang domain). Ini jangkar `actual_done` dan awal jendela dampak ±30 hari |
+| `[Dikerjakan]` | `[Gagal Upload]` | `false` | Upload ditolak marketplace. `catatan_ops` wajib |
+| `[Gagal Upload]` | `[Dikerjakan]` | `false` | Coba lagi pada baris yang **SAMA** |
+| `[Terupload]` | `[Dievaluasi]` | `false` | Langkah review ±30 hari kemudian: enam angka dampak (CTR/CVR/rating sebelum & sesudah) |
+
+- **Kenapa `[Terupload]` bukan terminal.** Ketokan K-6 memisahkan angka dampak dari "selesai": CTR/CVR baru bisa dinilai ~30 hari setelah upload, dan menjadikannya gerbang status selesai berarti leadtime **produksi** Store Ops ternoda waktu tunggu pasar. Angka leadtime yang mengukur dua hal sekaligus tidak mengukur apa pun. Rollup Brief (M18 §8) karena itu berhenti di `[Terupload]`, bukan `[Dievaluasi]`.
+- **Kenapa `[Gagal Upload]` sebuah STATE, bukan kolom flag.** Worksheet divisi menghitung "% SKU Gagal Upload"; sebuah flag boolean bisa ditulis ulang oleh orang yang sedang dinilai, sebuah state meninggalkan baris `audit_log` yang tidak punya jalur UPDATE/DELETE (aturan rumah #3). Mode gagal yang sama dengan alasan `internal_tasks` menolak kolom `pernah_terlambat` (§17). Penyebutnya dibaca sebagai "**pernah menyentuh** `[Gagal Upload]`", bukan status terkini — SKU yang gagal lalu berhasil tetap pernah gagal.
+- **Kenapa kembalinya ke baris yang sama, bukan `SKU-` baru.** SKU-nya sama, targetnya sama, janjinya ke klien sama; baris baru akan menyembunyikan kegagalan pertama dari penyebut metriknya sendiri.
+- **Nol edge ber-`require_lead`.** Keempat transisi adalah pekerjaan PIC atas barisnya sendiri (pola `creator_booking`, §8). Gerbang "siapa boleh menyentuh baris ini" dipikul RLS `store_ops_skus_select` + gerbang domain — `require_lead` adalah gerbang *seniority*, dan menyalakannya akan mengunci staf Store Ops keluar dari barisnya sendiri.
+- **DUA PENULIS pada satu baris, dan dindingnya di DB.** Ketokan 2026-09-08: AM menulis cakupan + target saat baris lahir; Store Operation menulis hasil saat eksekusi lalu dampak saat evaluasi. `trg_store_ops_skus_dinding_penulis` menolak tulisan dari sisi yang salah, membekukan Kelompok 1 begitu status meninggalkan `[Menunggu Eksekusi]`, dan menolak UPDATE yang tidak mendeklarasikan sisinya sama sekali. Penandanya GUC transaction-local `cdps.sku_writer` — **bukan** `jwt_division()`, karena jalur tulis CDPS berjalan privileged tanpa klaim JWT dan sebuah trigger ber-JWT akan melihat NULL pada setiap tulisan sungguhan (dinding yang selalu terbuka lebih buruk daripada nol dinding). Pengecualiannya satu dan sempit: UPDATE status-saja, yaitu pintu `sm_transition` sendiri.
+- **Nol kolom durasi/keterlambatan/`actual_done`** — semuanya turunan `audit_log` saat baca (aturan rumah #3/#4, PRD §5), preseden M16 Rule 4 dan `internal_tasks`.
+- Prefix `SKU-YYYYMM-NNNN` (registry, baru — `entity_prefix` 40→41).

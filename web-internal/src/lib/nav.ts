@@ -240,18 +240,20 @@ const PAPAN_DIVISI: NavSubGroup[] = [
       // (`account.listStrategies` punya arm AM), Account lead lewat antrean
       // Intake yang belum ditugaskan (`account.canReadIntake`).
       { href: '/account', label: 'Account & Service', access: ownedBy(ACCOUNT) },
-      // AI Optimizer / Store Operation (M16/M17, DECISIONS.md 2026-09-01):
-      // gerbang baca yang sama dengan empat papan di bawah, tapi belum punya
-      // halaman papan sendiri — keduanya mendarat di antrean Task Execution
-      // generik, sudah terfilter lewat `?division=`. Tukar href-nya kalau
-      // halaman khusus dibangun.
+      // AI Optimizer (M17, DECISIONS.md 2026-09-01): gerbang baca yang sama
+      // dengan papan di bawah, tapi belum punya halaman papan sendiri — ia
+      // mendarat di antrean Task Execution generik, sudah terfilter lewat
+      // `?division=`. Tukar href-nya kalau halaman khusus dibangun.
       { href: '/tasks?division=AI+Optimizer', label: 'AI Optimizer', access: divisionQueue(AI_OPTIMIZER) },
-      // Empat papan antrean Brief yang punya halaman sendiri — lihat divisionQueue().
+      // Lima papan antrean Brief yang punya halaman sendiri — lihat divisionQueue().
       { href: '/ads', label: 'Ads', access: divisionQueue(ADS) },
       { href: '/creative', label: 'Creative', access: divisionQueue(CREATIVE) },
       { href: '/kol', label: 'KOL', access: divisionQueue(KOL) },
       { href: '/livestream', label: 'Live Stream', access: divisionQueue(LIVE_STREAM) },
-      { href: '/tasks?division=Store+Operation', label: 'Store Operation', access: divisionQueue(STORE_OPS) },
+      // M18 — Store Operation dapat papannya sendiri: unit kerjanya adalah baris
+      // SKU, dan antrean generik `/tasks` tidak punya tempat untuk itu (satu
+      // Brief "optimasi 7 SKU" terbaca sebagai satu baris atom).
+      { href: '/store-ops', label: 'Store Operation', access: divisionQueue(STORE_OPS) },
     ],
   },
 ];

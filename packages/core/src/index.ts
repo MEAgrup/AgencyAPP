@@ -74,6 +74,10 @@ export * as showcase from './showcase';
 // (ketokan D-1 hangus · D-2 hold menjeda · D-KOM penanda pengakuan; nilainya
 // BRUTO, PPN tidak pernah disentuh mesin ini — D-4).
 export * as accrual from './accrual';
+// M18 — kosakata Store Operation (request_type / jenis_gambar / state mesin
+// `store_ops_sku` + penanda sisi penulis). Dual-home dengan CHECK constraint di
+// `store_ops_skus`, dijaga `packages/db/src/storeops.registry.test.ts`.
+export * as storeops from './storeops';
 // CR-12 — aset dokumen laporan yang ditempel (CSS, ikon, Chart.js, boot Print).
 // Diekspor supaya tes di luar `packages/core` bisa memeriksa isinya.
 export * as docassets from './docassets';

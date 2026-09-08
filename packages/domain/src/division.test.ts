@@ -10,9 +10,11 @@
  * `TASK_CATALOG[a.divisi].findIndex(...)` atas `undefined`. Sebelum M16, satu-
  * satunya penjaga aturan itu adalah komentar. Sekarang ia gerbang.
  *
- * Inilah alasan registry punya TIGA flag, bukan satu: Store Operation boleh
- * menerima Brief dan jadi tujuan dispatch, tapi `punyaKuotaSatuan` sengaja
- * `false` sampai `TASK_CATALOG` punya barisnya (DECISIONS.md LT-2).
+ * Inilah alasan registry punya TIGA flag, bukan satu: Store Operation menerima
+ * Brief dan jadi tujuan dispatch sejak M16, sementara `punyaKuotaSatuan`-nya
+ * baru dinyalakan di M18 — bersama entri `TASK_CATALOG` dan cabang
+ * `wrr_aggregate`-nya, di commit yang sama. Pipeline tahapannya (LT-2) masih
+ * terbuka sampai hari ini dan tidak dituntut oleh satu pun flag di sini.
  */
 import { describe, expect, it } from 'vitest';
 import { division, plantask } from '@cdps/core';
@@ -50,13 +52,16 @@ describe('M16 registry divisi ↔ TASK_CATALOG', () => {
     expect(bocor).toEqual([]);
   });
 
-  it('divisi baru M16/M17 terdaftar dan bisa menerima Brief', () => {
-    // Store Operation sengaja TANPA kuota satuan — pipeline & daftar
-    // pekerjaannya menyusul (DECISIONS.md LT-2).
+  it('divisi baru M16/M17/M18 terdaftar, bisa menerima Brief, dan punya kuota satuan', () => {
+    // Store Operation ikut ber-kuota sejak M18 — sebelumnya sengaja tidak,
+    // karena `wrr_aggregate` belum punya apa pun untuk dihitung dan rekap
+    // mingguan akan melaporkan produksi 0 untuk divisi yang bekerja.
+    // Pipeline tahapannya (LT-2) masih terbuka dan memang TIDAK dituntut oleh
+    // flag mana pun di sini — dua hal berbeda yang mudah tertukar.
     expect(BRIEF_ASSIGNABLE_DIVISIONS).toContain('AI Optimizer');
     expect(BRIEF_ASSIGNABLE_DIVISIONS).toContain('Store Operation');
     expect(ALLOWED_DIVISIONS).toContain('AI Optimizer');
-    expect(ALLOWED_DIVISIONS).not.toContain('Store Operation');
+    expect(ALLOWED_DIVISIONS).toContain('Store Operation');
   });
 });
 
@@ -94,13 +99,29 @@ describe('TASK_CATALOG ↔ PLAN_TASK_CATALOG (jembatan `jenis`)', () => {
     expect(beda).toEqual([]);
   });
 
-  it('Store Operation punya jenis task Plan walau TANPA kuota satuan Strategi', () => {
-    // Ini justru buktinya ketiga flag registry terpisah itu berguna: pemilik
-    // meratifikasi tiga pekerjaan Store Operation untuk baris Plan (2026-09-02)
-    // tanpa menyalakan `punyaKuotaSatuan` — yang akan menuntut entri
-    // TASK_CATALOG + baris `wrr_divisi` yang LT-2 belum putuskan.
+  it('Store Operation kini punya KEDUA katalog, dan `jenis`-nya identik (M18)', () => {
+    // Sampai M18 divisi ini sengaja hanya punya katalog Plan: `punyaKuotaSatuan`
+    // menuntut entri TASK_CATALOG **dan** cabang `wrr_aggregate`, dan yang
+    // terakhir mustahil sebelum ada tabel yang bisa dihitung (`store_ops_skus`).
+    // Sekarang ketiganya terpasang, jadi yang dijaga di sini adalah bahwa kedua
+    // katalog mengeja tiga `jenis` yang SAMA: kuota yang dijanjikan di Strategi
+    // dijoin ke baris Plan lewat `jenis`, tanpa tabel pemetaan, jadi satu huruf
+    // beda memutus join itu diam-diam.
     expect(plantask.punyaKatalog('Store Operation')).toBe(true);
-    expect(TASK_CATALOG['Store Operation']).toBeUndefined();
-    expect(ALLOWED_DIVISIONS).not.toContain('Store Operation');
+    expect(ALLOWED_DIVISIONS).toContain('Store Operation');
+    expect(TASK_CATALOG['Store Operation'].map((t) => t.jenis).sort()).toEqual(
+      plantask.jenisFor('Store Operation').map((j) => j.jenis).sort(),
+    );
+    // Nol yang bertanda Rupiah: ketiganya hitungan (kasus/promo/konten), bukan
+    // nominal seperti `ads_spent`.
+    expect(TASK_CATALOG['Store Operation'].every((t) => t.money !== true)).toBe(true);
+  });
+
+  it('`punyaKuotaSatuan` tidak pernah menyala tanpa entri TASK_CATALOG-nya', () => {
+    // Invariant, bukan pemeriksaan satu divisi: inilah kombinasi yang
+    // meng-crash comparator `normalizeTasks` di `undefined`, dan ia akan
+    // terulang pada divisi BERIKUTNYA kalau yang dijaga cuma Store Operation.
+    const tanpaKatalog = ALLOWED_DIVISIONS.filter((d) => TASK_CATALOG[d] === undefined);
+    expect(tanpaKatalog).toEqual([]);
   });
 });

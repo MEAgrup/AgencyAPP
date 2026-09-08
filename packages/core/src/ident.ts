@@ -136,6 +136,15 @@ export const PREFIXES = {
   // tool with no Client Portal surface (O69, and the long "kenapa bukan
   // client_reports" note in the Gelombang 4 migration).
   ASR: { entity: 'Ads Scanner run (TikTok Ads Scanner)', module: 'Gelombang 4 (TikTok Ads Scanner)' },
+  // M18 (Store Operation) — the division's UNIT OF WORK: one row per SKU whose
+  // images Store Ops produces and uploads, child of a Brief. Same fan-out shape
+  // as `AST-` (Creative), `ADC-` (Ads), `BKG-` (KOL), `LSS-` (Live Stream);
+  // owner decision K-5, 2026-09-07. Deliberately NOT reusing `SCR-`/`ADL-`
+  // (Gelombang 3 SKU Screener) even though all three say "SKU": those are Ads'
+  // pre-campaign screening runs keyed to an export, with no Brief parent and no
+  // lifecycle of their own. This one is a work row with a status machine
+  // (`store_ops_sku`, #32) and two writers (M18 §2 Rule 2).
+  SKU: { entity: 'Baris SKU Store Operation', module: 'M18' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

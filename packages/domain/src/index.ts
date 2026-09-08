@@ -151,3 +151,9 @@ export * as salesperf from './salesperf';
 // Parallel to `sales.ts`'s attempt-anchored negotiation/closing, not a reuse
 // of it (nol LEAD-/PRSP- palsu). See renewal.ts's header + STATE_MACHINES §20.
 export * as renewal from './renewal';
+// M18 — Store Operation: baris SKU (`SKU-`) sebagai unit kerja divisi. DUA
+// penulis pada satu baris (AM menulis cakupan + target, Store Operation menulis
+// hasil lalu dampak), dan dindingnya di DB — modul ini hanya wajib
+// mendeklarasikan sisinya. Rollup Brief-nya tinggal di `task.ts` bersama
+// saudara Creative/KOL-nya. Lihat `docs/prd/CDPS_Module18_Store_Ops.md`.
+export * as storeops from './storeops';
