@@ -510,6 +510,53 @@ semua tes lain; di produksi ia hanya muncul sebagai halaman lambat.
   pipelined ~1.0ms vs ~1.0ms per read di loopback (P2 §5 akan memangkas RTT,
   bukan ms lokal — nilainya di WAN). Angka ini jadi pembanding "before" P2.
 
+### P2.5 — DITUTUP 2026-09-08: DIPUTUSKAN TIDAK DIKERJAKAN (data produksi nyata, bukan tebakan)
+
+Pemilik membuka Vercel Dashboard (Observability → Functions → `agency-app-api`
+→ production, Advanced Metrics) dan memberi angka p95 SUNGGUHAN — prasyarat
+yang ditahan sejak 2026-09-04 akhirnya terpenuhi:
+
+| Metrik | Average | P75 | P95 |
+|---|---|---|---|
+| Active CPU | 25ms | 28ms | 71ms |
+| CPU Throttle | 10.1% | 11.5% | 24% |
+| **Time to First Byte** | **77ms** | **82ms** | **213ms** |
+
+Plus P75 Duration per-rute (tabel Functions): mayoritas rute baca (`/me` 34ms,
+`/notifications` 43ms, `/master-services` 58ms, `/audit` 38ms,
+`/attempts/[id]` 80ms) berkerumun rapat di pita 30-80ms — **hanya dua
+pencilan**: `/auth/login` 522ms dan `/attempts` 212ms. Region deployment
+dikonfirmasi `sin1` lewat `mcp__Vercel__get_deployment` langsung (bukan cuma
+label dashboard, yang sempat menunjukkan "Region IAD1" di panel lain — beda
+metrik, bukan region eksekusi fungsi; dicek silang supaya tidak salah baca).
+
+**Kesimpulan: TIDAK DIKERJAKAN.** Tiga alasan, semuanya dari data ini:
+
+1. **P95 TTFB 213ms sudah wajar** untuk volume trafik MEA saat ini (~2.3K
+   invokasi/12 jam) — bukan sistem yang kelihatan tertekan latensi.
+2. **Round-trip `withClaims` (`BEGIN→SET→query→COMMIT`) berlaku RATA ke semua
+   rute baca** — kalau itu biaya dominan, semua rute serupa akan sama-sama
+   naik. Yang terjadi justru sebaliknya: mayoritas rute rapat di 30-80ms,
+   cuma dua pencilan, dan keduanya punya penjelasan lain yang TIDAK disentuh
+   P2.5 — `/auth/login` 522ms sejalan dengan CPU Throttle P95 24% (biaya
+   bcrypt, CPU-bound, bukan I/O jaringan), `/attempts` 212ms lebih mungkin
+   query/join yang lebih berat atau volume baris, bukan overhead round-trip
+   tetap yang sama untuk semua rute.
+3. **Vercel `sin1` dan Supabase `CDPS SG` (`ap-southeast-1`) berdekatan
+   geografis** — RTT di antaranya kemungkinan besar rendah (puluhan ms untuk
+   3 round-trip tambahan, bukan ratusan), jadi potensi penghematannya kecil
+   dibanding risiko menyentuh mekanisme yang menegakkan RLS di setiap
+   request (kebocoran klaim/role lintas request bila `RESET ROLE`/`RESET
+   ALL` gagal di satu jalur error, pooler transaction-mode).
+
+Bar yang rencana ini sendiri tetapkan ("PR terpisah SETELAH region produksi
+diverifikasi memberi dampak nyata") **tidak terpenuhi oleh data ini** — jadi
+langkah 5 ditutup sebagai keputusan sadar, bukan dibiarkan `⬜` menunggu bar
+yang mungkin tidak akan pernah jelas terlampaui. Kalau profil trafik/latensi
+berubah signifikan di masa depan (P95 TTFB naik jauh di atas 213ms secara
+konsisten, BUKAN sekali lonjakan), buka lagi dengan data baru — bukan
+diasumsikan dari baris ini.
+
 ---
 
 ## Urutan Pengerjaan
@@ -531,7 +578,7 @@ semua tes lain; di produksi ia hanya muncul sebagai halaman lambat.
 | P2.7 | Batch 2 N+1 `salesperf` (`commissionAchievementBatch`, `computeMetricActualsBatch`) | P1 | ✅ |
 | P2.8 | `health.portfolio` `canView` → predikat SQL, bukan `.filter()` | P1 | ✅ |
 | P2.6 | Pagination `LIMIT`+keyset di 6 pembacaan daftar (ubah kontrak wire + FE) | P1 | ✅ |
-| P2.5 | Pangkas round-trip `withClaims` (pipeline/`onconnect`+`RESET`, `idle_timeout`) | P1 | ⬜ — lihat catatan risiko di bawah |
+| P2.5 | Pangkas round-trip `withClaims` (pipeline/`onconnect`+`RESET`, `idle_timeout`) | P1 | ❌ **DITUTUP 2026-09-08 — diputuskan TIDAK dikerjakan, data p95 produksi nyata** (lihat catatan di atas) |
 
 ---
 
