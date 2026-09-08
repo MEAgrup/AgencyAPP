@@ -95,9 +95,15 @@ describeDb('allowedTransitions', () => {
       await sql`delete from leads where id = ${leadId}`;
     };
 
-    it('has exactly the three legal exits, bracketed status last (byte order)', async () => {
+    it('has exactly the four legal exits, bracketed statuses last (byte order)', async () => {
+      // FS-3 menambah `[Closed - Prospek Bersama]` sebagai penutup keempat.
+      // Edge-nya diturunkan dari baris `[Closed - Kalah Kompetisi]` yang sudah
+      // ada (migrasi 20260925030000 memakai INSERT ... SELECT, bukan daftar
+      // yang diketik ulang), jadi setiap state hulu yang bisa kalah kompetisi
+      // otomatis juga bisa ditutup sebagai prospek bersama — termasuk
+      // `[Unrespon]`, yang ranjaunya justru dicatat tes di bawah ini.
       expect(await allowedTransitions(sql, 'prospect_attempt', '[Unrespon]')).toEqual([
-        'Contacted', 'Not Qualified', '[Closed - Kalah Kompetisi]',
+        'Contacted', 'Not Qualified', '[Closed - Kalah Kompetisi]', '[Closed - Prospek Bersama]',
       ]);
     });
 

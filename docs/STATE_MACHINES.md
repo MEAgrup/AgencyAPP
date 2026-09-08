@@ -5,6 +5,40 @@
 ## 1. Prospect attempt (M0/M1)
 `Pending Validation` → `New Lead` → `Contacted` → { `Qualified` | `Not Qualified` } ; `Qualified` → Negotiation states → { `Closed-Success` | `Closed-Lost` }
 - Intake collision ⇒ `Blocked` (no updates possible). Pool competitors on win ⇒ `[Closed - Kalah Kompetisi]` (auto).
+
+**`[Closed - Prospek Bersama]` — terminal, dan sengaja BUKAN `[Closed - Kalah Kompetisi]`
+(FS-3, feedback tim Sales 2026-09-08; ketokan pemilik FS-1).** Satu `LEAD-` sudah lama
+boleh punya banyak `PRSP-`, dan pintu pendaftaran tunggal (serta batch, yang
+mendelegasikan ke sana) sudah mengembalikan outcome `join` — bukan `block` — saat lead
+dipegang sales lain. Yang belum ada: penanda bahwa attempt itu lahir sebagai **prospek
+bersama**, dan penutup yang tidak menghukum.
+
+- Kolom `prospect_attempts.bersama_dengan_attempt_id` (migrasi `20260925030000`,
+  preseden `contracts.contract_sebelumnya_id`) menunjuk attempt yang SUDAH ada saat
+  attempt ini lahir lewat `join`. `NULL` untuk attempt tunggal **dan** untuk kontes lead
+  `[Pool]` — dua hal yang perlakuan win-resolution-nya berbeda, jadi keduanya tidak boleh
+  memakai nilai yang sama. "Dikerjakan bersama" adalah TURUNAN dari keberadaan penunjuk
+  itu, bukan flag kedua yang bisa berbeda dengan kenyataannya.
+- `leads.resolveWin` menutup saudara yang bertaut ke `[Closed - Prospek Bersama]`, dan
+  saudara yang TIDAK bertaut tetap ke `[Closed - Kalah Kompetisi]`. Tautannya diperiksa
+  **dua arah** (`o.bersama_dengan_attempt_id = pemenang` ATAU `pemenang.bersama_dengan = o.id`)
+  karena penunjuknya hanya ada di baris yang menyusul sementara keduanya sama-sama pemilik
+  prospeknya; kedua lengan divalidasi-mutasi terpisah.
+- **Kenapa state sendiri:** `salesperf` menghitung contested-win-rate dari attempt yang
+  kalah. Ketokan FS-1 adalah kepemilikan menjadi bersama dan komisi dibagi (50-50 atau
+  kesepakatan, diketik di form Closing yang alokasinya kini prefill dua baris). Sales yang
+  memegang 50% komisi tapi tercatat "kalah kompetisi" adalah dua pernyataan yang saling
+  meniadakan pada orang yang sama — dan yang salah tidak pernah melempar galat, ia cuma
+  menurunkan angka kinerja seseorang diam-diam.
+- Edge masuknya **diturunkan** dari baris `[Closed - Kalah Kompetisi]` lewat
+  `INSERT ... SELECT`, bukan daftar yang diketik ulang, supaya setiap state hulu (termasuk
+  `[Unrespon]`) otomatis punya keduanya dan tidak bisa menyimpang.
+- Masuk `TERMINAL_ATTEMPT_STATUSES`: tanpa itu attempt yang sudah ditutup masih terbaca
+  "terbuka" dan pendaftaran berikutnya akan menautkan diri padanya — rantai prospek
+  bersama yang tidak pernah putus.
+- **Nol event notifikasi baru:** `m1.lead.co_pursuit` sudah ada dan sudah mengirim ke
+  pemilik attempt lama saat `join` terjadi. Menambah event kedua berarti pintu kedua ke
+  aturan yang sudah punya pintu.
 - `Qualified` only via successful Qualified Form submit; exit without submit ⇒ stays `Contacted`.
 - Negotiation states: `Negotiation - Pending Approval` → { `Negotiation - Approved` | `Negotiation - Revision Required` | `Negotiation - Rejected` }; Revision Required → (accept ⇒ Approved) | (resubmit ⇒ Pending Approval, new version); `Negotiation - Rejected` → (resubmit ⇒ Pending Approval, new version) | `Closed-Lost` (DECISIONS O16); No-nego path ⇒ `Negotiation - Auto Approved`. Closing only from Approved/Auto Approved.
 - **Edit Service sebelum closing** (M0 §5.1, keputusan pemilik 2026-08-07): `Negotiation - Approved` / `Negotiation - Auto Approved` → `Negotiation - Pending Approval` (versi proposal baru, `require_lead = false` seperti seluruh edge masuk Pending Approval yang digerakkan sales; migrasi `20260807040000_edit_service_reapproval.sql`). Edge ini HANYA dipakai revisi ber-harga **custom** — revisi dengan harga standar MSL menulis versi proposal baru **tanpa transisi status sama sekali**, jadi tidak melewati mesin ini.

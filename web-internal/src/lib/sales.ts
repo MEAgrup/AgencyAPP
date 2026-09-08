@@ -134,6 +134,9 @@ export interface AttemptDetailAttempt {
   lead_id: string;
   owner_employee_id: string;
   owner_nama: string;
+  /** FS-3: rekan prospek bersama (dua arah), atau null. */
+  bersama_owner_employee_id: string | null;
+  bersama_owner_nama: string | null;
   status: string;
   claimed_at: string;
   created_at: string;

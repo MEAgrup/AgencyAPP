@@ -113,6 +113,21 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
   const { lead, attempts } = leadDetail;
 
+  /**
+   * FS-3 — attempt yang termasuk prospek bersama: yang MENAUTKAN dirinya, dan
+   * yang DITUNJUK. Diturunkan dari data, bukan flag kedua — satu tautan sudah
+   * cukup menandai keduanya, dan menandai satu sisi saja membuat sales yang
+   * mendaftarkan lead-nya lebih dulu tidak pernah tahu prospeknya kini
+   * dikerjakan berdua.
+   */
+  const bersamaIds = new Set<string>();
+  for (const a of attempts) {
+    if (a.bersama_dengan_attempt_id) {
+      bersamaIds.add(a.id);
+      bersamaIds.add(a.bersama_dengan_attempt_id);
+    }
+  }
+
   return (
     <div className="stack">
       <div>
@@ -242,6 +257,20 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                   <tr key={attempt.id}>
                     <td>
                       <Link href={`/sales/${attempt.id}`}>{attempt.id}</Link>
+                      {/*
+                        FS-3 — "Prospek tersebut otomatis menjadi prospek
+                        bersama". Ditandai di KEDUA baris: yang menautkan diri
+                        dan yang ditunjuknya. Menandai satu sisi saja membuat
+                        sales yang mendaftarkan lead-nya lebih dulu tidak pernah
+                        melihat bahwa prospeknya kini dikerjakan berdua.
+                      */}
+                      {bersamaIds.has(attempt.id) && (
+                        <div>
+                          <span className="badge badge-amber" title="Prospek ini dikerjakan lebih dari satu sales">
+                            Prospek Bersama
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td>{attempt.owner_nama}</td>
                     <td>

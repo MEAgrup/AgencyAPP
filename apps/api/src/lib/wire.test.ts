@@ -168,7 +168,10 @@ describe('leads wire mappers', () => {
         recordStatus: 'active', winningAttemptId: null, createdAt: new Date('2026-07-01T00:00:00.000Z'),
       },
       attempts: [
-        { id: 'PRSP-1', ownerEmployeeId: 'EMP-1', ownerNama: 'Budi', status: 'New Lead', claimedAt: new Date('2026-07-02T00:00:00.000Z') },
+        {
+          id: 'PRSP-1', ownerEmployeeId: 'EMP-1', ownerNama: 'Budi', status: 'New Lead',
+          claimedAt: new Date('2026-07-02T00:00:00.000Z'), bersamaDenganAttemptId: null,
+        },
       ],
     };
     const wire = leadDetailToWire(detail);
@@ -1188,6 +1191,8 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
       leadId: 'LEAD-202607-0001',
       ownerEmployeeId: '2409230432',
       ownerNama: 'BUDI SANTOSO',
+      bersamaOwnerEmployeeId: null,
+      bersamaOwnerNama: null,
       status: 'Negotiation',
       claimedAt: new Date('2026-07-20T03:00:00Z'),
       createdAt: new Date('2026-07-19T02:00:00Z'),

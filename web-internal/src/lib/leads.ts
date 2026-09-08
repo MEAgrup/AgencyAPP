@@ -180,6 +180,8 @@ export interface LeadAttemptRow {
   owner_nama: string;
   status: string;
   claimed_at: string;
+  /** FS-3: attempt yang ditautkan sebagai prospek bersama, atau null. */
+  bersama_dengan_attempt_id: string | null;
 }
 
 // GET /leads/{id} response — LeadRow minus open_attempt_count, plus attempts.

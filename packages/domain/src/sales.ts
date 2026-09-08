@@ -1970,6 +1970,14 @@ export interface AttemptCoreView {
   leadId: string;
   ownerEmployeeId: string;
   ownerNama: string;
+  /**
+   * FS-3 — rekan prospek bersama, dilihat dari attempt INI. Diisi dari dua
+   * arah (attempt ini menautkan diri, atau attempt lain menautkan diri ke
+   * attempt ini), karena penunjuknya hanya ada di satu baris sementara
+   * keduanya sama-sama pemilik prospeknya. `null` bila bukan prospek bersama.
+   */
+  bersamaOwnerEmployeeId: string | null;
+  bersamaOwnerNama: string | null;
   status: string;
   claimedAt: Date;
   createdAt: Date;
@@ -2069,11 +2077,26 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
   const rows = await sql<{
     id: string; lead_id: string; owner_employee_id: string; owner_nama: string;
     status: string; claimed_at: Date; created_at: Date;
+    bersama_owner_employee_id: string | null; bersama_owner_nama: string | null;
   }[]>`
     select pa.id, pa.lead_id, pa.owner_employee_id,
            private.employee_display_name(pa.owner_employee_id) as owner_nama,
-           pa.status, pa.claimed_at, pa.created_at
+           pa.status, pa.claimed_at, pa.created_at,
+           -- FS-3: rekan prospek bersama, DUA ARAH. Penunjuknya hanya ada di
+           -- baris yang menyusul, sementara keduanya sama-sama pemilik
+           -- prospeknya — jadi satu arah saja membuat sales yang mendaftarkan
+           -- lead-nya lebih dulu tidak pernah melihat rekannya di form closing.
+           rekan.owner_employee_id as bersama_owner_employee_id,
+           private.employee_display_name(rekan.owner_employee_id) as bersama_owner_nama
     from prospect_attempts pa
+    left join lateral (
+      select p2.owner_employee_id
+        from prospect_attempts p2
+       where p2.id = pa.bersama_dengan_attempt_id
+          or p2.bersama_dengan_attempt_id = pa.id
+       order by p2.created_at, p2.id
+       limit 1
+    ) rekan on true
     where pa.id = ${id}`;
   if (rows.length === 0) {
     throw new NotFoundError();
@@ -2081,7 +2104,10 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
   const a = rows[0];
   const attempt: AttemptCoreView = {
     id: a.id, leadId: a.lead_id, ownerEmployeeId: a.owner_employee_id,
-    ownerNama: a.owner_nama, status: a.status, claimedAt: a.claimed_at, createdAt: a.created_at,
+    ownerNama: a.owner_nama,
+    bersamaOwnerEmployeeId: a.bersama_owner_employee_id,
+    bersamaOwnerNama: a.bersama_owner_nama,
+    status: a.status, claimedAt: a.claimed_at, createdAt: a.created_at,
   };
 
   // P-2 (kecepatan loading) — satu batch untuk seluruh panel attempt.

@@ -174,6 +174,8 @@ export interface LeadAttemptWire {
   owner_nama: string;
   status: string;
   claimed_at: string;
+  /** FS-3: attempt yang ditautkan sebagai prospek bersama, atau null. */
+  bersama_dengan_attempt_id: string | null;
 }
 
 /**
@@ -680,6 +682,7 @@ export function leadDetailToWire(d: leads.LeadDetailView): LeadDetailWire {
       id: a.id,
       owner_employee_id: a.ownerEmployeeId,
       owner_nama: a.ownerNama,
+      bersama_dengan_attempt_id: a.bersamaDenganAttemptId,
       status: a.status,
       claimed_at: a.claimedAt.toISOString(),
     })),
@@ -2420,6 +2423,9 @@ export interface AttemptDetailAttemptWire {
   lead_id: string;
   owner_employee_id: string;
   owner_nama: string;
+  /** FS-3: rekan prospek bersama (dua arah), atau null. */
+  bersama_owner_employee_id: string | null;
+  bersama_owner_nama: string | null;
   status: string;
   claimed_at: string;
   created_at: string;
@@ -2474,6 +2480,8 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
       lead_id: d.attempt.leadId,
       owner_employee_id: d.attempt.ownerEmployeeId,
       owner_nama: d.attempt.ownerNama,
+      bersama_owner_employee_id: d.attempt.bersamaOwnerEmployeeId,
+      bersama_owner_nama: d.attempt.bersamaOwnerNama,
       status: d.attempt.status,
       claimed_at: d.attempt.claimedAt.toISOString(),
       created_at: d.attempt.createdAt.toISOString(),

@@ -29,6 +29,7 @@ function attempt(id: string, ownerEmployeeId: string, status: string): LeadAttem
     owner_nama: ownerEmployeeId,
     status,
     claimed_at: '2026-08-03T10:43:56.000Z',
+    bersama_dengan_attempt_id: null,
   };
 }
 
