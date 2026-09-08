@@ -175,10 +175,23 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "146"
-check "entity_prefix"    "select count(*) from entity_prefix"    "40"
-check "sm_machines"      "select count(*) from sm_machines"      "31"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "147"
+check "entity_prefix"    "select count(*) from entity_prefix"    "41"
+check "sm_machines"      "select count(*) from sm_machines"      "32"
 check "notif_events"     "select count(*) from notif_events"     "73"
+# --- M18 Store Operation (20260924010000_m18_store_ops_sku.sql) --------------
+# 147 = 146 + `store_ops_skus` — unit kerja divisi Store Operation, satu baris
+#       per SKU di bawah satu Brief (ketokan K-5, pola AST-/ADC-/BKG-/LSS-).
+#  41 =  40 + prefix `SKU` (M6A §7; dual-home dengan PREFIXES di ident.ts).
+#  32 =  31 + mesin #32 `store_ops_sku`
+#       ([Menunggu Eksekusi] -> [Dikerjakan] -> [Terupload] -> [Dievaluasi],
+#       plus [Gagal Upload] dua arah dari [Dikerjakan]). [Terupload] SELESAI
+#       produksi dan sengaja bukan terminal — K-6 memisahkan angka dampak dari
+#       "selesai" supaya leadtime produksi tidak ternoda tunggu pasar ~30 hari.
+#  73 TETAP — event Store Ops didaftarkan BERSAMA emitternya (preseden v9
+#       `internal_tasks`); Brief-nya sudah ikut BriefSiapReviewAm/BriefSelesai
+#       (B-1). Mendaftarkan event yang tak pernah diemisikan membuat katalog
+#       berbohong.
 # 73 = 69 + 4 event Feedback OD 2026-09-07 (katalog v15,
 #      20260922100100_f3_notif_feedback_od.sql): `m6.brief.siap_review_am` dan
 #      `m6.brief.selesai` (resolver 'explicit' -> AM pemilik klien, menutup
