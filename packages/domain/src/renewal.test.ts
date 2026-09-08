@@ -20,6 +20,7 @@ import {
   executeRenewal,
   getRenewal,
   getRenewalDetail,
+  JENIS_BAYAR_KOMISI,
   JENIS_CROSS_SELL,
   JENIS_PERPANJANGAN,
   listRenewals,
@@ -140,6 +141,22 @@ async function closedClient(actor: Actor, svc: string): Promise<string> {
     paymentScheme: PAYMENT_SCHEME_LUNAS,
   });
   return res.clientId;
+}
+
+/**
+ * Layanan Komisi seperti di katalog live: passthrough, harga standar Rp 0,
+ * `durasi_bulan` NULL, dan `pengakuan = 'bulan_berikutnya'` (D-KOM). Nilainya
+ * diisi Sales per transaksi — itu sebabnya harga standarnya nol.
+ */
+async function seedKomisiService(id: string): Promise<string> {
+  await sql`insert into master_services (id, created_by) values (${id}, 'ZZ-ADMIN')`;
+  await sql`
+    insert into master_service_versions
+      (service_id, version_no, name, standard_price, commission_rule, active, effective_from,
+       pricing_mode, durasi_bulan, qty_menambah, pengakuan, created_by)
+    values (${id}, 1, 'Komisi', '0.00', 'flat Rp 0', true, '2020-01-01',
+            'passthrough', NULL, 'volume', 'bulan_berikutnya', 'ZZ-ADMIN')`;
+  return id;
 }
 
 const standardLine = (svc: string): RenewalLine => ({ masterServiceId: svc });
@@ -576,5 +593,172 @@ describeDb('reads', () => {
     expect(money.parse(after.lines[0].proposedPrice)).toBe(money.parse('7200000'));
 
     await expect(getRenewalDetail(sql, andi(), rn.id)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-4 — jenis `bayar_komisi`: TAGIHAN, bukan kesepakatan baru.
+// ---------------------------------------------------------------------------
+describeDb('bayar_komisi (FS-4)', () => {
+  /**
+   * Inti FS-4, dan alasan jenis ini punya cabangnya sendiri.
+   *
+   * `executeRenewal` untuk perpanjangan/cross-sell MENGGANTI SELURUH alokasi
+   * komisi klien (KS-2) dan memindahkan `clients.sales_pic_id`. Komisi ditagih
+   * SETIAP BULAN — memakai jalur itu apa adanya berarti kepemilikan klien
+   * berpindah tiap bulan, diam-diam, ke siapa pun yang menekan tombol tagih.
+   *
+   * Dua assertion ini yang menahannya, dan keduanya membandingkan keadaan
+   * SEBELUM dengan SESUDAH, bukan sekadar "ada barisnya".
+   */
+  it('TIDAK mencetak CTR- dan TIDAK menyentuh alokasi komisi klien', async () => {
+    const komisi = await seedKomisiService('MSV-ZZ-RNKOM1');
+    const svc = await seedService('MSV-ZZ-RNKOM1B');
+    const clientId = await closedClient(budi(), svc);
+
+    const allocSebelum = await sql`
+      select salesperson_id, basis_points from client_sales_allocations
+       where client_id = ${clientId} order by salesperson_id`;
+    const picSebelum = await sql`
+      select sales_pic_id, commission_payment_pic_id from clients where id = ${clientId}`;
+    const kontrakSebelum = await sql`select id from contracts where client_id = ${clientId}`;
+
+    const rn = await proposeRenewal(
+      sql, budi(), clientId, JENIS_BAYAR_KOMISI,
+      [{ masterServiceId: komisi, amount: '2500000' }], true,
+    );
+    expect(rn.status).toBe(STATUS_AUTO_APPROVED);
+
+    const res = await executeRenewal(sql, budi(), rn.id, {
+      parties: { primarySalespersonId: '', allocations: [] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+
+    // 1) Nol kontrak baru — jumlahnya sama persis dengan sebelumnya.
+    expect(res.contractId).toBeNull();
+    const kontrakSesudah = await sql`select id from contracts where client_id = ${clientId}`;
+    expect(kontrakSesudah.length).toBe(kontrakSebelum.length);
+
+    // 2) Alokasi & PIC tidak bergerak sedikit pun.
+    const allocSesudah = await sql`
+      select salesperson_id, basis_points from client_sales_allocations
+       where client_id = ${clientId} order by salesperson_id`;
+    expect(allocSesudah).toEqual(allocSebelum);
+    const picSesudah = await sql`
+      select sales_pic_id, commission_payment_pic_id from clients where id = ${clientId}`;
+    expect(picSesudah).toEqual(picSebelum);
+
+    // 3) Yang MEMANG lahir: satu SVC- (tanpa kontrak) + satu TRX- senilai
+    //    angka yang diketik Sales.
+    expect(res.transactionId).toMatch(/^TRX-/);
+    const trx = await sql`
+      select total_agreed_value::text as total from transactions where id = ${res.transactionId}`;
+    expect(money.parse(trx[0].total)).toBe(money.parse('2500000'));
+    const svcRows = await sql`
+      select id, contract_id from services
+       where client_id = ${clientId} and master_service_id = ${komisi}`;
+    expect(svcRows.length).toBe(1);
+    expect(svcRows[0].contract_id).toBeNull();
+  });
+
+  it('menolak layanan yang pengakuan-nya BUKAN bulan_berikutnya', async () => {
+    // Digerbangi lewat penanda katalog, bukan nama "Komisi": nama bisa
+    // disunting Sales Head lewat form MSL kapan saja.
+    const biasa = await seedService('MSV-ZZ-RNKOM2');
+    const clientId = await closedClient(budi(), biasa);
+    await expect(
+      proposeRenewal(sql, budi(), clientId, JENIS_BAYAR_KOMISI, [standardLine(biasa)], true),
+    ).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('menolak lebih dari satu baris — "pilihan jasa hanya 1 yaitu komisi"', async () => {
+    const komisi = await seedKomisiService('MSV-ZZ-RNKOM3');
+    const svc = await seedService('MSV-ZZ-RNKOM3B');
+    const clientId = await closedClient(budi(), svc);
+    await expect(
+      proposeRenewal(sql, budi(), clientId, JENIS_BAYAR_KOMISI,
+        [{ masterServiceId: komisi, amount: '1000000' }, standardLine(svc)], true),
+    ).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('gerbang yang sama berlaku saat RESUBMIT, bukan hanya saat mengajukan', async () => {
+    // Pintu kedua ke aturan yang sama selalu jadi yang terlupa.
+    const komisi = await seedKomisiService('MSV-ZZ-RNKOM4');
+    const biasa = await seedService('MSV-ZZ-RNKOM4B');
+    const clientId = await closedClient(budi(), biasa);
+
+    const rn = await proposeRenewal(
+      sql, budi(), clientId, JENIS_BAYAR_KOMISI,
+      [{ masterServiceId: komisi, amount: '900000', proposedPrice: '900000', commissionRule: 'flat Rp 0' }],
+      false,
+    );
+    await decideRenewal(sql, salesLead(), rn.id, DECISION_REJECT, 'angkanya salah');
+
+    await expect(
+      resubmitRenewal(sql, budi(), rn.id, [standardLine(biasa)]),
+    ).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  /**
+   * Pagar untuk harga yang dibayar FS-4: `ExecuteRenewalInput.durasiBulan`/
+   * `tanggalMulai`/`tanggalAkhir` dilonggarkan jadi opsional, karena
+   * `bayar_komisi` tidak punya jendela untuk diisi dan jenisnya baru diketahui
+   * saat baris `RNW-` dibaca di dalam transaksi.
+   *
+   * Konsekuensinya: `tsc` tidak lagi menahan pemanggil perpanjangan yang lupa
+   * mengisinya. Yang menahan sekarang adalah runtime — dan tanpa tes ini,
+   * pelonggaran tipe tadi mencabut satu-satunya penjaga yang ada.
+   */
+  it('perpanjangan MENOLAK jendela yang hilang atau tidak masuk akal', async () => {
+    const svc = await seedService('MSV-ZZ-RNKOM6');
+    const clientId = await closedClient(budi(), svc);
+    const parties = {
+      primarySalespersonId: budi().employeeId,
+      allocations: [{ salespersonId: budi().employeeId, basisPoints: 10000 }],
+    };
+
+    const rn1 = await proposeRenewal(sql, budi(), clientId, JENIS_PERPANJANGAN, [standardLine(svc)], true);
+    // Jendela HILANG sama sekali.
+    await expect(executeRenewal(sql, budi(), rn1.id, {
+      parties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    })).rejects.toBeInstanceOf(IncompleteError);
+
+    // Akhir mendahului mulai.
+    await expect(executeRenewal(sql, budi(), rn1.id, {
+      durasiBulan: 12, tanggalMulai: '2027-09-01', tanggalAkhir: '2026-09-01',
+      parties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    })).rejects.toBeInstanceOf(IncompleteError);
+
+    // Durasi di luar 1..36.
+    await expect(executeRenewal(sql, budi(), rn1.id, {
+      durasiBulan: 0, ...nextYearWindow(),
+      parties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    })).rejects.toBeInstanceOf(IncompleteError);
+    await expect(executeRenewal(sql, budi(), rn1.id, {
+      durasiBulan: 37, ...nextYearWindow(),
+      parties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    })).rejects.toBeInstanceOf(IncompleteError);
+
+    // Dan sesudah semua penolakan itu, TIDAK ada kontrak yang terlanjur lahir.
+    const kontrak = await sql`select id from contracts where client_id = ${clientId}`;
+    expect(kontrak.length).toBe(0);
+  });
+
+  it('perpanjangan TETAP mencetak CTR- dan TETAP mengganti alokasi (KS-2 utuh)', async () => {
+    // Pagar arah sebaliknya: cabang FS-4 tidak boleh diam-diam mematikan
+    // perilaku jenis lain.
+    const svc = await seedService('MSV-ZZ-RNKOM5');
+    const clientId = await closedClient(budi(), svc);
+    const rn = await proposeRenewal(sql, budi(), clientId, JENIS_PERPANJANGAN, [standardLine(svc)], true);
+    const res = await executeRenewal(sql, budi(), rn.id, {
+      ...nextYearWindow(),
+      durasiBulan: 12,
+      parties: { primarySalespersonId: andi().employeeId, allocations: [{ salespersonId: andi().employeeId, basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    expect(res.contractId).toMatch(/^CTR-/);
+    const alloc = await sql`
+      select salesperson_id from client_sales_allocations where client_id = ${clientId}`;
+    expect(alloc.map((r) => r.salesperson_id)).toEqual([andi().employeeId]);
   });
 });

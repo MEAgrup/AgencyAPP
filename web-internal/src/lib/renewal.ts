@@ -33,6 +33,23 @@ export function canDecideRenewalUi(role: Role | null): boolean {
 
 export const JENIS_PERPANJANGAN = 'perpanjangan';
 export const JENIS_CROSS_SELL = 'cross_sell';
+/** FS-4 — penagihan komisi bulan lalu: TAGIHAN, bukan kesepakatan baru. */
+export const JENIS_BAYAR_KOMISI = 'bayar_komisi';
+
+/**
+ * Label jenis. Sengaja MAP, bukan ternary: bentuk ternary biner yang dipakai
+ * sebelumnya akan melabeli jenis ketiga sebagai "Cross Sell" — salah, diam,
+ * dan hanya terlihat oleh orang yang tahu jenis itu ada.
+ */
+export const JENIS_LABEL: Record<string, string> = {
+  [JENIS_PERPANJANGAN]: 'Perpanjangan',
+  [JENIS_CROSS_SELL]: 'Cross Sell',
+  [JENIS_BAYAR_KOMISI]: 'Bayar Komisi',
+};
+
+export function labelJenis(jenis: string): string {
+  return JENIS_LABEL[jenis] ?? jenis;
+}
 
 export const STATUS_PENDING = 'Pending Approval';
 export const STATUS_AUTO_APPROVED = 'Auto Approved';
@@ -80,7 +97,8 @@ export interface ExecuteRenewalInput {
 }
 
 export interface ExecuteRenewalResult {
-  contract_id: string;
+  /** `null` untuk `bayar_komisi` (FS-4) — tagihan tidak mencetak kontrak. */
+  contract_id: string | null;
   transaction_id: string;
 }
 

@@ -1394,9 +1394,20 @@ export function resolvePIC(c: ClosingParties): string {
   return c.commissionPaymentPicId as string;
 }
 
-/** validateShape enforces the payment-scheme ↔ schedule shape (M0 §6 rule 5). Exported so `renewal.ts` (R-03) validates a renewal/cross-sell's parties+payment shape with the same rule, not a second copy. */
-export function validateShape(input: ClosingInput): void {
-  validateParties(input.parties);
+/**
+ * validateSchemeShape enforces ONLY the payment-scheme ↔ schedule half of
+ * M0 §6 rule 5 — no parties, no allocation.
+ *
+ * Dipisah dari `validateShape` untuk FS-4: `renewal.executeRenewal` dengan
+ * jenis `bayar_komisi` tidak memakai alokasi sales sama sekali (ketokan FS-3 —
+ * penagihan komisi tidak boleh memindahkan kepemilikan klien), tapi jadwal
+ * cicilannya tetap tagihan sungguhan yang Finance verifikasi seperti tagihan
+ * lain. Diekstrak, BUKAN disalin: satu aturan jadwal, satu tempat.
+ */
+export function validateSchemeShape(input: {
+  paymentScheme: string;
+  installments?: InstallmentInput[];
+}): void {
   if (!PAYMENT_SCHEMES.has(input.paymentScheme)) {
     throw new IncompleteError();
   }
@@ -1428,6 +1439,12 @@ export function validateShape(input: ClosingInput): void {
       throw new IncompleteError();
     }
   }
+}
+
+/** validateShape enforces the payment-scheme ↔ schedule shape (M0 §6 rule 5) PLUS the parties/allocation rules. Exported so `renewal.ts` (R-03) validates a renewal/cross-sell's parties+payment shape with the same rule, not a second copy. */
+export function validateShape(input: ClosingInput): void {
+  validateParties(input.parties);
+  validateSchemeShape(input);
 }
 
 /** approvedLine is one line of the latest proposal, enriched from the Qualified snapshot. */

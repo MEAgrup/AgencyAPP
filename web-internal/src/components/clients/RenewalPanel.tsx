@@ -30,8 +30,10 @@ import {
   getRenewalDetail,
   isSalesLead,
   isSalesStaff,
+  JENIS_BAYAR_KOMISI,
   JENIS_CROSS_SELL,
   JENIS_PERPANJANGAN,
+  labelJenis,
   listRenewals,
   proposeRenewal,
   resubmitRenewal,
@@ -39,6 +41,7 @@ import {
   STATUS_AUTO_APPROVED,
   STATUS_PENDING,
   STATUS_REJECTED,
+  type ExecuteRenewalResult,
   type Renewal,
   type RenewalDetail,
 } from '@/lib/renewal';
@@ -65,6 +68,19 @@ const emptyLineRow = (): LineRow => ({
   master_service_id: '', name: '', proposed_price: '', commission_rule: '', quantity: '', amount: '',
 });
 
+/**
+ * FS-4 — layanan yang sah untuk tagihan komisi.
+ *
+ * Disaring lewat PENANDA KATALOG `pengakuan = 'bulan_berikutnya'` (D-KOM),
+ * bukan lewat nama "Komisi": nama layanan bisa disunting Sales Head lewat form
+ * MSL kapan saja, dan mengunci ke nama berarti penagihan berhenti bekerja pada
+ * hari seseorang merapikan katalog. Server menegakkan aturan yang sama — ini
+ * cerminnya, supaya dropdown tidak menawarkan yang nanti ditolak.
+ */
+function layananKomisi(services: MasterService[]): MasterService[] {
+  return services.filter((s) => s.pengakuan === 'bulan_berikutnya');
+}
+
 function toProposalLineInputs(rows: LineRow[]): ProposalLineInput[] {
   return rows
     .filter((r) => r.master_service_id.trim() !== '')
@@ -79,13 +95,15 @@ function toProposalLineInputs(rows: LineRow[]): ProposalLineInput[] {
 
 /** Compact line editor — same standard/custom split as `/sales/[id]`'s ProposalLinesEditor, without the Payment Terms column (renewal execution takes its own installment schedule, not per-line terms). */
 function LinesEditor({
-  rows, custom, services, onChange, disabled,
+  rows, custom, services, onChange, disabled, satuBaris,
 }: {
   rows: LineRow[];
   custom: boolean;
   services: MasterService[];
   onChange: (rows: LineRow[]) => void;
   disabled?: boolean;
+  /** FS-4: "Pilihan jasa hanya 1 yaitu komisi" — tanpa tombol tambah baris. */
+  satuBaris?: boolean;
 }) {
   const byId = new Map(services.map((s) => [s.id, s]));
 
@@ -173,7 +191,7 @@ function LinesEditor({
                     </td>
                   )}
                   <td>
-                    {rows.length > 1 && (
+                    {rows.length > 1 && !satuBaris && (
                       <button type="button" className="btn btnGhost btnSm" disabled={disabled}
                         onClick={() => onChange(rows.filter((_, i) => i !== idx))}>
                         Hapus
@@ -186,9 +204,11 @@ function LinesEditor({
           </tbody>
         </table>
       </div>
-      <button type="button" className="btn btnSecondary btnSm" disabled={disabled} onClick={() => onChange([...rows, emptyLineRow()])}>
-        + Tambah Jasa
-      </button>
+      {!satuBaris && (
+        <button type="button" className="btn btnSecondary btnSm" disabled={disabled} onClick={() => onChange([...rows, emptyLineRow()])}>
+          + Tambah Jasa
+        </button>
+      )}
     </div>
   );
 }
@@ -198,7 +218,20 @@ interface AllocRow {
   persen: string;
 }
 
-function ExecuteForm({ clientId, id, onDone }: { clientId: string; id: string; onDone: () => void }) {
+function ExecuteForm({
+  clientId, id, onDone, tagihanSaja,
+}: {
+  clientId: string;
+  id: string;
+  onDone: () => void;
+  /**
+   * FS-4 `bayar_komisi`: tidak ada kontrak yang lahir, jadi tidak ada jendela
+   * untuk diisi — dan alokasi sales SENGAJA tidak diminta, karena KS-2
+   * mengganti seluruh alokasi klien setiap eksekusi dan komisi ditagih tiap
+   * bulan. Server menegakkan hal yang sama; ini cerminnya, bukan gerbangnya.
+   */
+  tagihanSaja?: boolean;
+}) {
   const [durasi, setDurasi] = useState('12');
   const [mulai, setMulai] = useState(todayISO());
   const [akhir, setAkhir] = useState('');
@@ -208,7 +241,7 @@ function ExecuteForm({ clientId, id, onDone }: { clientId: string; id: string; o
   const [installments, setInstallments] = useState<{ amount: string; due_date: string }[]>([{ amount: '', due_date: '' }]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ contract_id: string; transaction_id: string } | null>(null);
+  const [result, setResult] = useState<ExecuteRenewalResult | null>(null);
 
   const sumPersen = allocRows.reduce((sum, r) => sum + (Number(r.persen) || 0), 0);
   const needsSchedule = scheme === '[Termin]' || scheme === '[Bayar di Belakang]';
@@ -224,16 +257,18 @@ function ExecuteForm({ clientId, id, onDone }: { clientId: string; id: string; o
     try {
       const primary = allocRows[0]?.salesperson_id.trim() ?? '';
       const res = await executeRenewal(clientId, id, {
-        durasi_bulan: Number(durasi),
-        tanggal_mulai: mulai,
-        tanggal_akhir: akhir,
-        parties: {
-          primary_salesperson_id: primary,
-          allocations: allocRows
-            .filter((r) => r.salesperson_id.trim() !== '')
-            .map((r) => ({ salesperson_id: r.salesperson_id.trim(), basis_points: Math.round((Number(r.persen) || 0) * 100) })),
-          commission_payment_pic_id: allocRows.length > 1 ? (pic || undefined) : undefined,
-        },
+        durasi_bulan: tagihanSaja ? 0 : Number(durasi),
+        tanggal_mulai: tagihanSaja ? '' : mulai,
+        tanggal_akhir: tagihanSaja ? '' : akhir,
+        parties: tagihanSaja
+          ? { primary_salesperson_id: '', allocations: [] }
+          : {
+              primary_salesperson_id: primary,
+              allocations: allocRows
+                .filter((r) => r.salesperson_id.trim() !== '')
+                .map((r) => ({ salesperson_id: r.salesperson_id.trim(), basis_points: Math.round((Number(r.persen) || 0) * 100) })),
+              commission_payment_pic_id: allocRows.length > 1 ? (pic || undefined) : undefined,
+            },
         payment_scheme: scheme,
         installments: needsSchedule ? installments.filter((i) => i.amount && i.due_date) : undefined,
       });
@@ -249,7 +284,11 @@ function ExecuteForm({ clientId, id, onDone }: { clientId: string; id: string; o
   if (result) {
     return (
       <div className="alert alertSuccess" role="status">
-        Eksekusi berhasil. Contract: {result.contract_id} · Transaction:{' '}
+        Eksekusi berhasil.{' '}
+        {result.contract_id
+          ? <>Contract: {result.contract_id} &middot; </>
+          : <>Tagihan komisi (tanpa kontrak baru) &middot; </>}
+        Transaction:{' '}
         <Link href={`/finance/transactions/${result.transaction_id}`}>{result.transaction_id}</Link>
       </div>
     );
@@ -258,6 +297,15 @@ function ExecuteForm({ clientId, id, onDone }: { clientId: string; id: string; o
   return (
     <form className="form" onSubmit={submit} style={{ marginTop: 12 }}>
       {error && <div className="alert alertError" role="alert">{error}</div>}
+      {tagihanSaja && (
+        <p className="muted" style={{ fontSize: 13 }}>
+          Bayar Komisi tidak membuat kontrak baru dan tidak mengubah alokasi
+          komisi klien — yang lahir hanya baris jasa dan transaksi untuk ditagih
+          Finance.
+        </p>
+      )}
+
+      {!tagihanSaja && (
       <div className="formRow">
         <div className="field">
           <label htmlFor={`durasi-${id}`}>Durasi (bulan)</label>
@@ -272,7 +320,9 @@ function ExecuteForm({ clientId, id, onDone }: { clientId: string; id: string; o
           <input id={`akhir-${id}`} type="date" required value={akhir} onChange={(e) => setAkhir(e.target.value)} />
         </div>
       </div>
+      )}
 
+      {!tagihanSaja && (
       <div className="field">
         <label>Alokasi Sales (Σ harus 100%, maks 5) &middot; KS-2: kredit ini MENGGANTI seluruh alokasi lama klien</label>
         <div className="table-wrap">
@@ -301,8 +351,9 @@ function ExecuteForm({ clientId, id, onDone }: { clientId: string; id: string; o
           <span style={{ color: sumPersen === 100 ? undefined : 'var(--danger, #c0392b)' }}>Σ alokasi: {sumPersen}%</span>
         </div>
       </div>
+      )}
 
-      {allocRows.length > 1 && (
+      {!tagihanSaja && allocRows.length > 1 && (
         <div className="field">
           <label htmlFor={`pic-${id}`}>Commission &amp; Payment PIC</label>
           <select id={`pic-${id}`} value={pic} onChange={(e) => setPic(e.target.value)}>
@@ -441,7 +492,7 @@ function RenewalRow({
         <div>
           <strong>{row.id}</strong>{' '}
           <span className="muted" style={{ fontSize: 12 }}>
-            {row.jenis === JENIS_PERPANJANGAN ? 'Perpanjangan' : 'Cross Sell'} &middot; {formatDateTime(row.created_at)}
+            {labelJenis(row.jenis)} &middot; {formatDateTime(row.created_at)}
           </span>
         </div>
         <span className={`badge ${row.status === STATUS_REJECTED ? 'badge-red' : row.status.startsWith('Auto') || row.status === STATUS_APPROVED ? 'badge-green' : 'badge-amber'}`}>
@@ -494,7 +545,14 @@ function RenewalRow({
           {row.status === STATUS_REJECTED && canWrite && (
             <form className="form" onSubmit={resubmit}>
               {resubmitError && <div className="alert alertError" role="alert">{resubmitError}</div>}
-              <LinesEditor rows={resubmitLines} custom services={msvcs} onChange={setResubmitLines} disabled={resubmitBusy} />
+              <LinesEditor
+                rows={resubmitLines}
+                custom
+                services={row.jenis === JENIS_BAYAR_KOMISI ? layananKomisi(msvcs) : msvcs}
+                onChange={setResubmitLines}
+                disabled={resubmitBusy}
+                satuBaris={row.jenis === JENIS_BAYAR_KOMISI}
+              />
               <div>
                 <button type="submit" className="btn btnSecondary" disabled={resubmitBusy}>
                   {resubmitBusy ? 'Memproses...' : 'Resubmit Proposal'}
@@ -508,7 +566,14 @@ function RenewalRow({
               <button type="button" className={`btn ${showExecute ? 'btnPrimary' : 'btnSecondary'} btnSm`} onClick={() => setShowExecute((v) => !v)}>
                 {showExecute ? 'Tutup' : 'Eksekusi Renewal'}
               </button>
-              {showExecute && <ExecuteForm clientId={clientId} id={row.id} onDone={onChanged} />}
+              {showExecute && (
+                <ExecuteForm
+                  clientId={clientId}
+                  id={row.id}
+                  onDone={onChanged}
+                  tagihanSaja={row.jenis === JENIS_BAYAR_KOMISI}
+                />
+              )}
             </div>
           )}
 
@@ -542,6 +607,8 @@ export default function RenewalPanel({
   const [lines, setLines] = useState<LineRow[]>([emptyLineRow()]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const bayarKomisi = jenis === JENIS_BAYAR_KOMISI;
 
   const canWrite = canWriteRenewalUi(role, employeeId, salesPicId || null);
   const canDecide = canDecideRenewalUi(role);
@@ -586,10 +653,10 @@ export default function RenewalPanel({
   return (
     <section className="card" id="renewal">
       <div className="cardHeader">
-        <h2>Perpanjangan / Cross Sell</h2>
+        <h2>Perpanjangan / Cross Sell / Bayar Komisi</h2>
         {canWrite && (
           <button type="button" className={`btn ${showPropose ? 'btnPrimary' : 'btnSecondary'} btnSm`} onClick={() => setShowPropose((v) => !v)}>
-            {showPropose ? 'Tutup' : '+ Perpanjangan / Cross Sell'}
+            {showPropose ? 'Tutup' : '+ Penawaran / Tagihan'}
           </button>
         )}
       </div>
@@ -602,9 +669,21 @@ export default function RenewalPanel({
           <div className="formRow">
             <div className="field">
               <label htmlFor="rnw-jenis">Jenis</label>
-              <select id="rnw-jenis" value={jenis} onChange={(e) => setJenis(e.target.value)}>
+              <select
+                id="rnw-jenis"
+                value={jenis}
+                onChange={(e) => {
+                  // Baris di-reset saat jenis berubah: layanan yang sah untuk
+                  // satu jenis belum tentu sah untuk yang lain, dan baris sisa
+                  // dari pilihan sebelumnya akan ditolak server tanpa petunjuk
+                  // dari mana asalnya.
+                  setJenis(e.target.value);
+                  setLines([emptyLineRow()]);
+                }}
+              >
                 <option value={JENIS_PERPANJANGAN}>Perpanjangan</option>
                 <option value={JENIS_CROSS_SELL}>Cross Sell</option>
+                <option value={JENIS_BAYAR_KOMISI}>Bayar Komisi</option>
               </select>
             </div>
             <div className="field">
@@ -614,7 +693,21 @@ export default function RenewalPanel({
               </label>
             </div>
           </div>
-          <LinesEditor rows={lines} custom={!noNego} services={msvcs} onChange={setLines} disabled={submitting} />
+          <LinesEditor
+            rows={lines}
+            custom={!noNego}
+            services={bayarKomisi ? layananKomisi(msvcs) : msvcs}
+            onChange={setLines}
+            disabled={submitting}
+            satuBaris={bayarKomisi}
+          />
+          {bayarKomisi && layananKomisi(msvcs).length === 0 && (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Belum ada layanan berpengakuan &ldquo;bulan berikutnya&rdquo; di
+              Master Service List — tagihan komisi tidak bisa diajukan sampai
+              layanan itu ada.
+            </p>
+          )}
           <div>
             <button type="submit" className="btn btnPrimary" disabled={submitting}>
               {submitting ? 'Mengirim...' : 'Ajukan'}
@@ -626,7 +719,7 @@ export default function RenewalPanel({
       {rows === null ? (
         <p className="muted">Memuat...</p>
       ) : rows.length === 0 ? (
-        <div className="emptyState">Belum ada penawaran perpanjangan/cross-sell untuk klien ini.</div>
+        <div className="emptyState">Belum ada perpanjangan, cross-sell, atau tagihan komisi untuk klien ini.</div>
       ) : (
         <div className="stack" style={{ gap: 10 }}>
           {rows.map((r) => (
