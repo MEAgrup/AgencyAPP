@@ -30,57 +30,11 @@ export type TaskSource = 'brief' | 'asset';
 
 // module6_account.Brief. Many optional fields carry `omitempty` server-side, so
 // they can be ABSENT from the JSON (not null) when empty — treat missing == empty.
-export interface Brief {
-  id: string;
-  service_id: string;
-  strategy_id?: string;
-  assigned_division: string;
-  assigned_pic?: string;
-  // Feedback OD 2026-09-07 Creative #3 (F-1/F-2, dirender B-2) — identitas klien
-  // + nama PIC, ada di SETIAP baca Brief. NON-opsional: server mengirim `''`
-  // eksplisit kalau belum ada PIC, jadi halaman merender `—`, bukan `undefined`.
-  // Kueri yang mengisinya lewat `private.*` (perangkap O52) — jangan menambah
-  // join `services`/`clients` di FE maupun di kueri baru.
-  client_id: string;
-  client_nama: string;
-  assigned_pic_nama: string;
-  /**
-   * A-req-1 (KOL #1) — jendela campaign + budget sebagai KOLOM. `''`/`null`
-   * berarti belum diisi (eksplisit, bukan kunci hilang).
-   */
-  tanggal_mulai: string;
-  tanggal_akhir: string;
-  budget: string | null;
-  /** A-req-2 (K-3) — Brief Creative sumber aset; null = tidak ditunjuk. */
-  source_creative_brief_id: string | null;
-  /**
-   * A-req-3 — jumlah unit kerja anak (Asset / Campaign / Booking / Sesi Live).
-   * `0` = belum dipecah, dan itu justru baris yang paling perlu dilihat leader.
-   *
-   * ⚠️ Bentuk ini adalah SALINAN PARALEL dari `account.ts::Brief`, dan hanya yang
-   * di `account.ts` yang diikat `shape-parity.test.ts` ke `BriefWire`. Keduanya
-   * disuapi wire yang SAMA, jadi field baru harus ditambahkan di dua tempat —
-   * kalau tidak, halaman yang membaca bentuk ini melihat `undefined` sementara
-   * parity tetap hijau. Dicatat di handoff sebagai utang yang perlu disatukan.
-   */
-  jumlah_anak: number;
-  deliverable_type: string;
-  quantity_target: number;
-  due_date: string; // "YYYY-MM-DD"
-  priority: string;
-  recurring: boolean;
-  recurring_frequency?: string;
-  recurring_count?: number;
-  recurring_end_date?: string;
-  instructions?: string;
-  reference_attachments?: string;
-  title: string;
-  status: string;
-  revision_count: number;
-  revision_flagged: boolean;
-  created_by: string;
-  created_at: string; // RFC3339
-}
+// Rumahnya `@/lib/brief` sejak 2026-09-08 — dulu salinan paralel dari
+// `account.ts::Brief` yang harus disunting dua kali untuk setiap field baru.
+// Re-export supaya pemanggil lama tidak berubah.
+import type { Brief } from '@/lib/brief';
+export type { Brief };
 
 // module7_creative.Asset. `sla_target_hours`/`revision_sla_target_hours`/
 // `hours_logged`/`attributed_gmv` are `*float64` with `omitempty` — absent when nil.
