@@ -10,18 +10,42 @@
 
 | Apa | Nilai |
 |---|---|
-| Branch | `claude/peaceful-wozniak-25acg5` — **belum ada PR** (tidak diminta) |
+| PR | **#335 SUDAH DI-MERGE** (`a9cb9e0`). PR #334 juga sudah di-merge (`ad20659`) |
+| Branch | `claude/peaceful-wozniak-25acg5` — di-reset ke `origin/main` sesudah merge |
 | Migrasi di repo | **217** (`20260928010000_m19_scs_task_engine.sql`) |
 | Gate repo | **155 tabel · 43 entity_prefix · 34 sm_machines · 73 notif_events** |
-| Live `CDPS SG` | **216 migrasi — M19 separuh SCS BELUM diterapkan** (lihat §4) |
+| Live `CDPS SG` | **217 migrasi — SINKRON dengan repo**, diverifikasi (lihat §1.1) |
 | Tes | core 985 · db 98 · domain 2355 (+1 skip) · apps/api 496 · web-internal 736 |
 | Typecheck | bersih di 6 target |
 | Lint | 3 error + 61 warning — **identik baseline**, semuanya pre-existing |
 
-**Yang berubah sejak handoff sebelumnya, dan perlu diketahui:** PR #334 sudah
-**di-merge** (2026-09-09 16:55 UTC) dan migrasi M19 separuh jadwal harian
-**sudah diterapkan ke live** — live sekarang 153 · 42 · 33 · 73. Langkah §2.1
-handoff sebelumnya karena itu **sudah selesai**, bukan tertunda.
+**M19 LENGKAP.** Kedua separuhnya (jadwal harian Gap A/D/E/F + SCS Gap B/G/I)
+sudah di `main` dan sudah di live. Tidak ada sisa M19 yang menunggu ketokan.
+
+### 1.1 Yang benar-benar diverifikasi di live, bukan diasumsikan
+
+Urutan O65 dipatuhi untuk KEDUA migrasi: **migrasi dulu lewat `apply_migration`,
+merge kemudian.** Sesudah apply, angka di live di-probe langsung:
+
+```
+tabel public   155 ✓    entity_prefix 43 ✓    sm_machines 34 ✓    notif_events 73 ✓
+notif katalog konsisten (SUM(event_count) = COUNT(notif_events)) ✓
+scs_kategori 4 baris seed ✓   sm_edges scs_task 9 ✓   terminal 1 ✓
+```
+
+plus empat invariant yang di-probe di live karena hanya di sanalah ia berarti:
+
+- himpunan state `scs_task` **identik** `brief_task` (minus state pembatalan
+  ber-Service) — invariant yang menopang pemakaian ulang `computeMetrics`;
+- `GRANT SELECT TO authenticated` ada di **kedua** tabel (tanpanya
+  `readAsActor` gagal "permission denied" sebelum satu policy pun dievaluasi);
+- **nol** write policy di kedua tabel;
+- `scs_tasks.client_id` **nullable**.
+
+`scripts/check-live-drift.sh` masih belum bisa dijalankan dari sandbox (egress
+Supabase diblok kebijakan org). Yang LEWAT dari sandbox adalah
+`mcp__Supabase__execute_sql` / `apply_migration` — itu yang dipakai di atas.
+Drift check per-slug penuh tetap perlu dijalankan sekali dari operator/CI.
 
 ---
 
@@ -101,56 +125,63 @@ sekaligus. **Pola "Task Additional" (Gap I)** juga menunggu dokumen yang sama.
 
 ---
 
-## 4. Langkah berikutnya, berurutan
+## 4. TASK BERIKUTNYA — browser UAT enam layar, lalu enam butir Sales
 
-### 4.1 Terapkan migrasi ke live — **belum dilakukan, dan sengaja**
+Migrasi dan merge **sudah selesai** (§1.1). Yang tersisa dari M19 bukan lagi
+kode, melainkan **satu-satunya jenis verifikasi yang belum pernah dijalankan**.
 
-```
-apply_migration  20260928010000_m19_scs_task_engine.sql   ← satu berkas, satu panggilan
-```
+### 4.1 🔴 Browser UAT — utang yang menumpuk dari DUA PR
 
-O65 dan preseden 2026-09-09: **migrasi dulu, merge kemudian**. Sesi ini
-**tidak** menerapkannya karena tidak ada PR yang diminta dan karenanya tidak ada
-merge yang diurutkan terhadapnya — menulis ke basis data produksi untuk cabang
-yang belum ditinjau siapa pun adalah keputusan pemilik, bukan keputusan sesi.
+Ini butir prioritas sesi berikutnya, dan alasannya spesifik: **keenam layar bisa
+gagal murni secara visual**. `next build` sukses, typecheck bersih, 736 tes
+`web-internal` hijau — dan grid-nya tetap bisa salah, karena tidak satu pun tes
+itu me-render halaman di browser sungguhan.
 
-Jangan `supabase db push`. Jangan `psql -f` (itu yang melahirkan drift O38).
-Verifikasi angka di live sesudah apply: **155 · 43 · 34 · 73**.
-`scripts/check-live-drift.sh` harus nol MISSING — **tidak berfungsi dari sandbox
-Claude Code** (egress Supabase diblok kebijakan org); jalankan dari operator
-atau CI runner. (Catatan: `mcp__Supabase__execute_sql`/`apply_migration` LEWAT
-dari sandbox — itu yang dipakai sesi ini untuk memverifikasi posisi live.)
-
-### 4.2 Browser UAT — **belum dilakukan** (dua bagian)
-
-Yang tertunggak dari handoff sebelumnya (§2.2, tiga layar jadwal harian) **plus**
-tiga layar baru sesi ini. Ketiganya bisa gagal **murni secara visual**:
-`next build` sukses, nol error, tabelnya salah.
+Harness B2 sudah ada dan Chromium sudah terpasang:
 
 ```bash
 node scripts/dev-jwt.mjs   ...   # cookie sesi lokal, klaim dari employee_claims()
 node scripts/browser-tour.mjs --token "$(cat token.txt)" --pages pages.json
 ```
 
-Halaman lama: `/creative/schedule`, `/creative/schedule/rekap`,
-`/creative/ketersediaan`. Halaman baru: `/creative/scs`, `/creative/scs/rekap`,
-`/creative/scs/kategori`. **Minimal empat aktor**: staff Creative, lead
-Creative, OD, Director.
+**Minimal empat aktor** untuk semuanya: staff Creative, lead Creative, OD,
+Director — gerbang tampilannya berbeda di keempatnya.
 
-Yang harus dilihat di layar baru, bukan cuma "200":
-- baris tanpa klien menampilkan **"Semua klien"**, bukan sel kosong;
+**Tiga layar dari PR #334** (`/creative/schedule`, `/creative/schedule/rekap`,
+`/creative/ketersediaan`). Yang harus dilihat, bukan cuma "200":
+- grid menampilkan **keempat** studio termasuk yang nol slot ("Bebas");
+- dua slot bertumpang **keduanya** tampil, yang bertumpang bergaris kuning;
+- menyimpan slot yang bentrok memunculkan **"Tersimpan, dengan catatan"** —
+  bukan pesan galat merah (warn-not-block adalah PERILAKU, D3/D4);
+- halaman rekap menampilkan kalimat "bukan KPI";
+- halaman ketersediaan menampilkan kotak "Ini bukan pengajuan cuti".
+
+**Tiga layar dari PR #335** (`/creative/scs`, `/creative/scs/rekap`,
+`/creative/scs/kategori`):
+- baris tanpa klien menampilkan **"Semua klien"**, bukan sel kosong (sel kosong
+  terbaca seperti data yang gagal dimuat);
 - baris Kategori standing menampilkan penanda **"· standing"**;
-- tombol aksi yang muncul **berbeda** antara PIC baris itu dan lead — staff
-  bukan-PIC tidak boleh melihat "Mulai"/"Submit" sama sekali;
+- tombol aksi **berbeda** antara PIC baris itu dan lead — staff bukan-PIC tidak
+  boleh melihat "Mulai"/"Submit" sama sekali;
 - halaman rekap menampilkan kalimat **"Angka ini bukan KPI"**;
-- layar Kategori: memilih standing = ya **mengosongkan dan mematikan** input SLA.
+- layar Kategori: memilih standing = ya **mengosongkan dan mematikan** input
+  SLA (kalau tidak, server menolaknya dan penolakannya jadi kejutan).
 
-### 4.3 Sisa yang tidak berubah
+### 4.2 🟡 Browser UAT enam butir feedback Sales
 
-**§2.2 browser UAT enam butir feedback Sales** masih terbuka dari handoff
-sebelumnya.
+Terbuka sejak sebelum M19 (`HANDOFF_FEEDBACK_SALES_TUTUP_20260909.md` §2.2).
+Belum berubah, dan sekarang jadi tetangga sealur dengan §4.1 — dua-duanya
+menunggu sesi yang menyalakan browser.
 
----
+### 4.3 🟡 Isi 21 Kategori + 8 Sub Type (butuh pemilik — lihat §3)
+
+Tidak memblokir apa pun: modulnya jalan penuh dengan empat Kategori seed.
+Jalannya lewat layar `/creative/scs/kategori`, nol migrasi.
+
+### 4.4 Drift check penuh sekali dari operator/CI
+
+`bash scripts/check-live-drift.sh` harus nol MISSING. Tidak berfungsi dari
+sandbox Claude Code (§1.1).
 
 ## 5. Delapan hal yang paling mudah dirusak sesi berikutnya
 
@@ -220,7 +251,17 @@ Keduanya lolos typecheck dan lolos review mata sendiri:
 
 ## 8. Yang masih terbuka di luar M19
 
-Belum berubah: **LT-2/LT-8** (pipeline tahapan Store Operation, ditahan pemilik
-2026-09-08 — jangan tanya ulang), **LT-1** (bobot KPI Store Operation, masih 0),
-**O75** (Service tidak punya jalur ke Done — edge `[In Execution] → Done` ada di
-`sm_edges` dengan nol pemanggil), **O76** (asal floor GMV bulanan), **A2-DRIFT**.
+Belum berubah, dan tidak satu pun disentuh sesi ini:
+
+| # | Apa | Catatan |
+|---|---|---|
+| **LT-2 / LT-8** | pipeline tahapan Store Operation | **ditahan pemilik 2026-09-08 — jangan tanya ulang** |
+| **LT-1** | bobot KPI Store Operation | masih 0 |
+| **O75** | Service tidak punya jalur ke Done | edge `[In Execution] → Done` ADA di `sm_edges` dengan **nol pemanggil** |
+| **O76** | asal floor GMV bulanan | sisa O57 (b) yang K-2 tidak tutup |
+| **A2-DRIFT** | satu migrasi live tanpa berkas yang cocok di `main` | ditemukan 2026-09-08, terpisah dari M19 |
+| **M19-SCS-KATEGORI-DATA** | 21 Kategori + 8 Sub Type | §3 — data, bukan kode; nol yang terblokir |
+
+Urutan yang disarankan untuk sesi berikutnya: **§4.1 browser UAT lebih dulu**
+(ia utang verifikasi atas kode yang sudah berjalan di live), lalu §4.2, lalu
+pilih dari tabel ini.

@@ -11,8 +11,14 @@ Sebelum M19 (per `1947262^`): **150 tabel · 41 entity_prefix · 33 sm_machines 
 Sesudah separuh jadwal harian (PR #334, sudah di-merge + sudah diterapkan ke
 live `CDPS SG`): **153 · 42 · 33 · 73**,
 migrasi `20260927010000_m19_creative_daily_ops.sql`.
-Sesudah separuh SCS: **155 · 43 · 34 · 73**,
-migrasi `20260928010000_m19_scs_task_engine.sql`.
+Sesudah separuh SCS (PR #335, **sudah di-merge** `a9cb9e0` + **sudah
+diterapkan ke live** `CDPS SG` lewat `apply_migration` LEBIH DULU, urutan O65):
+**155 · 43 · 34 · 73**, migrasi `20260928010000_m19_scs_task_engine.sql`.
+
+**M19 lengkap** — kedua separuhnya di `main` dan di live, nol sisa yang menunggu
+ketokan. Sisa pekerjaannya bukan kode: browser UAT enam layar
+(`docs/handoff/HANDOFF_M19_SCS_20260909.md` §4.1) dan pengisian 21 Kategori
+sisanya oleh Leader (§4.3).
 
 ## Context
 
