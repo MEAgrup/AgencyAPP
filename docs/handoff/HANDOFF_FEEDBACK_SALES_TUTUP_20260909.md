@@ -7,8 +7,8 @@
 > **sengaja tidak dihapus** — ia tetap catatan terbaik tentang KENAPA pekerjaan
 > itu perlu; yang berubah hanya statusnya, dan itu dicatat di §2.1a.
 >
-> Yang **BELUM**: §2.2 (UAT di peramban) dan **penerapan migrasi FS-6b ke live
-> `CDPS SG`** — lihat §2.1a.
+> Yang **BELUM**: §2.2 (UAT di peramban). Migrasi FS-6b **sudah di live** —
+> lihat §2.1a.
 
 > Baca `docs/DECISIONS.md` baris **2026-09-09** (paling atas) lebih dulu — di situ
 > angka live dan cara memverifikasinya. Handoff ini tidak mengulanginya; ia
@@ -108,12 +108,15 @@ tebakan yang perlu dibuat tentang baris lama, dan tidak ada satu pun yang
 berubah artinya. Ada tes khusus untuk itu di ketiga jalur (closing, perpanjangan,
 accrual).
 
-**Sisa pekerjaan FS-6b: menerapkan migrasinya ke live `CDPS SG`.** Urutannya
-sama dengan ketokan 2026-09-09 (baris teratas `DECISIONS.md`): **migrasi lebih
-dulu lewat `apply_migration`, baru merge** — kode yang me-`select` kolom yang
-belum ada akan menjatuhkan setiap halaman yang membacanya. Gate live TIDAK
-berubah (150 tabel / 41 prefix / 33 mesin / 73 event): berkas ini hanya menambah
-empat kolom.
+**✅ Migrasi FS-6b SUDAH DI LIVE `CDPS SG` (2026-09-09), diterapkan SEBELUM
+merge** — urutan yang sama dengan ketokan FS sebelumnya. Angka dan cara
+memverifikasinya ada di baris `DECISIONS.md` FS-6b; ringkasnya: gate **tetap
+150/41/33/73** (memang hanya empat kolom), ledger 216 → 217, drift per-slug nol
+MISSING, keempat kolom 100% NULL sesudah apply (nol backfill terbukti), uji
+negatif nol/negatif ditolak & 12 diterima lewat SQL langsung lalu dibatalkan
+(nol jejak), dan `get_advisors security` nol temuan baru (28/1/8/3/1).
+
+> Yang TERSISA dari FS-6b hanyalah pembuktian di peramban — lihat §2.2.
 
 ### 2.2 🟡 UAT di peramban — belum pernah dilakukan
 
