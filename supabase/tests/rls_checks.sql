@@ -1176,7 +1176,21 @@ DECLARE
     'strategi_prasyarat_klien_select','strategi_quick_win_select',
     'strategi_risiko_struktural_select','strategi_risk_select',
     'strategi_tanggal_besar_select','strategi_target_select',
-    'strategi_trigger_revisi_select','strategi_version_select','vendors_select',
+    'strategi_trigger_revisi_select','strategi_version_select',
+    -- `studios_select` (M19, migrasi 20260927010000) masuk daftar ini DENGAN
+    -- SENGAJA, dan keputusannya dicatat di `docs/DECISIONS.md` 2026-09-09 —
+    -- bukan ditambahkan agar tes hijau. Ia cermin
+    -- `master_service_versions_select` / `master_service_duration_options_select`
+    -- tepat di atas: isinya EMPAT NAMA RUANGAN (Kasuari, Rajawali, Cempaka,
+    -- Luar Kantor), tidak ada satu pun kolom yang lebih sensitif daripada
+    -- `standard_price` di `master_services` yang sudah terbuka bagi seluruh
+    -- staff, dan SETIAP orang yang membuka layar jadwal butuh daftarnya untuk
+    -- merender kolom grid — termasuk pada hari yang nol slot. Lengan
+    -- lead/divisi di sini hanya akan mengosongkan grid bagi orang yang berhak
+    -- melihatnya. Baris KERJA-nya (`prod_slots`, `pic_unavailability`) TETAP
+    -- ber-lengan lead/divisi dan karena itu tidak ada di daftar ini.
+    'studios_select',
+    'vendors_select',
     'wrr_catatan_divisi_select','wrr_catatan_select','wrr_divisi_select','wrr_metrik_select'
   ];
   gained text[];

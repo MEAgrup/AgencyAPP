@@ -103,12 +103,28 @@ export default function CreativeWorkspacePage() {
           <h1>Creative</h1>
           <p className="muted">
             Workspace Creative (M7) &mdash; assign team untuk creative production per brief, loop
-            revisi, dan Daily Output.
+            revisi, dan Daily Output. Lapisan RENCANA-nya (jadwal harian per studio) ada di
+            Jadwal Produksi (M19).
           </p>
         </div>
-        <Link href="/creative/daily-output" className="btn btnSecondary">
-          Daily Output
-        </Link>
+        {/* Sub-layar Creative dijangkau dari sini, bukan dari menu utama —
+            pola yang sama dengan Daily Output. Menaruhnya di nav akan membuat
+            Creative satu-satunya divisi yang punya sub-item, dan simetri lima
+            papan divisi itu yang dijaga `nav.test.ts`. */}
+        <div className="row" style={{ gap: 8 }}>
+          <Link href="/creative/schedule" className="btn btnPrimary">
+            Jadwal Produksi
+          </Link>
+          <Link href="/creative/schedule/rekap" className="btn btnSecondary">
+            Rekap Hari-Sama
+          </Link>
+          <Link href="/creative/ketersediaan" className="btn btnSecondary">
+            Ketidaktersediaan
+          </Link>
+          <Link href="/creative/daily-output" className="btn btnSecondary">
+            Daily Output
+          </Link>
+        </div>
       </div>
 
       {canScanReminders && (

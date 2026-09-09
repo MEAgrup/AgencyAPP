@@ -37,6 +37,7 @@
 | 16 | `CDPS_Module16_Lead_Time.md` | **New — added 2026-08-28** (lead time per tahapan divisi: `brief_stage`, pipeline per divisi, gerbang intake *Cek Brief AM*). Owner interview, `docs/DECISIONS.md` 2026-08-28 M16. |
 | 17 | `CDPS_Module17_AI_Optimizer.md` | **New — added 2026-08-28** (divisi eksekusi AI Optimizer: optimasi SKU + AI video, dengan jalur balik bernomor ke STRG). |
 | 18 | `CDPS_Module18_Store_Ops.md` | **New — added 2026-09-08** (divisi Store Operation: baris SKU `SKU-` sebagai unit kerja, mesin #32, dinding dua penulis AM↔Store Ops). Ketokan pemilik K-4/K-5/K-6 (2026-09-07) + pembagian peran (2026-09-08), `docs/DECISIONS.md`. |
+| 19 | `CDPS_Module19_Creative_Daily_Ops.md` | **New — added 2026-09-09** (ketokan D1/D3/D4/D5/D8 2026-09-09; realisasi bagian "jadwal harian leader" dari K-1 2026-09-07). Lapisan RENCANA di bawah lapisan eksekusi M7: slot produksi harian per studio, ketidaktersediaan produksi PIC, penyelesaian hari-sama. Separuh `SMO & Content Strategist` DITAHAN — lihat `DECISIONS.md` §Open `M19-SCS-ENGINE`. |
 | — | `CDPS_Build_Plan.md` (this file) | New |
 
 *"Use your existing copy" = the file from the original batch is already final; no content changed, so no regenerated version is issued (avoids accidental drift). This manifest supersedes README v2's file list.*

@@ -145,6 +145,19 @@ export const PREFIXES = {
   // lifecycle of their own. This one is a work row with a status machine
   // (`store_ops_sku`, #32) and two writers (M18 §2 Rule 2).
   SKU: { entity: 'Baris SKU Store Operation', module: 'M18' },
+  // M19 (Creative Daily Ops) — RENCANA satu sesi produksi: hari + studio + PIC
+  // + klien + slot waktu + target qty. Deliberately NOT a Task and NOT a child
+  // of a Brief: it is planning, and it carries `client_id` rather than
+  // `brief_id` precisely so tomorrow's schedule can be built today without
+  // forcing Assets to exist a day early (M7-OA-6). It has NO state machine at
+  // all (PRD Rule 1/D1) — execution and review stay owned by `AST-`/M12, so
+  // there is no second lifecycle engine beside `brief_task`.
+  //
+  // `SCS` (baris SMO & Content Strategist) is deliberately NOT registered
+  // alongside it: its shape is the open question `M19-SCS-ENGINE` in
+  // `docs/DECISIONS.md` §Open — M12 §2 Rule 1 freezes Task = Asset | Creator
+  // Booking | Brief-as-task, and that row wants a nullable `client_id`.
+  SLOT: { entity: 'Slot produksi harian Creative', module: 'M19' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

@@ -10,7 +10,7 @@
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -8017,5 +8017,244 @@ export function toSkuScopeInput(b: Partial<SkuScopeBody> & {
     targetCvr: angka(b.target_cvr),
     targetRating: angka(b.target_rating),
     catatanAm: b.catatan_am ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// M19 — Creative Daily Ops.
+//
+// Tiga kolom `date` baru masuk lewat sini (`tanggal`, `tanggal_mulai`,
+// `tanggal_selesai`) dan WAJIB dikirim `YYYY-MM-DD`, bukan `.toISOString()` —
+// mereka terdaftar di `DATE_BACKED_WIRE_KEYS` (`wire.datecolumns.test.ts`).
+// Domainnya sudah mengembalikan string YMD, jadi di sini ia diteruskan apa
+// adanya; yang penting adalah TIDAK menyentuhnya dengan `new Date()`.
+//
+// `waktu_mulai`/`waktu_selesai` adalah kolom `time` PERTAMA di CDPS (nol di 216
+// migrasi sebelumnya). Bentuk wire-nya `HH:MM` — dinormalkan di domain, bukan
+// di sini, supaya satu-satunya ejaan jam hidup di satu tempat.
+// ---------------------------------------------------------------------------
+
+export interface SlotWire {
+  id: string;
+  tanggal: string;              // YYYY-MM-DD (WIB)
+  client_id: string;
+  client_name: string;
+  studio_code: string;
+  studio_nama: string;
+  waktu_mulai: string;          // HH:MM
+  waktu_selesai: string;        // HH:MM
+  assigned_pic: string;
+  assigned_pic_nama: string;
+  jenis_paket: string | null;
+  task_type: string;
+  target_qty: number;
+  actual_qty: number | null;
+  sisa_qty: number | null;
+  penyelesaian_pct: number | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export function slotToWire(r: dailyops.SlotRow): SlotWire {
+  return {
+    id: r.id,
+    tanggal: r.tanggal,
+    client_id: r.clientId,
+    client_name: r.clientName,
+    studio_code: r.studioCode,
+    studio_nama: r.studioNama,
+    waktu_mulai: r.waktuMulai,
+    waktu_selesai: r.waktuSelesai,
+    assigned_pic: r.assignedPic,
+    assigned_pic_nama: r.assignedPicNama,
+    jenis_paket: r.jenisPaket,
+    task_type: r.taskType,
+    target_qty: r.targetQty,
+    // Ketiganya dikirim EKSPLISIT walau bisa dihitung ulang di halaman:
+    // kalau halaman menghitungnya sendiri, "berapa sisanya" punya dua
+    // implementasi yang berbeda begitu salah satunya lupa bahwa `actual_qty`
+    // null bukan nol.
+    actual_qty: r.actualQty,
+    sisa_qty: r.sisaQty,
+    penyelesaian_pct: r.penyelesaianPct,
+    notes: r.notes,
+    created_by: r.createdBy,
+    created_at: r.createdAt.toISOString(),
+  };
+}
+
+/**
+ * Hasil tulisan yang BISA memperingatkan tapi TETAP tersimpan (D3/D4).
+ *
+ * `peringatan` SELALU ada sebagai array — kosong kalau bersih, bukan hilang.
+ * Kunci yang hilang lebih berbahaya daripada null (kelas O43): halaman yang
+ * membaca `res.peringatan.length` akan meledak, bukan menampilkan "tidak ada
+ * peringatan".
+ */
+export interface SlotSaveResultWire {
+  slot: SlotWire;
+  peringatan: string[];
+}
+
+export function slotSaveResultToWire(r: dailyops.SlotSaveResult): SlotSaveResultWire {
+  return { slot: slotToWire(r.slot), peringatan: r.peringatan };
+}
+
+export interface StudioWire {
+  code: string;
+  nama: string;
+  aktif: boolean;
+  cek_konflik: boolean;
+  urutan: number;
+}
+
+export function studioToWire(s: {
+  code: string; nama: string; aktif: boolean; cekKonflik: boolean; urutan: number;
+}): StudioWire {
+  return {
+    code: s.code, nama: s.nama, aktif: s.aktif,
+    cek_konflik: s.cekKonflik, urutan: s.urutan,
+  };
+}
+
+export interface UnavailabilityWire {
+  id: number;
+  employee_id: string;
+  employee_nama: string;
+  tanggal_mulai: string;        // YYYY-MM-DD
+  tanggal_selesai: string;      // YYYY-MM-DD
+  alasan: string;
+  catatan: string | null;
+  dicatat_oleh: string;
+  created_at: string;
+}
+
+export function unavailabilityToWire(r: dailyops.UnavailabilityRow): UnavailabilityWire {
+  return {
+    id: r.id,
+    employee_id: r.employeeId,
+    employee_nama: r.employeeNama,
+    tanggal_mulai: r.tanggalMulai,
+    tanggal_selesai: r.tanggalSelesai,
+    alasan: r.alasan,
+    catatan: r.catatan,
+    dicatat_oleh: r.dicatatOleh,
+    created_at: r.createdAt.toISOString(),
+  };
+}
+
+export interface StudioColumnWire {
+  code: string;
+  nama: string;
+  cek_konflik: boolean;
+  slots: SlotWire[];
+  /**
+   * ID slot di kolom ini yang bertumpang dengan saudaranya. Dikirim dari server
+   * karena `web-internal` tidak punya `@cdps/core` — menandainya di halaman
+   * berarti definisi KEDUA "bertumpang", dan yang kedua akan lupa bahwa
+   * perbandingannya setengah terbuka.
+   */
+  bentrok_ids: string[];
+}
+
+export interface DayScheduleWire {
+  tanggal: string;
+  studios: StudioColumnWire[];
+  tidak_tersedia: UnavailabilityWire[];
+  total_target: number;
+  total_actual: number;
+}
+
+export function dayScheduleToWire(d: dailyops.DaySchedule): DayScheduleWire {
+  return {
+    tanggal: d.tanggal,
+    // SELURUH studio aktif, termasuk yang nol slot — kolom kosong itu
+    // informasi ("ruangan itu bebas"), bukan hiasan yang boleh dihemat.
+    studios: d.studios.map((c) => ({
+      code: c.code, nama: c.nama, cek_konflik: c.cekKonflik,
+      slots: c.slots.map(slotToWire),
+      bentrok_ids: c.bentrokIds,
+    })),
+    tidak_tersedia: d.tidakTersedia.map(unavailabilityToWire),
+    total_target: d.totalTarget,
+    total_actual: d.totalActual,
+  };
+}
+
+export interface PicSameDayWire {
+  employee_id: string;
+  nama: string;
+  jumlah_slot: number;
+  slot_ditutup: number;
+  total_target: number;
+  total_actual: number;
+  penyelesaian_pct: number | null;
+  slot_fill_pct: number | null;
+}
+
+export function picSameDayToWire(r: dailyops.PicSameDayRow): PicSameDayWire {
+  return {
+    employee_id: r.employeeId,
+    nama: r.nama,
+    jumlah_slot: r.jumlahSlot,
+    slot_ditutup: r.slotDitutup,
+    total_target: r.totalTarget,
+    total_actual: r.totalActual,
+    // `null` (bukan 0) saat penyebutnya nol — halaman merendernya '—'
+    // (aturan rumah #7). Mengirim 0 berarti menyatakan "0% tercapai" tentang
+    // orang yang datanya belum ada.
+    penyelesaian_pct: r.penyelesaianPct,
+    slot_fill_pct: r.slotFillPct,
+  };
+}
+
+export interface SlotBody {
+  tanggal: string;
+  client_id: string;
+  studio_code: string;
+  waktu_mulai: string;
+  waktu_selesai: string;
+  assigned_pic: string;
+  jenis_paket: string | null;
+  task_type: string;
+  target_qty: number;
+  notes: string | null;
+}
+
+export function toSlotInput(b: Partial<SlotBody> & {
+  target_qty?: number | string;
+}): dailyops.SlotInput {
+  return {
+    tanggal: b.tanggal ?? '',
+    clientId: b.client_id ?? '',
+    studioCode: b.studio_code ?? '',
+    waktuMulai: b.waktu_mulai ?? '',
+    waktuSelesai: b.waktu_selesai ?? '',
+    assignedPic: b.assigned_pic ?? '',
+    jenisPaket: b.jenis_paket ?? null,
+    taskType: b.task_type ?? '',
+    // `Number('')` = 0, yang gagal validasi `> 0` dengan pesan BI-nya —
+    // itu memang yang diinginkan untuk field wajib yang tidak diisi.
+    targetQty: Number(b.target_qty ?? 0),
+    notes: b.notes ?? null,
+  };
+}
+
+export interface UnavailabilityBody {
+  employee_id: string;
+  tanggal_mulai: string;
+  tanggal_selesai: string;
+  alasan: string;
+  catatan: string | null;
+}
+
+export function toUnavailabilityInput(b: Partial<UnavailabilityBody>): dailyops.UnavailabilityInput {
+  return {
+    employeeId: b.employee_id ?? '',
+    tanggalMulai: b.tanggal_mulai ?? '',
+    tanggalSelesai: b.tanggal_selesai ?? '',
+    alasan: b.alasan ?? '',
+    catatan: b.catatan ?? null,
   };
 }
