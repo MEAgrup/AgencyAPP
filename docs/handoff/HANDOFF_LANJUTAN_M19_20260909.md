@@ -13,11 +13,11 @@ Pendahulunya: `HANDOFF_M19_CREATIVE_DAILY_OPS_20260909.md` (detail modulnya),
 
 | Apa | Nilai |
 |---|---|
-| PR | **#334** `claude/eloquent-clarke-qmk87m` → `main`, **BELUM di-merge** |
-| Commit | `1947262` · `9140ec6` · `65c67d4` · `28c8863` |
+| PR | **#334 SUDAH MERGED** (`ad20659`), 11/11 check hijau |
+| Commit | `1947262` · `9140ec6` · `65c67d4` · `28c8863` · `605dc88` |
 | Migrasi di repo | **216** (`20260927010000_m19_creative_daily_ops.sql`) |
 | Gate repo | **153 tabel · 42 entity_prefix · 33 sm_machines · 73 notif_events** |
-| Live `CDPS SG` | **215 migrasi — M19 BELUM diterapkan** |
+| Live `CDPS SG` | **218 migrasi — M19 SUDAH diterapkan**, gate live diverifikasi **153 · 42 · 33 · 73** |
 | Tes | core 985 · db 81 · domain 2300 · apps/api 496 · web-internal 729 · typecheck bersih |
 | Lint | 3 error + 61 warning — **identik baseline**, semuanya pre-existing |
 
@@ -28,20 +28,26 @@ penyelesaian hari-sama). Separuh `SMO & Content Strategist` (Gap B/G/I) ditahan.
 
 ## 2. Langkah berikutnya, berurutan
 
-### 2.1 Terapkan migrasi ke live, LALU merge (urutannya wajib)
+### 2.1 ✅ SELESAI — migrasi ke live, lalu merge
 
-O65 dan preseden 2026-09-09: **migrasi dulu, merge kemudian** — bukan sebaliknya.
+Dikerjakan 2026-09-09 dalam urutan yang benar (O65): `apply_migration`
+`20260927010000_m19_creative_daily_ops.sql` ke `CDPS SG`
+(`egddxfcnrtecheiykhlf`) **lebih dulu**, diverifikasi, **baru** PR #334
+di-merge (`ad20659`).
+
+Yang diverifikasi di live sesudah apply — bukan diasumsikan:
 
 ```
-apply_migration  20260927010000_m19_creative_daily_ops.sql   ← satu berkas, satu panggilan
+tabel 153 · prefix 42 · mesin 33 · event 73
+studios 4 baris ter-seed, 1 ber-cek_konflik=false (LUAR_KANTOR)
+3 policy SELECT · 3 GRANT SELECT ke authenticated · 2 trigger
+prefix SCS: 0 baris — memang belum didaftarkan
 ```
 
-Jangan `supabase db push`. Jangan `psql -f` (itu yang melahirkan drift O38).
-Sesudah apply: `scripts/check-live-drift.sh` harus nol MISSING — **tidak
-berfungsi dari sandbox Claude Code** (egress Supabase diblok kebijakan org),
-jalankan dari operator atau CI runner.
-
-Verifikasi angka di live sesudah apply: `153 · 42 · 33 · 73`.
+**Sisa satu hal:** `scripts/check-live-drift.sh` belum dijalankan — ia **tidak
+berfungsi dari sandbox Claude Code** (egress Supabase diblok kebijakan org).
+Jalankan dari operator atau CI runner; harapannya nol MISSING dan satu EXTRA
+yang sudah di-allowlist (A2-DRIFT, milik jalur D-3).
 
 ### 2.2 Browser UAT tiga layar baru
 
@@ -66,6 +72,8 @@ Yang harus dilihat, bukan cuma "200":
 - halaman ketersediaan menampilkan kotak "Ini bukan pengajuan cuti".
 
 ### 2.3 Baru sesudah itu: separuh SCS (butuh ketokan §3.1)
+
+**Langkah aktif berikutnya adalah §2.2** — browser UAT tiga layar baru.
 
 ---
 
