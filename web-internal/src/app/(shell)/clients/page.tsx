@@ -11,7 +11,10 @@ import { SisaBadge } from '@/components/clients/ContractSection';
 // Sama badge, `SisaBadge`, supaya roster dan detail konsisten.
 function DurasiKontrak({ c }: { c: Client }) {
   if (c.contract_durasi_bulan === null || c.contract_tanggal_mulai === null || c.contract_tanggal_akhir === null) {
-    return <span className="muted">—</span>;
+    // Bukan '—' diam-diam (alasan sama dengan ContractSection.tsx): klien ini
+    // hanya membeli layanan sekali jadi, jadi memang tidak punya jendela
+    // kontrak — bukan data yang hilang.
+    return <span className="muted">Layanan tidak ada durasi</span>;
   }
   return (
     <span className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
