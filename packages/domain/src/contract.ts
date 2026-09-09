@@ -44,6 +44,13 @@ import {
   type Actor,
 } from './account';
 
+// Dieja di sini, BUKAN diimpor dari `./sales`. `sales.ts` adalah modul terbesar
+// di paket ini dan `strategi.ts` mengimpor `contract` — menariknya lewat sini
+// berarti memasukkan seluruh graf `sales` ke jalur Strategi. Pola yang sama
+// dipakai `account.ACCOUNT_DIVISION`. Nilainya dijaga tes registry di
+// `contract.test.ts` agar tidak menyimpang dari `sales.SALES_DIVISION`.
+const SALES_DIVISION = 'Sales';
+
 const ENTITY_CONTRACT = 'contract';
 
 // --- BI messages (CLAUDE.md #5). M6A gives no error strings for an entity it
@@ -89,6 +96,15 @@ export interface Contract {
   tanggalMulai: string;
   tanggalAkhir: string;
   catatan: string | null;
+  /**
+   * Klasifikasi kontrak (R-01): `baru` | `perpanjangan` | `cross_sell`.
+   * Dicatat sekali di titik pembuatan, bukan angka turunan. Sudah ada di DB
+   * sejak `20260901040000_contracts_jenis.sql`; dibawa ke permukaan di sini
+   * karena Client Record perlu membedakan kontrak pertama dari lanjutannya.
+   */
+  jenis: string;
+  /** Rantai perpanjangan: `CTR-` sebelumnya pada klien yang sama, atau null. */
+  contractSebelumnyaId: string | null;
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -109,6 +125,8 @@ interface ContractRow {
   tanggal_mulai: string | Date;
   tanggal_akhir: string | Date;
   catatan: string | null;
+  jenis: string;
+  contract_sebelumnya_id: string | null;
   created_at: string | Date;
   updated_at: string | Date;
   created_by: string;
@@ -127,6 +145,8 @@ function rowToContract(r: ContractRow): Contract {
     tanggalMulai: isoDate(r.tanggal_mulai),
     tanggalAkhir: isoDate(r.tanggal_akhir),
     catatan: r.catatan,
+    jenis: r.jenis,
+    contractSebelumnyaId: r.contract_sebelumnya_id,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
     createdBy: r.created_by,
@@ -143,9 +163,58 @@ export function canWriteContract(actor: Actor, ownerAm: string | null): boolean 
   return ownerAm !== null && ownerAm === actor.employeeId;
 }
 
-/** canReadContract: the write set, plus every read-all role (OD / Director). */
-export function canReadContract(actor: Actor, ownerAm: string | null): boolean {
-  return canWriteContract(actor, ownerAm) || permission.canReadAll(actor);
+/** Kolom kepemilikan klien yang menentukan siapa boleh MEMBACA kontraknya. */
+export interface ClientOwnership {
+  assignedAmId: string | null;
+  salesPicId: string | null;
+  commissionPaymentPicId: string | null;
+  createdBy: string | null;
+}
+
+/**
+ * canReadContract: cermin policy `contracts_select`
+ * (`20260807120000_o57_contract_entity.sql:220`), bukan pelebaran atasnya.
+ *
+ * KENAPA INI BERUBAH. Policy DB-nya sejak awal memakai
+ * `private.jwt_owns_client(client_id)` — bukan padanan sempit ala
+ * `jwt_is_am_of_service` — dan komentarnya menyatakan maksudnya verbatim:
+ * *"kontrak adalah dokumen kesepakatan: Sales yang menutupnya dan Finance yang
+ * menagih terminnya memang perlu melihat durasi & jendelanya"*. Gate TS di
+ * sini hanya menyalin sisi AM-nya, jadi kedua lapis MENYIMPANG — hal yang
+ * `packages/core/src/permission.ts` §14-17 justru melarang ("re-implemented
+ * identically in RLS … the two sides must never diverge").
+ *
+ * Akibat nyatanya: route `GET /clients/{id}/contracts` berjalan lewat `db()`
+ * (service-role), jadi gate TS adalah SATU-SATUNYA dinding — dan seorang Sales
+ * yang menutup deal itu sendiri ditolak `[anda tidak memiliki akses untuk
+ * mengelola kontrak ini]` saat membuka jendela kontraknya sendiri. Sejak A-4
+ * (ketokan K-2) `sales.close()` justru yang MENCETAK baris `contracts` itu,
+ * jadi penulisnya tidak bisa membacanya kembali.
+ *
+ * `jwt_owns_client` mencakup: AM yang ditugaskan, Sales PIC, PIC Komisi/
+ * Pembayaran, dan pembuat barisnya. Lengan Sales **lead** ditambahkan sejajar
+ * S-01 (`20260901010000_rls_sales_lead_scope.sql`), yang sudah memberi Head
+ * Sales scope se-divisi atas `clients`/`transactions`/`installments` — kontrak
+ * adalah dokumen yang sama, dan Head Sales yang bisa melihat klien tapi tidak
+ * durasinya adalah setengah jawaban.
+ *
+ * TIDAK melebar ke divisi eksekusi: Creative/Ads/KOL tetap tidak punya lengan,
+ * dan Strategi di atas kontrak tetap dijaga `strategi_select` sendiri.
+ */
+export function canReadContract(
+  actor: Actor,
+  ownerAm: string | null,
+  owners?: ClientOwnership,
+): boolean {
+  if (canWriteContract(actor, ownerAm) || permission.canReadAll(actor)) return true;
+  if (permission.isLead(actor, SALES_DIVISION)) return true;
+  if (owners === undefined) return false;
+  return [
+    owners.assignedAmId,
+    owners.salesPicId,
+    owners.commissionPaymentPicId,
+    owners.createdBy,
+  ].some((id) => id !== null && id === actor.employeeId);
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +257,30 @@ async function ownerAmOfClient(sql: Queryable, clientId: string): Promise<string
   return rows[0].assigned_am_id;
 }
 
+/**
+ * Tuple kepemilikan klien — cermin `private.jwt_owns_client`
+ * (`20260723064438_rls_baseline.sql:104-114`), satu kueri, empat kolom yang
+ * SAMA. Dipisah dari `ownerAmOfClient` supaya jalur TULIS (yang memang hanya
+ * peduli AM) tidak ikut melebar.
+ */
+async function clientOwnership(sql: Queryable, clientId: string): Promise<ClientOwnership> {
+  const rows = await sql<{
+    assigned_am_id: string | null;
+    sales_pic_id: string | null;
+    commission_payment_pic_id: string | null;
+    created_by: string | null;
+  }[]>`
+    select assigned_am_id, sales_pic_id, commission_payment_pic_id, created_by
+      from clients where id = ${clientId}`;
+  if (rows.length === 0) throw new NotFoundError(MSG_CLIENT_NOT_FOUND);
+  return {
+    assignedAmId: rows[0].assigned_am_id,
+    salesPicId: rows[0].sales_pic_id,
+    commissionPaymentPicId: rows[0].commission_payment_pic_id,
+    createdBy: rows[0].created_by,
+  };
+}
+
 /** ownerAmOfContract resolves the AM who owns the client behind a Contract. */
 export async function ownerAmOfContract(
   sql: Queryable,
@@ -224,8 +317,8 @@ export async function listContractsForClient(
   actor: Actor,
   clientId: string,
 ): Promise<Contract[]> {
-  const ownerAm = await ownerAmOfClient(sql, clientId);
-  if (!canReadContract(actor, ownerAm)) {
+  const owners = await clientOwnership(sql, clientId);
+  if (!canReadContract(actor, owners.assignedAmId, owners)) {
     throw new ForbiddenError(MSG_CONTRACT_FORBIDDEN);
   }
   const rows = await sql<ContractRow[]>`

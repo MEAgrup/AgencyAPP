@@ -1151,7 +1151,16 @@ DECLARE
     -- ini dengan sengaja: Finance tidak perlu membaca papan booking KOL.
     'creator_bookings_select','creator_lists_select',
     'dependencies_select','employees_select','live_stream_sessions_select',
-    'marketing_performance_records_select','master_service_versions_select',
+    'marketing_performance_records_select',
+    -- `master_service_duration_options_select` (FS-6, migrasi 20260925040000)
+    -- masuk daftar ini DENGAN SENGAJA, dan keputusannya dicatat di
+    -- `docs/DECISIONS.md` 2026-09-08 — bukan ditambahkan agar tes hijau.
+    -- Ia cermin `master_service_versions_select` tepat di bawahnya: baris opsi
+    -- tenor adalah HARGA KATALOG, dan harga katalog memang dibaca seluruh staff
+    -- untuk menyusun penawaran. Tidak ada satu pun kolom di sana yang lebih
+    -- sensitif daripada `standard_price` di baris induknya, yang sudah terbuka.
+    'master_service_duration_options_select',
+    'master_service_versions_select',
     'master_services_select','metric_entries_select','metric_entry_assets_select',
     'negotiation_proposal_lines_select','negotiation_proposals_select','notifications_select',
     'optimization_logs_select','plan_actual_select','plan_flag_select',

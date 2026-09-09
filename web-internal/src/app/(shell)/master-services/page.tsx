@@ -8,6 +8,7 @@ import { formatIDR } from '@/lib/money';
 import {
   EMPTY_MSL_FORM,
   formatDurasiBulan,
+  formatOpsiDurasi,
   formToPayload,
   PENGAKUAN_LABELS,
   QTY_MENAMBAH_LABELS,
@@ -319,6 +320,91 @@ export default function MasterServicesPage() {
                 Mall): pendapatannya diakui sekaligus saat selesai, bukan disebar 1 bulan.
               </span>
             </div>
+            {/*
+              FS-6 — "1 service ada pilihan durasi, 1 bulan 3 bulan 6 bulan
+              dstnya (dengan opsi harga berbeda), supaya list tidak terlalu
+              banyak". Harganya harga PAKET UTUH per tenor, bukan per bulan:
+              itulah yang membuat diskon paket bisa dinyatakan sama sekali.
+            */}
+            <div className="field">
+              <label>Pilihan Durasi &amp; Harga Paket (opsional)</label>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Durasi (bulan)</th>
+                      <th>Harga Paket (Rp)</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {form.durasi_options.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="muted">
+                          Belum ada pilihan durasi — layanan ini dijual satu tenor saja.
+                        </td>
+                      </tr>
+                    )}
+                    {form.durasi_options.map((o, idx) => (
+                      <tr key={idx}>
+                        <td>
+                          <input
+                            aria-label={`Durasi baris ${idx + 1}`}
+                            type="number" min="1" step="1" style={{ width: 120 }}
+                            value={o.durasi_bulan}
+                            onChange={(e) => setForm((f) => ({
+                              ...f,
+                              durasi_options: f.durasi_options.map((r, i) =>
+                                i === idx ? { ...r, durasi_bulan: e.target.value } : r),
+                            }))}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            aria-label={`Harga paket baris ${idx + 1}`}
+                            type="number" min="0" step="0.01" style={{ width: 180 }}
+                            value={o.harga}
+                            onChange={(e) => setForm((f) => ({
+                              ...f,
+                              durasi_options: f.durasi_options.map((r, i) =>
+                                i === idx ? { ...r, harga: e.target.value } : r),
+                            }))}
+                          />
+                        </td>
+                        <td>
+                          <button
+                            type="button" className="btn btnGhost btnSm"
+                            onClick={() => setForm((f) => ({
+                              ...f,
+                              durasi_options: f.durasi_options.filter((_, i) => i !== idx),
+                            }))}
+                          >
+                            Hapus
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button
+                type="button" className="btn btnSecondary btnSm"
+                onClick={() => setForm((f) => ({
+                  ...f,
+                  durasi_options: [...f.durasi_options, { durasi_bulan: '', harga: '' }],
+                }))}
+              >
+                + Tambah Pilihan Durasi
+              </button>
+              <span className="muted" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+                Isi <strong>harga paket utuh</strong> per tenor, bukan harga per bulan — itulah
+                yang membuat diskon paket bisa dinyatakan (mis. 3 bulan Rp 10.200.000, 12 bulan
+                Rp 36.000.000). Pilihan <strong>terpendek wajib sama</strong> dengan
+                &ldquo;Harga Standar&rdquo; dan &ldquo;Durasi Jasa&rdquo; di atas: itu yang dibaca
+                Ads Management Date dan mesin pengakuan pendapatan untuk layanan ini.{' '}
+                <strong>Kosongkan</strong> bila layanan ini dijual satu tenor saja.
+              </span>
+            </div>
             <div className="field" style={{ maxWidth: 320 }}>
               <label htmlFor="qty_menambah">Kalau Klien Beli Lebih dari Satu</label>
               <select
@@ -412,6 +498,7 @@ export default function MasterServicesPage() {
                   <th>PPN</th>
                   <th>Frekuensi</th>
                   <th>Durasi Jasa</th>
+                  <th>Pilihan Durasi</th>
                   <th>Qty Menambah</th>
                   <th>Pengakuan</th>
                   <th>Strategi &amp; Plan</th>
@@ -435,6 +522,7 @@ export default function MasterServicesPage() {
                       <td>{s.apply_ppn ? 'Ya' : 'Tidak'}</td>
                       <td>{s.frequency || '—'}</td>
                       <td>{formatDurasiBulan(s.durasi_bulan)}</td>
+                      <td>{formatOpsiDurasi(s.durasi_options)}</td>
                       <td>{s.qty_menambah === 'durasi' ? 'Durasi' : 'Volume'}</td>
                       <td>{PENGAKUAN_LABELS[s.pengakuan]}</td>
                       <td>{TIER_LABELS[s.plan_tier]}</td>
@@ -458,7 +546,7 @@ export default function MasterServicesPage() {
                     </tr>
                     {expandedId === s.id && (
                       <tr>
-                        <td colSpan={16} style={{ background: 'var(--color-bg)' }}>
+                        <td colSpan={17} style={{ background: 'var(--color-bg)' }}>
                           {versionsLoadingId === s.id && <p className="muted">Memuat riwayat versi...</p>}
                           {versionsError && <div className="alert alertError">{versionsError}</div>}
                           {versionsByService[s.id] && versionsByService[s.id].length > 0 && (
@@ -475,6 +563,7 @@ export default function MasterServicesPage() {
                                   <th>PPN</th>
                                   <th>Frekuensi</th>
                                   <th>Durasi Jasa</th>
+                                  <th>Pilihan Durasi</th>
                                   <th>Qty Menambah</th>
                                   <th>Pengakuan</th>
                                   <th>Strategi &amp; Plan</th>
@@ -495,6 +584,7 @@ export default function MasterServicesPage() {
                                     <td>{v.apply_ppn ? 'Ya' : 'Tidak'}</td>
                                     <td>{v.frequency || '—'}</td>
                                     <td>{formatDurasiBulan(v.durasi_bulan)}</td>
+                                    <td>{formatOpsiDurasi(v.durasi_options)}</td>
                                     <td>{v.qty_menambah === 'durasi' ? 'Durasi' : 'Volume'}</td>
                                     <td>{PENGAKUAN_LABELS[v.pengakuan]}</td>
                                     <td>{TIER_LABELS[v.plan_tier]}</td>

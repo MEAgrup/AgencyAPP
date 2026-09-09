@@ -15,6 +15,7 @@ import { OUTSIDE_CAMPAIGN, campaignRequiredForSource } from '@/lib/campaign-pick
 import { listSelectableCampaigns, type SelectableCampaign } from '@/lib/marketing';
 import CampaignPicker from '@/components/CampaignPicker';
 import StatusBadge from '@/components/StatusBadge';
+import WaButton from '@/components/WaButton';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
@@ -387,7 +388,7 @@ export default function SalesWorkspacePage() {
                   <tr key={a.id}>
                     <td><Link href={`/sales/${a.id}`}>{a.id}</Link></td>
                     <td>{a.lead_name}</td>
-                    <td>{a.phone_number}</td>
+                    <td><WaButton phone={a.phone_number} nama={a.lead_name} /></td>
                     <td>{a.source}</td>
                     <td><StatusBadge status={a.status} /></td>
                     <td>{formatDate(a.claimed_at)}</td>

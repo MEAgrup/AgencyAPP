@@ -190,6 +190,10 @@ const TERMINAL_ATTEMPT_STATUSES = new Set<string>([
   'Closed-Lost',
   'Blocked',
   '[Closed - Kalah Kompetisi]',
+  // FS-3: sama terminalnya dengan Kalah Kompetisi. Tanpa baris ini sebuah
+  // attempt yang sudah ditutup sebagai prospek bersama masih terbaca "terbuka",
+  // dan pendaftaran berikutnya atas nomor yang sama akan menautkan diri padanya.
+  '[Closed - Prospek Bersama]',
 ]);
 
 /** isTerminalAttemptStatus reports whether a status counts as "not actively worked". */
@@ -199,6 +203,8 @@ export function isTerminalAttemptStatus(status: string): boolean {
 
 /** One holder of a non-terminal attempt on the matched lead. */
 export interface OpenAttempt {
+  /** FS-3: `PRSP-` itu sendiri — yang ditunjuk `bersama_dengan_attempt_id`. */
+  attemptId: string;
   ownerEmployeeId: string;
   /** resolved employee name, or the raw id when unsynced (O19). */
   ownerName: string;
@@ -224,10 +230,20 @@ export interface Decision {
   joinLeadId: string;
   /** outcome === 'join': other open-attempt owners (notification recipients). */
   coOwners: string[];
+  /**
+   * FS-3, outcome === 'join': attempt yang SUDAH ada dan akan ditautkan sebagai
+   * prospek bersama ("" bila tidak ada — mis. lead aktif tanpa attempt terbuka
+   * sama sekali, yang tetap `join` tapi bukan prospek bersama).
+   */
+  bersamaDenganAttemptId: string;
 }
 
 function actorHoldsOpenAttempt(m: ExistingLead, actor: string): boolean {
   return actor !== '' && m.openAttempts.some((a) => a.ownerEmployeeId === actor);
+}
+
+function firstOtherAttemptId(m: ExistingLead, actor: string): string {
+  return m.openAttempts.find((a) => a.ownerEmployeeId !== actor)?.attemptId ?? '';
 }
 
 function otherOwners(m: ExistingLead, actor: string): string[] {
@@ -248,7 +264,10 @@ function interpolateOwner(msg: string, owner: string): string {
  * (join); the import door passes "" (any holder blocks — M1-OA-6).
  */
 export function decide(channel: Channel, match: ExistingLead | null, actor: string): Decision {
-  const base: Decision = { outcome: 'create', message: '', reopenLeadId: '', joinLeadId: '', coOwners: [] };
+  const base: Decision = {
+    outcome: 'create', message: '', reopenLeadId: '', joinLeadId: '', coOwners: [],
+    bersamaDenganAttemptId: '',
+  };
   if (match === null) {
     return base;
   }
@@ -274,7 +293,20 @@ export function decide(channel: Channel, match: ExistingLead | null, actor: stri
         return { ...base, outcome: 'block', message: MSG_ALREADY_OWN_ATTEMPT };
       }
       // Held only by other salespeople — collaborative co-pursuit (v2).
-      return { ...base, outcome: 'join', joinLeadId: match.id, coOwners: otherOwners(match, actor) };
+      //
+      // FS-3: INILAH prospek bersama. Yang ditautkan adalah attempt terbuka
+      // PERTAMA milik orang lain — attempt yang sudah ada lebih dulu, sesuai
+      // cerita feedback ("didaftarkan sales A bulan Agustus, menghubungi sales
+      // B bulan September"). Kalau ada lebih dari satu, yang pertama sudah
+      // cukup: `resolveWin` menutup SEMUA attempt bertaut, dan satu attempt
+      // bertaut sudah menandai lead itu dikerjakan bersama.
+      return {
+        ...base,
+        outcome: 'join',
+        joinLeadId: match.id,
+        coOwners: otherOwners(match, actor),
+        bersamaDenganAttemptId: firstOtherAttemptId(match, actor),
+      };
     }
     // Import never distinguishes the actor: any open attempt blocks (M1-OA-6).
     return { ...base, outcome: 'block', message: interpolateOwner(MSG_ACTIVE_OTHER_SALES_IMPORT, ownerName(match)) };
@@ -471,7 +503,10 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
       case 'join': {
         // Co-pursuit: attach a new attempt WITHOUT any record_status transition
         // (the lead stays active; status only ever moves through the engine).
-        const attempt = await insertAttempt(tx, ex, decision.joinLeadId, actor, now);
+        const attempt = await insertAttempt(
+          tx, ex, decision.joinLeadId, actor, now,
+          decision.bersamaDenganAttemptId === '' ? null : decision.bersamaDenganAttemptId,
+        );
         await ex.audit.insertAudit({
           entityType: 'lead', entityId: decision.joinLeadId, actorEmployeeId: actor.employeeId,
           action: 'dedup_join', beforeJson: null,
@@ -730,15 +765,28 @@ async function insertAttempt(
   leadId: string,
   actor: Actor,
   now: Date,
+  /**
+   * FS-3: attempt yang SUDAH ada saat attempt ini lahir lewat outcome `join`
+   * (prospek menghubungi sales kedua). `null` untuk attempt tunggal DAN untuk
+   * kontes lead Pool — dua hal yang perlakuan win-resolution-nya berbeda.
+   */
+  bersamaDengan: string | null = null,
 ): Promise<Attempt> {
   const id = await ex.ident.identNext('PRSP', now);
   await tx`
-    insert into prospect_attempts (id, lead_id, owner_employee_id, status, created_by)
-    values (${id}, ${leadId}, ${actor.employeeId}, ${ATTEMPT_NEW_LEAD}, ${actor.employeeId})`;
+    insert into prospect_attempts
+      (id, lead_id, owner_employee_id, status, bersama_dengan_attempt_id, created_by)
+    values
+      (${id}, ${leadId}, ${actor.employeeId}, ${ATTEMPT_NEW_LEAD}, ${bersamaDengan}, ${actor.employeeId})`;
   await ex.audit.insertAudit({
     entityType: 'prospect_attempt', entityId: id, actorEmployeeId: actor.employeeId,
     action: 'create', beforeJson: null,
-    afterJson: { status: ATTEMPT_NEW_LEAD, lead_id: leadId }, createdBy: actor.employeeId,
+    // Kunci `bersama_dengan_attempt_id` dikirim EKSPLISIT (null bila tidak
+    // ada), bukan dihilangkan: aturan rumah — kunci yang HILANG lebih
+    // berbahaya daripada null, karena pembaca audit tidak bisa membedakan
+    // "attempt tunggal" dari "field ini belum ada waktu itu".
+    afterJson: { status: ATTEMPT_NEW_LEAD, lead_id: leadId, bersama_dengan_attempt_id: bersamaDengan },
+    createdBy: actor.employeeId,
   });
   return { id, leadId, owner: actor.employeeId, status: ATTEMPT_NEW_LEAD };
 }
@@ -899,6 +947,8 @@ export interface LeadAttemptRow {
   ownerNama: string;
   status: string;
   claimedAt: Date;
+  /** FS-3: attempt yang ditautkan sebagai prospek bersama, atau null. */
+  bersamaDenganAttemptId: string | null;
 }
 
 /** Lead detail: the record plus every attempt on it, oldest first. */
@@ -948,13 +998,15 @@ export async function get(sql: Queryable, id: string): Promise<LeadDetail> {
   }
   const r = rows[0];
   const attempts = await sql<
-    { id: string; owner_employee_id: string; owner_nama: string; status: string; claimed_at: Date }[]
+    {
+      id: string; owner_employee_id: string; owner_nama: string; status: string;
+      claimed_at: Date; bersama_dengan_attempt_id: string | null;
+    }[]
   >`
     select pa.id, pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
-           pa.status, pa.claimed_at
+           private.employee_display_name(pa.owner_employee_id) as owner_nama,
+           pa.status, pa.claimed_at, pa.bersama_dengan_attempt_id
     from prospect_attempts pa
-    left join employees e on e.employee_id = pa.owner_employee_id
     where pa.lead_id = ${id}
     order by pa.created_at, pa.id`;
   return {
@@ -964,6 +1016,7 @@ export async function get(sql: Queryable, id: string): Promise<LeadDetail> {
     createdAt: r.created_at,
     attempts: attempts.map((a) => ({
       id: a.id, ownerEmployeeId: a.owner_employee_id, ownerNama: a.owner_nama,
+      bersamaDenganAttemptId: a.bersama_dengan_attempt_id,
       status: a.status, claimedAt: a.claimed_at,
     })),
   };
@@ -1283,13 +1336,15 @@ export async function leadDetailView(sql: Queryable, id: string): Promise<LeadDe
   }
   const r = rows[0];
   const attempts = await sql<
-    { id: string; owner_employee_id: string; owner_nama: string; status: string; claimed_at: Date }[]
+    {
+      id: string; owner_employee_id: string; owner_nama: string; status: string;
+      claimed_at: Date; bersama_dengan_attempt_id: string | null;
+    }[]
   >`
     select pa.id, pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
-           pa.status, pa.claimed_at
+           private.employee_display_name(pa.owner_employee_id) as owner_nama,
+           pa.status, pa.claimed_at, pa.bersama_dengan_attempt_id
     from prospect_attempts pa
-    left join employees e on e.employee_id = pa.owner_employee_id
     where pa.lead_id = ${id}
     order by pa.created_at, pa.id`;
   return {
@@ -1301,6 +1356,7 @@ export async function leadDetailView(sql: Queryable, id: string): Promise<LeadDe
     },
     attempts: attempts.map((a) => ({
       id: a.id, ownerEmployeeId: a.owner_employee_id, ownerNama: a.owner_nama,
+      bersamaDenganAttemptId: a.bersama_dengan_attempt_id,
       status: a.status, claimedAt: a.claimed_at,
     })),
   };
@@ -1329,16 +1385,17 @@ export async function matchByPhone(q: Queryable, phoneNorm: string): Promise<Exi
     return null;
   }
   const m: ExistingLead = { id: leadRows[0].id, recordStatus: leadRows[0].record_status, openAttempts: [] };
-  const attemptRows = await q<{ owner_employee_id: string; owner_name: string; status: string }[]>`
-    select pa.owner_employee_id,
+  const attemptRows = await q<{ id: string; owner_employee_id: string; owner_name: string; status: string }[]>`
+    select pa.id, pa.owner_employee_id,
            coalesce(e.nama, pa.owner_employee_id) as owner_name,
            pa.status
     from prospect_attempts pa
     left join employees e on e.employee_id = pa.owner_employee_id
-    where pa.lead_id = ${m.id}`;
+    where pa.lead_id = ${m.id}
+    order by pa.created_at, pa.id`;
   for (const a of attemptRows) {
     if (!isTerminalAttemptStatus(a.status)) {
-      m.openAttempts.push({ ownerEmployeeId: a.owner_employee_id, ownerName: a.owner_name });
+      m.openAttempts.push({ attemptId: a.id, ownerEmployeeId: a.owner_employee_id, ownerName: a.owner_name });
     }
   }
   return m;
@@ -1357,16 +1414,17 @@ async function matchByLeadId(tx: Queryable, leadId: string): Promise<ExistingLea
     return null;
   }
   const m: ExistingLead = { id: leadRows[0].id, recordStatus: leadRows[0].record_status, openAttempts: [] };
-  const attemptRows = await tx<{ owner_employee_id: string; owner_name: string; status: string }[]>`
-    select pa.owner_employee_id,
+  const attemptRows = await tx<{ id: string; owner_employee_id: string; owner_name: string; status: string }[]>`
+    select pa.id, pa.owner_employee_id,
            coalesce(e.nama, pa.owner_employee_id) as owner_name,
            pa.status
     from prospect_attempts pa
     left join employees e on e.employee_id = pa.owner_employee_id
-    where pa.lead_id = ${m.id}`;
+    where pa.lead_id = ${m.id}
+    order by pa.created_at, pa.id`;
   for (const a of attemptRows) {
     if (!isTerminalAttemptStatus(a.status)) {
-      m.openAttempts.push({ ownerEmployeeId: a.owner_employee_id, ownerName: a.owner_name });
+      m.openAttempts.push({ attemptId: a.id, ownerEmployeeId: a.owner_employee_id, ownerName: a.owner_name });
     }
   }
   return m;
@@ -1389,6 +1447,18 @@ async function loadLead(tx: Queryable, id: string): Promise<Lead> {
 
 /** Auto pool-competition loss status. */
 export const ATTEMPT_CLOSED_KALAH = '[Closed - Kalah Kompetisi]';
+/**
+ * FS-3 — penutup untuk attempt PROSPEK BERSAMA saat rekannya menutup deal.
+ *
+ * Kenapa state sendiri dan bukan memakai ulang `[Closed - Kalah Kompetisi]`:
+ * `salesperf` menghitung contested-win-rate dari attempt yang kalah. Ketokan
+ * pemilik (FS-1) adalah kepemilikan menjadi BERSAMA dan komisi dibagi di antara
+ * keduanya — jadi sales yang memegang 50% komisi tapi tercatat "kalah
+ * kompetisi" adalah dua pernyataan yang saling meniadakan pada orang yang sama.
+ * Yang salah tidak pernah melempar galat; ia cuma menurunkan angka kinerja
+ * seseorang diam-diam.
+ */
+export const ATTEMPT_CLOSED_BERSAMA = '[Closed - Prospek Bersama]';
 
 /** A lead's win was already resolved (a second resolution is rejected). */
 export class AlreadyResolvedError extends Error {
@@ -1427,26 +1497,40 @@ export async function resolveWin(
   }
   await tx`update leads set winning_attempt_id = ${winningAttemptId} where id = ${leadId}`;
 
-  const others = await tx<{ id: string; status: string }[]>`
-    select id, status from prospect_attempts where lead_id = ${leadId} and id <> ${winningAttemptId}`;
+  const others = await tx<{ id: string; status: string; bersama_dengan_attempt_id: string | null }[]>`
+    select id, status, bersama_dengan_attempt_id
+      from prospect_attempts where lead_id = ${leadId} and id <> ${winningAttemptId}`;
+  const winnerRows = await tx<{ bersama_dengan_attempt_id: string | null }[]>`
+    select bersama_dengan_attempt_id from prospect_attempts where id = ${winningAttemptId}`;
+  const winnerBersama = winnerRows[0]?.bersama_dengan_attempt_id ?? null;
+
   const ex = executors(tx);
   const losers: string[] = [];
+  const bersama: string[] = [];
   for (const o of others) {
     if (isTerminalAttemptStatus(o.status)) {
       continue;
     }
+    // FS-3: prospek bersama ditutup TANPA menghukum. Tautannya diperiksa DUA
+    // ARAH — sales B menunjuk attempt sales A, jadi dilihat dari sisi A
+    // penunjuknya ada di baris B. Memeriksa satu arah saja berarti setengah
+    // pasangan tetap tercatat "kalah kompetisi", dan yang setengah itu justru
+    // pihak yang mendaftarkan lead-nya lebih dulu.
+    const isBersama = o.bersama_dengan_attempt_id === winningAttemptId
+      || winnerBersama === o.id;
+    const to = isBersama ? ATTEMPT_CLOSED_BERSAMA : ATTEMPT_CLOSED_KALAH;
     const res = await statemachine.transition(ex.sm, {
       machine: 'prospect_attempt',
       entityType: 'prospect_attempt',
       table: 'prospect_attempts',
       entityId: o.id,
-      to: ATTEMPT_CLOSED_KALAH,
+      to,
       actor: SYSTEM_ACTOR,
     });
     if (!res.ok) {
-      throw new Error(`win-resolution ${o.id} -> ${ATTEMPT_CLOSED_KALAH} failed: ${res.message}`);
+      throw new Error(`win-resolution ${o.id} -> ${to} failed: ${res.message}`);
     }
-    losers.push(o.id);
+    (isBersama ? bersama : losers).push(o.id);
   }
 
   await ex.audit.insertAudit({
@@ -1454,7 +1538,12 @@ export async function resolveWin(
     action: 'win_resolved', beforeJson: null,
     afterJson: {
       winning_attempt_id: winningAttemptId, winner: winnerEmployeeId, losers,
-      note: '[lead dimenangkan oleh sales lain (nama)]',
+      // Dipisahkan dari `losers` supaya riwayatnya bisa menjawab "siapa yang
+      // kalah" dan "siapa yang berbagi" tanpa menebak dari status.
+      prospek_bersama: bersama,
+      note: bersama.length > 0
+        ? '[prospek dikerjakan bersama, pembagian mengikuti alokasi komisi]'
+        : '[lead dimenangkan oleh sales lain (nama)]',
     },
     createdBy: 'SYSTEM',
   });
@@ -1834,12 +1923,10 @@ export async function deleteRequestQueue(
     select r.id, r.lead_id, r.reason, r.status, r.decision_note,
            r.requested_by, r.resolved_by, r.resolved_at, r.created_at,
            l.lead_name, l.phone_number, l.record_status, l.origin_division,
-           coalesce(req.nama, r.requested_by) as requested_by_nama,
-           coalesce(res.nama, r.resolved_by)  as resolved_by_nama
+           private.employee_display_name(r.requested_by) as requested_by_nama,
+           private.employee_display_name(r.resolved_by)  as resolved_by_nama
     from lead_delete_requests r
     join leads l on l.id = r.lead_id
-    left join employees req on req.employee_id = r.requested_by
-    left join employees res on res.employee_id = r.resolved_by
     where (${status} = '' or r.status = ${status})
       and (${leadId} = '' or r.lead_id = ${leadId})
     order by r.created_at desc, r.id desc`;

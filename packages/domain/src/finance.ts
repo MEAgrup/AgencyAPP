@@ -1496,13 +1496,11 @@ export async function schemeChangeRequests(
            r.requested_by, r.resolved_by, r.resolved_at, r.created_at,
            t.client_id, t.total_agreed_value::text as total_agreed_value, t.payment_status,
            c.toko,
-           coalesce(req.nama, r.requested_by) as requested_by_nama,
-           coalesce(res.nama, r.resolved_by)  as resolved_by_nama
+           private.employee_display_name(r.requested_by) as requested_by_nama,
+           private.employee_display_name(r.resolved_by)  as resolved_by_nama
     from transaction_change_requests r
     join transactions t on t.id = r.transaction_id
     join clients c on c.id = t.client_id
-    left join employees req on req.employee_id = r.requested_by
-    left join employees res on res.employee_id = r.resolved_by
     where (${status} = '' or r.status = ${status})
       and (${transactionId} = '' or r.transaction_id = ${transactionId})
     order by r.created_at desc, r.id desc`;

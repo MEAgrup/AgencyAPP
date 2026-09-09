@@ -1067,7 +1067,19 @@ describeDb('closing', () => {
     })).rejects.toBeInstanceOf(NotClosableError);
   });
 
-  it('closing a contested pool lead auto-loses the competitor (M1 §6)', async () => {
+  it('closing a PROSPEK BERSAMA closes the partner without punishing them (FS-3)', async () => {
+    // Tes ini dulu bernama "contested pool lead auto-loses the competitor" dan
+    // menuntut `[Closed - Kalah Kompetisi]`. Setup-nya BUKAN klaim lead Pool —
+    // ia dua pendaftaran tunggal atas nomor yang sama, yang persis skenario
+    // feedback FS-3: prospek didaftarkan sales A, lalu menghubungi sales B.
+    //
+    // Ketokan pemilik (FS-1): kepemilikan menjadi bersama dan komisi dibagi.
+    // Sales yang memegang 50% komisi tapi tercatat "kalah kompetisi" adalah dua
+    // pernyataan yang saling meniadakan pada orang yang sama, dan yang salah
+    // hanya menurunkan contested-win-rate-nya diam-diam.
+    //
+    // Kontes lead Pool yang SUNGGUHAN tetap ditutup Kalah Kompetisi — dijaga
+    // tes tepat di bawah ini, lewat `close()` yang sama.
     const svc = await seedService('SVC-ZZ-WIN');
     // Budi registers; Andi co-pursues the same phone (a second open attempt).
     const phone = uniquePhone();
@@ -1088,8 +1100,9 @@ describeDb('closing', () => {
     });
 
     expect(await status(budiReg.attempt.id)).toBe('Closed-Success');
-    // Andi's competing attempt is auto-closed as Kalah Kompetisi.
-    expect(await status(andiReg.attempt.id)).toBe('[Closed - Kalah Kompetisi]');
+    // Attempt Andi ditutup sebagai prospek bersama — bukan sebagai kalah.
+    expect(await status(andiReg.attempt.id)).toBe('[Closed - Prospek Bersama]');
+    expect(await status(andiReg.attempt.id)).not.toBe('[Closed - Kalah Kompetisi]');
     const lead = await sql<{ winning_attempt_id: string }[]>`
       select winning_attempt_id from leads where id = ${budiReg.lead.id}`;
     expect(lead[0].winning_attempt_id).toBe(budiReg.attempt.id);
@@ -1098,12 +1111,18 @@ describeDb('closing', () => {
 
   it('closing a contested pool lead still wins when the competitor already aged to [Unrespon] (L1 §1.2)', async () => {
     // Regression guard for the ranjau in docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md
-    // L1 §1.2: resolveWin closes every non-terminal sibling attempt to
-    // [Closed - Kalah Kompetisi], inside the Closing transaction, and THROWS if
-    // any of those transitions fails. Without the [Unrespon] -> [Closed - Kalah
-    // Kompetisi] edge, an attempt that aged to [Unrespon] while its sibling was
-    // closing would fail that transition and roll back the ENTIRE close (no
-    // Client/Transaction/Service created) with an unhelpful error.
+    // L1 §1.2: resolveWin closes every non-terminal sibling attempt INSIDE the
+    // Closing transaction and THROWS if any of those transitions fails. Tanpa
+    // edge dari [Unrespon], sebuah attempt yang menua ke [Unrespon] sementara
+    // saudaranya sedang closing akan menggagalkan transisi itu dan me-rollback
+    // SELURUH closing (nol Client/Transaction/Service) dengan galat yang tidak
+    // menolong.
+    //
+    // FS-3 memperluas ranjau ini, bukan menggantinya: state penutupnya kini
+    // bisa `[Closed - Prospek Bersama]`, jadi edge dari [Unrespon] harus ada
+    // untuk KEDUANYA. Migrasi 20260925030000 menurunkannya lewat
+    // INSERT ... SELECT dari baris Kalah Kompetisi justru supaya keduanya tidak
+    // bisa menyimpang — dan tes ini yang membuktikannya di jalur nyata.
     const svc = await seedService('SVC-ZZ-WIN-UNRESPON');
     const phone = uniquePhone();
     const budiReg = await leads.register(sql, budi(), { leadName: 'Contested Unrespon Co', phoneNumber: phone });
@@ -1132,11 +1151,54 @@ describeDb('closing', () => {
 
     expect(res.clientId).toMatch(/^CLI-\d{6}-\d{4}$/);
     expect(await status(budiReg.attempt.id)).toBe('Closed-Success');
-    // The [Unrespon] sibling is closed out, same as a live competitor would be.
-    expect(await status(andiReg.attempt.id)).toBe('[Closed - Kalah Kompetisi]');
+    // Saudara yang sudah [Unrespon] tetap ditutup — dan karena pasangan ini
+    // lahir dari dua pendaftaran tunggal, penutupnya prospek bersama. Yang
+    // dijaga tes ini bukan NAMA state-nya, melainkan bahwa transisinya BERHASIL
+    // dari [Unrespon] sehingga closing tidak ter-rollback.
+    expect(await status(andiReg.attempt.id)).toBe('[Closed - Prospek Bersama]');
     const lead = await sql<{ winning_attempt_id: string }[]>`
       select winning_attempt_id from leads where id = ${budiReg.lead.id}`;
     expect(lead[0].winning_attempt_id).toBe(budiReg.attempt.id);
+  });
+
+  /**
+   * Pagar arah sebaliknya, lewat `close()` yang sama — bukan lewat `resolveWin`
+   * langsung. Dua tes di atas memakai dua PENDAFTARAN tunggal (prospek
+   * bersama); yang ini memakai dua KLAIM atas lead `[Pool]`, yang memang
+   * kompetisi by design (M1 §6) dan harus tetap menghasilkan Kalah Kompetisi.
+   *
+   * Tanpa tes ini, aturan lama hanya terjaga di level `resolveWin` dan sebuah
+   * regresi di jalur closing tidak akan memerahkan apa pun.
+   */
+  it('closing a REAL contested pool lead still auto-loses the competitor (M1 §6)', async () => {
+    const svc = await seedService('SVC-ZZ-WIN-POOL');
+    const phone = uniquePhone();
+    // Lead [Pool] tanpa attempt terbuka: daftarkan, terminalkan attempt-nya,
+    // lalu balik record-nya ke [Pool] — pola `seedPoolLead` di leads.test.ts.
+    const seeded = await leads.register(sql, budi(), { leadName: 'Pool Contest Co', phoneNumber: phone });
+    await sql`update prospect_attempts set status = 'Not Qualified' where id = ${seeded.attempt.id}`;
+    await sql`update leads set record_status = '[Pool]' where id = ${seeded.lead.id}`;
+
+    const budiClaim = await leads.claim(sql, budi(), seeded.lead.id);
+    const andiClaim = await leads.claim(sql, andi(), seeded.lead.id);
+    // Klaim TIDAK menautkan: itulah yang membedakan kontes dari prospek bersama.
+    const linked = await sql<{ bersama_dengan_attempt_id: string | null }[]>`
+      select bersama_dengan_attempt_id from prospect_attempts
+       where id in (${budiClaim.attempt.id}, ${andiClaim.attempt.id})`;
+    expect(linked.every((r) => r.bersama_dengan_attempt_id === null)).toBe(true);
+
+    await markContacted(sql, budi(), budiClaim.attempt.id);
+    await submitQualifiedForm(sql, budi(), budiClaim.attempt.id, {
+      namaPic: 'PIC', toko: 'Pool Contest Co', kota: 'JKT', linkToko: 'https://x', kategori: 'x', platform: 'Shopee',
+      gmvBaseline: '1000000', targetGmv: '2000000', services: [{ masterServiceId: svc, quantity: 1 }],
+    });
+    await submitNegotiation(sql, budi(), budiClaim.attempt.id, [], true);
+    await close(sql, budi(), budiClaim.attempt.id, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+
+    expect(await status(andiClaim.attempt.id)).toBe('[Closed - Kalah Kompetisi]');
   });
 });
 

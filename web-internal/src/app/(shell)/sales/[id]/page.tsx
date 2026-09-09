@@ -44,6 +44,7 @@ import {
 import { ACTIVITY_TYPES, type ActivityRow, type EffortSummary } from '@/lib/leads';
 import { PLATFORM_OPTIONS } from '@/lib/clients';
 import StatusBadge from '@/components/StatusBadge';
+import WaButton from '@/components/WaButton';
 
 // Status literals mirrored from ATTEMPT_STATUSES (module0_sales/sales.go).
 const S_NEW = 'New Lead';
@@ -500,13 +501,32 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     }
   }, [detail]);
 
-  // Prefill the closing allocation once (primary = owner @ 100%) when entering closing.
+  // Prefill the closing allocation once when entering closing.
+  //
+  // FS-3 (ketokan pemilik FS-1): untuk PROSPEK BERSAMA, prefill-nya DUA baris
+  // 50/50 — "bagian kinerja penjualan dan komisi bisa diatur diantara mereka
+  // (50-50) atau kesepakatan". 50/50 adalah titik mulai yang wajar, bukan
+  // keputusan: barisnya tetap bisa diubah sebelum closing, dan server tetap
+  // menuntut Σ = 100%.
+  //
+  // Prefill satu baris @100% untuk pemenang saja akan membuat rekannya hilang
+  // dari alokasi tanpa ada yang menyadarinya — dan alokasi itulah yang menjadi
+  // dasar komisi DAN angka klien di dashboard Kinerja Sales.
   useEffect(() => {
     if (!detail || closingInitRef.current) return;
     const s = detail.attempt.status;
     if (s === S_APPROVED || s === S_AUTO) {
-      setAllocRows([{ salesperson_id: detail.attempt.owner_employee_id, persen: '100' }]);
-      setCommissionPic(detail.attempt.owner_employee_id);
+      const owner = detail.attempt.owner_employee_id;
+      const rekan = detail.attempt.bersama_owner_employee_id;
+      setAllocRows(
+        rekan && rekan !== owner
+          ? [
+              { salesperson_id: owner, persen: '50' },
+              { salesperson_id: rekan, persen: '50' },
+            ]
+          : [{ salesperson_id: owner, persen: '100' }],
+      );
+      setCommissionPic(owner);
       closingInitRef.current = true;
     }
   }, [detail]);
@@ -924,6 +944,15 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           <p className="muted">
             Lead:{' '}
             <Link href={`/leads/${lead.id}`}>{lead.id}</Link> &middot; Owner: {attempt.owner_nama || attempt.owner_employee_id}
+            {attempt.bersama_owner_employee_id && (
+              <>
+                {' '}
+                <span className="badge badge-amber" title="Prospek ini dikerjakan berdua">
+                  Prospek Bersama
+                </span>{' '}
+                dengan {attempt.bersama_owner_nama || attempt.bersama_owner_employee_id}
+              </>
+            )}
           </p>
         </div>
         <StatusBadge status={status} />
@@ -938,7 +967,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Telepon</div>
-            <div>{lead.phone_number}</div>
+            <div><WaButton phone={lead.phone_number} nama={lead.lead_name} /></div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Email</div>

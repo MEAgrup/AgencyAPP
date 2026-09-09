@@ -88,6 +88,20 @@ export class ServiceNotFoundError extends Error {
 // ---------------------------------------------------------------------------
 
 /** The effective view of one service at a date (id = service id). */
+/**
+ * FS-6 — satu pilihan tenor pada satu versi layanan.
+ *
+ * `harga` adalah harga PAKET UTUH untuk tenor itu, bukan harga per bulan:
+ * itulah yang membuat diskon paket bisa dinyatakan sama sekali
+ * (`Jasa Iklan Traffic Marketplace Basic` 3 bln Rp 10,2jt vs 12 bln Rp 36jt,
+ * bukan 12 × harga sebulan). `qty_menambah` yang linear tidak bisa
+ * mengungkapkan itu — lihat header migrasi 20260925040000.
+ */
+export interface DurasiOption {
+  durasiBulan: number;
+  harga: string;
+}
+
 export interface ServiceView {
   id: string;
   name: string;
@@ -147,6 +161,18 @@ export interface ServiceView {
    * rumah #4 ada untuk mencegah.
    */
   pengakuan: Pengakuan;
+  /**
+   * FS-6: pilihan tenor untuk layanan ini, terurut dari yang TERPENDEK.
+   * Array kosong = layanan tenor tunggal (perilaku sebelum FS-6, dan bentuk
+   * dari 100% katalog hari ini).
+   *
+   * Bila tidak kosong, opsi PERTAMA selalu sama dengan `standardPrice` +
+   * `durasiBulan` di atas — invarian yang ditegakkan trigger DB
+   * `trg_msdo_terpendek`, bukan hanya di sini. Itulah yang membuat setiap
+   * pembaca lama (`sales.deriveDuration`, `ads.computeAdsManagementEndDate`,
+   * mesin accrual) terus membaca angka yang sah tanpa tahu soal opsi.
+   */
+  durasiOptions: DurasiOption[];
   versionNo: number;
   effectiveFrom: string;
 }
@@ -170,6 +196,7 @@ interface VersionRow {
   durasi_bulan: number | null;
   qty_menambah: string;
   pengakuan: string;
+  durasi_options: { durasi_bulan: number; harga: string }[] | null;
   version_no: number;
   effective_from: Date | string;
 }
@@ -184,6 +211,10 @@ function toView(r: VersionRow): ServiceView {
     durasiBulan: r.durasi_bulan,
     qtyMenambah: r.qty_menambah as QtyMenambah,
     pengakuan: r.pengakuan as Pengakuan,
+    durasiOptions: (r.durasi_options ?? []).map((o) => ({
+      durasiBulan: Number(o.durasi_bulan),
+      harga: o.harga,
+    })),
     versionNo: r.version_no,
     effectiveFrom: r.effective_from instanceof Date
       ? r.effective_from.toISOString().slice(0, 10)
@@ -204,7 +235,13 @@ export async function effectiveAt(sql: Queryable, serviceId: string, date: strin
   const rows = await sql<VersionRow[]>`
     select service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan, version_no, effective_from
+           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan, version_no, effective_from,
+           coalesce((
+             select json_agg(json_build_object('durasi_bulan', o.durasi_bulan, 'harga', o.harga::text)
+                             order by o.durasi_bulan)
+               from master_service_duration_options o
+              where o.version_id = master_service_versions.id
+           ), '[]'::json) as durasi_options
     from master_service_versions
     where service_id = ${serviceId} and effective_from <= ${date}
     order by effective_from desc, version_no desc limit 1`;
@@ -224,7 +261,13 @@ export async function listEffectiveAt(sql: Queryable, date: string): Promise<Ser
     select distinct on (service_id)
            service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan, version_no, effective_from
+           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan, version_no, effective_from,
+           coalesce((
+             select json_agg(json_build_object('durasi_bulan', o.durasi_bulan, 'harga', o.harga::text)
+                             order by o.durasi_bulan)
+               from master_service_duration_options o
+              where o.version_id = master_service_versions.id
+           ), '[]'::json) as durasi_options
     from master_service_versions
     where effective_from <= ${date}
     order by service_id, effective_from desc, version_no desc`;
@@ -236,7 +279,13 @@ export async function listVersions(sql: Queryable, serviceId: string): Promise<S
   const rows = await sql<VersionRow[]>`
     select service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan, version_no, effective_from
+           requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan, version_no, effective_from,
+           coalesce((
+             select json_agg(json_build_object('durasi_bulan', o.durasi_bulan, 'harga', o.harga::text)
+                             order by o.durasi_bulan)
+               from master_service_duration_options o
+              where o.version_id = master_service_versions.id
+           ), '[]'::json) as durasi_options
     from master_service_versions
     where service_id = ${serviceId}
     order by version_no desc`;
@@ -281,6 +330,15 @@ export interface ServiceInput {
    * `reconcileTier` derives it from `requiresStrategyPlan` when absent.
    */
   planTier?: PlanTier;
+  /**
+   * FS-6 — pilihan tenor (1/3/6/12 bulan dengan harga berbeda). Boleh kosong /
+   * dihilangkan: layanan tenor tunggal tetap bekerja persis seperti sebelumnya.
+   *
+   * Bila diisi, opsi TERPENDEK wajib sama dengan `standardPrice` +
+   * `durasiBulan` — ditolak di sini DAN oleh trigger DB `trg_msdo_terpendek`,
+   * dua lapis karena route MSL bukan satu-satunya penulis tabel ini.
+   */
+  durasiOptions?: DurasiOption[] | null;
   /**
    * Durasi jasa dalam HARI KALENDER (M16 LT-42 / M17 §5.4). Optional/undefined
    * = tidak berlaku untuk layanan ini (disimpan NULL) — kebanyakan layanan
@@ -378,7 +436,7 @@ export function reconcileTier(
 }
 
 /** A normalized (validated) input ready to persist. */
-interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit' | 'minQty' | 'frequency' | 'priceNote' | 'description' | 'durasiBulan'>> {
+interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit' | 'minQty' | 'frequency' | 'priceNote' | 'description' | 'durasiBulan' | 'durasiOptions'>> {
   category: string;
   unit: string;
   minQty: string;
@@ -388,6 +446,8 @@ interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit
   /** null = tidak berlaku untuk layanan ini (disimpan SQL NULL). */
   durasiBulan: number | null;
   pengakuan: Pengakuan;
+  /** Terurut dari tenor TERPENDEK; kosong = layanan tenor tunggal. */
+  durasiOptions: DurasiOption[];
 }
 
 /**
@@ -510,6 +570,50 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
     throw new IncompleteError();
   }
 
+  // --- FS-6: pilihan tenor ---------------------------------------------------
+  // Diurutkan DI SINI, bukan diserahkan ke pemanggil: invarian "opsi terpendek
+  // = harga & durasi versinya" hanya bisa diperiksa kalau urutannya pasti, dan
+  // form yang mengirim 6/3/12 bukan input yang salah — cuma tidak terurut.
+  const durasiOptions: DurasiOption[] = [...(inp.durasiOptions ?? [])]
+    .map((o) => ({ durasiBulan: Number(o.durasiBulan), harga: (o.harga ?? '').trim() }))
+    .sort((a, b) => a.durasiBulan - b.durasiBulan);
+
+  if (durasiOptions.length > 0) {
+    const seen = new Set<number>();
+    for (const o of durasiOptions) {
+      if (!Number.isInteger(o.durasiBulan) || o.durasiBulan <= 0) {
+        throw new IncompleteError();
+      }
+      if (seen.has(o.durasiBulan)) {
+        throw new IncompleteError();  // dua harga untuk satu tenor
+      }
+      seen.add(o.durasiBulan);
+      let harga: money.Money;
+      try {
+        harga = money.parse(o.harga);
+      } catch {
+        throw new IncompleteError();
+      }
+      if (harga < 0n) {
+        throw new IncompleteError();
+      }
+      o.harga = money.decimal(harga);
+    }
+    // Invarian yang menjaga SELURUH pembaca lama tetap benar. Ditolak di sini
+    // supaya Sales Head melihat pesan BI di form, bukan galat trigger mentah —
+    // tapi trigger DB-nya tetap ada, karena route ini bukan satu-satunya pintu.
+    const terpendek = durasiOptions[0];
+    // Dibandingkan sebagai UANG, bukan sebagai teks: `standardPrice` di sini
+    // masih apa adanya seperti diketik ('10200000'), sementara `harga` opsi
+    // sudah dinormalkan ('10200000.00'). Perbandingan string akan menolak dua
+    // angka yang sama persis — dan menolaknya dengan pesan "data tidak
+    // lengkap", yang tidak menunjuk ke apa pun yang bisa diperbaiki.
+    if (durasiBulan !== terpendek.durasiBulan
+        || money.parse(standardPrice) !== money.parse(terpendek.harga)) {
+      throw new IncompleteError();
+    }
+  }
+
   return {
     name, standardPrice, commissionRule, effectiveFrom, pricingMode,
     category: inp.category ?? '', unit: inp.unit ?? '', minQty, frequency,
@@ -519,6 +623,7 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
     durasiBulan,
     qtyMenambah,
     pengakuan,
+    durasiOptions,
     active: inp.active ?? false,
   };
 }
@@ -547,7 +652,7 @@ async function insertVersion(
   inp: NormalizedInput,
   actorId: string,
 ): Promise<void> {
-  await tx`
+  const rows = await tx<{ id: string }[]>`
     insert into master_service_versions
       (service_id, version_no, name, standard_price, commission_rule, category, unit,
        min_qty, pricing_mode, apply_ppn, frequency, price_note, description,
@@ -557,7 +662,18 @@ async function insertVersion(
        ${nullText(inp.category)}, ${nullText(inp.unit)}, ${nullText(inp.minQty)}, ${inp.pricingMode},
        ${inp.applyPPN}, ${nullText(inp.frequency)}, ${nullText(inp.priceNote)}, ${nullText(inp.description)},
        ${inp.active}, ${inp.requiresStrategyPlan}, ${inp.planTier}, ${inp.durasiBulan}, ${inp.qtyMenambah},
-       ${inp.pengakuan}, ${inp.effectiveFrom}, ${actorId})`;
+       ${inp.pengakuan}, ${inp.effectiveFrom}, ${actorId})
+    returning id`;
+  // FS-6: baris opsi ditulis dalam transaksi yang SAMA. Trigger-nya DEFERRABLE
+  // INITIALLY DEFERRED justru untuk urutan ini — baris versi wajib ada lebih
+  // dulu (FK), jadi pemeriksaan yang tidak ditunda akan menolak penulisan yang
+  // sah hanya karena urutannya.
+  const versionId = rows[0].id;
+  for (const o of inp.durasiOptions) {
+    await tx`
+      insert into master_service_duration_options (version_id, durasi_bulan, harga, created_by)
+      values (${versionId}, ${o.durasiBulan}, ${o.harga}, ${actorId})`;
+  }
 }
 
 /**

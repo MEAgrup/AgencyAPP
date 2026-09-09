@@ -40,6 +40,18 @@ interface ServiceBody {
    * ada sisi yang aman untuk ditebak (lihat msl.ts).
    */
   pengakuan?: string;
+  /**
+   * FS-6: pilihan tenor (1/3/6/12 bulan dengan harga berbeda). Absent atau `[]`
+   * sama artinya: layanan tenor tunggal. Bila diisi, opsi TERPENDEK wajib sama
+   * dengan `standard_price` + `durasi_bulan` — ditolak `msl.normalizeInput` DAN
+   * trigger DB `trg_msdo_terpendek`.
+   *
+   * CATATAN semantik FULL REPLACE: `updateService` menulis baris versi BARU dari
+   * isi payload, jadi payload yang TIDAK membawa `durasi_options` menghapus
+   * opsinya di versi baru. Itu perilaku yang dinyatakan (ada tesnya), bukan
+   * kecelakaan — dan itulah kenapa form MSL wajib mem-carry field ini.
+   */
+  durasi_options?: { durasi_bulan?: number; harga?: string }[];
   effective_from?: string;
 }
 
@@ -66,6 +78,10 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       durasiBulan: b.durasi_bulan,
       qtyMenambah: b.qty_menambah as msl.ServiceInput['qtyMenambah'],
       pengakuan: b.pengakuan as msl.ServiceInput['pengakuan'],
+      durasiOptions: (b.durasi_options ?? []).map((o) => ({
+        durasiBulan: Number(o.durasi_bulan ?? 0),
+        harga: o.harga ?? '',
+      })),
       effectiveFrom: b.effective_from ?? '',
     });
     return json({ id, version_no: versionNo });

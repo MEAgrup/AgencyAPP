@@ -17,7 +17,11 @@ import {
   BlockedError,
   CHANNEL_IMPORT,
   CHANNEL_SINGLE_REG,
+  ATTEMPT_CLOSED_BERSAMA,
+  ATTEMPT_CLOSED_KALAH,
   claim,
+  isTerminalAttemptStatus,
+  resolveWin,
   decide,
   decideClaim,
   type ExistingLead,
@@ -69,7 +73,8 @@ describe('normalizePhone', () => {
 // ---------------------------------------------------------------------------
 describe('decide', () => {
   const withAttempt = (owner: string, status = 'New Lead', recordStatus = 'active'): ExistingLead => ({
-    id: 'LEAD-x', recordStatus, openAttempts: [{ ownerEmployeeId: owner, ownerName: owner }],
+    id: 'LEAD-x', recordStatus,
+    openAttempts: [{ attemptId: `PRSP-${owner}`, ownerEmployeeId: owner, ownerName: owner }],
   });
 
   it('no match -> create', () => {
@@ -131,7 +136,7 @@ describe('decide', () => {
 describe('decideClaim', () => {
   const pool = (owners: string[] = []): ExistingLead => ({
     id: 'LEAD-x', recordStatus: '[Pool]',
-    openAttempts: owners.map((o) => ({ ownerEmployeeId: o, ownerName: o })),
+    openAttempts: owners.map((o) => ({ attemptId: `PRSP-${o}`, ownerEmployeeId: o, ownerName: o })),
   });
 
   it('a [Pool] lead with no held attempt -> claim', () => {
@@ -168,7 +173,7 @@ describe('decideClaim', () => {
   it('a scouted-exclusive (active) lead is not claimable via the Pool flow -> block', () => {
     const m: ExistingLead = {
       id: 'LEAD-x', recordStatus: 'active',
-      openAttempts: [{ ownerEmployeeId: 'ZZ-ANDI', ownerName: 'Andi' }],
+      openAttempts: [{ attemptId: 'PRSP-ANDI', ownerEmployeeId: 'ZZ-ANDI', ownerName: 'Andi' }],
     };
     const d = decideClaim(m, 'ZZ-BUDI');
     expect(d.outcome).toBe('block');
@@ -313,17 +318,21 @@ describeDb('register — dedup v2', () => {
   });
 });
 
-describeDb('claim — pool (M1 §6)', () => {
-  /** Seed a marketing-style [Pool] lead with no open attempt, return its id. */
-  async function seedPoolLead(): Promise<string> {
-    const first = await register(sql, budi(), { leadName: 'Sini Store', phoneNumber: uniquePhone() });
-    // Terminate Budi's registration attempt and flip the record to [Pool] so it
-    // looks like a Marketing pool lead nobody is actively holding.
-    await sql`update prospect_attempts set status = 'Not Qualified' where id = ${first.attempt.id}`;
-    await sql`update leads set record_status = '[Pool]' where id = ${first.lead.id}`;
-    return first.lead.id;
-  }
+/**
+ * Seed a marketing-style [Pool] lead with no open attempt, return its id.
+ * Di lingkup modul karena DUA blok memakainya (klaim Pool dan FS-3 prospek
+ * bersama) — menyalinnya berarti dua definisi "lead Pool" yang bisa menyimpang.
+ */
+async function seedPoolLead(): Promise<string> {
+  const first = await register(sql, budi(), { leadName: 'Sini Store', phoneNumber: uniquePhone() });
+  // Terminate Budi's registration attempt and flip the record to [Pool] so it
+  // looks like a Marketing pool lead nobody is actively holding.
+  await sql`update prospect_attempts set status = 'Not Qualified' where id = ${first.attempt.id}`;
+  await sql`update leads set record_status = '[Pool]' where id = ${first.lead.id}`;
+  return first.lead.id;
+}
 
+describeDb('claim — pool (M1 §6)', () => {
   it('claims a [Pool] lead: new PRSP at New Lead, claim audited on the lead', async () => {
     const leadId = await seedPoolLead();
     const res = await claim(sql, andi(), leadId);
@@ -520,5 +529,130 @@ describeDb('registerBatch', () => {
     const made = await sql<{ n: number }[]>`
       select count(*)::int as n from leads where phone_norm = any(${phones.map(normalizePhone)})`;
     expect(made[0].n).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-3 — PROSPEK BERSAMA (feedback tim Sales 2026-09-08 #3).
+// ---------------------------------------------------------------------------
+describeDb('prospek bersama (FS-3)', () => {
+  it('attempt kedua MENAUTKAN dirinya ke attempt yang sudah ada', async () => {
+    const phone = uniquePhone();
+    const a = await register(sql, budi(), { leadName: 'Toko Bersama', phoneNumber: phone });
+    const b = await register(sql, andi(), { leadName: 'Toko Bersama', phoneNumber: phone });
+
+    const rows = await sql<{ id: string; bersama_dengan_attempt_id: string | null }[]>`
+      select id, bersama_dengan_attempt_id from prospect_attempts where lead_id = ${a.lead.id}
+       order by created_at, id`;
+    const byId = new Map(rows.map((r) => [r.id, r.bersama_dengan_attempt_id]));
+
+    // Yang datang belakangan menunjuk yang sudah ada — arah tautannya searah
+    // dengan ceritanya: sales A lebih dulu, sales B menyusul.
+    expect(byId.get(b.attempt.id)).toBe(a.attempt.id);
+    expect(byId.get(a.attempt.id)).toBeNull();
+  });
+
+  it('KLAIM lead Pool TIDAK menautkan — itu kontes, bukan prospek bersama', async () => {
+    // Pagar yang menjaga arti kolomnya. Dua sales yang mengklaim lead Pool
+    // memang sedang berkompetisi (M1 §6), dan menutup salah satunya sebagai
+    // "prospek bersama" akan menghapus metrik contested-win-rate.
+    const leadId = await seedPoolLead();
+    const c1 = await claim(sql, budi(), leadId);
+    const c2 = await claim(sql, andi(), leadId);
+    // `seedPoolLead` menyisakan satu attempt Not Qualified dari pendaftaran
+    // awalnya, jadi yang diperiksa adalah kedua KLAIM-nya, bukan jumlah baris.
+    const rows = await sql<{ id: string; bersama_dengan_attempt_id: string | null }[]>`
+      select id, bersama_dengan_attempt_id from prospect_attempts
+       where id in (${c1.attempt.id}, ${c2.attempt.id})`;
+    expect(rows.length).toBe(2);
+    for (const r of rows) {
+      expect(r.bersama_dengan_attempt_id).toBeNull();
+    }
+  });
+
+  /**
+   * Inti FS-1, dan alasan state terminalnya dipisah.
+   *
+   * `salesperf` menghitung contested-win-rate dari attempt yang KALAH. Sales
+   * yang memegang 50% komisi tapi tercatat "kalah kompetisi" adalah dua
+   * pernyataan yang saling meniadakan pada orang yang sama — dan yang salah
+   * tidak pernah melempar galat, ia cuma menurunkan angka kinerja seseorang
+   * diam-diam di dashboard.
+   */
+  it('sales B (pemegang tautan) menang → sales A ditutup Prospek Bersama, bukan Kalah', async () => {
+    const phone = uniquePhone();
+    const a = await register(sql, budi(), { leadName: 'Toko Menang', phoneNumber: phone });
+    const b = await register(sql, andi(), { leadName: 'Toko Menang', phoneNumber: phone });
+
+    // Sales B (yang menyusul) menutup deal-nya.
+    await resolveWin(sql, a.lead.id, b.attempt.id, andi().employeeId);
+
+    const rows = await sql<{ id: string; status: string }[]>`
+      select id, status from prospect_attempts where lead_id = ${a.lead.id}`;
+    const status = new Map(rows.map((r) => [r.id, r.status]));
+    expect(status.get(a.attempt.id)).toBe(ATTEMPT_CLOSED_BERSAMA);
+    expect(status.get(a.attempt.id)).not.toBe(ATTEMPT_CLOSED_KALAH);
+  });
+
+  it('sales A (yang ditunjuk) menang → sales B juga tidak dihukum — arah sebaliknya', async () => {
+    // Penunjuknya HANYA ada di baris B, jadi kedua arah butuh lengan yang
+    // berbeda: saat B menang yang cocok `winnerBersama === o.id`, saat A menang
+    // yang cocok `o.bersama_dengan_attempt_id === winningAttemptId`. Kedua
+    // lengan itu divalidasi-mutasi terpisah — mencabut salah satunya
+    // memerahkan tes yang berbeda, jadi tidak satu pun di antaranya hiasan.
+    const phone = uniquePhone();
+    const a = await register(sql, budi(), { leadName: 'Toko Dua Arah', phoneNumber: phone });
+    const b = await register(sql, andi(), { leadName: 'Toko Dua Arah', phoneNumber: phone });
+
+    await resolveWin(sql, a.lead.id, a.attempt.id, budi().employeeId);
+
+    const rows = await sql<{ id: string; status: string }[]>`
+      select id, status from prospect_attempts where lead_id = ${a.lead.id}`;
+    const status = new Map(rows.map((r) => [r.id, r.status]));
+    expect(status.get(b.attempt.id)).toBe(ATTEMPT_CLOSED_BERSAMA);
+  });
+
+  it('kontes lead Pool TETAP ditutup sebagai Kalah Kompetisi', async () => {
+    // Pagar arah sebaliknya: cabang FS-3 tidak boleh mematikan perilaku lama.
+    const leadId = await seedPoolLead();
+    const c1 = await claim(sql, budi(), leadId);
+    const c2 = await claim(sql, andi(), leadId);
+
+    await resolveWin(sql, leadId, c1.attempt.id, budi().employeeId);
+
+    const rows = await sql<{ id: string; status: string }[]>`
+      select id, status from prospect_attempts where id = ${c2.attempt.id}`;
+    expect(rows[0].status).toBe(ATTEMPT_CLOSED_KALAH);
+  });
+
+  it('audit memisahkan `prospek_bersama` dari `losers`', async () => {
+    // Riwayatnya harus bisa menjawab "siapa yang kalah" dan "siapa yang
+    // berbagi" tanpa menebak dari status.
+    const phone = uniquePhone();
+    const a = await register(sql, budi(), { leadName: 'Toko Audit', phoneNumber: phone });
+    const b = await register(sql, andi(), { leadName: 'Toko Audit', phoneNumber: phone });
+    await resolveWin(sql, a.lead.id, b.attempt.id, andi().employeeId);
+
+    const rows = await sql<{ after_json: { losers: string[]; prospek_bersama: string[]; note: string } }[]>`
+      select after_json from audit_log
+       where entity_type = 'lead' and entity_id = ${a.lead.id} and action = 'win_resolved'`;
+    expect(rows.length).toBe(1);
+    expect(rows[0].after_json.prospek_bersama).toEqual([a.attempt.id]);
+    expect(rows[0].after_json.losers).toEqual([]);
+    expect(rows[0].after_json.note).toContain('prospek dikerjakan bersama');
+  });
+
+  it('[Closed - Prospek Bersama] TERMINAL — nomor yang sama bisa didaftarkan lagi', async () => {
+    // Kalau state ini tidak terdaftar terminal, attempt yang sudah ditutup
+    // masih terbaca "terbuka" dan pendaftaran berikutnya akan menautkan diri
+    // padanya — rantai prospek bersama yang tidak pernah putus.
+    const phone = uniquePhone();
+    const a = await register(sql, budi(), { leadName: 'Toko Terminal', phoneNumber: phone });
+    const b = await register(sql, andi(), { leadName: 'Toko Terminal', phoneNumber: phone });
+    await resolveWin(sql, a.lead.id, b.attempt.id, andi().employeeId);
+
+    const match = await sql<{ status: string }[]>`
+      select status from prospect_attempts where id = ${a.attempt.id}`;
+    expect(isTerminalAttemptStatus(match[0].status)).toBe(true);
   });
 });

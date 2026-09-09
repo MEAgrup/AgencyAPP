@@ -37,6 +37,7 @@ import {
   attachService,
   canReadContract,
   canWriteContract,
+  type ClientOwnership,
   createContract,
   detachService,
   getContract,
@@ -50,6 +51,7 @@ import {
   listStrategiForService,
   updateHeader,
 } from './strategi';
+import { SALES_DIVISION } from './sales';
 
 const am = (id = 'ZZ-AM') => ({
   employeeId: id,
@@ -84,6 +86,90 @@ describe('permission predicates', () => {
     expect(canReadContract(od(), 'ZZ-AM')).toBe(true);
     expect(canWriteContract(od(), 'ZZ-AM')).toBe(false);
     expect(canReadContract(otherAm(), 'ZZ-AM')).toBe(false);
+  });
+
+  /**
+   * FS-5. `canReadContract` adalah CERMIN policy `contracts_select`, bukan
+   * pelebaran atasnya — policy itu sejak 20260807120000 memakai
+   * `private.jwt_owns_client`, yang mencakup Sales PIC / PIC Komisi / pembuat
+   * baris, dan komentarnya menyebut Sales secara eksplisit. Gate TS-nya yang
+   * dulu hanya menyalin sisi AM, jadi kedua lapis menyimpang.
+   *
+   * Ini bukan soal kerapian: `GET /clients/{id}/contracts` berjalan lewat
+   * `db()` (service-role), jadi gate TS ini SATU-SATUNYA dinding.
+   */
+  const salesStaff = (id = 'ZZ-SALES') => ({
+    employeeId: id,
+    role: permission.makeRole({ division: 'Sales', level: 'staff' }),
+  });
+  const salesHead = () => ({
+    employeeId: 'ZZ-SALESHEAD',
+    role: permission.makeRole({ division: 'Sales', level: 'lead' }),
+  });
+  const owners = (o: Partial<ClientOwnership> = {}): ClientOwnership => ({
+    assignedAmId: 'ZZ-AM',
+    salesPicId: null,
+    commissionPaymentPicId: null,
+    createdBy: null,
+    ...o,
+  });
+
+  it('FS-5: Sales PIC klien boleh MEMBACA kontraknya — ia yang menutup deal-nya', () => {
+    expect(canReadContract(salesStaff(), 'ZZ-AM', owners({ salesPicId: 'ZZ-SALES' }))).toBe(true);
+    // Sejak A-4 (K-2) `sales.close()` yang MENCETAK baris kontrak itu.
+    expect(canReadContract(salesStaff(), 'ZZ-AM', owners({ createdBy: 'ZZ-SALES' }))).toBe(true);
+    expect(canReadContract(salesStaff(), 'ZZ-AM', owners({ commissionPaymentPicId: 'ZZ-SALES' }))).toBe(true);
+  });
+
+  it('FS-5: Head Sales membaca se-divisinya, sejajar arm S-01 pada clients', () => {
+    expect(canReadContract(salesHead(), 'ZZ-AM', owners())).toBe(true);
+  });
+
+  it('FS-5: TIDAK melebar — Sales staff tanpa kaitan ke klien tetap ditolak', () => {
+    expect(canReadContract(salesStaff('ZZ-ORANG-LAIN'), 'ZZ-AM', owners({ salesPicId: 'ZZ-SALES' }))).toBe(false);
+    // Divisi eksekusi tidak punya lengan se-divisi sama sekali — bahkan
+    // leader-nya, yang di modul lain justru punya scope divisi.
+    const creativeLead = {
+      employeeId: 'ZZ-CRE',
+      role: permission.makeRole({ division: 'Creative', level: 'lead' }),
+    };
+    expect(canReadContract(creativeLead, 'ZZ-AM', owners({ salesPicId: 'ZZ-SALES' }))).toBe(false);
+  });
+
+  it('FS-5: lengan kepemilikan berbasis IDENTITAS, bukan divisi — persis jwt_owns_client', () => {
+    // Ditemukan oleh tes di atas saat ia ditulis dengan asumsi yang salah.
+    // `private.jwt_owns_client` hanya membandingkan `jwt_employee_id()` dengan
+    // keempat kolom kepemilikan; ia TIDAK melihat divisi sama sekali. Jadi
+    // siapa pun yang benar-benar tercatat sebagai Sales PIC sebuah klien —
+    // divisinya apa pun — memang boleh membacanya, dan gate TS ini harus
+    // berkata sama supaya kedua lapis tidak menyimpang. Dinyatakan di sini
+    // supaya perilakunya menjadi pilihan yang tertulis, bukan kebetulan.
+    const orangCreative = {
+      employeeId: 'ZZ-CRE',
+      role: permission.makeRole({ division: 'Creative', level: 'staff' }),
+    };
+    expect(canReadContract(orangCreative, 'ZZ-AM', owners({ salesPicId: 'ZZ-CRE' }))).toBe(true);
+  });
+
+  it('FS-5: MENULIS tidak ikut melebar — Sales PIC tetap tidak boleh mengubah kontrak', () => {
+    // Jendela kontrak ditulis `sales.close()` di titik closing; sesudah itu
+    // pengubahnya AM/Account lead. Melebarkan baca tidak boleh menyeret tulis.
+    expect(canWriteContract(salesStaff(), 'ZZ-AM')).toBe(false);
+    expect(canWriteContract(salesHead(), 'ZZ-AM')).toBe(false);
+  });
+
+  it('FS-5: nama divisi Sales tidak menyimpang dari sales.SALES_DIVISION', () => {
+    // `contract.ts` sengaja MENGEJA ULANG konstanta itu, bukan mengimpornya:
+    // `strategi.ts` mengimpor `contract`, jadi menariknya dari `sales` berarti
+    // memasukkan modul terbesar paket ini ke jalur Strategi. Harganya adalah
+    // dua ejaan untuk satu nama — dan tes inilah yang menahannya tetap sama.
+    // Diuji lewat PERILAKU, bukan dengan meng-export internal: seorang lead
+    // yang divisinya diambil dari `sales.SALES_DIVISION` harus lolos.
+    const leadDariSumberAsli = {
+      employeeId: 'ZZ-SALESHEAD',
+      role: permission.makeRole({ division: SALES_DIVISION, level: 'lead' }),
+    };
+    expect(canReadContract(leadDariSumberAsli, 'ZZ-AM', owners())).toBe(true);
   });
 });
 

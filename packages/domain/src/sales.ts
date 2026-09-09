@@ -1394,9 +1394,20 @@ export function resolvePIC(c: ClosingParties): string {
   return c.commissionPaymentPicId as string;
 }
 
-/** validateShape enforces the payment-scheme ↔ schedule shape (M0 §6 rule 5). Exported so `renewal.ts` (R-03) validates a renewal/cross-sell's parties+payment shape with the same rule, not a second copy. */
-export function validateShape(input: ClosingInput): void {
-  validateParties(input.parties);
+/**
+ * validateSchemeShape enforces ONLY the payment-scheme ↔ schedule half of
+ * M0 §6 rule 5 — no parties, no allocation.
+ *
+ * Dipisah dari `validateShape` untuk FS-4: `renewal.executeRenewal` dengan
+ * jenis `bayar_komisi` tidak memakai alokasi sales sama sekali (ketokan FS-3 —
+ * penagihan komisi tidak boleh memindahkan kepemilikan klien), tapi jadwal
+ * cicilannya tetap tagihan sungguhan yang Finance verifikasi seperti tagihan
+ * lain. Diekstrak, BUKAN disalin: satu aturan jadwal, satu tempat.
+ */
+export function validateSchemeShape(input: {
+  paymentScheme: string;
+  installments?: InstallmentInput[];
+}): void {
   if (!PAYMENT_SCHEMES.has(input.paymentScheme)) {
     throw new IncompleteError();
   }
@@ -1428,6 +1439,12 @@ export function validateShape(input: ClosingInput): void {
       throw new IncompleteError();
     }
   }
+}
+
+/** validateShape enforces the payment-scheme ↔ schedule shape (M0 §6 rule 5) PLUS the parties/allocation rules. Exported so `renewal.ts` (R-03) validates a renewal/cross-sell's parties+payment shape with the same rule, not a second copy. */
+export function validateShape(input: ClosingInput): void {
+  validateParties(input.parties);
+  validateSchemeShape(input);
 }
 
 /** approvedLine is one line of the latest proposal, enriched from the Qualified snapshot. */
@@ -1936,11 +1953,10 @@ export async function listAttempts(
   const b = page.sqlBounds(filter.page);
   const rows = await sql<AttemptRow[]>`
     select pa.id, pa.lead_id, l.lead_name, l.phone_number, l.source, pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           private.employee_display_name(pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at, pa.created_at
     from prospect_attempts pa
     join leads l on l.id = pa.lead_id
-    left join employees e on e.employee_id = pa.owner_employee_id
     where (${status} = '' or pa.status = ${status})
       and (pa.created_at, pa.id) < (${b.at}, ${b.id})
     order by pa.created_at desc, pa.id desc
@@ -1954,6 +1970,14 @@ export interface AttemptCoreView {
   leadId: string;
   ownerEmployeeId: string;
   ownerNama: string;
+  /**
+   * FS-3 — rekan prospek bersama, dilihat dari attempt INI. Diisi dari dua
+   * arah (attempt ini menautkan diri, atau attempt lain menautkan diri ke
+   * attempt ini), karena penunjuknya hanya ada di satu baris sementara
+   * keduanya sama-sama pemilik prospeknya. `null` bila bukan prospek bersama.
+   */
+  bersamaOwnerEmployeeId: string | null;
+  bersamaOwnerNama: string | null;
   status: string;
   claimedAt: Date;
   createdAt: Date;
@@ -2053,12 +2077,26 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
   const rows = await sql<{
     id: string; lead_id: string; owner_employee_id: string; owner_nama: string;
     status: string; claimed_at: Date; created_at: Date;
+    bersama_owner_employee_id: string | null; bersama_owner_nama: string | null;
   }[]>`
     select pa.id, pa.lead_id, pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
-           pa.status, pa.claimed_at, pa.created_at
+           private.employee_display_name(pa.owner_employee_id) as owner_nama,
+           pa.status, pa.claimed_at, pa.created_at,
+           -- FS-3: rekan prospek bersama, DUA ARAH. Penunjuknya hanya ada di
+           -- baris yang menyusul, sementara keduanya sama-sama pemilik
+           -- prospeknya — jadi satu arah saja membuat sales yang mendaftarkan
+           -- lead-nya lebih dulu tidak pernah melihat rekannya di form closing.
+           rekan.owner_employee_id as bersama_owner_employee_id,
+           private.employee_display_name(rekan.owner_employee_id) as bersama_owner_nama
     from prospect_attempts pa
-    left join employees e on e.employee_id = pa.owner_employee_id
+    left join lateral (
+      select p2.owner_employee_id
+        from prospect_attempts p2
+       where p2.id = pa.bersama_dengan_attempt_id
+          or p2.bersama_dengan_attempt_id = pa.id
+       order by p2.created_at, p2.id
+       limit 1
+    ) rekan on true
     where pa.id = ${id}`;
   if (rows.length === 0) {
     throw new NotFoundError();
@@ -2066,7 +2104,10 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
   const a = rows[0];
   const attempt: AttemptCoreView = {
     id: a.id, leadId: a.lead_id, ownerEmployeeId: a.owner_employee_id,
-    ownerNama: a.owner_nama, status: a.status, claimedAt: a.claimed_at, createdAt: a.created_at,
+    ownerNama: a.owner_nama,
+    bersamaOwnerEmployeeId: a.bersama_owner_employee_id,
+    bersamaOwnerNama: a.bersama_owner_nama,
+    status: a.status, claimedAt: a.claimed_at, createdAt: a.created_at,
   };
 
   // P-2 (kecepatan loading) — satu batch untuk seluruh panel attempt.
@@ -2109,10 +2150,9 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
       decision_note: string | null; created_at: Date;
     }[]>`
       select np.id, np.version_no, np.proposed_by,
-             coalesce(e.nama, np.proposed_by) as proposed_by_nama,
+             private.employee_display_name(np.proposed_by) as proposed_by_nama,
              np.decision_note, np.created_at
       from negotiation_proposals np
-      left join employees e on e.employee_id = np.proposed_by
       where np.attempt_id = ${id}
       order by np.version_no asc`,
 
@@ -2309,11 +2349,10 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
   >`
     select c.id, c.lead_id, c.winning_attempt_id, c.nama_pic, c.toko, c.kota, c.link_toko,
            c.kategori, c.gmv_baseline, c.target_gmv, c.marketing_budget, c.origin_campaign_id,
-           c.sales_pic_id, coalesce(e.nama, c.sales_pic_id) as sales_pic_nama,
+           c.sales_pic_id, private.employee_display_name(c.sales_pic_id) as sales_pic_nama,
            c.commission_payment_pic_id, c.payment_intent, c.total_sales, c.transaction_id,
            c.released_to_account_at, c.created_at
     from clients c
-    left join employees e on e.employee_id = c.sales_pic_id
     where c.id = ${id}`;
   if (rows.length === 0) {
     throw new NotFoundError();
@@ -2335,10 +2374,10 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
     sql<
       { salesperson_id: string; salesperson_nama: string; basis_points: number }[]
     >`
-      select csa.salesperson_id, coalesce(e.nama, csa.salesperson_id) as salesperson_nama,
+      select csa.salesperson_id,
+             private.employee_display_name(csa.salesperson_id) as salesperson_nama,
              csa.basis_points
       from client_sales_allocations csa
-      left join employees e on e.employee_id = csa.salesperson_id
       where csa.client_id = ${id} order by csa.id`,
 
     sql<

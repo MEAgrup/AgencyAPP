@@ -514,3 +514,128 @@ describeDb('listEffectiveAt', () => {
     expect(byId[b].versionNo).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FS-6 — satu layanan, banyak pilihan durasi.
+// ---------------------------------------------------------------------------
+describeDb('opsi durasi (FS-6)', () => {
+  /** Paket 3/6/12 bulan dengan diskon tenor — bentuk yang memang dijual MEA. */
+  const PAKET = [
+    { durasiBulan: 3, harga: '10200000' },
+    { durasiBulan: 6, harga: '19200000' },
+    { durasiBulan: 12, harga: '36000000' },
+  ];
+
+  it('menyimpan opsi dan mengembalikannya TERURUT dari tenor terpendek', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa Iklan Paket', standardPrice: '10200000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 3, pengakuan: 'per_periode',
+      // Sengaja TIDAK terurut: form bisa mengirim urutan apa pun, dan invarian
+      // "opsi terpendek" hanya bisa diperiksa kalau urutannya dipastikan di sini.
+      durasiOptions: [PAKET[2], PAKET[0], PAKET[1]],
+    });
+    const v = await effectiveAt(sql, id, TODAY);
+    expect(v.durasiOptions.map((o) => o.durasiBulan)).toEqual([3, 6, 12]);
+    expect(v.durasiOptions[2].harga).toBe('36000000.00');
+  });
+
+  it('layanan tanpa opsi mengembalikan array KOSONG, bukan null', async () => {
+    // Bentuk 100% katalog hari ini. Array kosong supaya setiap pemanggil bisa
+    // me-map tanpa menjaga null lebih dulu — dan supaya "tenor tunggal" tidak
+    // terbaca sama dengan "belum dibaca".
+    const id = await createService(sql, salesLead(), {
+      name: 'Tanpa Opsi', standardPrice: '1000000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-01-01', active: true,
+    });
+    expect((await effectiveAt(sql, id, TODAY)).durasiOptions).toEqual([]);
+  });
+
+  it('MENOLAK opsi terpendek yang tidak sama dengan harga/durasi versinya', async () => {
+    // Invarian yang menjaga `sales.deriveDuration`, `ads.computeAdsManagementEndDate`
+    // dan mesin accrual tetap membaca angka yang sah tanpa tahu soal opsi.
+    await expect(createService(sql, salesLead(), {
+      name: 'Harga Beda', standardPrice: '9999999', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 3, pengakuan: 'per_periode',
+      durasiOptions: PAKET,
+    })).rejects.toBeInstanceOf(IncompleteError);
+
+    await expect(createService(sql, salesLead(), {
+      name: 'Durasi Beda', standardPrice: '10200000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 6, pengakuan: 'per_periode',
+      durasiOptions: PAKET,
+    })).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('MENOLAK tenor duplikat, nol, negatif, dan pecahan', async () => {
+    const base = {
+      name: 'Opsi Buruk', standardPrice: '10200000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 3, pengakuan: 'per_periode' as const,
+    };
+    // Dua harga untuk satu tenor: mana yang berlaku tidak bisa dijawab.
+    await expect(createService(sql, salesLead(), {
+      ...base, durasiOptions: [PAKET[0], { durasiBulan: 3, harga: '11000000' }],
+    })).rejects.toBeInstanceOf(IncompleteError);
+    await expect(createService(sql, salesLead(), {
+      ...base, durasiOptions: [PAKET[0], { durasiBulan: 0, harga: '1000000' }],
+    })).rejects.toBeInstanceOf(IncompleteError);
+    await expect(createService(sql, salesLead(), {
+      ...base, durasiOptions: [PAKET[0], { durasiBulan: -6, harga: '1000000' }],
+    })).rejects.toBeInstanceOf(IncompleteError);
+    await expect(createService(sql, salesLead(), {
+      ...base, durasiOptions: [PAKET[0], { durasiBulan: 1.5, harga: '1000000' }],
+    })).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  /**
+   * Semantik FULL REPLACE dinyatakan, bukan diasumsikan.
+   *
+   * `updateService` menulis baris versi BARU dari isi payload — field yang tidak
+   * dibawa form TERHAPUS di versi baru. Itu pernah memakan korban nyata:
+   * `durasi_bulan` hilang diam-diam persis begini (lihat header
+   * `web-internal/src/lib/msl.ts`). Kedua arah dinyatakan di sini supaya yang
+   * berikutnya menemukan aturannya tertulis, bukan menemukannya di produksi.
+   */
+  it('opsi BERTAHAN di update yang membawanya, dan TERHAPUS di update yang tidak', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Paket', standardPrice: '10200000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 3, pengakuan: 'per_periode',
+      durasiOptions: PAKET,
+    });
+
+    await updateService(sql, salesLead(), id, {
+      name: 'Paket v2', standardPrice: '10200000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-02-01', active: true, durasiBulan: 3, pengakuan: 'per_periode',
+      durasiOptions: PAKET,
+    });
+    expect((await effectiveAt(sql, id, TODAY)).durasiOptions.length).toBe(3);
+
+    await updateService(sql, salesLead(), id, {
+      name: 'Paket v3', standardPrice: '10200000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-03-01', active: true, durasiBulan: 3, pengakuan: 'per_periode',
+    });
+    const v3 = await effectiveAt(sql, id, TODAY);
+    expect(v3.versionNo).toBe(3);
+    expect(v3.durasiOptions).toEqual([]);
+
+    // Versi LAMA tetap memegang opsinya — kontrak yang mem-pin versi 1 atau 2
+    // tidak boleh kehilangan tenor yang disepakati.
+    const chain = await listVersions(sql, id);
+    expect(chain.find((v) => v.versionNo === 1)?.durasiOptions.length).toBe(3);
+    expect(chain.find((v) => v.versionNo === 2)?.durasiOptions.length).toBe(3);
+  });
+
+  it('TRIGGER DB menolak pelanggaran meski TS dilewati sepenuhnya', async () => {
+    // Dua lapis, karena route MSL bukan satu-satunya penulis tabel ini (psql,
+    // skrip seed, klien masa depan). Ditulis langsung lewat SQL — persis cara
+    // penulis lain akan melewati `normalizeInput`.
+    const id = await createService(sql, salesLead(), {
+      name: 'Probe Trigger', standardPrice: '5000000', commissionRule: 'flat Rp 0',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 3, pengakuan: 'per_periode',
+    });
+    const vrows = await sql<{ id: string }[]>`
+      select id from master_service_versions where service_id = ${id}`;
+    await expect(sql`
+      insert into master_service_duration_options (version_id, durasi_bulan, harga, created_by)
+      values (${vrows[0].id}, 3, '7777777.00', 'ZZ-ADMIN')`).rejects.toThrow(/opsi terpendek/);
+  });
+});

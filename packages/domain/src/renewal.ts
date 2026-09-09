@@ -51,7 +51,7 @@
  */
 import { money, notification, page, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
-import { effectiveAt } from './msl';
+import { effectiveAt, PENGAKUAN_BULAN_BERIKUTNYA } from './msl';
 import {
   AllocationTotalError,
   CustomTermRequiresNegotiationError,
@@ -71,6 +71,7 @@ import {
   TRX_STATUS_MENUNGGU,
   validateParties,
   validateScheduleTotal,
+  validateSchemeShape,
   validateShape,
   type ClosingParties,
   type InstallmentInput,
@@ -92,6 +93,40 @@ export const STATUS_EXECUTED = 'Executed';
 /** Mirrors `contracts.jenis` minus 'baru' — this entity never produces a first-time contract. */
 export const JENIS_PERPANJANGAN = 'perpanjangan';
 export const JENIS_CROSS_SELL = 'cross_sell';
+/**
+ * FS-4 — penagihan komisi bulan lalu. Ketokan pemilik (FS-3, 2026-09-08):
+ * ini TAGIHAN, bukan kesepakatan baru. Ia melahirkan `SVC-` + `TRX-` saja —
+ * TANPA `CTR-` dan TANPA menyentuh `client_sales_allocations`. Lihat
+ * `executeRenewal` untuk kenapa itu bukan sekadar penyederhanaan.
+ */
+export const JENIS_BAYAR_KOMISI = 'bayar_komisi';
+
+const JENIS_SAH = new Set<string>([JENIS_PERPANJANGAN, JENIS_CROSS_SELL, JENIS_BAYAR_KOMISI]);
+
+/**
+ * Gerbang isi khusus `bayar_komisi`: tepat SATU baris, dan layanannya harus
+ * ber-`pengakuan = 'bulan_berikutnya'` (D-KOM).
+ *
+ * Digerbangi lewat PENANDA KATALOG, bukan nama "Komisi". Nama layanan bisa
+ * disunting Sales Head lewat form MSL kapan saja — mengunci ke nama berarti
+ * penagihan komisi berhenti bekerja pada hari seseorang merapikan katalog, dan
+ * gagalnya akan terbaca seperti bug di tempat lain. `pengakuan` dijaga CHECK
+ * `ck_msv_pengakuan` di DB dan justru LAHIR (D-KOM) untuk membedakan Komisi
+ * dari layanan sekali-jadi, yang sama-sama `durasi_bulan = NULL`.
+ */
+async function validateBayarKomisiLines(
+  sql: Queryable,
+  lines: RenewalLine[],
+  today: string,
+): Promise<void> {
+  if (lines.length !== 1) {
+    throw new IncompleteError();
+  }
+  const view = await effectiveAt(sql, lines[0].masterServiceId, today);
+  if (view.pengakuan !== PENGAKUAN_BULAN_BERIKUTNYA) {
+    throw new IncompleteError();
+  }
+}
 
 export const DECISION_APPROVE = 'approve';
 export const DECISION_REJECT = 'reject';
@@ -244,10 +279,10 @@ export async function listRenewals(
   const status = filter.status?.trim() ?? '';
   const b = page.sqlBounds(filter.page);
   const rows = await sql<RenewalListSqlRow[]>`
-    select r.*, c.toko, c.nama_pic, coalesce(e.nama, r.proposed_by) as proposed_by_nama
+    select r.*, c.toko, c.nama_pic,
+           private.employee_display_name(r.proposed_by) as proposed_by_nama
     from renewal_requests r
     join clients c on c.id = r.client_id
-    left join employees e on e.employee_id = r.proposed_by
     where (${status} = '' or r.status = ${status})
       and (r.created_at, r.id) < (${b.at}, ${b.id})
     order by r.created_at desc, r.id desc
@@ -389,7 +424,7 @@ export async function proposeRenewal(
   noNego: boolean,
   now: Date = new Date(),
 ): Promise<RenewalRequest> {
-  if (jenis !== JENIS_PERPANJANGAN && jenis !== JENIS_CROSS_SELL) {
+  if (!JENIS_SAH.has(jenis)) {
     throw new IncompleteError();
   }
   if (noNego && hasCustomLine(lines)) {
@@ -400,6 +435,9 @@ export async function proposeRenewal(
   }
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
+    if (jenis === JENIS_BAYAR_KOMISI) {
+      await validateBayarKomisiLines(tx, lines, tz.dateString(now));
+    }
     const picId = await salesPicOfClient(tx, clientId);
     if (!canWriteRenewal(actor, picId)) {
       throw new ForbiddenError();
@@ -438,6 +476,12 @@ export async function resubmitRenewal(
     const picId = await salesPicOfClient(tx, row.client_id);
     if (!canWriteRenewal(actor, picId)) {
       throw new ForbiddenError();
+    }
+    // Gerbang yang SAMA dengan proposeRenewal. Tanpa ini sebuah `RNW-`
+    // bayar_komisi yang ditolak bisa dikirim ulang dengan layanan apa pun —
+    // pintu kedua ke aturan yang sama, dan pintu kedua selalu yang terlupa.
+    if (row.jenis === JENIS_BAYAR_KOMISI) {
+      await validateBayarKomisiLines(tx, lines, tz.dateString(now));
     }
     const result = await renewalTransition(ex.sm, id, STATUS_PENDING, actor);
     if (!result.ok) {
@@ -496,9 +540,18 @@ const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The contract window + closing parties an Approved/Auto Approved renewal is executed with. */
 export interface ExecuteRenewalInput {
-  durasiBulan: number;
-  tanggalMulai: string;
-  tanggalAkhir: string;
+  /**
+   * Jendela kontrak — WAJIB untuk `perpanjangan`/`cross_sell`, dan **tidak
+   * berlaku** untuk `bayar_komisi` (FS-4), yang tidak mencetak kontrak sama
+   * sekali. Opsional di TIPE karena jenisnya baru diketahui saat baris `RNW-`
+   * dibaca di dalam transaksi; yang menegakkan kewajibannya adalah
+   * `executeRenewal` sendiri (`IncompleteError` pada cabang non-tagihan), dan
+   * ada tesnya. Tipe yang menuntut tiga field yang mustahil diisi untuk satu
+   * jenis hanya akan mendorong pemanggil mengarang nilai.
+   */
+  durasiBulan?: number;
+  tanggalMulai?: string;
+  tanggalAkhir?: string;
   parties: ClosingParties;
   paymentScheme: string;
   installments?: InstallmentInput[];
@@ -507,7 +560,13 @@ export interface ExecuteRenewalInput {
 }
 
 export interface ExecuteRenewalResult {
-  contractId: string;
+  /**
+   * `null` untuk jenis `bayar_komisi` (FS-4) — ia tidak mencetak kontrak.
+   * Dinyatakan nullable di TIPE, bukan diakali dengan string kosong: `''`
+   * akan lolos setiap pemeriksaan `typeof` dan berakhir sebagai tautan
+   * `/contracts/` yang menuju entah ke mana.
+   */
+  contractId: string | null;
   transactionId: string;
 }
 
@@ -534,20 +593,30 @@ export async function executeRenewal(
   input: ExecuteRenewalInput,
   now: Date = new Date(),
 ): Promise<ExecuteRenewalResult> {
-  validateShape({ parties: input.parties, paymentScheme: input.paymentScheme, installments: input.installments });
-  const mulai = (input.tanggalMulai ?? '').trim();
-  const akhir = (input.tanggalAkhir ?? '').trim();
-  const durasi = Number(input.durasiBulan);
-  if (!RE_DATE.test(mulai) || !RE_DATE.test(akhir) || akhir <= mulai) {
-    throw new IncompleteError();
-  }
-  if (!Number.isInteger(durasi) || durasi < 1 || durasi > 36) {
-    throw new IncompleteError();
-  }
-
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     const row = await loadRenewalRow(tx, id, true);
+    // FS-4: `bayar_komisi` tidak mencetak kontrak, jadi ia tidak punya jendela
+    // untuk divalidasi dan tidak memakai alokasi sales sama sekali. Yang tetap
+    // divalidasi adalah skema pembayaran + jadwal cicilannya — itu tagihan
+    // sungguhan yang Finance verifikasi seperti tagihan lain.
+    const tagihanSaja = row.jenis === JENIS_BAYAR_KOMISI;
+    if (tagihanSaja) {
+      validateSchemeShape({ paymentScheme: input.paymentScheme, installments: input.installments });
+    } else {
+      validateShape({ parties: input.parties, paymentScheme: input.paymentScheme, installments: input.installments });
+    }
+    const mulai = (input.tanggalMulai ?? '').trim();
+    const akhir = (input.tanggalAkhir ?? '').trim();
+    const durasi = Number(input.durasiBulan);
+    if (!tagihanSaja) {
+      if (!RE_DATE.test(mulai) || !RE_DATE.test(akhir) || akhir <= mulai) {
+        throw new IncompleteError();
+      }
+      if (!Number.isInteger(durasi) || durasi < 1 || durasi > 36) {
+        throw new IncompleteError();
+      }
+    }
     const picId = await salesPicOfClient(tx, row.client_id);
     if (!canWriteRenewal(actor, picId)) {
       throw new ForbiddenError();
@@ -577,15 +646,26 @@ export async function executeRenewal(
 
     // 1) Contract (CTR-) — jenis dicatat sekali, rantai perpanjangan diisi
     //    dari kontrak TERAKHIR klien ini (jika ada).
-    const prevContract = await tx<{ id: string }[]>`
-      select id from contracts where client_id = ${row.client_id} order by created_at desc, id desc limit 1`;
-    const contractSebelumnyaId = row.jenis === JENIS_PERPANJANGAN && prevContract.length > 0 ? prevContract[0].id : null;
-    const contractId = await ex.ident.identNext('CTR', now);
-    await tx`
-      insert into contracts
-        (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, contract_sebelumnya_id, created_by)
-      values
-        (${contractId}, ${row.client_id}, ${durasi}, ${mulai}, ${akhir}, ${row.jenis}, ${contractSebelumnyaId}, ${actor.employeeId})`;
+    //
+    //    FS-4: `bayar_komisi` MELEWATI langkah ini seluruhnya. Komisi adalah
+    //    tagihan atas penjualan yang sudah terjadi, bukan kesepakatan baru —
+    //    tidak ada jendela yang dimulai, jadi tidak ada kontrak yang lahir.
+    //    Akibat sampingannya disengaja: `contracts.jenis` tidak pernah menerima
+    //    nilai keempat, jadi `ck_contracts_jenis` dan `salesperf.ts` (yang
+    //    mencocokkan string literal dan akan diam-diam melewatkan nilai tak
+    //    dikenal) tidak perlu disentuh sama sekali.
+    let contractId: string | null = null;
+    if (!tagihanSaja) {
+      const prevContract = await tx<{ id: string }[]>`
+        select id from contracts where client_id = ${row.client_id} order by created_at desc, id desc limit 1`;
+      const contractSebelumnyaId = row.jenis === JENIS_PERPANJANGAN && prevContract.length > 0 ? prevContract[0].id : null;
+      contractId = await ex.ident.identNext('CTR', now);
+      await tx`
+        insert into contracts
+          (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, contract_sebelumnya_id, created_by)
+        values
+          (${contractId}, ${row.client_id}, ${durasi}, ${mulai}, ${akhir}, ${row.jenis}, ${contractSebelumnyaId}, ${actor.employeeId})`;
+    }
 
     // 2) Services (SVC- per line, born [Awaiting Onboarding]) under this
     //    Contract — same birth status as sales.close(), attached from day 1
@@ -632,17 +712,27 @@ export async function executeRenewal(
 
     // 5) Allocation credit (KS-2): REPLACE, not add — the whole client's
     //    allocation set moves to whoever executed this renewal.
+    //
+    //    FS-4: `bayar_komisi` MELEWATI langkah ini seluruhnya, dan itu justru
+    //    alasan utama jenis ini punya cabangnya sendiri. KS-2 mengganti SELURUH
+    //    alokasi komisi klien setiap eksekusi dan memindahkan
+    //    `clients.sales_pic_id`. Komisi ditagih SETIAP BULAN — memakai jalur
+    //    yang sama apa adanya berarti kepemilikan klien berpindah tiap bulan,
+    //    diam-diam, ke siapa pun yang kebetulan menekan tombol tagih. Nol tulis
+    //    ke `client_sales_allocations`, nol `update clients`.
     const before = await tx<{ salesperson_id: string; basis_points: number }[]>`
       select salesperson_id, basis_points from client_sales_allocations where client_id = ${row.client_id}`;
-    await tx`delete from client_sales_allocations where client_id = ${row.client_id}`;
-    for (const al of input.parties.allocations) {
+    if (!tagihanSaja) {
+      await tx`delete from client_sales_allocations where client_id = ${row.client_id}`;
+      for (const al of input.parties.allocations) {
+        await tx`
+          insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
+          values (${row.client_id}, ${al.salespersonId}, ${al.basisPoints}, ${actor.employeeId})`;
+      }
       await tx`
-        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
-        values (${row.client_id}, ${al.salespersonId}, ${al.basisPoints}, ${actor.employeeId})`;
+        update clients set sales_pic_id = ${primary}, commission_payment_pic_id = ${pic}
+         where id = ${row.client_id}`;
     }
-    await tx`
-      update clients set sales_pic_id = ${primary}, commission_payment_pic_id = ${pic}
-       where id = ${row.client_id}`;
 
     // 6) Link the renewal request to what it produced, transition to Executed.
     await tx`update renewal_requests set contract_id = ${contractId}, transaction_id = ${trxId} where id = ${id}`;
@@ -658,7 +748,12 @@ export async function executeRenewal(
       afterJson: {
         contract_id: contractId, transaction_id: trxId, total_agreed_value: money.decimal(total),
         total_ppn: money.decimal(totalPPN), ditagih: money.decimal(total + totalPPN),
-        payment_scheme: input.paymentScheme, allocations: input.parties.allocations,
+        payment_scheme: input.paymentScheme,
+        // Kunci `allocations` dikirim EKSPLISIT sebagai `null` untuk tagihan,
+        // bukan dihilangkan: aturan rumah — kunci yang HILANG lebih berbahaya
+        // daripada null, karena pembaca audit tidak bisa membedakan "tidak
+        // menyentuh alokasi" dari "field ini belum ada waktu itu".
+        allocations: tagihanSaja ? null : input.parties.allocations,
       },
       createdBy: actor.employeeId,
     });

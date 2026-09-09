@@ -175,10 +175,15 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "149"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "150"
 check "entity_prefix"    "select count(*) from entity_prefix"    "41"
 check "sm_machines"      "select count(*) from sm_machines"      "33"
 check "notif_events"     "select count(*) from notif_events"     "73"
+# FS-6 (20260925040000_fs6_msl_opsi_durasi.sql): 150 = 149 +
+#       `master_service_duration_options` — pilihan tenor per VERSI layanan
+#       (1/3/6/12 bulan dengan harga PAKET berbeda), supaya satu layanan tidak
+#       lagi dipecah jadi tiga baris katalog. Nol prefix (anak ber-identity,
+#       pola `renewal_proposals`), nol mesin, nol event ⇒ 41/32/73 TETAP.
 # --- M18 Store Operation (20260924010000_m18_store_ops_sku.sql) --------------
 # 147 = 146 + `store_ops_skus` — unit kerja divisi Store Operation, satu baris
 #       per SKU di bawah satu Brief (ketokan K-5, pola AST-/ADC-/BKG-/LSS-).

@@ -694,13 +694,12 @@ export async function pendingHoldRequests(sql: Queryable, actor: Actor): Promise
     reason: string | null; requested_by: string | null; requested_by_nama: string | null;
   }[]>`
     select s.id, s.client_id, c.toko, c.nama_pic, s.name, c.assigned_am_id,
-           coalesce(am.nama, c.assigned_am_id) as owner_am_nama,
+           private.employee_display_name(c.assigned_am_id) as owner_am_nama,
            coalesce(req.created_at, s.created_at) as updated_at,
            req.reason, req.actor_employee_id as requested_by,
-           coalesce(reqe.nama, req.actor_employee_id) as requested_by_nama
+           private.employee_display_name(req.actor_employee_id) as requested_by_nama
       from services s
       join clients c on c.id = s.client_id
-      left join employees am on am.employee_id = c.assigned_am_id
       -- The stated cause of the pause. LATERAL + limit 1 = the LATEST request:
       -- a Service can be held, resumed and held again, and the Head must read
       -- the reason for the request in front of them, not the first one ever.
@@ -712,7 +711,6 @@ export async function pendingHoldRequests(sql: Queryable, actor: Actor): Promise
          order by a.created_at desc, a.id desc
          limit 1
       ) req on true
-      left join employees reqe on reqe.employee_id = req.actor_employee_id
      where s.status = ${SERVICE_HOLD_REQUESTED}
      order by coalesce(req.created_at, s.created_at) asc, s.id asc`;
   return rows.map((r) => ({
@@ -924,10 +922,9 @@ export async function listClients(sql: Queryable, pageReq?: page.PageRequest): P
     }[]
   >`
     select c.id, c.toko, c.nama_pic, c.kota, c.kategori, c.sales_pic_id,
-           coalesce(e.nama, c.sales_pic_id) as sales_pic_nama, c.assigned_am_id,
+           private.employee_display_name(c.sales_pic_id) as sales_pic_nama, c.assigned_am_id,
            c.payment_intent, c.released_to_account_at, c.created_at
     from clients c
-    left join employees e on e.employee_id = c.sales_pic_id
     where (c.created_at, c.id) < (${b.at}, ${b.id})
     order by c.created_at desc, c.id desc
     limit ${b.limit}::bigint`;

@@ -35,6 +35,8 @@ export interface MasterServiceWire {
   qty_menambah: string;
   /** 'per_periode' | 'saat_selesai' | 'bulan_berikutnya' (D-KOM). */
   pengakuan: string;
+  /** FS-6: pilihan tenor, terurut dari yang TERPENDEK. `[]` = tenor tunggal. */
+  durasi_options: { durasi_bulan: number; harga: string }[];
   version_no: number;
   effective_from: string;
 }
@@ -60,6 +62,10 @@ export function masterServiceToWire(v: msl.ServiceView): MasterServiceWire {
     durasi_bulan: v.durasiBulan,
     qty_menambah: v.qtyMenambah,
     pengakuan: v.pengakuan,
+    durasi_options: v.durasiOptions.map((o) => ({
+      durasi_bulan: o.durasiBulan,
+      harga: o.harga,
+    })),
     version_no: v.versionNo,
     effective_from: v.effectiveFrom,
   };
@@ -174,6 +180,8 @@ export interface LeadAttemptWire {
   owner_nama: string;
   status: string;
   claimed_at: string;
+  /** FS-3: attempt yang ditautkan sebagai prospek bersama, atau null. */
+  bersama_dengan_attempt_id: string | null;
 }
 
 /**
@@ -680,6 +688,7 @@ export function leadDetailToWire(d: leads.LeadDetailView): LeadDetailWire {
       id: a.id,
       owner_employee_id: a.ownerEmployeeId,
       owner_nama: a.ownerNama,
+      bersama_dengan_attempt_id: a.bersamaDenganAttemptId,
       status: a.status,
       claimed_at: a.claimedAt.toISOString(),
     })),
@@ -2423,6 +2432,9 @@ export interface AttemptDetailAttemptWire {
   lead_id: string;
   owner_employee_id: string;
   owner_nama: string;
+  /** FS-3: rekan prospek bersama (dua arah), atau null. */
+  bersama_owner_employee_id: string | null;
+  bersama_owner_nama: string | null;
   status: string;
   claimed_at: string;
   created_at: string;
@@ -2477,6 +2489,8 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
       lead_id: d.attempt.leadId,
       owner_employee_id: d.attempt.ownerEmployeeId,
       owner_nama: d.attempt.ownerNama,
+      bersama_owner_employee_id: d.attempt.bersamaOwnerEmployeeId,
+      bersama_owner_nama: d.attempt.bersamaOwnerNama,
       status: d.attempt.status,
       claimed_at: d.attempt.claimedAt.toISOString(),
       created_at: d.attempt.createdAt.toISOString(),
@@ -4155,6 +4169,9 @@ export interface ContractWire {
   tanggal_mulai: string;
   tanggal_akhir: string;
   catatan: string | null;
+  /** R-01: `baru` | `perpanjangan` | `cross_sell`. */
+  jenis: string;
+  contract_sebelumnya_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -4168,6 +4185,8 @@ export function contractToWire(c: contract.Contract): ContractWire {
     tanggal_mulai: c.tanggalMulai,
     tanggal_akhir: c.tanggalAkhir,
     catatan: c.catatan,
+    jenis: c.jenis,
+    contract_sebelumnya_id: c.contractSebelumnyaId,
     created_by: c.createdBy,
     created_at: c.createdAt,
     updated_at: c.updatedAt,

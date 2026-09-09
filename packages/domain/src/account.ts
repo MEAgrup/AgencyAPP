@@ -1177,11 +1177,10 @@ export async function pendingStrategyReviews(sql: Queryable, actor: Actor): Prom
     status: string; gmv_adjustment_status: string; created_by: string; created_by_nama: string | null; created_at: Date;
   }[]>`
     select sp.id, sp.service_id, sv.client_id, c.toko, c.nama_pic, sp.status, sp.gmv_adjustment_status,
-           sp.created_by, coalesce(e.nama, sp.created_by) as created_by_nama, sp.created_at
+           sp.created_by, private.employee_display_name(sp.created_by) as created_by_nama, sp.created_at
       from strategy_plans sp
       join services sv on sv.id = sp.service_id
       join clients c on c.id = sv.client_id
-      left join employees e on e.employee_id = sp.created_by
      where sp.status = ${STRATEGY_STATUS_SUBMITTED} or sp.gmv_adjustment_status = ${GMV_ADJ_PENDING}
      order by sp.created_at asc, sp.id asc`;
   return rows.map((r) => ({

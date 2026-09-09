@@ -79,6 +79,7 @@ describe('masterServiceToWire', () => {
       durasiBulan: 6,
       qtyMenambah: 'durasi',
       pengakuan: 'per_periode',
+      durasiOptions: [],
       versionNo: 3,
       effectiveFrom: '2026-07-01',
     };
@@ -101,6 +102,7 @@ describe('masterServiceToWire', () => {
       durasi_bulan: 6,
       qty_menambah: 'durasi',
       pengakuan: 'per_periode',
+      durasi_options: [],
       version_no: 3,
       effective_from: '2026-07-01',
     });
@@ -168,14 +170,20 @@ describe('leads wire mappers', () => {
         recordStatus: 'active', winningAttemptId: null, createdAt: new Date('2026-07-01T00:00:00.000Z'),
       },
       attempts: [
-        { id: 'PRSP-1', ownerEmployeeId: 'EMP-1', ownerNama: 'Budi', status: 'New Lead', claimedAt: new Date('2026-07-02T00:00:00.000Z') },
+        {
+          id: 'PRSP-1', ownerEmployeeId: 'EMP-1', ownerNama: 'Budi', status: 'New Lead',
+          claimedAt: new Date('2026-07-02T00:00:00.000Z'), bersamaDenganAttemptId: null,
+        },
       ],
     };
     const wire = leadDetailToWire(detail);
     expect(wire.lead).not.toHaveProperty('open_attempt_count');
     expect(wire.lead.created_at).toBe('2026-07-01T00:00:00.000Z');
     expect(wire.attempts).toEqual([
-      { id: 'PRSP-1', owner_employee_id: 'EMP-1', owner_nama: 'Budi', status: 'New Lead', claimed_at: '2026-07-02T00:00:00.000Z' },
+      {
+        id: 'PRSP-1', owner_employee_id: 'EMP-1', owner_nama: 'Budi', status: 'New Lead',
+        claimed_at: '2026-07-02T00:00:00.000Z', bersama_dengan_attempt_id: null,
+      },
     ]);
   });
 });
@@ -1188,6 +1196,8 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
       leadId: 'LEAD-202607-0001',
       ownerEmployeeId: '2409230432',
       ownerNama: 'BUDI SANTOSO',
+      bersamaOwnerEmployeeId: null,
+      bersamaOwnerNama: null,
       status: 'Negotiation',
       claimedAt: new Date('2026-07-20T03:00:00Z'),
       createdAt: new Date('2026-07-19T02:00:00Z'),
