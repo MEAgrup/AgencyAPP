@@ -446,12 +446,20 @@ jobs:
       #       CONSTRAINT TRIGGER, bukan hanya TS, supaya setiap pembaca lama
       #       (deriveDuration, Ads Management Date, accrual) terus membaca
       #       angka yang sah. Nol prefix/mesin/event ⇒ 41/32/73 TETAP.
-      - name: Verify table count (expect 150)
+      # M19 (20260927010000_m19_creative_daily_ops.sql): 153 = 150 +
+      #       `studios` + `prod_slots` + `pic_unavailability` — lapisan RENCANA
+      #       di bawah lapisan eksekusi M7 (hari x studio x PIC x slot waktu),
+      #       plus ketidaktersediaan produksi PIC. +1 prefix `SLOT` ⇒
+      #       entity_prefix 41→42. Nol mesin baru ⇒ sm_machines TETAP 33
+      #       (`PROD-SLOT` sengaja tanpa mesin, PRD Rule 1/D1); nol event
+      #       katalog baru ⇒ notif_events TETAP 73 (konflik studio & PIC tidak
+      #       tersedia adalah peringatan inline, bukan notifikasi).
+      - name: Verify table count (expect 153)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 150
+          test "$n" -eq 153
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
@@ -471,11 +479,18 @@ jobs:
       #      Operation). Sengaja BUKAN memakai ulang SCR-/ADL- (Gelombang 3 SKU
       #      Screener): keduanya run screening Ads atas sebuah ekspor, tanpa
       #      induk Brief dan tanpa lifecycle sendiri.
-      - name: Verify entity_prefix registry (expect 41)
+      # 42 = 41 + SLOT (M19, 20260927010000: slot produksi harian Creative).
+      #      Prefix `SCS` (baris SMO & Content Strategist) SENGAJA belum
+      #      didaftarkan — bentuknya masih pertanyaan terbuka `M19-SCS-ENGINE`
+      #      di DECISIONS.md §Open (M12 §2 Rule 1 membekukan Task = Asset |
+      #      Creator Booking | Brief-as-task, sementara barisnya ber-client_id
+      #      nullable). Registry yang mendaftarkan entitas yang bentuknya belum
+      #      diketok menjanjikan sesuatu yang belum ada.
+      - name: Verify entity_prefix registry (expect 42)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          test "$n" -eq 41
+          test "$n" -eq 42
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)

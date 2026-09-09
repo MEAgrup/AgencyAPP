@@ -78,6 +78,12 @@ export * as accrual from './accrual';
 // `store_ops_sku` + penanda sisi penulis). Dual-home dengan CHECK constraint di
 // `store_ops_skus`, dijaga `packages/db/src/storeops.registry.test.ts`.
 export * as storeops from './storeops';
+// M19 — kosakata Creative Daily Ops (task_type slot, alasan ketidaktersediaan,
+// registry studio + helper tumpang-tindih waktu). Dual-home dengan CHECK
+// constraint `prod_slots`/`pic_unavailability` dan tabel `studios`, dijaga
+// `packages/db/src/dailyops.registry.test.ts`. NOL nama state: modul ini nol
+// mesin status dengan sengaja (PRD Rule 1/D1).
+export * as dailyops from './dailyops';
 // CR-12 — aset dokumen laporan yang ditempel (CSS, ikon, Chart.js, boot Print).
 // Diekspor supaya tes di luar `packages/core` bisa memeriksa isinya.
 export * as docassets from './docassets';

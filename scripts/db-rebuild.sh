@@ -175,10 +175,26 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "150"
-check "entity_prefix"    "select count(*) from entity_prefix"    "41"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "153"
+check "entity_prefix"    "select count(*) from entity_prefix"    "42"
 check "sm_machines"      "select count(*) from sm_machines"      "33"
 check "notif_events"     "select count(*) from notif_events"     "73"
+# --- M19 Creative Daily Ops (20260927010000_m19_creative_daily_ops.sql) ------
+# 153 = 150 + `studios` + `prod_slots` + `pic_unavailability` — lapisan RENCANA
+#       di bawah lapisan eksekusi M7: hari x studio x PIC x slot waktu, plus
+#       ketidaktersediaan produksi seorang PIC. Jadwal harian Leader Video yang
+#       hari ini disusun ulang dengan tangan setiap hari.
+#  42 =  41 + prefix `SLOT` (dual-home dengan PREFIXES di ident.ts). Prefix
+#       `SCS` (SMO & Content Strategist) SENGAJA belum didaftarkan — bentuknya
+#       masih pertanyaan terbuka `M19-SCS-ENGINE` di DECISIONS.md §Open.
+#  33 TETAP — `PROD-SLOT` sengaja TANPA mesin status (PRD Rule 1/D1: ia catatan
+#       rencana, bukan deliverable). Eksekusi/review tetap milik Asset lewat
+#       mesin `brief_task`; memberi slot lifecycle sendiri berarti mesin paralel
+#       kedua. `packages/db/src/dailyops.registry.test.ts` memaku ketiadaan itu.
+#  73 TETAP — modul ini nol event. Konflik studio dan PIC tidak tersedia adalah
+#       PERINGATAN INLINE di layar perencana (D3/D4 "warn, never block"), bukan
+#       notifikasi ke orang lain. Mendaftarkan event yang tak pernah diemisikan
+#       membuat katalog berbohong (preseden `internal_tasks` / M18).
 # FS-6 (20260925040000_fs6_msl_opsi_durasi.sql): 150 = 149 +
 #       `master_service_duration_options` — pilihan tenor per VERSI layanan
 #       (1/3/6/12 bulan dengan harga PAKET berbeda), supaya satu layanan tidak
