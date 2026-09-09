@@ -3,6 +3,13 @@
 Tutorial langkah-demi-langkah untuk keempat butir yang tersisa di
 `HANDOFF_M19_SCS_20260909.md` §4:
 
+> **✅ BUTIR 1 SUDAH DIJALANKAN 2026-09-09** — hasilnya
+> `UAT_M19_BROWSER_20260909.md`: 86 butir, 83 PASS, **3 FAIL yang semuanya satu
+> cacat** (nama klien & nama PIC kosong untuk lead Creative — RLS membungkam
+> `LEFT JOIN`). Tiga butir tutorial ini dikoreksi karena menjalankannya:
+> §1.2(b)/(c), §1.5(c), §1.4(h) — dan §0.5 bertambah satu aktor. Sisanya
+> (§2, §3, §4) belum dijalankan.
+
 | # | Pekerjaan | Siapa | Bisa dari sandbox? |
 |---|---|---|---|
 | **1** | 🔴 Browser UAT enam layar M19 (§4.1) | Claude/dev, satu sesi bernyala | **Ya** (Chromium terpasang) |
@@ -79,11 +86,12 @@ mendaftarkan lead baru dengan nomor telepon baru; tidak merusak, cuma mubazir).
 `CLI-…` dari berkas ini dipakai di form slot produksi (§1.1) dan di form baris
 SCS ber-klien (§1.4). Baris SCS "Semua klien" justru **tidak** membutuhkannya.
 
-### 0.5 Empat aktor — dan kenapa seed saja tidak cukup
+### 0.5 Tujuh aktor — dan kenapa seed saja tidak cukup
 
 Seed Sprint-0 punya Creative **staff** (`EMP-0003`) dan Director
-(`EMP-0008`), tapi **tidak punya** Creative **lead** maupun **OD murni**.
-Keduanya wajib ada: gerbang tampilan M19 berbeda persis di dua peran itu.
+(`EMP-0008`), tapi **tidak punya** Creative **lead**, **OD murni**, maupun
+**staff Creative kedua**. Ketiganya wajib ada: gerbang tampilan M19 berbeda
+persis di dua peran pertama, dan §1.4(h) mustahil diuji tanpa yang ketiga.
 
 ```bash
 psql "$DATABASE_URL" <<'SQL'
@@ -103,6 +111,12 @@ ON CONFLICT (employee_id) DO UPDATE SET divisi = EXCLUDED.divisi, jabatan = EXCL
 INSERT INTO employee_layered_roles (employee_id, role, enabled, created_by)
 VALUES ('EMP-0012', 'od', true, 'SYSTEM')
 ON CONFLICT (employee_id, role) DO UPDATE SET enabled = true;
+
+-- Staff Creative KEDUA. Tanpa ini §1.4(h) mustahil diuji: "baris milik PIC
+-- lain" tidak bisa dibuat kalau hanya ada satu staff Creative (EMP-0003).
+INSERT INTO employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+VALUES ('EMP-0013', 'Sari Melati', 'sari@mea.co.id', 'Creative', 'Creative Designer', true, 'SYSTEM')
+ON CONFLICT (employee_id) DO UPDATE SET divisi = EXCLUDED.divisi, jabatan = EXCLUDED.jabatan;
 SQL
 ```
 
@@ -111,7 +125,7 @@ menghasilkan laporan bug palsu (ini persis yang terjadi saat harness B2 pertama
 kali menebak `division: 'Management'` untuk Director):
 
 ```bash
-for e in EMP-0003 EMP-0011 EMP-0012 EMP-0008 EMP-0001 EMP-0006; do
+for e in EMP-0003 EMP-0013 EMP-0011 EMP-0012 EMP-0008 EMP-0001 EMP-0006; do
   echo -n "$e  "; psql "$DATABASE_URL" -tAc "select employee_claims('$e')"
 done
 ```
@@ -121,13 +135,14 @@ Yang harus keluar:
 | Aktor | `employee_id` | division | level | od | director |
 |---|---|---|---|---|---|
 | Creative staff | `EMP-0003` | `Creative` | `staff` | false | false |
+| Creative staff #2 | `EMP-0013` | `Creative` | `staff` | false | false |
 | Creative lead | `EMP-0011` | `Creative` | `lead` | false | false |
 | OD murni | `EMP-0012` | `''` | `''` | **true** | false |
 | Director | `EMP-0008` | `''` | `''` | false | **true** |
 | Sales staff | `EMP-0001` | `Sales` | `staff` | false | false |
 | Head Sales | `EMP-0006` | `Sales` | `lead` | false | false |
 
-### 0.6 Cetak enam token
+### 0.6 Cetak tujuh token
 
 `SUPABASE_JWT_SECRET` harus **sama persis** dengan yang dibaca `apps/api`
 (`apps/api/.env.local`). Set keduanya dari satu variabel supaya tidak bisa
@@ -136,10 +151,10 @@ menyimpang:
 ```bash
 export SUPABASE_JWT_SECRET='local-dev-harness-secret-do-not-use-in-prod'
 mkdir -p /tmp/uat
-for e in EMP-0003 EMP-0011 EMP-0012 EMP-0008 EMP-0001 EMP-0006; do
+for e in EMP-0003 EMP-0013 EMP-0011 EMP-0012 EMP-0008 EMP-0001 EMP-0006; do
   node scripts/dev-jwt.mjs --employee "$e" > "/tmp/uat/$e.jwt"
 done
-wc -c /tmp/uat/*.jwt      # keenam berkas harus > 200 byte
+wc -c /tmp/uat/*.jwt      # ketujuh berkas harus > 200 byte
 ```
 
 Ini bukan jalan pintas melewati otorisasi — hanya melewati **login**. Setiap
@@ -238,8 +253,8 @@ Peran: **lead Creative (`EMP-0011`)** untuk menyusun; ulangi sebagai
 | # | Langkah | Yang HARUS terlihat |
 |---|---|---|
 | a | Buka sebagai lead | Kalimat **"Bukan KPI:"** — "…tidak masuk Team Performance (Modul 14) dan tidak punya bobot penilaian" |
-| b | Buka sebagai `EMP-0003` | Pemilih PIC terkunci ke diri sendiri (staff tidak boleh mengintip rekap orang lain) |
-| c | Buka sebagai `EMP-0012` (OD) | Boleh **melihat** semua PIC, nol tombol tulis |
+| b | Buka sebagai `EMP-0003` | Kalimat **"Anda melihat baris Anda sendiri"** tampil — halaman ini **tidak punya picker PIC**; cakupannya ditentukan server (`canSeeAllPics`), dan kalimat itulah satu-satunya penanda di layar |
+| c | Buka sebagai `EMP-0012` (OD) dan `EMP-0011` (lead) | Kalimat itu **TIDAK** tampil (tidak terkunci), dan barisnya memuat semua PIC |
 
 ### 1.3 `/creative/ketersediaan`
 
@@ -265,7 +280,7 @@ mengerjakan; **`EMP-0012`** untuk membuktikan OD read-only.
 | e | Sebagai lead, lihat kolom aksi baris milik Rian | **Tidak ada "Mulai" maupun "Submit"** — lead bukan PIC. Yang ada: "Cabut" (baris `[To Do]`) |
 | f | Buka sebagai **`EMP-0003`** (PIC-nya) | Baris miliknya punya **"Mulai"**; klik → status jadi `[In Progress]` |
 | g | Sebagai `EMP-0003`, klik **"Submit"** | Diminta link hasil; setelah diisi → `[Submitted]` |
-| h | Buat baris keempat ber-PIC lain, lalu lihat sebagai `EMP-0003` | Rian **tidak boleh melihat** "Mulai"/"Submit" pada baris itu sama sekali |
+| h | Buat baris keempat ber-PIC `EMP-0013`, lalu lihat sebagai `EMP-0003` | Barisnya **tidak muncul sama sekali** di antrean Rian. `ownRowsOnly(actor)` mengunci query ke `assigned_pic = dirinya`, jadi baris orang lain bukan sekadar kehilangan tombol — ia tidak ada |
 | i | Sebagai lead, pada baris `[Submitted]` | Muncul "Buka review" / "Minta revisi"; pada `[In Review]` → "Setujui" |
 | j | Sebagai lead, pada baris `[In Progress]` | Muncul **"Blokir"** (kebalikan (e): memblokir justru lead-saja, karena waktunya dikurangkan dari turnaround) |
 | k | Buka sebagai `EMP-0012` (OD murni) | Tabel terbaca penuh, **nol** tombol aksi, **nol** form "Tambah baris" |
@@ -281,8 +296,7 @@ mengerjakan; **`EMP-0012`** untuk membuktikan OD read-only.
 |---|---|---|
 | a | Buka sebagai lead | Kalimat **"Angka ini bukan KPI."** (persis; ia tidak masuk Modul 14) |
 | b | Baca kolomnya | **Baris standing dihitung TERPISAH** dari deliverable — dua kolom, bukan satu jumlah |
-| c | Lihat Speed Score baris Kategori standing | **`N/A`** — **BUKAN** `0%`. `0%` adalah pernyataan tentang kecepatan seseorang atas pekerjaan yang tidak pernah di-SLA-kan; kalau muncul, halaman menghitung sendiri dari `speed_score_pct` yang null alih-alih memakai `speed_score_display` |
-| d | Setujui satu baris ber-SLA di §1.4(i), lalu muat ulang | Speed Score-nya berupa persen, dan turnaround-nya masuk akal |
+| c | **Cek API, bukan layar.** Speed Score **tidak dirender** di antrean maupun rekap — kolomnya tidak ada di kedua halaman. Bawa SATU baris standing dan SATU baris deliverable sampai `[Approved]`, lalu: `curl -H "Cookie: cdps_access_token=$(cat /tmp/uat/EMP-0008.jwt)" .../api/v1/creative/scs/tasks/<id>` | Baris **standing** → `speed_score_display: "N/A"` **walau sudah `[Approved]`** (bukan `0%`, dan bukan sekadar efek "belum selesai"). Baris **deliverable** → persen sungguhan |
 
 ### 1.6 `/creative/scs/kategori`
 
@@ -485,7 +499,7 @@ Diperbarui dari `HANDOFF_M19_SCS_20260909.md` §4 + §8, dirujuk silang ke
 
 | # | Apa | Status | Butuh siapa |
 |---|---|---|---|
-| **UAT-M19** | Browser UAT enam layar M19 | 🔴 **belum pernah dijalankan** | sesi dev · **§1** |
+| **UAT-M19** | Browser UAT enam layar M19 | ✅ **DIJALANKAN 2026-09-09** — 86 butir, 83 PASS, 3 FAIL (satu cacat, lihat `M19-NAMA-RLS` di §5.3). Laporan: `UAT_M19_BROWSER_20260909.md` | selesai |
 | **UAT-SALES** | Browser UAT enam butir feedback Sales | 🟡 belum pernah dijalankan | sesi dev · **§2** |
 | **DRIFT-FULL** | `check-live-drift.sh` penuh sekali | 🟡 belum pernah dijalankan utuh | **operator/CI** · **§4** |
 
@@ -501,6 +515,7 @@ Diperbarui dari `HANDOFF_M19_SCS_20260909.md` §4 + §8, dirujuk silang ke
 
 | # | Apa | Status |
 |---|---|---|
+| **M19-NAMA-RLS** | 🔴 **BARU 2026-09-09 (dari UAT §1).** Nama klien & nama PIC kosong untuk **lead Creative** di `/creative/schedule` (kartu slot + "Tidak tersedia hari ini") dan `/creative/scs/rekap`. `left join clients/employees` di bawah `readAsActor` dibungkam RLS; FE jatuh ke `CLI-…`/`EMP-…`. Tak terlihat oleh Director/OD (`jwt_can_read_all()`) — kelas cacat yang SAMA dengan feedback Sales `#2`. Cakupan diduga lebih luas dari M19 | 🔴 menunggu ketokan: resolver `SECURITY DEFINER` sempit (pola O51) vs lengan RLS baru. Rincian `UAT_M19_BROWSER_20260909.md` §2 |
 | **A2-DRIFT** | `d3_tutup_buku_pulihkan_komentar_jaga_transisi` ada di live, nol berkas di `main`; plus baris ledger ganda `m6a_section_d` | 🟡 terbuka sejak 2026-09-08. Namanya kini konkret; back-port belum dilakukan |
 | **O75** | Service tidak punya jalur ke Done — edge `[In Execution] → Done` ada di `sm_edges` dengan **nol pemanggil** | ⚠️ terbuka 2026-09-07 |
 | **O76** | Asal floor GMV bulanan (sisa O57 (b) yang K-2 tidak tutup) | ⚠️ terbuka 2026-09-07 |
@@ -534,8 +549,8 @@ Diperbarui dari `HANDOFF_M19_SCS_20260909.md` §4 + §8, dirujuk silang ke
 
 ### 5.6 Urutan yang disarankan
 
-1. **§1** (UAT M19) — utang verifikasi paling besar, atas kode yang sudah
-   berjalan di live.
+1. ~~**§1** (UAT M19)~~ — ✅ selesai 2026-09-09. Yang lahir darinya:
+   `M19-NAMA-RLS` (§5.3), dan itu kini butir paling mendesak.
 2. **§2** (UAT Sales) — lingkungannya sudah nyala; ongkos tambahannya kecil.
 3. **§4** (drift penuh) — paralel, oleh operator, tidak menunggu 1 dan 2.
 4. **§3** (Kategori) — kapan pun pemilik sempat; nol yang menunggu.
