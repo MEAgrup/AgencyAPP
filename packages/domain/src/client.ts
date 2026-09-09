@@ -902,6 +902,22 @@ export interface ClientListRow {
   paymentIntent: string | null;
   releasedToAccountAt: Date | null;
   createdAt: Date;
+  /**
+   * FS-5b (feedback tim Sales 2026-09-09, lanjutan FS-5) — durasi kontrak yang
+   * sedang berjalan, ringkas untuk daftar. FS-5 memberi jendela kontrak
+   * lengkap ke Client Record (`ContractSection.tsx`); halaman roster
+   * `/clients` sendiri tetap tidak menampilkannya sama sekali, dan itu justru
+   * layar yang disebut pemilik. Kontrak TERBARU per klien (`tanggal_mulai
+   * desc, id desc` — ordering yang sama dengan `listContractsForClient`),
+   * bukan agregat: satu klien bisa punya banyak baris `contracts` (perpanjangan),
+   * dan daftar hanya punya ruang untuk satu ringkasan.
+   * `null` = klien ini belum punya kontrak (layanan sekali jadi tanpa durasi,
+   * atau closing belum lahir) — dibedakan dari "0" secara eksplisit, bukan '—'
+   * yang dipilih FE.
+   */
+  contractDurasiBulan: number | null;
+  contractTanggalMulai: string | null;
+  contractTanggalAkhir: string | null;
 }
 
 /**
@@ -919,19 +935,44 @@ export async function listClients(sql: Queryable, pageReq?: page.PageRequest): P
       id: string; toko: string; nama_pic: string; kota: string; kategori: string;
       sales_pic_id: string; sales_pic_nama: string; assigned_am_id: string | null;
       payment_intent: string | null; released_to_account_at: Date | null; created_at: Date;
+      contract_durasi_bulan: number | null;
+      contract_tanggal_mulai: string | Date | null;
+      contract_tanggal_akhir: string | Date | null;
     }[]
   >`
     select c.id, c.toko, c.nama_pic, c.kota, c.kategori, c.sales_pic_id,
            private.employee_display_name(c.sales_pic_id) as sales_pic_nama, c.assigned_am_id,
-           c.payment_intent, c.released_to_account_at, c.created_at
+           c.payment_intent, c.released_to_account_at, c.created_at,
+           ct.durasi_bulan as contract_durasi_bulan,
+           ct.tanggal_mulai as contract_tanggal_mulai,
+           ct.tanggal_akhir as contract_tanggal_akhir
     from clients c
+    -- FS-5b: kontrak TERBARU klien ini, ordering sama dengan listContractsForClient
+    -- (tanggal_mulai desc, id desc). RLS policy contracts_select tetap berlaku di
+    -- sini (kueri ini jalan lewat readAsActor) -- pembaca yang boleh melihat baris
+    -- clients tapi tidak diberi lengan di contracts_select (mis. Finance/Ads di luar
+    -- klien miliknya) melihat kolom ini kosong, bukan galat.
+    left join lateral (
+      select ct.durasi_bulan, ct.tanggal_mulai, ct.tanggal_akhir
+      from contracts ct
+      where ct.client_id = c.id
+      order by ct.tanggal_mulai desc, ct.id desc
+      limit 1
+    ) ct on true
     where (c.created_at, c.id) < (${b.at}, ${b.id})
     order by c.created_at desc, c.id desc
     limit ${b.limit}::bigint`;
+  const dateStr = (v: string | Date | null): string | null => {
+    if (v === null) return null;
+    return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
+  };
   const mapped = rows.map((r) => ({
     id: r.id, toko: r.toko, namaPic: r.nama_pic, kota: r.kota, kategori: r.kategori,
     salesPicId: r.sales_pic_id, salesPicNama: r.sales_pic_nama, assignedAmId: r.assigned_am_id,
     paymentIntent: r.payment_intent, releasedToAccountAt: r.released_to_account_at, createdAt: r.created_at,
+    contractDurasiBulan: r.contract_durasi_bulan === null ? null : Number(r.contract_durasi_bulan),
+    contractTanggalMulai: dateStr(r.contract_tanggal_mulai),
+    contractTanggalAkhir: dateStr(r.contract_tanggal_akhir),
   }));
   return page.paginate(mapped, pageReq, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }

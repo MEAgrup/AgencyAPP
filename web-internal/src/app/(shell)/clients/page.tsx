@@ -4,6 +4,22 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { listClients, type Client } from '@/lib/clients';
+import { SisaBadge } from '@/components/clients/ContractSection';
+
+// FS-5b (feedback tim Sales 2026-09-09) — "durasi kontrak service klien bisa
+// di cek di halaman klien" (roster), bukan hanya di Client Record (FS-5).
+// Sama badge, `SisaBadge`, supaya roster dan detail konsisten.
+function DurasiKontrak({ c }: { c: Client }) {
+  if (c.contract_durasi_bulan === null || c.contract_tanggal_mulai === null || c.contract_tanggal_akhir === null) {
+    return <span className="muted">—</span>;
+  }
+  return (
+    <span className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+      <span>{c.contract_durasi_bulan} bulan</span>
+      <SisaBadge mulai={c.contract_tanggal_mulai} akhir={c.contract_tanggal_akhir} />
+    </span>
+  );
+}
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<Client[] | null>(null);
@@ -72,6 +88,7 @@ export default function ClientsPage() {
                   <th>Kota</th>
                   <th>Kategori</th>
                   <th>Sales PIC</th>
+                  <th>Durasi Kontrak</th>
                   <th>Payment Intent</th>
                   <th>Status Rilis</th>
                 </tr>
@@ -87,6 +104,7 @@ export default function ClientsPage() {
                     <td>{c.kota}</td>
                     <td>{c.kategori}</td>
                     <td>{c.sales_pic_id}</td>
+                    <td><DurasiKontrak c={c} /></td>
                     <td>
                       {c.payment_intent ? (
                         <span className="badge badge-blue">{c.payment_intent}</span>
