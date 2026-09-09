@@ -84,6 +84,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ClientIncompleteError: 400, // client.IncompleteError
   ClientPortalValidationError: 400, // clientPortal.PortalValidationError
   CreativeValidationError: 400, // creative.ValidationError
+  DailyOpsValidationError: 400, // dailyops.ValidationError (M19)
   CustomTermRequiresNegotiationError: 400, // sales.CustomTermRequiresNegotiationError
   FinanceIncompleteError: 400, // finance.IncompleteError
   IncompleteError: 400, // demo.IncompleteError
@@ -124,6 +125,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ClientForbiddenError: 403, // client.ForbiddenError
   ClientPortalForbiddenError: 403, // clientPortal.PortalForbiddenError
   CreativeForbiddenError: 403, // creative.ForbiddenError
+  DailyOpsForbiddenError: 403, // dailyops.ForbiddenError (M19)
   DirectoryForbiddenError: 403, // directory.ForbiddenError
   FinanceForbiddenError: 403, // finance.ForbiddenError
   ForbiddenError: 403, // demo.ForbiddenError
@@ -154,6 +156,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ClientNotFoundError: 404, // client.NotFoundError
   ClientPortalNotFoundError: 404, // clientPortal.PortalNotFoundError
   CreativeNotFoundError: 404, // creative.NotFoundError
+  DailyOpsNotFoundError: 404, // dailyops.NotFoundError (M19)
   FinanceNotFoundError: 404, // finance.NotFoundError
   HealthNotFoundError: 404, // health.NotFoundError
   InternalTaskNotFoundError: 404, // internaltask.NotFoundError
@@ -183,6 +186,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ChangePendingError: 409, // finance.ChangePendingError
   ContractRequiredError: 409, // finance.ContractRequiredError
   CreativeConflictError: 409, // creative.ConflictError
+  DailyOpsConflictError: 409, // dailyops.ConflictError (M19)
   IntentLockedError: 409, // client.IntentLockedError
   InternalTaskConflictError: 409, // internaltask.ConflictError
   KolConflictError: 409, // kol.ConflictError

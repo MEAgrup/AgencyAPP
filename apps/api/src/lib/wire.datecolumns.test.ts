@@ -32,7 +32,12 @@ import { clientDetailToWire, installmentToWire, remindersToWire } from './wire';
  */
 const DATE_BACKED_WIRE_KEYS = ['due_date', 'verified_date', 'period_start', 'period_end',
   'start_date', 'end_date', 'timeline_start', 'timeline_end', 'effective_from',
-  'recurring_end_date', 'managed_since'] as const;
+  'recurring_end_date', 'managed_since',
+  // M19 (20260927010000): `prod_slots.tanggal`, `pic_unavailability.tanggal_mulai`
+  // / `tanggal_selesai`. Ketiganya kolom `date`, dan domainnya sudah
+  // mengembalikan string YMD — jadi gate di bawah menjaga agar tidak ada yang
+  // "merapikannya" jadi `new Date(...).toISOString()` suatu hari.
+  'tanggal', 'tanggal_mulai', 'tanggal_selesai'] as const;
 
 /**
  * Ledger pola `KNOWN_GAPS`: field date-backed yang MASIH dikirim RFC3339.

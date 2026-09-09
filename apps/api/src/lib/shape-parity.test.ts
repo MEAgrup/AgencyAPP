@@ -192,7 +192,7 @@ const FE_FILES = [
   // itu hidup empat kali (account/tasks/creative/kol) dengan hanya SATU yang
   // di-anchor di sini; lihat `ONE_BRIEF` di bawah, yang menjaga agar tidak
   // lahir yang kelima.
-  'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts',
+  'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyops.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
   'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
@@ -403,6 +403,18 @@ const WIRE_TO_FE: Record<string, string> = {
   // Badan permintaan cakupan+target, sama alasannya dengan ProposalLineBody di
   // bawah: arah berbalik (FE yang mengirim), assertion kesetaraan kunci sama.
   SkuScopeBody: 'storeops.ts::SkuScopeInput',
+  // M19 — Creative Daily Ops. Delapan bentuk, semuanya ber-anchor ke deklarasi
+  // yang BENAR-BENAR dibaca halaman (`web-internal/src/lib/dailyops.ts`), bukan
+  // salinan paralel — pelajaran empat bentuk `Brief`.
+  SlotWire: 'dailyops.ts::SlotRow',
+  SlotSaveResultWire: 'dailyops.ts::SlotSaveResult',
+  StudioWire: 'dailyops.ts::StudioRow',
+  UnavailabilityWire: 'dailyops.ts::UnavailabilityRow',
+  StudioColumnWire: 'dailyops.ts::StudioColumn',
+  DayScheduleWire: 'dailyops.ts::DaySchedule',
+  PicSameDayWire: 'dailyops.ts::PicSameDay',
+  SlotBody: 'dailyops.ts::SlotInput',
+  UnavailabilityBody: 'dailyops.ts::UnavailabilityInput',
 
   RenewalWire: 'renewal.ts::Renewal',
   RenewalLineWire: 'renewal.ts::RenewalLine',

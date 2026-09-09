@@ -241,6 +241,25 @@ export interface StudioColumn {
   nama: string;
   cekKonflik: boolean;
   slots: SlotRow[];
+  /**
+   * ID slot di kolom ini yang bertumpang dengan setidaknya satu saudaranya.
+   *
+   * Dihitung DI SERVER, dan itu bukan kerapian: `web-internal` adalah app Next
+   * yang berdiri sendiri tanpa dependency `@cdps/core` (lihat
+   * `web-internal/src/lib/interview-scoring.ts`), jadi menandai bentrok di
+   * halaman berarti menulis definisi KEDUA "bertumpang" — dan yang kedua akan
+   * lupa bahwa perbandingannya setengah terbuka begitu seseorang
+   * menyederhanakannya. Di sini ia memakai `vocab.waktuBertumpang` yang sama
+   * dengan yang dipakai pemeriksaan tulis dan dipaku registry test.
+   *
+   * Fakta ini ber-scope HARI, bukan baris — karena itu ia hidup di kolom, bukan
+   * di `SlotRow`: satu slot yang dibaca sendirian (`getSlot`) tidak punya
+   * saudara untuk dibandingkan, dan sebuah field `bentrok` di sana akan selalu
+   * `false` dengan cara yang menyesatkan.
+   *
+   * Kosong untuk studio ber-`cekKonflik = false` (`Luar Kantor`).
+   */
+  bentrokIds: string[];
 }
 
 /** Satu baris dashboard Leader (D5) — per PIC, satu periode. */
@@ -725,6 +744,27 @@ export async function getSlot(sql: Queryable, actor: Actor, id: string): Promise
 }
 
 /**
+ * ID slot yang bertumpang dengan setidaknya satu saudara di kolom yang sama.
+ *
+ * O(n²) dengan sengaja: satu studio dalam satu hari berisi satuan slot, dan
+ * indeks interval untuk n < 20 adalah kompleksitas yang dibayar tanpa imbalan.
+ */
+function bentrokDalamKolom(kolom: SlotRow[]): string[] {
+  const out = new Set<string>();
+  for (let i = 0; i < kolom.length; i += 1) {
+    for (let j = i + 1; j < kolom.length; j += 1) {
+      const a = kolom[i];
+      const b = kolom[j];
+      if (vocab.waktuBertumpang(a.waktuMulai, a.waktuSelesai, b.waktuMulai, b.waktuSelesai)) {
+        out.add(a.id);
+        out.add(b.id);
+      }
+    }
+  }
+  return [...out].sort();
+}
+
+/**
  * daySchedule adalah bentuk yang dirender grid: SELURUH studio aktif sebagai
  * kolom — termasuk yang nol slot hari itu.
  *
@@ -758,12 +798,16 @@ export async function daySchedule(
 
   return {
     tanggal,
-    studios: vocab.studiosAktif().map((st) => ({
-      code: st.code,
-      nama: st.nama,
-      cekKonflik: st.cekKonflik,
-      slots: slots.filter((s) => s.studioCode === st.code),
-    })),
+    studios: vocab.studiosAktif().map((st) => {
+      const kolom = slots.filter((s) => s.studioCode === st.code);
+      return {
+        code: st.code,
+        nama: st.nama,
+        cekKonflik: st.cekKonflik,
+        slots: kolom,
+        bentrokIds: st.cekKonflik ? bentrokDalamKolom(kolom) : [],
+      };
+    }),
     tidakTersedia: unavRows.map(toUnavRow),
     totalTarget: slots.reduce((a, s) => a + s.targetQty, 0),
     totalActual: slots.reduce((a, s) => a + (s.actualQty ?? 0), 0),

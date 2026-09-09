@@ -586,6 +586,34 @@ describeDb('daySchedule — bentuk yang dirender grid', () => {
     expect(kasuari?.slots.map((s) => s.waktuMulai)).toEqual(['09:00', '11:00']);
   });
 
+  it('bentrokIds menandai KEDUA slot yang bertumpang, dihitung di server', async () => {
+    await setup();
+    const a = await createSlot(sql, creativeLead(), slot({ waktuMulai: '09:00', waktuSelesai: '12:00' }));
+    const b = await createSlot(sql, creativeLead(), slot({
+      waktuMulai: '11:00', waktuSelesai: '14:00', assignedPic: PIC2,
+    }));
+    const d = await daySchedule(sql, creativeLead(), HARI);
+    const kasuari = d.studios.find((s) => s.code === 'KASUARI');
+    expect(kasuari?.bentrokIds.slice().sort()).toEqual([a.slot.id, b.slot.id].sort());
+  });
+
+  it('bentrokIds kosong untuk slot bersambung, dan SELALU kosong di `Luar Kantor`', async () => {
+    await setup();
+    // Setengah terbuka: 09.00–12.00 lalu 12.00–14.00 bukan bentrok.
+    await createSlot(sql, creativeLead(), slot({ waktuMulai: '09:00', waktuSelesai: '12:00' }));
+    await createSlot(sql, creativeLead(), slot({
+      waktuMulai: '12:00', waktuSelesai: '14:00', assignedPic: PIC2,
+    }));
+    // Dua slot yang JELAS bertumpang, tapi di lokasi luar kantor.
+    await createSlot(sql, creativeLead(), slot({ studioCode: 'LUAR_KANTOR' }));
+    await createSlot(sql, creativeLead(), slot({
+      studioCode: 'LUAR_KANTOR', assignedPic: PIC2, waktuMulai: '09:30', waktuSelesai: '11:00',
+    }));
+    const d = await daySchedule(sql, creativeLead(), HARI);
+    expect(d.studios.find((s) => s.code === 'KASUARI')?.bentrokIds).toEqual([]);
+    expect(d.studios.find((s) => s.code === 'LUAR_KANTOR')?.bentrokIds).toEqual([]);
+  });
+
   it('PIC yang tidak tersedia hari itu ikut terbawa — Leader melihatnya SAAT merencanakan', async () => {
     await setup();
     await markUnavailable(sql, creativeLead(), {
