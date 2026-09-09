@@ -2797,6 +2797,10 @@ export interface ClientListRowWire {
   payment_intent: string;
   released_to_account_at: string | null;
   created_at: string;
+  /** FS-5b — kontrak TERBARU klien ini; null = belum ada kontrak. */
+  contract_durasi_bulan: number | null;
+  contract_tanggal_mulai: string | null;
+  contract_tanggal_akhir: string | null;
 }
 
 export function clientListRowToWire(r: client.ClientListRow): ClientListRowWire {
@@ -2812,6 +2816,9 @@ export function clientListRowToWire(r: client.ClientListRow): ClientListRowWire 
     payment_intent: r.paymentIntent ?? '',
     released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,
     created_at: r.createdAt.toISOString(),
+    contract_durasi_bulan: r.contractDurasiBulan,
+    contract_tanggal_mulai: r.contractTanggalMulai,
+    contract_tanggal_akhir: r.contractTanggalAkhir,
   };
 }
 

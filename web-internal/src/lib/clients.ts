@@ -54,6 +54,19 @@ export interface Client {
   platforms: Platform[];
   sales_allocation: Allocation[];
   services: ServiceLine[];
+  /**
+   * FS-5b (feedback tim Sales 2026-09-09) — durasi kontrak TERBARU klien ini,
+   * untuk kolom di daftar `/clients`. Hanya diisi oleh `GET /clients`
+   * (roster); `GET /clients/{id}` sengaja TIDAK mengisinya — jendela kontrak
+   * lengkap (termasuk riwayat perpanjangan) sudah dibaca `ContractSection.tsx`
+   * lewat `/clients/{id}/contracts` (FS-5), dan menduplikasi angkanya di sini
+   * akan membuat dua sumber untuk satu fakta yang sama (alasan yang sama
+   * dengan kenapa jendela kontrak dipindah keluar dari `strategi` di O57).
+   * `null` = klien belum punya kontrak sama sekali.
+   */
+  contract_durasi_bulan: number | null;
+  contract_tanggal_mulai: string | null;
+  contract_tanggal_akhir: string | null;
 }
 
 export interface FieldChange {

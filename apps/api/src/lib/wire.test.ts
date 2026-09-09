@@ -940,6 +940,9 @@ describe('M4 clientListRowToWire (the roster page read res.data)', () => {
     paymentIntent: '[Termin]',
     releasedToAccountAt: null,
     createdAt: new Date('2026-07-01T03:00:00.000Z'),
+    contractDurasiBulan: 12,
+    contractTanggalMulai: '2026-01-01',
+    contractTanggalAkhir: '2027-01-01',
   };
 
   it('maps to snake_case', () => {
@@ -955,12 +958,27 @@ describe('M4 clientListRowToWire (the roster page read res.data)', () => {
       payment_intent: '[Termin]',
       released_to_account_at: null,
       created_at: '2026-07-01T03:00:00.000Z',
+      contract_durasi_bulan: 12,
+      contract_tanggal_mulai: '2026-01-01',
+      contract_tanggal_akhir: '2027-01-01',
     });
+  });
+
+  it('a client with no contract yet renders all three as null (FS-5b)', () => {
+    const wire = clientListRowToWire({
+      ...row, contractDurasiBulan: null, contractTanggalMulai: null, contractTanggalAkhir: null,
+    });
+    expect(wire.contract_durasi_bulan).toBeNull();
+    expect(wire.contract_tanggal_mulai).toBeNull();
+    expect(wire.contract_tanggal_akhir).toBeNull();
   });
 
   it('covers every field the roster page renders', () => {
     const wire = clientListRowToWire(row) as unknown as Record<string, unknown>;
-    for (const key of ['id', 'toko', 'kota', 'kategori', 'sales_pic_id', 'payment_intent', 'released_to_account_at']) {
+    for (const key of [
+      'id', 'toko', 'kota', 'kategori', 'sales_pic_id', 'payment_intent', 'released_to_account_at',
+      'contract_durasi_bulan', 'contract_tanggal_mulai', 'contract_tanggal_akhir',
+    ]) {
       expect(wire).toHaveProperty(key);
     }
   });

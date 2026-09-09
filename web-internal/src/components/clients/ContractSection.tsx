@@ -40,7 +40,8 @@ const TONE: Record<ContractState, string> = {
   belum_mulai: 'badge-amber',
 };
 
-function SisaBadge({ mulai, akhir }: { mulai: string; akhir: string }) {
+/** Dipakai juga oleh roster `/clients` (FS-5b) — satu badge, satu definisi. */
+export function SisaBadge({ mulai, akhir }: { mulai: string; akhir: string }) {
   const w = contractWindow(mulai, akhir);
   const teks =
     w.state === 'berakhir'

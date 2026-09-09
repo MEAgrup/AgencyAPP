@@ -787,6 +787,18 @@ const APPROVED_DIVERGENCE: Record<string, { keys: string[]; decision: string }> 
     ],
     decision: 'DECISIONS O43 (a), owner 2026-07-29',
   },
+  /**
+   * The reverse of the divergence above: `Client` also carries the roster's
+   * latest-contract summary, which `GET /clients/{id}` deliberately does NOT
+   * emit — `ContractSection.tsx` (FS-5) reads the full window (all renewals,
+   * not just the latest) from `/clients/{id}/contracts` instead, so mirroring
+   * the same numbers onto `ClientDetailWire` would be a second source for one
+   * fact. See FS-5b.
+   */
+  ClientDetailWire: {
+    keys: ['contract_durasi_bulan', 'contract_tanggal_mulai', 'contract_tanggal_akhir'],
+    decision: 'DECISIONS FS-5b, 2026-09-09',
+  },
 };
 
 const { pairs, unfollowed } = walkPairs();

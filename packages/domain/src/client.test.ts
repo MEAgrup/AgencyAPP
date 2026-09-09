@@ -551,6 +551,46 @@ describeDb('listClients (M4 §6)', () => {
   });
 });
 
+describeDb('listClients — durasi kontrak terbaru (FS-5b)', () => {
+  it('carries the latest contract window; null when the client has none', async () => {
+    // `closedClient()`'s fixture service has no `durasi_bulan` (a one-off
+    // service) so `sales.close()` prints no `contracts` row for it — exactly
+    // the "belum ada kontrak" case `ContractSection.tsx` already renders.
+    // The contract here is inserted directly, same as `reads_rls.test.ts`,
+    // to test the roster projection in isolation from the closing pipeline.
+    const withCtr = await closedClient();
+    await sql`insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, created_by)
+      values (${`CTR-ZZ-${seq++}`}, ${withCtr}, 12, '2026-01-01', '2027-01-01', 'ZZ-ADMIN')`;
+    const noCtr = await closedClient();
+
+    const rows = (await listClients(sql)).rows;
+
+    const withRow = rows.find((r) => r.id === withCtr);
+    expect(withRow).toBeDefined();
+    expect(withRow!.contractDurasiBulan).toBe(12);
+    expect(withRow!.contractTanggalMulai).toBe('2026-01-01');
+    expect(withRow!.contractTanggalAkhir).toBe('2027-01-01');
+
+    const noRow = rows.find((r) => r.id === noCtr);
+    expect(noRow).toBeDefined();
+    expect(noRow!.contractDurasiBulan).toBeNull();
+    expect(noRow!.contractTanggalMulai).toBeNull();
+    expect(noRow!.contractTanggalAkhir).toBeNull();
+  });
+
+  it('picks the newest window (tanggal_mulai desc) when a client has more than one contract', async () => {
+    const clientId = await closedClient();
+    await sql`insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, created_by)
+      values (${`CTR-ZZ-${seq++}`}, ${clientId}, 3, '2025-01-01', '2025-04-01', 'ZZ-ADMIN')`;
+    await sql`insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, created_by)
+      values (${`CTR-ZZ-${seq++}`}, ${clientId}, 12, '2026-01-01', '2027-01-01', 'ZZ-ADMIN')`;
+
+    const row = (await listClients(sql)).rows.find((r) => r.id === clientId);
+    expect(row!.contractDurasiBulan).toBe(12);
+    expect(row!.contractTanggalMulai).toBe('2026-01-01');
+  });
+});
+
 describeDb('listClients — keyset pagination (P2 §6)', () => {
   it('pages the roster and, unpaged, still returns everything', async () => {
     const a = await closedClient();
