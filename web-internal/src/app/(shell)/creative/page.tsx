@@ -124,6 +124,9 @@ export default function CreativeWorkspacePage() {
           <Link href="/creative/daily-output" className="btn btnSecondary">
             Daily Output
           </Link>
+          <Link href="/creative/scs" className="btn btnSecondary">
+            Antrean SMO &amp; Content Strategist
+          </Link>
         </div>
       </div>
 

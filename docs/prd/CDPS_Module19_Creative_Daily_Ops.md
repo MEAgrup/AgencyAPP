@@ -1,6 +1,6 @@
 # CDPS — Module 19: Creative Daily Ops
 
-**Status:** Separuh **dibangun 2026-09-09** (Gap A/D/E/F, ketokan D1/D3/D4/D5/D8). Separuh `SMO & Content Strategist` (Gap B/G/I) **DITAHAN** — lihat §12 dan `docs/DECISIONS.md` §Open `M19-SCS-ENGINE`
+**Status:** **LENGKAP 2026-09-09.** Separuh jadwal harian (Gap A/D/E/F, ketokan D1/D3/D4/D5/D8) + separuh `SMO & Content Strategist` (Gap B/G/I) sesudah ketokan `M19-SCS-ENGINE` opsi (b) — lihat §12 (riwayat pertanyaannya) dan §13 (yang dibangun)
 **Worked example:** Kamis 10 Sep 2026 — tiga slot di dua studio, satu bertumpang, satu PIC cuti (§4)
 **Depends on:** Module 6 (Brief), Module 7 (Creative Asset — lapisan eksekusi di atas modul ini), Module 12 (Task Execution engine), Phase 0 (Role Matrix, ID, audit)
 **Resolves:** `docs/DECISIONS.md` K-1 (2026-09-07) — bagian "jadwal harian leader" dari wave yang ditunda
@@ -367,12 +367,14 @@ yang tidak pernah diemisikan membuat katalog berbohong (preseden v9
 
 ---
 
-## 12. Separuh yang DITAHAN — `SMO & Content Strategist`
+## 12. `M19-SCS-ENGINE` — pertanyaannya, dan kenapa jawabannya (b)
 
-Gap B/G/I (antrean peran gabungan, taksonomi 24 Kategori, flag `is_standing`,
-pola "Task Additional") **tidak dibangun**, dan alasannya satu pertanyaan
-arsitektur yang belum diketok. Dicatat sebagai **`M19-SCS-ENGINE`** di
-`docs/DECISIONS.md` §Open.
+**DIKETOK 2026-09-09: opsi (b), mesin sendiri #34.** Bagian ini disimpan karena
+ia satu-satunya tempat alasan pilihan itu tertulis lengkap; yang DIBANGUN ada di
+§13.
+
+Gap B/G/I (antrean peran gabungan, taksonomi Kategori, flag `is_standing`)
+sempat ditahan satu pertanyaan arsitektur.
 
 Draft modul ini menyatakan dua hal yang tidak bisa dua-duanya benar: Rule 5-nya
 bilang baris SCS "masuk penuh ke Task Execution Engine", sementara §5.4-nya
@@ -397,12 +399,201 @@ Yang membuatnya tegas adalah kodenya sendiri:
   > Asset | Creator Booking | Brief-as-task … `task.ts` (M12) tidak disentuh
   > sama sekali, jadi tidak ada dua definisi Speed Score / turnaround.*
 
-**Rekomendasi: mesin sendiri, pola `internal_tasks`** — M12 tidak disentuh,
+**Diketok: mesin sendiri, pola `internal_tasks`** — M12 tidak disentuh,
 `client_id` boleh nullable, dan `task.computeMetrics()` (sudah exported, pure)
-tetap dipakai ulang sehingga tidak ada definisi kedua Speed Score. Tapi ini
-keputusan pemilik, dan sesuai `CLAUDE.md` ia dicatat sebagai pertanyaan terbuka
-alih-alih dipilih diam-diam di dalam satu migrasi.
+tetap dipakai ulang sehingga tidak ada definisi kedua Speed Score.
+
+### 12.1 Bagaimana kedua pernyataan PRD yang bertentangan jadi sama-sama benar
+
+Draft Rule 5 bilang baris SCS *"masuk penuh ke Task Execution Engine"* dan
+*"reuse the engine config, do not write a variant"*; §5.4-nya memesan mesin #34.
+Keduanya benar SEKALIGUS bila mesin #34 adalah **salinan verbatim konfigurasi
+`brief_task`** di bawah namanya sendiri: state yang SAMA, edge yang SAMA,
+gerbang `require_lead` yang SAMA. Yang berbeda hanya NAMA mesinnya — karena
+`sm_transition` mengunci mesin ke pasangan entityType/table, dan dua entitas yang
+berbagi satu baris `sm_machines` berarti gerbang role salah satunya tidak bisa
+digeser tanpa menggeser yang lain.
+
+Konsekuensinya justru alasan utama pilihan ini: `computeMetrics` membaca nama
+state `[In Progress]`/`[Approved]`/`[Revision Requested]`/`[Blocked]`/
+`[Submitted]`/`[In Review]` dari `audit_log`, jadi kosakata yang identik berarti
+rumus Speed Score, turnaround, dan jumlah revisi punya SATU implementasi.
+
+⚠️ Mode gagalnya senyap: kalau seseorang "merapikan" `[Approved]` jadi
+`[Selesai]` di migrasi, tidak ada yang gagal secara mencolok — Speed Score
+seluruh baris SCS diam-diam jadi `null`. Yang merah lebih dulu adalah
+`packages/db/src/scs.registry.test.ts`, yang membandingkan HIMPUNAN state dan
+edge kedua mesin.
 
 Dua item §6 draft yang lain **diputuskan** dan sudah masuk:
 `pic_unavailability` dibangun sebagai ketidaktersediaan produksi berbatas
 (Rule 9), dan KPI Profile M14 ditunda (§5.5).
+
+---
+
+## 13. `SMO & Content Strategist` (`SCS-`) — yang dibangun
+
+Realisasi Gap B/G/I sesudah ketokan §12. Migrasi
+`20260928010000_m19_scs_task_engine.sql`, domain `packages/domain/src/scs.ts`.
+
+### 13.1 Rules
+
+1. **Sebuah baris SCS adalah PEKERJAAN, bukan rencana.** Beda dari `PROD-SLOT`
+   (Rule 1), ia PUNYA mesin status — karena ia memang di-review dan
+   di-turnaround-kan. Mesinnya #34 `scs_task`.
+2. **Mesin #34 adalah salinan verbatim `brief_task`** (§12.1). Nol nama state
+   baru, nol edge baru. Yang tidak ikut: `[Cancelled — Service Voided]`, karena
+   baris SCS tidak punya Service sehingga sebab itu tak pernah terjadi.
+3. **Nol edge pembatalan pengganti.** Nama state pembatalan baru TIDAK dikarang
+   — ia butuh ketokan pemilik lebih dulu, sikap yang sama yang diambil mesin
+   #21 `internal_task` terhadap edge "buka kembali" yang juga tidak ada.
+   Penggantinya: baris `[To Do]` boleh DIHAPUS (Rule 7).
+4. **`client_id` NULLABLE, dan itu seluruh alasan modul ini berdiri sendiri.**
+   Baris `all client` berlaku lintas klien (§12). Konsekuensi yang mengikat:
+   baris ber-NULL **tidak boleh ikut ke angka per-klien mana pun** — health
+   score M13, rekap klien M6D, laporan Client Portal M15. Setiap query per-klien
+   memfilter `client_id is not null`, dan tabelnya **nol view** sehingga tidak
+   ada jalan tersembunyi ke sana (ada tesnya).
+5. **`is_standing` adalah sifat KATEGORI, bukan sifat baris.** Kategori standing
+   = pekerjaan berulang harian; ia dihitung sebagai VOLUME, bukan deliverable
+   yang diseri. Skema memaksa `is_standing ⇒ sla_jam IS NULL`, dan
+   `computeMetrics(evs, null)` mengembalikan Speed Score **`N/A`** — jadi
+   "standing tidak di-SLA-kan" ditegakkan SKEMA, bukan kesopanan pemakai layar.
+6. **Kategori `Brief` `is_standing = false`, dan itu ketokan.** Pemilik
+   2026-09-09: *"brief SMO sebetulnya membantu team lain menyelesaikan task dari
+   AM"*. Yang membedakan Brief SMO dari Brief Strategist karena itu adalah
+   `mendukung_divisi` pada BARISNYA. Menandai Kategorinya standing akan membuat
+   deliverable Brief Strategist yang sungguhan HILANG dari seri deliverable.
+7. **Baris beku begitu ia meninggalkan `[To Do]`.** Tanggal, Kategori, PIC,
+   target qty, dan klien tidak bisa disunting sesudahnya — Kategori membawa SLA
+   yang dipakai menghitung Speed Score baris yang sedang dinilai. Sebelum itu ia
+   bebas diperbaiki: baris SCS diketik cepat di awal hari dan salah ketik nyata
+   harus bisa dibetulkan sebelum ada satu pun jejak pengerjaan. Ditegakkan DUA
+   kali (pesan BI + trigger `scs_tasks_beku()`).
+8. **Taksonomi Kategori adalah DATA, bukan skema** (`M19-SCS-KATEGORI-DATA`).
+   Hanya empat Kategori yang TERBUKTI di sumber yang di-seed; sisanya diisi lead
+   Creative lewat layar admin. `sub_type` sengaja teks bebas.
+9. **Angka turunan dari `audit_log`, nol kolom jangkar.** Turnaround, Speed
+   Score, dan jumlah revisi dihitung ulang lewat `task.computeMetrics()`
+   (aturan rumah #3/#4).
+10. **Nol bobot Modul 14.** KPI Profile peran gabungan ditunda dengan sengaja
+    (§5.5). Dijaga tes yang memindai `performance.ts`, cermin penjaga D5.
+
+### 13.2 Entitas
+
+#### `scs_kategori` — registry, dikelola lead Creative
+
+| Field | Tipe | Catatan |
+|---|---|---|
+| `kode` | varchar PK | dinormalkan huruf besar |
+| `nama` | text | unik |
+| `sub_type` | text, nullable | label worksheet. **Bukan** enum tertutup (Rule 8) |
+| `is_standing` | bool | Rule 5 |
+| `sla_jam` | int, nullable | satuan sama dengan `briefs.sla_target_hours`. NULL ⇒ Speed Score `N/A` |
+| `aktif` · `urutan` | bool · int | nonaktif = hilang dari picker, tetap terbaca di baris lama |
+
+Seed: `SCRIPT` (SLA 24) · `BRIEF` (SLA 24) · `UPLOAD_CHECKLIST` (standing) ·
+`KOORDINASI` (standing — jurnal Content Creator, Gap H-1).
+
+**Nol jalur DELETE**: baris pekerjaan historis menunjuknya lewat FK (nol
+CASCADE, nol SET NULL). Menonaktifkan lewat `aktif = false`.
+
+#### `scs_tasks` — prefix `SCS`, mesin #34
+
+| Field | Tipe | Catatan |
+|---|---|---|
+| `id` | `SCS-YYYYMM-NNNN` | di-mint HANYA sesudah validasi lolos |
+| `tanggal` | date | hari kerja baris ini |
+| `kategori_kode` | ref `scs_kategori` | membawa SLA-nya |
+| `judul` | text | pekerjaannya |
+| `client_id` | ref `clients`, **nullable** | NULL = "all client" (Rule 4) |
+| `mendukung_divisi` | ref `division_registry`, nullable | Rule 6 |
+| `assigned_pic` | ref `employees` | `creative.validateCreativeStaff` |
+| `target_qty` | int > 0 | |
+| `status` | varchar | eksklusif lewat `sm_transition` |
+| `link_hasil` | text | WAJIB pada `[Submitted]` dan sesudahnya |
+
+Nol kolom jangkar waktu, nol kolom turunan (Rule 9).
+
+### 13.3 Permission
+
+| Aksi | Siapa |
+|---|---|
+| Buat/sunting/cabut baris · kelola Kategori | Lead/SPV Creative, Director |
+| `[To Do]`→`[In Progress]`, submit, kerjakan ulang | **PIC baris itu SAJA** |
+| Buka review, setujui, minta revisi, blokir | Lead/SPV Creative, Director |
+| Baca | Lead/SPV = divisi · staff = barisnya sendiri · OD/Director = di mana pun |
+
+**NOL akses AM**, berbeda dari Asset M7 (yang review-nya memang milik AM):
+baris SCS tidak punya induk Brief, jadi tidak ada AM yang memilikinya — dan
+untuk baris "all client" tidak ada klien sama sekali.
+
+**Mengerjakan lebih sempit daripada M19**: `canWorkTask` menolak lead, karena
+lead yang menandai baris orang lain `[In Progress]` memalsukan jangkar yang
+turnaround-nya diukur dari situ. `[Blocked]` sebaliknya lead-saja: waktu blocked
+DIKURANGKAN dari turnaround, jadi PIC yang bisa memblokir barinya sendiri
+memotong sendiri angka yang menilainya (gerbang M12 §5.3a).
+
+Peran `SMO & Content Strategist` duduk DI BAWAH divisi Creative (ketokan
+2026-09-09) ⇒ nol level klaim baru, nol baris `division_registry` baru.
+
+### 13.4 Pesan validasi (BI, string persis)
+
+`[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]` ·
+`[jumlah target harus lebih dari 0]` · `[kategori pekerjaan tidak dikenal]` ·
+`[kategori pekerjaan sudah tidak aktif]` · `[kode kategori sudah dipakai]` ·
+`[kategori standing tidak boleh punya SLA — pekerjaan berulang tidak diukur kecepatannya]` ·
+`[divisi yang didukung tidak dikenal]` · `[baris pekerjaan tidak ditemukan]` ·
+`[link hasil kerja wajib diisi untuk submit]` ·
+`[baris yang sudah dikerjakan tidak bisa disunting — ia membawa SLA yang dipakai menghitung Speed Score]` ·
+`[hanya baris yang belum dikerjakan bisa dihapus]` ·
+`[hanya PIC baris ini yang bisa mengerjakannya]` ·
+`[hanya lead divisi yang bisa me-review baris pekerjaan ini]` ·
+`[anda tidak memiliki akses ke antrean pekerjaan ini]` ·
+`[PIC tidak valid: harus staff divisi Creative yang aktif]` (dari M7, dipakai ulang).
+
+### 13.5 Angka gerbang
+
+```
+tabel public   153 → 155   scs_kategori, scs_tasks
+entity_prefix   42 →  43   SCS
+sm_machines      33 →  34   mesin #34 `scs_task`
+notif_events     73 →  73   TETAP — nol event; antrean adalah LAYAR yang dibuka
+                            setiap hari, bukan sesuatu yang butuh inbox
+                            (preseden v9 `internal_tasks`, dan M18)
+```
+
+`scs_kategori_select` tidak punya lengan lead/divisi dan karena itu masuk ledger
+O48 (`supabase/tests/rls_checks.sql`) dengan alasan tertulis — cermin
+`studios_select`. Baris KERJA-nya (`scs_tasks`) tetap ber-lengan lead/divisi.
+
+### 13.6 Rute + layar
+
+| Path | Method |
+|---|---|
+| `creative/scs/tasks` | GET · POST |
+| `creative/scs/tasks/{id}` | GET · PUT · DELETE |
+| `creative/scs/tasks/{id}/transition` | POST (`aksi`, bukan nama state mentah) |
+| `creative/scs/kategori` | GET · POST |
+| `creative/scs/kategori/{kode}` | PUT |
+| `creative/scs/summary` | GET |
+
+Tiga layar: `/creative/scs` (antrean + form), `/creative/scs/rekap` (rekap per
+PIC — **menyatakan di layar** bahwa angkanya bukan KPI), `/creative/scs/kategori`
+(taksonomi). Dijangkau dari `/creative`, **nol perubahan `nav.ts`** — pola yang
+sama dengan Daily Output dan Jadwal Produksi.
+
+**SATU pintu transisi, `aksi` bukan `to`:** sebuah body `{to: '[Approved]'}`
+akan melewati gerbang peran yang menempel pada aksinya.
+
+### 13.7 Yang SENGAJA tidak dibangun
+
+- **Nol 24 baris Kategori di seed** (Rule 8) — dokumen taksonomi sumbernya tidak
+  ada di repo; mengarang 21 nama berarti menaruh tebakan di dalam migrasi.
+- **Nol state pembatalan** (Rule 3).
+- **Nol event notifikasi** (§13.5).
+- **Nol lengan RLS `mendukung_divisi`** — lead divisi lain tetap tidak boleh
+  membaca baris kerja Creative "karena dibantu": izin itu tidak pernah diketok.
+- **Nol bobot M14** (Rule 10).
+- **Pola "Task Additional" (Gap I)** — detailnya hanya ada di dokumen gap
+  analysis yang tidak ada di repo. Belum dibangun, dan tidak ditebak.

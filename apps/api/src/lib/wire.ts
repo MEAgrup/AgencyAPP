@@ -10,7 +10,7 @@
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -8256,5 +8256,192 @@ export function toUnavailabilityInput(b: Partial<UnavailabilityBody>): dailyops.
     tanggalSelesai: b.tanggal_selesai ?? '',
     alasan: b.alasan ?? '',
     catatan: b.catatan ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// M19 separuh SCS — baris pekerjaan `SMO & Content Strategist` (`SCS-`).
+//
+// `tanggal` adalah kolom `date` dan WAJIB dikirim `YYYY-MM-DD`, bukan
+// `.toISOString()` — ia terdaftar di `DATE_BACKED_WIRE_KEYS`
+// (`wire.datecolumns.test.ts`). Domainnya sudah mengembalikan string YMD.
+//
+// ⚠️ `client_id` dan `client_name` DIKIRIM SEBAGAI `null`, bukan dihilangkan.
+// Baris "all client" adalah kasus SAH (lihat header `packages/domain/src/scs.ts`),
+// dan kunci yang HILANG lebih berbahaya daripada null — kelas O43: halaman
+// membaca `row.client_name` dan mendapat `undefined`, lalu merender "undefined"
+// alih-alih label "Semua klien".
+// ---------------------------------------------------------------------------
+
+export interface ScsKategoriWire {
+  kode: string;
+  nama: string;
+  sub_type: string | null;
+  is_standing: boolean;
+  sla_jam: number | null;
+  aktif: boolean;
+  urutan: number;
+}
+
+export function scsKategoriToWire(k: scs.KategoriRow): ScsKategoriWire {
+  return {
+    kode: k.kode,
+    nama: k.nama,
+    sub_type: k.subType,
+    is_standing: k.isStanding,
+    sla_jam: k.slaJam,
+    aktif: k.aktif,
+    urutan: k.urutan,
+  };
+}
+
+export interface ScsTaskWire {
+  id: string;
+  tanggal: string;              // YYYY-MM-DD (WIB)
+  kategori_kode: string;
+  kategori_nama: string;
+  kategori_is_standing: boolean;
+  judul: string;
+  client_id: string | null;     // null = baris "all client" — SAH, bukan hilang
+  client_name: string | null;
+  mendukung_divisi: string | null;
+  assigned_pic: string;
+  assigned_pic_nama: string;
+  target_qty: number;
+  status: string;
+  link_hasil: string;
+  catatan: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function scsTaskToWire(r: scs.ScsTaskRow): ScsTaskWire {
+  return {
+    id: r.id,
+    tanggal: r.tanggal,
+    kategori_kode: r.kategoriKode,
+    kategori_nama: r.kategoriNama,
+    // Dikirim eksplisit walau bisa dicari dari daftar Kategori: ia yang
+    // menentukan apakah halaman menampilkan Speed Score atau 'N/A', dan sebuah
+    // pencarian di halaman akan gagal diam-diam untuk Kategori yang sudah
+    // dinonaktifkan (yang tidak ikut di daftar picker).
+    kategori_is_standing: r.kategoriIsStanding,
+    judul: r.judul,
+    client_id: r.clientId,
+    client_name: r.clientName,
+    mendukung_divisi: r.mendukungDivisi,
+    assigned_pic: r.assignedPic,
+    assigned_pic_nama: r.assignedPicNama,
+    target_qty: r.targetQty,
+    status: r.status,
+    link_hasil: r.linkHasil,
+    catatan: r.catatan,
+    created_by: r.createdBy,
+    created_at: r.createdAt.toISOString(),
+  };
+}
+
+export interface ScsMetricsWire {
+  id: string;
+  status: string;
+  turnaround_hours: number | null;
+  speed_score_pct: number | null;
+  /** 'N/A' untuk Kategori standing — bukan '0%'. */
+  speed_score_display: string;
+  revision_count: number;
+}
+
+export function scsMetricsToWire(m: scs.ScsTaskMetrics): ScsMetricsWire {
+  return {
+    id: m.id,
+    status: m.status,
+    turnaround_hours: m.turnaroundHours,
+    speed_score_pct: m.speedScorePct,
+    speed_score_display: m.speedScoreDisplay,
+    revision_count: m.revisionCount,
+  };
+}
+
+export interface ScsPicSummaryWire {
+  employee_id: string;
+  nama: string;
+  deliverable_selesai: number;
+  deliverable_qty: number;
+  standing_selesai: number;
+  belum_selesai: number;
+  total_baris: number;
+}
+
+export function scsPicSummaryToWire(r: scs.ScsPicSummaryRow): ScsPicSummaryWire {
+  return {
+    employee_id: r.employeeId,
+    nama: r.nama,
+    deliverable_selesai: r.deliverableSelesai,
+    deliverable_qty: r.deliverableQty,
+    standing_selesai: r.standingSelesai,
+    belum_selesai: r.belumSelesai,
+    total_baris: r.totalBaris,
+  };
+}
+
+export interface ScsTaskBody {
+  tanggal: string;
+  kategori_kode: string;
+  judul: string;
+  client_id: string | null;
+  mendukung_divisi: string | null;
+  assigned_pic: string;
+  target_qty: number;
+  catatan: string | null;
+}
+
+export function toScsTaskInput(
+  b: Omit<Partial<ScsTaskBody>, 'target_qty'> & { target_qty?: number | string },
+): scs.ScsTaskInput {
+  return {
+    tanggal: b.tanggal ?? '',
+    kategoriKode: b.kategori_kode ?? '',
+    judul: b.judul ?? '',
+    // `?? null` dan BUKAN `?? ''`: kunci yang tidak dikirim sama sekali berarti
+    // "tidak ada klien", yang di modul ini adalah jawaban yang sah.
+    clientId: b.client_id ?? null,
+    mendukungDivisi: b.mendukung_divisi ?? null,
+    assignedPic: b.assigned_pic ?? '',
+    // `Number('')` = 0, yang gagal validasi `> 0` dengan pesan BI-nya — itu
+    // memang yang diinginkan untuk field wajib yang tidak diisi.
+    targetQty: Number(b.target_qty ?? 0),
+    catatan: b.catatan ?? null,
+  };
+}
+
+export interface ScsKategoriBody {
+  kode: string;
+  nama: string;
+  sub_type: string | null;
+  is_standing: boolean;
+  sla_jam: number | null;
+  aktif: boolean;
+  urutan: number;
+}
+
+export function toScsKategoriInput(
+  b: Omit<Partial<ScsKategoriBody>, 'sla_jam' | 'urutan'> & {
+    sla_jam?: number | string | null;
+    urutan?: number | string;
+  },
+): scs.KategoriInput {
+  // `sla_jam` yang tidak dikirim BERBEDA artinya dari `sla_jam: 0`: yang
+  // pertama berarti "tidak di-SLA-kan" (Speed Score N/A), yang kedua omong
+  // kosong aritmetik yang ditolak validator. Karena itu `null` dipertahankan
+  // apa adanya alih-alih di-`Number()`-kan.
+  const sla = b.sla_jam ?? null;
+  return {
+    kode: b.kode ?? '',
+    nama: b.nama ?? '',
+    subType: b.sub_type ?? null,
+    isStanding: b.is_standing === true,
+    slaJam: sla === null || sla === '' ? null : Number(sla),
+    aktif: b.aktif !== false,
+    urutan: Number(b.urutan ?? 0),
   };
 }

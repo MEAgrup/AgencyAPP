@@ -106,6 +106,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   SalesPerfValidationError: 400, // salesperf.ValidationError
   SalesTooManyServicesError: 400, // sales.TooManyServicesError
   ScheduleTotalError: 400, // finance.ScheduleTotalError
+  ScsValidationError: 400, // scs.ValidationError (M19 separuh SCS)
   StageValidationError: 400, // stage.ValidationError
   StoreOpsValidationError: 400, // storeops.ValidationError
   TaskValidationError: 400, // task.ValidationError
@@ -142,6 +143,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ReqForbiddenError: 403, // req.ForbiddenError
   SalesForbiddenError: 403, // sales.ForbiddenError
   SalesPerfForbiddenError: 403, // salesperf.ForbiddenError
+  ScsForbiddenError: 403, // scs.ForbiddenError (M19 separuh SCS)
   StageForbiddenError: 403, // stage.ForbiddenError
   StoreOpsForbiddenError: 403, // storeops.ForbiddenError
   TaskForbiddenError: 403, // task.ForbiddenError
@@ -170,6 +172,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ReqNotFoundError: 404, // req.NotFoundError
   SalesNotFoundError: 404, // sales.NotFoundError
   ServiceNotFoundError: 404, // msl.ServiceNotFoundError
+  ScsNotFoundError: 404, // scs.NotFoundError (M19 separuh SCS)
   StageNotFoundError: 404, // stage.NotFoundError
   StoreOpsNotFoundError: 404, // storeops.NotFoundError
   TaskNotFoundError: 404, // task.NotFoundError
@@ -202,6 +205,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ScheduleExistsError: 409, // finance.ScheduleExistsError
   SchemeLockedError: 409, // finance.SchemeLockedError
   SchemeNoScheduleError: 409, // finance.SchemeNoScheduleError
+  ScsConflictError: 409, // scs.ConflictError (M19 separuh SCS)
   ServiceStateError: 409, // client.ServiceStateError
   StageConflictError: 409, // stage.ConflictError
   StoreOpsConflictError: 409, // storeops.ConflictError

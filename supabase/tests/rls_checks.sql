@@ -1168,6 +1168,16 @@ DECLARE
     'prospect_attempt_nq_reasons_select',
     'qualified_form_services_select','qualified_forms_select',
     'sales_level_labels_select',
+    -- `scs_kategori_select` (M19 separuh SCS, migrasi 20260928010000) masuk
+    -- daftar ini DENGAN SENGAJA, dicatat di `docs/DECISIONS.md` 2026-09-09 —
+    -- bukan ditambahkan agar tes hijau. Ia cermin `studios_select` tepat di
+    -- bawah: isinya nama-nama Kategori pekerjaan (Script, Brief, Upload &
+    -- Checklist, Koordinasi) dan SLA jam-nya, tidak lebih sensitif daripada
+    -- `standard_price` yang sudah terbuka bagi seluruh staff, dan setiap
+    -- pembuka layar antrean butuh daftarnya untuk merender filter — termasuk
+    -- pada hari yang nol baris. Baris KERJA-nya (`scs_tasks`) TETAP ber-lengan
+    -- lead/divisi dan karena itu tidak ada di daftar ini.
+    'scs_kategori_select',
     'stage_definition_select','stage_pipeline_select',
     'strategi_akses_select','strategi_assumption_select','strategi_baseline_bulan_select',
     'strategi_channel_select','strategi_diagnosa_select','strategi_dispatch_select',

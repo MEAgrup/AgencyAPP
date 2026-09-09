@@ -175,19 +175,36 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "153"
-check "entity_prefix"    "select count(*) from entity_prefix"    "42"
-check "sm_machines"      "select count(*) from sm_machines"      "33"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "155"
+check "entity_prefix"    "select count(*) from entity_prefix"    "43"
+check "sm_machines"      "select count(*) from sm_machines"      "34"
 check "notif_events"     "select count(*) from notif_events"     "73"
+# --- M19 separuh SCS (20260928010000_m19_scs_task_engine.sql) ----------------
+# 155 = 153 + `scs_kategori` + `scs_tasks` — baris pekerjaan `SMO & Content
+#       Strategist` plus taksonomi Kategori-nya. Ketokan `M19-SCS-ENGINE`
+#       2026-09-09 memilih opsi (b): mesin SENDIRI, pola `internal_tasks`.
+#  43 =  42 + prefix `SCS`. Tidak bisa `TSK-` (itu tugas dari atasan, nol klien
+#       nol Kategori) dan tidak bisa masuk M12 (§2 Rule 1 membekukan Task =
+#       Asset|Creator Booking|Brief-as-task, ketiganya wajib ber-klien — dan
+#       baris "all client" di sheet TIDAK punya klien).
+#  34 =  33 + mesin `scs_task`. Konfigurasinya SALINAN VERBATIM `brief_task`:
+#       state sama, edge sama, gerbang `require_lead` sama. Itu yang membuat
+#       `task.computeMetrics()` (exported, pure) dipakai ulang apa adanya, jadi
+#       nol definisi KEDUA Speed Score. `packages/db/src/scs.registry.test.ts`
+#       membandingkan HIMPUNAN state kedua mesin — kalau nama state di sini
+#       "dirapikan", Speed Score seluruh baris SCS diam-diam jadi null.
+#  73 TETAP — nol event. Preseden v9 `internal_tasks` dan M18: event lahir
+#       BERSAMA emitternya; antrean SCS adalah layar yang dibuka setiap hari,
+#       bukan sesuatu yang butuh inbox.
 # --- M19 Creative Daily Ops (20260927010000_m19_creative_daily_ops.sql) ------
 # 153 = 150 + `studios` + `prod_slots` + `pic_unavailability` — lapisan RENCANA
 #       di bawah lapisan eksekusi M7: hari x studio x PIC x slot waktu, plus
 #       ketidaktersediaan produksi seorang PIC. Jadwal harian Leader Video yang
 #       hari ini disusun ulang dengan tangan setiap hari.
 #  42 =  41 + prefix `SLOT` (dual-home dengan PREFIXES di ident.ts). Prefix
-#       `SCS` (SMO & Content Strategist) SENGAJA belum didaftarkan — bentuknya
-#       masih pertanyaan terbuka `M19-SCS-ENGINE` di DECISIONS.md §Open.
-#  33 TETAP — `PROD-SLOT` sengaja TANPA mesin status (PRD Rule 1/D1: ia catatan
+#       `SCS` menyusul di migrasi 20260928010000 sesudah ketokan
+#       `M19-SCS-ENGINE` (lihat blok di atas).
+#  33 TETAP pada migrasi ini — `PROD-SLOT` sengaja TANPA mesin status (PRD Rule 1/D1: ia catatan
 #       rencana, bukan deliverable). Eksekusi/review tetap milik Asset lewat
 #       mesin `brief_task`; memberi slot lifecycle sendiri berarti mesin paralel
 #       kedua. `packages/db/src/dailyops.registry.test.ts` memaku ketiadaan itu.

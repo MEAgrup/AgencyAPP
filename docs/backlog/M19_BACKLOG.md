@@ -8,7 +8,11 @@ D1–D9) + `docs/prd/CDPS_Module19_Creative_Daily_Ops.md`. Format sama dengan
 
 Sebelum M19 (per `1947262^`): **150 tabel · 41 entity_prefix · 33 sm_machines ·
 73 notif_events**, migrasi terakhir `20260926010000_fs6b_tenor_di_deal.sql`.
-Sesudah M19: **153 · 42 · 33 · 73**, migrasi `20260927010000_m19_creative_daily_ops.sql`.
+Sesudah separuh jadwal harian (PR #334, sudah di-merge + sudah diterapkan ke
+live `CDPS SG`): **153 · 42 · 33 · 73**,
+migrasi `20260927010000_m19_creative_daily_ops.sql`.
+Sesudah separuh SCS: **155 · 43 · 34 · 73**,
+migrasi `20260928010000_m19_scs_task_engine.sql`.
 
 ## Context
 
@@ -112,31 +116,71 @@ registrasi: `FE_FILES` + sembilan `WIRE_TO_FE`) · `wire.datecolumns`
 
 ---
 
-## Bagian D — DITAHAN, menunggu ketokan
+## Bagian D — separuh SCS · ✅ SELESAI (ketokan 2026-09-09, opsi b)
 
-### D1 · antrean `SMO & Content Strategist` (blocker: `M19-SCS-ENGINE`)
+### D1 · antrean `SMO & Content Strategist` — ✅
 
-Gap B/G/I: taksonomi 24 Kategori + 8 Sub Type, flag `is_standing`, Support-VG
-cross-link, pola "Task Additional". **Tidak dibangun.** Pertanyaannya di
-`DECISIONS.md` §Open: `brief_task` sebagai Task M12 keempat (⇒ `sm_machines`
-tetap 33, butuh amandemen M12 §2 Rule 1 + `client_id` WAJIB) atau mesin sendiri
-#34 pola `internal_tasks` (⇒ M12 tak disentuh, `client_id` nullable,
-`computeMetrics()` dipakai ulang). Rekomendasi: yang kedua.
+`M19-SCS-ENGINE` diketok **opsi (b): mesin SENDIRI #34 `scs_task`**, pola
+`internal_tasks`. Yang dibangun:
 
-Konsekuensi yang perlu diingat saat ia dibangun: kalau bentuknya ternyata
-ber-parent Brief, ia **akan** butuh barisnya di `HALAMAN_BRIEF`
-(`web-internal/src/lib/stage-panel-coverage.test.ts`) — halaman M19 hari ini
-tidak butuh karena `prod_slots` tidak punya `brief_id`.
+- **Migrasi** `20260928010000_m19_scs_task_engine.sql` (481 baris, tujuh bagian
+  bernomor): prefix `SCS` · mesin #34 (SALINAN VERBATIM konfigurasi
+  `brief_task`, minus state pembatalan ber-Service) · `scs_kategori` + seed 4
+  baris · `scs_tasks` · RLS + `GRANT` keduanya · `trg_scs_tasks_beku` ·
+  `trg_scs_tasks_hapus_hanya_todo`. Ledger O48 menerima `scs_kategori_select`
+  dengan alasan tertulis.
+- **Gerbang hitung** dinaikkan di `scripts/db-rebuild.sh` **DAN**
+  `.github/workflows/ci.yml` di commit yang SAMA: **155 · 43 · 34 · 73**.
+- **`packages/core/src/ident.ts`** — `PREFIXES.SCS`. Nol berkas kosakata baru:
+  taksonomi Kategori adalah DATA (tabel), dan nama state di-RE-EXPORT dari
+  `task.ts` alih-alih dituliskan kedua kali.
+- **`packages/domain/src/scs.ts`** — `createScsTask`/`updateScsTask`/
+  `deleteScsTask` · delapan transisi lewat `sm_transition` · `queueScsTasks` ·
+  `scsTaskMetrics` (memanggil `task.computeMetrics()`) · `scsPicSummary` ·
+  `listKategori`/`createKategori`/`updateKategori`, plus predikat izin murni.
+- **Enam rute** `/api/v1/creative/scs/**` + 6 converter `wire.ts` + 2 `to*Input`
+  + 4 baris `Scs*Error` di `http.ts` (ditempatkan alfabetis).
+- **Tiga layar** `/creative/scs`, `/creative/scs/rekap`, `/creative/scs/kategori`
+  + `web-internal/src/lib/scs.ts`. **Nol perubahan `nav.ts`** — dijangkau dari
+  `/creative`, pola Daily Output.
+- **Tes:** `scs.registry.test.ts` (17) · `scs.test.ts` (41) ·
+  `scs-scope.rls.test.ts` (14) · `web-internal/src/lib/scs.test.ts` (7).
 
-### D2 · jurnal koordinasi Content Creator (Gap H-1)
+**AC tercapai:** himpunan state DAN edge mesin #34 dibandingkan dengan
+`brief_task` (bukan dihitung) · `client_id` nullable dipaku sebagai KEPUTUSAN ·
+Kategori standing ⇒ Speed Score `N/A` bukan `0%` · warn/beku/hapus ditegakkan
+DUA kali (domain + trigger, diuji dari koneksi service-role) · matriks peran
+termasuk `staff+od` berlapis · recompute-from-log tiap angka turunan · satu tes
+memindai `performance.ts` untuk menjaga penundaan KPI M14.
 
-D7 mengetok "satu peran", dan Gap H-1 menyarankan checklist sederhana, bukan
-entitas Task-Execution. Hak tulisnya atas kalender **sudah** ada (ia menumpang
-`lead` Creative); jurnalnya menunggu bersama D1.
+**Yang TIDAK dibangun, dan sebabnya bukan kelalaian:**
+- **21 nama Kategori sisanya + 8 label Sub Type.** Dokumen sumbernya
+  (`CDPS_GapAnalysis_LeaderVideo_CreativeDailyOps.md`) tidak ada di repo maupun
+  di Drive. Taksonomi karena itu dibuat ADMIN-MANAGED (`scs_kategori`, layar
+  `/creative/scs/kategori`) dan seed-nya hanya empat baris yang terbukti di
+  sumber — lihat `DECISIONS.md` `M19-SCS-KATEGORI-DATA`. **Butuh pemilik:** isi
+  lewat layar (nol migrasi), atau kirim daftarnya untuk di-seed sekaligus.
+- **Pola "Task Additional" (Gap I).** Detailnya hanya ada di dokumen yang sama.
+  Tidak ditebak.
+- **State pembatalan.** Nama barunya butuh ketokan; penggantinya hari ini adalah
+  DELETE yang dibatasi `[To Do]`.
 
-### D3 · KPI Profile M14 untuk peran gabungan
+### D2 · jurnal koordinasi Content Creator (Gap H-1) — ✅
 
-Ditunda dengan sengaja (PRD §5.5). Revisit sesudah 2–3 bulan data Kategori nyata.
+Ketokan 2026-09-09: **"jalan rekomendasi"** ⇒ ia satu **Kategori** di dalam
+modul SCS, bukan entitas ketiga. Direalisasikan sebagai baris `scs_kategori`
+**`KOORDINASI`, `is_standing = true`, nol SLA**. Nol tabel, nol prefix, nol
+mesin baru untuk butir ini. Hak tulis kalendernya sudah ada sejak PR #334.
+
+### D3 · KPI Profile M14 untuk peran gabungan — ⏸️ TETAP DITUNDA
+
+Ketokan 2026-09-09: **"ditunda dengan sengaja"**. Alasan berangkanya di PRD §5.5
+dan `DECISIONS.md`: 47,5% bobot profil "Creative" secara struktural nol untuk
+peran ini, dan M14 Rule 6 meredistribusinya sampai Speed Score jadi ~54% seluruh
+skor orang itu. Skor yang absen jujur; skor yang salah dipakai di review
+kinerja. Dijaga tes yang memindai `performance.ts`. Revisit sesudah 2–3 bulan
+data Kategori nyata, lalu Output Quantity diukur sebagai *baris Kategori selesai
+vs target periode* — bukan Approved Assets.
 
 ---
 
@@ -145,15 +189,16 @@ Ditunda dengan sengaja (PRD §5.5). Revisit sesudah 2–3 bulan data Kategori ny
 ```bash
 pg_ctlcluster 16 main start && pg_isready
 export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/cdps
-make db-rebuild                              # 153 · 42 · 33 · 73 + 4 invariant
+make db-rebuild                              # 155 · 43 · 34 · 73 + 4 invariant
 make test-core test-db test-domain test-api  # test-domain SENDIRIAN
 npx vitest run --root web-internal           # TIDAK tercakup `make test`
 make typecheck && make lint
 ```
 
-Patokan jumlah tes yang **jalan** (bukan "0 failed"): `core 985 · db 81 ·
-domain 2298 · apps/api 496 · web-internal 729`. Kalau `db` melaporkan 0,
-`DATABASE_URL` tidak sampai dan seluruh tes DB/RLS di-skip diam-diam.
+Patokan jumlah tes yang **jalan** (bukan "0 failed") sesudah separuh SCS:
+`core 985 · db 98 · domain 2355 · apps/api 496 · web-internal 736`. Kalau `db`
+melaporkan 0, `DATABASE_URL` tidak sampai dan seluruh tes DB/RLS di-skip
+diam-diam sementara `make test` tetap lapor hijau.
 
 Lint: **3 error + 61 warning, identik dengan baseline** — ketiganya pre-existing
 (`admin/employees`, `performance/page.tsx`), nol tambahan dari M19.
@@ -171,3 +216,16 @@ Lint: **3 error + 61 warning, identik dengan baseline** — ketiganya pre-existi
    `employee_id`, pola M7/M18.
 4. Draft PRD §5.4 memesan mesin #34 sambil Rule 5 memasukkan SCS ke engine M12.
    Dicabut ke §12 sebagai pertanyaan terbuka.
+
+## Deviasi tambahan — separuh SCS
+
+5. Draft PRD §12 menyebut "taksonomi 24 Kategori + 8 Sub Type"; dokumen
+   sumbernya tidak ada di repo maupun Drive, jadi taksonomi dibuat
+   admin-managed dan hanya empat Kategori yang terbukti yang di-seed
+   (`DECISIONS.md` `M19-SCS-KATEGORI-DATA`).
+6. Draft §5.4 memesan mesin #34 sambil Rule 5 memasukkan SCS ke engine M12.
+   Keduanya dipenuhi: mesin #34 ADALAH konfigurasi engine M12, disalin verbatim
+   di bawah namanya sendiri (PRD §12.1).
+7. Draft menyebut "Support-VG cross-link"; direalisasikan sebagai
+   `scs_tasks.mendukung_divisi` (FK `division_registry`), bukan tautan ke
+   `briefs` — alasannya di PRD §13 Rule 6 dan `DECISIONS.md` 2026-09-09.

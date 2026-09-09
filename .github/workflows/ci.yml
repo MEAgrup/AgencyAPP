@@ -246,11 +246,17 @@ jobs:
       # bukan sesuatu yang butuh inbox; ia dilihat saat orang membuka layarnya).
       # +2 tabel (`book_periods`, `book_period_snapshots`) — TIDAK digerbang di
       # sini, hanya di scripts/db-rebuild.sh. Nol prefix baru.
-      - name: Verify migration seed counts (33 machines, 73 events, catalog registry consistent)
+      # 34 = 33 + mesin `scs_task` (#34, 20260928010000_m19_scs_task_engine.sql).
+      # Ia SALINAN VERBATIM konfigurasi `brief_task` di bawah namanya sendiri:
+      # `sm_machines` adalah DATA, dan dua entitas yang berbagi satu baris mesin
+      # berarti gerbang role salah satunya tak bisa digeser tanpa menggeser yang
+      # lain. Kosakata state yang identik itulah yang membuat
+      # `task.computeMetrics()` dipakai ulang tanpa ditulis dua kali.
+      - name: Verify migration seed counts (34 machines, 73 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 33 then raise exception 'expected 33 machines'; end if;
+               if (select count(*) from sm_machines) <> 34 then raise exception 'expected 34 machines'; end if;
                if (select count(*) from notif_events) <> 73 then raise exception 'expected 73 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
@@ -454,12 +460,20 @@ jobs:
       #       (`PROD-SLOT` sengaja tanpa mesin, PRD Rule 1/D1); nol event
       #       katalog baru ⇒ notif_events TETAP 73 (konflik studio & PIC tidak
       #       tersedia adalah peringatan inline, bukan notifikasi).
-      - name: Verify table count (expect 153)
+      # 155 = 153 + `scs_kategori` + `scs_tasks` (M19 separuh SCS,
+      #       20260928010000_m19_scs_task_engine.sql): baris pekerjaan `SMO &
+      #       Content Strategist` plus taksonomi Kategori-nya. +1 prefix `SCS` ⇒
+      #       entity_prefix 42→43. +1 mesin `scs_task` ⇒ sm_machines 33→34 —
+      #       konfigurasinya SALINAN VERBATIM `brief_task` (state sama, edge
+      #       sama, gerbang sama), yang justru alasannya:
+      #       `task.computeMetrics()` dipakai ulang apa adanya ⇒ nol definisi
+      #       KEDUA Speed Score. Nol event katalog ⇒ notif_events TETAP 73.
+      - name: Verify table count (expect 155)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 153
+          test "$n" -eq 155
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
