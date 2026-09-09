@@ -285,8 +285,15 @@ export function canLogHours(actor: Actor, division: string, assignedPic: string)
  * validateCreativeStaff enforces that picId is an ACTIVE employee whose resolved
  * CDPS division is Creative and whose level is staff (§2 Rule 1). Mirrors
  * task.validatePicForDivision.
+ *
+ * EXPORTED for M19 (`dailyops.ts`), which assigns the same people to production
+ * slots. Deliberately shared rather than re-implemented: two definitions of
+ * "an active Creative staff member" are two answers waiting to drift, and the
+ * one that drifts is the one nobody is looking at. It is also what closes the
+ * HRIS chain with no extra code — an employee deactivated in HRIS stops being
+ * schedulable on the next sync, because `status_aktif` is checked here.
  */
-async function validateCreativeStaff(tx: Queryable, picId: string): Promise<void> {
+export async function validateCreativeStaff(tx: Queryable, picId: string): Promise<void> {
   const rows = await tx<{ status_aktif: number | boolean; division: string | null; level: string | null }[]>`
     select e.status_aktif, rm.division, rm.level
       from employees e

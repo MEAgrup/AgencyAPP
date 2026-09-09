@@ -163,3 +163,7 @@ export * as tutupbuku from './tutupbuku';
 // mendeklarasikan sisinya. Rollup Brief-nya tinggal di `task.ts` bersama
 // saudara Creative/KOL-nya. Lihat `docs/prd/CDPS_Module18_Store_Ops.md`.
 export * as storeops from './storeops';
+// M19 — Creative Daily Ops: slot produksi harian (`SLOT-`), ketidaktersediaan
+// PIC, dan angka penyelesaian hari-sama. NOL mesin status (PRD Rule 1/D1) dan
+// NOL jalur ke Modul 14 (D5) — dua-duanya dengan sengaja.
+export * as dailyops from './dailyops';
