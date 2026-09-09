@@ -762,3 +762,74 @@ describeDb('bayar_komisi (FS-4)', () => {
     expect(alloc.map((r) => r.salesperson_id)).toEqual([andi().employeeId]);
   });
 });
+
+/**
+ * FS-6b — tenor pilihan klien pada perpanjangan / cross-sell.
+ *
+ * Bentuknya sengaja identik dengan jalur closing (`sales.test.ts` blok yang
+ * sama): satu aturan tenor, bukan dua. Yang dijaga di sini adalah sambungannya
+ * — `renewal_proposal_lines.durasi_bulan` → `services.durasi_bulan` — karena
+ * `executeRenewal` melahirkan `SVC-` lewat jalurnya SENDIRI, bukan lewat
+ * `sales.close()`. Kalau tenor berhenti di baris proposal, layanan hasil
+ * perpanjangan diakui sepanjang opsi TERPENDEK katalog, persis cacat yang
+ * FS-6b ada untuk menutup — dan hanya di jalur ini.
+ */
+describeDb('FS-6b — tenor pada perpanjangan', () => {
+  async function seedTenorService(id: string): Promise<string> {
+    await sql`insert into master_services (id, created_by) values (${id}, 'ZZ-ADMIN')`;
+    const ver = await sql<{ id: string }[]>`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, active, effective_from,
+         pricing_mode, durasi_bulan, pengakuan, created_by)
+      values (${id}, 1, ${'Svc ' + id}, '10200000.00', '10% of standard price', true, '2020-01-01',
+              'flat', 3, 'per_periode', 'ZZ-ADMIN')
+      returning id`;
+    for (const [bulan, harga] of [[3, '10200000.00'], [12, '36000000.00']] as [number, string][]) {
+      await sql`insert into master_service_duration_options (version_id, durasi_bulan, harga, created_by)
+                values (${ver[0].id}, ${bulan}, ${harga}, 'ZZ-ADMIN')`;
+    }
+    return id;
+  }
+
+  it('menyimpan tenor di baris proposal DAN di layanan yang lahir dari eksekusinya', async () => {
+    const svc = await seedTenorService('MSV-ZZ-RNTENOR');
+    const clientId = await closedClient(budi(), svc);
+    const rn = await proposeRenewal(sql, budi(), clientId, JENIS_PERPANJANGAN,
+      [{ masterServiceId: svc, durasiBulan: 12 }], true);
+
+    const line = await sql<{ proposed_price: string; durasi_bulan: number | null }[]>`
+      select l.proposed_price, l.durasi_bulan from renewal_proposal_lines l
+        join renewal_proposals p on p.id = l.proposal_id
+       where p.renewal_request_id = ${rn.id}`;
+    // Harga paket 12 bulan, bukan harga versinya (= opsi 3 bulan).
+    expect(line[0].proposed_price).toBe('36000000.00');
+    expect(line[0].durasi_bulan).toBe(12);
+
+    const res = await executeRenewal(sql, budi(), rn.id, {
+      ...nextYearWindow(), durasiBulan: 12,
+      parties: { primarySalespersonId: budi().employeeId, allocations: [{ salespersonId: budi().employeeId, basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+
+    const svcRows = await sql<{ durasi_bulan: number | null; standard_price: string }[]>`
+      select durasi_bulan, standard_price from services where contract_id = ${res.contractId}`;
+    expect(svcRows).toHaveLength(1);
+    expect(svcRows[0].durasi_bulan).toBe(12);
+    expect(svcRows[0].standard_price).toBe('36000000.00');
+  });
+
+  it('tanpa tenor: baris dan layanan tetap NULL — perpanjangan lama tidak berubah artinya', async () => {
+    const svc = await seedTenorService('MSV-ZZ-RNTENOR-NULL');
+    const clientId = await closedClient(budi(), svc);
+    const rn = await proposeRenewal(sql, budi(), clientId, JENIS_PERPANJANGAN, [standardLine(svc)], true);
+    const res = await executeRenewal(sql, budi(), rn.id, {
+      ...nextYearWindow(), durasiBulan: 12,
+      parties: { primarySalespersonId: budi().employeeId, allocations: [{ salespersonId: budi().employeeId, basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    const svcRows = await sql<{ durasi_bulan: number | null; standard_price: string }[]>`
+      select durasi_bulan, standard_price from services where contract_id = ${res.contractId}`;
+    expect(svcRows[0].durasi_bulan).toBeNull();
+    expect(svcRows[0].standard_price).toBe('10200000.00');
+  });
+});

@@ -23,6 +23,13 @@ export interface ServiceSelection {
   master_service_id: string;
   quantity?: number;
   amount?: string;
+  /**
+   * FS-6b — tenor yang dipilih, dalam bulan, untuk layanan yang katalognya
+   * menawarkan lebih dari satu (`MasterService.durasi_options`). Dihilangkan
+   * untuk layanan tenor tunggal; mengirim tenor yang tidak ada di daftar
+   * ditolak server dengan pesan `[...]` rumah, bukan diam-diam diabaikan.
+   */
+  durasi_bulan?: number;
 }
 
 export interface LineQuote {
@@ -91,6 +98,11 @@ export interface QualifiedFormServiceRow {
   input_amount: string | null;
   subtotal: string;
   commission_rule: string;
+  /**
+   * FS-6b — tenor yang dipilih untuk baris ini, dalam bulan, atau `null` bila
+   * layanannya tenor tunggal (dan `standard_price` di atas sudah menjawabnya).
+   */
+  durasi_bulan: number | null;
 }
 
 // The persisted Qualified Lead Form snapshot (qualified_forms + qualified_form_services).
@@ -115,6 +127,8 @@ export interface ProposalLineRow {
   proposed_price: string;
   commission_rule: string;
   payment_terms: string | null;
+  /** FS-6b — tenor yang disepakati baris ini, atau `null`. */
+  durasi_bulan: number | null;
 }
 
 // One versioned negotiation_proposals row + its lines (version_no ASC).
@@ -205,6 +219,13 @@ export interface ProposalLineInput {
   payment_terms?: string;
   quantity?: number;
   amount?: string;
+  /**
+   * FS-6b — tenor baris ini, dalam bulan. Dikirim untuk KEDUA bentuk baris:
+   * pada baris standar ia ikut memilih harganya (harga paket tenor itu), pada
+   * baris custom ia hanya dicatat — harga negonya yang menang. Menegosiasikan
+   * harga paket setahun tidak mengubahnya jadi paket tiga bulan.
+   */
+  durasi_bulan?: number;
 }
 
 export type NegotiationDecision = 'approve' | 'revise' | 'reject';

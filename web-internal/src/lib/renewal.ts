@@ -74,6 +74,8 @@ export interface RenewalLine {
   master_service_id: string;
   proposed_price: string;
   commission_rule: string;
+  /** FS-6b — tenor yang disepakati baris ini, atau `null`. */
+  durasi_bulan: number | null;
 }
 
 export interface RenewalDetail extends Renewal {

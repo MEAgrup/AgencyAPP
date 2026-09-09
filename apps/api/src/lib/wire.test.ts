@@ -1235,6 +1235,7 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
         inputAmount: null,
         subtotal: '9000000',
         commissionRule: '10% of standard price',
+        durasiBulan: null,
       }],
     },
     proposals: [{
@@ -1250,6 +1251,7 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
         proposedPrice: '8000000',
         commissionRule: '10% of standard price',
         paymentTerms: null,
+        durasiBulan: null,
       }],
     }],
     nqReasons: [],
@@ -1296,6 +1298,10 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
       input_amount: null,
       subtotal: '9000000',
       commission_rule: '10% of standard price',
+      // FS-6b: the key is ALWAYS present, explicit null when no tenor was
+      // chosen. A missing key is the O43 failure mode — the page reads
+      // `undefined` and renders nothing, with the route still answering 200.
+      durasi_bulan: null,
     });
   });
 
@@ -1314,6 +1320,7 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
         proposed_price: '8000000',
         commission_rule: '10% of standard price',
         payment_terms: null,
+        durasi_bulan: null,
       }],
     });
   });

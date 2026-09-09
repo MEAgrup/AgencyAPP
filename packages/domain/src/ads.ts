@@ -564,10 +564,14 @@ export async function setAdditionalDays(sql: Sql, actor: Actor, campaignId: stri
  * books per month — see `DECISIONS.md` and migration
  * `20260918010000_d0_durasi_bulan_qty_menambah.sql`.
  *
- * `durasi_bulan` comes from the MASTER SERVICE LIST version pinned on the
- * parent Brief's Service (`services.master_service_id`/`master_version_no` —
- * the same pin `msl.ts effectiveAt` reads), defaulting to 0 when the pinned
- * version has none. `total_hari_hold` is NEVER a column — it is summed from
+ * `durasi_bulan` comes from the Service the parent Brief hangs on: the tenor
+ * the deal sold (`services.durasi_bulan`, FS-6b) when one was chosen, else the
+ * MASTER SERVICE LIST version pinned on it
+ * (`services.master_service_id`/`master_version_no` — the same pin `msl.ts
+ * effectiveAt` reads), defaulting to 0 when neither has one. The order matters
+ * for a multi-tenor service: the pinned version is by construction its
+ * SHORTEST option (FS-6 `trg_msdo_terpendek`), so reading the version alone
+ * would end a 12-month engagement's Ads Management three months in. `total_hari_hold` is NEVER a column — it is summed from
  * the `ad_campaign` machine's own `[Active]->[Paused]->[Active]` transition
  * history in `audit_log` (mirrors `blockedMs()`, M12), so `end_date` moves by
  * itself every time the campaign is resumed and stays fully recomputable from
@@ -587,10 +591,10 @@ export async function computeAdsManagementEndDate(sql: Queryable, actor: Actor, 
   const additionalDays = Number(row.additional_days);
 
   const msvRows = await sql<{ durasi_bulan: number | null }[]>`
-    select msv.durasi_bulan
+    select coalesce(sv.durasi_bulan, msv.durasi_bulan) as durasi_bulan
       from briefs b
       join services sv on sv.id = b.service_id
-      join master_service_versions msv
+      left join master_service_versions msv
         on msv.service_id = sv.master_service_id and msv.version_no = sv.master_version_no
      where b.id = ${row.brief_id}`;
   const durasiBulan = msvRows.length > 0 ? Number(msvRows[0].durasi_bulan ?? 0) : 0;

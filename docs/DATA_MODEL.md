@@ -151,6 +151,58 @@ Sumber seed kanonik: `backend/seed/msl_kalkulator.csv` (32 layanan dari sheet "K
 | apply_ppn | bool | Flag PPN (copy dari MSL version) |
 | subtotal | decimal | Nilai baris terhitung: `flat`=qty×harga; `min_floor`=max(qty,min)×harga; `batch_ceiling`=ceil(qty/min)×min×harga; `passthrough`=input_amount; +PPN 11% jika `apply_ppn`. **Pinned (immutable), recomputable dari parameter.** Estimasi Nilai M0 = Σ subtotal baris. |
 
+### 3a-1. Opsi tenor (FS-6 / FS-6b, 2026-09-08…09)
+
+Satu versi layanan boleh menawarkan BEBERAPA tenor dengan harga berbeda —
+1/3/6/12 bulan — supaya diskon paket bisa dinyatakan sama sekali. `qty_menambah
+= 'durasi'` tidak bisa menggantikannya: ia mengalikan harga secara LINEAR, dan
+diskonlah yang jadi inti paketnya.
+
+**Sisi katalog — `master_service_duration_options`** (FS-6, migrasi
+`20260925040000`; anak ber-identity, nol prefix):
+
+| Field | Type | Rule |
+|---|---|---|
+| version_id | bigint | FK `master_service_versions (id)`, `ON DELETE CASCADE` |
+| durasi_bulan | int | `> 0`, unik per versi (`uq_msdo`) |
+| harga | decimal | Harga **PAKET UTUH** untuk tenor itu — bukan harga per bulan |
+
+**Invarian yang menjaga seluruh pembaca lama:** bila sebuah versi punya baris
+opsi, `standard_price` + `durasi_bulan` versi itu WAJIB sama dengan opsi
+**TERPENDEK**. Ditegakkan CONSTRAINT TRIGGER `trg_msdo_terpendek` /
+`trg_msv_opsi_terpendek` (DEFERRABLE — baris versi ditulis lebih dulu dari baris
+opsinya di dalam satu transaksi), bukan hanya di TS.
+
+**Sisi deal — kolom snapshot `durasi_bulan`** (FS-6b, migrasi
+`20260926010000`), nullable, `> 0`, di **empat** tabel di sepanjang rantai deal:
+`qualified_form_services` → `negotiation_proposal_lines` →
+`renewal_proposal_lines` → `services`.
+
+`NULL` **bukan "belum diisi"**. Ia berarti tepat satu hal — "pakai durasi versi
+MSL yang di-pin baris ini" — yaitu perilaku sebelum FS-6b, sehingga migrasinya
+**nol backfill**: setiap baris lama sudah membawa arti yang benar.
+
+Kolom-kolom itu ada karena invarian di atas punya konsekuensi yang tidak enak
+dibaca tapi benar: **selama tenor pilihan tidak disimpan, setiap pembaca lama
+membaca paket TERPENDEK, selamanya.** Tiga pembaca, dan ketiganya salah tanpa
+melempar galat apa pun:
+
+| Pembaca | Membaca sekarang | Kalau snapshot diabaikan |
+|---|---|---|
+| `sales.deriveDuration` → `contracts.durasi_bulan` | `coalesce(npl, qfs, versi)` di `loadApprovedLines` | deal 12 bulan mencetak kontrak 3 bulan |
+| `tutupbuku.hitungAngkaPeriode` (accrual D-3) | `coalesce(services.durasi_bulan, versi)` | Rp 36jt/12 bln diakui Rp 12jt × 3 bln, lalu nol |
+| `ads.computeAdsManagementEndDate` | `coalesce(services.durasi_bulan, versi)` | Ads Management berakhir sembilan bulan terlalu cepat |
+
+Batasnya sengaja `> 0` dan **bukan** `BETWEEN 1 AND 36`: kolom snapshot tidak
+boleh menolak nilai yang katalognya (`ck_msdo_durasi`, juga `> 0`) terima. Batas
+36 tetap ditegakkan di tempat yang benar — `sales.resolveClosingWindow` menjawab
+dengan pesan `[...]` rumah, dan `ck_contracts_durasi` jadi jaring kedua.
+
+Baris **CUSTOM** (harga nego) juga membawa tenor, dan tenornya TIDAK divalidasi
+ke katalog: menegosiasikan harga paket setahun tidak mengubahnya jadi paket tiga
+bulan, dan baris custom memang pintu masuk kesepakatan yang katalognya tak
+pernah daftarkan.
+
 ## 4. Computation registry (all read-only, recompute-from-log)
 
 - **M0:** Estimasi Nilai Transaksi, Perhitungan Komisi (from Master Service List version at date), allocation math.

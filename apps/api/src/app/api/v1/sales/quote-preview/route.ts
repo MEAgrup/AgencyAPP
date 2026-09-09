@@ -15,7 +15,13 @@ export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
     requireActor(request);
     const body = await readJson<{
-      services?: { master_service_id?: string; quantity?: number; amount?: string }[];
+      services?: {
+        master_service_id?: string;
+        quantity?: number;
+        amount?: string;
+        /** FS-6b — tenor pilihan, bila katalognya menawarkan lebih dari satu. */
+        durasi_bulan?: number | null;
+      }[];
       /** "Include PPN" (D-4) — absent means no tax, the safe side. */
       include_ppn?: boolean;
     }>(request);
@@ -23,6 +29,7 @@ export async function POST(request: Request): Promise<Response> {
       masterServiceId: s.master_service_id ?? '',
       quantity: s.quantity,
       amount: s.amount,
+      durasiBulan: s.durasi_bulan,
     }));
     const quote = await sales.previewQuote(db(), selections, new Date(), body.include_ppn === true);
     // Top-level, snake_case, IDR-only — the Quote shape web-internal declares

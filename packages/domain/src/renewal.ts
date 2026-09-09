@@ -222,7 +222,13 @@ export async function getRenewal(sql: Queryable, actor: Actor, id: string): Prom
 
 /** A renewal request plus its latest priced proposal lines — what the R-04 review/decide/execute screens read. */
 export interface RenewalDetail extends RenewalRequest {
-  lines: { masterServiceId: string; proposedPrice: string; commissionRule: string }[];
+  lines: {
+    masterServiceId: string;
+    proposedPrice: string;
+    commissionRule: string;
+    /** FS-6b — tenor yang disepakati baris ini, atau `null`. */
+    durasiBulan: number | null;
+  }[];
 }
 
 /** getRenewalDetail loads one renewal/cross-sell request with its newest proposal version's priced lines. */
@@ -326,10 +332,10 @@ async function writeRenewalProposal(
     }
     seen.add(id);
   }
-  const resolved: { line: RenewalLine; price: string; rule: string }[] = [];
+  const resolved: { line: RenewalLine; price: string; rule: string; durasiBulan: number | null }[] = [];
   for (const l of lines) {
-    const { price, rule } = await resolveProposalLine(tx, l, now);
-    resolved.push({ line: l, price, rule });
+    const { price, rule, durasiBulan } = await resolveProposalLine(tx, l, now);
+    resolved.push({ line: l, price, rule, durasiBulan });
   }
 
   const version = await nextVersion(tx, renewalRequestId);
@@ -338,11 +344,13 @@ async function writeRenewalProposal(
     values (${renewalRequestId}, ${version}, ${actor.employeeId}, ${actor.employeeId})
     returning id`;
   const proposalId = proposalRows[0].id;
-  for (const { line: l, price, rule } of resolved) {
+  for (const { line: l, price, rule, durasiBulan } of resolved) {
     await tx`
       insert into renewal_proposal_lines
-        (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms, created_by)
-      values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule}, ${nullString(l.paymentTerms)}, ${actor.employeeId})`;
+        (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms,
+         durasi_bulan, created_by)
+      values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule}, ${nullString(l.paymentTerms)},
+              ${durasiBulan}, ${actor.employeeId})`;
   }
   await ex.audit.insertAudit({
     entityType: ENTITY, entityId: renewalRequestId, actorEmployeeId: actor.employeeId,
@@ -359,9 +367,11 @@ async function writeRenewalProposal(
 async function loadLatestLines(
   sql: Queryable,
   renewalRequestId: string,
-): Promise<{ masterServiceId: string; proposedPrice: string; commissionRule: string }[]> {
-  const rows = await sql<{ master_service_id: string; proposed_price: string; commission_rule: string }[]>`
-    select l.master_service_id, l.proposed_price, l.commission_rule
+): Promise<{ masterServiceId: string; proposedPrice: string; commissionRule: string; durasiBulan: number | null }[]> {
+  const rows = await sql<
+    { master_service_id: string; proposed_price: string; commission_rule: string; durasi_bulan: number | null }[]
+  >`
+    select l.master_service_id, l.proposed_price, l.commission_rule, l.durasi_bulan
       from renewal_proposal_lines l
       join renewal_proposals p on p.id = l.proposal_id
      where p.renewal_request_id = ${renewalRequestId}
@@ -370,6 +380,9 @@ async function loadLatestLines(
   return rows.map((r) => ({
     masterServiceId: r.master_service_id, proposedPrice: r.proposed_price,
     commissionRule: r.commission_rule,
+    // FS-6b: the tenor this renewal agreed. `null` = nobody chose one, so the
+    // Service born below reads its pinned version — the pre-FS-6b behaviour.
+    durasiBulan: r.durasi_bulan === null ? null : Number(r.durasi_bulan),
   }));
 }
 
@@ -681,11 +694,11 @@ export async function executeRenewal(
       await tx`
         insert into services
           (id, client_id, contract_id, master_service_id, master_version_no, name, standard_price,
-           commission_rule, status, requires_strategy_plan, plan_tier, created_by)
+           commission_rule, status, requires_strategy_plan, plan_tier, durasi_bulan, created_by)
         values
           (${svcId}, ${row.client_id}, ${contractId}, ${l.masterServiceId}, ${view.versionNo}, ${view.name}, ${l.proposedPrice},
            ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING}, ${view.requiresStrategyPlan}, ${view.planTier},
-           ${actor.employeeId})`;
+           ${l.durasiBulan}, ${actor.employeeId})`;
     }
 
     // 3) Transaction (TRX-) born awaiting Finance verification.

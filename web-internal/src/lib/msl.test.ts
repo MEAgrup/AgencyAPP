@@ -15,7 +15,11 @@ import {
   formatDurasiBulan,
   formToPayload,
   parseDurasiBulan,
+  punyaTenor,
   serviceToForm,
+  tenorDefault,
+  tenorLabel,
+  tenorOptions,
   todayISO,
   type MslPayload,
 } from './msl';
@@ -201,5 +205,55 @@ describe('opsi durasi (FS-6)', () => {
 
   it('form layanan baru yang kosong mengirim array kosong', () => {
     expect(formToPayload(EMPTY_MSL_FORM).durasi_options).toEqual([]);
+  });
+});
+
+/**
+ * FS-6b — pembantu pemilih tenor yang dipakai EMPAT layar (kalkulator, Form
+ * Qualified, editor negosiasi, RenewalPanel).
+ *
+ * Diuji di sini, bukan di masing-masing halaman, karena itulah alasan mereka
+ * ada: empat salinan aturan "layanan tenor tunggal tidak boleh mengirim tenor"
+ * adalah empat kesempatan untuk salah satunya menyimpang, dan penyimpangannya
+ * muncul sebagai `[data tidak lengkap, ...]` pada form yang tampak lengkap.
+ */
+describe('FS-6b — pembantu tenor', () => {
+  const berTenor = {
+    durasi_options: [
+      { durasi_bulan: 3, harga: '10200000.00' },
+      { durasi_bulan: 12, harga: '36000000.00' },
+    ],
+  };
+
+  it('punyaTenor hanya benar ketika katalognya benar-benar menawarkan opsi', () => {
+    expect(punyaTenor(berTenor)).toBe(true);
+    expect(punyaTenor({ durasi_options: [] })).toBe(false);
+    // `undefined` — layanan yang belum termuat, atau respons lama tanpa kunci
+    // itu. Keduanya harus terbaca sebagai "tidak menawarkan tenor": menebak
+    // "iya" akan memasang dropdown kosong dan mengirim tenor yang ditolak.
+    expect(punyaTenor(undefined)).toBe(false);
+    expect(punyaTenor({})).toBe(false);
+  });
+
+  it('tenorDefault memilih opsi TERPENDEK — angka yang sama dengan sebelum FS-6', () => {
+    // Opsi terpendek adalah satu-satunya yang harganya sama dengan
+    // `standard_price` versinya (invarian trg_msdo_terpendek). Jadi baris yang
+    // baru dibuka menampilkan rupiah yang identik dengan perilaku lama, dan
+    // Sales hanya melihat perubahan ketika ia sendiri memilih tenor lain.
+    expect(tenorDefault(berTenor)).toBe(3);
+    expect(tenorDefault({ durasi_options: [] })).toBeUndefined();
+    expect(tenorDefault(undefined)).toBeUndefined();
+  });
+
+  it('tenorOptions mengembalikan array kosong, bukan undefined, untuk layanan tanpa opsi', () => {
+    expect(tenorOptions(berTenor)).toHaveLength(2);
+    expect(tenorOptions(undefined)).toEqual([]);
+  });
+
+  it('tenorLabel menyebut HARGA-nya, bukan cuma jumlah bulan', () => {
+    // Yang membuat paket panjang layak dijual justru harganya. Label yang hanya
+    // menulis "12 bulan" menyembunyikan satu-satunya alasan memilihnya.
+    expect(tenorLabel({ durasi_bulan: 12, harga: '36000000.00' }, (v) => `Rp ${v}`))
+      .toBe('12 bulan — Rp 36000000.00');
   });
 });

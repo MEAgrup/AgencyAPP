@@ -268,3 +268,54 @@ export async function saveMasterService(id: string | null, payload: MslPayload):
     await api.post('/master-services', payload);
   }
 }
+
+/**
+ * FS-6b — apa yang boleh dikirim sebagai `durasi_bulan` untuk satu layanan.
+ *
+ * Array kosong berarti "layanan tenor tunggal": TIDAK ada yang boleh dikirim,
+ * dan bukan karena tampilannya lebih rapi tanpa dropdown. Server menolak tenor
+ * apa pun untuk layanan tanpa opsi (`sales.resolveTenor`), jadi UI yang
+ * menawarkan satu pilihan di situ hanya akan melahirkan
+ * `[data tidak lengkap, ...]` pada form yang tampak lengkap.
+ */
+export function tenorOptions(svc: { durasi_options?: { durasi_bulan: number; harga: string }[] } | undefined): {
+  durasi_bulan: number;
+  harga: string;
+}[] {
+  return svc?.durasi_options ?? [];
+}
+
+/**
+ * punyaTenor menjawab satu pertanyaan yang dipakai empat layar: perlukah baris
+ * ini menampilkan pemilih tenor sama sekali?
+ */
+export function punyaTenor(svc: { durasi_options?: { durasi_bulan: number; harga: string }[] } | undefined): boolean {
+  return tenorOptions(svc).length > 0;
+}
+
+/**
+ * tenorDefault memilih tenor yang sudah terpasang saat baris pertama muncul.
+ *
+ * Jawabannya opsi TERPENDEK, dan itu bukan sekadar "yang pertama": opsi
+ * terpendek adalah satu-satunya yang harganya SAMA dengan `standard_price`
+ * versi induknya (invarian `trg_msdo_terpendek`). Jadi baris yang baru dibuka
+ * menunjukkan angka yang sama persis dengan yang ditunjukkan sistem sebelum
+ * FS-6 — Sales melihat perubahan hanya ketika ia benar-benar memilih tenor
+ * lain, bukan ketika ia membuka halaman.
+ */
+export function tenorDefault(svc: { durasi_options?: { durasi_bulan: number; harga: string }[] } | undefined): number | undefined {
+  const opts = tenorOptions(svc);
+  return opts.length > 0 ? opts[0].durasi_bulan : undefined;
+}
+
+/**
+ * tenorLabel merangkai satu opsi jadi teks dropdown: "12 bulan — Rp. 36.000.000,00".
+ *
+ * Harganya IKUT ditampilkan, dan itu inti keluhan #6: yang membuat paket
+ * panjang layak dijual justru harganya yang lebih murah per bulan. Dropdown
+ * yang hanya menulis "12 bulan" menyembunyikan satu-satunya alasan Sales
+ * memilihnya.
+ */
+export function tenorLabel(o: { durasi_bulan: number; harga: string }, formatIDR: (v: string) => string): string {
+  return `${o.durasi_bulan} bulan — ${formatIDR(o.harga)}`;
+}

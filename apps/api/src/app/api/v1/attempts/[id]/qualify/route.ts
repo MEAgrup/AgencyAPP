@@ -26,7 +26,13 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       gmv_baseline?: string;
       target_gmv?: string;
       marketing_budget?: string;
-      services?: { master_service_id?: string; quantity?: number; amount?: string }[];
+      services?: {
+        master_service_id?: string;
+        quantity?: number;
+        amount?: string;
+        /** FS-6b — tenor pilihan, bila katalognya menawarkan lebih dari satu. */
+        durasi_bulan?: number | null;
+      }[];
     }>(request);
     const result = await sales.submitQualifiedForm(db(), actor, id, {
       namaPic: body.nama_pic ?? '',
@@ -43,6 +49,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
         masterServiceId: s.master_service_id ?? '',
         quantity: s.quantity,
         amount: s.amount,
+        durasiBulan: s.durasi_bulan,
       })),
     });
     return transitionResponse(result);

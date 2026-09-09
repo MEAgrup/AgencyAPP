@@ -41,6 +41,7 @@ import {
   type Quote,
   type ServiceSelection,
 } from '@/lib/sales';
+import { punyaTenor, tenorDefault, tenorLabel, tenorOptions } from '@/lib/msl';
 import { ACTIVITY_TYPES, type ActivityRow, type EffortSummary } from '@/lib/leads';
 import { PLATFORM_OPTIONS } from '@/lib/clients';
 import StatusBadge from '@/components/StatusBadge';
@@ -77,6 +78,13 @@ interface QualifyRow {
   master_service_id: string;
   quantity: string;
   amount: string;
+  /**
+   * FS-6b — tenor pilihan, dipegang sebagai STRING seperti nilai <select>-nya.
+   * '' berarti "layanan ini tenor tunggal" ATAU "belum memilih jasa"; keduanya
+   * tidak mengirim `durasi_bulan` sama sekali, yang memang satu-satunya bentuk
+   * yang diterima server untuk layanan tanpa opsi.
+   */
+  durasi_bulan: string;
 }
 
 // Satu baris jasa di editor proposal. `proposed_price` KOSONG berarti "harga
@@ -91,11 +99,13 @@ interface LineRow {
   payment_terms: string;
   quantity: string;
   amount: string;
+  /** FS-6b — tenor pilihan sebagai string, sama alasannya dengan QualifyRow. */
+  durasi_bulan: string;
 }
 
 const emptyLineRow = (): LineRow => ({
   master_service_id: '', name: '', proposed_price: '', commission_rule: '',
-  payment_terms: '', quantity: '', amount: '',
+  payment_terms: '', quantity: '', amount: '', durasi_bulan: '',
 });
 
 /**
@@ -135,7 +145,19 @@ function ProposalLinesEditor({
         // jasa LAMA dibuang: membiarkannya akan mengirim harga jasa A sebagai
         // harga jasa B.
         if (field === 'master_service_id') {
-          return { ...r, master_service_id: value, name: byId.get(value)?.name ?? '', proposed_price: '', commission_rule: '' };
+          const next = byId.get(value);
+          return {
+            ...r,
+            master_service_id: value,
+            name: next?.name ?? '',
+            proposed_price: '',
+            commission_rule: '',
+            // FS-6b: tenor jasa LAMA tidak boleh menempel di jasa baru. "12"
+            // yang sah untuk satu layanan bisa tidak ada sama sekali di
+            // layanan lain, dan server akan menolaknya — pada baris yang
+            // tampak normal.
+            durasi_bulan: String(tenorDefault(next) ?? ''),
+          };
         }
         return { ...r, [field]: value };
       }),
@@ -150,6 +172,7 @@ function ProposalLinesEditor({
           <thead>
             <tr>
               <th>Jasa</th>
+              <th>Durasi</th>
               <th>Qty / Nominal</th>
               {custom && <th>Proposed Price</th>}
               {custom && <th>Commission Rule</th>}
@@ -180,6 +203,24 @@ function ProposalLinesEditor({
                         <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
+                  </td>
+                  <td>
+                    {punyaTenor(svc) ? (
+                      <select
+                        aria-label={`Durasi baris ${idx + 1}`}
+                        value={l.durasi_bulan || String(tenorDefault(svc) ?? '')}
+                        disabled={disabled}
+                        onChange={(e) => update(idx, 'durasi_bulan', e.target.value)}
+                      >
+                        {tenorOptions(svc).map((o) => (
+                          <option key={o.durasi_bulan} value={o.durasi_bulan}>
+                            {tenorLabel(o, formatIDR)}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="muted">{svc?.durasi_bulan ? `${svc.durasi_bulan} bulan` : '—'}</span>
+                    )}
                   </td>
                   <td>
                     {isPassthrough ? (
@@ -317,7 +358,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   const [qGmv, setQGmv] = useState('');
   const [qTargetGmv, setQTargetGmv] = useState('');
   const [qBudget, setQBudget] = useState('');
-  const [qRows, setQRows] = useState<QualifyRow[]>([{ master_service_id: '', quantity: '', amount: '' }]);
+  const [qRows, setQRows] = useState<QualifyRow[]>([{ master_service_id: '', quantity: '', amount: '', durasi_bulan: '' }]);
   const [qQuote, setQQuote] = useState<Quote | null>(null);
   const [qQuoteError, setQQuoteError] = useState<string | null>(null);
   const [qSubmitting, setQSubmitting] = useState(false);
@@ -469,6 +510,11 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           // qty yang SAMA, bukan diam-diam jadi 1.
           quantity: sv.quantity ? String(Math.trunc(Number(sv.quantity))) : '',
           amount: sv.input_amount ?? '',
+          // FS-6b: tenor yang sudah dipin di snapshot Qualified. Membiarkannya
+          // kosong akan mengirim balik tenor TERPENDEK pada setiap penyuntingan
+          // proposal — deal setahun diam-diam menyusut jadi paket terpendek
+          // hanya karena seseorang membuka editornya.
+          durasi_bulan: sv.durasi_bulan === null ? '' : String(sv.durasi_bulan),
         })),
       );
     } else if (
@@ -495,6 +541,13 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
             payment_terms: l.payment_terms ?? '',
             quantity: sv?.quantity ? String(Math.trunc(Number(sv.quantity))) : '',
             amount: sv?.input_amount ?? '',
+            // Tenor versi proposal TERAKHIR lebih dulu — itulah yang disepakati
+            // ronde ini; snapshot Qualified hanya jadi cadangan untuk baris yang
+            // lahir sebelum tenornya pernah dicatat.
+            durasi_bulan:
+              l.durasi_bulan !== null ? String(l.durasi_bulan)
+                : sv?.durasi_bulan != null ? String(sv.durasi_bulan)
+                : '',
           };
         }),
       );
@@ -537,12 +590,18 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     qRows.forEach((r) => {
       if (!r.master_service_id) return;
       const svc = byId.get(r.master_service_id);
+      // FS-6b: kuncinya hanya ADA untuk layanan ber-opsi (server menolak tenor
+      // pada layanan tenor tunggal), dan isinya jatuh ke opsi terpendek selama
+      // Sales belum menyentuh dropdown-nya — angka yang sama dengan sebelum FS-6.
+      const durasi = punyaTenor(svc)
+        ? { durasi_bulan: Number(r.durasi_bulan) || tenorDefault(svc) }
+        : {};
       if (svc && svc.pricing_mode === 'passthrough') {
         const n = Number(r.amount);
-        if (!Number.isNaN(n) && n > 0) out.push({ master_service_id: r.master_service_id, amount: r.amount.trim() });
+        if (!Number.isNaN(n) && n > 0) out.push({ master_service_id: r.master_service_id, amount: r.amount.trim(), ...durasi });
       } else {
         const n = Number(r.quantity);
-        if (!Number.isNaN(n) && n > 0) out.push({ master_service_id: r.master_service_id, quantity: Math.trunc(n) });
+        if (!Number.isNaN(n) && n > 0) out.push({ master_service_id: r.master_service_id, quantity: Math.trunc(n), ...durasi });
       }
     });
     return out;
@@ -618,14 +677,25 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   // ---- Qualified Lead Form ----
   function addQRow() {
     setQRows((rows) =>
-      rows.length >= MAX_SERVICES ? rows : [...rows, { master_service_id: '', quantity: '', amount: '' }],
+      rows.length >= MAX_SERVICES ? rows : [...rows, { master_service_id: '', quantity: '', amount: '', durasi_bulan: '' }],
     );
   }
   function removeQRow(idx: number) {
     setQRows((rows) => rows.filter((_, i) => i !== idx));
   }
   function updateQRow(idx: number, field: keyof QualifyRow, value: string) {
-    setQRows((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+    setQRows((rows) =>
+      rows.map((r, i) => {
+        if (i !== idx) return r;
+        // FS-6b: mengganti jasa membuang tenor jasa LAMA. Tenor "12" yang sah
+        // untuk satu layanan bisa tidak ditawarkan sama sekali oleh layanan
+        // berikutnya, dan server akan menolaknya pada baris yang tampak wajar.
+        if (field === 'master_service_id') {
+          return { ...r, master_service_id: value, durasi_bulan: String(tenorDefault(byId.get(value)) ?? '') };
+        }
+        return { ...r, [field]: value };
+      }),
+    );
   }
   function togglePlatform(p: string) {
     setQPlatforms((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
@@ -702,6 +772,14 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
         if (l.amount.trim() !== '') line.amount = l.amount.trim();
       } else if (!Number.isNaN(qty) && qty > 0) {
         line.quantity = Math.trunc(qty);
+      }
+      // FS-6b: dikirim untuk KEDUA jalur, termasuk `strip=true`. Tenor bukan
+      // harga — membuangnya bersama harga akan memulangkan setiap deal
+      // non-nego ke paket TERPENDEK, yaitu justru jalur yang dipakai mayoritas
+      // closing.
+      if (punyaTenor(svc)) {
+        const bulan = Number(l.durasi_bulan) || tenorDefault(svc);
+        if (bulan) line.durasi_bulan = bulan;
       }
       return line;
     });
@@ -1054,6 +1132,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                     <th>Jasa</th>
                     <th>Qty</th>
                     <th>Satuan</th>
+                    <th>Durasi</th>
                     <th>Subtotal</th>
                     <th>Aturan Komisi</th>
                   </tr>
@@ -1064,6 +1143,9 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                       <td>{s.name || s.master_service_id}</td>
                       <td>{s.quantity}</td>
                       <td>{s.unit || '—'}</td>
+                      {/* FS-6b: '—' berarti layanan tenor tunggal — durasi versi
+                          MSL-nya yang berlaku, dan tidak ada yang dipilih. */}
+                      <td>{s.durasi_bulan === null ? '—' : `${s.durasi_bulan} bulan`}</td>
                       <td>{money(s.subtotal)}</td>
                       <td>{s.commission_rule || '—'}</td>
                     </tr>
@@ -1310,6 +1392,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                     <thead>
                       <tr>
                         <th>Jasa</th>
+                        <th>Durasi</th>
                         <th>Qty / Nominal</th>
                         <th></th>
                       </tr>
@@ -1330,6 +1413,23 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                                   <option key={s.id} value={s.id}>{s.name}</option>
                                 ))}
                               </select>
+                            </td>
+                            <td>
+                              {punyaTenor(svc) ? (
+                                <select
+                                  aria-label={`Durasi jasa baris ${idx + 1}`}
+                                  value={row.durasi_bulan || String(tenorDefault(svc) ?? '')}
+                                  onChange={(e) => updateQRow(idx, 'durasi_bulan', e.target.value)}
+                                >
+                                  {tenorOptions(svc).map((o) => (
+                                    <option key={o.durasi_bulan} value={o.durasi_bulan}>
+                                      {tenorLabel(o, formatIDR)}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span className="muted">{svc?.durasi_bulan ? `${svc.durasi_bulan} bulan` : '—'}</span>
+                              )}
                             </td>
                             <td>
                               {isPassthrough ? (
@@ -1968,6 +2068,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                       <thead>
                         <tr>
                           <th>Jasa</th>
+                          <th>Durasi</th>
                           <th>Proposed Price</th>
                           <th>Commission Rule</th>
                           <th>Payment Terms</th>
@@ -1977,6 +2078,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                         {p.lines.map((l, idx) => (
                           <tr key={`${l.master_service_id}-${idx}`}>
                             <td>{l.name || l.master_service_id}</td>
+                            <td>{l.durasi_bulan === null ? '—' : `${l.durasi_bulan} bulan`}</td>
                             <td>{money(l.proposed_price)}</td>
                             <td>{l.commission_rule || '—'}</td>
                             <td>{l.payment_terms || '—'}</td>
