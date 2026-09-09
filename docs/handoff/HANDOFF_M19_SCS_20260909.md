@@ -14,7 +14,7 @@
 | Branch | `claude/peaceful-wozniak-25acg5` — di-reset ke `origin/main` sesudah merge |
 | Migrasi di repo | **217** (`20260928010000_m19_scs_task_engine.sql`) |
 | Gate repo | **155 tabel · 43 entity_prefix · 34 sm_machines · 73 notif_events** |
-| Live `CDPS SG` | **217 migrasi — SINKRON dengan repo**, diverifikasi (lihat §1.1) |
+| Live `CDPS SG` | **nol MISSING** — setiap migrasi repo ada di live. Ledger 219 baris ≠ 217 berkas, dan selisihnya SUDAH DIKENAL (§1.2) |
 | Tes | core 985 · db 98 · domain 2355 (+1 skip) · apps/api 496 · web-internal 736 |
 | Typecheck | bersih di 6 target |
 | Lint | 3 error + 61 warning — **identik baseline**, semuanya pre-existing |
@@ -44,8 +44,38 @@ plus empat invariant yang di-probe di live karena hanya di sanalah ia berarti:
 
 `scripts/check-live-drift.sh` masih belum bisa dijalankan dari sandbox (egress
 Supabase diblok kebijakan org). Yang LEWAT dari sandbox adalah
-`mcp__Supabase__execute_sql` / `apply_migration` — itu yang dipakai di atas.
-Drift check per-slug penuh tetap perlu dijalankan sekali dari operator/CI.
+`mcp__Supabase__execute_sql` / `apply_migration` — itu yang dipakai di atas, dan
+perbandingan per-slug di §1.2 dijalankan dengan cara yang sama.
+
+### 1.2 Ledger live 219 baris vs 217 berkas repo — selisihnya sudah dikenal
+
+Draf pertama handoff ini menulis *"217 migrasi — SINKRON dengan repo"*. **Itu
+salah**, dan dikoreksi di sini karena angkanya di-probe sesudahnya. Yang benar,
+dibandingkan PER-SLUG (bentuk yang sama dengan `check-live-drift.sh`, karena
+nama di ledger tidak konsisten: sebagian ber-timestamp, sebagian slug telanjang):
+
+```
+ledger live : 219 baris, 217 slug unik
+repo        : 217 berkas, 216 slug unik
+
+MISSING (ada di repo, TIDAK di live) : NOL   ← ini yang penting, dan ia bersih
+EXTRA   (ada di live, TIDAK di repo) : 1     ← d3_tutup_buku_pulihkan_komentar_jaga_transisi
+slug ber-jumlah beda                 : m6a_section_d  live=2 repo=1
+```
+
+**Nol MISSING** berarti setiap migrasi di repo — termasuk kedua migrasi M19 —
+benar-benar ada di live. Itu invariant yang dijaga, dan ia hijau.
+
+Dua selisih sisanya BUKAN dibuat sesi ini dan bukan hal baru:
+- `d3_tutup_buku_pulihkan_komentar_jaga_transisi` adalah **A2-DRIFT** persis,
+  yang sudah tercatat di `DECISIONS.md` §Open sejak 2026-09-08. Sesi ini
+  memberinya nama konkret untuk pertama kalinya — sebelumnya ia cuma "SATU
+  migrasi tanpa berkas yang cocok".
+- `m6a_section_d` punya DUA baris ledger (`20260808000000` dan
+  `20260808020000`) untuk satu berkas repo — duplikat historis, bukan drift
+  skema.
+
+Keduanya perlu dituntaskan lewat A2-DRIFT, bukan lewat M19.
 
 ---
 
@@ -259,7 +289,7 @@ Belum berubah, dan tidak satu pun disentuh sesi ini:
 | **LT-1** | bobot KPI Store Operation | masih 0 |
 | **O75** | Service tidak punya jalur ke Done | edge `[In Execution] → Done` ADA di `sm_edges` dengan **nol pemanggil** |
 | **O76** | asal floor GMV bulanan | sisa O57 (b) yang K-2 tidak tutup |
-| **A2-DRIFT** | satu migrasi live tanpa berkas yang cocok di `main` | ditemukan 2026-09-08, terpisah dari M19 |
+| **A2-DRIFT** | migrasi live tanpa berkas yang cocok di `main` | ditemukan 2026-09-08. **Namanya kini konkret** (§1.2): `d3_tutup_buku_pulihkan_komentar_jaga_transisi`, plus baris ledger ganda `m6a_section_d`. Terpisah dari M19 |
 | **M19-SCS-KATEGORI-DATA** | 21 Kategori + 8 Sub Type | §3 — data, bukan kode; nol yang terblokir |
 
 Urutan yang disarankan untuk sesi berikutnya: **§4.1 browser UAT lebih dulu**
