@@ -136,6 +136,26 @@ const peristiwa = (o: Partial<IzinPeristiwa> & { aksi: 'beri' | 'cabut' }): Izin
   createdAt: new Date('2026-09-01T00:00:00Z'), createdBy: OWNER, ...o,
 });
 
+/**
+ * setahunLagi — tanggal masa berlaku yang SELALU di masa depan, apa pun hari
+ * tesnya dijalankan.
+ *
+ * Kenapa ada: `beriIzinPitch` menolak `berlakuSampai` yang sudah lewat, jadi
+ * setiap tanggal literal di sebuah tes DB adalah bom waktu — hijau sampai
+ * tanggal itu terlampaui, lalu merah selamanya, dan merahnya muncul di PR
+ * orang lain yang tidak menyentuh apa pun di sini.
+ *
+ * Kasus izin yang BENAR-BENAR kedaluwarsa tidak bisa dibangun lewat API (dan
+ * memang tidak seharusnya bisa) — ia diuji di blok murni
+ * `statusIzinDariPeristiwa` di bawah, tempat `hariIni` diteruskan sebagai
+ * argumen justru supaya batasnya bisa diuji tanpa menunggu kalender.
+ */
+function setahunLagi(): string {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 describe('statusIzinDariPeristiwa', () => {
   it('ledger kosong ⇒ tidak berizin, dan BUKAN kedaluwarsa (belum pernah ada izin)', () => {
     const s = statusIzinDariPeristiwa('ZSC-CLI', null, '2026-09-07');
@@ -324,11 +344,14 @@ describeDb('izin pitch — ledger append-only (C-5)', () => {
     expect((await statusIzin(sql, am(), c)).berizin).toBe(true);
   });
 
-  it('izin yang KEDALUWARSA boleh dicabut eksplisit — "ditarik" ≠ "habis masanya"', async () => {
+  it('izin BERTANGGAL yang dicabut tercatat "ditarik", bukan "habis masanya"', async () => {
     const c = await seedClient();
-    await beriIzinPitch(sql, am(), c, { berlakuSampai: '2026-09-08' });
-    await sql`update clients set total_sales = total_sales where id = ${c}`; // no-op, memastikan tak ada trigger nyangkut
-    // Paksa kedaluwarsa lewat baris baru, bukan UPDATE (ledger immutable).
+    // Tanggalnya RELATIF terhadap hari ini, tidak pernah literal. Versi
+    // pertama tes ini memakai '2026-09-08' — hari ia ditulis — sehingga ia
+    // hijau satu hari lalu MERAH selamanya sesudahnya: `beriIzinPitch`
+    // menolak masa berlaku yang sudah lewat, jadi tesnya gagal di SETUP dan
+    // tidak pernah sekali pun mencapai perilaku yang namanya klaim.
+    await beriIzinPitch(sql, am(), c, { berlakuSampai: setahunLagi() });
     await cabutIzinPitch(sql, am(), c, 'klien menarik izin sebelum masa berlaku habis');
     const st = await statusIzin(sql, am(), c);
     expect(st.berizin).toBe(false);
