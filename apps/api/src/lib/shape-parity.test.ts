@@ -192,7 +192,7 @@ const FE_FILES = [
   // itu hidup empat kali (account/tasks/creative/kol) dengan hanya SATU yang
   // di-anchor di sini; lihat `ONE_BRIEF` di bawah, yang menjaga agar tidak
   // lahir yang kelima.
-  'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyops.ts',
+  'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyops.ts', 'scs.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
   'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
@@ -415,6 +415,17 @@ const WIRE_TO_FE: Record<string, string> = {
   PicSameDayWire: 'dailyops.ts::PicSameDay',
   SlotBody: 'dailyops.ts::SlotInput',
   UnavailabilityBody: 'dailyops.ts::UnavailabilityInput',
+
+  // M19 separuh SCS. `ScsTaskWire::client_id`/`client_name` sengaja `string |
+  // null` di KEDUA sisi: baris "all client" tidak punya klien, dan sebuah
+  // `string` di sisi FE akan membuat halaman merender "undefined" alih-alih
+  // label "Semua klien".
+  ScsKategoriWire: 'scs.ts::KategoriRow',
+  ScsTaskWire: 'scs.ts::ScsTaskRow',
+  ScsMetricsWire: 'scs.ts::ScsMetrics',
+  ScsPicSummaryWire: 'scs.ts::ScsPicSummary',
+  ScsTaskBody: 'scs.ts::ScsTaskInput',
+  ScsKategoriBody: 'scs.ts::KategoriInput',
 
   RenewalWire: 'renewal.ts::Renewal',
   RenewalLineWire: 'renewal.ts::RenewalLine',

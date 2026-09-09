@@ -152,12 +152,23 @@ export const PREFIXES = {
   // forcing Assets to exist a day early (M7-OA-6). It has NO state machine at
   // all (PRD Rule 1/D1) — execution and review stay owned by `AST-`/M12, so
   // there is no second lifecycle engine beside `brief_task`.
-  //
-  // `SCS` (baris SMO & Content Strategist) is deliberately NOT registered
-  // alongside it: its shape is the open question `M19-SCS-ENGINE` in
-  // `docs/DECISIONS.md` §Open — M12 §2 Rule 1 freezes Task = Asset | Creator
-  // Booking | Brief-as-task, and that row wants a nullable `client_id`.
   SLOT: { entity: 'Slot produksi harian Creative', module: 'M19' },
+  // M19 separuh kedua — one work row of the `SMO & Content Strategist` role:
+  // a day, a Kategori, a PIC, a target quantity, and OPTIONALLY a client.
+  //
+  // Its own entity rather than an M12 Task, and the reason is one row in the
+  // owner's sheet: `all client: Brief` has NO client, while M12 §2 Rule 1
+  // freezes Task = Asset | Creator Booking | Brief-as-task, all three anchored
+  // to a paying client. Loosening `client_id` there is the move `REQ` above
+  // already records as refused ("akan membongkar gerbang pembayaran M4/M5").
+  // Owner decision `M19-SCS-ENGINE` option (b), 2026-09-09.
+  //
+  // Deliberately NOT `TSK-` (that is work a superior hands out: no client, no
+  // Kategori, no quantity) and NOT `AST-`/`BRF-` (no Brief parent). Machine
+  // #34 `scs_task`, whose config is a VERBATIM copy of `brief_task` so that
+  // `task.computeMetrics()` is reused rather than reimplemented — registered
+  // in entity_prefix by 20260928010000_m19_scs_task_engine.sql.
+  SCS: { entity: 'Baris pekerjaan SMO & Content Strategist', module: 'M19' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

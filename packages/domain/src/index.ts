@@ -167,3 +167,9 @@ export * as storeops from './storeops';
 // PIC, dan angka penyelesaian hari-sama. NOL mesin status (PRD Rule 1/D1) dan
 // NOL jalur ke Modul 14 (D5) — dua-duanya dengan sengaja.
 export * as dailyops from './dailyops';
+// M19 separuh kedua — `SMO & Content Strategist` (`SCS-`), mesin #34. Entitas
+// SENDIRI dan bukan Task M12 (§2 Rule 1 membekukan Task sebagai turunan
+// Klien→Service→Brief, dan baris "all client" tidak punya klien), TAPI dengan
+// kosakata state IDENTIK `brief_task` supaya `task.computeMetrics()` dipakai
+// ulang — nol definisi kedua Speed Score. Ketokan `M19-SCS-ENGINE` opsi (b).
+export * as scs from './scs';
