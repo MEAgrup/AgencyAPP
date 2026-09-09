@@ -296,6 +296,57 @@ async function seedLayanan(): Promise<{ clientId: string; svcAda: string; svcNul
   return { clientId, svcAda, svcNull };
 }
 
+/**
+ * FS-6b — satu versi katalog ber-OPSI TENOR (3/12 bulan) dan dua layanan di
+ * atasnya: satu yang menjual paket 12 bulan (snapshot terisi), satu yang tidak
+ * memilih tenor sama sekali (snapshot NULL).
+ *
+ * Versinya sengaja dibuat persis seperti katalog sungguhan setelah FS-6:
+ * `standard_price`/`durasi_bulan` versi = opsi TERPENDEK (Rp 10,2jt / 3 bulan),
+ * karena itulah yang ditegakkan `trg_msdo_terpendek`. Tanpa meniru bentuk itu,
+ * tesnya akan hijau karena fixture-nya salah, bukan karena kodenya benar —
+ * jebakan yang sudah tercatat di handoff FS (§3.4).
+ */
+async function seedTenor(): Promise<{ clientId: string; svcTenor: string; svcVersi: string }> {
+  const clientId = `ZZT-CLI-T-${RUN}`;
+  const msId = `ZZT-MS-T-${RUN}`;
+  const svcTenor = `ZZT-SVC-T12-${RUN}`;
+  const svcVersi = `ZZT-SVC-TNL-${RUN}`;
+
+  await sql`insert into clients (id, nama_pic, toko, kota, link_toko, kategori,
+              gmv_baseline, target_gmv, total_sales, sales_pic_id, commission_payment_pic_id, created_by)
+            values (${clientId}, 'PIC', 'Toko Tenor', 'Bandung', 'https://x', 'Fashion',
+                    0, 0, 0, 'ZZ-TEST', 'ZZ-TEST', 'ZZ-TEST')`;
+  await sql`insert into master_services (id, created_by) values (${msId}, 'ZZ-TEST')`;
+  const ver = await sql<{ id: string }[]>`
+    insert into master_service_versions
+      (service_id, version_no, name, standard_price, commission_rule, active,
+       effective_from, durasi_bulan, qty_menambah, pengakuan, created_by)
+    values (${msId}, 1, 'Jasa Iklan Traffic Basic', 10200000, '0% of standard price', true,
+            '2019-01-01', 3, 'volume', 'per_periode', 'ZZ-TEST')
+    returning id`;
+  for (const [durasi, harga] of [[3, 10200000], [12, 36000000]] as [number, number][]) {
+    await sql`insert into master_service_duration_options (version_id, durasi_bulan, harga, created_by)
+              values (${ver[0].id}, ${durasi}, ${harga}, 'ZZ-TEST')`;
+  }
+
+  for (const [id, harga, durasi] of [
+    [svcTenor, 36000000, 12],
+    [svcVersi, 10200000, null],
+  ] as [string, number, number | null][]) {
+    await sql`insert into services (id, client_id, master_service_id, master_version_no, name,
+                standard_price, commission_rule, status, qty, durasi_bulan, created_by, created_at)
+              values (${id}, ${clientId}, ${msId}, 1, 'Jasa Iklan Traffic Basic', ${harga},
+                      '0% of standard price', '[In Execution]', 1, ${durasi}, 'ZZ-TEST',
+                      '2019-12-01T00:00:00Z')`;
+    await sql`insert into audit_log (entity_type, entity_id, actor_employee_id, action,
+                before_json, after_json, created_by, created_at)
+              values ('service', ${id}, 'ZZ-TEST', 'transition:[Briefed]->[In Execution]',
+                      '{}'::jsonb, '{}'::jsonb, 'ZZ-TEST', '2020-01-01T03:00:00Z')`;
+  }
+  return { clientId, svcTenor, svcVersi };
+}
+
 async function bersihkanLayanan(): Promise<void> {
   await sql`set session_replication_role = replica`;
   await sql`delete from audit_log where created_by = 'ZZ-TEST'`;
@@ -341,6 +392,44 @@ describeDb('hitungAngkaPeriode — yang tidak bisa dihitung TIDAK ikut dihitung'
     expect(bulan12.baris.find((x) => x.serviceId === svcAda)?.jumlah).toBe('50000000');
     const bulan13 = await hitungAngkaPeriode(sql, '2021-01');
     expect(bulan13.baris.find((x) => x.serviceId === svcAda)).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // FS-6b — tenor yang DIJUAL, bukan tenor terpendek di katalog
+  // -------------------------------------------------------------------------
+  //
+  // Cacat yang dijaga tes ini tidak melempar galat apa pun. Invarian FS-6
+  // (`trg_msdo_terpendek`) menyamakan `master_service_versions.durasi_bulan`
+  // dengan opsi TERPENDEK. Jadi selama `hitungAngkaPeriode` membaca versi,
+  // paket 12 bulan diakui sepanjang 3 bulan: nilainya utuh, jumlah irisannya
+  // salah, dan setiap baris tetap konsisten dengan dirinya sendiri.
+  //
+  // Rp 36.000.000 / 12 = Rp 3.000.000 sebulan. Kalau kolom snapshot diabaikan,
+  // angkanya jadi Rp 12.000.000 sebulan selama tiga bulan lalu nol — empat kali
+  // lipat, di seperempat jumlah bulan.
+  it('FS-6b: paket 12 bulan disebar 12 bulan, bukan sepanjang opsi terpendek', async () => {
+    const { svcTenor } = await seedTenor();
+
+    const p1 = await hitungAngkaPeriode(sql, P1);
+    const b = p1.baris.find((x) => x.serviceId === svcTenor);
+    expect(b?.jumlah).toBe('300000000');
+    expect(b?.jumlahIdr).toBe('Rp. 3.000.000,00');
+
+    // Bulan ke-12 masih berangka; bulan ke-13 tidak. Kalau versi yang terbaca,
+    // keduanya sudah kosong sejak bulan ke-4.
+    expect((await hitungAngkaPeriode(sql, '2020-12')).baris.find((x) => x.serviceId === svcTenor)?.jumlah)
+      .toBe('300000000');
+    expect((await hitungAngkaPeriode(sql, '2021-01')).baris.find((x) => x.serviceId === svcTenor))
+      .toBeUndefined();
+  });
+
+  it('FS-6b: durasi_bulan NULL tetap membaca versi — nol perubahan bagi baris lama', async () => {
+    const { svcVersi } = await seedTenor();
+    // Layanan yang sama, snapshot kosong: Rp 10.200.000 / 3 = Rp 3.400.000.
+    const b = (await hitungAngkaPeriode(sql, P1)).baris.find((x) => x.serviceId === svcVersi);
+    expect(b?.jumlahIdr).toBe('Rp. 3.400.000,00');
+    expect((await hitungAngkaPeriode(sql, '2020-04')).baris.find((x) => x.serviceId === svcVersi))
+      .toBeUndefined();
   });
 
   it('angka beku menyimpan daftar tidak-terhitung, jadi bulan yang kurang lengkap terbaca', async () => {

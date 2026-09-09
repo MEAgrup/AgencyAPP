@@ -2389,6 +2389,8 @@ export interface QualifiedFormServiceWire {
   input_amount: string | null;
   subtotal: string;
   commission_rule: string;
+  /** FS-6b — tenor yang dipilih, atau null bila memakai durasi versi. */
+  durasi_bulan: number | null;
 }
 
 /** The persisted Qualified form snapshot — web-internal's `QualifiedFormSnapshot`. */
@@ -2413,6 +2415,8 @@ export interface ProposalLineWire {
   proposed_price: string;
   commission_rule: string;
   payment_terms: string | null;
+  /** FS-6b — tenor yang disepakati baris ini, atau null. */
+  durasi_bulan: number | null;
 }
 
 /** One negotiation proposal + its lines — web-internal's `NegotiationProposalRow`. */
@@ -2528,6 +2532,7 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
         input_amount: s.inputAmount,
         subtotal: s.subtotal,
         commission_rule: s.commissionRule,
+        durasi_bulan: s.durasiBulan,
       })),
     },
     proposals: d.proposals.map((p) => ({
@@ -2543,6 +2548,7 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
         proposed_price: l.proposedPrice,
         commission_rule: l.commissionRule,
         payment_terms: l.paymentTerms,
+        durasi_bulan: l.durasiBulan,
       })),
     })),
     nq_reasons: d.nqReasons,
@@ -2595,6 +2601,8 @@ export interface RenewalLineWire {
   master_service_id: string;
   proposed_price: string;
   commission_rule: string;
+  /** FS-6b — tenor yang disepakati baris ini, atau null. */
+  durasi_bulan: number | null;
 }
 
 /** GET /clients/{id}/renewals/{rid} — web-internal's `RenewalDetail`. */
@@ -2607,6 +2615,7 @@ export function renewalDetailToWire(r: renewal.RenewalDetail): RenewalDetailWire
     ...renewalToWire(r),
     lines: r.lines.map((l) => ({
       master_service_id: l.masterServiceId, proposed_price: l.proposedPrice, commission_rule: l.commissionRule,
+      durasi_bulan: l.durasiBulan,
     })),
   };
 }
@@ -3423,6 +3432,8 @@ export interface ProposalLineBody {
   payment_terms?: string;
   quantity?: number;
   amount?: string;
+  /** FS-6b — the tenor in months, when the catalog offers several. */
+  durasi_bulan?: number | null;
 }
 
 /**
@@ -3443,6 +3454,11 @@ export function toProposalLines(rows: ProposalLineBody[] | undefined): sales.Pro
     paymentTerms: l.payment_terms,
     quantity: l.quantity,
     amount: l.amount,
+    // FS-6b: passed through UNTOUCHED, `undefined` included. Defaulting it to
+    // anything — 0, or the version's own duration — would turn "no tenor
+    // chosen" into a choice, and the whole point of the nullable snapshot
+    // column is that those two are different facts.
+    durasiBulan: l.durasi_bulan,
   }));
 }
 

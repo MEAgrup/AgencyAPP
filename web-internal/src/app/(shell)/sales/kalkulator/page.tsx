@@ -5,6 +5,7 @@ import { api, errorMessage } from '@/lib/api';
 import type { MasterService } from '@/lib/types';
 import { formatIDR } from '@/lib/money';
 import { previewQuote, type Quote, type ServiceSelection } from '@/lib/sales';
+import { punyaTenor, tenorDefault, tenorLabel, tenorOptions } from '@/lib/msl';
 
 // Category display order mirrors the sales team's "Kalkulator Service Jasa"
 // sheet (docs/handoff/MSL_KALKULATOR_VALIDASI.md §2). Categories not in this
@@ -42,6 +43,10 @@ export default function KalkulatorPenawaranPage() {
   // Raw text entered per service row: quantity (non-passthrough) or nominal
   // rupiah (passthrough). Keyed by master_service_id.
   const [inputs, setInputs] = useState<Record<string, string>>({});
+  // FS-6b — tenor pilihan per baris, dalam bulan. Hanya diisi untuk layanan
+  // yang katalognya menawarkan lebih dari satu; baris lain tidak pernah punya
+  // kunci di sini, jadi selection-nya tidak pernah membawa `durasi_bulan`.
+  const [tenor, setTenor] = useState<Record<string, number>>({});
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
@@ -107,6 +112,24 @@ export default function KalkulatorPenawaranPage() {
     setInputs((prev) => ({ ...prev, [id]: value }));
   }
 
+  function tenorOf(svc: MasterService): number | undefined {
+    return tenor[svc.id] ?? tenorDefault(svc);
+  }
+
+  /**
+   * Harga yang DITAMPILKAN di kolom Harga untuk baris ini.
+   *
+   * Untuk layanan ber-opsi ia mengikuti tenor yang sedang dipilih, bukan
+   * `standard_price`. Keduanya sama persis selama tenor terpendek yang dipilih
+   * (invarian `trg_msdo_terpendek`) — dan berbeda begitu Sales memilih paket
+   * yang lebih panjang, yang justru satu-satunya alasan kolomnya perlu berubah.
+   */
+  function hargaTenor(svc: MasterService): string {
+    const bulan = tenorOf(svc);
+    const hit = tenorOptions(svc).find((o) => o.durasi_bulan === bulan);
+    return hit ? hit.harga : svc.standard_price;
+  }
+
   const selections = useMemo<ServiceSelection[]>(() => {
     const out: ServiceSelection[] = [];
     Object.entries(inputs).forEach(([id, raw]) => {
@@ -114,20 +137,24 @@ export default function KalkulatorPenawaranPage() {
       if (trimmed === '') return;
       const svc = byId.get(id);
       if (!svc) return;
+      // FS-6b: kunci `durasi_bulan` hanya ADA untuk layanan ber-opsi. Untuk
+      // layanan tenor tunggal server menolak tenor apa pun, jadi mengirim
+      // `undefined` bukan sekadar mubazir — ia harus benar-benar tidak ada.
+      const durasi = punyaTenor(svc) ? { durasi_bulan: tenor[id] ?? tenorDefault(svc) } : {};
       if (svc.pricing_mode === 'passthrough') {
         const n = Number(trimmed);
         if (!Number.isNaN(n) && n > 0) {
-          out.push({ master_service_id: id, amount: trimmed });
+          out.push({ master_service_id: id, amount: trimmed, ...durasi });
         }
       } else {
         const n = Number(trimmed);
         if (!Number.isNaN(n) && n > 0) {
-          out.push({ master_service_id: id, quantity: Math.trunc(n) });
+          out.push({ master_service_id: id, quantity: Math.trunc(n), ...durasi });
         }
       }
     });
     return out;
-  }, [inputs, byId]);
+  }, [inputs, byId, tenor]);
 
   useEffect(() => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -196,6 +223,7 @@ export default function KalkulatorPenawaranPage() {
                   <th>Nama</th>
                   <th>Satuan</th>
                   <th>Batas Minimal</th>
+                  <th>Durasi</th>
                   <th>Harga</th>
                   <th>Quantity / Nominal</th>
                   <th>Subtotal</th>
@@ -210,7 +238,25 @@ export default function KalkulatorPenawaranPage() {
                       <td>{s.name}</td>
                       <td>{s.unit || '—'}</td>
                       <td>{formatQty(s.min_qty)}</td>
-                      <td>{isPassthrough ? '—' : formatIDR(s.standard_price)}</td>
+                      <td>
+                        {punyaTenor(s) ? (
+                          <select
+                            value={String(tenorOf(s) ?? '')}
+                            onChange={(e) => setTenor((prev) => ({ ...prev, [s.id]: Number(e.target.value) }))}
+                            style={{ width: 200 }}
+                            aria-label={`Durasi ${s.name}`}
+                          >
+                            {tenorOptions(s).map((o) => (
+                              <option key={o.durasi_bulan} value={o.durasi_bulan}>
+                                {tenorLabel(o, formatIDR)}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="muted">{s.durasi_bulan ? `${s.durasi_bulan} bulan` : '—'}</span>
+                        )}
+                      </td>
+                      <td>{isPassthrough ? '—' : formatIDR(hargaTenor(s))}</td>
                       <td>
                         {isPassthrough ? (
                           <input

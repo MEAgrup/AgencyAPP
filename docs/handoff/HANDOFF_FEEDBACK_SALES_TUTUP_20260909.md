@@ -1,4 +1,14 @@
-# Handoff — Feedback tim Sales: **enam butir di `main` DAN di live. Satu setengah tersisa.**
+# Handoff — Feedback tim Sales: **enam butir di `main` DAN di live. FS-6b sudah dibangun; sisanya UAT peramban.**
+
+> **PEMBARUAN 2026-09-09 (sesi berikutnya).** §2.1 di bawah — separuh kedua butir
+> `#6` — **SUDAH DIKERJAKAN** di branch `claude/handoff-feedback-sales-tutup-3wucjl`
+> (FS-6b, migrasi `20260926010000_fs6b_tenor_di_deal`). Rinciannya ada di
+> `DECISIONS.md` baris 2026-09-09 FS-6b dan `DATA_MODEL.md` §3a-1. Teks §2.1
+> **sengaja tidak dihapus** — ia tetap catatan terbaik tentang KENAPA pekerjaan
+> itu perlu; yang berubah hanya statusnya, dan itu dicatat di §2.1a.
+>
+> Yang **BELUM**: §2.2 (UAT di peramban) dan **penerapan migrasi FS-6b ke live
+> `CDPS SG`** — lihat §2.1a.
 
 > Baca `docs/DECISIONS.md` baris **2026-09-09** (paling atas) lebih dulu — di situ
 > angka live dan cara memverifikasinya. Handoff ini tidak mengulanginya; ia
@@ -24,7 +34,10 @@ bersama · `#4` jenis `bayar_komisi` · `#5` durasi kontrak di Client Record ·
 
 ## 2 · Yang TERSISA
 
-### 2.1 🔴 `#6` baru separuh — tenornya belum bisa DIJUAL
+### 2.1 ✅ (dulu 🔴) `#6` baru separuh — tenornya belum bisa DIJUAL
+
+> **SUDAH DIKERJAKAN 2026-09-09 — lihat §2.1a untuk statusnya.** Bagian di bawah
+> ini dibiarkan utuh sebagai catatan KENAPA-nya, bukan sebagai daftar tugas.
 
 **Ini satu-satunya sisa yang substantif, dan ia layak dibaca sebelum yang lain.**
 
@@ -66,6 +79,42 @@ lama yang terpecah — yaitu keluhan aslinya.
 mesin accrual Gelombang D). Layak jadi PR-nya sendiri, dengan tes uang lebih
 dulu.
 
+### 2.1a ✅ `#6` — separuh keduanya SUDAH mendarat (FS-6b, 2026-09-09)
+
+Keempat langkah di §2.1 dikerjakan, plus dua pembaca yang **tidak** ada di daftar
+itu dan justru membawa risiko uang terbesar.
+
+| Langkah §2.1 | Status |
+|---|---|
+| 1 · kolom snapshot `durasi_bulan` di empat tabel | ✅ `20260926010000_fs6b_tenor_di_deal` — nullable, `> 0`, nol backfill |
+| 2 · `deriveDuration` membaca snapshot lebih dulu | ✅ lewat `coalesce(npl, qfs, pinned, at_proposal)` di `loadApprovedLines` — badan `deriveDuration` sendiri tidak berubah |
+| 3 · pemilih tenor di empat layar | ✅ kalkulator · Form Qualified · editor proposal (negosiasi + Edit Service) · `RenewalPanel` |
+| 4 · batas `uq_qfs` dicatat, bukan diperbaiki | ✅ tercatat di baris `DECISIONS.md` FS-6b |
+
+**Dua pembaca tambahan yang ditemukan saat mengerjakannya.** Keduanya salah
+diam-diam dengan cara yang sama, dan keduanya di jalur uang:
+
+- `tutupbuku.hitungAngkaPeriode` membaca `v.durasi_bulan` dari versi yang di-pin,
+  jadi paket Rp 36jt/12 bulan diakui **Rp 12jt sebulan selama tiga bulan** lalu
+  nol selama sembilan. Sekarang `coalesce(s.durasi_bulan, v.durasi_bulan)`.
+  Tesnya diverifikasi GAGAL tanpa perbaikannya
+  (`expected '1200000000' to be '300000000'`).
+- `ads.computeAdsManagementEndDate` — sumber yang sama, akibat yang sama: Ads
+  Management berakhir sembilan bulan terlalu cepat.
+
+**Yang membuat pekerjaan ini aman terhadap deal berjalan:** `NULL` di kolom baru
+berarti tepat satu hal — "pakai durasi versi" — sehingga tidak ada satu pun
+tebakan yang perlu dibuat tentang baris lama, dan tidak ada satu pun yang
+berubah artinya. Ada tes khusus untuk itu di ketiga jalur (closing, perpanjangan,
+accrual).
+
+**Sisa pekerjaan FS-6b: menerapkan migrasinya ke live `CDPS SG`.** Urutannya
+sama dengan ketokan 2026-09-09 (baris teratas `DECISIONS.md`): **migrasi lebih
+dulu lewat `apply_migration`, baru merge** — kode yang me-`select` kolom yang
+belum ada akan menjatuhkan setiap halaman yang membacanya. Gate live TIDAK
+berubah (150 tabel / 41 prefix / 33 mesin / 73 event): berkas ini hanya menambah
+empat kolom.
+
 ### 2.2 🟡 UAT di peramban — belum pernah dilakukan
 
 Utang **B2**. Harness-nya kini **ada** (`scripts/dev-jwt.mjs`,
@@ -80,6 +129,8 @@ Tiga layar pembuktinya, dan peran yang harus dipakai:
 | `/sales` — kolom Owner | **Head Sales** | `#2` — nama, bukan `EMP-…` |
 | `/clients/{id}` — panel Kontrak | **Sales staff** | `#5` — nol 403, jendela kontrak tampil |
 | `/master-services` — form MSL | **Sales Head** | `#6` — editor baris opsi |
+| `/sales/kalkulator` — kolom Durasi | **Sales staff** | `#6` (FS-6b) — dropdown tenor mengubah kolom Harga & Ringkasan |
+| `/sales/{id}` — Form Qualified | **Sales staff** | `#6` (FS-6b) — tenor terkirim, lalu terbaca lagi di tabel snapshot |
 
 Kolom Owner sebagai Head Sales adalah bukti utama: gejalanya **hanya** muncul
 di layar itu, karena OD/Director lolos `jwt_can_read_all()` dan tidak pernah

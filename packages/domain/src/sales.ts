@@ -30,7 +30,7 @@
 
 import { bi, money, notification, page, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
-import { effectiveAt, type ServiceView } from './msl';
+import { effectiveAt, type DurasiOption, type ServiceView } from './msl';
 import { resolveWin } from './leads';
 import { allowedTransitions } from './engine';
 
@@ -329,6 +329,20 @@ export interface ServiceLine {
   minQty: bigint;
   inputAmount: money.Money; // passthrough only
   rule: CommissionRule;
+  /**
+   * FS-6b — the tenor the client CHOSE, in months, when the catalog offers
+   * several (`ServiceView.durasiOptions`). `null` means "no tenor was chosen",
+   * which is the only honest thing to record for the ~100% of the catalog that
+   * has one tenor: the version's own `durasiBulan` already says it, and
+   * duplicating it here would make a re-versioned catalog and a deliberately
+   * chosen tenor indistinguishable later.
+   *
+   * When it IS set, `standardPrice` above is that option's PACKAGE price — not
+   * the version's — which is the whole point: a 12-month package is cheaper
+   * per month than three 3-month ones, and no linear `qty` multiplier can say
+   * that (see migration 20260925040000's header).
+   */
+  durasiBulan: number | null;
 }
 
 function lineParams(l: ServiceLine): PriceParams {
@@ -440,18 +454,57 @@ export function buildQuote(lines: ServiceLine[], includePPN = false): Quote {
 // ===========================================================================
 
 /**
+ * resolveTenor picks the duration option the caller asked for, and refuses
+ * anything the catalog does not actually offer.
+ *
+ * Three answers, and each is a different fact:
+ *   - caller asked for nothing (`undefined`/`null`)  ⇒ `null`, "use the version
+ *     as it stands". Every pre-FS-6b caller lands here, unchanged.
+ *   - caller asked for a tenor the version offers    ⇒ that option, whose
+ *     `harga` becomes the line's unit price.
+ *   - caller asked for a tenor it does NOT offer, or the version has no options
+ *     at all                                          ⇒ `IncompleteError`.
+ *
+ * The refusal is the important one. A tenor silently falling back to the
+ * version's price would sell a 12-month package at the 3-month price — a money
+ * bug with no error anywhere, which is exactly the failure class the FS-6
+ * invariant (`trg_msdo_terpendek`) was built to avoid, arriving through the
+ * other door.
+ */
+function resolveTenor(v: ServiceView, durasiBulan?: number | null): DurasiOption | null {
+  if (durasiBulan === undefined || durasiBulan === null) {
+    return null;
+  }
+  if (!Number.isInteger(durasiBulan) || durasiBulan <= 0) {
+    throw new IncompleteError();
+  }
+  const hit = v.durasiOptions.find((o) => o.durasiBulan === durasiBulan);
+  if (hit === undefined) {
+    throw new IncompleteError();
+  }
+  return hit;
+}
+
+/**
  * lineFromView resolves an MSL version + the sales-entered quantity / passthrough
  * amount into a ServiceLine (name, unit price, commission rule and calculator
  * params pinned from the version). Passthrough requires a parseable amount > 0;
  * min_floor / batch_ceiling require a whole positive min_qty.
  */
-export function lineFromView(v: ServiceView, quantity: bigint, amount: string): ServiceLine {
-  const price = money.parse(v.standardPrice);
+export function lineFromView(
+  v: ServiceView,
+  quantity: bigint,
+  amount: string,
+  durasiBulan?: number | null,
+): ServiceLine {
+  const tenor = resolveTenor(v, durasiBulan);
+  const price = money.parse(tenor === null ? v.standardPrice : tenor.harga);
   const rule = parseCommissionRule(v.commissionRule);
   const mode = v.pricingMode === '' ? PRICING_FLAT : v.pricingMode;
   const line: ServiceLine = {
     serviceId: v.id, versionNo: v.versionNo, name: v.name, standardPrice: price,
     unit: v.unit, mode, quantity, minQty: 0n, inputAmount: 0n, rule,
+    durasiBulan: tenor === null ? null : tenor.durasiBulan,
   };
   if (mode === PRICING_MIN_FLOOR || mode === PRICING_BATCH_CEILING) {
     const mq = parseWholeQty(v.minQty);
@@ -481,6 +534,12 @@ export interface ServiceSelection {
   quantity?: number;
   /** passthrough rupiah value (passthrough mode only). */
   amount?: string;
+  /**
+   * FS-6b — which tenor of this service, in months, when the catalog offers
+   * several. Omit for a single-tenor service; supplying a tenor the version
+   * does not offer is refused (`resolveTenor`), never quietly ignored.
+   */
+  durasiBulan?: number | null;
 }
 
 /** resolveLines resolves each selection against the MSL version effective today. */
@@ -493,7 +552,7 @@ async function resolveLines(sql: Queryable, selections: ServiceSelection[], now:
     }
     const v = await effectiveAt(sql, sel.masterServiceId, today);
     const qty = sel.quantity && sel.quantity > 0 ? BigInt(Math.trunc(sel.quantity)) : 0n;
-    lines.push(lineFromView(v, qty, sel.amount ?? ''));
+    lines.push(lineFromView(v, qty, sel.amount ?? '', sel.durasiBulan));
   }
   return lines;
 }
@@ -722,11 +781,12 @@ export async function submitQualifiedForm(
       await tx`
         insert into qualified_form_services
           (attempt_id, master_service_id, master_version_no, name, standard_price, commission_rule,
-           quantity, input_amount, unit, min_qty, pricing_mode, subtotal, created_by)
+           quantity, input_amount, unit, min_qty, pricing_mode, subtotal, durasi_bulan, created_by)
         values
           (${attemptId}, ${l.serviceId}, ${l.versionNo}, ${l.name}, ${money.decimal(l.standardPrice)},
            ${l.rule.raw}, ${p.quantity.toString()}, ${inputAmountValue(l)}, ${nullString(l.unit)},
-           ${minQtyValue(l.minQty)}, ${l.mode}, ${money.decimal(subtotal)}, ${actor.employeeId})`;
+           ${minQtyValue(l.minQty)}, ${l.mode}, ${money.decimal(subtotal)}, ${l.durasiBulan},
+           ${actor.employeeId})`;
     }
 
     await ex.audit.insertAudit({
@@ -861,6 +921,18 @@ export interface ProposalLine {
   quantity?: number;
   /** passthrough rupiah nominal for a standard line in passthrough mode. */
   amount?: string;
+  /**
+   * FS-6b — the tenor this line is sold at, in months. Read for BOTH kinds of
+   * line, not only standard ones: negotiating the price of a 12-month package
+   * does not turn it into a 3-month one, so a custom line carries its tenor
+   * through to the snapshot even though its price came from the negotiation
+   * rather than from the option.
+   *
+   * On a standard line it also selects the PRICE (the option's package price).
+   * On a custom line it is recorded only — the negotiated price wins, which is
+   * what "custom" means.
+   */
+  durasiBulan?: number | null;
 }
 
 /**
@@ -1102,14 +1174,21 @@ export async function acceptCounter(
  * standard price — MSL v2, DECISIONS 2026-07-16).
  */
 async function standardLines(tx: Queryable, attemptId: string): Promise<ProposalLine[]> {
-  const rows = await tx<{ master_service_id: string; subtotal: string; commission_rule: string }[]>`
-    select master_service_id, subtotal, commission_rule
+  const rows = await tx<
+    { master_service_id: string; subtotal: string; commission_rule: string; durasi_bulan: number | null }[]
+  >`
+    select master_service_id, subtotal, commission_rule, durasi_bulan
     from qualified_form_services where attempt_id = ${attemptId} order by id`;
   if (rows.length === 0) {
     throw new IncompleteError();
   }
   return rows.map((r) => ({
     masterServiceId: r.master_service_id, proposedPrice: r.subtotal, commissionRule: r.commission_rule,
+    // FS-6b: carried through, not re-derived. These rows read as CUSTOM here
+    // (they carry a pinned price), so `resolveProposalLine` will not look at the
+    // catalog at all — if the tenor were dropped here it would be lost for the
+    // whole no-negotiation path, which is the path most deals take.
+    durasiBulan: r.durasi_bulan === null ? null : Number(r.durasi_bulan),
   }));
 }
 
@@ -1132,7 +1211,7 @@ export async function resolveProposalLine(
   tx: Queryable,
   l: ProposalLine,
   now: Date,
-): Promise<{ price: string; rule: string }> {
+): Promise<{ price: string; rule: string; durasiBulan: number | null }> {
   if ((l.masterServiceId ?? '').trim() === '') {
     throw new IncompleteError();
   }
@@ -1152,12 +1231,37 @@ export async function resolveProposalLine(
     parseCommissionRule(rule); // throws BadCommissionRuleError on a bad shape
     // A negotiated price is non-PPN, like every other price (D-4). There is no
     // tax to resolve here at all — the invoice decides that later, once.
-    return { price, rule };
+    //
+    // FS-6b: the tenor IS still recorded, and deliberately not validated against
+    // the catalog. A custom line is the door through which a negotiated
+    // agreement enters, including one whose tenor the catalog never listed; the
+    // DB's `> 0` check is the whole guard it gets, and `resolveClosingWindow`
+    // still refuses anything past 36 months with the house BI message.
+    return { price, rule, durasiBulan: normalizeTenor(l.durasiBulan) };
   }
   const view = await effectiveAt(tx, l.masterServiceId, tz.dateString(now));
   const qty = l.quantity && l.quantity > 0 ? BigInt(Math.trunc(l.quantity)) : 0n;
-  const line = lineFromView(view, qty, l.amount ?? '');
-  return { price: money.decimal(lineSubtotal(line)), rule: line.rule.raw };
+  const line = lineFromView(view, qty, l.amount ?? '', l.durasiBulan);
+  return { price: money.decimal(lineSubtotal(line)), rule: line.rule.raw, durasiBulan: line.durasiBulan };
+}
+
+/**
+ * normalizeTenor accepts what a custom line may carry and reduces it to the two
+ * values the column stores: a whole positive month count, or `null`.
+ *
+ * Zero and negatives are REFUSED rather than folded into `null`. `null` means
+ * "no tenor chosen — read the version"; a caller that sent `0` said something
+ * else, and turning a wrong answer into a plausible one is how a deal ends up
+ * accruing over the wrong window with nothing in the log to show for it.
+ */
+function normalizeTenor(v: number | null | undefined): number | null {
+  if (v === undefined || v === null) {
+    return null;
+  }
+  if (!Number.isInteger(v) || v <= 0) {
+    throw new IncompleteError();
+  }
+  return v;
 }
 
 /**
@@ -1198,10 +1302,10 @@ async function writeProposal(
   // Resolve every line BEFORE the first insert: a bad line must not leave a
   // half-written proposal version behind (the whole call is one transaction, but
   // resolving first also means no NEG- id is burned on an invalid set).
-  const resolved: { line: ProposalLine; price: string; rule: string }[] = [];
+  const resolved: { line: ProposalLine; price: string; rule: string; durasiBulan: number | null }[] = [];
   for (const l of lines) {
-    const { price, rule } = await resolveProposalLine(tx, l, now);
-    resolved.push({ line: l, price, rule });
+    const { price, rule, durasiBulan } = await resolveProposalLine(tx, l, now);
+    resolved.push({ line: l, price, rule, durasiBulan });
   }
 
   const verRows = await tx<{ max: number | null }[]>`
@@ -1213,12 +1317,13 @@ async function writeProposal(
     insert into negotiation_proposals (id, attempt_id, version_no, proposed_by, created_by)
     values (${proposalId}, ${attemptId}, ${version}, ${actor.employeeId}, ${actor.employeeId})`;
 
-  for (const { line: l, price, rule } of resolved) {
+  for (const { line: l, price, rule, durasiBulan } of resolved) {
     await tx`
       insert into negotiation_proposal_lines
-        (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms, created_by)
+        (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms,
+         durasi_bulan, created_by)
       values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule},
-              ${nullString(l.paymentTerms)}, ${actor.employeeId})`;
+              ${nullString(l.paymentTerms)}, ${durasiBulan}, ${actor.employeeId})`;
   }
   await ex.audit.insertAudit({
     entityType: 'prospect_attempt', entityId: attemptId, actorEmployeeId: actor.employeeId,
@@ -1464,6 +1569,19 @@ interface ApprovedLine {
    * rather than treating them as zero.
    */
   durasiBulan: number | null;
+  /**
+   * FS-6b — the tenor this proposal line explicitly agreed, or `null` when
+   * nobody chose one and `durasiBulan` above therefore came from the catalog.
+   *
+   * Kept SEPARATE from `durasiBulan` on purpose. `durasiBulan` answers "how
+   * long does this run" (which is what the contract window needs, whichever
+   * source it came from); this one answers "did anyone choose", which is what
+   * `services.durasi_bulan` must store — writing a catalog-derived number into
+   * the snapshot column would make a re-versioned catalog and a deliberate
+   * choice indistinguishable, and that column exists precisely to tell them
+   * apart.
+   */
+  durasiDipilih: number | null;
 }
 
 interface QualifiedFormRow {
@@ -1512,6 +1630,16 @@ interface QualifiedFormRow {
  * no qty column, so the `qty_menambah = 'durasi'` scaling the MSL describes
  * (buy 3 GMV Max ⇒ 3 months) is not derivable here. An AM who negotiated that
  * uses the override, with a reason — which is exactly what the override is for.
+ *
+ * ## Where each line's number comes from (FS-6b)
+ *
+ * This function does not read the catalog; `loadApprovedLines` already resolved
+ * each line to ONE number, preferring the tenor the deal chose over the version
+ * the line pinned. Before FS-6b there was only the version to read, and since
+ * the FS-6 invariant makes a version equal to its SHORTEST option, every
+ * multi-tenor deal derived the shortest window no matter what was sold. The
+ * MAX-over-lines rule below is unchanged — it is the per-line input that got
+ * honest.
  */
 export function deriveDuration(lines: ApprovedLine[]): number | null {
   let max: number | null = null;
@@ -1727,11 +1855,11 @@ export async function close(
       await tx`
         insert into services
           (id, client_id, contract_id, master_service_id, master_version_no, name, standard_price,
-           commission_rule, status, requires_strategy_plan, plan_tier, created_by)
+           commission_rule, status, requires_strategy_plan, plan_tier, durasi_bulan, created_by)
         values
           (${svcId}, ${clientId}, ${contractId}, ${l.masterServiceId}, ${l.versionNo}, ${l.name},
            ${l.proposedPrice}, ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING},
-           ${l.requiresStrategyPlan}, ${l.planTier}, ${actor.employeeId})`;
+           ${l.requiresStrategyPlan}, ${l.planTier}, ${l.durasiDipilih}, ${actor.employeeId})`;
     }
 
     // 5) Transaction (TRX-) born awaiting Finance verification.
@@ -1839,6 +1967,7 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
       master_service_id: string; proposed_price: string; commission_rule: string;
       name: string; master_version_no: number; requires_strategy_plan: boolean; plan_tier: string;
       durasi_bulan: number | null;
+      durasi_dipilih: number | null;
     }[]
   >`
     select npl.master_service_id, npl.proposed_price, npl.commission_rule,
@@ -1847,7 +1976,23 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
            coalesce(pinned.requires_strategy_plan, at_proposal.requires_strategy_plan, false)
              as requires_strategy_plan,
            coalesce(pinned.plan_tier, at_proposal.plan_tier, 'tanpa_plan') as plan_tier,
-           coalesce(pinned.durasi_bulan, at_proposal.durasi_bulan) as durasi_bulan
+           -- FS-6b: the CHOSEN tenor first, the catalog's only as a fallback.
+           -- The order matters and is not the same as the enrichment order
+           -- above: npl.durasi_bulan is what this proposal version agreed,
+           -- qfs.durasi_bulan what the Qualified Form offered, and the two
+           -- version columns are what the catalog would say if nobody chose.
+           -- Reading the catalog first would make every FS-6 deal close at the
+           -- SHORTEST tenor, because the shortest option IS the version
+           -- (trg_msdo_terpendek) — silently, with no error to notice.
+           coalesce(npl.durasi_bulan, qfs.durasi_bulan, pinned.durasi_bulan,
+                    at_proposal.durasi_bulan) as durasi_bulan,
+           -- The SAME chain minus the two catalog fallbacks. The two must not
+           -- diverge: if this read only npl.durasi_bulan, a proposal version
+           -- that dropped the tenor would close with a 12-month CONTRACT (the
+           -- Qualified snapshot still says 12) holding a Service that accrues
+           -- over the catalog's 3 — two rows born in the same transaction
+           -- disagreeing about the same deal, each self-consistent.
+           coalesce(npl.durasi_bulan, qfs.durasi_bulan) as durasi_dipilih
     from negotiation_proposal_lines npl
     join negotiation_proposals np on np.id = npl.proposal_id
     left join qualified_form_services qfs
@@ -1871,6 +2016,7 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
     name: r.name, versionNo: r.master_version_no, requiresStrategyPlan: r.requires_strategy_plan,
     planTier: r.plan_tier,
     durasiBulan: r.durasi_bulan === null ? null : Number(r.durasi_bulan),
+    durasiDipilih: r.durasi_dipilih === null ? null : Number(r.durasi_dipilih),
   }));
 }
 
@@ -2012,6 +2158,8 @@ export interface QualifiedFormServiceView {
   inputAmount: string | null;
   subtotal: string;
   commissionRule: string;
+  /** FS-6b — tenor yang dipilih, atau `null` bila baris ini memakai durasi versi. */
+  durasiBulan: number | null;
 }
 
 /** The locked Qualified draft carried on an attempt (M0 §4) — Go's QualifiedFormView. */
@@ -2036,6 +2184,8 @@ export interface AttemptProposalLine {
   proposedPrice: string;
   commissionRule: string;
   paymentTerms: string | null;
+  /** FS-6b — tenor yang disepakati baris ini, atau `null`. */
+  durasiBulan: number | null;
 }
 
 /** One versioned negotiation proposal with its lines — Go's ProposalView. */
@@ -2140,9 +2290,10 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
       master_service_id: string; master_version_no: number; name: string; quantity: string;
       unit: string | null; pricing_mode: string; standard_price: string;
       input_amount: string | null; subtotal: string; commission_rule: string;
+      durasi_bulan: number | null;
     }[]>`
       select master_service_id, master_version_no, name, quantity, unit, pricing_mode,
-             standard_price, input_amount, subtotal, commission_rule
+             standard_price, input_amount, subtotal, commission_rule, durasi_bulan
       from qualified_form_services where attempt_id = ${id} order by id`,
 
     sql<{
@@ -2186,6 +2337,7 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
         name: s.name, quantity: s.quantity, unit: s.unit, pricingMode: s.pricing_mode,
         standardPrice: s.standard_price, inputAmount: s.input_amount, subtotal: s.subtotal,
         commissionRule: s.commission_rule,
+        durasiBulan: s.durasi_bulan === null ? null : Number(s.durasi_bulan),
       })),
     };
   }
@@ -2201,11 +2353,11 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
       ? []
       : await sql<{
           proposal_id: string; master_service_id: string; name: string; proposed_price: string;
-          commission_rule: string; payment_terms: string | null;
+          commission_rule: string; payment_terms: string | null; durasi_bulan: number | null;
         }[]>`
           select npl.proposal_id, npl.master_service_id,
                  coalesce(qfs.name, latest.name, '') as name,
-                 npl.proposed_price, npl.commission_rule, npl.payment_terms
+                 npl.proposed_price, npl.commission_rule, npl.payment_terms, npl.durasi_bulan
           from negotiation_proposal_lines npl
           left join qualified_form_services qfs
                  on qfs.attempt_id = ${id} and qfs.master_service_id = npl.master_service_id
@@ -2227,6 +2379,7 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
     list.push({
       masterServiceId: ln.master_service_id, name: ln.name, proposedPrice: ln.proposed_price,
       commissionRule: ln.commission_rule, paymentTerms: ln.payment_terms,
+      durasiBulan: ln.durasi_bulan === null ? null : Number(ln.durasi_bulan),
     });
     linesByProposal.set(ln.proposal_id, list);
   }

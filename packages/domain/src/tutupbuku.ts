@@ -298,7 +298,15 @@ export async function hitungAngkaPeriode(sql: Queryable, periode: string): Promi
 
   const layanan = await sql<BarisLayanan[]>`
     select s.id, s.client_id, s.name, s.standard_price::text as standard_price,
-           s.qty::text as qty, v.pengakuan, v.durasi_bulan, v.qty_menambah, s.created_at
+           s.qty::text as qty, v.pengakuan,
+           -- FS-6b: the tenor the deal actually sold, falling back to the pinned
+           -- version's. Reading v.durasi_bulan alone spread a 12-month package
+           -- across the SHORTEST option's months, because the FS-6 invariant
+           -- (trg_msdo_terpendek) makes the version equal to that option — so
+           -- Rp 36jt over 12 months was recognised as Rp 12jt x 3 and then
+           -- nothing for nine months, with no error anywhere.
+           coalesce(s.durasi_bulan, v.durasi_bulan) as durasi_bulan,
+           v.qty_menambah, s.created_at
       from services s
       join master_service_versions v
         on v.service_id = s.master_service_id and v.version_no = s.master_version_no

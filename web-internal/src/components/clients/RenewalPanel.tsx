@@ -21,6 +21,7 @@ import CommissionRuleInput from '@/components/CommissionRuleInput';
 import type { Role } from '@/lib/types';
 import type { MasterService } from '@/lib/types';
 import { formatIDR } from '@/lib/money';
+import { punyaTenor, tenorDefault, tenorLabel, tenorOptions } from '@/lib/msl';
 import { PAYMENT_SCHEMES, type ProposalLineInput } from '@/lib/sales';
 import {
   canDecideRenewalUi,
@@ -62,10 +63,13 @@ interface LineRow {
   commission_rule: string;
   quantity: string;
   amount: string;
+  /** FS-6b — tenor pilihan sebagai string; '' = layanan tenor tunggal. */
+  durasi_bulan: string;
 }
 
 const emptyLineRow = (): LineRow => ({
   master_service_id: '', name: '', proposed_price: '', commission_rule: '', quantity: '', amount: '',
+  durasi_bulan: '',
 });
 
 /**
@@ -90,6 +94,11 @@ function toProposalLineInputs(rows: LineRow[]): ProposalLineInput[] {
       commission_rule: r.commission_rule,
       quantity: r.quantity ? Number(r.quantity) : undefined,
       amount: r.amount || undefined,
+      // FS-6b: `undefined` bila tidak ada tenor yang dipilih — kuncinya boleh
+      // absen, tapi tidak boleh berisi 0. Perpanjangan yang menjual paket
+      // setahun harus mencetak layanan 12 bulan, bukan layanan sepanjang opsi
+      // terpendek katalog.
+      durasi_bulan: r.durasi_bulan ? Number(r.durasi_bulan) : undefined,
     }));
 }
 
@@ -111,7 +120,13 @@ function LinesEditor({
     onChange(rows.map((r, i) => {
       if (i !== idx) return r;
       if (field === 'master_service_id') {
-        return { ...r, master_service_id: value, name: byId.get(value)?.name ?? '', proposed_price: '', commission_rule: '' };
+        const next = byId.get(value);
+        return {
+          ...r, master_service_id: value, name: next?.name ?? '', proposed_price: '', commission_rule: '',
+          // Tenor jasa lama tidak boleh menempel di jasa baru — sama alasannya
+          // dengan editor proposal di `/sales/[id]`.
+          durasi_bulan: String(tenorDefault(next) ?? ''),
+        };
       }
       return { ...r, [field]: value };
     }));
@@ -125,6 +140,7 @@ function LinesEditor({
           <thead>
             <tr>
               <th>Jasa</th>
+              <th>Durasi</th>
               <th>Qty / Nominal</th>
               {custom && <th>Proposed Price</th>}
               {custom && <th>Commission Rule</th>}
@@ -149,6 +165,24 @@ function LinesEditor({
                         <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
+                  </td>
+                  <td>
+                    {punyaTenor(svc) ? (
+                      <select
+                        aria-label={`Durasi baris ${idx + 1}`}
+                        value={l.durasi_bulan || String(tenorDefault(svc) ?? '')}
+                        disabled={disabled}
+                        onChange={(e) => update(idx, 'durasi_bulan', e.target.value)}
+                      >
+                        {tenorOptions(svc).map((o) => (
+                          <option key={o.durasi_bulan} value={o.durasi_bulan}>
+                            {tenorLabel(o, formatIDR)}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="muted">{svc?.durasi_bulan ? `${svc.durasi_bulan} bulan` : '—'}</span>
+                    )}
                   </td>
                   <td>
                     {isPassthrough ? (
@@ -443,6 +477,7 @@ function RenewalRow({
           ? d.lines.map((l) => ({
               master_service_id: l.master_service_id, name: '', proposed_price: l.proposed_price,
               commission_rule: l.commission_rule, quantity: '', amount: '',
+              durasi_bulan: l.durasi_bulan === null ? '' : String(l.durasi_bulan),
             }))
           : [emptyLineRow()],
       );
@@ -506,11 +541,12 @@ function RenewalRow({
           {detail && detail.lines.length > 0 && (
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Jasa</th><th>Proposed Price</th><th>Commission Rule</th></tr></thead>
+                <thead><tr><th>Jasa</th><th>Durasi</th><th>Proposed Price</th><th>Commission Rule</th></tr></thead>
                 <tbody>
                   {detail.lines.map((l, idx) => (
                     <tr key={idx}>
                       <td>{msvcs.find((s) => s.id === l.master_service_id)?.name ?? l.master_service_id}</td>
+                      <td>{l.durasi_bulan === null ? '—' : `${l.durasi_bulan} bulan`}</td>
                       <td>{formatIDR(l.proposed_price)}</td>
                       <td>{l.commission_rule}</td>
                     </tr>

@@ -142,7 +142,7 @@ describe('buildQuote — PPN adalah tombol per INVOICE (D-4)', () => {
   const line = (serviceId = 'MSV-1'): ServiceLine => ({
     serviceId, versionNo: 1, name: 'Jasa', unit: 'paket', mode: PRICING_FLAT,
     quantity: 1n, minQty: 0n, inputAmount: 0n, standardPrice: rp('10000000'),
-    rule: parseCommissionRule('10% of standard price'),
+    rule: parseCommissionRule('10% of standard price'), durasiBulan: null,
   });
 
   it('komisi dihitung dari NILAI NON-PPN — tidak pernah dari uang pajak', () => {
@@ -280,7 +280,7 @@ describe('buildQuote', () => {
   const line = (id: string, price: string, rule: string): ServiceLine => ({
     serviceId: id, versionNo: 1, name: id, standardPrice: rp(price), unit: '',
     mode: PRICING_FLAT, quantity: 1n, minQty: 0n, inputAmount: 0n,
-    rule: parseCommissionRule(rule),
+    rule: parseCommissionRule(rule), durasiBulan: null,
   });
 
   it('sums Estimasi Nilai + Komisi across lines (M0 §4 example)', () => {
@@ -1417,6 +1417,10 @@ describeDb('A-4 — the cooperation window at closing (K-2)', () => {
     const line = (durasiBulan: number | null) => ({
       masterServiceId: 'X', proposedPrice: '1.00', commissionRule: 'r', name: 'n',
       versionNo: 1, requiresStrategyPlan: false, planTier: 'tanpa_plan', durasiBulan,
+      // FS-6b: these two are the same fact here (nobody chose a tenor), but
+      // deriveDuration reads only `durasiBulan` — `durasiDipilih` is what the
+      // Service snapshot stores, and it is tested where it is written.
+      durasiDipilih: null,
     });
     // 12-month Store Management + 3-month GMV Max is a TWELVE-month agreement.
     // Summing would say 15 (a window that outlives the deal); taking the min
@@ -1430,6 +1434,10 @@ describeDb('A-4 — the cooperation window at closing (K-2)', () => {
     const line = (durasiBulan: number | null) => ({
       masterServiceId: 'X', proposedPrice: '1.00', commissionRule: 'r', name: 'n',
       versionNo: 1, requiresStrategyPlan: false, planTier: 'tanpa_plan', durasiBulan,
+      // FS-6b: these two are the same fact here (nobody chose a tenor), but
+      // deriveDuration reads only `durasiBulan` — `durasiDipilih` is what the
+      // Service snapshot stores, and it is tested where it is written.
+      durasiDipilih: null,
     });
     expect(deriveDuration([line(null), line(6)])).toBe(6);
     // Every line one-off ⇒ there is no periodic window at all, which is null,
@@ -1655,5 +1663,255 @@ describeDb('A-4 — the cooperation window at closing (K-2)', () => {
     expect(rows2[0].after_json).toHaveProperty('contract_id');
     expect(rows2[0].after_json.contract_id).toBeNull();
     expect(rows2[0].after_json.durasi_bulan).toBeNull();
+  });
+});
+
+/**
+ * FS-6b (Feedback tim Sales 2026-09-08 #6, paruh kedua) — tenor yang dipilih
+ * klien ikut sampai ke deal.
+ *
+ * ## Apa yang dijaga di sini, dan kenapa ia bagian dari jalur uang
+ *
+ * FS-6 memberi katalog opsi tenor, dengan invarian keras: opsi TERPENDEK sama
+ * dengan `standard_price` + `durasi_bulan` versinya (`trg_msdo_terpendek`).
+ * Invarian itu membuat setiap pembaca lama tetap membaca angka yang SAH — dan
+ * sekaligus membuat mereka selalu membaca paket TERPENDEK. Jadi sebelum FS-6b,
+ * menjual paket 12 bulan menghasilkan:
+ *
+ *   * harga 3 bulan pada baris Form Qualified (klien kurang ditagih),
+ *   * `contracts.durasi_bulan = 3` (kontrak berakhir sembilan bulan terlalu
+ *     cepat, dan setiap periode Plan sesudahnya jatuh di luar jendelanya),
+ *
+ * keduanya TANPA satu pun galat. Itu sebabnya tesnya ditulis lebih dulu, dan
+ * kenapa yang diperiksa adalah RUPIAH dan BULAN yang benar-benar tersimpan di
+ * baris DB, bukan bentuk objek yang dikembalikan fungsi.
+ */
+describeDb('FS-6b — tenor pilihan klien sampai ke deal', () => {
+  /**
+   * Satu layanan katalog ber-opsi 3/6/12 bulan, dibentuk PERSIS seperti katalog
+   * sungguhan sesudah FS-6: versi induknya memegang opsi terpendek.
+   *
+   * Angkanya diambil dari keluhan aslinya (`DECISIONS.md` 2026-09-07 Q2):
+   * `Jasa Iklan Traffic Marketplace Basic` dijual 3 bln Rp 10,2jt / 6 bln
+   * Rp 19,2jt / 12 bln Rp 36jt — makin panjang makin murah per bulan, yang
+   * justru TIDAK bisa dinyatakan oleh pengali `qty` yang linear.
+   */
+  async function seedTenorService(id: string): Promise<string> {
+    await sql`insert into master_services (id, created_by) values (${id}, 'ZZ-ADMIN')`;
+    const ver = await sql<{ id: string }[]>`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, active,
+         effective_from, pricing_mode, durasi_bulan, pengakuan, created_by)
+      values (${id}, 1, ${'Svc ' + id}, '10200000.00', '10% of standard price', true,
+              '2020-01-01', 'flat', 3, 'per_periode', 'ZZ-ADMIN')
+      returning id`;
+    for (const [bulan, harga] of [[3, '10200000.00'], [6, '19200000.00'], [12, '36000000.00']] as [number, string][]) {
+      await sql`insert into master_service_duration_options (version_id, durasi_bulan, harga, created_by)
+                values (${ver[0].id}, ${bulan}, ${harga}, 'ZZ-ADMIN')`;
+    }
+    return id;
+  }
+
+  const qualifyWithTenor = async (svc: string, durasiBulan: number | null): Promise<string> => {
+    const attemptId = await contactedAttempt(budi());
+    await submitQualifiedForm(sql, budi(), attemptId, {
+      namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+      kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '50000000', targetGmv: '80000000',
+      services: [{ masterServiceId: svc, quantity: 1, durasiBulan }],
+    });
+    return attemptId;
+  };
+
+  // --- harga: paket, bukan harga per bulan × tenor --------------------------
+
+  it('kalkulator memakai harga PAKET tenor yang dipilih, bukan harga versinya', async () => {
+    const svc = await seedTenorService('SVC-ZZ-FS6B-QUOTE');
+
+    // Tanpa tenor: perilaku lama, harga versi (= opsi terpendek).
+    const polos = await previewQuote(sql, [{ masterServiceId: svc, quantity: 1 }]);
+    expect(polos.estimasiNilaiIdr).toBe('Rp. 10.200.000,00');
+
+    // Dengan tenor 12 bulan: Rp 36.000.000 — BUKAN 4 × 10,2jt (Rp 40,8jt).
+    // Selisih Rp 4,8jt itulah diskon paket yang jadi alasan keluhan #6 ada.
+    const setahun = await previewQuote(sql, [{ masterServiceId: svc, quantity: 1, durasiBulan: 12 }]);
+    expect(setahun.estimasiNilaiIdr).toBe('Rp. 36.000.000,00');
+    // Komisi ikut harga paket, karena komisi dihitung dari subtotal baris.
+    expect(setahun.totalKomisiIdr).toBe('Rp. 3.600.000,00');
+  });
+
+  it('menolak tenor yang tidak ditawarkan katalog — tidak diam-diam jatuh ke harga versi', async () => {
+    const svc = await seedTenorService('SVC-ZZ-FS6B-TOLAK');
+    // 9 bulan tidak ada di daftar. Kalau ini LOLOS, klien dijual paket 9 bulan
+    // dengan harga 3 bulan dan tidak ada yang tahu — kelas cacat yang persis
+    // sama dengan yang dijaga invarian FS-6, lewat pintu yang berbeda.
+    await expect(previewQuote(sql, [{ masterServiceId: svc, quantity: 1, durasiBulan: 9 }]))
+      .rejects.toBeInstanceOf(IncompleteError);
+    // Nol dan pecahan bukan "tidak memilih" — keduanya ditolak, bukan dianggap null.
+    await expect(previewQuote(sql, [{ masterServiceId: svc, quantity: 1, durasiBulan: 0 }]))
+      .rejects.toBeInstanceOf(IncompleteError);
+    await expect(previewQuote(sql, [{ masterServiceId: svc, quantity: 1, durasiBulan: 1.5 }]))
+      .rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('layanan tenor tunggal menolak tenor apa pun — katalognya memang tidak menawarkan', async () => {
+    const svc = await seedService('SVC-ZZ-FS6B-TUNGGAL');
+    await expect(previewQuote(sql, [{ masterServiceId: svc, quantity: 1, durasiBulan: 12 }]))
+      .rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  // --- rantai snapshot: Form Qualified → proposal → Service → Contract ------
+
+  it('jalur non-nego: tenor 12 bulan sampai ke kontrak, dan harganya harga paket', async () => {
+    const svc = await seedTenorService('SVC-ZZ-FS6B-CHAIN');
+    const attemptId = await qualifyWithTenor(svc, 12);
+
+    const qfs = await sql<{ durasi_bulan: number | null; subtotal: string; standard_price: string }[]>`
+      select durasi_bulan, subtotal, standard_price
+        from qualified_form_services where attempt_id = ${attemptId}`;
+    expect(qfs[0].durasi_bulan).toBe(12);
+    expect(qfs[0].standard_price).toBe('36000000.00');
+    expect(qfs[0].subtotal).toBe('36000000.00');
+
+    // Jalur "No Negotiation Required": barisnya disalin dari snapshot Form
+    // Qualified dan terbaca sebagai CUSTOM (sudah berharga). Kalau tenornya
+    // tidak ikut dibawa di sini, ia hilang untuk jalur yang dipakai MAYORITAS
+    // deal — dan hilangnya tidak kelihatan sampai kontraknya salah.
+    await submitNegotiation(sql, budi(), attemptId, [], true);
+    const npl = await sql<{ durasi_bulan: number | null }[]>`
+      select l.durasi_bulan from negotiation_proposal_lines l
+        join negotiation_proposals p on p.id = l.proposal_id
+       where p.attempt_id = ${attemptId}`;
+    expect(npl[0].durasi_bulan).toBe(12);
+
+    const res = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      managedSince: '2026-09-01',
+    });
+
+    const svcRows = await sql<{ durasi_bulan: number | null; standard_price: string }[]>`
+      select durasi_bulan, standard_price from services where client_id = ${res.clientId}`;
+    expect(svcRows[0].durasi_bulan).toBe(12);
+    expect(svcRows[0].standard_price).toBe('36000000.00');
+
+    // INTI TES INI. Sebelum FS-6b angkanya 3 — jendela kerja sama berakhir
+    // 1 Desember 2026 untuk paket yang dibayar sampai September 2027.
+    const ct = await sql<{ durasi_bulan: number; tanggal_akhir: string }[]>`
+      select durasi_bulan, tanggal_akhir::text as tanggal_akhir
+        from contracts where client_id = ${res.clientId}`;
+    expect(ct[0].durasi_bulan).toBe(12);
+    expect(ct[0].tanggal_akhir).toBe('2027-09-01');
+
+    const trx = await sql<{ total_agreed_value: string }[]>`
+      select total_agreed_value from transactions where id = ${res.transactionId}`;
+    expect(trx[0].total_agreed_value).toBe('36000000.00');
+  });
+
+  it('tanpa tenor: setiap kolom snapshot NULL dan kontraknya turun dari versi — nol perubahan perilaku', async () => {
+    const svc = await seedTenorService('SVC-ZZ-FS6B-DIAM');
+    const attemptId = await qualifyWithTenor(svc, null);
+    await submitNegotiation(sql, budi(), attemptId, [], true);
+    const res = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      managedSince: '2026-09-01',
+    });
+
+    // NULL berarti TEPAT satu hal: "pakai durasi versi". Itulah yang membuat
+    // migrasi FS-6b nol backfill — setiap baris lama sudah benar apa adanya.
+    const qfs = await sql<{ durasi_bulan: number | null }[]>`
+      select durasi_bulan from qualified_form_services where attempt_id = ${attemptId}`;
+    expect(qfs[0].durasi_bulan).toBeNull();
+    const svcRows = await sql<{ durasi_bulan: number | null }[]>`
+      select durasi_bulan from services where client_id = ${res.clientId}`;
+    expect(svcRows[0].durasi_bulan).toBeNull();
+    // Kontraknya tetap terbit, dari durasi versi (3 bulan).
+    const ct = await sql<{ durasi_bulan: number }[]>`
+      select durasi_bulan from contracts where client_id = ${res.clientId}`;
+    expect(ct[0].durasi_bulan).toBe(3);
+  });
+
+  it('jalur nego: baris standar dihargai per tenor; baris nego menyimpan tenor tapi harganya harga nego', async () => {
+    const svc = await seedTenorService('SVC-ZZ-FS6B-NEGO');
+    const attemptId = await qualifyWithTenor(svc, 3);
+
+    // Baris STANDAR ber-tenor 6: harganya diambil dari opsi, bukan dari versi.
+    await submitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: svc, quantity: 1, durasiBulan: 6 },
+    ], false);
+    const std = await sql<{ proposed_price: string; durasi_bulan: number | null }[]>`
+      select l.proposed_price, l.durasi_bulan from negotiation_proposal_lines l
+        join negotiation_proposals p on p.id = l.proposal_id
+       where p.attempt_id = ${attemptId} and p.version_no = 1`;
+    expect(std[0].proposed_price).toBe('19200000.00');
+    expect(std[0].durasi_bulan).toBe(6);
+
+    // Baris NEGO atas paket 12 bulan: harga turun jadi Rp 30jt, tapi ia tetap
+    // paket 12 bulan. Menegosiasikan harga tidak memendekkan jangka waktunya.
+    await decideNegotiation(sql, salesLead(), attemptId, DECISION_REVISE, 'coba tawarkan paket setahun');
+    await resubmitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: svc, proposedPrice: '30000000', commissionRule: '10% of standard price', durasiBulan: 12 },
+    ]);
+    const nego = await sql<{ proposed_price: string; durasi_bulan: number | null }[]>`
+      select l.proposed_price, l.durasi_bulan from negotiation_proposal_lines l
+        join negotiation_proposals p on p.id = l.proposal_id
+       where p.attempt_id = ${attemptId} and p.version_no = 2`;
+    expect(nego[0].proposed_price).toBe('30000000.00');
+    expect(nego[0].durasi_bulan).toBe(12);
+  });
+});
+
+/**
+ * FS-6b, satu jahitan yang mudah lolos: baris proposal yang KEHILANGAN tenornya.
+ *
+ * Klien lama (atau skrip) boleh saja mengirim `lines[]` tanpa `durasi_bulan`
+ * sesudah Form Qualified memilih tenor 12 bulan. Kalau `services.durasi_bulan`
+ * dibaca dari baris proposal SAJA sementara jendela kontrak juga jatuh ke
+ * snapshot Qualified, closing yang sama melahirkan kontrak 12 bulan berisi
+ * layanan yang diakui sepanjang 3 bulan — dua baris, satu transaksi, saling
+ * bertentangan, dan masing-masing konsisten dengan dirinya sendiri.
+ */
+describeDb('FS-6b — kontrak dan layanan tidak boleh berbeda tenor', () => {
+  it('baris proposal tanpa tenor tetap mewarisi tenor Form Qualified', async () => {
+    const id = 'SVC-ZZ-FS6B-JAHIT';
+    await sql`insert into master_services (id, created_by) values (${id}, 'ZZ-ADMIN')`;
+    const ver = await sql<{ id: string }[]>`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, active,
+         effective_from, pricing_mode, durasi_bulan, pengakuan, created_by)
+      values (${id}, 1, 'Svc jahit', '10200000.00', '10% of standard price', true,
+              '2020-01-01', 'flat', 3, 'per_periode', 'ZZ-ADMIN')
+      returning id`;
+    for (const [bulan, harga] of [[3, '10200000.00'], [12, '36000000.00']] as [number, string][]) {
+      await sql`insert into master_service_duration_options (version_id, durasi_bulan, harga, created_by)
+                values (${ver[0].id}, ${bulan}, ${harga}, 'ZZ-ADMIN')`;
+    }
+
+    const attemptId = await contactedAttempt(budi());
+    await submitQualifiedForm(sql, budi(), attemptId, {
+      namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+      kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '50000000', targetGmv: '80000000',
+      services: [{ masterServiceId: id, quantity: 1, durasiBulan: 12 }],
+    });
+    // Baris CUSTOM tanpa `durasiBulan` — persis yang dikirim klien yang belum
+    // tahu soal kolomnya.
+    await submitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: id, proposedPrice: '30000000', commissionRule: '10% of standard price' },
+    ], false);
+    await decideNegotiation(sql, salesLead(), attemptId, DECISION_APPROVE);
+
+    const res = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      managedSince: '2026-09-01',
+    });
+
+    const ct = await sql<{ durasi_bulan: number }[]>`
+      select durasi_bulan from contracts where client_id = ${res.clientId}`;
+    const svcRows = await sql<{ durasi_bulan: number | null }[]>`
+      select durasi_bulan from services where client_id = ${res.clientId}`;
+    expect(ct[0].durasi_bulan).toBe(12);
+    // Angka yang SAMA, bukan 3 dan bukan null.
+    expect(svcRows[0].durasi_bulan).toBe(12);
   });
 });
