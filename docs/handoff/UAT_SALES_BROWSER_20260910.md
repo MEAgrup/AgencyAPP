@@ -14,21 +14,26 @@ mendarat hanya pernah dibuktikan lewat tes, tidak pernah lewat layar.
 
 ## 1 · Hasil
 
-**24 butir · 23 PASS · 1 FAIL.** Keenam butir feedback Sales **terbukti bekerja
-di layar**. Satu FAIL bukan bagian dari keenam butir itu — ia observasi baru yang
-ditemukan sambil jalan (§3).
+**Putaran kedua (2026-09-10, sesudah semua perbaikan): 33 butir · 33 PASS ·
+0 FAIL.** Naik dari 24 butir karena tiga butir yang dulu tidak bisa dibuktikan
+kini punya fixture-nya (§4).
+
+_Putaran pertama: 24 butir · 23 PASS · 1 FAIL._ Keenam butir feedback Sales
+terbukti bekerja di layar; satu FAIL bukan bagian dari keenam butir itu — ia
+observasi baru yang ditemukan sambil jalan (§3), dan kini sudah diperbaiki.
 
 | Butir | Layar | Peran | Hasil |
 |---|---|---|---|
 | **#1** WhatsApp | `/sales` | Head Sales | ✅ tombol ada, `phone=62812743285000`, sapaan ter-encode |
 | **#2** Owner tampil nama | `/sales` | **Head Sales** | ✅ **"Budi Santoso"**, bukan `EMP-0001` |
 | **#2** gerbangnya | `/sales` | Sales staff | ✅ kolom Owner **tidak** tampil (level lead/od/director) |
-| **#3** prospek bersama | `/sales/{id}` | Sales staff | 🟡 sisi negatifnya saja — lihat §4 |
+| **#3** prospek bersama | `/sales/{id}` | Sales staff + Head Sales | ✅ **kedua sisi** — penanda tampil di kedua baris bertaut, menyebut nama rekannya (§4) |
 | **#4** `bayar_komisi` | `/clients/{id}` | Sales staff | ✅ opsi `["Perpanjangan","Cross Sell","Bayar Komisi"]` |
-| **#5** durasi di daftar | `/clients` | Sales staff | ✅ "6 bulan · 112 hari lagi" |
+| **#5** durasi di daftar | `/clients` | Sales staff | ✅ "6 bulan · 112 hari lagi", **dan** "Layanan tidak ada durasi" untuk klien tanpa kontrak (§4) |
 | **#5** panel Kontrak | `/clients/{id}` | Sales staff | ✅ **nol galat di panel itu**, `CTR-202609-0001 · Baru · 6 bulan · 01 Jul 2026 → 31 Des 2026` |
 | **#6** editor opsi durasi | `/master-services` | Sales Head | ✅ dua tenor tersimpan, tampil `1 / 6 bulan` di katalog |
 | **#6/FS-6b** kalkulator | `/sales/kalkulator` | Sales staff | ✅ lihat §2 |
+| **#6/FS-6b** Form Qualified | `/sales/{id}` | Sales staff | ✅ tenor `6` terbaca lagi DAN jadi nilai awal pemilih tenor di editor proposal (§4) |
 
 ### #2 adalah bukti utama, dan ia diuji dengan peran yang benar
 
@@ -136,7 +141,22 @@ melainkan juga bahwa panelnya tidak ikut hilang bagi yang berhak:
 
 Empat tes di `web-internal/src/lib/api.test.ts` (berkas baru).
 
-## 4 · Yang TIDAK bisa dibuktikan, dan kenapa
+## 4 · ✅ Tiga butir yang dulu TIDAK bisa dibuktikan — kini SUDAH, dan lulus
+
+> **STATUS 2026-09-10 (putaran kedua): ketiganya DIUJI dan PASS.** Yang
+> memblokirnya bukan aplikasinya melainkan **fixture**, dan fixture itu sudah
+> diperbaiki (§5a). UAT Sales naik **24 → 33 butir, 33 PASS**.
+
+| Butir | Yang sekarang terbukti |
+|---|---|
+| **#3** prospek bersama, sisi POSITIF | Penanda **"Prospek Bersama" tampil di KEDUA baris** yang bertaut, dan menyebut **nama** rekannya — `Dewi Anggraini` di baris Budi, `Budi Santoso` di baris Dewi. Sisi negatifnya (nol rekan ⇒ nol penanda) tetap diuji. |
+| **#5** cabang FS-5b tanpa kontrak | Klien yang hanya membeli layanan sekali jadi menampilkan **"Layanan tidak ada durasi"** — teks eksplisit, bukan sel kosong. |
+| **#6/FS-6b** tenor di Form Qualified | Tenor `6` **terbaca lagi** di layar attempt Qualified, editor proposalnya punya pemilih tenor (`1 bulan`/`6 bulan`), dan **nilai awalnya `6`** — tenor pilihan klien benar-benar terbawa dari Form Qualified ke editor negosiasi. |
+
+Teks di bawah ini adalah catatan aslinya, ditinggalkan sebagai jejak KENAPA
+ketiganya sempat tidak teruji.
+
+### 4a · (catatan asli) Yang TIDAK bisa dibuktikan, dan kenapa
 
 **#3 prospek bersama — hanya sisi negatifnya.** Attempt fixture
 (`PRSP-202609-0001`) tidak punya rekan, jadi yang terbukti adalah penanda
@@ -188,7 +208,25 @@ update services          set created_by = 'EMP-0001' where created_by = 'B2TOUR-
 sejak awal. Selama ia memakai aktor non-karyawan, setiap UAT Sales berikutnya
 akan mengulang dua kegagalan palsu di atas.
 
-## 6 · Koreksi skrip UAT (empat, semuanya milik skrip — bukan aplikasi)
+### 5a · ✅ SUDAH DIKERJAKAN (2026-09-10) — fixture-nya sendiri yang diperbaiki
+
+`seed-browser-tour.ts` kini memakai **karyawan sungguhan**: `EMP-0001` (Budi,
+Sales staff), `EMP-0006` (Dewi, Sales Head) sebagai admin katalog. **Nol UPDATE
+manual** lagi sesudah menjalankannya — `clients.sales_pic_id` langsung `EMP-0001`.
+
+Dan tiga fixture ditambahkan, tepat untuk membuka §4:
+
+| Fixture | Membuka |
+|---|---|
+| Lead kedua didaftarkan **dua sales** (Budi lalu Dewi, nomor sama) — sengaja **tidak ditutup** | `#3` sisi positif. Prospek bersama lahir sendiri lewat `leads.register` outcome `join`; menutupnya justru menghapus yang mau dilihat |
+| Klien kedua dari layanan **tanpa `durasi_bulan`** ⇒ nol kontrak | cabang FS-5b "Layanan tidak ada durasi" |
+| Attempt ketiga ditinggal **DI tahap Qualified**, ber-`durasi_bulan = 6`, atas layanan ber-opsi tenor 1/6 bulan | `#6/FS-6b` Form Qualified. Ditinggal di Qualified dengan sengaja: sesudah ditutup, formnya tidak bisa disunting dan pemilih tenornya hilang |
+
+`seedService` juga bisa memasang `master_service_duration_options` langsung,
+supaya pemilih tenor punya sesuatu untuk dipilih tanpa harus melewati layar MSL
+lebih dulu.
+
+## 6 · Koreksi skrip UAT (tujuh, semuanya milik skrip — bukan aplikasi)
 
 Ditulis supaya sesi berikutnya tidak mengulanginya:
 
@@ -199,6 +237,13 @@ Ditulis supaya sesi berikutnya tidak mengulanginya:
 3. **Dropdown Jenis perpanjangan baru dirender SESUDAH tombol
    "+ Penawaran / Tagihan" diklik** — ia tidak ada di DOM saat halaman dimuat.
 4. **Tanggal kontrak dirender "01 Jul 2026", bukan ISO.**
+5. **`has-text` adalah SUBSTRING.** `button:has-text("Negotiation Required")`
+   juga cocok dengan **"No** Negotiation Required" ⇒ hitungannya 2, bukan 1.
+   Pakai `getByRole('button', { name: …, exact: true })`.
+6. **Editor proposal di tahap Qualified ada DI BALIK tombol** ("Negotiation
+   Required" / "No Negotiation Required") — ia tidak ada di DOM saat dimuat.
+7. **Sesudah fixture bertambah, `/clients` punya dua baris.** Asersi yang
+   membaca "baris pertama" jadi salah sasaran; targetkan klien yang dimaksud.
 
 ## 7 · Yang TIDAK dijalankan
 
@@ -207,9 +252,14 @@ Ditulis supaya sesi berikutnya tidak mengulanginya:
 - ~~Perbaikan `M19-NAMA-RLS`~~ — ✅ selesai 2026-09-10, plus sapuan modul lain:
   `UAT_M19_BROWSER_20260909.md` §2b–§2c.
 - ~~Perbaikan OBS-1~~ — ✅ selesai 2026-09-10 (§3a).
+- ~~Tiga butir yang tidak bisa dibuktikan~~ — ✅ fixture-nya dibangun, ketiganya
+  diuji dan PASS (§4, §5a).
+- ~~Pesan `prospect attempt not found`~~ — ✅ **diperbaiki 2026-09-10.**
+  Ditemukan di sini sebagai pita galat bagi AM yang bukan `assigned_am_id`
+  klien: bahasa Inggris, tanpa kurung siku, melanggar aturan rumah #5. Default
+  `sales.NotFoundError` kini `MSG_NOT_FOUND = '[prospek tidak ditemukan]'`,
+  mengikuti pendahulunya di `account.ts` (`[klien tidak ditemukan]`,
+  `[layanan tidak ditemukan]`).
 
-**Satu hal kecil yang DITEMUKAN tapi TIDAK diperbaiki** (di luar cakupan, dan
-tidak ditambal diam-diam): AM yang bukan `assigned_am_id` klien mendapat pita
-`prospect attempt not found` — pesan **berbahasa Inggris tanpa kurung siku**,
-melanggar aturan rumah #5. Cacat lama, tidak berhubungan dengan OBS-1, layak
-tiket sendiri.
+**Yang benar-benar tersisa, dan bukan pekerjaan UAT:** isi 21 Kategori + 8 Sub
+Type (butuh pemilik) dan drift check penuh (butuh operator/CI).

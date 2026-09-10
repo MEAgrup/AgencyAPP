@@ -500,11 +500,15 @@ jobs:
       #      Creator Booking | Brief-as-task, sementara barisnya ber-client_id
       #      nullable). Registry yang mendaftarkan entitas yang bentuknya belum
       #      diketok menjanjikan sesuatu yang belum ada.
-      - name: Verify entity_prefix registry (expect 42)
+      - name: Verify entity_prefix registry (expect 43)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          test "$n" -eq 42
+          # 43 sejak M19 §13 (`20260928010000_m19_scs_task_engine.sql`) menambah
+          # prefix SCS. Ledger komentar di atas SUDAH mencatat 42→43 saat PR #335
+          # mendarat; gerbang inilah yang ketinggalan, dan itu membuat `main`
+          # merah sejak commit itu. Naikkan KEDUANYA dalam satu commit.
+          test "$n" -eq 43
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)
