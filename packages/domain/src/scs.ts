@@ -339,15 +339,21 @@ interface TaskDbRow {
 const TASK_COLS = `
   t.id, t.tanggal, t.kategori_kode, k.nama as kategori_nama,
   k.is_standing as kategori_is_standing, k.sla_jam as kategori_sla_jam,
-  t.judul, t.client_id, c.toko as client_name, t.mendukung_divisi,
-  t.assigned_pic, e.nama as pic_nama, t.target_qty, t.status,
+  t.judul, t.client_id, private.client_toko(t.client_id) as client_name, t.mendukung_divisi,
+  t.assigned_pic, private.employee_display_name(t.assigned_pic) as pic_nama, t.target_qty, t.status,
   t.link_hasil, t.catatan, t.created_by, t.created_at`;
 
+/**
+ * ⚠️ Nama klien & nama PIC lewat RESOLVER — JANGAN kembalikan ke `left join`.
+ * Alasan lengkapnya di komentar `SLOT_FROM` (`dailyops.ts`): baca ini berjalan
+ * di bawah `readAsActor`, dan RLS `employees`/`clients` membungkam join-nya
+ * untuk lead Creative, jadi layar jatuh ke `EMP-…`/`CLI-…`. `client_toko(NULL)`
+ * tetap NULL, jadi baris "all client" tetap dirender "Semua klien" oleh FE —
+ * itu invariant M19, bukan kebetulan.
+ */
 const TASK_FROM = `
   from scs_tasks t
-  join scs_kategori k on k.kode = t.kategori_kode
-  left join clients c on c.id = t.client_id
-  left join employees e on e.employee_id = t.assigned_pic`;
+  join scs_kategori k on k.kode = t.kategori_kode`;
 
 function ymd(v: string | Date): string {
   return typeof v === 'string' ? v.slice(0, 10) : tz.dateString(v);
@@ -975,7 +981,8 @@ export async function scsPicSummary(
     deliverable_selesai: string; deliverable_qty: string | null;
     standing_selesai: string; belum_selesai: string; total_baris: string;
   }[]>(
-    `select t.assigned_pic as employee_id, e.nama,
+    `select t.assigned_pic as employee_id,
+            private.employee_display_name(t.assigned_pic) as nama,
             count(*) filter (where t.status = $3 and not k.is_standing)::text as deliverable_selesai,
             coalesce(sum(t.target_qty) filter (where t.status = $3 and not k.is_standing), 0)::text as deliverable_qty,
             count(*) filter (where t.status = $3 and k.is_standing)::text as standing_selesai,
@@ -983,11 +990,10 @@ export async function scsPicSummary(
             count(*)::text as total_baris
        from scs_tasks t
        join scs_kategori k on k.kode = t.kategori_kode
-       left join employees e on e.employee_id = t.assigned_pic
       where t.tanggal between $1::date and $2::date
         and ($4::text is null or t.assigned_pic = $4::text)
-      group by t.assigned_pic, e.nama
-      order by e.nama nulls last, t.assigned_pic`,
+      group by t.assigned_pic
+      order by private.employee_display_name(t.assigned_pic) nulls last, t.assigned_pic`,
     [dari, sampai, STATUS_APPROVED, picFilter],
   );
   return rows.map((r) => ({

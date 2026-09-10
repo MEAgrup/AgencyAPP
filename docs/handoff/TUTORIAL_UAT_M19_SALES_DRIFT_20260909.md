@@ -523,7 +523,7 @@ Diperbarui dari `HANDOFF_M19_SCS_20260909.md` §4 + §8, dirujuk silang ke
 
 | # | Apa | Status |
 |---|---|---|
-| **M19-NAMA-RLS** | 🔴 **BARU 2026-09-09 (dari UAT §1).** Nama klien & nama PIC kosong untuk **lead Creative** di `/creative/schedule` (kartu slot + "Tidak tersedia hari ini") dan `/creative/scs/rekap`. `left join clients/employees` di bawah `readAsActor` dibungkam RLS; FE jatuh ke `CLI-…`/`EMP-…`. Tak terlihat oleh Director/OD (`jwt_can_read_all()`) — kelas cacat yang SAMA dengan feedback Sales `#2`. Cakupan diduga lebih luas dari M19 | 🔴 menunggu ketokan: resolver `SECURITY DEFINER` sempit (pola O51) vs lengan RLS baru. Rincian `UAT_M19_BROWSER_20260909.md` §2 |
+| **M19-NAMA-RLS** | ✅ **SELESAI 2026-09-10** — 7 situs diganti resolver, 6 tes regresi, sapuan nol temuan lain. _Konteks:_ 🔴 **BARU 2026-09-09 (dari UAT §1).** Nama klien & nama PIC kosong untuk **lead Creative** di `/creative/schedule` (kartu slot + "Tidak tersedia hari ini") dan `/creative/scs/rekap`. `left join clients/employees` di bawah `readAsActor` dibungkam RLS; FE jatuh ke `CLI-…`/`EMP-…`. Tak terlihat oleh Director/OD (`jwt_can_read_all()`) — kelas cacat yang SAMA dengan feedback Sales `#2`. Cakupan diduga lebih luas dari M19 | ✅ tertutup — nol ketokan yang dibutuhkan; resolvernya sudah ada sejak O37. Rincian `UAT_M19_BROWSER_20260909.md` §2b–§2c |
 | **A2-DRIFT** | `d3_tutup_buku_pulihkan_komentar_jaga_transisi` ada di live, nol berkas di `main`; plus baris ledger ganda `m6a_section_d` | 🟡 terbuka sejak 2026-09-08. Namanya kini konkret; back-port belum dilakukan |
 | **O75** | Service tidak punya jalur ke Done — edge `[In Execution] → Done` ada di `sm_edges` dengan **nol pemanggil** | ⚠️ terbuka 2026-09-07 |
 | **O76** | Asal floor GMV bulanan (sisa O57 (b) yang K-2 tidak tutup) | ⚠️ terbuka 2026-09-07 |
@@ -557,8 +557,8 @@ Diperbarui dari `HANDOFF_M19_SCS_20260909.md` §4 + §8, dirujuk silang ke
 
 ### 5.6 Urutan yang disarankan
 
-1. ~~**§1** (UAT M19)~~ — ✅ selesai 2026-09-09. Yang lahir darinya:
-   `M19-NAMA-RLS` (§5.3), dan itu kini butir paling mendesak.
+1. ~~**§1** (UAT M19)~~ — ✅ selesai 2026-09-09; temuannya `M19-NAMA-RLS`
+   ✅ diperbaiki 2026-09-10, dan UAT-nya dijalankan ulang 62/62 PASS.
 2. ~~**§2** (UAT Sales)~~ — ✅ selesai 2026-09-10.
 3. **§4** (drift penuh) — paralel, oleh operator, tidak menunggu 1 dan 2.
 4. **§3** (Kategori) — kapan pun pemilik sempat; nol yang menunggu.

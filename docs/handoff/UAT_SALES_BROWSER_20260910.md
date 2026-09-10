@@ -59,7 +59,11 @@ Inilah yang tidak ada sebelum FS-6b, dan yang membuat tim Sales terpaksa memakai
 sembilan layanan terpecah.
 → `screenshots/uat-sales-02-kalkulator-tenor.png`
 
-## 3 · 🟡 OBS-1 (BARU) — Client Record memunculkan tiga pita galat MERAH pada halaman yang boleh dibuka
+## 3 · ✅ OBS-1 (SUDAH DIPERBAIKI 2026-09-10) — Client Record memunculkan tiga pita galat MERAH pada halaman yang boleh dibuka
+
+> **STATUS: DIPERBAIKI & DIVERIFIKASI.** Nol pita untuk keempat peran, dan
+> ketiga panel TETAP tampil bagi yang berhak. Rinciannya §3a.
+> → `screenshots/uat-sales-04-client-record-sesudah-perbaikan.png`
 
 **Bukan bagian dari keenam butir**, ditemukan sambil menguji #5.
 
@@ -97,6 +101,40 @@ satu per satu, dan itu jujur ditulis di sini alih-alih ditebak.
 sendiri: tak terlihat oleh Director/OD.** Tiga kali dalam satu sesi UAT. Setiap
 verifikasi yang hanya memakai Director akan melaporkan "bersih".
 → `screenshots/uat-sales-03-client-record-pita-galat.png`
+
+### 3a · Perbaikan yang mendarat (2026-09-10)
+
+Tiga panel yang 403 saat MEMUAT kini menyembunyikan diri alih-alih berteriak
+merah, lewat satu penolong bersama `isForbidden(err)` di `lib/api.ts`
+(`ApiError.status === 403`):
+
+| Panel | Endpoint yang 403 | Perilaku baru |
+|---|---|---|
+| Unified Board | `GET /board?client=…` | `return null` |
+| Laporan Performa | `GET /clients/{id}/reports` | `return null` |
+| Upcoming Milestones | `GET /clients/{id}/milestones` | `return null` |
+
+**Batas yang dijaga dengan sengaja, dan ini bagian terpenting dari perbaikannya:
+HANYA 403, dan HANYA saat memuat.**
+
+- **Status lain tetap terlihat.** 500 atau kegagalan jaringan yang
+  disembunyikan akan mengubah KERUSAKAN menjadi "datanya memang tidak ada" —
+  persis kelas cacat termahal di repo ini. Satu tes memaku 0/400/401/404/409/
+  422/500/502/503 semuanya `false`.
+- **403 atas sebuah AKSI tetap merah.** Di situ pengguna menekan sesuatu dan
+  berhak tahu kenapa ditolak (aturan rumah #5 — pesan BI `[...]` verbatim).
+
+Diukur ulang sesudah perbaikan, dan yang diperiksa BUKAN cuma "nol pita"
+melainkan juga bahwa panelnya tidak ikut hilang bagi yang berhak:
+
+| Aktor | pita merah | board | laporan | milestones | kontrak |
+|---|---|---|---|---|---|
+| Sales staff (pemilik) | **0** | — | — | — | ✅ |
+| Head Sales | **0** | — | — | — | ✅ |
+| Director | **0** | ✅ | ✅ | ✅ | ✅ |
+| OD murni | **0** | ✅ | ✅ | ✅ | ✅ |
+
+Empat tes di `web-internal/src/lib/api.test.ts` (berkas baru).
 
 ## 4 · Yang TIDAK bisa dibuktikan, dan kenapa
 
@@ -166,7 +204,12 @@ Ditulis supaya sesi berikutnya tidak mengulanginya:
 
 - **§3 mengisi 21 Kategori + 8 Sub Type** — butuh pemilik.
 - **§4 drift check penuh** — tetap tidak bisa dari sandbox.
-- Perbaikan `M19-NAMA-RLS` — lihat koreksi penting di
-  `UAT_M19_BROWSER_20260909.md` §2a: resolvernya **sudah ada**.
-- Perbaikan OBS-1 (§3) — belum ditiketkan sebagai keputusan; ia cacat presentasi,
-  bukan izin.
+- ~~Perbaikan `M19-NAMA-RLS`~~ — ✅ selesai 2026-09-10, plus sapuan modul lain:
+  `UAT_M19_BROWSER_20260909.md` §2b–§2c.
+- ~~Perbaikan OBS-1~~ — ✅ selesai 2026-09-10 (§3a).
+
+**Satu hal kecil yang DITEMUKAN tapi TIDAK diperbaiki** (di luar cakupan, dan
+tidak ditambal diam-diam): AM yang bukan `assigned_am_id` klien mendapat pita
+`prospect attempt not found` — pesan **berbahasa Inggris tanpa kurung siku**,
+melanggar aturan rumah #5. Cacat lama, tidak berhubungan dengan OBS-1, layak
+tiket sendiri.

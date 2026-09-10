@@ -93,6 +93,22 @@ export const api = {
 export const MAX_PAGE_LIMIT = 500;
 
 /** Extracts the verbatim [...] message from any thrown value, with a safe fallback. */
+/**
+ * 403 saat MEMUAT sebuah panel berarti "panel ini bukan hak Anda" — bukan
+ * kesalahan yang perlu diteriakkan. Client Record dulu merender tiga pita
+ * MERAH untuk Sales staff yang justru PEMILIK klien itu (Unified Board,
+ * Laporan, Upcoming Milestones semuanya milik Account/AM), sehingga layar yang
+ * sehat tampak rusak — dan Director/OD tidak pernah melihatnya karena keduanya
+ * lolos `jwt_can_read_all()`. Ditemukan UAT peramban 2026-09-10
+ * (`UAT_SALES_BROWSER_20260910.md` §3, `OBS-1-PITA-GALAT`).
+ *
+ * ⚠️ Hanya untuk kegagalan MEMUAT. 403 atas sebuah AKSI tetap harus terlihat:
+ * di situ pengguna menekan sesuatu dan berhak tahu kenapa ia ditolak.
+ */
+export function isForbidden(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403;
+}
+
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.message;
   if (err instanceof Error) return err.message;

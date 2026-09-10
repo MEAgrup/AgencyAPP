@@ -27,7 +27,12 @@ di Chromium sungguhan, bukan sekadar lolos `next build`.
 justru cacat §2 membuktikan kenapa: ia lolos 200, lolos nol console error,
 lolos typecheck, lolos 736 tes — dan tetap salah di layar.
 
-## 2 · 🔴 TEMUAN — nama klien & nama PIC hilang, tepat untuk peran yang paling memakainya
+## 2 · ✅ TEMUAN (SUDAH DIPERBAIKI 2026-09-10) — nama klien & nama PIC hilang, tepat untuk peran yang paling memakainya
+
+> **STATUS: DIPERBAIKI & DIVERIFIKASI.** Ketujuh situs `left join` diganti
+> pemanggilan resolver; UAT yang menemukannya dijalankan ulang dan kini
+> **62/62 PASS** (dari 59/62). Rinciannya §2b.
+> → `screenshots/uat-m19-05-nama-sesudah-perbaikan.png`
 
 **Gejala.** Untuk **lead Creative** — pengguna utama layar jadwal, "Leader Video"
 yang menyusunnya — setiap kartu slot menampilkan `CLI-202609-0001` dan
@@ -121,10 +126,59 @@ Konsekuensinya untuk rencana kerja:
 | Butuh perubahan izin | mungkin | **tidak** — nol policy disentuh |
 | Bentuk pekerjaan | desain + implementasi | **mekanis**: ganti 7 join dengan pemanggilan resolver, plus tes |
 
-⚠️ Yang TETAP berlaku dari draf pertama: **sapu dulu**. Pola `left join employees`
-+ `readAsActor` mungkin ada di modul lain yang juga melewatkan resolver ini;
-memperbaiki tujuh tempat di M19 saja akan meninggalkan cacat yang sama hidup di
-tempat lain.
+⚠️ Yang TETAP berlaku dari draf pertama: **sapu dulu**. Sapuannya sudah
+dikerjakan — hasilnya §2c.
+
+### 2b · Perbaikan yang mendarat (2026-09-10)
+
+`packages/domain/src/dailyops.ts` (5 situs) dan `scs.ts` (2 situs):
+`left join clients`/`left join employees` → `private.client_toko(...)` /
+`private.employee_display_name(...)`, termasuk `order by`/`group by` yang ikut
+bergantung padanya. **Nol migrasi, nol policy, nol perubahan izin.**
+
+Payload yang sama, diukur ulang per peran sesudah perbaikan:
+
+| Aktor | `assigned_pic_nama` | `client_name` |
+|---|---|---|
+| **EMP-0011 Creative lead** | `'Rian Pratama'` | `'Tur Browser Demo Store'` |
+| EMP-0003 Creative staff | `'Rian Pratama'` | `'Tur Browser Demo Store'` |
+| EMP-0008 Director | `'Rian Pratama'` | `'Tur Browser Demo Store'` |
+
+**Enam tes regresi** di `dailyops-scope.rls.test.ts` (3) dan
+`scs-scope.rls.test.ts` (3) — di berkas `*-scope.rls.test.ts` karena hanya
+`withClaims` yang bisa membedakan resolver dari join; `dailyops.test.ts` dan
+`scs.test.ts` BYPASSRLS dan hijau di kedua bentuk.
+
+**Keenamnya dibuktikan MERAH tanpa perbaikannya**: kode sengaja dikembalikan ke
+bentuk join, keenam tes gagal, lalu perbaikannya dipasang lagi. Dan yang paling
+penting dari percobaan itu: **19 tes lama tetap HIJAU saat cacatnya hidup** —
+bukti langsung bahwa suite yang ada memang tidak bisa menangkap kelas cacat ini.
+
+Satu invariant M19 dijaga ke arah SEBALIKNYA: baris "all client"
+(`client_id` NULL) harus tetap ber-`clientName` **null**. `client_toko(NULL)`
+mengembalikan NULL — mengubahnya jadi `coalesce(..., client_id)` gaya
+`employee_display_name` akan membuat FE berhenti merender "Semua klien".
+
+### 2c · Hasil sapuan modul lain
+
+Sapuan atas SETIAP `left join employees` / `left join clients` di
+`packages/domain`. Yang menentukan bukan bentuk join-nya, melainkan **apakah
+baca itu berjalan di bawah RLS**:
+
+| Situs | Jalur baca | Terdampak? |
+|---|---|---|
+| `dailyops.ts` ×5, `scs.ts` ×2 | `readAsActor` | **YA — diperbaiki** |
+| `kol.ts:236` (`coordinator_nama`) | `db()`, sengaja unscoped & berdokumentasi di rutenya | tidak |
+| `task.ts:947,960` (`requested_by_nama`) | `db()` (rute block-request) | tidak |
+| `leads.ts:1393,1422` (`owner_name`) | `tx` privileged di dalam transaksi tulis, DAN sudah `coalesce(e.nama, id)` | tidak |
+| `finance.ts:1633` (`directorIds`) | inner join, jalur notifikasi privileged, bukan nama tampilan | tidak |
+| ±60 `join clients` lain | INNER join sebagai mekanisme row-scoping RLS | tidak — **jangan disentuh** |
+
+**Kesimpulan sapuan: kelasnya terbatas pada M19 saja.** Modul lain sudah memakai
+resolver (9 modul) atau memang membaca unscoped dengan sengaja. Yang tersisa
+sebagai pelajaran, bukan sebagai tiket: `left join` untuk NAMA hanya aman di
+jalur yang tidak ber-RLS, dan itu tidak terbaca dari bentuk kuerinya — harus
+dilacak sampai rutenya.
 
 ## 3 · Yang TERBUKTI benar (83 butir)
 
@@ -217,4 +271,4 @@ Creative.
 - **§2 UAT enam butir Sales** — belum. Lingkungannya masih nyala dan siap.
 - **§3 mengisi 21 Kategori + 8 Sub Type** — butuh pemilik.
 - **§4 drift check penuh** — tetap tidak bisa dari sandbox.
-- Perbaikan temuan §2 — menunggu ketokan (dua opsi + preseden ada di §2).
+- ~~Perbaikan temuan §2~~ — ✅ selesai 2026-09-10 (§2b), termasuk sapuan (§2c).

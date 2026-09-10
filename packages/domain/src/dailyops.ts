@@ -295,16 +295,32 @@ interface SlotDbRow {
   created_at: Date;
 }
 
+/**
+ * Nama klien & nama PIC lewat RESOLVER, bukan `left join`.
+ *
+ * ⚠️ JANGAN kembalikan ke `left join clients` / `left join employees`. Baca ini
+ * berjalan di bawah `readAsActor`, jadi RLS kedua tabel itu yang memutuskan
+ * apakah join menghasilkan baris — dan lead Creative tidak memenuhi satu lengan
+ * pun (`employees_select` = read-all / diri sendiri / created_by;
+ * `clients_select` nol lengan Creative). Hasilnya `LEFT JOIN` → NULL → sel
+ * kosong, dan layar jatuh ke `CLI-…`/`EMP-…` untuk peran yang justru paling
+ * memakai layar ini. Ditemukan UAT peramban 2026-09-09
+ * (`UAT_M19_BROWSER_20260909.md` §2); cacatnya TIDAK terlihat oleh
+ * Director/OD karena keduanya lolos `jwt_can_read_all()`.
+ *
+ * `private.employee_display_name` (O37) dan `private.client_toko` adalah
+ * SECURITY DEFINER dan mengembalikan NAMA saja — jauh lebih sempit daripada
+ * membuka kedua tabel itu ke setiap lead.
+ */
 const SLOT_COLS = `
-  s.id, s.tanggal, s.client_id, c.toko as client_name, s.studio_code,
-  s.waktu_mulai, s.waktu_selesai, s.assigned_pic, e.nama as pic_nama,
+  s.id, s.tanggal, s.client_id, private.client_toko(s.client_id) as client_name, s.studio_code,
+  s.waktu_mulai, s.waktu_selesai, s.assigned_pic,
+  private.employee_display_name(s.assigned_pic) as pic_nama,
   s.jenis_paket, s.task_type, s.target_qty, s.actual_qty, s.notes,
   s.created_by, s.created_at`;
 
 const SLOT_FROM = `
-  from prod_slots s
-  left join clients c on c.id = s.client_id
-  left join employees e on e.employee_id = s.assigned_pic`;
+  from prod_slots s`;
 
 function ymd(v: string | Date): string {
   return typeof v === 'string' ? v.slice(0, 10) : tz.dateString(v);
@@ -689,10 +705,11 @@ export async function markUnavailable(
       createdBy: actor.employeeId,
     });
     const rows = await tx<UnavDbRow[]>`
-      select u.id, u.employee_id, e.nama, u.tanggal_mulai, u.tanggal_selesai, u.alasan,
+      select u.id, u.employee_id,
+             private.employee_display_name(u.employee_id) as nama,
+             u.tanggal_mulai, u.tanggal_selesai, u.alasan,
              u.catatan, u.dicatat_oleh, u.created_at
         from pic_unavailability u
-        left join employees e on e.employee_id = u.employee_id
        where u.id = ${id}`;
     return toUnavRow(rows[0]);
   });
@@ -789,12 +806,13 @@ export async function daySchedule(
   const slots = rows.map(toSlotRow);
 
   const unavRows = await sql<UnavDbRow[]>`
-    select u.id, u.employee_id, e.nama, u.tanggal_mulai, u.tanggal_selesai, u.alasan,
+    select u.id, u.employee_id,
+           private.employee_display_name(u.employee_id) as nama,
+           u.tanggal_mulai, u.tanggal_selesai, u.alasan,
            u.catatan, u.dicatat_oleh, u.created_at
       from pic_unavailability u
-      left join employees e on e.employee_id = u.employee_id
      where ${tanggal}::date between u.tanggal_mulai and u.tanggal_selesai
-     order by e.nama asc, u.id asc`;
+     order by private.employee_display_name(u.employee_id) asc, u.id asc`;
 
   return {
     tanggal,
@@ -820,10 +838,11 @@ export async function listUnavailability(
   if (!RE_YMD.test(dariTanggal) || !RE_YMD.test(sampaiTanggal)) throw new ValidationError();
   if (!canReadSchedule(actor)) throw new ForbiddenError(MSG_BACA_JADWAL_FORBIDDEN);
   const rows = await sql<UnavDbRow[]>`
-    select u.id, u.employee_id, e.nama, u.tanggal_mulai, u.tanggal_selesai, u.alasan,
+    select u.id, u.employee_id,
+           private.employee_display_name(u.employee_id) as nama,
+           u.tanggal_mulai, u.tanggal_selesai, u.alasan,
            u.catatan, u.dicatat_oleh, u.created_at
       from pic_unavailability u
-      left join employees e on e.employee_id = u.employee_id
      where u.tanggal_mulai <= ${sampaiTanggal}::date
        and u.tanggal_selesai >= ${dariTanggal}::date
      order by u.tanggal_mulai asc, u.id asc`;
@@ -849,17 +868,17 @@ export async function sameDaySummary(
     employee_id: string; nama: string | null; jumlah_slot: string; slot_ditutup: string;
     total_target: string; total_actual: string;
   }[]>(
-    `select s.assigned_pic as employee_id, e.nama,
+    `select s.assigned_pic as employee_id,
+            private.employee_display_name(s.assigned_pic) as nama,
             count(*)::text as jumlah_slot,
             count(s.actual_qty)::text as slot_ditutup,
             coalesce(sum(s.target_qty), 0)::text as total_target,
             coalesce(sum(s.actual_qty), 0)::text as total_actual
        from prod_slots s
-       left join employees e on e.employee_id = s.assigned_pic
       where s.tanggal between $1::date and $2::date
         and ($3::text is null or s.assigned_pic = $3::text)
-      group by s.assigned_pic, e.nama
-      order by e.nama asc, s.assigned_pic asc`,
+      group by s.assigned_pic
+      order by private.employee_display_name(s.assigned_pic) asc, s.assigned_pic asc`,
     [dariTanggal, sampaiTanggal, hanyaSendiri ? actor.employeeId : null],
   );
   return rows.map((r) => {
