@@ -1,5 +1,11 @@
 # Handoff — Lima fitur tambahan pemilik (2026-09-10)
 
+> ⚠️ **SEBAGIAN SUDAH KADALUARSA.** Baca
+> `HANDOFF_PR3_LAPORAN_PENJUALAN_20260910.md` LEBIH DULU — ia menggantikan §2
+> (posisi PR) dan §9 (langkah berikutnya) di bawah, dan mencatat dua bug yang
+> ditemukan sesudah berkas ini ditulis. Yang tetap berlaku di sini: §0 permintaan
+> verbatim pemilik, §1 ketokan, §3 isi PR-1, §4 aksi pemilik, §6 temuan riset.
+
 > **Baca ini lebih dulu, lalu `/root/.claude/plans/tambahan-fitur-buat-synchronous-bunny.md`**
 > (rencana lengkap lima bagian, sudah disetujui pemilik). Berkas ini menyatakan **posisi
 > sebenarnya**: apa yang sudah mendarat, apa yang belum, dan jebakan apa yang sudah dipetakan
