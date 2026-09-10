@@ -36,7 +36,10 @@ import {
   MSG_EMPLOYEE_NOT_FOUND,
   MSG_INCOMPLETE,
   MSG_LAYERED_ROLE_DENIED,
+  MSG_RESIGN_ALASAN_WAJIB,
+  MSG_RESIGN_DENIED,
   MSG_ROLE_MAPPING_DENIED,
+  MSG_SUDAH_RESIGN,
   MSG_UNMAPPED_POSITION,
   NotFoundError,
   addHariLibur,
@@ -46,7 +49,9 @@ import {
   MSG_HARI_LIBUR_KETERANGAN,
   MSG_HARI_LIBUR_NOT_FOUND,
   MSG_HARI_LIBUR_TANGGAL,
+  handoverList,
   removeHariLibur,
+  resignEmployee,
   setLayeredRole,
   updateEmployeeAssignment,
   upsertRoleMapping,
@@ -83,6 +88,16 @@ describe('admin permission matrix', () => {
     // authorization rules, so it is Director/OD only.
     expect(canReadAdmin(salesLead())).toBe(false);
     expect(canReadAdmin(salesStaff())).toBe(false);
+  });
+
+  it('lets the HR Lead read — a write authority must be able to find its subjects', () => {
+    // 2026-09-10: `canManageEmployeeAssignment` has let an HR Lead MUTATE an
+    // employee since 2026-08-10 while this predicate refused them the LIST, so
+    // the only non-Director the mutasi arm exists for could never find anyone to
+    // mutate. The read arm mirrors the write arm exactly — no wider.
+    expect(canReadAdmin(hrLead())).toBe(true);
+    // And it really is the HR arm doing it, not a blanket "any lead" loosening.
+    expect(canReadAdmin(salesLead())).toBe(false);
   });
 
   it('lets ONLY Director write — OD can read the plane but never change it', () => {
@@ -689,5 +704,130 @@ describeDb('hari libur (integration)', () => {
     await addHariLibur(sql, director(), { tanggal: TANGGAL, keterangan: 'Natal (uji)' });
     const after = await sql<{ n: number }[]>`select working_days_between('2099-12-24','2099-12-25') as n`;
     expect(Number(after[0].n)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Resign — permanent access revocation (owner decision 2026-09-10).
+// ---------------------------------------------------------------------------
+describeDb('resignEmployee', () => {
+  const TARGET = 'ZZ-RESIGN';
+
+  it('gates to Director + HR Lead; OD (read-only) and other leads are refused', async () => {
+    await seedEmployee(TARGET);
+    for (const actor of [od(), salesLead(), salesStaff()]) {
+      await expect(resignEmployee(sql, actor, TARGET, { alasan: 'pindah kerja' }))
+        .rejects.toThrow(MSG_RESIGN_DENIED);
+    }
+    // Still active — a refused resign must not have half-applied.
+    const row = await sql<{ status_aktif: boolean; resigned_at: Date | null }[]>`
+      select status_aktif, resigned_at from employees where employee_id = ${TARGET}`;
+    expect(row[0].status_aktif).toBe(true);
+    expect(row[0].resigned_at).toBeNull();
+  });
+
+  it('requires a reason, and says WHICH field is missing', async () => {
+    await seedEmployee(TARGET);
+    await expect(resignEmployee(sql, hrLead(), TARGET, { alasan: '   ' }))
+      .rejects.toThrow(MSG_RESIGN_ALASAN_WAJIB);
+    // An unknown employee is a 404, not a validation error.
+    await expect(resignEmployee(sql, hrLead(), 'ZZ-NOPE', { alasan: 'x' }))
+      .rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('revokes access, keeps the row, audits before→after, and refuses a second resign', async () => {
+    await seedEmployee(TARGET);
+    const watermark = await auditWatermark();
+
+    const res = await resignEmployee(sql, hrLead(), TARGET, { alasan: 'resign 30 Sept' });
+    expect(res.employee.statusAktif).toBe(false);
+    expect(res.employee.resignedAt).not.toBeNull();
+
+    // The ROW SURVIVES (house rule #3) — historical attribution keeps resolving.
+    const row = await sql<{ status_aktif: boolean; resigned_at: Date | null; resigned_by: string | null }[]>`
+      select status_aktif, resigned_at, resigned_by from employees where employee_id = ${TARGET}`;
+    expect(row).toHaveLength(1);
+    expect(row[0].status_aktif).toBe(false);
+    expect(row[0].resigned_at).not.toBeNull();
+    expect(row[0].resigned_by).toBe('ZZ-HRLEAD');
+
+    // One audit row, carrying the before state and the reason.
+    const audit = await sql<{ action: string; before_json: unknown; after_json: Record<string, unknown> }[]>`
+      select action, before_json, after_json from audit_log
+       where entity_id = ${TARGET} and id > ${watermark} order by id`;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].action).toBe('resign');
+    expect(audit[0].before_json).toMatchObject({ status_aktif: true, resigned_at: null });
+    expect(audit[0].after_json).toMatchObject({ status_aktif: false, alasan: 'resign 30 Sept' });
+
+    // PERMANENT: a second attempt is refused, not treated as idempotent — a
+    // second `resign` audit row would claim a revocation that did not happen.
+    await expect(resignEmployee(sql, director(), TARGET, { alasan: 'lagi' }))
+      .rejects.toThrow(MSG_SUDAH_RESIGN);
+  });
+
+  it('revokes any live session, so an issued token does not outlive the resign', async () => {
+    await seedEmployee(TARGET);
+    await sql`
+      insert into sessions (token, employee_id, expires_at, created_by)
+      values ('ZZ-TOK-LIVE', ${TARGET}, now() + interval '1 day', 'ZZ-DIR')`;
+    try {
+      await resignEmployee(sql, director(), TARGET, { alasan: 'cabut' });
+      const s = await sql<{ revoked_at: Date | null }[]>`
+        select revoked_at from sessions where token = 'ZZ-TOK-LIVE'`;
+      expect(s[0].revoked_at).not.toBeNull();
+    } finally {
+      await sql`delete from sessions where token = 'ZZ-TOK-LIVE'`;
+    }
+  });
+
+  it('drops the person from the assignable picker but KEEPS them on the historical roster', async () => {
+    // The distinction migration 20260929010000 exists for: a resigned salesperson
+    // must stop being selectable, yet must not vanish from Kinerja Sales along
+    // with every closing they ever made.
+    await seedMapping('BUSINESS DEVELOPMENT', 'MARKETING STRATEGIST', 'Marketing', 'staff');
+    await seedEmployee(TARGET);
+    await resignEmployee(sql, director(), TARGET, { alasan: 'cabut' });
+
+    const assignable = await sql<{ employee_id: string }[]>`
+      select employee_id from private.employee_assignable() where employee_id = ${TARGET}`;
+    expect(assignable).toHaveLength(0);
+
+    const roster = await sql<{ employee_id: string; resigned_at: Date | null }[]>`
+      select employee_id, resigned_at from private.employee_roster() where employee_id = ${TARGET}`;
+    expect(roster).toHaveLength(1);
+    expect(roster[0].resigned_at).not.toBeNull();
+  });
+});
+
+describeDb('handoverList', () => {
+  const TARGET = 'ZZ-HANDOVER';
+
+  it('reports what still points at the employee, and reports nothing for a clean one', async () => {
+    await seedEmployee(TARGET);
+    expect(await handoverList(sql, TARGET)).toEqual([]);
+
+    // One open Penugasan Internal, one already-terminal — only the open one counts.
+    // `dibatalkan_pada` is not optional decoration: `ck_internal_tasks_batal`
+    // refuses a `[Dibatalkan]` row without it, which is the schema keeping the
+    // house-rule-#4 anchor honest. The fixture obeys it rather than working
+    // around it.
+    await sql`
+      insert into internal_tasks
+        (id, judul, assignee_id, assignee_division, due_date, status, dibatalkan_pada, created_by)
+      values ('ZZ-TSK-OPEN', 'Masih jalan', ${TARGET}, 'Marketing', '2099-01-01', '[Ditugaskan]', null,  ${TARGET}),
+             ('ZZ-TSK-DONE', 'Sudah kelar', ${TARGET}, 'Marketing', '2099-01-01', '[Dibatalkan]', now(), ${TARGET})`;
+    try {
+      const items = await handoverList(sql, TARGET);
+      expect(items.map((i) => i.id)).toEqual(['ZZ-TSK-OPEN']);
+      expect(items[0].kind).toBe('penugasan');
+      expect(items[0].label).toBe('Masih jalan');
+    } finally {
+      await sql`delete from internal_tasks where id like 'ZZ-TSK-%'`;
+    }
+  });
+
+  it('is empty for a blank id rather than reporting every row in the table', async () => {
+    expect(await handoverList(sql, '   ')).toEqual([]);
   });
 });

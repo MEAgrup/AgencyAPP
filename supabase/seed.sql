@@ -14,7 +14,7 @@
 -- pembuatan entity ber-ID menulis baris audit 'create' immutable, seperti kode domain.
 
 -- ============================================================================
--- 1) Karyawan (10) — upsert idempotent (mirror HRIS sync dari testdata/employees.csv)
+-- 1) Karyawan (11) — upsert idempotent (mirror HRIS sync dari testdata/employees.csv)
 -- ============================================================================
 INSERT INTO employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by) VALUES
     ('EMP-0001', 'Budi Santoso',    'budi@mea.co.id',    'Sales',      'Sales Executive',  true, 'SYSTEM'),
@@ -26,13 +26,21 @@ INSERT INTO employees (employee_id, nama, email, divisi, jabatan, status_aktif, 
     ('EMP-0007', 'Fajar Nugroho',   'fajar@mea.co.id',   'Finance',    'Finance Staff',    true, 'SYSTEM'),
     ('EMP-0008', 'Yohan Saputra',   'yohan@mea.co.id',   'Management', 'Director',         true, 'SYSTEM'),
     ('EMP-0009', 'Nerissa Arviana', 'nerissa@mea.co.id', 'Management', 'Director',         true, 'SYSTEM'),
-    ('EMP-0010', 'Hans Kurniawan',  'hans@mea.co.id',    'Management', 'Director',         true, 'SYSTEM')
+    ('EMP-0010', 'Hans Kurniawan',  'hans@mea.co.id',    'Management', 'Director',         true, 'SYSTEM'),
+    -- EMP-0011 memberi gerbang `admin.canManageEmployeeAssignment` (Director ATAU
+    -- Lead divisi HR) seorang pemegang di fixture. Sebelum ini lengan HR-nya ada
+    -- di kode tapi nol orang memegangnya, jadi setiap tes gerbang hanya pernah
+    -- menguji cabang Director-nya. Pemetaan HR yang SUNGGUHAN tetap pekerjaan
+    -- pemilik lewat /admin/role-mappings — pasangan HRIS divisi/jabatan aslinya
+    -- tidak diketahui dari sini, dan `seed/role_mappings_riil.csv` sengaja tidak
+    -- disentuh karena berisi pemetaan nyata.
+    ('EMP-0011', 'Maya Hartono',    'maya@mea.co.id',    'HR',         'HR Head',          true, 'SYSTEM')
 ON CONFLICT (employee_id) DO UPDATE SET
     nama = EXCLUDED.nama, email = EXCLUDED.email, divisi = EXCLUDED.divisi,
     jabatan = EXCLUDED.jabatan, status_aktif = EXCLUDED.status_aktif;
 
 -- ============================================================================
--- 2) Role mapping HRIS(divisi,jabatan) -> CDPS(division,level) (11) — upsert
+-- 2) Role mapping HRIS(divisi,jabatan) -> CDPS(division,level) (14) — upsert
 -- ============================================================================
 INSERT INTO role_mappings (divisi, jabatan, division, level, created_by) VALUES
     ('Sales',    'Sales Executive',   'Sales',    'staff', 'SYSTEM'),
@@ -46,7 +54,9 @@ INSERT INTO role_mappings (divisi, jabatan, division, level, created_by) VALUES
     ('KOL',      'KOL Specialist',    'KOL',      'staff', 'SYSTEM'),
     ('KOL',      'KOL Lead',          'KOL',      'lead',  'SYSTEM'),
     ('Finance',  'Finance Staff',     'Finance',  'staff', 'SYSTEM'),
-    ('Finance',  'Finance Head',      'Finance',  'lead',  'SYSTEM')
+    ('Finance',  'Finance Head',      'Finance',  'lead',  'SYSTEM'),
+    ('HR',       'HR Head',           'HR',       'lead',  'SYSTEM'),
+    ('HR',       'HR Staff',          'HR',       'staff', 'SYSTEM')
 ON CONFLICT (divisi, jabatan) DO UPDATE SET
     division = EXCLUDED.division, level = EXCLUDED.level;
 

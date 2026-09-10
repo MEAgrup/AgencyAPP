@@ -412,9 +412,27 @@ const TIM: NavNode[] = [
 // ---------------------------------------------------------------------------
 // ADMIN
 // ---------------------------------------------------------------------------
+/**
+ * Divisi CDPS yang Lead-nya dipercaya mengelola roster karyawan (mutasi +
+ * resign). Cermin `admin.HR_DIVISION` / `admin.canManageEmployeeAssignment` di
+ * `packages/domain/src/admin.ts` — bukan aturan baru, dan bukan nilai kedua:
+ * kalau konstanta di sana berubah, baris ini ikut.
+ */
+const HR = 'HR';
+
 const ADMIN: NavNode[] = [
-  // Director/OD saja (tidak berubah): PERMISSIONS.md "Manage employees / role mapping".
-  { href: '/admin/employees', label: 'Karyawan', access: (role) => Boolean(role.director || role.od) },
+  // Director/OD membaca; Lead divisi HR juga, karena ia yang MENULIS mutasi &
+  // resign (`admin.canManageEmployeeAssignment`, DECISIONS 2026-08-10 +
+  // ketokan resign 2026-09-10). Sebelumnya gerbang ini `director || od` saja,
+  // sementara halamannya sudah menghitung `canMutate` dengan lengan HR —
+  // artinya seorang Lead HR lolos gerbang server tapi tidak pernah melihat
+  // menunya. Itu persis "hiding something reachable = a silent functional
+  // regression" di kepala berkas ini.
+  {
+    href: '/admin/employees',
+    label: 'Karyawan',
+    access: (role) => Boolean(role.director || role.od) || isLead(role, HR),
+  },
   {
     href: '/admin/role-mappings',
     label: 'Role Mapping',

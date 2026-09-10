@@ -1002,6 +1002,7 @@ describe('adminEmployeeToWire', () => {
     statusAktif: true,
     flagged: false,
     syncedAt: new Date('2026-07-29T02:00:00Z'),
+    resignedAt: null,
   };
 
   it('emits snake_case with the date as an ISO string', () => {
@@ -1014,6 +1015,7 @@ describe('adminEmployeeToWire', () => {
       status_aktif: true,
       flagged: false,
       synced_at: '2026-07-29T02:00:00.000Z',
+      resigned_at: null,
     });
   });
 
@@ -1021,7 +1023,12 @@ describe('adminEmployeeToWire', () => {
     // O43's lesson: a MISSING key is what blanks a page, so assert presence of
     // exactly what the table body reads.
     const wire = adminEmployeeToWire(row) as unknown as Record<string, unknown>;
-    for (const key of ['employee_id', 'nama', 'email', 'divisi', 'jabatan', 'status_aktif', 'flagged']) {
+    for (const key of [
+      'employee_id', 'nama', 'email', 'divisi', 'jabatan', 'status_aktif', 'flagged',
+      // The Resign action is gated on this key, so an absent one would re-offer
+      // the button on someone who has already left.
+      'resigned_at',
+    ]) {
       expect(wire).toHaveProperty(key);
     }
   });

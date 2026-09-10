@@ -1150,7 +1150,17 @@ DECLARE
     -- mereka sentuh (probe: 0 baris). `creator_bookings_select` TETAP di daftar
     -- ini dengan sengaja: Finance tidak perlu membaca papan booking KOL.
     'creator_bookings_select','creator_lists_select',
-    'dependencies_select','employees_select','live_stream_sessions_select',
+    -- `employees_select` KELUAR dari daftar ini 2026-09-10 (migrasi
+    -- `20260929010000_resign_permanen`): ia sekarang punya lengan
+    -- `jwt_is_lead() AND jwt_division() = 'HR'`. Ledger MENYUSUT, dan itu arah
+    -- yang benar. Alasannya bukan kenyamanan: `canManageEmployeeAssignment`
+    -- sudah mengizinkan Lead HR MEMUTASI karyawan sejak 2026-08-10, sementara
+    -- policy ini hanya memberinya baris dirinya sendiri — jadi satu-satunya
+    -- peran yang lengan mutasi itu dibuat untuk melayani tidak pernah bisa
+    -- menemukan subjeknya. Lengannya sengaja SELURUH tabel, bukan per-divisi
+    -- seperti lengan Sales/Account, karena HR memang mengelola roster semua
+    -- divisi. Read-only: nol write policy ditambahkan.
+    'dependencies_select','live_stream_sessions_select',
     'marketing_performance_records_select',
     -- `master_service_duration_options_select` (FS-6, migrasi 20260925040000)
     -- masuk daftar ini DENGAN SENGAJA, dan keputusannya dicatat di

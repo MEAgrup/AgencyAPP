@@ -232,6 +232,70 @@ describeDb('syncEmployees (integration)', () => {
     });
   });
 
+  it('a resigned employee is NEVER reactivated, however active the source claims they are', async () => {
+    // The whole point of `employees.resigned_at`. Before migration 20260929010000
+    // this exact sequence unbanned them in GoTrue and audited it as
+    // `hris_sync:reactivated` — no error anywhere, and they could log in again.
+    await inRollback(async (tx) => {
+      await syncEmployees(tx, [emp('ZZ-A')], 'SYSTEM', { full: false });
+      // Resign, as `admin.resignEmployee` leaves the row.
+      await tx`
+        update employees
+           set resigned_at = now(), resigned_by = 'ZZ-HR', status_aktif = false
+         where employee_id = 'ZZ-A'`;
+
+      // The sheet still lists them as active — the ordinary real-world case.
+      const res = await syncEmployees(tx, [emp('ZZ-A', { statusAktif: true })], 'SYSTEM', { full: false });
+
+      expect(res.reactivated).toBe(0);
+      expect(res.skippedResigned).toBe(1);
+      const row = await tx<{ status_aktif: boolean; resigned_at: Date | null }[]>`
+        select status_aktif, resigned_at from employees where employee_id = 'ZZ-A'`;
+      expect(row[0].status_aktif).toBe(false);
+      expect(row[0].resigned_at).not.toBeNull();
+
+      // Not silent: the disagreement with the source is on the record.
+      const audits = await tx<{ n: number }[]>`
+        select count(*)::int as n from audit_log
+         where entity_id = 'ZZ-A' and action = 'hris_sync:skipped_resigned'`;
+      expect(audits[0].n).toBe(1);
+      // And emphatically NOT recorded as a reactivation.
+      const wrong = await tx<{ n: number }[]>`
+        select count(*)::int as n from audit_log
+         where entity_id = 'ZZ-A' and action = 'hris_sync:reactivated'`;
+      expect(wrong[0].n).toBe(0);
+    });
+  });
+
+  it('still refreshes a resigned row\'s profile fields — but never its status', async () => {
+    // A name or division correction is worth having on a historical row; what
+    // must not move is access. Both halves asserted so a future "just skip the
+    // row entirely" simplification fails here.
+    await inRollback(async (tx) => {
+      await syncEmployees(tx, [emp('ZZ-A', { nama: 'Lama' })], 'SYSTEM', { full: false });
+      await tx`
+        update employees set resigned_at = now(), resigned_by = 'ZZ-HR', status_aktif = false
+         where employee_id = 'ZZ-A'`;
+      await syncEmployees(tx, [emp('ZZ-A', { nama: 'Baru', statusAktif: true })], 'SYSTEM', { full: false });
+      const row = await tx<{ nama: string; status_aktif: boolean }[]>`
+        select nama, status_aktif from employees where employee_id = 'ZZ-A'`;
+      expect(row[0].nama).toBe('Baru');
+      expect(row[0].status_aktif).toBe(false);
+    });
+  });
+
+  it('a source that already agrees the person is inactive is not counted as an anomaly', async () => {
+    await inRollback(async (tx) => {
+      await syncEmployees(tx, [emp('ZZ-A')], 'SYSTEM', { full: false });
+      await tx`
+        update employees set resigned_at = now(), resigned_by = 'ZZ-HR', status_aktif = false
+         where employee_id = 'ZZ-A'`;
+      const res = await syncEmployees(tx, [emp('ZZ-A', { statusAktif: false })], 'SYSTEM', { full: false });
+      expect(res.skippedResigned).toBe(0);
+      expect(res.deactivated).toBe(0);
+    });
+  });
+
   it('full sync flags employees absent from the source', async () => {
     await inRollback(async (tx) => {
       await syncEmployees(tx, [emp('ZZ-A'), emp('ZZ-B')], 'SYSTEM', { full: false });

@@ -3,8 +3,39 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import type { CredentialInfo, EmployeeImportResult, RoleMapping } from '@/lib/types';
+import type {
+  AdminEmployee,
+  CredentialInfo,
+  EmployeeImportResult,
+  HandoverItem,
+  RoleMapping,
+} from '@/lib/types';
 import { pairKey, parsePairKey } from '@/lib/role-mapping-pairs';
+import {
+  employeeHandover,
+  handoverLabel,
+  listAdminEmployees,
+  resignEmployee,
+} from '@/lib/admin-employees';
+
+/**
+ * One roster row: the employee directory record, plus the credential columns
+ * where the caller is allowed to see them.
+ *
+ * The roster SPINE is `/admin/employees`, not `/auth/admin/credentials` as it
+ * was until 2026-09-10 — that endpoint filters `WHERE status_aktif` (so a
+ * resigned employee vanished from the table, leaving the operator no
+ * confirmation their own action landed) and scopes a Lead to their own mapped
+ * division (so an HR Lead saw HR staff only, and could never reach the person
+ * they were asked to mutate). Credentials are merged in on top; a row without
+ * them simply shows `—` in those columns, which is honest — an HR Lead has no
+ * business reading, let alone resetting, another division's password.
+ *
+ * Still ONE table, so DECISIONS 2026-08-10 stands.
+ */
+type RosterRow = AdminEmployee & {
+  cred: CredentialInfo | null;
+};
 
 export default function AdminEmployeesPage() {
   const { role } = useAuth();
@@ -19,7 +50,7 @@ export default function AdminEmployeesPage() {
   // already carries email/divisi/jabatan alongside the credential status — so the
   // page shows ONE table (DECISIONS 2026-08-10: the second, /admin/employees
   // directory table was a duplicate and was removed).
-  const [creds, setCreds] = useState<CredentialInfo[] | null>(null);
+  const [creds, setCreds] = useState<RosterRow[] | null>(null);
   const [credError, setCredError] = useState<string | null>(null);
 
   // Reset password (temp-password recovery path).
@@ -40,6 +71,18 @@ export default function AdminEmployeesPage() {
   const [savingMut, setSavingMut] = useState(false);
   const [mutError, setMutError] = useState<string | null>(null);
   const [mutMsg, setMutMsg] = useState<string | null>(null);
+
+  // Resign — permanent access revocation. Same gate as mutasi (`canMutate`);
+  // the server is the real one. Two steps on purpose: step 1 shows what the
+  // person still holds, step 2 makes the operator retype the ID. This is a
+  // one-way door with no undo, so a single mis-click must not be enough.
+  const [resignTarget, setResignTarget] = useState<RosterRow | null>(null);
+  const [resignHandover, setResignHandover] = useState<HandoverItem[] | null>(null);
+  const [resignAlasan, setResignAlasan] = useState('');
+  const [resignConfirmId, setResignConfirmId] = useState('');
+  const [resigning, setResigning] = useState(false);
+  const [resignError, setResignError] = useState<string | null>(null);
+  const [resignMsg, setResignMsg] = useState<string | null>(null);
 
   // Divisi/jabatan are CHOSEN from existing Role Mapping entries, never typed —
   // a free-text pair that matches no mapping strands the employee with no CDPS
@@ -78,12 +121,22 @@ export default function AdminEmployeesPage() {
 
   const loadCreds = useCallback(async () => {
     setCredError(null);
-    try {
-      const res = await api.get<{ data: CredentialInfo[] }>('/auth/admin/credentials');
-      setCreds(res.data);
-    } catch (err) {
-      setCredError(errorMessage(err));
+    // The directory is required; credentials are a bonus. Fetched with
+    // allSettled rather than await-in-sequence so a caller who may read the
+    // roster but NOT passwords (an HR Lead) still gets a table instead of an
+    // error page — the exact case that made this feature unusable before.
+    const [dir, cred] = await Promise.allSettled([
+      listAdminEmployees(),
+      api.get<{ data: CredentialInfo[] }>('/auth/admin/credentials'),
+    ]);
+    if (dir.status === 'rejected') {
+      setCredError(errorMessage(dir.reason));
+      return;
     }
+    const credById = new Map<string, CredentialInfo>(
+      cred.status === 'fulfilled' ? cred.value.data.map((c) => [c.employee_id, c]) : [],
+    );
+    setCreds(dir.value.data.map((e) => ({ ...e, cred: credById.get(e.employee_id) ?? null })));
   }, []);
 
   useEffect(() => {
@@ -192,7 +245,7 @@ export default function AdminEmployeesPage() {
     }
   }
 
-  function startEdit(c: CredentialInfo) {
+  function startEdit(c: RosterRow) {
     setEditId(c.employee_id);
     setEditDivisi(c.divisi);
     setEditJabatan(c.jabatan);
@@ -224,6 +277,53 @@ export default function AdminEmployeesPage() {
       setMutError(errorMessage(err));
     } finally {
       setSavingMut(false);
+    }
+  }
+
+  async function openResign(c: RosterRow) {
+    setResignTarget(c);
+    setResignHandover(null);
+    setResignAlasan('');
+    setResignConfirmId('');
+    setResignError(null);
+    setResignMsg(null);
+    try {
+      setResignHandover((await employeeHandover(c.employee_id)).data);
+    } catch (err) {
+      // The preview failing must not block the revocation itself — but it must
+      // not be silently rendered as "nothing assigned" either, which would be a
+      // false reassurance at exactly the wrong moment.
+      setResignError(errorMessage(err));
+    }
+  }
+
+  function closeResign() {
+    setResignTarget(null);
+    setResignHandover(null);
+    setResignAlasan('');
+    setResignConfirmId('');
+    setResignError(null);
+  }
+
+  async function confirmResign() {
+    if (!resignTarget) return;
+    setResignError(null);
+    setResigning(true);
+    try {
+      const res = await resignEmployee(resignTarget.employee_id, { alasan: resignAlasan });
+      const left = res.data.handover.length;
+      setResignMsg(
+        `Akses ${resignTarget.nama} (${resignTarget.employee_id}) dicabut permanen.` +
+          (left > 0
+            ? ` ${left} penugasan masih menunjuk namanya — serahkan lewat halaman terkait.`
+            : ' Tidak ada penugasan yang tertinggal.'),
+      );
+      closeResign();
+      await loadCreds();
+    } catch (err) {
+      setResignError(errorMessage(err));
+    } finally {
+      setResigning(false);
     }
   }
 
@@ -483,6 +583,108 @@ export default function AdminEmployeesPage() {
         {credError && <div className="alert alertError">{credError}</div>}
         {mutError && <div className="alert alertError">{mutError}</div>}
         {mutMsg && <div className="alert alertSuccess">{mutMsg}</div>}
+        {resignMsg && <div className="alert alertSuccess">{resignMsg}</div>}
+
+        {resignTarget && (
+          <div className="card" style={{ borderColor: 'var(--danger, #b91c1c)' }}>
+            <div className="cardHeader">
+              <h2>
+                Cabut akses: {resignTarget.nama}{' '}
+                <span className="muted">({resignTarget.employee_id})</span>
+              </h2>
+            </div>
+
+            <div className="alert alertError" role="alert">
+              <strong>Ini permanen dan tidak bisa dibatalkan.</strong> Karyawan langsung tidak
+              bisa login, sesinya dicabut, dan namanya hilang dari semua pilihan penugasan.
+              Sinkron karyawan berikutnya <strong>tidak akan</strong> mengaktifkannya kembali,
+              walau sheet HRIS masih menyebutnya aktif. Baris datanya tetap disimpan supaya
+              riwayat lama (klien, komisi, aset) tetap terbaca — memperbaiki kekeliruan di sini
+              butuh Director dan migrasi, bukan satu klik.
+            </div>
+
+            <h3>Yang masih menunjuk namanya</h3>
+            {resignError && <div className="alert alertError" role="alert">{resignError}</div>}
+            {resignHandover === null && !resignError && <p className="muted">Memuat...</p>}
+            {resignHandover !== null && resignHandover.length === 0 && (
+              <div className="emptyState">
+                Tidak ada penugasan aktif. Aman untuk dicabut.
+              </div>
+            )}
+            {resignHandover !== null && resignHandover.length > 0 && (
+              <>
+                <p className="muted" style={{ fontSize: 12 }}>
+                  Sistem <strong>tidak</strong> memindahkan ini otomatis. Kepemilikan klien
+                  menentukan komisi, jadi pemindahannya harus keputusan yang tercatat — lakukan
+                  lewat halaman klien/divisi terkait (jalur reassign M4), bukan dari sini.
+                </p>
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Jenis</th>
+                        <th>ID</th>
+                        <th>Keterangan</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resignHandover.map((h) => (
+                        <tr key={`${h.kind}-${h.id}`}>
+                          <td>{handoverLabel(h.kind)}</td>
+                          <td>{h.id}</td>
+                          <td>{h.label || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            <div className="formRow">
+              <div className="field">
+                <label htmlFor="resign-alasan">Alasan (wajib)</label>
+                <input
+                  id="resign-alasan"
+                  className="input"
+                  value={resignAlasan}
+                  onChange={(e) => setResignAlasan(e.target.value)}
+                  placeholder="mis. resign efektif 30 September"
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="resign-confirm">
+                  Ketik ulang ID karyawan (<code>{resignTarget.employee_id}</code>)
+                </label>
+                <input
+                  id="resign-confirm"
+                  className="input"
+                  value={resignConfirmId}
+                  onChange={(e) => setResignConfirmId(e.target.value)}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+
+            <div className="row" style={{ gap: 8 }}>
+              <button
+                type="button"
+                className="btn btnDanger"
+                disabled={
+                  resigning ||
+                  resignAlasan.trim() === '' ||
+                  resignConfirmId.trim() !== resignTarget.employee_id
+                }
+                onClick={confirmResign}
+              >
+                {resigning ? 'Mencabut...' : 'Cabut akses permanen'}
+              </button>
+              <button type="button" className="btn" disabled={resigning} onClick={closeResign}>
+                Batal
+              </button>
+            </div>
+          </div>
+        )}
 
         {creds && creds.length > 0 && (
           <p className="muted">
@@ -510,6 +712,7 @@ export default function AdminEmployeesPage() {
                   <th>Punya Password</th>
                   <th>Wajib Ganti</th>
                   <th>Terakhir Ganti</th>
+                  <th>Status</th>
                   {canMutate && <th>Aksi</th>}
                 </tr>
               </thead>
@@ -547,21 +750,41 @@ export default function AdminEmployeesPage() {
                       </td>
                       {!editing && <td>{c.jabatan}</td>}
                       <td>
-                        <span className={`badge badge-${c.has_password ? 'green' : 'red'}`}>
-                          {c.has_password ? 'Ya' : 'Belum'}
-                        </span>
+                        {/* `—`, bukan "Belum": tanpa hak baca kredensial kita
+                            memang TIDAK TAHU, dan itu beda dari "belum punya". */}
+                        {c.cred === null ? (
+                          <span className="muted">—</span>
+                        ) : (
+                          <span className={`badge badge-${c.cred.has_password ? 'green' : 'red'}`}>
+                            {c.cred.has_password ? 'Ya' : 'Belum'}
+                          </span>
+                        )}
                       </td>
                       <td>
-                        {c.must_change_password ? (
+                        {c.cred?.must_change_password ? (
                           <span className="badge badge-orange">Wajib ganti</span>
                         ) : (
                           <span className="muted">—</span>
                         )}
                       </td>
                       <td>
-                        {c.password_changed_at
-                          ? new Date(c.password_changed_at).toLocaleDateString('id-ID')
+                        {c.cred?.password_changed_at
+                          ? new Date(c.cred.password_changed_at).toLocaleDateString('id-ID')
                           : '—'}
+                      </td>
+                      <td>
+                        {c.resigned_at ? (
+                          <span
+                            className="badge badge-darkgray"
+                            title={`Akses dicabut permanen ${new Date(c.resigned_at).toLocaleDateString('id-ID')}`}
+                          >
+                            Resign
+                          </span>
+                        ) : c.status_aktif ? (
+                          <span className="badge badge-green">Aktif</span>
+                        ) : (
+                          <span className="badge badge-orange">Nonaktif</span>
+                        )}
                       </td>
                       {canMutate && (
                         <td>
@@ -579,10 +802,24 @@ export default function AdminEmployeesPage() {
                                 Batal
                               </button>
                             </div>
+                          ) : c.resigned_at ? (
+                            // No actions on someone who has already left. There
+                            // is no un-resign, so offering anything here could
+                            // only mislead.
+                            <span className="muted">—</span>
                           ) : (
-                            <button type="button" className="btn" onClick={() => startEdit(c)}>
-                              Mutasi
-                            </button>
+                            <div className="row" style={{ gap: 6 }}>
+                              <button type="button" className="btn" onClick={() => startEdit(c)}>
+                                Mutasi
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btnDanger"
+                                onClick={() => openResign(c)}
+                              >
+                                Resign
+                              </button>
+                            </div>
                           )}
                         </td>
                       )}

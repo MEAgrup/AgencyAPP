@@ -21,10 +21,16 @@ import {
   rolePairs,
 } from './role-mapping-pairs';
 
-function emp(id: string, divisi: string, jabatan: string, aktif = true): AdminEmployee {
+function emp(
+  id: string,
+  divisi: string,
+  jabatan: string,
+  aktif = true,
+  resignedAt: string | null = null,
+): AdminEmployee {
   return {
     employee_id: id, nama: `Nama ${id}`, email: `${id}@mea.id`,
-    divisi, jabatan, status_aktif: aktif, flagged: false,
+    divisi, jabatan, status_aktif: aktif, flagged: false, resigned_at: resignedAt,
   };
 }
 function map(id: string, divisi: string, jabatan: string, division: string, level: string): RoleMapping {

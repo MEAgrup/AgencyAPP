@@ -366,6 +366,45 @@ describeDb('bySalesperson (Kinerja Sales)', () => {
   });
 });
 
+describeDb('a resigned salesperson keeps their history (migrasi 20260929010000)', () => {
+  // The trap this closes: `loadRoster` used to read
+  // `private.employee_assignable()`, which filters `WHERE status_aktif`. Resigning
+  // a salesperson therefore removed their row — and with it every closing they
+  // ever made — from Kinerja Sales, silently. Last month's omzet would change
+  // because of an HR decision taken today, with no error anywhere.
+  //
+  // Asserted by comparing BEFORE with AFTER, not merely "a row exists": the
+  // numbers have to be identical, which is the part that would have regressed.
+  it('still reports their row, with the same money, after access is revoked', async () => {
+    const filter = { period: PERIOD, salespersonId: SLS1, source: null, campaignId: null };
+    const before = await bySalesperson(sql, director('ZZSP-DIR'), filter);
+    expect(before).toHaveLength(1);
+
+    await sql`
+      update employees
+         set resigned_at = now(), resigned_by = 'ZZSP-DIR', status_aktif = false
+       where employee_id = ${SLS1}`;
+    try {
+      const after = await bySalesperson(sql, director('ZZSP-DIR'), filter);
+      expect(after).toHaveLength(1);
+      expect(after[0].nama).toBe(before[0].nama);
+      expect(after[0].levelSales).toBe(before[0].levelSales);
+      expect(after[0].omzetIdr).toBe(before[0].omzetIdr);
+      expect(after[0].komisiDiakuiIdr).toBe(before[0].komisiDiakuiIdr);
+      expect(after[0].closedSuccess).toBe(before[0].closedSuccess);
+
+      // And the other half of the same decision: they are no longer selectable.
+      const assignable = await sql<{ n: number }[]>`
+        select count(*)::int as n from private.employee_assignable() where employee_id = ${SLS1}`;
+      expect(assignable[0].n).toBe(0);
+    } finally {
+      await sql`
+        update employees set resigned_at = null, resigned_by = null, status_aktif = true
+         where employee_id = ${SLS1}`;
+    }
+  });
+});
+
 describeDb('bySource (View 3 — DASHBOARD LEAD)', () => {
   it('groups by period/source/campaign with campaign name + nq breakdown', async () => {
     const rows = await bySource(sql, director('ZZSP-DIR'), { period: PERIOD, salespersonId: SLS1, source: null, campaignId: null });
