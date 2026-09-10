@@ -78,23 +78,53 @@ yang catatan handoff-nya sendiri sudah memperingatkan: *"OD/Director lolos
 muncul lagi di modul baru — dan hanya ketahuan karena UAT ini menjalankan
 peran lead, bukan Director.
 
-**Belum diperbaiki, dan sengaja.** Perbaikannya menyentuh permukaan permission,
-jadi ia butuh ketokan + entri `DECISIONS.md`, bukan tambalan diam-diam. Dua
-jalan, dengan preseden yang sudah ada di repo:
+**Belum diperbaiki**, tapi lihat koreksi di bawah — ia jauh lebih kecil daripada
+yang ditulis draf pertama laporan ini.
 
-1. **(disarankan) Resolver `SECURITY DEFINER` sempit** — persis pola
-   `private.employee_role` (O51), yang lahir untuk masalah yang sama persis:
-   sebuah tabel default-deny yang dibutuhkan jalur baca. Fungsi yang
-   mengembalikan **nama saja** untuk satu id membocorkan jauh lebih sedikit
-   daripada membuka `employees_select`/`clients_select`.
-2. **Lengan RLS baru** (mis. `jwt_is_lead()` untuk `employees`) — lebih murah
-   ditulis, tapi ia membuka **seluruh baris** tabel peran/klien ke setiap lead,
-   dan `employees` adalah tabel yang O51 justru menutupnya.
+### 2a · KOREKSI (2026-09-10) — resolvernya SUDAH ADA; ini bukan pertanyaan desain
 
-⚠️ Cakupan sebenarnya kemungkinan **lebih luas dari M19**: pola
-`left join employees` + `readAsActor` ada di banyak modul. Sebelum memperbaiki,
-sapu dulu pemakai pola yang sama — memperbaiki tiga tempat di M19 saja akan
-meninggalkan cacat yang sama hidup di tempat lain.
+Draf pertama §2 menyimpulkan perbaikannya "menyentuh permukaan permission, jadi
+butuh ketokan" antara membangun resolver `SECURITY DEFINER` atau menambah lengan
+RLS. **Itu salah, dan dikoreksi di sini.** Ditemukan saat UAT Sales keesokan
+harinya: `sales.ts` baris 2240 memanggil `private.employee_display_name(...)` —
+resolver yang persis dimaksud, dan ia sudah ada sejak **O37**
+(`20260724134427_employee_display_name.sql`):
+
+```sql
+CREATE FUNCTION private.employee_display_name(p_employee_id text) RETURNS text
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT coalesce((SELECT e.nama FROM public.employees e
+                    WHERE e.employee_id = p_employee_id), p_employee_id) $$;
+-- GRANT EXECUTE ... TO authenticated, service_role
+```
+
+Ia sudah di-`GRANT` ke `authenticated`, sudah jatuh balik ke id-nya sendiri bila
+tidak ketemu, dan **sudah dipakai 9 modul domain** (`account`, `activity`,
+`client`, `finance`, `sales`, …). Padanan untuk nama klien juga ada:
+`private.client_toko`.
+
+**Jadi M19 tidak menemukan lubang arsitektur — M19 menyimpang dari pola rumah
+yang sudah berdiri.** Tujuh tempat memakai join mentah alih-alih resolver:
+
+```
+packages/domain/src/dailyops.ts:307, 695, 795, 826, 858   left join employees …
+packages/domain/src/scs.ts:350, 986                        left join employees …
++ `left join clients c` di SLOT_FROM (nama klien)
+```
+
+Konsekuensinya untuk rencana kerja:
+
+| | Draf pertama | Sebenarnya |
+|---|---|---|
+| Butuh ketokan pemilik | ya, dua opsi | **tidak** |
+| Butuh migrasi | ya (fungsi baru) | **tidak** — fungsinya sudah di live |
+| Butuh perubahan izin | mungkin | **tidak** — nol policy disentuh |
+| Bentuk pekerjaan | desain + implementasi | **mekanis**: ganti 7 join dengan pemanggilan resolver, plus tes |
+
+⚠️ Yang TETAP berlaku dari draf pertama: **sapu dulu**. Pola `left join employees`
++ `readAsActor` mungkin ada di modul lain yang juga melewatkan resolver ini;
+memperbaiki tujuh tempat di M19 saja akan meninggalkan cacat yang sama hidup di
+tempat lain.
 
 ## 3 · Yang TERBUKTI benar (83 butir)
 

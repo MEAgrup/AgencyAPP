@@ -7,8 +7,16 @@ Tutorial langkah-demi-langkah untuk keempat butir yang tersisa di
 > `UAT_M19_BROWSER_20260909.md`: 86 butir, 83 PASS, **3 FAIL yang semuanya satu
 > cacat** (nama klien & nama PIC kosong untuk lead Creative — RLS membungkam
 > `LEFT JOIN`). Tiga butir tutorial ini dikoreksi karena menjalankannya:
-> §1.2(b)/(c), §1.5(c), §1.4(h) — dan §0.5 bertambah satu aktor. Sisanya
-> (§2, §3, §4) belum dijalankan.
+> §1.2(b)/(c), §1.5(c), §1.4(h) — dan §0.5 bertambah satu aktor.
+>
+> **✅ BUTIR 2 SUDAH DIJALANKAN 2026-09-10** — `UAT_SALES_BROWSER_20260910.md`:
+> 24 butir, 23 PASS, keenam butir feedback Sales terbukti di layar (FS-6b
+> termasuk: memilih tenor 6 bulan mengubah harga Rp 3jt → Rp 15jt). Satu
+> observasi baru: `OBS-1-PITA-GALAT`. ⚠️ **Baca §5 laporan itu sebelum
+> mengulang**: `seed-browser-tour.ts` memakai aktor non-karyawan `B2TOUR-BUDI`
+> yang membuat butir #2 dan #5 GAGAL PALSU sampai kepemilikannya dipindahkan.
+>
+> Sisanya (§3, §4) belum dijalankan.
 
 | # | Pekerjaan | Siapa | Bisa dari sandbox? |
 |---|---|---|---|
@@ -500,7 +508,7 @@ Diperbarui dari `HANDOFF_M19_SCS_20260909.md` §4 + §8, dirujuk silang ke
 | # | Apa | Status | Butuh siapa |
 |---|---|---|---|
 | **UAT-M19** | Browser UAT enam layar M19 | ✅ **DIJALANKAN 2026-09-09** — 86 butir, 83 PASS, 3 FAIL (satu cacat, lihat `M19-NAMA-RLS` di §5.3). Laporan: `UAT_M19_BROWSER_20260909.md` | selesai |
-| **UAT-SALES** | Browser UAT enam butir feedback Sales | 🟡 belum pernah dijalankan | sesi dev · **§2** |
+| **UAT-SALES** | Browser UAT enam butir feedback Sales | ✅ **DIJALANKAN 2026-09-10** — 24 butir, 23 PASS. Keenam butir terbukti di layar (FS-6b termasuk). Laporan: `UAT_SALES_BROWSER_20260910.md` | selesai; tiga sisi belum teruji (§4 laporan) |
 | **DRIFT-FULL** | `check-live-drift.sh` penuh sekali | 🟡 belum pernah dijalankan utuh | **operator/CI** · **§4** |
 
 ### 5.2 Data — menunggu pemilik, nol yang terblokir
@@ -551,7 +559,7 @@ Diperbarui dari `HANDOFF_M19_SCS_20260909.md` §4 + §8, dirujuk silang ke
 
 1. ~~**§1** (UAT M19)~~ — ✅ selesai 2026-09-09. Yang lahir darinya:
    `M19-NAMA-RLS` (§5.3), dan itu kini butir paling mendesak.
-2. **§2** (UAT Sales) — lingkungannya sudah nyala; ongkos tambahannya kecil.
+2. ~~**§2** (UAT Sales)~~ — ✅ selesai 2026-09-10.
 3. **§4** (drift penuh) — paralel, oleh operator, tidak menunggu 1 dan 2.
 4. **§3** (Kategori) — kapan pun pemilik sempat; nol yang menunggu.
 5. Baru pilih dari §5.3.

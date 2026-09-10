@@ -31,3 +31,7 @@ lengkapnya `TUTORIAL_UAT_M19_SALES_DRIFT_20260909.md` §0–§1; hasilnya
 | `uat-m19-02-pic-tidak-tersedia.png` | Menjadwalkan PIC yang tercatat tidak tersedia: peringatan `[PIC tidak tersedia pada tanggal ini]` **dan slotnya tetap tersimpan**. Terlihat juga cacat `M19-NAMA-RLS`: blok "Tidak tersedia hari ini" berbunyi `EMP-0003 (Cuti)`, bukan nama orang. |
 | `uat-m19-03-semua-klien.png` | Baris SCS tanpa klien merender **"Semua klien"**, bukan sel kosong. |
 | `uat-m19-04-kategori-sla-standing.png` | Layar Kategori: SLA dua Kategori standing kosong, dan memilih standing = ya mengosongkan + mematikan input SLA. |
+
+| `uat-sales-01-owner-nama.png` | `/sales` sebagai **Head Sales**: kolom Owner berisi **"Budi Santoso"**, bukan `EMP-0001` (feedback Sales `#2`). Peran ini yang membuktikan — OD/Director lolos `jwt_can_read_all()` dan tidak pernah melihat bug-nya. |
+| `uat-sales-02-kalkulator-tenor.png` | `/sales/kalkulator` (FS-6b): memilih tenor **6 bulan** mengubah kolom Harga Rp 3.000.000 → **Rp 15.000.000** dan ikut mengubah Ringkasan — harga PAKET UTUH tenor terpilih, bukan `standard_price` versi. |
+| `uat-sales-03-client-record-pita-galat.png` | `OBS-1-PITA-GALAT`: Client Record sebagai Sales staff **pemilik klien** — tiga pita galat merah pada halaman yang boleh dibuka, sementara panel Kontrak & Perpanjangan berfungsi penuh. Director/OD melihat nol pita. |
