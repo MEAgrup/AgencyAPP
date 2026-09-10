@@ -79,6 +79,27 @@ export interface AdminEmployee {
  * kategorinya, dan menyalin daftarnya ke sini hanya menciptakan versi kedua
  * yang bisa ketinggalan. Labelnya dipetakan lewat `HANDOVER_LABELS`.
  */
+/**
+ * Pemakaian satu id katalog per tabel snapshot (`GET /master-services/{id}/refs`).
+ *
+ * Duduk di sini dan bukan di `msl.ts` supaya ia satu rumah dengan
+ * `MasterService`, dan supaya `shape-parity` bisa menjangkarnya tanpa harus
+ * memindai seluruh `msl.ts`.
+ */
+export interface ServiceRefs {
+  services: number;
+  qualified_forms: number;
+  negotiation_lines: number;
+  renewal_lines: number;
+  /**
+   * Boleh dihapus atau tidak. DIBACA dari server, tidak diturunkan ulang di
+   * layar dengan menjumlahkan keempat angka: aturannya milik
+   * `private.master_service_refs`, dan tabel snapshot kelima yang lahir kelak
+   * akan membuat penjumlahan lokal benar-menurut-dirinya tapi salah.
+   */
+  unused: boolean;
+}
+
 export interface HandoverItem {
   kind: string;
   id: string;

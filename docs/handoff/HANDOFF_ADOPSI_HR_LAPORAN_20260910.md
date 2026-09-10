@@ -34,8 +34,8 @@
 
 | PR | Bagian | Status |
 |---|---|---|
-| **PR-1** | Bagian 2 — Mutasi & Resign permanen (HR) | ✅ **SELESAI & di-commit** (`bcfd998`) |
-| PR-2 | Bagian 5 — Arsip & hapus Master Service List | ⬜ belum |
+| **PR-1** | Bagian 2 — Mutasi & Resign permanen (HR) | ✅ **SELESAI, migrasi di live, di-MERGE** (`714da1a`) — migrasi diterapkan ke `CDPS SG` lebih dulu (O65) dan UAT empat aktor lolos: `UAT_RESIGN_PERMANEN_20260910.md` |
+| PR-2 | Bagian 5 — Arsip & hapus Master Service List | ✅ **SELESAI & di-commit** — migrasi `20260930010000_msl_arsip_hapus.sql`. Bug laten "layanan nonaktif masih terjual" ikut ditutup. ⚠️ **Migrasi BELUM diterapkan ke live** (O65: apply lebih dulu, merge sesudahnya) |
 | PR-3 | Bagian 3 — Laporan Penjualan (Finance & Head Sales) | ⬜ belum |
 | PR-4 | Bagian 1 — Adopsi Sistem | ⬜ belum |
 | PR-5 | Bagian 4 — Layanan multi-platform (⚠️ jalur uang) | ⬜ belum |
@@ -95,7 +95,7 @@ resign praktis Director-only sampai Director membuat pemetaan riilnya lewat
 isinya pemetaan sungguhan dan pasangan HRIS `divisi,jabatan` HR yang asli tidak diketahui dari
 repo.
 
-## 5. ⚠️ Satu hal yang PERLU KETOKAN PEMILIK sebelum PR-5
+## 5. ✅ SUDAH DIKETOK PEMILIK (2026-09-10) — PR-5 tidak lagi tertahan
 
 **Bagian 4 (layanan multi-platform) membalik sebagian ketokan Nerissa 2026-08-07**, yang
 berbunyi: *"jasa yang sama dua kali dalam satu set kini DITOLAK … quantity-lah field untuk
@@ -108,13 +108,20 @@ baris snapshot untuk satu layanan **melipatgandakan join itu** — deal ditutup 
 ganda dan `total_agreed_value` menggelembung, **tanpa galat di mana pun**.
 
 🔴 **Karena itu mencabut `uq_qfs` saja akan membuka kembali bug itu.** Yang harus diperlebar
-adalah **kunci join**-nya (tambah `platform`), bukan jaminan 1:1-nya yang dibuang. Aturan yang
-menyelesaikan konflik tanpa membuka bug lama, dan yang perlu diketok pemilik:
+adalah **kunci join**-nya (tambah `platform`), bukan jaminan 1:1-nya yang dibuang.
+
+**Ketokan pemilik 2026-09-10 (via `AskUserQuestion`) — dicatat penuh di `DECISIONS.md`:**
 
 - **`qty`** = lebih banyak unit layanan yang sama **di toko yang sama**;
-- **baris kedua** = **toko/platform yang berbeda**.
+- **baris kedua** = **toko/platform yang berbeda**, masing-masing ber-`store_link` sendiri;
+- **`uq_qfs` TIDAK dicabut** — kuncinya diperlebar dari `(attempt_id, master_service_id)`
+  menjadi `(attempt_id, master_service_id, platform)`.
 
-Pekerjaan PR-2/3/4 **tidak menunggu** ketokan ini; hanya PR-5 yang menunggu.
+**Urutan pekerjaannya WAJIB: perlebar kunci join LEBIH DULU, baru `uq_qfs`.** Terbalik, atau
+salah satunya saja, dan bug penggelembungan itu hidup di jendela di antaranya — tanpa galat.
+Penjaganya harus tes yang menutup satu deal dua-platform dan meng-assert `total_agreed_value`
+**tepat 2×**, bukan 4×: tes yang hanya meng-assert "dua baris tercatat" akan HIJAU di atas
+join yang mekar.
 
 ## 6. Temuan riset yang menghemat sesi berikutnya
 
@@ -190,15 +197,32 @@ lint web-internal     3 error + 61 warning — IDENTIK baseline, semuanya pre-ex
 
 ## 9. Langkah berikutnya yang konkret
 
-1. **Terapkan migrasi PR-1 ke live `CDPS SG` LEBIH DULU, merge sesudahnya** (O65). Migrasinya
-   `20260929010000_resign_permanen.sql`. Sesudah apply, buktikan lewat kueri — bukan lewat
-   `success: true`: gate live tidak bergerak, ledger bertambah tepat satu, `get_advisors
-   security` nol temuan baru.
+1. ~~**Terapkan migrasi PR-1 ke live `CDPS SG` LEBIH DULU, merge sesudahnya** (O65).~~
+   ✅ **SELESAI 2026-09-10.** Gate live tetap 155/43/34/73, ledger 219→220,
+   `employees_select` 3→4 lengan (ketiga lengan baseline utuh), advisors `security`
+   identik 28/1/8/3/1. Kedua CHECK diuji menggigit di live dalam transaksi ber-rollback;
+   jebakan #2 dibuktikan pada data live (roster 60 tetap 60, assignable 55→54). PR #340
+   di-merge sesudahnya (`714da1a`). Rinciannya `UAT_RESIGN_PERMANEN_20260910.md` §1.
 2. **Minta pemilik membuat pemetaan `role_mappings` → divisi `HR`** (§4), kalau tidak fiturnya
    Director-only.
-3. **UAT browser halaman Karyawan** dengan 4 aktor: Lead HR (harus melihat menu + tombol
-   Resign), OD (harus melihat halaman, **tidak** melihat tombol Resign), Director, Lead divisi
-   lain (tidak melihat menu). Harness: `node scripts/dev-jwt.mjs` + `node scripts/browser-tour.mjs`.
-4. **Lanjut PR-2** (arsip/hapus MSL) — paling murah dari empat sisanya dan menutup bug laten
-   "layanan nonaktif masih terjual".
-5. **Ajukan ketokan §5 ke pemilik** kapan pun, supaya PR-5 tidak tertahan nanti.
+3. ~~**UAT browser halaman Karyawan** dengan 4 aktor.~~ ✅ **SELESAI 2026-09-10, LOLOS** —
+   `UAT_RESIGN_PERMANEN_20260910.md` §2, tiga tangkapan layar di `screenshots/uat-resign-*`.
+   Jebakan #1 diuji ujung-ke-ujung (impor CSV yang masih menyebut orangnya aktif ⇒
+   `skippedResigned: 1`, `reactivated: 0`, ban dipasang ulang), jebakan #2 lewat
+   `GET /sales/performance` yang barisnya bertahan identik.
+   **Tiga temuan PRE-EXISTING dicatat di sana §3** (`OBS-OD-PANEL-TULIS`,
+   `OBS-IMPORT-PESAN-INGGRIS`, `OBS-PASSWORD-RESIGN`) — semuanya di luar cakupan PR-1,
+   nol di antaranya lubang hak akses.
+4. ~~**Lanjut PR-2** (arsip/hapus MSL).~~ ✅ **SELESAI 2026-09-10.** Bug laten "layanan nonaktif
+   masih terjual" ditutup: `active` selama ini KOSMETIK karena nol pembaca menghormatinya.
+   Sekarang ada `msl.sellableAt`/`listSellableAt` (jalur JUAL) di samping `effectiveAt`
+   (pengayaan deal yang sudah disetujui) — DUA pembaca, bukan satu flag. Hapus dijaga trigger
+   DB `trg_master_services_hapus_terjaga` karena `master_service_id` nol FK di mana pun.
+   Dibuktikan dengan **enam mutasi**, termasuk pengecualian `bayar_komisi` yang teruji DUA ARAH.
+   ⚠️ **Langkah berikutnya untuk PR-2: terapkan migrasinya ke live `CDPS SG` LEBIH DULU (O65),
+   baru merge** — dan buktikan lewat kueri, bukan lewat `success: true`.
+
+   Yang PR-2 sengaja TIDAK kerjakan: layar MSL masih tanpa gerbang peran untuk `Ubah`/`Tambah`
+   sebelum PR ini — keduanya kini digerbangi `canEdit`, tapi cacat sekelasnya di halaman
+   Karyawan (`OBS-OD-PANEL-TULIS`, lihat `UAT_RESIGN_PERMANEN_20260910.md` §3) TETAP terbuka.
+5. ~~**Ajukan ketokan §5 ke pemilik**~~ ✅ **SELESAI 2026-09-10** — lihat §5 di atas dan barisnya di `DECISIONS.md`. PR-5 tidak lagi tertahan.

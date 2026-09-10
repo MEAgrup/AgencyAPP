@@ -71,6 +71,34 @@ export function masterServiceToWire(v: msl.ServiceView): MasterServiceWire {
   };
 }
 
+/**
+ * Pemakaian satu id katalog per tabel snapshot (`msl.ServiceRefs`).
+ *
+ * `unused` DIKIRIM walau ia turunan dari keempat angkanya, dan itu disengaja:
+ * layar tidak boleh menurunkan ulang aturan "boleh dihapus" dengan
+ * menjumlahkan sendiri, karena tabel snapshot kelima yang lahir kelak akan
+ * membuat penjumlahan di layar benar-menurut-dirinya tapi salah. Satu sumber
+ * untuk aturannya (`private.master_service_refs`), satu bendera di wire.
+ */
+export interface ServiceRefsWire {
+  services: number;
+  qualified_forms: number;
+  negotiation_lines: number;
+  renewal_lines: number;
+  unused: boolean;
+}
+
+/** msl.ServiceRefs → wire. */
+export function refsToWire(r: msl.ServiceRefs): ServiceRefsWire {
+  return {
+    services: r.services,
+    qualified_forms: r.qualifiedForms,
+    negotiation_lines: r.negotiationLines,
+    renewal_lines: r.renewalLines,
+    unused: r.unused,
+  };
+}
+
 // --- M1 Leads (contract HANDOFF_SESSION_20260719_FE_M0M1 §1/§3/§4/§5) ---
 
 /** module1_leads.Lead subset returned by register/claim (web-internal LeadStub). */

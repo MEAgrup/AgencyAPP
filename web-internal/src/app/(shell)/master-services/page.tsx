@@ -6,7 +6,9 @@ import { FREQUENCIES, PRICING_MODES, type MasterService, type Pengakuan, type Pl
 import { TIER_LABELS } from '@/lib/account';
 import { formatIDR } from '@/lib/money';
 import {
+  deleteMasterService,
   EMPTY_MSL_FORM,
+  fetchServiceRefs,
   formatDurasiBulan,
   formatOpsiDurasi,
   formToPayload,
@@ -14,9 +16,12 @@ import {
   QTY_MENAMBAH_LABELS,
   saveMasterService,
   serviceToForm,
+  setMasterServiceActive,
   todayISO,
   type MslFormState,
+  type ServiceRefs,
 } from '@/lib/msl';
+import { useAuth } from '@/lib/auth-context';
 
 // "Batas Minimal" is stored as a DECIMAL string ("5.00") but is always a whole
 // quantity (see backend parseWholeQty) — display it as a plain integer.
@@ -28,6 +33,13 @@ function formatQty(value: string | undefined): string {
 }
 
 export default function MasterServicesPage() {
+  const { role } = useAuth();
+  // Cermin `msl.canEditMasterServices`. Server tetap gerbang sebenarnya — ini
+  // yang menentukan apakah tombolnya DITAWARKAN, dan menawarkan tombol yang
+  // pasti gagal kepada peran read-only (OD) adalah cara mengajari orang bahwa
+  // 403 itu normal.
+  const canEdit = !!role?.director || (role?.division === 'Sales' && role?.level === 'lead');
+
   const [effectiveAt, setEffectiveAt] = useState(todayISO());
   const [services, setServices] = useState<MasterService[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,6 +55,13 @@ export default function MasterServicesPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [versionsError, setVersionsError] = useState<string | null>(null);
   const [versionsLoadingId, setVersionsLoadingId] = useState<string | null>(null);
+
+  // Arsip / pulihkan / hapus. `pendingDelete` memegang layanan yang sedang
+  // dikonfirmasi BESERTA angka pemakaiannya: panelnya menyatakan konsekuensinya
+  // sebelum bertanya, karena hapus tidak punya undo.
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ service: MasterService; refs: ServiceRefs } | null>(null);
 
   const load = useCallback(async (at: string) => {
     setLoading(true);
@@ -96,6 +115,59 @@ export default function MasterServicesPage() {
     }
   }
 
+  async function onToggleActive(service: MasterService) {
+    setRowError(null);
+    setBusyId(service.id);
+    try {
+      await setMasterServiceActive(service.id, !service.active);
+      await load(effectiveAt);
+      // Riwayat versi yang sedang terbuka jadi basi begitu versi baru lahir.
+      setVersionsByService((prev) => {
+        const next = { ...prev };
+        delete next[service.id];
+        return next;
+      });
+    } catch (err) {
+      setRowError(errorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function askDelete(service: MasterService) {
+    setRowError(null);
+    setBusyId(service.id);
+    try {
+      const refs = await fetchServiceRefs(service.id);
+      setPendingDelete({ service, refs });
+    } catch (err) {
+      setRowError(errorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    const { service } = pendingDelete;
+    setRowError(null);
+    setBusyId(service.id);
+    try {
+      await deleteMasterService(service.id);
+      setPendingDelete(null);
+      if (expandedId === service.id) setExpandedId(null);
+      await load(effectiveAt);
+    } catch (err) {
+      // Termasuk 409 `[layanan ini sudah dipakai (...)]` — bisa terjadi walau
+      // panelnya baru saja menampilkan nol, kalau seseorang menutup deal di
+      // antara dua klik. Pesannya ditampilkan apa adanya dan panelnya DIBIARKAN
+      // TERBUKA supaya angka yang keliru itu tidak hilang bersama alasannya.
+      setRowError(errorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function toggleVersions(service: MasterService) {
     if (expandedId === service.id) {
       setExpandedId(null);
@@ -122,9 +194,11 @@ export default function MasterServicesPage() {
           <h1>Master Service List</h1>
           <p className="muted">Harga standar &amp; aturan komisi per layanan.</p>
         </div>
-        <button type="button" className="btn btnPrimary" onClick={openCreateForm}>
-          Tambah Layanan
-        </button>
+        {canEdit && (
+          <button type="button" className="btn btnPrimary" onClick={openCreateForm}>
+            Tambah Layanan
+          </button>
+        )}
       </div>
 
       <section className="card">
@@ -480,6 +554,51 @@ export default function MasterServicesPage() {
       <section className="card">
         {loading && <p className="muted">Memuat...</p>}
         {error && <div className="alert alertError">{error}</div>}
+        {rowError && <div className="alert alertError" role="alert">{rowError}</div>}
+        {pendingDelete && (
+          <div className="alert alertWarning" role="alert">
+            <p>
+              <strong>Hapus layanan &ldquo;{pendingDelete.service.name}&rdquo; permanen?</strong>
+            </p>
+            {pendingDelete.refs.unused ? (
+              <p>
+                Layanan ini <strong>belum pernah dipakai</strong> — nol Service, nol Qualified Form, nol
+                baris proposal, nol baris perpanjangan. Seluruh riwayat versinya
+                ({pendingDelete.service.version_no} versi) ikut hilang, dan <strong>tidak ada jalur
+                undo</strong>. Kalau layanan ini pernah benar-benar dijual dan Anda hanya ingin
+                menghentikan penjualannya, pakai <strong>Arsipkan</strong>.
+              </p>
+            ) : (
+              <p>
+                <strong>Tidak bisa dihapus.</strong> Layanan ini sudah dipakai{' '}
+                {pendingDelete.refs.services} Service, {pendingDelete.refs.qualified_forms} Qualified
+                Form, {pendingDelete.refs.negotiation_lines} baris proposal, dan{' '}
+                {pendingDelete.refs.renewal_lines} baris perpanjangan. Menghapusnya akan membuat
+                baris-baris itu menunjuk katalog yang tidak ada lagi. Pakai{' '}
+                <strong>Arsipkan</strong> untuk menghentikan penjualannya tanpa menyentuh riwayat.
+              </p>
+            )}
+            <div className="row" style={{ gap: 6 }}>
+              {pendingDelete.refs.unused && (
+                <button
+                  type="button"
+                  className="btn btnDanger btnSm"
+                  disabled={busyId === pendingDelete.service.id}
+                  onClick={confirmDelete}
+                >
+                  Ya, hapus permanen
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btnGhost btnSm"
+                onClick={() => { setPendingDelete(null); setRowError(null); }}
+              >
+                Batal
+              </button>
+            </div>
+          </div>
+        )}
         {!loading && !error && services && services.length === 0 && (
           <div className="emptyState">Belum ada layanan pada tanggal ini.</div>
         )}
@@ -535,12 +654,34 @@ export default function MasterServicesPage() {
                       <td>{s.effective_from}</td>
                       <td>
                         <div className="row" style={{ gap: 6 }}>
-                          <button type="button" className="btn btnSecondary btnSm" onClick={() => openEditForm(s)}>
-                            Ubah
-                          </button>
+                          {canEdit && (
+                            <button type="button" className="btn btnSecondary btnSm" onClick={() => openEditForm(s)}>
+                              Ubah
+                            </button>
+                          )}
                           <button type="button" className="btn btnGhost btnSm" onClick={() => toggleVersions(s)}>
                             {expandedId === s.id ? 'Tutup Riwayat' : 'Riwayat Versi'}
                           </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              className="btn btnGhost btnSm"
+                              disabled={busyId === s.id}
+                              onClick={() => onToggleActive(s)}
+                            >
+                              {s.active ? 'Arsipkan' : 'Pulihkan'}
+                            </button>
+                          )}
+                          {canEdit && (
+                            <button
+                              type="button"
+                              className="btn btnDanger btnSm"
+                              disabled={busyId === s.id}
+                              onClick={() => askDelete(s)}
+                            >
+                              Hapus
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

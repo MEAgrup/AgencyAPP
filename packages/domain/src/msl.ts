@@ -21,7 +21,7 @@
  * Reference: archive/backend-go/internal/admin/master_service.go.
  */
 
-import { accrual, money, permission } from '@cdps/core';
+import { accrual, money, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 // `plangate_rules` is pure (its only import is @cdps/core), so taking the tier
 // vocabulary from it cannot form a cycle — unlike `sales`, which this module
@@ -45,6 +45,18 @@ export const SALES_DIVISION = 'Sales';
 
 /** Exact BI message for an unauthorized MSL edit. */
 export const MSG_MASTER_SERVICE_DENIED = '[anda tidak memiliki akses untuk mengubah master service list]';
+
+/**
+ * Exact BI message for trying to SELL an archived service.
+ *
+ * It names the service so the refusal is actionable: a Qualified Form with six
+ * lines that answers only "layanan tidak aktif" sends the closer hunting.
+ */
+export const MSG_MASTER_SERVICE_ARCHIVED_PREFIX = '[layanan ';
+export const MSG_MASTER_SERVICE_ARCHIVED_SUFFIX = ' sudah tidak aktif dan tidak bisa dijual lagi]';
+
+/** Exact BI message for deleting a service that some snapshot already points at. */
+export const MSG_MASTER_SERVICE_IN_USE_SUFFIX = ' — tidak bisa dihapus, arsipkan saja]';
 
 // Pricing modes / frequencies (local literals — this module never imports
 // `sales` so the two never form a cycle; the sets mirror the calculator).
@@ -80,6 +92,36 @@ export class ServiceNotFoundError extends Error {
   constructor(serviceId: string) {
     super(`master service not found: ${serviceId}`);
     this.name = 'ServiceNotFoundError';
+  }
+}
+
+/**
+ * The version effective at the date exists but is ARCHIVED, so it may not be
+ * sold. Deliberately a DIFFERENT error from `ServiceNotFoundError`: "the
+ * catalog has no such service" and "the catalog withdrew this service" call for
+ * different fixes by the person reading it, and collapsing them into one 404
+ * would make a withdrawal look like a data bug.
+ */
+export class ServiceArchivedError extends Error {
+  constructor(public readonly serviceName: string) {
+    super(`${MSG_MASTER_SERVICE_ARCHIVED_PREFIX}${serviceName}${MSG_MASTER_SERVICE_ARCHIVED_SUFFIX}`);
+    this.name = 'ServiceArchivedError';
+  }
+}
+
+/**
+ * Delete refused because a snapshot still points at this catalog id. Carries the
+ * per-table counts, because a Sales Head who is refused needs to know WHERE it
+ * is used to decide whether archiving is the answer.
+ */
+export class ServiceInUseError extends Error {
+  constructor(public readonly refs: ServiceRefs) {
+    super(
+      `[layanan ini sudah dipakai (${refs.services} Service, ${refs.qualifiedForms} Qualified Form, ` +
+      `${refs.negotiationLines} baris proposal, ${refs.renewalLines} baris perpanjangan)` +
+      MSG_MASTER_SERVICE_IN_USE_SUFFIX,
+    );
+    this.name = 'ServiceInUseError';
   }
 }
 
@@ -272,6 +314,58 @@ export async function listEffectiveAt(sql: Queryable, date: string): Promise<Ser
     where effective_from <= ${date}
     order by service_id, effective_from desc, version_no desc`;
   return rows.map(toView);
+}
+
+/**
+ * sellableAt returns the MSL version effective on `date` for a service and
+ * REFUSES it when that version is archived (`active = false`).
+ *
+ * ## Why a second reader instead of a flag on `effectiveAt`
+ *
+ * Same reasoning that split `private.employee_roster()` from
+ * `employee_assignable()` (DECISIONS 2026-09-10): two callers want two
+ * different questions answered, and a boolean parameter makes the WRONG answer
+ * reachable by forgetting an argument. Here the two questions are:
+ *
+ *   - *"what does the catalog say about this service"* — `effectiveAt`. Used to
+ *     ENRICH things that were already agreed (`sales.close` naming a Service,
+ *     `renewal.executeRenewal` filling `plan_tier`). These must keep working
+ *     forever, because an approved deal cannot be allowed to fail on the day
+ *     someone tidies the catalog. That is not a new rule — `renewal.ts` already
+ *     refuses to gate commission billing on catalog labels for exactly this
+ *     reason.
+ *   - *"may I sell this service today"* — `sellableAt`. Used by every path that
+ *     creates a NEW agreement.
+ *
+ * ## Why this is `effectiveAt` + a check, and NOT `where active`
+ *
+ * This is the trap, and it is quiet. Suppose v1 is active at Rp 10jt and v2
+ * archives the service. A query written `where active order by effective_from
+ * desc limit 1` does not see v2, so it happily returns **v1 — and sells at the
+ * old price**. Archiving something would silently resurrect the version before
+ * it. So `active` is a fact ABOUT the version in force, never a filter for
+ * finding a different one. The migration comment on the column says the same,
+ * because this is the kind of "fix" a later reader reintroduces.
+ */
+export async function sellableAt(sql: Queryable, serviceId: string, date: string): Promise<ServiceView> {
+  const view = await effectiveAt(sql, serviceId, date);
+  if (!view.active) {
+    throw new ServiceArchivedError(view.name);
+  }
+  return view;
+}
+
+/**
+ * listSellableAt returns every service that MAY BE SOLD at `date` — i.e.
+ * `listEffectiveAt` minus the ones whose effective version is archived.
+ *
+ * Filtered AFTER the per-service pick, for the reason spelled out on
+ * `sellableAt`: filtering inside would surface an older active version instead
+ * of dropping the service.
+ */
+export async function listSellableAt(sql: Queryable, date: string): Promise<ServiceView[]> {
+  const all = await listEffectiveAt(sql, date);
+  return all.filter((v) => v.active);
 }
 
 /** listVersions returns the full immutable version chain for one service. */
@@ -728,6 +822,209 @@ export async function updateService(sql: Sql, actor: Actor, serviceId: string, i
       createdBy: actor.employeeId,
     });
     return next;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Arsip / pulihkan / hapus (permintaan pemilik 2026-09-10)
+// ---------------------------------------------------------------------------
+
+/** How many snapshots point at one catalog id, per table. */
+export interface ServiceRefs {
+  services: number;
+  qualifiedForms: number;
+  negotiationLines: number;
+  renewalLines: number;
+  /** true when all four are zero — i.e. this catalog row was never used. */
+  unused: boolean;
+}
+
+/**
+ * serviceRefs counts how many snapshots point at one catalog id.
+ *
+ * Reads `private.master_service_refs()` rather than four counts written here:
+ * the trigger that ENFORCES the delete rule reads the same function, so the
+ * refusal a person sees and the refusal the database applies can never disagree
+ * — and a fifth snapshot table added later lands in one place.
+ */
+export async function serviceRefs(sql: Queryable, serviceId: string): Promise<ServiceRefs> {
+  const rows = await sql<
+    { services: string; qualified_forms: string; negotiation_lines: string; renewal_lines: string }[]
+  >`select * from private.master_service_refs(${serviceId})`;
+  const r = rows[0];
+  const refs = {
+    services: Number(r?.services ?? 0),
+    qualifiedForms: Number(r?.qualified_forms ?? 0),
+    negotiationLines: Number(r?.negotiation_lines ?? 0),
+    renewalLines: Number(r?.renewal_lines ?? 0),
+  };
+  return {
+    ...refs,
+    unused: refs.services + refs.qualifiedForms + refs.negotiationLines + refs.renewalLines === 0,
+  };
+}
+
+/**
+ * setActive archives (`active = false`) or restores (`true`) a service by
+ * appending a new version that is a VERBATIM copy of the one in force, with
+ * only that one flag flipped.
+ *
+ * ## Why not `updateService({ active: false })`
+ *
+ * Because `updateService` is FULL REPLACE, and `DECISIONS.md` 2026-09-07 already
+ * records the damage that caused: every "Ubah" that does not resend
+ * `durasi_jasa` silently ERASES it. Archiving is a one-flag operation; routing
+ * it through a full-replace writer means the caller must reconstruct all twenty
+ * fields correctly or quietly lose the ones it forgot — and the caller here is a
+ * button, which knows none of them.
+ *
+ * ## Why the copy is done in SQL, not through ServiceInput
+ *
+ * A round trip through `toView` → `ServiceInput` → `normalizeInput` would run
+ * every value through coercion built for HUMAN input (empty-string-to-NULL,
+ * price re-parsing, tier reconciliation). For a copy, any transformation at all
+ * is a defect. `insert … select` lets Postgres carry each column across
+ * untouched, so the only fields that can differ are the four this function
+ * means to change.
+ *
+ * The column list here is the one risk: a column added to
+ * `master_service_versions` later would not be copied. `msl.test.ts` guards
+ * exactly that — it compares the copy against its source column-by-column from
+ * `information_schema`, so the day someone adds a column and forgets this
+ * list, that test goes red instead of a service quietly losing a field.
+ */
+export async function setActive(
+  sql: Sql,
+  actor: Actor,
+  serviceId: string,
+  active: boolean,
+  now: Date = new Date(),
+): Promise<number> {
+  if (!canEditMasterServices(actor)) {
+    throw new ForbiddenError();
+  }
+  const today = tz.dateString(now);
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    // Lock the chain so two concurrent archive clicks cannot both compute the
+    // same `version_no` (uq_service_version would reject the loser, but with a
+    // constraint name instead of a message anyone can act on).
+    const cur = await tx<{ id: string; version_no: number; active: boolean; name: string }[]>`
+      select id, version_no, active, name
+        from master_service_versions
+       where service_id = ${serviceId}
+       order by effective_from desc, version_no desc
+       limit 1
+         for update`;
+    if (cur.length === 0) {
+      throw new ServiceNotFoundError(serviceId);
+    }
+    const latest = cur[0];
+    // Already in the requested state: return the current version rather than
+    // appending a version that records no change. An append-only chain full of
+    // no-op versions makes the real edits unfindable, and `effective_from`
+    // would move for nothing.
+    if (latest.active === active) {
+      return Number(latest.version_no);
+    }
+    const next = Number(latest.version_no) + 1;
+    const inserted = await tx<{ id: string }[]>`
+      insert into master_service_versions
+        (service_id, name, standard_price, commission_rule, category, unit, min_qty,
+         pricing_mode, apply_ppn, frequency, price_note, description, active,
+         requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan,
+         version_no, effective_from, created_by)
+      select service_id, name, standard_price, commission_rule, category, unit, min_qty,
+             pricing_mode, apply_ppn, frequency, price_note, description, ${active},
+             requires_strategy_plan, plan_tier, durasi_bulan, qty_menambah, pengakuan,
+             ${next}, ${today}, ${actor.employeeId}
+        from master_service_versions
+       where id = ${latest.id}
+      returning id`;
+    // FS-6 tenor options belong to the version, so a copy that skipped them
+    // would archive a multi-tenor service into a single-price one — and
+    // restoring it later would bring back the wrong catalog.
+    await tx`
+      insert into master_service_duration_options (version_id, durasi_bulan, harga, created_by)
+      select ${inserted[0].id}, durasi_bulan, harga, ${actor.employeeId}
+        from master_service_duration_options
+       where version_id = ${latest.id}`;
+    await ex.audit.insertAudit({
+      entityType: 'master_service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: active ? 'restore' : 'archive',
+      beforeJson: { version_no: Number(latest.version_no), active: latest.active },
+      afterJson: { version_no: next, active, name: latest.name, effective_from: today },
+      createdBy: actor.employeeId,
+    });
+    return next;
+  });
+}
+
+/**
+ * deleteService removes a master service and its whole version chain — but ONLY
+ * when nothing has ever pointed at it.
+ *
+ * Permintaan pemilik 2026-09-10: *"Fitur untuk menghapus Master Service List
+ * yang salah."* The "yang salah" is load-bearing: what the owner wants gone is
+ * a mistyped catalog row, not a service the agency actually sold.
+ *
+ * ## Why this does not violate house rule #3 (immutable history)
+ *
+ * Rule #3 protects the record of what HAPPENED. A catalog row that no Service,
+ * Qualified Form, proposal line or renewal line has ever referenced never took
+ * part in anything: there is no money derived from it and no history to lose.
+ * The moment one snapshot does point at it, delete stops being available at all
+ * and archiving is the only path — which is precisely the boundary
+ * `private.master_service_refs()` draws. The `delete` audit row itself is never
+ * removed, so the fact that this row existed and was removed stays readable.
+ *
+ * ## Why the check is here AND in the database
+ *
+ * The TS check exists to produce a BI message carrying the counts. The trigger
+ * `trg_master_services_hapus_terjaga` exists because this route is not the only
+ * writer — the seeder, migrations and any operator `psql` session bypass TS
+ * entirely, and `master_service_id` has no foreign key anywhere, so without the
+ * trigger Postgres would accept the delete silently and leave dangling pointers
+ * inside closed money rows. Neither layer is redundant: one explains, the other
+ * enforces.
+ *
+ * Versions are deleted explicitly rather than by `ON DELETE CASCADE`, and
+ * `fk_msv_service` deliberately still has no cascade: that missing cascade is a
+ * second guard, making a stray `DELETE FROM master_services` fail on the
+ * foreign key for any service that has ever had a version.
+ */
+export async function deleteService(sql: Sql, actor: Actor, serviceId: string): Promise<ServiceRefs> {
+  if (!canEditMasterServices(actor)) {
+    throw new ForbiddenError();
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const chain = await tx<{ version_no: number; name: string }[]>`
+      select version_no, name from master_service_versions
+       where service_id = ${serviceId} order by version_no desc for update`;
+    if (chain.length === 0) {
+      throw new ServiceNotFoundError(serviceId);
+    }
+    const refs = await serviceRefs(tx, serviceId);
+    if (!refs.unused) {
+      throw new ServiceInUseError(refs);
+    }
+    // The audit row is written BEFORE the rows disappear, so `before_json` can
+    // still describe what was removed. It survives the delete — audit_log has
+    // no delete path (house rule #3) — so "this catalog row existed and was
+    // removed by whom, when, and how many versions it had" stays answerable.
+    await ex.audit.insertAudit({
+      entityType: 'master_service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'delete',
+      beforeJson: { versions: chain.length, name: chain[0].name, latest_version_no: Number(chain[0].version_no) },
+      afterJson: null,
+      createdBy: actor.employeeId,
+    });
+    // Duration options cascade from the version rows (fk_msdo_version
+    // ON DELETE CASCADE), so they need no statement of their own.
+    await tx`delete from master_service_versions where service_id = ${serviceId}`;
+    await tx`delete from master_services where id = ${serviceId}`;
+    return refs;
   });
 }
 

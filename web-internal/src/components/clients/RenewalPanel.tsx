@@ -85,6 +85,26 @@ function layananKomisi(services: MasterService[]): MasterService[] {
   return services.filter((s) => s.pengakuan === 'bulan_berikutnya');
 }
 
+/**
+ * Layanan mana yang boleh dipilih untuk satu `jenis` perpanjangan — cermin
+ * PERSIS aturan server (`renewal.writeRenewalProposal`).
+ *
+ * `perpanjangan` / `cross_sell` adalah kesepakatan BARU, jadi layanan yang
+ * sudah diarsipkan dibuang. `bayar_komisi` adalah TAGIHAN atas komisi yang
+ * sudah diperoleh (FS-3/FS-4), jadi ia SENGAJA tidak menyaring `active`:
+ * seseorang mengarsipkan layanan Komisi tidak boleh menghentikan penagihan
+ * komisi se-agensi.
+ *
+ * Penyaringnya ada DI SINI dan bukan di URL fetch (`?sellable=1`) karena satu
+ * panel ini melayani ketiga jenis dari SATU daftar — menyaring di fetch akan
+ * membuang layanan Komisi yang diarsipkan sebelum `layananKomisi` pernah
+ * melihatnya, dan mematahkan pengecualian yang justru sengaja dibuat server.
+ */
+function layananUntukJenis(services: MasterService[], jenis: string): MasterService[] {
+  if (jenis === JENIS_BAYAR_KOMISI) return layananKomisi(services);
+  return services.filter((s) => s.active);
+}
+
 function toProposalLineInputs(rows: LineRow[]): ProposalLineInput[] {
   return rows
     .filter((r) => r.master_service_id.trim() !== '')
@@ -584,7 +604,7 @@ function RenewalRow({
               <LinesEditor
                 rows={resubmitLines}
                 custom
-                services={row.jenis === JENIS_BAYAR_KOMISI ? layananKomisi(msvcs) : msvcs}
+                services={layananUntukJenis(msvcs, row.jenis)}
                 onChange={setResubmitLines}
                 disabled={resubmitBusy}
                 satuBaris={row.jenis === JENIS_BAYAR_KOMISI}
@@ -732,7 +752,7 @@ export default function RenewalPanel({
           <LinesEditor
             rows={lines}
             custom={!noNego}
-            services={bayarKomisi ? layananKomisi(msvcs) : msvcs}
+            services={layananUntukJenis(msvcs, jenis)}
             onChange={setLines}
             disabled={submitting}
             satuBaris={bayarKomisi}

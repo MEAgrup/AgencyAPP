@@ -37,3 +37,14 @@ lengkapnya `TUTORIAL_UAT_M19_SALES_DRIFT_20260909.md` §0–§1; hasilnya
 | `uat-sales-03-client-record-pita-galat.png` | `OBS-1-PITA-GALAT`: Client Record sebagai Sales staff **pemilik klien** — tiga pita galat merah pada halaman yang boleh dibuka, sementara panel Kontrak & Perpanjangan berfungsi penuh. Director/OD melihat nol pita. |
 | `uat-m19-05-nama-sesudah-perbaikan.png` | `M19-NAMA-RLS` **sesudah** diperbaiki: kartu slot sebagai lead Creative kini menampilkan nama toko & nama PIC, bukan `CLI-…`/`EMP-…`. Bandingkan dengan `uat-m19-02` yang merekam keadaan cacatnya. |
 | `uat-sales-04-client-record-sesudah-perbaikan.png` | `OBS-1-PITA-GALAT` **sesudah** diperbaiki: Client Record sebagai Sales staff pemilik — nol pita merah, panel Kontrak & Perpanjangan tetap utuh. Bandingkan dengan `uat-sales-03`. |
+
+## UAT resign permanen (PR #340, 2026-09-10)
+
+Harness `scripts/dev-jwt.mjs` + `scripts/browser-tour.mjs` terhadap DB lokal
+hasil `db-rebuild`; hasil lengkapnya `UAT_RESIGN_PERMANEN_20260910.md`.
+
+| Berkas | Yang dibuktikan |
+|---|---|
+| `uat-resign-01-lead-hr.png` | Halaman Karyawan sebagai **Lead HR** — inilah perbaikan jebakan #3 sebagai PERILAKU: menu ADMIN tampil, dan tabelnya berisi **11 dari 11** karyawan LINTAS DIVISI (Account/Ads/Creative/Finance/HR/KOL/Management/Sales), bukan hanya divisi HR. Tombol **Mutasi + Resign** per baris; baris EMP-0003 yang sudah resign berbadge `Resign` dan kolom Aksi-nya `—` (tidak bisa di-resign dua kali). Kolom "Punya Password" berbunyi `Belum` HANYA pada barisnya sendiri dan `—` untuk semua orang di luar divisinya — batas password yang sengaja tidak dilebarkan, terlihat di layar. |
+| `uat-resign-02-od-tanpa-tombol.png` | Aktor **OD** (badge `OD`, `od:true director:false`): halaman terbuka penuh, 11 baris terbaca, **nol tombol Resign, nol tombol Mutasi, nol kolom Aksi**. Invarian "OD tidak pernah menulis" sebagai perilaku, bukan sekadar 403 di jaringan. Terlihat juga temuan pre-existing `OBS-OD-PANEL-TULIS`: panel "Impor karyawan" dan "Reset password" TETAP disodorkan kepadanya. |
+| `uat-resign-03-lead-divisi-lain.png` | **Lead divisi lain** (Head Sales): **menu ADMIN sama sekali tidak ada** di sidebar, dan saat URL-nya diketik langsung direktori menolak dengan `[anda tidak memiliki akses ke data ini]` di panel merah — bukan halaman kosong, bukan galat mentah. Dua panel tulis yang sama juga masih tampil di sini (`OBS-OD-PANEL-TULIS`). |

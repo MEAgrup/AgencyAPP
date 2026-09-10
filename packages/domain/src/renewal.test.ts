@@ -260,6 +260,58 @@ describeDb('proposeRenewal', () => {
   });
 });
 
+describeDb('layanan yang diarsipkan — dan kenapa `bayar_komisi` DIKECUALIKAN', () => {
+  /** Arsipkan `svc` dengan menambahkan versi 2 ber-`active = false`. */
+  async function arsipkan(svc: string, pengakuan = 'saat_selesai'): Promise<void> {
+    const prev = await sql<{ name: string; standard_price: string; commission_rule: string; pricing_mode: string }[]>`
+      select name, standard_price, commission_rule, pricing_mode
+        from master_service_versions where service_id = ${svc} order by version_no desc limit 1`;
+    const p = prev[0];
+    await sql`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, active, effective_from,
+         pricing_mode, durasi_bulan, qty_menambah, pengakuan, created_by)
+      values (${svc}, 2, ${p.name}, ${p.standard_price}, ${p.commission_rule}, false, '2020-01-02',
+              ${p.pricing_mode}, NULL, 'volume', ${pengakuan}, 'ZZ-ADMIN')`;
+  }
+
+  it('perpanjangan MENOLAK layanan yang sudah diarsipkan — ia kesepakatan baru', async () => {
+    const svc = await seedService('SVC-ZZ-RN-ARSIP');
+    const clientId = await closedClient(budi(), svc);
+    await arsipkan(svc);
+    await expect(proposeRenewal(sql, budi(), clientId, JENIS_PERPANJANGAN, [standardLine(svc)], true))
+      .rejects.toThrow(/tidak bisa dijual lagi\]$/);
+  });
+
+  it('cross_sell juga menolaknya', async () => {
+    const svc = await seedService('SVC-ZZ-RN-ARSIP-CS');
+    const clientId = await closedClient(budi(), svc);
+    await arsipkan(svc);
+    await expect(proposeRenewal(sql, budi(), clientId, JENIS_CROSS_SELL, [standardLine(svc)], true))
+      .rejects.toThrow(/tidak bisa dijual lagi\]$/);
+  });
+
+  it('bayar_komisi TETAP JALAN walau layanan Komisi-nya diarsipkan', async () => {
+    // Ini tes yang paling penting di blok ini, dan bentuknya sengaja terbalik
+    // dari dua tes di atasnya. `bayar_komisi` adalah TAGIHAN atas komisi yang
+    // SUDAH diperoleh (ketokan FS-3/FS-4 2026-09-08), bukan kesepakatan baru.
+    // Menggerbanginya berarti: seseorang mengarsipkan layanan Komisi, dan
+    // penagihan komisi berhenti SE-AGENSI — dengan galatnya muncul di layar
+    // perpanjangan, jauh dari penyebabnya. `renewal.ts` sudah menolak kelas
+    // kegagalan itu untuk nama layanan; ini menolaknya untuk `active`.
+    const komisi = await seedKomisiService('SVC-ZZ-RN-KOM-ARSIP');
+    const jual = await seedService('SVC-ZZ-RN-KOM-JUAL');
+    const clientId = await closedClient(budi(), jual);
+    await arsipkan(komisi, 'bulan_berikutnya');
+
+    const rn = await proposeRenewal(sql, budi(), clientId, JENIS_BAYAR_KOMISI, [
+      { masterServiceId: komisi, amount: '2500000' },
+    ], true);
+    expect(rn.jenis).toBe(JENIS_BAYAR_KOMISI);
+    expect(rn.status).toBe(STATUS_AUTO_APPROVED);
+  });
+});
+
 describeDb('decideRenewal / resubmitRenewal', () => {
   it('a non-lead cannot decide (role_denied); the lead approves, then a staff without PIC still cannot decide', async () => {
     const svc = await seedService('SVC-ZZ-RN-DECIDE');

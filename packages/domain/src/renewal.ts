@@ -332,9 +332,30 @@ async function writeRenewalProposal(
     }
     seen.add(id);
   }
+  // Apakah katalog yang sudah diarsipkan boleh dipakai baris ini — dan
+  // jawabannya bergantung pada JENIS-nya, bukan pada pemanggilnya.
+  //
+  // `perpanjangan` dan `cross_sell` adalah KESEPAKATAN BARU: layanan yang sudah
+  // ditarik dari katalog tidak boleh masuk ke dalamnya, jadi `resolveProposalLine`
+  // menggerbanginya lewat `msl.sellableAt`.
+  //
+  // `bayar_komisi` BUKAN kesepakatan baru — ia tagihan atas komisi yang sudah
+  // diperoleh (ketokan FS-3/FS-4 2026-09-08). Menggerbanginya berarti mengulang
+  // persis kegagalan yang sudah ditolak `validateBayarKomisiLines` di atas
+  // ("penagihan komisi berhenti bekerja pada hari seseorang merapikan katalog"),
+  // hanya lewat pintu lain: seseorang mengarsipkan layanan Komisi dan penagihan
+  // komisi berhenti se-agensi, dengan galatnya muncul di layar perpanjangan.
+  //
+  // Jenis-nya DIBACA DARI BARIS, bukan diterima sebagai argumen: fungsi ini
+  // dipanggil dari `proposeRenewal` DAN `resubmitRenewal`, dan satu parameter
+  // yang lupa diteruskan di salah satunya akan membuka gerbangnya diam-diam.
+  const jenisRows = await tx<{ jenis: string }[]>`
+    select jenis from renewal_requests where id = ${renewalRequestId}`;
+  const allowArchived = jenisRows[0]?.jenis === JENIS_BAYAR_KOMISI;
+
   const resolved: { line: RenewalLine; price: string; rule: string; durasiBulan: number | null }[] = [];
   for (const l of lines) {
-    const { price, rule, durasiBulan } = await resolveProposalLine(tx, l, now);
+    const { price, rule, durasiBulan } = await resolveProposalLine(tx, l, now, allowArchived);
     resolved.push({ line: l, price, rule, durasiBulan });
   }
 

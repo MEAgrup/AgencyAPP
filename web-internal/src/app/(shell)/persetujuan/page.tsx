@@ -1146,7 +1146,7 @@ export default function PerluPersetujuanPage() {
   useEffect(() => {
     let alive = true;
     api
-      .get<{ data: MasterService[] }>(`/master-services?effective_at=${todayISO()}`)
+      .get<{ data: MasterService[] }>(`/master-services?effective_at=${todayISO()}&sellable=1`)
       .then((res) => {
         if (alive) setCatalog(res.data.map((s) => ({ id: s.id, name: s.name, standard_price: s.standard_price })));
       })

@@ -16,7 +16,7 @@
  * quietly disappears the next time someone edits a price.
  */
 import { api } from './api';
-import type { MasterService, Pengakuan, PlanTier, QtyMenambah } from './types';
+import type { MasterService, Pengakuan, PlanTier, QtyMenambah, ServiceRefs } from './types';
 
 export interface MslFormState {
   name: string;
@@ -319,3 +319,47 @@ export function tenorDefault(svc: { durasi_options?: { durasi_bulan: number; har
 export function tenorLabel(o: { durasi_bulan: number; harga: string }, formatIDR: (v: string) => string): string {
   return `${o.durasi_bulan} bulan — ${formatIDR(o.harga)}`;
 }
+
+// ---------------------------------------------------------------------------
+// Arsip / pulihkan / hapus (permintaan pemilik 2026-09-10)
+// ---------------------------------------------------------------------------
+
+/** Badan `PUT /master-services/{id}/active`. */
+export interface MslActivePayload {
+  active: boolean;
+}
+
+/**
+ * fetchServiceRefs mengambil angka pemakaian untuk panel konfirmasi hapus.
+ *
+ * Dipanggil SEBELUM bertanya, bukan sesudah ditolak: hapus tidak punya undo,
+ * jadi konsekuensinya harus dinyatakan lebih dulu — pola yang sama dengan
+ * daftar serah-terima pada resign permanen.
+ */
+export async function fetchServiceRefs(id: string): Promise<ServiceRefs> {
+  const res = await api.get<{ data: ServiceRefs }>(`/master-services/${id}/refs`);
+  return res.data;
+}
+
+/**
+ * setMasterServiceActive mengarsipkan (`false`) atau memulihkan (`true`) satu
+ * layanan.
+ *
+ * Pintunya SENGAJA bukan `saveMasterService` walau keduanya menyentuh kolom
+ * `active` yang sama: `PUT /master-services/{id}` ber-semantik FULL REPLACE, dan
+ * `DECISIONS.md` 2026-09-07 sudah mencatat apa yang ditimbulkannya — setiap
+ * kiriman yang tidak menyertakan `durasi_jasa` MENGHAPUS nilai itu diam-diam.
+ * Tombol "Arsipkan" tidak memegang dua puluh field lainnya, jadi ia tidak boleh
+ * lewat pintu yang menuntutnya.
+ */
+export async function setMasterServiceActive(id: string, active: boolean): Promise<void> {
+  const payload: MslActivePayload = { active };
+  await api.put(`/master-services/${id}/active`, payload);
+}
+
+/** deleteMasterService menghapus katalog yang belum pernah dipakai. Yang sudah dipakai ditolak 409 dengan pesan BI ber-angka. */
+export async function deleteMasterService(id: string): Promise<void> {
+  await api.delete(`/master-services/${id}`);
+}
+
+export type { ServiceRefs };

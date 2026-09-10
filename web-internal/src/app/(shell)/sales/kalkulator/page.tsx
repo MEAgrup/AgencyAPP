@@ -65,7 +65,7 @@ export default function KalkulatorPenawaranPage() {
       setLoading(true);
       setLoadError(null);
       try {
-        const res = await api.get<{ data: MasterService[] }>(`/master-services?effective_at=${todayISO()}`);
+        const res = await api.get<{ data: MasterService[] }>(`/master-services?effective_at=${todayISO()}&sellable=1`);
         if (!cancelled) setServices(res.data.filter((s) => s.active));
       } catch (err) {
         if (!cancelled) setLoadError(errorMessage(err));
