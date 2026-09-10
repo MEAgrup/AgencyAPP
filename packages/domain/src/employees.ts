@@ -248,6 +248,14 @@ export interface SyncResult {
   deactivated: number;
   reactivated: number;
   flagged: number;
+  /**
+   * Rows the source called ACTIVE but that carry `employees.resigned_at`, so the
+   * sync left them revoked instead of reactivating them. Counted rather than
+   * silently skipped: a non-zero number here means the upstream sheet still
+   * lists someone who has already resigned, and that is an operator's problem
+   * to fix at the source, not a detail to swallow.
+   */
+  skippedResigned: number;
 }
 
 /**
@@ -258,6 +266,21 @@ export interface SyncResult {
  * (never deleted — audit trail preserved). Every status change is audited.
  *
  * `actor` is the employee id that triggered the sync (or "SYSTEM" for scheduled).
+ *
+ * ## `resigned_at` outranks the source (migration 20260929010000)
+ *
+ * A permanent resign is a CDPS decision, not an HRIS fact, so the source cannot
+ * undo it. Without this the feature would be a lie: the upsert below writes
+ * `status_aktif = excluded.status_aktif`, and the reactivation arm fires on any
+ * `priorActive === false`, so ONE import of a sheet that still lists a resigned
+ * person as active would unban them in GoTrue and audit it as
+ * `hris_sync:reactivated` — no error anywhere, and they can log in again.
+ *
+ * So for a row carrying `resigned_at` the sync keeps the profile fields fresh
+ * (a name or division correction is still worth having on a historical row) but
+ * FORCES `status_aktif = false`, never calls `set_employee_banned(..., false)`,
+ * and counts the event in `skippedResigned`. The DB carries the same rule as
+ * `ck_employees_resign_nonaktif`, so even raw SQL cannot reactivate them.
  */
 export async function syncEmployees(
   tx: Queryable,
@@ -266,29 +289,48 @@ export async function syncEmployees(
   opts: { full: boolean },
 ): Promise<SyncResult> {
   const audit = auditExecutor(tx);
-  const res: SyncResult = { synced: 0, deactivated: 0, reactivated: 0, flagged: 0 };
+  const res: SyncResult = { synced: 0, deactivated: 0, reactivated: 0, flagged: 0, skippedResigned: 0 };
   const present = new Set<string>();
   const now = new Date();
 
   for (const e of emps) {
     present.add(e.employeeId);
 
-    const prior = await tx<{ status_aktif: boolean }[]>`
-      select status_aktif from employees where employee_id = ${e.employeeId}`;
+    const prior = await tx<{ status_aktif: boolean; resigned_at: Date | null }[]>`
+      select status_aktif, resigned_at from employees where employee_id = ${e.employeeId}`;
     const priorActive: boolean | null = prior.length > 0 ? prior[0].status_aktif : null;
+    // A resigned employee is revoked permanently; the source cannot lift that.
+    const resigned = prior.length > 0 && prior[0].resigned_at !== null;
+    // `statusAktif` as the sync will actually WRITE it — not as the source
+    // claimed it. Resolved once, here, so the upsert and both branches below
+    // can never disagree about it.
+    const statusAktif = resigned ? false : e.statusAktif;
 
     await tx`
       insert into employees
         (employee_id, nama, email, divisi, jabatan, status_aktif, flagged_for_review, synced_at, created_by)
       values
-        (${e.employeeId}, ${e.nama}, ${e.email}, ${e.divisi}, ${e.jabatan}, ${e.statusAktif}, false, ${now}, ${actor})
+        (${e.employeeId}, ${e.nama}, ${e.email}, ${e.divisi}, ${e.jabatan}, ${statusAktif}, false, ${now}, ${actor})
       on conflict (employee_id) do update set
         nama = excluded.nama, email = excluded.email, divisi = excluded.divisi,
         jabatan = excluded.jabatan, status_aktif = excluded.status_aktif,
         flagged_for_review = false, synced_at = excluded.synced_at`;
     res.synced++;
 
-    if (!e.statusAktif) {
+    if (resigned) {
+      // Nothing to ban (resignEmployee already did) and nothing to lift. Only
+      // record it when the source DISAGREED — a source that already says
+      // inactive is simply in step, not an anomaly worth counting.
+      if (e.statusAktif) {
+        res.skippedResigned++;
+        await audit.insertAudit({
+          entityType: 'employee', entityId: e.employeeId, actorEmployeeId: actor,
+          action: 'hris_sync:skipped_resigned', beforeJson: null,
+          afterJson: { status_aktif: false, source_status_aktif: true },
+          createdBy: actor,
+        });
+      }
+    } else if (!e.statusAktif) {
       // Deactivated in the source => ban in GoTrue (no-op on plain PG). Count a
       // deactivation only on a transition from active/unknown to inactive.
       await tx`select set_employee_banned(${e.employeeId}, true)`;

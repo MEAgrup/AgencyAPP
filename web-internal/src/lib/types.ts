@@ -61,6 +61,34 @@ export interface AdminEmployee {
   jabatan: string;
   status_aktif: boolean;
   flagged: boolean;
+  /**
+   * Non-null = akses sudah DICABUT PERMANEN (resign, ketokan pemilik
+   * 2026-09-10). Berbeda dari `status_aktif: false`, yang bisa berbalik pada
+   * sinkron HRIS berikutnya; yang ini tidak pernah. Tabel Karyawan memakainya
+   * untuk menyembunyikan aksi pada baris yang sudah keluar.
+   */
+  resigned_at: string | null;
+}
+
+/**
+ * Satu hal yang masih menunjuk seorang karyawan saat aksesnya dicabut —
+ * ditampilkan sebagai langkah konfirmasi resign, supaya "lepas penugasan
+ * aktif" jadi daftar yang bisa dibaca, bukan efek samping tak terlihat.
+ *
+ * `kind` sengaja string (bukan union sempit): server yang memutuskan
+ * kategorinya, dan menyalin daftarnya ke sini hanya menciptakan versi kedua
+ * yang bisa ketinggalan. Labelnya dipetakan lewat `HANDOVER_LABELS`.
+ */
+export interface HandoverItem {
+  kind: string;
+  id: string;
+  label: string;
+}
+
+/** Jawaban `POST /admin/employees/{id}/resign`. */
+export interface ResignResult {
+  employee: AdminEmployee;
+  handover: HandoverItem[];
 }
 
 /**

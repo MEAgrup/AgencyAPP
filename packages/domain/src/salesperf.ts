@@ -322,11 +322,28 @@ interface RosterEntry {
   levelSales: string;
 }
 
-/** loadRoster reads the Sales-division roster via the existing assignable-employee picker (directory.ts's own SECURITY DEFINER), joined against the Level Sales label table. */
+/**
+ * loadRoster reads the Sales-division roster, joined against the Level Sales
+ * label table.
+ *
+ * It reads `private.employee_roster()` — the HISTORICAL roster, active or not —
+ * NOT `private.employee_assignable()`, and that distinction is load-bearing
+ * rather than incidental. `employee_assignable()` filters `WHERE status_aktif`,
+ * which is right for an assignment dropdown and wrong here: a salesperson who
+ * resigns (or is deactivated in HRIS) would drop out of this roster, and with
+ * them every closing they ever made. `resolveSalespersonIds` scopes on exactly
+ * these ids, so last month's omzet and commission would quietly shrink because
+ * of an HR decision taken today. See migration 20260929010000.
+ *
+ * Both functions are SECURITY DEFINER on purpose: `employees_select` carries no
+ * lead/division arm (the O48 narrowness in PERMISSIONS.md), so reading
+ * `employees` through RLS would hand a Sales Head an almost-empty roster and
+ * silently under-report their own division.
+ */
 async function loadRoster(sql: Queryable): Promise<RosterEntry[]> {
   const [emps, labels] = await Promise.all([
     sql<{ employee_id: string; nama: string; jabatan: string }[]>`
-      select employee_id, nama, jabatan from private.employee_assignable() where division = ${SALES_DIVISION}`,
+      select employee_id, nama, jabatan from private.employee_roster() where division = ${SALES_DIVISION}`,
     sql<{ jabatan: string; level_label: string }[]>`select jabatan, level_label from sales_level_labels`,
   ]);
   const labelMap = new Map(labels.map((l) => [l.jabatan, l.level_label]));

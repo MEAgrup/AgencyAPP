@@ -2843,6 +2843,14 @@ export interface AdminEmployeeWire {
   status_aktif: boolean;
   flagged: boolean;
   synced_at: string | null;
+  /**
+   * Non-null = access PERMANENTLY revoked (resign). Sent as an explicit `null`
+   * rather than omitted when absent: a MISSING key is worse than a null one
+   * (CLAUDE.md — the O43 class), and the roster page keys the "Resign" action
+   * off this field, so an absent key would silently re-offer the button on
+   * someone who has already left.
+   */
+  resigned_at: string | null;
 }
 
 /** admin.EmployeeRow → wire (snake_case; dates as ISO strings). */
@@ -2856,6 +2864,33 @@ export function adminEmployeeToWire(e: admin.EmployeeRow): AdminEmployeeWire {
     status_aktif: e.statusAktif,
     flagged: e.flagged,
     synced_at: e.syncedAt ? e.syncedAt.toISOString() : null,
+    resigned_at: e.resignedAt ? e.resignedAt.toISOString() : null,
+  };
+}
+
+/** One row of the resign handover list (`admin.HandoverItem`). */
+export interface HandoverItemWire {
+  kind: string;
+  id: string;
+  label: string;
+}
+
+/** admin.HandoverItem → wire. */
+export function handoverItemToWire(h: admin.HandoverItem): HandoverItemWire {
+  return { kind: h.kind, id: h.id, label: h.label };
+}
+
+/** What `POST /admin/employees/{id}/resign` answers with (`admin.ResignResult`). */
+export interface ResignResultWire {
+  employee: AdminEmployeeWire;
+  handover: HandoverItemWire[];
+}
+
+/** admin.ResignResult → wire. */
+export function resignResultToWire(r: admin.ResignResult): ResignResultWire {
+  return {
+    employee: adminEmployeeToWire(r.employee),
+    handover: r.handover.map(handoverItemToWire),
   };
 }
 

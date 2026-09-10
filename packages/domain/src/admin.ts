@@ -96,6 +96,23 @@ export const MSG_EMPLOYEE_EXISTS = '[karyawan dengan ID atau email itu sudah ter
 export const MSG_UNMAPPED_POSITION =
   '[divisi/jabatan tidak dikenali, pilih posisi yang sudah dipetakan di Role Mapping]';
 
+/**
+ * Resign (permanent access revocation) write denied. Same gate as a mutation —
+ * Director OR a Lead of the HR division — so the sentence names the same two
+ * roles rather than inventing a third authority.
+ */
+export const MSG_RESIGN_DENIED =
+  '[hanya Director atau Lead HR yang dapat mencabut akses karyawan]';
+/**
+ * The target already carries `resigned_at`. A second resign is refused rather
+ * than treated as idempotent: "already revoked" and "just revoked by me" are
+ * different facts, and the audit trail should not gain a second `resign` row
+ * that claims a revocation which did not happen.
+ */
+export const MSG_SUDAH_RESIGN = '[karyawan ini sudah dicabut aksesnya]';
+/** Resign requires a reason — it is the only free-text explanation the audit row will ever carry. */
+export const MSG_RESIGN_ALASAN_WAJIB = '[alasan resign wajib diisi]';
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -136,9 +153,24 @@ export class ConflictError extends Error {
 // Permission predicates (Phase 0 §4; mirror of Go's handler gates)
 // ---------------------------------------------------------------------------
 
-/** Director/OD may READ the admin plane. OD is read-only everywhere by design. */
+/**
+ * Director/OD may READ the admin plane. OD is read-only everywhere by design.
+ *
+ * Plus the Lead of the HR division, and that arm is a bug fix rather than a
+ * widening: `canManageEmployeeAssignment` has let an HR Lead mutate an
+ * employee since 2026-08-10, but this predicate refused them the LIST — so the
+ * only people who could run a mutasi could not find anyone to run it on. The
+ * roster page's other source (`GET /auth/admin/credentials`) is no help either:
+ * it scopes a Lead to their own mapped division, so an HR Lead saw HR staff
+ * only. A write authority that cannot read its own subjects is not a feature.
+ *
+ * Deliberately NOT extended to passwords: `auth.canManagePasswords` /
+ * `adminMayManage` stay as they are, because letting HR reset anyone's password
+ * would be privilege escalation by password takeover — the exact thing
+ * `adminMayManage` already refuses for every other Lead.
+ */
 export function canReadAdmin(actor: Actor): boolean {
-  return permission.canManageAdmin(actor) || actor.role.od;
+  return permission.canManageAdmin(actor) || actor.role.od || canManageEmployeeAssignment(actor);
 }
 
 /** Only Director may WRITE the admin plane (OD stays read-only). */
@@ -194,6 +226,13 @@ export interface EmployeeRow {
   statusAktif: boolean;
   flagged: boolean;
   syncedAt: Date | null;
+  /**
+   * When set, access was PERMANENTLY revoked (migration 20260929010000) — the
+   * row is kept only so historical attribution keeps resolving. Deliberately
+   * separate from `statusAktif`: an HRIS-inactive employee can come back on the
+   * next sync, a resigned one never can, and one boolean cannot say both.
+   */
+  resignedAt: Date | null;
 }
 
 /**
@@ -207,9 +246,11 @@ export async function listEmployees(sql: Queryable): Promise<EmployeeRow[]> {
     {
       employee_id: string; nama: string; email: string; divisi: string; jabatan: string;
       status_aktif: boolean; flagged_for_review: boolean; synced_at: Date | null;
+      resigned_at: Date | null;
     }[]
   >`
-    select employee_id, nama, email, divisi, jabatan, status_aktif, flagged_for_review, synced_at
+    select employee_id, nama, email, divisi, jabatan, status_aktif, flagged_for_review, synced_at,
+           resigned_at
       from employees
      order by divisi, nama`;
   return rows.map((r) => ({
@@ -221,6 +262,7 @@ export async function listEmployees(sql: Queryable): Promise<EmployeeRow[]> {
     statusAktif: r.status_aktif,
     flagged: r.flagged_for_review,
     syncedAt: r.synced_at,
+    resignedAt: r.resigned_at,
   }));
 }
 
@@ -272,11 +314,13 @@ export async function updateEmployeeAssignment(
       {
         employee_id: string; nama: string; email: string; divisi: string; jabatan: string;
         status_aktif: boolean; flagged_for_review: boolean; synced_at: Date | null;
+        resigned_at: Date | null;
       }[]
     >`
       update employees set divisi = ${d}, jabatan = ${j}
        where employee_id = ${id}
-      returning employee_id, nama, email, divisi, jabatan, status_aktif, flagged_for_review, synced_at`;
+      returning employee_id, nama, email, divisi, jabatan, status_aktif, flagged_for_review, synced_at,
+                resigned_at`;
     await executors(tx).audit.insertAudit({
       entityType: 'employee',
       entityId: id,
@@ -296,6 +340,224 @@ export async function updateEmployeeAssignment(
       statusAktif: r.status_aktif,
       flagged: r.flagged_for_review,
       syncedAt: r.synced_at,
+      resignedAt: r.resigned_at,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Resign — permanent access revocation (owner decision 2026-09-10)
+// ---------------------------------------------------------------------------
+
+/**
+ * One thing that still points at an employee after they leave. `kind` names the
+ * category so the UI can group without re-deriving it, `label` is what a human
+ * reads, and `id` is the record to open.
+ */
+export interface HandoverItem {
+  kind: 'klien_sales_pic' | 'klien_am' | 'klien_komisi_pic' | 'brief' | 'penugasan' | 'scs' | 'booking_kol';
+  id: string;
+  label: string;
+}
+
+/**
+ * Everything still assigned to `employeeId`, for the confirmation step of a
+ * resign.
+ *
+ * ## Why this REPORTS instead of reassigning
+ *
+ * The owner asked resign to "sekalian lepas penugasan aktif", and the tempting
+ * reading is to null out or auto-move every pointer. That would be wrong for the
+ * three client-level ones: `sales_pic_id` and `commission_payment_pic_id` decide
+ * who earns commission, and moving them silently is exactly the trap DECISIONS
+ * 2026-09-08 (FS-4) already refused — "kepemilikan klien berpindah tiap bulan,
+ * diam-diam, ke siapa pun yang kebetulan menekan tombol". M4 already owns that
+ * transfer (Sales Lead, logged); resign surfaces the list and sends the operator
+ * there rather than inventing a second, unlogged path to the same money.
+ *
+ * The work-level pointers (Brief PIC, Penugasan, SCS, KOL booking) are not
+ * money, but they are still someone's decision: a division lead reassigns based
+ * on who has capacity, which this function cannot know. So it reports those too.
+ *
+ * What resign DOES do automatically is the part that needs no judgement: the
+ * person can no longer log in, and `private.employee_assignable()` filters on
+ * `status_aktif`, so they immediately disappear from every future picker.
+ *
+ * Non-terminal is resolved from `sm_terminal_states`, not from a hardcoded list
+ * of status strings — the machines already own that vocabulary, and a copy here
+ * would drift the first time a state is added.
+ */
+export async function handoverList(sql: Queryable, employeeId: string): Promise<HandoverItem[]> {
+  const id = employeeId.trim();
+  if (id === '') {
+    return [];
+  }
+  const rows = await sql<{ kind: string; id: string; label: string }[]>`
+    select 'klien_sales_pic' as kind, c.id, c.toko as label
+      from clients c where c.sales_pic_id = ${id}
+    union all
+    select 'klien_am', c.id, c.toko
+      from clients c where c.assigned_am_id = ${id}
+    union all
+    select 'klien_komisi_pic', c.id, c.toko
+      from clients c where c.commission_payment_pic_id = ${id}
+    union all
+    select 'brief', b.id, b.status
+      from briefs b
+     where b.assigned_pic = ${id}
+       and not exists (select 1 from sm_terminal_states t
+                        where t.machine = 'brief_task' and t.state = b.status)
+    union all
+    select 'penugasan', t.id, t.judul
+      from internal_tasks t
+     where t.assignee_id = ${id}
+       and not exists (select 1 from sm_terminal_states s
+                        where s.machine = 'internal_task' and s.state = t.status)
+    union all
+    select 'scs', k.id, k.status
+      from scs_tasks k
+     where k.assigned_pic = ${id}
+       and not exists (select 1 from sm_terminal_states s
+                        where s.machine = 'scs_task' and s.state = k.status)
+    union all
+    select 'booking_kol', bk.id, bk.status
+      from creator_bookings bk
+     where bk.assigned_coordinator = ${id}
+       and not exists (select 1 from sm_terminal_states s
+                        where s.machine = 'creator_booking' and s.state = bk.status)
+    order by kind, id`;
+  return rows.map((r) => ({ kind: r.kind as HandoverItem['kind'], id: r.id, label: r.label ?? '' }));
+}
+
+/** What a completed resign reports back: the updated row plus what it left behind. */
+export interface ResignResult {
+  employee: EmployeeRow;
+  handover: HandoverItem[];
+}
+
+/**
+ * resignEmployee permanently revokes an employee's CDPS access and appends an
+ * audit row, in one transaction. Returns the updated row plus the handover list
+ * as it stood at revocation time.
+ *
+ * PERMANENT means: `resigned_at` is set once and there is no path in this module
+ * that clears it. The DB carries the same rule (`ck_employees_resign_nonaktif`),
+ * and `syncEmployees` refuses to reactivate such a row — so an HRIS sheet that
+ * still lists the person as active cannot undo this either. Per the owner's
+ * decision there is deliberately NO undo affordance; correcting a mis-click
+ * needs a Director and a migration, and the UI says so before asking.
+ *
+ * The row itself is KEPT (house rule #3): `clients.sales_pic_id`,
+ * `client_sales_allocations`, `briefs.assigned_pic` and every `audit_log` row
+ * they ever wrote still point here, so deleting it would break historical
+ * attribution rather than tidy it.
+ *
+ * Gate: `canManageEmployeeAssignment` — Director OR HR-division Lead, the SAME
+ * predicate as a mutasi. Reused rather than re-derived on purpose: revoking
+ * access and moving someone between divisions are the same HR authority, and a
+ * second predicate would be a second thing to keep in step. OD is absent from
+ * it, which is the point — OD never writes.
+ *
+ * Takes the PRIVILEGED client: `set_employee_banned()` is service-role only and
+ * the write bypasses RLS, mirroring `updateEmployeeAssignment`.
+ */
+export async function resignEmployee(
+  sql: Sql,
+  actor: Actor,
+  employeeId: string,
+  input: { alasan: string },
+): Promise<ResignResult> {
+  if (!canManageEmployeeAssignment(actor)) {
+    throw new ForbiddenError(MSG_RESIGN_DENIED);
+  }
+  const id = employeeId.trim();
+  const alasan = input.alasan.trim();
+  if (id === '') {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+  // A separate message from the generic one: "you forgot the reason" and "you
+  // forgot who" are different mistakes, and the reason is the only free text
+  // the audit row will ever carry about why access went away.
+  if (alasan === '') {
+    throw new ValidationError(MSG_RESIGN_ALASAN_WAJIB);
+  }
+  return withTransaction(sql, async (tx) => {
+    const before = await tx<
+      { status_aktif: boolean; resigned_at: Date | null; nama: string; divisi: string; jabatan: string }[]
+    >`
+      select status_aktif, resigned_at, nama, divisi, jabatan
+        from employees where employee_id = ${id} for update`;
+    if (before.length === 0) {
+      throw new NotFoundError(MSG_EMPLOYEE_NOT_FOUND);
+    }
+    if (before[0].resigned_at !== null) {
+      throw new ConflictError(MSG_SUDAH_RESIGN);
+    }
+
+    // Read the handover list BEFORE the update. It is a snapshot of what was
+    // still assigned at the moment access was revoked; reading it after would
+    // report the same rows but date them wrongly in the audit entry.
+    const handover = await handoverList(tx, id);
+
+    const now = new Date();
+    const rows = await tx<
+      {
+        employee_id: string; nama: string; email: string; divisi: string; jabatan: string;
+        status_aktif: boolean; flagged_for_review: boolean; synced_at: Date | null;
+        resigned_at: Date | null;
+      }[]
+    >`
+      update employees
+         set resigned_at = ${now}, resigned_by = ${actor.employeeId}, status_aktif = false
+       where employee_id = ${id}
+      returning employee_id, nama, email, divisi, jabatan, status_aktif, flagged_for_review,
+                synced_at, resigned_at`;
+
+    // Ban in GoTrue so the token stops being issued (no-op on a plain PG).
+    await tx`select set_employee_banned(${id}, true)`;
+    // And revoke any CDPS-owned session still alive, so an already-issued token
+    // does not outlive the revocation until its own expiry.
+    await tx`
+      update sessions set revoked_at = ${now}
+       where employee_id = ${id} and revoked_at is null`;
+
+    await executors(tx).audit.insertAudit({
+      entityType: 'employee',
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'resign',
+      beforeJson: {
+        status_aktif: before[0].status_aktif,
+        resigned_at: null,
+        divisi: before[0].divisi,
+        jabatan: before[0].jabatan,
+      },
+      afterJson: {
+        status_aktif: false,
+        resigned_at: now.toISOString(),
+        alasan,
+        // Counted, not enumerated: the list can be long, and audit rows are
+        // read as evidence of a decision, not as a work queue. The queue is the
+        // response body the operator just acted on.
+        penugasan_tertinggal: handover.length,
+      },
+      createdBy: actor.employeeId,
+    });
+
+    const r = rows[0]!;
+    return {
+      employee: {
+        employeeId: r.employee_id,
+        nama: r.nama,
+        email: r.email,
+        divisi: r.divisi,
+        jabatan: r.jabatan,
+        statusAktif: r.status_aktif,
+        flagged: r.flagged_for_review,
+        syncedAt: r.synced_at,
+        resignedAt: r.resigned_at,
+      },
+      handover,
     };
   });
 }

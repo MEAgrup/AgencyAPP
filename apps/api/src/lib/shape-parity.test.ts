@@ -732,6 +732,8 @@ const WIRE_TO_FE: Record<string, string> = {
   NotificationWire: 'types.ts::NotificationItem',
   NotificationsResponseWire: 'types.ts::NotificationsResponse',
   AdminEmployeeWire: 'types.ts::AdminEmployee',
+  HandoverItemWire: 'types.ts::HandoverItem',
+  ResignResultWire: 'types.ts::ResignResult',
   VendorAccountWire: 'types.ts::VendorAccount',
   ClientContactAccountWire: 'types.ts::ClientContactAccount',
   AssignableEmployeeWire: 'types.ts::AssignableEmployee',

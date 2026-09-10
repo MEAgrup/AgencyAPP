@@ -10,7 +10,7 @@
 | View cross-division / all clients | ❌ | ❌ (see notes) | ✅ read-only | ✅ |
 | Edit auto-computed fields | ❌ nobody — system only | ❌ | ❌ | ❌ |
 | Manage OKR | ❌ | ❌ | ✅ | ✅ |
-| Manage employees / role mapping | ❌ | ❌ | ❌ | ✅ (+ system admin) |
+| Manage employees / role mapping | ❌ | ❌ (kecuali Lead **HR**, lihat catatan) | ❌ | ✅ (+ system admin) |
 | Read audit trail | ✅ **own entries only** | ✅ own division (by entry's actor) | ✅ read-all | ✅ read-all |
 
 > ### Audit trail scope — O46 decided, fixed, applied, and VERIFIED live 2026-07-30 (`docs/DECISIONS.md`)
@@ -77,6 +77,41 @@
 > verified only by the shared helper (`private.jwt_division_owns_client`, same
 > `employee_claims()` resolution, unit-covered by `rls_checks`) and **not** by live data. Re-probe it
 > once transactions exist.
+
+
+> ### Roster karyawan — Lead HR menulis mutasi & resign (2026-08-10 + 2026-09-10)
+> Baris "Manage employees / role mapping" di atas tetap **Director** untuk `role_mappings` dan
+> layered role. Yang punya satu pengecualian bernama adalah **roster karyawan**:
+> `admin.canManageEmployeeAssignment` (`packages/domain/src/admin.ts`) mengizinkan **Director
+> ATAU Lead divisi CDPS `HR`** untuk (a) **mutasi** — menyunting `divisi`/`jabatan`, sejak
+> keputusan pemilik 2026-08-10 — dan (b) **resign** — mencabut akses secara permanen, ketokan
+> pemilik 2026-09-10. Gerbangnya satu predikat untuk keduanya: mencabut akses dan memindahkan
+> divisi adalah otoritas HR yang sama, dan predikat kedua hanya akan jadi hal kedua yang harus
+> dijaga sejalan.
+>
+> **OD tidak termasuk, dan itu memang keputusannya.** Pemilik ditanya langsung dan memilih
+> Director + Lead HR; invarian "OD tidak pernah menulis" (`permission.canWrite` /
+> `canManageAdmin`) **tidak disentuh**. OD tetap membaca roster dan riwayatnya.
+>
+> **Membaca menyertai menulis.** `admin.canReadAdmin` ikut membawa lengan HR sejak 2026-09-10,
+> dan `employees_select` diberi lengan `jwt_is_lead() AND jwt_division() = 'HR'` (migrasi
+> `20260929010000`). Sebelum itu Lead HR boleh memutasi tapi hanya bisa membaca baris dirinya
+> sendiri — otoritas menulis yang tidak bisa menemukan subjeknya. Lengan HR itu **seluruh
+> tabel**, bukan per-divisi seperti lengan Sales/Account, karena HR memang mengelola roster
+> semua divisi. Ledger O48 di `supabase/tests/rls_checks.sql` karena itu **menyusut** satu baris.
+>
+> ⚠️ **Password TIDAK ikut.** `auth.canManagePasswords` / `adminMayManage` tidak berubah: HR
+> membaca roster, tapi tidak me-reset password siapa pun di luar divisi terpetakannya — itu
+> eskalasi hak lewat pengambilalihan password, dan `adminMayManage` sudah menolaknya untuk
+> setiap Lead lain. Di halaman Karyawan, kolom kredensial baris yang tak boleh ia baca tampil
+> `—`, bukan "Belum".
+>
+> 🟠 **Nol pemegang sampai pemilik memetakannya.** Belum ada baris `role_mappings` nyata yang
+> menunjuk divisi `HR` (`supabase/seed/role_mappings_riil.csv` sengaja tidak disentuh — isinya
+> pemetaan sungguhan, dan pasangan HRIS `divisi,jabatan` HR yang asli tidak diketahui dari
+> repo). Fixture `supabase/seed.sql` punya `EMP-0011` (`HR`/`HR Head`) supaya tes gerbangnya
+> tidak hanya pernah menguji cabang Director. Sampai Director membuat pemetaan riilnya lewat
+> `/admin/role-mappings`, mutasi & resign praktis Director-only.
 
 ## Per-module specifics (exceptions & named rights)
 | Module | Rule |

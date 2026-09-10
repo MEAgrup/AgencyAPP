@@ -416,8 +416,15 @@ check "notif_events"     "select count(*) from notif_events"     "73"
 # harus sama dengan SUM(event_count) di notif_catalog_versions, dan gate di
 # bawah yang memaksanya. Menambah event tanpa mendaftarkan versinya = merah.
 check "notif_katalog_sesuai" "select case when (select count(*) from notif_events) = (select coalesce(sum(event_count),0) from notif_catalog_versions) then 1 else 0 end" "1"
-check "employees"        "select count(*) from employees"        "10"
-check "role_mappings"    "select count(*) from role_mappings"    "12"
+# 11 = 10 + EMP-0011 (Maya Hartono, HR Head) — pemegang fixture pertama untuk
+#      lengan Lead HR pada `admin.canManageEmployeeAssignment`. Sebelum ini
+#      lengannya ada di kode tapi nol orang memegangnya, jadi setiap tes gerbang
+#      hanya pernah menguji cabang Director-nya.
+# 14 = 12 + ('HR','HR Head'->HR/lead) + ('HR','HR Staff'->HR/staff). Pemetaan HR
+#      yang SUNGGUHAN tetap pekerjaan pemilik lewat /admin/role-mappings —
+#      `seed/role_mappings_riil.csv` sengaja tidak disentuh.
+check "employees"        "select count(*) from employees"        "11"
+check "role_mappings"    "select count(*) from role_mappings"    "14"
 check "master_services"  "select count(*) from master_services"  "6"
 check "demo_tasks"       "select count(*) from demo_tasks"       "1"
 
