@@ -34,7 +34,7 @@
  * pre-selected from the store name and stays the AM's to change.
  */
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { errorMessage } from '@/lib/api';
+import { errorMessage, isForbidden } from '@/lib/api';
 import { parseExportFile, type ParsedExport } from '@/lib/riset-awal';
 import {
   createClientReport,
@@ -130,6 +130,7 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [terlarang, setTerlarang] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -146,6 +147,13 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
       });
       setStatusMap(next);
     } catch (e) {
+      // 403 saat memuat = panel laporan bukan hak pembaca (OBS-1): laporan
+      // klien milik Account/AM, dan Sales yang membuka klien MILIKNYA SENDIRI
+      // tidak boleh disambut pita merah. Sembunyikan panelnya.
+      if (isForbidden(e)) {
+        setTerlarang(true);
+        return;
+      }
       setLoadErr(errorMessage(e));
     }
   }, [clientId]);
@@ -210,6 +218,8 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
       setSaving(false);
     }
   };
+
+  if (terlarang) return null;
 
   return (
     <section className="card" id="reports">

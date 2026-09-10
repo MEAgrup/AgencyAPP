@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { errorMessage } from '@/lib/api';
+import { errorMessage, isForbidden } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { canEditClientProfile, isAccountLead, isAccountStaff } from '@/lib/account';
 import {
@@ -901,6 +901,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 function MilestonesSection({ clientId, canManage }: { clientId: string; canManage: boolean }) {
   const [rows, setRows] = useState<Milestone[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 403 saat memuat = panel ini bukan hak pembaca (OBS-1). Sembunyikan.
+  const [terlarang, setTerlarang] = useState(false);
   const [title, setTitle] = useState('');
   const [targetDate, setTargetDate] = useState('');
   const [busy, setBusy] = useState(false);
@@ -911,6 +913,10 @@ function MilestonesSection({ clientId, canManage }: { clientId: string; canManag
       const res = await listMilestones(clientId);
       setRows(res.data);
     } catch (err) {
+      if (isForbidden(err)) {
+        setTerlarang(true);
+        return;
+      }
       setError(errorMessage(err));
     }
   }, [clientId]);
@@ -951,6 +957,8 @@ function MilestonesSection({ clientId, canManage }: { clientId: string; canManag
       setBusy(false);
     }
   }
+
+  if (terlarang) return null;
 
   return (
     <section className="card">
@@ -1050,6 +1058,8 @@ function ClientBoardSection({ clientId }: { clientId: string }) {
   const [cards, setCards] = useState<Card[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 403 saat memuat = board ini bukan hak pembaca (OBS-1). Sembunyikan.
+  const [terlarang, setTerlarang] = useState(false);
 
   const [filterDivision, setFilterDivision] = useState('');
   const [filterPic, setFilterPic] = useState('');
@@ -1062,6 +1072,11 @@ function ClientBoardSection({ clientId }: { clientId: string }) {
       const res = await getBoard(clientId);
       setCards(res.data);
     } catch (err) {
+      if (isForbidden(err)) {
+        setTerlarang(true);
+        setCards(null);
+        return;
+      }
       setError(errorMessage(err));
       setCards(null);
     } finally {
@@ -1088,6 +1103,8 @@ function ClientBoardSection({ clientId }: { clientId: string }) {
     : [];
   const columns = [...UNIVERSAL_COLUMNS, ...extraColumns];
   const divisionOptions = cards ? Array.from(new Set(cards.map((c) => c.division))).sort() : [];
+
+  if (terlarang) return null;
 
   return (
     <section className="card" id="board">

@@ -37,23 +37,40 @@
 #      Contoh: postgres://postgres:***@db.<ref>.supabase.co:5432/postgres
 #   2. SUPABASE_ACCESS_TOKEN + SUPABASE_PROJECT_REF — Management API
 #      (POST /v1/projects/<ref>/database/query), lewat curl+jq.
+#   3. LIVE_LEDGER_TSV     — berkas TSV `version<TAB>name` yang SUDAH diambil
+#      di luar skrip ini. Ada untuk satu alasan: dari sandbox Claude Code,
+#      jalur 1 dan 2 dua-duanya diblok egress (lihat CATATAN SANDBOX di bawah),
+#      tapi `mcp__Supabase__execute_sql` LEWAT. Jalur ini membuat hasil MCP itu
+#      bisa masuk ke gerbang yang SAMA, alih-alih dibandingkan ad-hoc di luar
+#      skrip — jadi logika pencocokan per-slug hanya punya satu implementasi.
+#      Query yang harus dipakai untuk mengisinya, apa pun alatnya:
+#        select version, coalesce(name,'') from
+#          supabase_migrations.schema_migrations order by version
+#      Skrip TIDAK memvalidasi kesegaran berkas ini — ia percaya pemanggil.
+#      Berkas basi = gerbang yang menjawab pertanyaan kemarin, jadi ambil ulang
+#      tiap kali, dan cocokkan jumlah barisnya dengan yang dilaporkan sumber.
 #
 # CATATAN SANDBOX (2026-09-08): dari sesi Claude Code di lingkungan sandbox
-# ini, KEDUA jalur di atas TIDAK bisa dicoba — egress proxy menolak CONNECT ke
+# ini, jalur 1 dan 2 TIDAK bisa dicoba — egress proxy menolak CONNECT ke
 # `api.supabase.com:443` (403, kebijakan organisasi) dan koneksi TCP langsung
 # ke `*.supabase.co:5432`/`:6543` time-out (tidak ada di allowlist proxy).
-# Dari sandbox seperti ini, JALUR YANG BEKERJA adalah `mcp__Supabase__list_
-# migrations` (MCP, bukan skrip shell) — itulah yang dipakai A2 untuk apply
-# empat migrasi tertinggal, dan langkah manualnya didokumentasikan di §3
-# handoff ini. Skrip ini untuk operator/CI runner yang PUNYA akses jaringan
-# nyata ke Supabase (laptop pemilik, atau runner dengan egress yang diizinkan)
-# — logika pencocokannya sudah diuji (lihat commit ini) terhadap data live
-# sungguhan yang diambil lewat MCP, bukan cuma data sintetis.
+# Dari sandbox seperti ini, JALUR YANG BEKERJA adalah MCP Supabase
+# (`execute_sql` / `list_migrations`), bukan soket yang dibuka skrip shell.
+# ITULAH SEBABNYA JALUR 3 ADA (ditambahkan 2026-09-10, sesi M19-lanjutan):
+# skrip ini TIDAK LAGI eksklusif operator/CI — sesi sandbox mengambil ledger
+# lewat MCP, menyimpannya sebagai TSV, lalu menyuapkannya ke gerbang yang SAMA,
+# jadi logika pencocokan per-slug tetap punya satu implementasi saja. Yang
+# masih eksklusif operator/CI hanya jalur 1 dan 2, yaitu koneksi yang diambil
+# skrip SENDIRI — satu perintah, tanpa langkah manual di tengah, dan karena itu
+# satu-satunya bentuk yang pantas dipasang di CI.
+# Logika pencocokannya sudah diuji terhadap data live sungguhan yang diambil
+# lewat MCP, bukan cuma data sintetis.
 #
 # PEMAKAIAN
 #   LIVE_DATABASE_URL="postgres://…" scripts/check-live-drift.sh
 #   SUPABASE_ACCESS_TOKEN=… SUPABASE_PROJECT_REF=egddxfcnrtecheiykhlf \
 #     scripts/check-live-drift.sh
+#   LIVE_LEDGER_TSV=/tmp/live-ledger.tsv scripts/check-live-drift.sh   # sandbox
 #   scripts/check-live-drift.sh --strict   # EXTRA ON LIVE yang belum di-
 #                                           # allowlist juga bikin exit tidak-nol
 # =============================================================================
@@ -71,7 +88,20 @@ STRICT="no"
 LIVE_TSV="$(mktemp)"
 trap 'rm -f "$LIVE_TSV"' EXIT
 
-if [[ -n "${LIVE_DATABASE_URL:-}" ]]; then
+if [[ -n "${LIVE_LEDGER_TSV:-}" ]]; then
+  echo "→ pakai ledger live dari berkas (LIVE_LEDGER_TSV=$LIVE_LEDGER_TSV)" >&2
+  [[ -f "$LIVE_LEDGER_TSV" ]] || { echo "FATAL: LIVE_LEDGER_TSV tidak ada: $LIVE_LEDGER_TSV" >&2; exit 1; }
+  # tolak berkas yang bukan TSV dua-kolom — tanpa cek ini, berkas satu-kolom
+  # membuat `cut -f2` mengembalikan kolom PERTAMA (perilaku cut tanpa
+  # delimiter), jadi seluruh ledger jadi angka dan SETIAP migrasi repo
+  # dilaporkan MISSING. Gerbang yang gagal dengan cara yang meyakinkan itu
+  # lebih buruk daripada gerbang yang menolak jalan.
+  if grep -qv "$(printf '\t')" "$LIVE_LEDGER_TSV"; then
+    echo "FATAL: ada baris tanpa TAB di $LIVE_LEDGER_TSV — format wajib 'version<TAB>name'." >&2
+    exit 1
+  fi
+  cat "$LIVE_LEDGER_TSV" > "$LIVE_TSV"
+elif [[ -n "${LIVE_DATABASE_URL:-}" ]]; then
   echo "→ ambil ledger live lewat psql (LIVE_DATABASE_URL)" >&2
   psql "$LIVE_DATABASE_URL" -v ON_ERROR_STOP=1 -tA -F"$(printf '\t')" \
     -c "select version, name from supabase_migrations.schema_migrations order by version" \
@@ -87,10 +117,15 @@ elif [[ -n "${SUPABASE_ACCESS_TOKEN:-}" && -n "${SUPABASE_PROJECT_REF:-}" ]]; th
     > "$LIVE_TSV"
 else
   echo "FATAL: tidak ada jalur koneksi ke live." >&2
-  echo "       Set LIVE_DATABASE_URL, atau SUPABASE_ACCESS_TOKEN + SUPABASE_PROJECT_REF." >&2
-  echo "       Dari sesi Claude Code di sandbox ini, jalur ini biasanya TIDAK tersedia" >&2
-  echo "       (lihat catatan sandbox di kepala skrip) — pakai mcp__Supabase__list_migrations" >&2
-  echo "       + langkah manual §3 handoff sebagai gantinya." >&2
+  echo "       Set LIVE_DATABASE_URL, atau SUPABASE_ACCESS_TOKEN + SUPABASE_PROJECT_REF," >&2
+  echo "       atau LIVE_LEDGER_TSV yang menunjuk ledger yang sudah diambil di luar." >&2
+  echo "       Dari sandbox Claude Code jalur 1 dan 2 memang TIDAK tersedia (egress" >&2
+  echo "       diblok — lihat CATATAN SANDBOX di kepala skrip). Pakai jalur 3:" >&2
+  echo "         1. ambil ledger lewat MCP Supabase execute_sql:" >&2
+  echo "              select version, coalesce(name,'') from" >&2
+  echo "                supabase_migrations.schema_migrations order by version" >&2
+  echo "         2. simpan sebagai TSV 'version<TAB>name', satu baris per migrasi" >&2
+  echo "         3. LIVE_LEDGER_TSV=<berkas itu> $0" >&2
   exit 1
 fi
 

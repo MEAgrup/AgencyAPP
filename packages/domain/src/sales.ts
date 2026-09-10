@@ -92,9 +92,21 @@ export class TooManyServicesError extends Error {
   }
 }
 
+/**
+ * Pesan default `NotFoundError` M0. Bahasa Indonesia dalam kurung siku, seperti
+ * setiap pesan validasi lain (aturan rumah #5) — pendahulunya di `account.ts`
+ * (`[klien tidak ditemukan]`, `[layanan tidak ditemukan]`, dst).
+ *
+ * Sebelum 2026-09-10 defaultnya `'prospect attempt not found'`: bahasa Inggris,
+ * tanpa kurung siku, dan ia BENAR-BENAR sampai ke layar — UAT peramban
+ * menemukannya sebagai pita galat di Client Record bagi AM yang bukan
+ * `assigned_am_id` klien (`UAT_SALES_BROWSER_20260910.md` §7).
+ */
+export const MSG_NOT_FOUND = '[prospek tidak ditemukan]';
+
 /** Requested attempt/entity does not exist. */
 export class NotFoundError extends Error {
-  constructor(message = 'prospect attempt not found') {
+  constructor(message = MSG_NOT_FOUND) {
     super(message);
     this.name = 'SalesNotFoundError';
   }
