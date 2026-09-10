@@ -160,6 +160,13 @@ sekaligus. **Pola "Task Additional" (Gap I)** juga menunggu dokumen yang sama.
 Migrasi dan merge **sudah selesai** (§1.1). Yang tersisa dari M19 bukan lagi
 kode, melainkan **satu-satunya jenis verifikasi yang belum pernah dijalankan**.
 
+> **Langkah demi langkah untuk keempat butir §4.1–§4.4 ada di
+> `TUTORIAL_UAT_M19_SALES_DRIFT_20260909.md`** — persiapan lingkungan (DB,
+> fixture, EMPAT aktor termasuk Creative lead + OD murni yang seed TIDAK punya,
+> token, dua server), tabel PASS/FAIL per butir per layar, cara mengisi
+> taksonomi Kategori, cara membaca hasil drift check, dan **daftar pekerjaan
+> belum selesai yang diperbarui** (tutorial §5, superset dari §8 di bawah).
+
 ### 4.1 🔴 Browser UAT — utang yang menumpuk dari DUA PR
 
 Ini butir prioritas sesi berikutnya, dan alasannya spesifik: **keenam layar bisa
@@ -291,6 +298,10 @@ Belum berubah, dan tidak satu pun disentuh sesi ini:
 | **O76** | asal floor GMV bulanan | sisa O57 (b) yang K-2 tidak tutup |
 | **A2-DRIFT** | migrasi live tanpa berkas yang cocok di `main` | ditemukan 2026-09-08. **Namanya kini konkret** (§1.2): `d3_tutup_buku_pulihkan_komentar_jaga_transisi`, plus baris ledger ganda `m6a_section_d`. Terpisah dari M19 |
 | **M19-SCS-KATEGORI-DATA** | 21 Kategori + 8 Sub Type | §3 — data, bukan kode; nol yang terblokir |
+
+Daftar yang lebih lengkap (verifikasi, data, cacat teknis, ketokan pemilik —
+termasuk O59-b/O60/O48, KS-4, B23-SHP, REV-1…4, dan celah ±50 label notifikasi)
+ada di `TUTORIAL_UAT_M19_SALES_DRIFT_20260909.md` §5.
 
 Urutan yang disarankan untuk sesi berikutnya: **§4.1 browser UAT lebih dulu**
 (ia utang verifikasi atas kode yang sudah berjalan di live), lalu §4.2, lalu

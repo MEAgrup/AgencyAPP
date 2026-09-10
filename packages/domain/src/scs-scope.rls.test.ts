@@ -29,6 +29,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, withClaims, type Sql } from '@cdps/db';
+import { permission } from '@cdps/core';
+import { queueScsTasks, scsPicSummary, type Actor } from './scs';
 
 const URL = process.env.DATABASE_URL;
 const dDb = describe.skipIf(!URL);
@@ -245,5 +247,65 @@ dDb('invariant DB yang tidak bisa dibuktikan dari TS', () => {
       sql`update audit_log set action = 'diubah' where entity_id = 'SCS-ZSR-9001'`,
     ).rejects.toThrow(/append-only|immutable/i);
     await sql`delete from scs_tasks where id = 'SCS-ZSR-9001'`;
+  });
+});
+
+dDb('nama klien & nama PIC — resolver, BUKAN `left join` (OBS UAT 2026-09-09)', () => {
+  /**
+   * Cermin `dailyops-scope.rls.test.ts`. `TASK_FROM` dulu memakai
+   * `left join clients` + `left join employees`, dan di bawah `readAsActor`
+   * RLS kedua tabel itu meng-NULL-kan kolom namanya untuk lead Creative —
+   * layar lalu menampilkan `EMP-…`/`CLI-…`.
+   *
+   * ⚠️ `scs.test.ts` BYPASSRLS dan karena itu buta terhadap regresi ini.
+   *
+   * ⚠️ Butir kedua di bawah menjaga invariant M19 yang BERLAWANAN arah, dan ia
+   * mudah dirusak justru saat "memperbaiki" yang pertama: baris "all client"
+   * (`client_id` NULL) HARUS tetap ber-`clientName` kosong. `client_toko(NULL)`
+   * mengembalikan NULL — kalau seseorang menggantinya dengan `coalesce(...,
+   * client_id)` gaya `employee_display_name`, FE berhenti merender
+   * "Semua klien" dan mulai merender sel kosong.
+   */
+  const leadActor = (): Actor => ({
+    employeeId: LEAD,
+    divisi: 'Creative',
+    role: permission.makeRole({ division: 'Creative', level: 'lead' }),
+  });
+  const leadClaim = { employeeId: LEAD, division: 'Creative', level: 'lead' };
+  const antrean = () =>
+    withClaims(sql, claims(leadClaim), (tx) =>
+      queueScsTasks(tx, leadActor(), {
+        dariTanggal: '2026-09-10', sampaiTanggal: '2026-09-10',
+        pic: null, kategoriKode: null, status: null,
+      }));
+
+  it('lead Creative mendapat NAMA klien & NAMA PIC pada baris ber-klien', async () => {
+    const rows = (await antrean()).filter((r) => r.id.startsWith('SCS-ZSR-') && r.clientId !== null);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(r.clientName).toBe('Toko ZSR');
+      expect(r.assignedPicNama).toBe('Nama ' + r.assignedPic);
+      expect(r.assignedPicNama).not.toBe('');
+    }
+  });
+
+  it('baris "all client" TETAP tanpa nama klien — `client_toko(NULL)` = NULL', async () => {
+    const all = (await antrean()).find((r) => r.id === T_ALL);
+    expect(all).toBeDefined();
+    expect(all?.clientId).toBeNull();
+    // `null`, BUKAN `''` — `toTaskRow` sengaja mempertahankan null di SCS
+    // (`clientName: string | null`), berbeda dari dailyops yang memakai ''.
+    // Null itulah yang dibaca FE sebagai "Semua klien".
+    expect(all?.clientName).toBeNull();
+    // PIC-nya tetap ber-nama: nol klien bukan alasan kehilangan nama orang.
+    expect(all?.assignedPicNama).toBe('Nama ' + PIC);
+  });
+
+  it('rekap PIC ber-NAMA untuk lead', async () => {
+    const rows = (await withClaims(sql, claims(leadClaim), (tx) =>
+      scsPicSummary(tx, leadActor(), '2026-09-10', '2026-09-10')))
+      .filter((r) => r.employeeId.startsWith('EMP-ZSR-'));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.nama).toBe('Nama ' + r.employeeId);
   });
 });

@@ -32,6 +32,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, withClaims, type Sql } from '@cdps/db';
+import { permission } from '@cdps/core';
+import { daySchedule, sameDaySummary, type Actor } from './dailyops';
 
 const URL = process.env.DATABASE_URL;
 const dDb = describe.skipIf(!URL);
@@ -275,5 +277,63 @@ dDb('invariant DB yang tidak bisa dibuktikan dari TS', () => {
     await expect(
       sql`update prod_slots set waktu_selesai = '08:00' where id = ${SLOT_PIC}`,
     ).rejects.toThrow();
+  });
+});
+
+dDb('nama klien & nama PIC — resolver, BUKAN `left join` (OBS UAT 2026-09-09)', () => {
+  /**
+   * REGRESI YANG DIJAGA DI SINI, dan kenapa ia butuh `withClaims`.
+   *
+   * `SLOT_COLS` dulu memakai `left join clients` + `left join employees`. Di
+   * bawah `readAsActor`, RLS kedua tabel itu memutuskan apakah join-nya
+   * menghasilkan baris — dan lead Creative tidak memenuhi satu lengan pun
+   * (`employees_select` = read-all / diri sendiri / created_by; `clients_select`
+   * nol lengan Creative). `LEFT JOIN` tidak membuang barisnya, ia MENG-NULL-KAN
+   * kolomnya, jadi layar jatuh ke `CLI-…`/`EMP-…` untuk peran yang justru
+   * paling memakai layar jadwal.
+   *
+   * ⚠️ `dailyops.test.ts` TIDAK BISA menangkap ini: koneksinya BYPASSRLS, jadi
+   * join mentah pun hijau di sana. Hanya jalur `withClaims` di bawah yang
+   * membedakan resolver dari join.
+   *
+   * ⚠️ Cacatnya juga TIDAK terlihat oleh Director/OD — keduanya lolos
+   * `jwt_can_read_all()`. Karena itu asersi yang menentukan adalah yang
+   * memakai klaim LEAD, bukan Director.
+   */
+  const leadActor = (): Actor => ({
+    employeeId: LEAD,
+    divisi: 'Creative',
+    role: permission.makeRole({ division: 'Creative', level: 'lead' }),
+  });
+
+  it('lead Creative mendapat NAMA klien & NAMA PIC, bukan id mentah', async () => {
+    const hari = await withClaims(sql, claims({ employeeId: LEAD, division: 'Creative', level: 'lead' }),
+      (tx) => daySchedule(tx, leadActor(), '2026-09-10'));
+
+    const slots = hari.studios.flatMap((st) => st.slots).filter((sl) => sl.id.startsWith('SLOT-ZDR-'));
+    expect(slots.length).toBe(2);
+    for (const sl of slots) {
+      expect(sl.clientName).toBe('Toko ZDR');
+      expect(sl.assignedPicNama).toBe('Nama ' + sl.assignedPic);
+      // Yang PERSIS terjadi sebelum perbaikan: string kosong, lalu FE jatuh ke id.
+      expect(sl.assignedPicNama).not.toBe('');
+      expect(sl.clientName).not.toBe('');
+    }
+  });
+
+  it('blok "tidak tersedia" juga ber-NAMA untuk lead', async () => {
+    const hari = await withClaims(sql, claims({ employeeId: LEAD, division: 'Creative', level: 'lead' }),
+      (tx) => daySchedule(tx, leadActor(), '2026-09-10'));
+    const kita = hari.tidakTersedia.filter((u) => u.employeeId.startsWith('EMP-ZDR-'));
+    expect(kita.length).toBeGreaterThan(0);
+    for (const u of kita) expect(u.employeeNama).toBe('Nama ' + u.employeeId);
+  });
+
+  it('rekap penyelesaian hari-sama ber-NAMA untuk lead', async () => {
+    const rows = (await withClaims(sql, claims({ employeeId: LEAD, division: 'Creative', level: 'lead' }),
+      (tx) => sameDaySummary(tx, leadActor(), '2026-09-10', '2026-09-10')))
+      .filter((r) => r.employeeId.startsWith('EMP-ZDR-'));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.nama).toBe('Nama ' + r.employeeId);
   });
 });

@@ -13,18 +13,22 @@ import { db } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 import { scsTaskToWire } from '@/lib/wire';
 
-const AKSI = {
-  mulai: 'mulai',
-  submit: 'submit',
-  buka_review: 'buka_review',
-  setujui: 'setujui',
-  minta_revisi: 'minta_revisi',
-  lanjut: 'lanjut',
-  blokir: 'blokir',
-  buka_blokir: 'buka_blokir',
-} as const;
-
-type Aksi = keyof typeof AKSI;
+/**
+ * Kedelapan aksi mesin #34. Ditulis sebagai TIPE, bukan objek `as const`:
+ * tidak ada satu pun pembaca runtime-nya — `switch` di bawah yang menjadi
+ * enumerasi sesungguhnya — dan objek yang hanya dipakai sebagai tipe adalah
+ * warning `no-unused-vars`, yang fatal di gerbang lint `apps/api`
+ * (`--max-warnings 0`).
+ */
+type Aksi =
+  | 'mulai'
+  | 'submit'
+  | 'buka_review'
+  | 'setujui'
+  | 'minta_revisi'
+  | 'lanjut'
+  | 'blokir'
+  | 'buka_blokir';
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
