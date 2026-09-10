@@ -1140,7 +1140,17 @@ DECLARE
     'ad_campaign_assets_select','ad_campaigns_select','ads_weekly_reports_select','campaigns_select',
     'client_platforms_select','client_report_insight_sel_portal',
     'client_report_publikasi_sel_portal','client_reports_sel_portal',
-    'client_sales_allocations_select','complaints_select',
+    -- `client_sales_allocations_select` DIKELUARKAN dari daftar ini 2026-09-10
+    -- (migrasi `20261001010000`): ia sekarang punya lengan
+    -- `jwt_is_lead() AND jwt_division() = 'Sales'` plus `jwt_division() =
+    -- 'Finance'`. Bukan pelonggaran diam-diam — lengan Sales-lead MEMPERBAIKI
+    -- BUG: ketiga lengan baseline semuanya per-orang (`created_by`,
+    -- `jwt_owns_client`), sehingga Head Sales melihat kolom klien & omzet
+    -- SELURUH TIM-nya berisi 0.00 di Kinerja Sales — tanpa galat, dan tidak
+    -- terlihat dari atas karena Director/OD lolos lewat `jwt_can_read_all()`.
+    -- `salesperf.scopeFor` sudah lama menyatakan "Sales lead/SPV = seluruh
+    -- divisi"; policy-nya lah yang membantah gerbang domainnya.
+    'complaints_select',
     -- `creator_payment_requests_select` DIKELUARKAN dari daftar ini 2026-09-07
     -- (A-2, migrasi `20260922100300`): ia sekarang punya lengan
     -- `public.jwt_division() = 'Finance'`. Bukan pelonggaran diam-diam —
