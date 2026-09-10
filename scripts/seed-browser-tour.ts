@@ -13,6 +13,23 @@
  * second lead with a new phone number and mints new IDs; harmless, just
  * redundant). Never run against anything but a local dev DB.
  *
+ * ## AKTORNYA WAJIB KARYAWAN SUNGGUHAN, dan itu bukan kosmetik
+ *
+ * Sampai 2026-09-10 fixture ini memakai aktor sintetis `B2TOUR-BUDI`, yang
+ * BUKAN baris `employees`. Akibatnya DUA butir UAT gagal PALSU
+ * (`UAT_SALES_BROWSER_20260910.md` §5):
+ *
+ *   - kolom Owner `/sales` menampilkan `B2TOUR-BUDI` karena tidak ada nama
+ *     untuk di-resolve — terbaca persis seperti bug feedback Sales `#2` yang
+ *     justru sudah diperbaiki;
+ *   - `clients.sales_pic_id` yang bukan karyawan berarti TIDAK ADA aktor yang
+ *     bisa memenuhi `private.jwt_owns_client`, jadi setiap Sales staff kena 403
+ *     di panel Kontrak — terbaca seperti FS-5 yang tidak bekerja.
+ *
+ * Karena itu ia kini memakai `EMP-0001` (Budi Santoso, Sales staff) dan
+ * `EMP-0006` (Dewi Anggraini, Sales Head) dari `supabase/seed.sql`. Gerbangnya
+ * tetap dievaluasi apa adanya — yang berubah hanya: aktornya benar-benar ada.
+ *
  *   DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/cdps \
  *   npx tsx scripts/seed-browser-tour.ts > /tmp/tour-ids.json
  *
@@ -45,18 +62,40 @@ const phone = () => `0812${String(Date.now()).slice(-6)}${String(seq++).padStart
 
 /** planTier defaults to 'tanpa_plan' (no Strategy gate) — pass 'ditentukan_am'
  *  for the one service you want to build a real STRG- against. */
-async function seedService(id: string, price: string, planTier: string = 'tanpa_plan') {
-  await sql`insert into master_services (id, created_by) values (${id}, 'B2TOUR-ADMIN')
+const SALES = 'EMP-0001';        // Budi Santoso — Sales staff (supabase/seed.sql)
+const SALES_LAIN = 'EMP-0006';   // Dewi Anggraini — Sales Head
+const ADMIN = 'EMP-0006';        // yang mengelola katalog MSL
+
+async function seedService(
+  id: string,
+  price: string,
+  planTier: string = 'tanpa_plan',
+  opts: { durasiBulan?: number | null; tenor?: { bulan: number; harga: string }[] } = {},
+) {
+  await sql`insert into master_services (id, created_by) values (${id}, ${ADMIN})
             on conflict (id) do nothing`;
   await sql`insert into master_service_versions
-    (service_id, version_no, name, standard_price, commission_rule, active, effective_from, pricing_mode, plan_tier, created_by)
-    values (${id}, 1, ${'Svc ' + id}, ${price}, '10% of standard price', true, '2020-01-01', 'flat', ${planTier}, 'B2TOUR-ADMIN')
+    (service_id, version_no, name, standard_price, commission_rule, active, effective_from, pricing_mode, plan_tier, durasi_bulan, created_by)
+    values (${id}, 1, ${'Svc ' + id}, ${price}, '10% of standard price', true, '2020-01-01', 'flat', ${planTier},
+            ${opts.durasiBulan ?? null}, ${ADMIN})
     on conflict do nothing`;
+  // FS-6 opsi tenor: dipasang langsung supaya pemilih tenor di kalkulator /
+  // Form Qualified punya sesuatu untuk dipilih tanpa perlu melewati layar MSL.
+  if (opts.tenor && opts.tenor.length > 0) {
+    const ver = await sql<{ id: string }[]>`
+      select id from master_service_versions where service_id = ${id} and version_no = 1`;
+    for (const t of opts.tenor) {
+      await sql`insert into master_service_duration_options (version_id, durasi_bulan, harga, created_by)
+                values (${ver[0].id}, ${t.bulan}, ${t.harga}, ${ADMIN})
+                on conflict do nothing`;
+    }
+  }
 }
 
 async function main() {
   console.error('== B2 tour fixture: building one worked example ==');
-  const budi = { employeeId: 'B2TOUR-BUDI', divisi: 'Sales', role: permission.makeRole({ division: 'Sales', level: 'staff' }) };
+  const budi = { employeeId: SALES, divisi: 'Sales', role: permission.makeRole({ division: 'Sales', level: 'staff' }) };
+  const dewi = { employeeId: SALES_LAIN, divisi: 'Sales', role: permission.makeRole({ division: 'Sales', level: 'lead' }) };
 
   await seedService('SVC-B2TOUR-1', '9000000.00', 'ditentukan_am');
   await seedService('SVC-B2TOUR-2', '6000000.00');
@@ -75,7 +114,7 @@ async function main() {
   });
   await submitNegotiation(sql, budi, reg.attempt.id, [], true);
   const closed = await close(sql, budi, reg.attempt.id, {
-    parties: { primarySalespersonId: 'B2TOUR-BUDI', allocations: [{ salespersonId: 'B2TOUR-BUDI', basisPoints: 10000 }] },
+    parties: { primarySalespersonId: SALES, allocations: [{ salespersonId: SALES, basisPoints: 10000 }] },
     paymentScheme: PAYMENT_SCHEME_TERMIN,
     installments: [{ amount: '10000000', dueDate: '2026-07-01' }, { amount: '10000000', dueDate: '2026-12-01' }],
   });
@@ -179,6 +218,60 @@ async function main() {
   }
   console.error('sku rows:', skuIds.join(', '));
 
+  // ==========================================================================
+  // TIGA FIXTURE TAMBAHAN — membuka butir UAT yang sebelumnya TIDAK BISA diuji
+  // (`UAT_SALES_BROWSER_20260910.md` §4). Ketiganya berdiri sendiri dan tidak
+  // mengubah rantai utama di atas.
+  // ==========================================================================
+
+  // --- (A) PROSPEK BERSAMA (feedback Sales #3) ------------------------------
+  // Lahir SENDIRI: sales kedua mendaftarkan nomor yang SAMA selagi attempt
+  // pertama masih terbuka ⇒ `leads.register` memutuskan outcome 'join' dan
+  // menautkan keduanya (`bersama_dengan_attempt_id`). Karena itu lead ini
+  // sengaja TIDAK ditutup — menutupnya menghapus justru yang mau dilihat.
+  const teleponBersama = phone();
+  const bersamaA = await leads.register(sql, budi, { leadName: 'Tur Prospek Bersama', phoneNumber: teleponBersama });
+  const bersamaB = await leads.register(sql, dewi, { leadName: 'Tur Prospek Bersama', phoneNumber: teleponBersama });
+  console.error('prospek bersama:', bersamaA.attempt.id, '<->', bersamaB.attempt.id);
+
+  // --- (B) KLIEN TANPA KONTRAK (FS-5b) --------------------------------------
+  // `sales.deriveDuration` TIDAK mencetak kontrak bila seluruh layanan yang
+  // ditutup berdurasi NULL. Klien ini membuktikan cabang teks eksplisit di
+  // kolom Durasi Kontrak — cabang yang tidak bisa dilihat selama satu-satunya
+  // klien di DB punya kontrak.
+  await seedService('SVC-B2TOUR-SEKALI', '4000000.00');   // nol durasi_bulan
+  const regTanpa = await leads.register(sql, budi, { leadName: 'Tur Tanpa Kontrak', phoneNumber: phone() });
+  await markContacted(sql, budi, regTanpa.attempt.id);
+  await submitQualifiedForm(sql, budi, regTanpa.attempt.id, {
+    namaPic: 'Bu Sekali', toko: 'Tur Tanpa Kontrak Store', kota: 'Bandung', linkToko: 'https://shopee/tur-sekali',
+    kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '10000000', targetGmv: '15000000',
+    services: [{ masterServiceId: 'SVC-B2TOUR-SEKALI', quantity: 1 }],
+  });
+  await submitNegotiation(sql, budi, regTanpa.attempt.id, [], true);
+  const closedTanpa = await close(sql, budi, regTanpa.attempt.id, {
+    parties: { primarySalespersonId: SALES, allocations: [{ salespersonId: SALES, basisPoints: 10000 }] },
+    paymentScheme: PAYMENT_SCHEME_TERMIN,
+    installments: [{ amount: '4000000', dueDate: '2026-08-01' }],
+  });
+  console.error('klien tanpa kontrak:', closedTanpa.clientId);
+
+  // --- (C) ATTEMPT DI TAHAP QUALIFIED, ber-TENOR (FS-6b) --------------------
+  // Ditinggal DI Qualified dengan sengaja: begitu ia dinegosiasikan dan
+  // ditutup, Form Qualified-nya tidak bisa disunting lagi dan pemilih tenornya
+  // hilang — persis yang membuat butir ini tidak teruji sebelumnya.
+  await seedService('SVC-B2TOUR-TENOR', '3000000.00', 'tanpa_plan', {
+    durasiBulan: 1,
+    tenor: [{ bulan: 1, harga: '3000000.00' }, { bulan: 6, harga: '15000000.00' }],
+  });
+  const regTenor = await leads.register(sql, budi, { leadName: 'Tur Tenor Qualified', phoneNumber: phone() });
+  await markContacted(sql, budi, regTenor.attempt.id);
+  await submitQualifiedForm(sql, budi, regTenor.attempt.id, {
+    namaPic: 'Bu Tenor', toko: 'Tur Tenor Store', kota: 'Surabaya', linkToko: 'https://shopee/tur-tenor',
+    kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '20000000', targetGmv: '30000000',
+    services: [{ masterServiceId: 'SVC-B2TOUR-TENOR', quantity: 1, durasiBulan: 6 }],
+  });
+  console.error('attempt Qualified ber-tenor:', regTenor.attempt.id);
+
   console.error('\n== DONE — JSON on stdout ==');
   console.log(JSON.stringify({
     clientId, trxId, prospectAttemptId: reg.attempt.id,
@@ -187,6 +280,10 @@ async function main() {
     briefCreative: briefCreative.id, briefUnsplit: briefUnsplit.id,
     briefKol: briefKol.id, bookingId: booking.id, paymentRequestId: paymentRequest.id,
     briefStoreOps: briefStoreOps.id, skuIds,
+    // Tiga fixture tambahan (UAT_SALES_BROWSER_20260910.md §4).
+    bersamaAttemptA: bersamaA.attempt.id, bersamaAttemptB: bersamaB.attempt.id,
+    clientTanpaKontrak: closedTanpa.clientId,
+    attemptQualifiedTenor: regTenor.attempt.id,
   }, null, 2));
 }
 
