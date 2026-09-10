@@ -158,6 +158,64 @@ Sumber seed kanonik: `backend/seed/msl_kalkulator.csv` (32 layanan dari sheet "K
 | apply_ppn | bool | Flag PPN (copy dari MSL version) |
 | subtotal | decimal | Nilai baris terhitung: `flat`=qty×harga; `min_floor`=max(qty,min)×harga; `batch_ceiling`=ceil(qty/min)×min×harga; `passthrough`=input_amount; +PPN 11% jika `apply_ppn`. **Pinned (immutable), recomputable dari parameter.** Estimasi Nilai M0 = Σ subtotal baris. |
 
+### 3a-0. Arsip & hapus katalog (2026-09-10, migrasi `20260930010000`)
+
+**`active` berhenti kosmetik.** Kolom `master_service_versions.active` ada sejak
+`init.sql` dan sejak lama punya checkbox + badge "Nonaktif" di layar MSL, tapi
+sampai 2026-09-10 **nol pembaca menghormatinya** — `msl.effectiveAt` dan
+`listEffectiveAt` sama-sama hanya memfilter `effective_from <= date`. Artinya
+layanan yang sudah ditandai nonaktif **tetap terjual pada harga itu**.
+
+Dua pembaca, bukan satu flag (pola yang sama dengan
+`employee_roster()`/`employee_assignable()`):
+
+| Pembaca | Menghormati `active`? | Dipakai untuk |
+|---|---|---|
+| `msl.effectiveAt` / `listEffectiveAt` / `listVersions` | **Tidak** (sengaja) | MENGAYA hal yang sudah disetujui — `sales.close()` menamai Service, `renewal.executeRenewal()` mengisi `plan_tier`. Deal yang sudah diketok tidak boleh gagal pada hari katalog dirapikan |
+| `msl.sellableAt` / `listSellableAt` | **Ya** | Setiap jalur yang melahirkan kesepakatan BARU: quote, Qualified Form, proposal negosiasi, proposal perpanjangan/cross-sell |
+
+⚠️ **`sellableAt` = `effectiveAt` + pemeriksaan, BUKAN `WHERE active`.** Sebuah
+kueri ber-`WHERE active … LIMIT 1` tidak melihat versi yang mengarsipkan, jadi
+ia jatuh ke versi AKTIF SEBELUMNYA dan **menjual pada harga lama** —
+mengarsipkan sesuatu akan diam-diam menghidupkan versi sebelumnya.
+
+**Satu pengecualian, dan ia disengaja:** renewal jenis `bayar_komisi` memakai
+jalur permisif (`resolveProposalLine(…, allowArchived = true)`). Ia TAGIHAN atas
+komisi yang sudah diperoleh, bukan kesepakatan baru (FS-3/FS-4 2026-09-08);
+menggerbanginya berarti seseorang mengarsipkan layanan Komisi dan penagihan
+komisi berhenti se-agensi. Jenisnya dibaca dari baris `renewal_requests`, bukan
+diteruskan sebagai argumen.
+
+**Arsip menyalin, tidak menyunting.** `msl.setActive` menambahkan versi baru yang
+salinan VERBATIM versi berjalan (dilakukan `insert … select` di SQL, bukan lewat
+`ServiceInput`) dengan satu flag dibalik, plus salinan baris opsi tenornya.
+Ia **bukan** `updateService({ active: false })`: `updateService` FULL REPLACE, dan
+DECISIONS 2026-09-07 mencatat kerusakannya — kiriman tanpa `durasi_jasa`
+menghapus nilai itu diam-diam.
+
+**Hapus hanya untuk katalog yang belum pernah dipakai.**
+`master_service_id` **tidak punya FK di mana pun** — `services`,
+`qualified_form_services`, `negotiation_proposal_lines`,
+`renewal_proposal_lines` semuanya `varchar(32)` biasa — jadi `DELETE` tidak
+ditolak Postgres dan hanya meninggalkan pointer menggantung di baris uang yang
+sudah ditutup. Penjaganya:
+
+| Lapisan | Apa |
+|---|---|
+| `private.master_service_refs(text)` | Hitungan pemakaian di keempat tabel snapshot. SATU definisi, dibaca penegak DAN penjelasnya |
+| `trg_master_services_hapus_terjaga` | Trigger `BEFORE DELETE` pada `master_services` — MENEGAKKAN, dan berlaku juga bagi seeder/migrasi/`psql` operator |
+| `msl.deleteService` | MENJELASKAN: pesan BI ber-angka per tabel + arah keluarnya ("arsipkan saja") |
+| `fk_msv_service` tanpa `ON DELETE CASCADE` | Penjaga kedua: `DELETE FROM master_services` mentah gagal pada FK untuk layanan yang pernah punya versi |
+
+Sengaja **bukan** empat FK sungguhan: keempat kolom itu SNAPSHOT (id katalog
+saat deal ditutup), dan FK akan mengubah artinya jadi referensi hidup — yang
+lalu memaksa `ON DELETE` punya jawaban untuk riwayat yang tidak boleh berubah.
+
+Kompatibilitas dengan rumah aturan #3: katalog yang belum pernah dirujuk apa pun
+tidak punya riwayat untuk dilindungi; begitu satu snapshot menunjuknya, hapus
+tidak tersedia sama sekali dan arsip jadi satu-satunya jalan. Baris audit
+`delete`-nya sendiri tidak pernah dihapus.
+
 ### 3a-1. Opsi tenor (FS-6 / FS-6b, 2026-09-08…09)
 
 Satu versi layanan boleh menawarkan BEBERAPA tenor dengan harga berbeda —

@@ -30,7 +30,7 @@
 
 import { bi, money, notification, page, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
-import { effectiveAt, type DurasiOption, type ServiceView } from './msl';
+import { effectiveAt, sellableAt, type DurasiOption, type ServiceView } from './msl';
 import { resolveWin } from './leads';
 import { allowedTransitions } from './engine';
 
@@ -562,7 +562,10 @@ async function resolveLines(sql: Queryable, selections: ServiceSelection[], now:
     if ((sel.masterServiceId ?? '').trim() === '') {
       throw new IncompleteError();
     }
-    const v = await effectiveAt(sql, sel.masterServiceId, today);
+    // `sellableAt`, not `effectiveAt`: this is the quote/Qualified-Form path,
+    // i.e. the moment a service is being SOLD. An archived service refused here
+    // is the entire point of archiving (see msl.sellableAt).
+    const v = await sellableAt(sql, sel.masterServiceId, today);
     const qty = sel.quantity && sel.quantity > 0 ? BigInt(Math.trunc(sel.quantity)) : 0n;
     lines.push(lineFromView(v, qty, sel.amount ?? '', sel.durasiBulan));
   }
@@ -1218,11 +1221,32 @@ async function standardLines(tx: Queryable, attemptId: string): Promise<Proposal
  * Exported so `renewal.ts` (R-03) can price a renewal/cross-sell proposal line
  * with the EXACT same MSL/custom-term rule this module uses for a fresh
  * closing — one pricing engine, not two that could drift.
+ *
+ * ## `allowArchived` — one caller needs it, and refusing it would break billing
+ *
+ * A standard line is priced through `msl.sellableAt`, so an archived service is
+ * refused: this function sits on the path that creates NEW agreements, and the
+ * whole point of archiving is that new agreements stop using it.
+ *
+ * The exception is `renewal` jenis `bayar_komisi`, which is a TAGIHAN for
+ * commission already earned, not a new agreement (DECISIONS FS-3/FS-4
+ * 2026-09-08). `renewal.validateBayarKomisiLines` already refuses to gate that
+ * flow on catalog labels, with the reason stated there: *"penagihan komisi
+ * berhenti bekerja pada hari seseorang merapikan katalog, dan gagalnya akan
+ * terbaca seperti bug di tempat lain."* Gating it on `active` would reintroduce
+ * exactly that failure through a different door — someone archives the Komisi
+ * service and agency-wide commission billing stops, with the error surfacing on
+ * a renewal screen.
+ *
+ * It is a parameter rather than a separate function because the two paths must
+ * share the pricing arithmetic verbatim; and it defaults to the STRICT
+ * behaviour, so a new caller that forgets it gets the safe answer.
  */
 export async function resolveProposalLine(
   tx: Queryable,
   l: ProposalLine,
   now: Date,
+  allowArchived = false,
 ): Promise<{ price: string; rule: string; durasiBulan: number | null }> {
   if ((l.masterServiceId ?? '').trim() === '') {
     throw new IncompleteError();
@@ -1251,7 +1275,10 @@ export async function resolveProposalLine(
     // still refuses anything past 36 months with the house BI message.
     return { price, rule, durasiBulan: normalizeTenor(l.durasiBulan) };
   }
-  const view = await effectiveAt(tx, l.masterServiceId, tz.dateString(now));
+  const today = tz.dateString(now);
+  const view = allowArchived
+    ? await effectiveAt(tx, l.masterServiceId, today)
+    : await sellableAt(tx, l.masterServiceId, today);
   const qty = l.quantity && l.quantity > 0 ? BigInt(Math.trunc(l.quantity)) : 0n;
   const line = lineFromView(view, qty, l.amount ?? '', l.durasiBulan);
   return { price: money.decimal(lineSubtotal(line)), rule: line.rule.raw, durasiBulan: line.durasiBulan };

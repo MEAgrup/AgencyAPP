@@ -729,6 +729,11 @@ const WIRE_TO_FE: Record<string, string> = {
   ManagementDashboardWire: 'portal.ts::ManagementDashboard',
   // Cross-module surfaces
   MasterServiceWire: 'types.ts::MasterService',
+  // Satu rumah dengan `MasterService`. Payload `PUT .../active` tetap
+  // dideklarasikan di `msl.ts` (tuntutan `body-parity`: badan request harus
+  // sekamar dengan panggilan `api.*`-nya) — respons ber-anchor di sini,
+  // request di sana, dan itu memang dua penjaga yang berbeda.
+  ServiceRefsWire: 'types.ts::ServiceRefs',
   NotificationWire: 'types.ts::NotificationItem',
   NotificationsResponseWire: 'types.ts::NotificationsResponse',
   AdminEmployeeWire: 'types.ts::AdminEmployee',

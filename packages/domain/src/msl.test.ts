@@ -14,14 +14,21 @@ import {
   type Actor,
   canEditMasterServices,
   createService,
+  deleteService,
   effectiveAt,
   ForbiddenError,
   IncompleteError,
   listEffectiveAt,
+  listSellableAt,
   listVersions,
   MSG_MASTER_SERVICE_DENIED,
   reconcileTier,
+  sellableAt,
+  ServiceArchivedError,
+  ServiceInUseError,
   ServiceNotFoundError,
+  serviceRefs,
+  setActive,
   updateService,
 } from './msl';
 
@@ -118,6 +125,12 @@ afterAll(async () => {
 
 afterEach(async () => {
   if (!sql) return;
+  // Urutannya penting: baris snapshot lebih dulu, karena penjaga
+  // `trg_master_services_hapus_terjaga` justru MENOLAK hapus induk selagi
+  // salah satunya masih menunjuk ke sana — kalau dibalik, pembersihan tes
+  // ini gagal dengan pesan BI dan mencemari test berikutnya.
+  await sql`delete from services where created_by like 'ZZ-%'`;
+  await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from master_service_versions where created_by like 'ZZ-%'`;
   await sql`delete from master_services where created_by like 'ZZ-%'`;
 });
@@ -637,5 +650,255 @@ describeDb('opsi durasi (FS-6)', () => {
     await expect(sql`
       insert into master_service_duration_options (version_id, durasi_bulan, harga, created_by)
       values (${vrows[0].id}, 3, '7777777.00', 'ZZ-ADMIN')`).rejects.toThrow(/opsi terpendek/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Arsip / pulihkan / hapus (permintaan pemilik 2026-09-10)
+//
+// Bug yang ditutup di sini pernah TERLIHAT sudah ditutup: kolom `active` ada
+// sejak `init.sql` dan punya checkbox + badge "Nonaktif" di layar, tapi nol
+// pembaca yang menghormatinya. Karena itu tes pertama di bawah bukan tes fitur
+// baru — ia tes REGRESI atas penjaga yang dulu palsu.
+// ---------------------------------------------------------------------------
+
+/** Satu layanan aktif yang siap dipakai tes di blok ini. */
+async function seedService(overrides: Record<string, unknown> = {}): Promise<string> {
+  return createService(sql, salesLead(), {
+    name: 'Jasa Uji Arsip', standardPrice: '1000000',
+    commissionRule: '5% of standard price', effectiveFrom: '2020-01-01',
+    pricingMode: 'flat', active: true, ...overrides,
+  });
+}
+
+describeDb('sellableAt / listSellableAt', () => {
+  it('menjual layanan aktif, MENOLAK yang diarsipkan dengan pesan BI ber-nama', async () => {
+    const id = await seedService();
+    await expect(sellableAt(sql, id, TODAY)).resolves.toMatchObject({ active: true });
+
+    await setActive(sql, salesLead(), id, false);
+
+    await expect(sellableAt(sql, id, TODAY)).rejects.toThrow(ServiceArchivedError);
+    // Namanya ada di dalam pesannya: sebuah Qualified Form enam baris yang
+    // hanya menjawab "layanan tidak aktif" mengirim closer-nya berburu.
+    await expect(sellableAt(sql, id, TODAY)).rejects.toThrow(/Jasa Uji Arsip/);
+    await expect(sellableAt(sql, id, TODAY)).rejects.toThrow(/tidak bisa dijual lagi\]$/);
+  });
+
+  it('effectiveAt TETAP mengembalikan versi yang diarsipkan — pengayaan deal lama tidak boleh patah', async () => {
+    const id = await seedService();
+    await setActive(sql, salesLead(), id, false);
+    // Inilah pemisahnya: `sales.close()` dan `renewal.executeRenewal()` memakai
+    // `effectiveAt` untuk MENGISI nama/plan_tier deal yang sudah disetujui.
+    // Kalau keduanya digerbangi, merapikan katalog akan mematahkan deal yang
+    // sudah diketok — persis kegagalan yang sudah ditolak renewal.ts.
+    const v = await effectiveAt(sql, id, TODAY);
+    expect(v.active).toBe(false);
+    expect(v.name).toBe('Jasa Uji Arsip');
+  });
+
+  it('MEMBUANG layanan yang diarsipkan dari daftar — dan tidak menggantinya dengan versi aktif sebelumnya', async () => {
+    const id = await seedService();
+    expect((await listSellableAt(sql, TODAY)).some((v) => v.id === id)).toBe(true);
+
+    await setActive(sql, salesLead(), id, false);
+
+    const sellable = await listSellableAt(sql, TODAY);
+    const effective = await listEffectiveAt(sql, TODAY);
+    // Ini assertion yang menangkap "perbaikan" yang salah. Sebuah implementasi
+    // ber-`where active ... limit 1` akan mengembalikan v1 (yang masih aktif)
+    // dan menjualnya pada harga lama — jadi barisnya ADA, dengan version_no
+    // yang lebih tua. Yang benar: layanannya HILANG sama sekali.
+    expect(sellable.some((v) => v.id === id)).toBe(false);
+    expect(effective.find((v) => v.id === id)).toMatchObject({ active: false, versionNo: 2 });
+  });
+});
+
+describeDb('setActive', () => {
+  it('menyalin versi berjalan VERBATIM dan hanya membalik satu flag', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa Lengkap', standardPrice: '2500000',
+      commissionRule: '4% of standard price', effectiveFrom: '2020-01-01',
+      category: 'Ads', unit: 'bulan', minQty: '2', pricingMode: 'min_floor',
+      applyPPN: true, frequency: 'Monthly', priceNote: 'catatan harga',
+      description: 'deskripsi panjang', active: true, requiresStrategyPlan: true,
+      durasiBulan: 3, qtyMenambah: 'durasi', pengakuan: 'per_periode',
+    });
+    await setActive(sql, salesLead(), id, false);
+
+    // Perbandingan KOLOM-PER-KOLOM yang dibaca dari information_schema, bukan
+    // daftar field yang ditulis tangan di sini. Inilah penjaga atas satu risiko
+    // nyata `setActive`: daftar kolom di `insert … select`-nya statis, jadi
+    // sebuah kolom yang ditambahkan ke `master_service_versions` kelak TIDAK
+    // akan ikut tersalin — dan layanan yang diarsipkan lalu dipulihkan akan
+    // kembali kehilangan field itu diam-diam. Tes ini memerah pada hari itu.
+    const cols = await sql<{ column_name: string }[]>`
+      select column_name from information_schema.columns
+       where table_schema = 'public' and table_name = 'master_service_versions'
+       order by ordinal_position`;
+    const berubah = new Set(['id', 'version_no', 'effective_from', 'created_at', 'created_by', 'active']);
+    const dibandingkan = cols.map((c) => c.column_name).filter((c) => !berubah.has(c));
+    expect(dibandingkan.length).toBeGreaterThan(10); // penjaga atas penjaga: daftarnya tidak boleh kosong
+
+    const rows = await sql<Record<string, unknown>[]>`
+      select * from master_service_versions where service_id = ${id} order by version_no`;
+    expect(rows).toHaveLength(2);
+    const [v1, v2] = rows;
+    for (const c of dibandingkan) {
+      expect(v2[c], `kolom \`${c}\` tidak tersalin oleh setActive`).toEqual(v1[c]);
+    }
+    expect(v1.active).toBe(true);
+    expect(v2.active).toBe(false);
+  });
+
+  it('menyalin opsi tenor FS-6 — kalau tidak, memulihkan layanan mengembalikan katalog yang salah', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa Bertenor', standardPrice: '10200000',
+      commissionRule: '5% of standard price', effectiveFrom: '2020-01-01',
+      pricingMode: 'flat', active: true, durasiBulan: 3, pengakuan: 'per_periode',
+      durasiOptions: [{ durasiBulan: 3, harga: '10200000' }, { durasiBulan: 12, harga: '36000000' }],
+    });
+    await setActive(sql, salesLead(), id, false);
+    const v = await effectiveAt(sql, id, TODAY);
+    expect(v.active).toBe(false);
+    expect(v.durasiOptions).toEqual([
+      { durasiBulan: 3, harga: '10200000.00' },
+      { durasiBulan: 12, harga: '36000000.00' },
+    ]);
+  });
+
+  it('memulihkan kembali ke aktif, dan tidak menulis versi kosong saat keadaannya sudah sama', async () => {
+    const id = await seedService();
+    const same = await setActive(sql, salesLead(), id, true); // sudah aktif
+    expect(same).toBe(1);
+    expect(await listVersions(sql, id)).toHaveLength(1);
+
+    expect(await setActive(sql, salesLead(), id, false)).toBe(2);
+    expect(await setActive(sql, salesLead(), id, true)).toBe(3);
+    await expect(sellableAt(sql, id, TODAY)).resolves.toMatchObject({ active: true, versionNo: 3 });
+  });
+
+  it('mengaudit archive/restore, dan menolak Sales staff dengan pesan BI', async () => {
+    const id = await seedService();
+    await setActive(sql, salesLead(), id, false);
+    await setActive(sql, salesLead(), id, true);
+    const audit = await sql<{ action: string }[]>`
+      select action from audit_log
+       where entity_id = ${id} and entity_type = 'master_service' and action in ('archive', 'restore')
+       order by id`;
+    expect(audit.map((a) => a.action)).toEqual(['archive', 'restore']);
+
+    await expect(setActive(sql, salesStaff(), id, false)).rejects.toThrow(MSG_MASTER_SERVICE_DENIED);
+    await expect(setActive(sql, salesStaff(), id, false)).rejects.toThrow(ForbiddenError);
+  });
+
+  it('menolak layanan yang tidak ada', async () => {
+    await expect(setActive(sql, salesLead(), 'MSV-000000-9999', false)).rejects.toThrow(ServiceNotFoundError);
+  });
+});
+
+describeDb('deleteService', () => {
+  it('menghapus katalog yang belum pernah dipakai, beserta rantai versinya', async () => {
+    const id = await seedService();
+    await updateService(sql, salesLead(), id, {
+      name: 'Jasa Uji Arsip', standardPrice: '1200000',
+      commissionRule: '5% of standard price', effectiveFrom: '2021-01-01', pricingMode: 'flat', active: true,
+    });
+    expect(await listVersions(sql, id)).toHaveLength(2);
+
+    const refs = await deleteService(sql, salesLead(), id);
+    expect(refs.unused).toBe(true);
+
+    await expect(effectiveAt(sql, id, TODAY)).rejects.toThrow(ServiceNotFoundError);
+    const left = await sql<{ n: number }[]>`
+      select count(*)::int as n from master_service_versions where service_id = ${id}`;
+    expect(left[0].n).toBe(0);
+  });
+
+  it('menulis baris audit `delete` yang BERTAHAN sesudah barisnya hilang', async () => {
+    const id = await seedService();
+    await deleteService(sql, salesLead(), id);
+    // Rumah aturan #3: audit_log tidak punya jalur hapus, jadi fakta bahwa
+    // katalog ini pernah ada dan dicabut tetap terbaca walau barisnya tidak.
+    const audit = await sql<{ action: string; before_json: Record<string, unknown> }[]>`
+      select action, before_json from audit_log
+       where entity_id = ${id} and entity_type = 'master_service' and action = 'delete'`;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].before_json).toMatchObject({ versions: 1, name: 'Jasa Uji Arsip' });
+    await sql`delete from audit_log where entity_id = ${id}`.catch(() => undefined);
+  });
+
+  it('MENOLAK katalog yang sudah dipakai, dengan pesan BI ber-angka, dan tidak menghapus apa pun', async () => {
+    const id = await seedService();
+    await sql`
+      insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, created_by)
+      values ('ZZ-CLI-MSL', 'PIC', 'Toko', 'Jakarta', 'https://x.id', 'Fashion', 0, 0,
+              'ZZ-SLEAD', 'ZZ-SLEAD', 'ZZ-SLEAD')`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values ('ZZ-SVC-MSL', 'ZZ-CLI-MSL', ${id}, 1, 'Jasa Uji Arsip', 1000000,
+              '5% of standard price', '[Awaiting Onboarding]', 'ZZ-SLEAD')`;
+
+    await expect(deleteService(sql, salesLead(), id)).rejects.toThrow(ServiceInUseError);
+    await expect(deleteService(sql, salesLead(), id)).rejects.toThrow(/sudah dipakai \(1 Service, 0 Qualified Form/);
+    // "arsipkan saja" ada di dalam pesannya: penolakan yang tidak menyebut
+    // jalan keluarnya membuat orangnya mencoba lagi, bukan mengarsipkan.
+    await expect(deleteService(sql, salesLead(), id)).rejects.toThrow(/arsipkan saja\]$/);
+
+    // Dan tidak ada yang hilang: rantai versinya utuh.
+    expect(await listVersions(sql, id)).toHaveLength(1);
+  });
+
+  it('trigger DB menolaknya juga — penjaga tidak hanya ada di TS', async () => {
+    const id = await seedService();
+    await sql`
+      insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, created_by)
+      values ('ZZ-CLI-MSL2', 'PIC', 'Toko', 'Jakarta', 'https://x.id', 'Fashion', 0, 0,
+              'ZZ-SLEAD', 'ZZ-SLEAD', 'ZZ-SLEAD')`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values ('ZZ-SVC-MSL2', 'ZZ-CLI-MSL2', ${id}, 1, 'Jasa Uji Arsip', 1000000,
+              '5% of standard price', '[Awaiting Onboarding]', 'ZZ-SLEAD')`;
+
+    // Lewat SQL MENTAH, melewati `deleteService` sepenuhnya — jalur yang
+    // dipakai seeder, migrasi, dan setiap sesi psql operator. `master_service_id`
+    // tidak punya FK di mana pun, jadi tanpa trigger ini Postgres akan
+    // menerimanya tanpa galat dan meninggalkan pointer menggantung.
+    await expect(sql.begin(async (tx) => {
+      await tx`delete from master_service_versions where service_id = ${id}`;
+      await tx`delete from master_services where id = ${id}`;
+    })).rejects.toThrow(/sudah dipakai \(1 Service/);
+  });
+
+  it('menolak Sales staff, dan layanan yang tidak ada', async () => {
+    const id = await seedService();
+    await expect(deleteService(sql, salesStaff(), id)).rejects.toThrow(MSG_MASTER_SERVICE_DENIED);
+    await expect(deleteService(sql, salesLead(), 'MSV-000000-9999')).rejects.toThrow(ServiceNotFoundError);
+  });
+});
+
+describeDb('serviceRefs', () => {
+  it('nol di keempat tabel ⇒ unused, dan angkanya datang dari fungsi yang SAMA dengan trigger-nya', async () => {
+    const id = await seedService();
+    expect(await serviceRefs(sql, id)).toEqual({
+      services: 0, qualifiedForms: 0, negotiationLines: 0, renewalLines: 0, unused: true,
+    });
+
+    await sql`
+      insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, created_by)
+      values ('ZZ-CLI-MSL3', 'PIC', 'Toko', 'Jakarta', 'https://x.id', 'Fashion', 0, 0,
+              'ZZ-SLEAD', 'ZZ-SLEAD', 'ZZ-SLEAD')`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values ('ZZ-SVC-MSL3', 'ZZ-CLI-MSL3', ${id}, 1, 'Jasa Uji Arsip', 1000000,
+              '5% of standard price', '[Awaiting Onboarding]', 'ZZ-SLEAD')`;
+
+    expect(await serviceRefs(sql, id)).toMatchObject({ services: 1, unused: false });
   });
 });

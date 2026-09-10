@@ -206,6 +206,12 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   SchemeLockedError: 409, // finance.SchemeLockedError
   SchemeNoScheduleError: 409, // finance.SchemeNoScheduleError
   ScsConflictError: 409, // scs.ConflictError (M19 separuh SCS)
+  // 409 dan BUKAN 404: "katalog menarik layanan ini" adalah konflik keadaan,
+  // sedangkan 404 berarti "tidak ada layanan begitu" — dua perbaikan berbeda
+  // bagi orang yang membacanya, dan menyatukannya membuat penarikan yang sah
+  // terbaca seperti bug data.
+  ServiceArchivedError: 409, // msl.ServiceArchivedError
+  ServiceInUseError: 409, // msl.ServiceInUseError (hapus ditolak, arsipkan saja)
   ServiceStateError: 409, // client.ServiceStateError
   StageConflictError: 409, // stage.ConflictError
   StoreOpsConflictError: 409, // storeops.ConflictError

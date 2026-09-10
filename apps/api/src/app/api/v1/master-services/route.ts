@@ -88,9 +88,23 @@ export async function GET(request: Request): Promise<Response> {
     // web-internal passes ?effective_at=YYYY-MM-DD (defaults to today) so the
     // Sales calculator can preview the MSL as of any date; fall back to today
     // when absent/malformed.
-    const at = new URL(request.url).searchParams.get('effective_at');
+    const params = new URL(request.url).searchParams;
+    const at = params.get('effective_at');
     const date = at && /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : tz.dateString(new Date());
-    const services = await readAsActor(actor, (sql) => msl.listEffectiveAt(sql, date));
+    // `?sellable=1` menyaring layanan yang sudah diarsipkan. Ia OPT-IN, dan itu
+    // disengaja: pemanggil terbesar endpoint ini adalah layar MSL admin, yang
+    // justru HARUS melihat baris nonaktif (dengan badge-nya) supaya ada tempat
+    // untuk memulihkannya. Yang opt-in adalah para PICKER — kalkulator,
+    // Qualified Form, panel perpanjangan, layar persetujuan — karena merekalah
+    // yang menawarkan sesuatu untuk DIJUAL.
+    //
+    // Penyaring ini KENYAMANAN, bukan gerbang: gerbang sebenarnya ada di
+    // `msl.sellableAt`, yang dipanggil setiap jalur tulis. Sebuah request buatan
+    // tangan yang melewatkan parameter ini tetap tidak bisa menjual layanan
+    // yang diarsipkan.
+    const sellableOnly = params.get('sellable') === '1';
+    const services = await readAsActor(actor, (sql) =>
+      sellableOnly ? msl.listSellableAt(sql, date) : msl.listEffectiveAt(sql, date));
     return json({ data: services.map(masterServiceToWire) });
   });
 }

@@ -474,7 +474,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.get<{ data: MasterService[] }>(`/master-services?effective_at=${todayISO()}`);
+        const res = await api.get<{ data: MasterService[] }>(`/master-services?effective_at=${todayISO()}&sellable=1`);
         if (!cancelled) setMsvcs(res.data.filter((s) => s.active));
       } catch {
         if (!cancelled) setMsvcs([]);

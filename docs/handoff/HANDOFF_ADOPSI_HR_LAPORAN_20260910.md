@@ -35,7 +35,7 @@
 | PR | Bagian | Status |
 |---|---|---|
 | **PR-1** | Bagian 2 — Mutasi & Resign permanen (HR) | ✅ **SELESAI, migrasi di live, di-MERGE** (`714da1a`) — migrasi diterapkan ke `CDPS SG` lebih dulu (O65) dan UAT empat aktor lolos: `UAT_RESIGN_PERMANEN_20260910.md` |
-| PR-2 | Bagian 5 — Arsip & hapus Master Service List | ⬜ belum |
+| PR-2 | Bagian 5 — Arsip & hapus Master Service List | ✅ **SELESAI & di-commit** — migrasi `20260930010000_msl_arsip_hapus.sql`. Bug laten "layanan nonaktif masih terjual" ikut ditutup. ⚠️ **Migrasi BELUM diterapkan ke live** (O65: apply lebih dulu, merge sesudahnya) |
 | PR-3 | Bagian 3 — Laporan Penjualan (Finance & Head Sales) | ⬜ belum |
 | PR-4 | Bagian 1 — Adopsi Sistem | ⬜ belum |
 | PR-5 | Bagian 4 — Layanan multi-platform (⚠️ jalur uang) | ⬜ belum |
@@ -213,6 +213,16 @@ lint web-internal     3 error + 61 warning — IDENTIK baseline, semuanya pre-ex
    **Tiga temuan PRE-EXISTING dicatat di sana §3** (`OBS-OD-PANEL-TULIS`,
    `OBS-IMPORT-PESAN-INGGRIS`, `OBS-PASSWORD-RESIGN`) — semuanya di luar cakupan PR-1,
    nol di antaranya lubang hak akses.
-4. **Lanjut PR-2** (arsip/hapus MSL) — paling murah dari empat sisanya dan menutup bug laten
-   "layanan nonaktif masih terjual".
+4. ~~**Lanjut PR-2** (arsip/hapus MSL).~~ ✅ **SELESAI 2026-09-10.** Bug laten "layanan nonaktif
+   masih terjual" ditutup: `active` selama ini KOSMETIK karena nol pembaca menghormatinya.
+   Sekarang ada `msl.sellableAt`/`listSellableAt` (jalur JUAL) di samping `effectiveAt`
+   (pengayaan deal yang sudah disetujui) — DUA pembaca, bukan satu flag. Hapus dijaga trigger
+   DB `trg_master_services_hapus_terjaga` karena `master_service_id` nol FK di mana pun.
+   Dibuktikan dengan **enam mutasi**, termasuk pengecualian `bayar_komisi` yang teruji DUA ARAH.
+   ⚠️ **Langkah berikutnya untuk PR-2: terapkan migrasinya ke live `CDPS SG` LEBIH DULU (O65),
+   baru merge** — dan buktikan lewat kueri, bukan lewat `success: true`.
+
+   Yang PR-2 sengaja TIDAK kerjakan: layar MSL masih tanpa gerbang peran untuk `Ubah`/`Tambah`
+   sebelum PR ini — keduanya kini digerbangi `canEdit`, tapi cacat sekelasnya di halaman
+   Karyawan (`OBS-OD-PANEL-TULIS`, lihat `UAT_RESIGN_PERMANEN_20260910.md` §3) TETAP terbuka.
 5. ~~**Ajukan ketokan §5 ke pemilik**~~ ✅ **SELESAI 2026-09-10** — lihat §5 di atas dan barisnya di `DECISIONS.md`. PR-5 tidak lagi tertahan.

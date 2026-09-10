@@ -562,6 +562,49 @@ describeDb('previewQuote', () => {
   });
 });
 
+describeDb('layanan yang diarsipkan tidak bisa DIJUAL (permintaan pemilik 2026-09-10)', () => {
+  /** Arsipkan `svc` dengan menambahkan versi 2 ber-`active = false`. */
+  async function arsipkan(svc: string): Promise<void> {
+    await sql`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, active, effective_from, pricing_mode, created_by)
+      values (${svc}, 2, ${'Svc ' + svc}, '9000000.00', '10% of standard price', false, '2020-01-02', 'flat', 'ZZ-ADMIN')`;
+  }
+
+  it('previewQuote menolaknya', async () => {
+    const svc = await seedService('SVC-ZZ-ARSIP1');
+    await expect(previewQuote(sql, [{ masterServiceId: svc, quantity: 1 }])).resolves.toBeTruthy();
+    await arsipkan(svc);
+    await expect(previewQuote(sql, [{ masterServiceId: svc, quantity: 1 }]))
+      .rejects.toThrow(/tidak bisa dijual lagi\]$/);
+  });
+
+  it('submitQualifiedForm menolaknya — inilah pintu tempat harganya masuk ke deal', async () => {
+    const svc = await seedService('SVC-ZZ-ARSIP2');
+    await arsipkan(svc);
+    const attemptId = await contactedAttempt(budi());
+    await expect(submitQualifiedForm(sql, budi(), attemptId, {
+      namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+      kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '50000000', targetGmv: '80000000',
+      services: [{ masterServiceId: svc, quantity: 1 }],
+    })).rejects.toThrow(/tidak bisa dijual lagi\]$/);
+  });
+
+  it('baris proposal negosiasi menolaknya', async () => {
+    const hidup = await seedService('SVC-ZZ-ARSIP3');
+    const mati = await seedService('SVC-ZZ-ARSIP4');
+    const attemptId = await qualifiedAttempt(budi(), hidup);
+    await arsipkan(mati);
+    // Menambahkan layanan yang sudah ditarik lewat editor negosiasi — pintu
+    // yang TIDAK lewat Qualified Form, dan karena itu pintu yang paling mudah
+    // terlupakan saat penjaganya dipasang.
+    await expect(submitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: hidup, quantity: 1 },
+      { masterServiceId: mati, quantity: 1 },
+    ], false)).rejects.toThrow(/tidak bisa dijual lagi\]$/);
+  });
+});
+
 describeDb('markContacted', () => {
   it('advances New Lead -> Contacted for the owner', async () => {
     const { attempt } = await leads.register(sql, budi(), { leadName: 'ABC', phoneNumber: uniquePhone() });

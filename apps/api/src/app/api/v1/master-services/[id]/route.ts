@@ -2,11 +2,18 @@
  * PUT /api/v1/master-services/{id} — append a new immutable version to a master
  * service (nothing is mutated in place). Ports Go's handleUpdateMasterService.
  * The Sales-owned write gate + validation live in the domain layer.
+ *
+ * DELETE /api/v1/master-services/{id} — hapus katalog yang SALAH (permintaan
+ * pemilik 2026-09-10). Hanya sah untuk katalog yang belum pernah dipakai apa
+ * pun; yang sudah dipakai ditolak 409 dengan pesan BI ber-angka dan diarahkan
+ * ke arsip. Gerbang, hitungan, dan alasannya ada di `msl.deleteService` —
+ * lapisan ini tetap shell.
  */
 import { msl } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
+import { refsToWire } from '@/lib/wire';
 
 interface ServiceBody {
   name?: string;
@@ -85,5 +92,18 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       effectiveFrom: b.effective_from ?? '',
     });
     return json({ id, version_no: versionNo });
+  });
+}
+
+export async function DELETE(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+  return handle(async () => {
+    const actor = requireActor(request);
+    const { id } = await ctx.params;
+    // Badan respons membawa `refs` yang SUDAH NOL, bukan cuma `{status:'ok'}`:
+    // pengirimnya adalah panel konfirmasi yang baru saja menampilkan angka
+    // pemakaian, dan mengembalikan angka yang sama menutup celah "layar bilang
+    // 0 tapi entah kapan itu dibaca".
+    const refs = await msl.deleteService(db(), actor, id);
+    return json({ id, refs: refsToWire(refs) });
   });
 }
