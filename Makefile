@@ -25,9 +25,14 @@ db-rebuild:
 
 ## check-live-drift: bandingkan supabase/migrations/** vs ledger live per-slug (B3)
 ##   Butuh LIVE_DATABASE_URL, atau SUPABASE_ACCESS_TOKEN + SUPABASE_PROJECT_REF —
-##   lihat kepala scripts/check-live-drift.sh. TIDAK berfungsi dari sandbox Claude
-##   Code (egress ke Supabase diblok kebijakan organisasi) — jalankan dari operator
-##   atau CI runner dengan akses jaringan nyata ke Supabase.
+##   lihat kepala scripts/check-live-drift.sh. Kedua jalur itu membuka soket ke
+##   Supabase sendiri, dan itu diblok kebijakan organisasi dari sandbox Claude
+##   Code, jadi TARGET INI jalankan dari operator atau CI runner dengan akses
+##   jaringan nyata ke Supabase.
+##   DARI SANDBOX, pakai jalur ke-3 (bukan target ini): ambil ledger lewat MCP
+##   Supabase `execute_sql`, simpan sebagai TSV `version<TAB>name`, lalu
+##     LIVE_LEDGER_TSV=/path/ke/ledger.tsv bash scripts/check-live-drift.sh
+##   Gerbang dan aturan pencocokannya persis sama; yang beda hanya asal ledger.
 check-live-drift:
 	bash scripts/check-live-drift.sh
 
