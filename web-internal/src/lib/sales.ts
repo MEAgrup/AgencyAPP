@@ -30,6 +30,15 @@ export interface ServiceSelection {
    * ditolak server dengan pesan `[...]` rumah, bukan diam-diam diabaikan.
    */
   durasi_bulan?: number;
+  /**
+   * PR-5 (2026-09-10 ketokan) — platform baris ini, salah satu dari checklist
+   * Platform List form ini. Dihilangkan ⇒ platform pertama di checklist itu.
+   * Inilah yang mengizinkan `master_service_id` yang SAMA muncul dua kali —
+   * sekali per platform, masing-masing boleh punya `store_link`-nya sendiri.
+   */
+  platform?: string;
+  /** PR-5 — link toko baris ini (kalau berbeda dari `store_link` form). */
+  store_link?: string;
 }
 
 export interface LineQuote {
@@ -103,6 +112,10 @@ export interface QualifiedFormServiceRow {
    * layanannya tenor tunggal (dan `standard_price` di atas sudah menjawabnya).
    */
   durasi_bulan: number | null;
+  /** PR-5 — platform baris ini terjual di dalamnya. */
+  platform: string;
+  /** PR-5 — link toko baris ini, atau `null` bila mengikuti `store_link` form. */
+  store_link: string | null;
 }
 
 // The persisted Qualified Lead Form snapshot (qualified_forms + qualified_form_services).
@@ -129,6 +142,8 @@ export interface ProposalLineRow {
   payment_terms: string | null;
   /** FS-6b — tenor yang disepakati baris ini, atau `null`. */
   durasi_bulan: number | null;
+  /** PR-5 — platform baris ini (selalu terisi). */
+  platform: string;
 }
 
 // One versioned negotiation_proposals row + its lines (version_no ASC).
@@ -226,6 +241,8 @@ export interface ProposalLineInput {
    * harga paket setahun tidak mengubahnya jadi paket tiga bulan.
    */
   durasi_bulan?: number;
+  /** PR-5 — platform baris ini; kosong ⇒ platform pertama di checklist form. */
+  platform?: string;
 }
 
 export type NegotiationDecision = 'approve' | 'revise' | 'reject';

@@ -85,7 +85,19 @@ interface QualifyRow {
    * yang diterima server untuk layanan tanpa opsi.
    */
   durasi_bulan: string;
+  /**
+   * PR-5 — platform baris ini. '' berarti "platform pertama di checklist",
+   * exactly seperti server men-default-kannya; hanya jadi pilihan nyata (dan
+   * jadi UI yang terlihat) ketika checklist punya lebih dari satu platform.
+   */
+  platform: string;
+  /** PR-5 — link toko baris ini, kosong berarti ikut Link Toko form. */
+  store_link: string;
 }
+
+const emptyQualifyRow = (): QualifyRow => (
+  { master_service_id: '', quantity: '', amount: '', durasi_bulan: '', platform: '', store_link: '' }
+);
 
 // Satu baris jasa di editor proposal. `proposed_price` KOSONG berarti "harga
 // standar" — server yang menghitungnya dari MSL (lihat lib/sales.ts
@@ -101,11 +113,13 @@ interface LineRow {
   amount: string;
   /** FS-6b — tenor pilihan sebagai string, sama alasannya dengan QualifyRow. */
   durasi_bulan: string;
+  /** PR-5 — platform baris ini; '' berarti platform pertama di checklist form. */
+  platform: string;
 }
 
 const emptyLineRow = (): LineRow => ({
   master_service_id: '', name: '', proposed_price: '', commission_rule: '',
-  payment_terms: '', quantity: '', amount: '', durasi_bulan: '',
+  payment_terms: '', quantity: '', amount: '', durasi_bulan: '', platform: '',
 });
 
 /**
@@ -127,14 +141,18 @@ function ProposalLinesEditor({
   services,
   onChange,
   disabled,
+  platformOptions,
 }: {
   rows: LineRow[];
   mode: 'standard' | 'custom';
   services: MasterService[];
   onChange: (rows: LineRow[]) => void;
   disabled?: boolean;
+  /** PR-5 — checklist Platform List klien ini; kolom Platform hanya muncul saat ada >1. */
+  platformOptions: string[];
 }) {
   const custom = mode === 'custom';
+  const showPlatform = platformOptions.length > 1;
   const byId = new Map(services.map((s) => [s.id, s]));
 
   function update(idx: number, field: keyof LineRow, value: string) {
@@ -172,6 +190,7 @@ function ProposalLinesEditor({
           <thead>
             <tr>
               <th>Jasa</th>
+              {showPlatform && <th>Platform</th>}
               <th>Durasi</th>
               <th>Qty / Nominal</th>
               {custom && <th>Proposed Price</th>}
@@ -204,6 +223,20 @@ function ProposalLinesEditor({
                       ))}
                     </select>
                   </td>
+                  {showPlatform && (
+                    <td>
+                      <select
+                        aria-label={`Platform baris ${idx + 1}`}
+                        value={l.platform || platformOptions[0]}
+                        disabled={disabled}
+                        onChange={(e) => update(idx, 'platform', e.target.value)}
+                      >
+                        {platformOptions.map((p) => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
                   <td>
                     {punyaTenor(svc) ? (
                       <select
@@ -316,6 +349,12 @@ function ProposalLinesEditor({
           Biarkan Proposed Price kosong untuk memakai harga standar MSL (dihitung server).
         </p>
       )}
+      {showPlatform && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          Jasa yang sama boleh dipilih dua kali HANYA kalau platformnya berbeda —
+          masing-masing dihargai sendiri (qty tetap untuk unit di toko yang SAMA).
+        </p>
+      )}
     </div>
   );
 }
@@ -358,7 +397,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   const [qGmv, setQGmv] = useState('');
   const [qTargetGmv, setQTargetGmv] = useState('');
   const [qBudget, setQBudget] = useState('');
-  const [qRows, setQRows] = useState<QualifyRow[]>([{ master_service_id: '', quantity: '', amount: '', durasi_bulan: '' }]);
+  const [qRows, setQRows] = useState<QualifyRow[]>([emptyQualifyRow()]);
   const [qQuote, setQQuote] = useState<Quote | null>(null);
   const [qQuoteError, setQQuoteError] = useState<string | null>(null);
   const [qSubmitting, setQSubmitting] = useState(false);
@@ -491,6 +530,15 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     return m;
   }, [msvcs]);
 
+  // PR-5 — this client's checked Platform List, parsed the SAME way `close()`
+  // and `submitQualifiedForm` do. Every ProposalLinesEditor gets it so a
+  // multi-platform client can pick a platform per line; a single-platform
+  // client (the common case) sees no such column at all.
+  const platformOptions = useMemo(() => {
+    const raw = detail?.qualified_form?.platform ?? '';
+    return raw.split(',').map((p) => p.trim()).filter((p) => p !== '');
+  }, [detail?.qualified_form?.platform]);
+
   // Prefill the proposal line editor from the qualified form (@ Qualified) or the
   // last proposal version (@ Revision / Rejected / before closing). Runs when the
   // detail changes.
@@ -515,6 +563,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           // proposal — deal setahun diam-diam menyusut jadi paket terpendek
           // hanya karena seseorang membuka editornya.
           durasi_bulan: sv.durasi_bulan === null ? '' : String(sv.durasi_bulan),
+          platform: sv.platform,
         })),
       );
     } else if (
@@ -527,12 +576,16 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
       // ditawarkan. Tanpa ini, mengubah satu baris ke harga standar akan
       // diam-diam menghitung ulang SEMUA baris dengan qty 1 — nilai dealnya
       // berubah tanpa ada yang mengetiknya.
+      // PR-5: keyed by (master_service_id, platform), NOT master_service_id
+      // alone — the same service can now have TWO Qualified rows (one per
+      // platform), and keying by id alone would collapse them, silently
+      // handing one platform's line the OTHER platform's quantity/amount.
       const offered = new Map(
-        (detail.qualified_form?.services ?? []).map((sv) => [sv.master_service_id, sv]),
+        (detail.qualified_form?.services ?? []).map((sv) => [`${sv.master_service_id} ${sv.platform}`, sv]),
       );
       setPropLines(
         last.lines.map((l) => {
-          const sv = offered.get(l.master_service_id);
+          const sv = offered.get(`${l.master_service_id} ${l.platform}`);
           return {
             master_service_id: l.master_service_id,
             name: l.name,
@@ -548,6 +601,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
               l.durasi_bulan !== null ? String(l.durasi_bulan)
                 : sv?.durasi_bulan != null ? String(sv.durasi_bulan)
                 : '',
+            platform: l.platform,
           };
         }),
       );
@@ -596,12 +650,20 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
       const durasi = punyaTenor(svc)
         ? { durasi_bulan: Number(r.durasi_bulan) || tenorDefault(svc) }
         : {};
+      // PR-5: '' berarti "pakai default server" (platform pertama di checklist),
+      // jadi dihilangkan dari body sama sekali alih-alih dikirim sebagai string kosong.
+      const platform = r.platform.trim() ? { platform: r.platform.trim() } : {};
+      const storeLink = r.store_link.trim() ? { store_link: r.store_link.trim() } : {};
       if (svc && svc.pricing_mode === 'passthrough') {
         const n = Number(r.amount);
-        if (!Number.isNaN(n) && n > 0) out.push({ master_service_id: r.master_service_id, amount: r.amount.trim(), ...durasi });
+        if (!Number.isNaN(n) && n > 0) {
+          out.push({ master_service_id: r.master_service_id, amount: r.amount.trim(), ...durasi, ...platform, ...storeLink });
+        }
       } else {
         const n = Number(r.quantity);
-        if (!Number.isNaN(n) && n > 0) out.push({ master_service_id: r.master_service_id, quantity: Math.trunc(n), ...durasi });
+        if (!Number.isNaN(n) && n > 0) {
+          out.push({ master_service_id: r.master_service_id, quantity: Math.trunc(n), ...durasi, ...platform, ...storeLink });
+        }
       }
     });
     return out;
@@ -676,9 +738,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
 
   // ---- Qualified Lead Form ----
   function addQRow() {
-    setQRows((rows) =>
-      rows.length >= MAX_SERVICES ? rows : [...rows, { master_service_id: '', quantity: '', amount: '', durasi_bulan: '' }],
-    );
+    setQRows((rows) => (rows.length >= MAX_SERVICES ? rows : [...rows, emptyQualifyRow()]));
   }
   function removeQRow(idx: number) {
     setQRows((rows) => rows.filter((_, i) => i !== idx));
@@ -781,6 +841,9 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
         const bulan = Number(l.durasi_bulan) || tenorDefault(svc);
         if (bulan) line.durasi_bulan = bulan;
       }
+      // PR-5: '' berarti "platform pertama di checklist" — server men-default-kan
+      // yang sama, jadi tidak dikirim sebagai string kosong.
+      if (l.platform.trim() !== '') line.platform = l.platform.trim();
       return line;
     });
   }
@@ -1130,6 +1193,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                 <thead>
                   <tr>
                     <th>Jasa</th>
+                    {platformOptions.length > 1 && <th>Platform</th>}
                     <th>Qty</th>
                     <th>Satuan</th>
                     <th>Durasi</th>
@@ -1141,6 +1205,17 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                   {qualified_form.services.map((s, idx) => (
                     <tr key={`${s.master_service_id}-${idx}`}>
                       <td>{s.name || s.master_service_id}</td>
+                      {platformOptions.length > 1 && (
+                        <td>
+                          {s.platform}
+                          {s.store_link && (
+                            <>
+                              {' · '}
+                              <a href={s.store_link} target="_blank" rel="noreferrer">Toko</a>
+                            </>
+                          )}
+                        </td>
+                      )}
                       <td>{s.quantity}</td>
                       <td>{s.unit || '—'}</td>
                       {/* FS-6b: '—' berarti layanan tenor tunggal — durasi versi
@@ -1392,6 +1467,8 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                     <thead>
                       <tr>
                         <th>Jasa</th>
+                        {qPlatforms.length > 1 && <th>Platform</th>}
+                        {qPlatforms.length > 1 && <th>Link Toko</th>}
                         <th>Durasi</th>
                         <th>Qty / Nominal</th>
                         <th></th>
@@ -1414,6 +1491,30 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                                 ))}
                               </select>
                             </td>
+                            {qPlatforms.length > 1 && (
+                              <td>
+                                <select
+                                  aria-label={`Platform jasa baris ${idx + 1}`}
+                                  value={row.platform || qPlatforms[0]}
+                                  onChange={(e) => updateQRow(idx, 'platform', e.target.value)}
+                                >
+                                  {qPlatforms.map((p) => (
+                                    <option key={p} value={p}>{p}</option>
+                                  ))}
+                                </select>
+                              </td>
+                            )}
+                            {qPlatforms.length > 1 && (
+                              <td>
+                                <input
+                                  aria-label={`Link toko jasa baris ${idx + 1}`}
+                                  placeholder="ikut Link Toko form"
+                                  value={row.store_link}
+                                  onChange={(e) => updateQRow(idx, 'store_link', e.target.value)}
+                                  style={{ width: 160 }}
+                                />
+                              </td>
+                            )}
                             <td>
                               {punyaTenor(svc) ? (
                                 <select
@@ -1476,6 +1577,12 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                     Tambah Jasa
                   </button>
                 </div>
+                {qPlatforms.length > 1 && (
+                  <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                    Jasa yang sama boleh dipilih dua kali HANYA kalau platformnya berbeda —
+                    masing-masing mendapat harganya sendiri (qty tetap untuk unit di toko yang SAMA).
+                  </p>
+                )}
               </div>
 
               {/* Estimasi & komisi (read-only, dari server) */}
@@ -1587,6 +1694,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                 services={msvcs}
                 onChange={setPropLines}
                 disabled={negoSubmitting}
+                platformOptions={platformOptions}
               />
               <div>
                 <button type="submit" className="btn btnPrimary" disabled={negoSubmitting}>
@@ -1604,6 +1712,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                 services={msvcs}
                 onChange={setPropLines}
                 disabled={negoSubmitting}
+                platformOptions={platformOptions}
               />
               <div>
                 <button type="submit" className="btn btnPrimary" disabled={negoSubmitting}>
@@ -1684,6 +1793,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
               services={msvcs}
               onChange={setPropLines}
               disabled={negoSubmitting}
+              platformOptions={platformOptions}
             />
             <div>
               <button type="submit" className="btn btnSecondary" disabled={negoSubmitting}>
@@ -1713,6 +1823,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
               services={msvcs}
               onChange={setPropLines}
               disabled={negoSubmitting}
+              platformOptions={platformOptions}
             />
             <div>
               <button type="submit" className="btn btnSecondary" disabled={negoSubmitting}>
@@ -1769,6 +1880,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                 services={msvcs}
                 onChange={setPropLines}
                 disabled={reviseSubmitting}
+                platformOptions={platformOptions}
               />
               <div>
                 <button type="submit" className="btn btnPrimary" disabled={reviseSubmitting}>
@@ -2068,6 +2180,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                       <thead>
                         <tr>
                           <th>Jasa</th>
+                          {platformOptions.length > 1 && <th>Platform</th>}
                           <th>Durasi</th>
                           <th>Proposed Price</th>
                           <th>Commission Rule</th>
@@ -2078,6 +2191,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                         {p.lines.map((l, idx) => (
                           <tr key={`${l.master_service_id}-${idx}`}>
                             <td>{l.name || l.master_service_id}</td>
+                            {platformOptions.length > 1 && <td>{l.platform}</td>}
                             <td>{l.durasi_bulan === null ? '—' : `${l.durasi_bulan} bulan`}</td>
                             <td>{money(l.proposed_price)}</td>
                             <td>{l.commission_rule || '—'}</td>

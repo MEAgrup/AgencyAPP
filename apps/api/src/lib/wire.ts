@@ -2419,6 +2419,10 @@ export interface QualifiedFormServiceWire {
   commission_rule: string;
   /** FS-6b — tenor yang dipilih, atau null bila memakai durasi versi. */
   durasi_bulan: number | null;
+  /** PR-5 — platform baris ini terjual di dalamnya. */
+  platform: string;
+  /** PR-5 — link toko baris ini, atau null bila mengikuti `store_link` form. */
+  store_link: string | null;
 }
 
 /** The persisted Qualified form snapshot — web-internal's `QualifiedFormSnapshot`. */
@@ -2445,6 +2449,8 @@ export interface ProposalLineWire {
   payment_terms: string | null;
   /** FS-6b — tenor yang disepakati baris ini, atau null. */
   durasi_bulan: number | null;
+  /** PR-5 — platform baris ini (selalu terisi). */
+  platform: string;
 }
 
 /** One negotiation proposal + its lines — web-internal's `NegotiationProposalRow`. */
@@ -2561,6 +2567,8 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
         subtotal: s.subtotal,
         commission_rule: s.commissionRule,
         durasi_bulan: s.durasiBulan,
+        platform: s.platform,
+        store_link: s.storeLink,
       })),
     },
     proposals: d.proposals.map((p) => ({
@@ -2577,6 +2585,7 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
         commission_rule: l.commissionRule,
         payment_terms: l.paymentTerms,
         durasi_bulan: l.durasiBulan,
+        platform: l.platform,
       })),
     })),
     nq_reasons: d.nqReasons,
@@ -3504,6 +3513,8 @@ export interface ProposalLineBody {
   amount?: string;
   /** FS-6b — the tenor in months, when the catalog offers several. */
   durasi_bulan?: number | null;
+  /** PR-5 — which of the form's checked platforms this line sells on; omitted ⇒ the checklist's first. */
+  platform?: string;
 }
 
 /**
@@ -3529,6 +3540,7 @@ export function toProposalLines(rows: ProposalLineBody[] | undefined): sales.Pro
     // chosen" into a choice, and the whole point of the nullable snapshot
     // column is that those two are different facts.
     durasiBulan: l.durasi_bulan,
+    platform: l.platform,
   }));
 }
 
