@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 15, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(15);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+  it('is at version 16, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(16);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -69,6 +69,11 @@ describe('frozen catalog', () => {
     expect(CATALOG['m6.brief.selesai'].resolver).toBe('explicit');
     expect(CATALOG['m9.booking.jatuh_tempo'].resolver).toBe('explicitOrLeads');
     expect(CATALOG['m9.campaign.mendekati_akhir'].resolver).toBe('explicitOrLeads');
+  });
+
+  it('registers the one v16 event (Bridge MSDPS→CDPS Fase 1) by name and recipient', () => {
+    expect(eventsOfVersion(16)).toEqual(['bridge.order.masuk']);
+    expect(CATALOG['bridge.order.masuk'].resolver).toBe('leadsOfDivision');
   });
 
   // The 15 frozen entries. Anything added past these is a DECISIONS.md-logged

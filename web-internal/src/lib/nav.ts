@@ -382,6 +382,12 @@ const KEUANGAN: NavNode[] = [
     label: 'Tutup Buku',
     access: (role) => canReadAll(role) || isLead(role, FINANCE),
   },
+  // Bridge MSDPS→CDPS Fase 1 — inbox order eksternal dari MEAGO!/MCN MEA.
+  // Gerbang D10 (dibaca ulang, lihat DECISIONS.md 2026-09-10): lead Account
+  // ATAU Director — sama persis `bridge.canDecideOrder`. OD melihat lewat
+  // `canReadAll` (read-only everywhere, Fase 0 §4) tapi tidak bisa
+  // Accept/Reject — itu digerbang lagi di halamannya sendiri.
+  { href: '/bridge/inbox', label: 'Bridge MSDPS (MEAGO!)', access: (role) => canReadAll(role) || isLead(role, ACCOUNT) },
   // ANCHOR-NAV-KEUANGAN (F-1/F-7) — titik sisip entri nav Jalur A (Uang &
   // Klien: finance/permintaan/contracts/sales, termasuk antrean Permintaan
   // Finance A-2). Anchor Jalur B ada di ujung `DELIVERY` di atas. Aturan yang

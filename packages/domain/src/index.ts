@@ -179,3 +179,10 @@ export * as dailyops from './dailyops';
 // kosakata state IDENTIK `brief_task` supaya `task.computeMetrics()` dipakai
 // ulang — nol definisi kedua Speed Score. Ketokan `M19-SCS-ENGINE` opsi (b).
 export * as scs from './scs';
+// Bridge MSDPS→CDPS Fase 1 — inbox order eksternal (`ORD-`) dari MEAGO!/MCN
+// MEA (repo terpisah `MEAgrup/MEAGO_MSDPS`). BUKAN modul PRD (otoritasnya
+// `docs/DECISIONS.md` 2026-09-10, preseden `TSK-` "di luar 18 PRD") dan
+// implementasi PARALEL yang disengaja terhadap `sales.close()` — bukan
+// reuse — preseden `renewal.ts`. Lihat header `bridge.ts` untuk amandemen
+// D5/§4.3 terhadap rencana bridging asli.
+export * as bridge from './bridge';

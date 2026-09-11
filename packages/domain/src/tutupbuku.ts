@@ -310,6 +310,14 @@ export async function hitungAngkaPeriode(sql: Queryable, periode: string): Promi
       from services s
       join master_service_versions v
         on v.service_id = s.master_service_id and v.version_no = s.master_version_no
+     -- Bridge MSDPS→CDPS A7 anti-drift: pendapatan layanan sumber='meago'
+     -- SUDAH diakui di buku MEAGO lewat transactions MSDPS (D4+D13 — bayar
+     -- pertama sudah terverifikasi di SUMBER sebelum bridge boleh berjalan).
+     -- Menghitungnya ulang di sini akan menutup buku CDPS dengan pendapatan
+     -- grup yang sama dua kali. DIKECUALIKAN, bukan GAGAL DIHITUNG — dua arti
+     -- berbeda yang sengaja TIDAK berbagi satu baris tidak_terhitung (lihat
+     -- filter di bawah).
+     where s.sumber <> 'meago'
      order by s.id`;
 
   const transisi = await sql<BarisTransisi[]>`

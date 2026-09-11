@@ -480,6 +480,30 @@ describeDb('read models', () => {
     const batch = await commissionAchievementBatch(sql, []);
     expect(batch.size).toBe(0);
   });
+
+  // ---------------------------------------------------------------------------
+  // Bridge MSDPS→CDPS A7 anti-drift (amandemen §4.3) — a CDPS client with a
+  // real TRX- that ALSO receives one bridged (sumber='meago') service must not
+  // see its commission move. clients.sumber alone cannot express this: the
+  // exclusion has to live on the SERVICE row, because commission is summed
+  // per service (dealServices), not per client.
+  // ---------------------------------------------------------------------------
+  it('a bridged sumber=meago service on the SAME client does not move totalDealCommission', async () => {
+    const { transactionId, clientId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const before = await commissionAchievement(sql, transactionId);
+
+    const svcRows = await sql<{ master_service_id: string; master_version_no: number }[]>`
+      select master_service_id, master_version_no from services where client_id = ${clientId} limit 1`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name,
+        standard_price, commission_rule, status, sumber, created_by)
+      values ('ZZ-SVC-MEAGO-BRIDGE', ${clientId}, ${svcRows[0].master_service_id}, ${svcRows[0].master_version_no},
+        'Layanan Bridge MEAGO', '999999999', '50% of standard price', '[Awaiting Onboarding]', 'meago', 'ZZ-TEST')`;
+
+    const after = await commissionAchievement(sql, transactionId);
+    expect(after.totalDealCommission).toBe(before.totalDealCommission);
+    expect(after.recognizedCommission).toBe(before.recognizedCommission);
+  });
 });
 
 describeDb('scanReminders + reminderDashboard (M5 §6 / §7)', () => {

@@ -440,6 +440,31 @@ describeDb('hitungAngkaPeriode — yang tidak bisa dihitung TIDAK ikut dihitung'
     const beku = (await listVersi(sql, P1))[0];
     expect(beku.angka.tidakTerhitung.map((t) => t.serviceId)).toContain(svcNull);
   });
+
+  // ---------------------------------------------------------------------------
+  // Bridge MSDPS→CDPS A7 anti-drift — services.sumber='meago' DIKECUALIKAN,
+  // dan itu artinya nol kontribusi DAN nol baris tidak_terhitung (dikecualikan
+  // ≠ gagal dihitung — docs/DECISIONS.md 2026-09-10).
+  // ---------------------------------------------------------------------------
+  it('layanan sumber=meago: nol kontribusi ke totalDiakui, dan TIDAK muncul di tidak_terhitung', async () => {
+    const { svcAda } = await seedLayanan();
+    const svcMeago = `ZZT-SVC-MEAGO-${RUN}`;
+    await sql`insert into services (id, client_id, master_service_id, master_version_no, name,
+                standard_price, commission_rule, status, qty, sumber, created_by, created_at)
+              select ${svcMeago}, client_id, master_service_id, master_version_no, name,
+                standard_price, commission_rule, status, qty, 'meago', created_by, created_at
+                from services where id = ${svcAda}`;
+    await sql`insert into audit_log (entity_type, entity_id, actor_employee_id, action,
+                before_json, after_json, created_by, created_at)
+              values ('service', ${svcMeago}, 'ZZ-TEST', 'transition:[Briefed]->[In Execution]',
+                      '{}'::jsonb, '{}'::jsonb, 'ZZ-TEST', '2019-12-01T00:00:00Z')`;
+
+    const angka = await hitungAngkaPeriode(sql, P1);
+    expect(angka.baris.find((b) => b.serviceId === svcMeago)).toBeUndefined();
+    expect(angka.tidakTerhitung.find((t) => t.serviceId === svcMeago)).toBeUndefined();
+    // The sales-origin sibling service is untouched by the exclusion.
+    expect(angka.baris.find((b) => b.serviceId === svcAda)).toBeDefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

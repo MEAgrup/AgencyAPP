@@ -169,6 +169,13 @@ export const PREFIXES = {
   // `task.computeMetrics()` is reused rather than reimplemented — registered
   // in entity_prefix by 20260928010000_m19_scs_task_engine.sql.
   SCS: { entity: 'Baris pekerjaan SMO & Content Strategist', module: 'M19' },
+  // Bridge MSDPS→CDPS Fase 1 — inbox order eksternal dari MSDPS (MEAGO!/MCN
+  // MEA, repo terpisah `MEAgrup/MEAGO_MSDPS`). Bridge BUKAN modul PRD;
+  // otoritasnya `docs/DECISIONS.md` 2026-09-10 (menggantikan entri
+  // 2026-07-12 yang menaruh TikTok GO di luar cakupan CDPS) — preseden `TSK`
+  // di atas ("di luar 18 PRD"). Machine #35 `external_order`, registered by
+  // 20261007010000_bridge_msdps_fase1.sql.
+  ORD: { entity: 'External work order (bridge MSDPS→CDPS)', module: 'Bridge' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

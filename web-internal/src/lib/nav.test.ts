@@ -536,6 +536,19 @@ describe('visibleNav — Marketing & Finance', () => {
     expect(hrefs(role('Sales', 'lead'))).not.toContain('/finance/tutup-buku');
   });
 
+  it('Bridge MSDPS inbox: lead Account, Director, dan OD melihatnya — bukan divisi/level lain', () => {
+    // Satu baris per entri nav baru. Gerbang D10 dibaca ulang (DECISIONS.md
+    // 2026-09-10): lead Account ATAU Director bisa Accept/Reject; OD melihat
+    // lewat canReadAll (read-only everywhere) tapi digerbang lagi di halaman
+    // itu sendiri untuk aksinya.
+    expect(hrefs(role('Account', 'lead'))).toContain('/bridge/inbox');
+    expect(hrefs(role('Account', 'staff'))).not.toContain('/bridge/inbox');
+    expect(hrefs(role('Sales', 'lead', { director: true }))).toContain('/bridge/inbox');
+    expect(hrefs(role('Sales', 'staff', { od: true }))).toContain('/bridge/inbox');
+    expect(hrefs(role('Creative', 'lead'))).not.toContain('/bridge/inbox');
+    expect(hrefs(role('Sales', 'lead'))).not.toContain('/bridge/inbox');
+  });
+
   it('Finance staff sees the payment queue + reminders + clients only', () => {
     const seen = hrefs(role('Finance', 'staff'));
     expect(seen).toContain('/finance');
@@ -824,7 +837,7 @@ describe('perilaku rail (Sidebar IA v3 §5)', () => {
     it('judul grup yang cocok mempertahankan SELURUH isinya', () => {
       // Mencari nama grup harus memperlihatkan isinya, bukan grup kosong.
       expect(titles('keuangan')).toEqual(['Keuangan']);
-      expect(labels('keuangan')).toEqual(['Finance', 'Reminder Pembayaran', 'Tutup Buku']);
+      expect(labels('keuangan')).toEqual(['Finance', 'Reminder Pembayaran', 'Tutup Buku', 'Bridge MSDPS (MEAGO!)']);
     });
 
     it('mencari ke DALAM sub-grup, dan judul sub-grup yang cocok membawa seluruh papannya', () => {

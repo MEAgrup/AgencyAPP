@@ -252,12 +252,16 @@ jobs:
       # berarti gerbang role salah satunya tak bisa digeser tanpa menggeser yang
       # lain. Kosakata state yang identik itulah yang membuat
       # `task.computeMetrics()` dipakai ulang tanpa ditulis dua kali.
-      - name: Verify migration seed counts (34 machines, 73 events, catalog registry consistent)
+      # Bridge MSDPS→CDPS Fase 1 (20261007010000_bridge_msdps_fase1.sql):
+      # +1 mesin `external_order` (#35, 34→35) + 1 event katalog v16
+      # `bridge.order.masuk` (73→74). Lihat komentar migrasi untuk rincian
+      # gate lengkap (tabel/prefix juga naik — dicek di step lain di bawah).
+      - name: Verify migration seed counts (35 machines, 74 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 34 then raise exception 'expected 34 machines'; end if;
-               if (select count(*) from notif_events) <> 73 then raise exception 'expected 73 events'; end if;
+               if (select count(*) from sm_machines) <> 35 then raise exception 'expected 35 machines'; end if;
+               if (select count(*) from notif_events) <> 74 then raise exception 'expected 74 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;
@@ -477,12 +481,17 @@ jobs:
       #       sama, gerbang sama), yang justru alasannya:
       #       `task.computeMetrics()` dipakai ulang apa adanya ⇒ nol definisi
       #       KEDUA Speed Score. Nol event katalog ⇒ notif_events TETAP 73.
-      - name: Verify table count (expect 156)
+      # 160 = 156 + 4 tabel Bridge MSDPS→CDPS Fase 1
+      #       (20261007010000_bridge_msdps_fase1.sql): `external_orders`,
+      #       `client_external_ref`, `client_external_billing`,
+      #       `external_service_map`. Lihat komentar migrasi untuk kenapa
+      #       empat, bukan kurang/lebih.
+      - name: Verify table count (expect 160)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 156
+          test "$n" -eq 160
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
@@ -509,15 +518,17 @@ jobs:
       #      Creator Booking | Brief-as-task, sementara barisnya ber-client_id
       #      nullable). Registry yang mendaftarkan entitas yang bentuknya belum
       #      diketok menjanjikan sesuatu yang belum ada.
-      - name: Verify entity_prefix registry (expect 43)
+      # 44 = 43 + ORD (Bridge MSDPS→CDPS Fase 1,
+      #      20261007010000_bridge_msdps_fase1.sql: inbox order eksternal).
+      - name: Verify entity_prefix registry (expect 44)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          # 43 sejak M19 §13 (`20260928010000_m19_scs_task_engine.sql`) menambah
-          # prefix SCS. Ledger komentar di atas SUDAH mencatat 42→43 saat PR #335
-          # mendarat; gerbang inilah yang ketinggalan, dan itu membuat `main`
-          # merah sejak commit itu. Naikkan KEDUANYA dalam satu commit.
-          test "$n" -eq 43
+          # 44 sejak Bridge MSDPS→CDPS Fase 1
+          # (`20261007010000_bridge_msdps_fase1.sql`) menambah prefix ORD.
+          # Naikkan KEDUA gate (di sini dan di scripts/db-rebuild.sh) dalam
+          # satu commit — persis pelajaran PR #170/#335.
+          test "$n" -eq 44
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)

@@ -742,6 +742,12 @@ async function dealServices(sql: Queryable, transactionIds: readonly string[]): 
       join services s
         on s.client_id = tt.client_id
        and s.status <> '[Cancelled — Service Voided]'
+       -- Bridge MSDPS→CDPS A7 anti-drift (amandemen §4.3): komisi dijumlahkan
+       -- PER LAYANAN di sini, jadi klien CDPS lama yang JUGA menerima satu
+       -- SVC- MEAGO tidak boleh menaikkan komisi tanpa transaksi CDPS di
+       -- belakangnya. clients.sumber TIDAK CUKUP untuk kasus ini — lihat
+       -- header migrasi 20261007010000_bridge_msdps_fase1.sql.
+       and s.sumber <> 'meago'
       left join contracts c on c.id = s.contract_id
       left join clients cl on cl.id = tt.client_id
      where tt.id = any(${[...transactionIds]})
