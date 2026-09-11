@@ -233,14 +233,32 @@ describeDb('M19 SCS — scs_kategori: taksonomi sebagai DATA', () => {
     expect(koor?.sla_jam).toBeNull();
   });
 
+  it('`sub_type` hidup di BARIS, bukan di taksonomi (M19-SCS-SUBTYPE-GRAIN, opsi (a))', async () => {
+    // Sumbernya (Gap B) menyebut Sub Type field PER BARIS: "Support
+    // VideoGrapher ... and Sub Type both become optional on the merged entity".
+    // Sebagai atribut Kategori ia MEMBATALKAN alasan penggabungan taksonominya
+    // sendiri — satu baris `Brief` tidak bisa `Brief Feed` sementara baris
+    // `Brief` lain `Brief Story`. Ketokan pemilik 2026-09-11: ia pindah.
+    const kol = await db()<{ table_name: string; data_type: string; is_nullable: string }[]>`
+      select table_name, data_type, is_nullable from information_schema.columns
+       where table_schema = 'public' and column_name = 'sub_type'
+         and table_name in ('scs_kategori', 'scs_tasks')
+       order by table_name`;
+    // TEPAT satu tempat. Dua tempat = dua sumber untuk satu fakta (opsi (c),
+    // ditolak); nol tempat = pembedaan Brief Feed/Story hilang lagi.
+    expect(kol.map((r) => r.table_name)).toEqual(['scs_tasks']);
+    expect(kol[0].is_nullable).toBe('YES');   // opsional — kosong itu sah
+  });
+
   it('sub_type SENGAJA teks bebas — nol CHECK constraint yang mengunci delapan nama', async () => {
     // Delapan Sub Type di worksheet masih bergerak; mengunci mereka di CHECK
     // berarti satu migrasi per koreksi taksonomi. Kalau ia kelak stabil, ia
     // naik jadi enum tertutup + baris DECISIONS.md — bukan sebaliknya.
+    // Alasannya tidak berubah karena kolomnya pindah tabel.
     const rows = await db()<{ conname: string }[]>`
       select c.conname from pg_constraint c
         join pg_class t on t.oid = c.conrelid
-       where t.relname = 'scs_kategori' and c.contype = 'c'
+       where t.relname in ('scs_kategori', 'scs_tasks') and c.contype = 'c'
          and pg_get_constraintdef(c.oid) like '%sub_type%'`;
     expect(rows.map((r) => r.conname)).toEqual([]);
   });

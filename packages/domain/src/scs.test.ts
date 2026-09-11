@@ -95,6 +95,7 @@ let CLI = '';
 const baris = (over: Partial<ScsTaskInput> = {}): ScsTaskInput => ({
   tanggal: HARI,
   kategoriKode: 'SCRIPT',
+  subType: null,
   judul: 'Script mamimegol',
   clientId: CLI,
   mendukungDivisi: null,
@@ -248,7 +249,7 @@ describeDb('Kategori', () => {
   it('Kategori standing ber-SLA DITOLAK dengan pesan yang bisa dibaca', async () => {
     await setup();
     await expect(createKategori(sql, creativeLead(), {
-      kode: 'ZSC_STD', nama: 'Zsc standing', subType: null,
+      kode: 'ZSC_STD', nama: 'Zsc standing',
       isStanding: true, slaJam: 24, aktif: true, urutan: 900,
     })).rejects.toThrow(MSG_STANDING_TANPA_SLA);
   });
@@ -256,7 +257,7 @@ describeDb('Kategori', () => {
   it('lead menambah Kategori baru — 21 sisanya adalah DATA, bukan migrasi', async () => {
     await setup();
     const k = await createKategori(sql, creativeLead(), {
-      kode: 'zsc_copy', nama: 'Zsc Copywriting', subType: 'Content',
+      kode: 'zsc_copy', nama: 'Zsc Copywriting',
       isStanding: false, slaJam: 12, aktif: true, urutan: 901,
     });
     expect(k.kode).toBe('ZSC_COPY');          // kode dinormalkan huruf besar
@@ -267,7 +268,7 @@ describeDb('Kategori', () => {
   it('staff TIDAK bisa mengelola Kategori; OD pun tidak', async () => {
     await setup();
     const input = {
-      kode: 'ZSC_X', nama: 'Zsc X', subType: null,
+      kode: 'ZSC_X', nama: 'Zsc X',
       isStanding: false, slaJam: null, aktif: true, urutan: 902,
     };
     await expect(createKategori(sql, creativeStaff(), input)).rejects.toThrow(ForbiddenError);
@@ -277,12 +278,12 @@ describeDb('Kategori', () => {
   it('menonaktifkan Kategori TIDAK menghapusnya — baris historis tetap terbaca', async () => {
     await setup();
     await createKategori(sql, creativeLead(), {
-      kode: 'ZSC_OFF', nama: 'Zsc Off', subType: null,
+      kode: 'ZSC_OFF', nama: 'Zsc Off',
       isStanding: false, slaJam: 8, aktif: true, urutan: 903,
     });
     const b = await createScsTask(sql, creativeLead(), baris({ kategoriKode: 'ZSC_OFF' }));
     await updateKategori(sql, creativeLead(), 'ZSC_OFF', {
-      kode: 'ZSC_OFF', nama: 'Zsc Off', subType: null,
+      kode: 'ZSC_OFF', nama: 'Zsc Off',
       isStanding: false, slaJam: 8, aktif: false, urutan: 903,
     });
     // Hilang dari picker…
@@ -396,6 +397,96 @@ describeDb('createScsTask — tiga baris sheet yang sungguhan', () => {
   it('staff TIDAK bisa membuat barisnya sendiri — Leader yang menyusun antrean', async () => {
     await setup();
     await expect(createScsTask(sql, creativeStaff(), baris())).rejects.toThrow(ForbiddenError);
+  });
+});
+
+// ===========================================================================
+// Sub Type — field BARIS, bukan sifat Kategori (M19-SCS-SUBTYPE-GRAIN,
+// ketokan pemilik 2026-09-11, opsi (a)).
+// ===========================================================================
+
+describeDb('Sub Type per BARIS', () => {
+  it('DUA baris `Brief` pada SATU Kategori, Sub Type BERBEDA — inti ketokannya', async () => {
+    await setup();
+    // Ini tes yang tidak mungkin hijau sebelum 2026-09-11. Saat `sub_type`
+    // masih kolom `scs_kategori`, kedua baris ini WAJIB berbagi satu nilai —
+    // dan itu membatalkan alasan penggabungan taksonominya sendiri: `Brief`,
+    // `Script`, dan `QC` digabung masing-masing jadi SATU Kategori DENGAN
+    // ALASAN "Sub Type carries the distinction where it matters (Brief Feed /
+    // Brief Story)" (Gap B). Kalau tes ini merah, pembedaan itu hilang lagi.
+    const feed = await createScsTask(sql, creativeLead(), baris({
+      kategoriKode: 'BRIEF', judul: 'Brief feed mamimegol', subType: 'Brief Feed',
+    }));
+    const story = await createScsTask(sql, creativeLead(), baris({
+      kategoriKode: 'BRIEF', judul: 'Brief story mamimegol', subType: 'Brief Story',
+    }));
+    expect(feed.kategoriKode).toBe(story.kategoriKode);
+    expect(feed.subType).toBe('Brief Feed');
+    expect(story.subType).toBe('Brief Story');
+  });
+
+  it('Sub Type OPSIONAL: kosong dan spasi-saja DINORMALKAN ke null, bukan ditolak', async () => {
+    await setup();
+    // Sumbernya menyebutnya *optional*, "left blank for posting-ops work
+    // (Upload & Checklist, Weekly/Monthly Report)". Menolak kosong di sini
+    // akan memaksa label karangan ke baris yang memang tidak punya.
+    const kosong = await createScsTask(sql, creativeLead(), baris({ subType: '' }));
+    expect(kosong.subType).toBeNull();
+    const spasi = await createScsTask(sql, creativeLead(), baris({ subType: '   ' }));
+    expect(spasi.subType).toBeNull();
+    // Satu bentuk di DB, bukan dua: '' yang lolos akan memecah setiap
+    // pengelompokan laporan jadi dua ember yang terlihat sama di layar.
+    const di = await sql<{ sub_type: string | null }[]>`
+      select sub_type from scs_tasks where id in (${kosong.id}, ${spasi.id})`;
+    expect(di.map((r) => r.sub_type)).toEqual([null, null]);
+  });
+
+  it('TEKS BEBAS dengan sengaja — nol daftar tertutup delapan nama di server', async () => {
+    await setup();
+    // Delapan label worksheet masih bergerak; mengunci mereka berarti satu
+    // migrasi (atau satu rilis) per koreksi label. Saran ejaan hidup di layar
+    // (`SUB_TYPES`, datalist), penegakan TIDAK.
+    const b = await createScsTask(sql, creativeLead(), baris({ subType: 'Label Yang Belum Ada' }));
+    expect(b.subType).toBe('Label Yang Belum Ada');
+  });
+
+  it('`scs_kategori` NOL kolom sub_type — satu tempat, bukan dua', async () => {
+    await setup();
+    // Opsi (c) ("kolomnya di kedua tempat") ditolak justru karena ia membuat
+    // dua sumber untuk satu fakta. Kalau kolomnya hidup lagi di sini, salah
+    // satu dari keduanya akan jadi yang dibaca laporan — dan tidak ada yang
+    // tahu yang mana.
+    const kol = await sql<{ column_name: string }[]>`
+      select column_name from information_schema.columns
+       where table_schema = 'public' and table_name = 'scs_kategori'
+         and column_name = 'sub_type'`;
+    expect(kol).toEqual([]);
+  });
+
+  it('Sub Type tercatat di audit_log create DAN update — bisa dihitung ulang dari log', async () => {
+    await setup();
+    const b = await createScsTask(sql, creativeLead(), baris({ subType: 'Script Video' }));
+    await updateScsTask(sql, creativeLead(), b.id, baris({ subType: 'Content Plan' }));
+    const jejak = await sql<{ action: string; before_json: unknown; after_json: unknown }[]>`
+      select action, before_json, after_json from audit_log
+       where entity_type = 'scs_task' and entity_id = ${b.id} order by id`;
+    expect(jejak.map((r) => r.action)).toEqual(['scs_created', 'scs_updated']);
+    expect((jejak[0].after_json as { sub_type: string }).sub_type).toBe('Script Video');
+    expect((jejak[1].before_json as { sub_type: string }).sub_type).toBe('Script Video');
+    expect((jejak[1].after_json as { sub_type: string }).sub_type).toBe('Content Plan');
+  });
+
+  it('BEKU sesudah baris mulai dikerjakan — TS menolak, dan DB menolak juga', async () => {
+    await setup();
+    const b = await createScsTask(sql, creativeLead(), baris({ subType: 'Brief Feed' }));
+    await startScsTask(sql, creativeStaff(), b.id);
+    await expect(updateScsTask(sql, creativeLead(), b.id, baris({ subType: 'Brief Story' })))
+      .rejects.toThrow(ConflictError);
+    // Jalur tulis PALING berwenang yang ada (service-role) tetap ditolak:
+    // Sub Type MENGELOMPOKKAN laporan, jadi mengubahnya sesudah baris dinilai
+    // menulis ulang periode yang sudah dibaca orang — tanpa baris audit.
+    await expect(sql`update scs_tasks set sub_type = 'Brief Story' where id = ${b.id}`)
+      .rejects.toThrow(/sub_type beku/);
   });
 });
 

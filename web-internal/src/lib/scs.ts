@@ -36,10 +36,31 @@ export const STATUSES = [
   '[Blocked]',
 ] as const;
 
+/**
+ * Delapan label Sub Type dari worksheet Leader, VERBATIM dari sumber
+ * (`docs/prd/CDPS_GapAnalysis_LeaderVideo_CreativeDailyOps.md` Gap B).
+ *
+ * ⚠️ Ini SARAN pengetikan (`<datalist>`), BUKAN daftar tertutup. Server
+ * menerima teks bebas dengan sengaja: delapan label ini masih bergerak, dan
+ * mengunci mereka di CHECK constraint berarti satu migrasi per koreksi label.
+ * Yang dibeli saran ini adalah ejaan yang konsisten — `Brief Feed` yang diketik
+ * tiga cara berbeda membuat pengelompokan laporannya tak berguna, dan
+ * pengelompokan itulah seluruh alasan field ini pindah ke baris.
+ */
+export const SUB_TYPES = [
+  'Brief Feed',
+  'Brief Story',
+  'Script Video',
+  'Content Plan',
+  'Caption',
+  'Angle Content',
+  'Copy SKU',
+  'Copy Banner',
+] as const;
+
 export interface KategoriRow {
   kode: string;
   nama: string;
-  sub_type: string | null;
   /** Pekerjaan berulang harian: dihitung sebagai volume, Speed Score N/A. */
   is_standing: boolean;
   /** null ⇒ tidak di-SLA-kan. Kategori standing SELALU null. */
@@ -54,6 +75,8 @@ export interface ScsTaskRow {
   kategori_kode: string;
   kategori_nama: string;
   kategori_is_standing: boolean;
+  /** Label Sub Type baris ini. null = tidak relevan — render '—', bukan kosong. */
+  sub_type: string | null;
   judul: string;
   /** null = baris "all client". Render label, bukan kolom kosong. */
   client_id: string | null;
@@ -92,6 +115,7 @@ export interface ScsPicSummary {
 export interface ScsTaskInput {
   tanggal: string;
   kategori_kode: string;
+  sub_type: string | null;
   judul: string;
   client_id: string | null;
   mendukung_divisi: string | null;
@@ -103,7 +127,6 @@ export interface ScsTaskInput {
 export interface KategoriInput {
   kode: string;
   nama: string;
-  sub_type: string | null;
   is_standing: boolean;
   sla_jam: number | null;
   aktif: boolean;

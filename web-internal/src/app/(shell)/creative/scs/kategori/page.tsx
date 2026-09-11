@@ -14,6 +14,13 @@
  * standing membuatnya hilang sepenuhnya dari seri deliverable &mdash; kesalahan
  * yang lebih buruk daripada sebaliknya.
  *
+ * ⚠️ NOL kolom <strong>Sub Type</strong> di sini, dan itu ketokan
+ * (<code>M19-SCS-SUBTYPE-GRAIN</code>, 2026-09-11). Sub Type adalah field per
+ * <em>BARIS</em> &mdash; ia yang membuat satu baris <code>Brief</code> bisa
+ * &ldquo;Brief Feed&rdquo; sementara baris <code>Brief</code> lain &ldquo;Brief
+ * Story&rdquo;, pembedaan yang justru jadi syarat penggabungan taksonomi
+ * Brief/Script/QC. Isinya diketik di layar Antrean, bukan di sini.
+ *
  * NOL tombol hapus, dan itu keputusan: baris pekerjaan historis menunjuk
  * Kategori-nya, jadi menghapus satu baris taksonomi membuat riwayat tak
  * terbaca. Yang ada: nonaktifkan.
@@ -33,7 +40,7 @@ import {
 } from '@/lib/scs';
 
 const KOSONG: KategoriInput = {
-  kode: '', nama: '', sub_type: null, is_standing: false, sla_jam: 24, aktif: true, urutan: 10,
+  kode: '', nama: '', is_standing: false, sla_jam: 24, aktif: true, urutan: 10,
 };
 
 export default function ScsKategoriPage() {
@@ -85,7 +92,7 @@ export default function ScsKategoriPage() {
     setSukses(null);
     try {
       await updateKategori(k.kode, {
-        kode: k.kode, nama: k.nama, sub_type: k.sub_type,
+        kode: k.kode, nama: k.nama,
         is_standing: k.is_standing, sla_jam: k.sla_jam, aktif, urutan: k.urutan,
       });
       setSukses(aktif ? 'Diaktifkan.' : 'Dinonaktifkan.');
@@ -129,7 +136,6 @@ export default function ScsKategoriPage() {
                   <tr>
                     <th>Kode</th>
                     <th>Nama</th>
-                    <th>Sub Type</th>
                     <th>Standing</th>
                     <th>SLA (jam)</th>
                     <th>Urutan</th>
@@ -142,7 +148,6 @@ export default function ScsKategoriPage() {
                     <tr key={k.kode}>
                       <td>{k.kode}</td>
                       <td>{k.nama}</td>
-                      <td>{k.sub_type ?? '—'}</td>
                       <td>{k.is_standing ? 'ya' : 'tidak'}</td>
                       {/* SLA kosong pada Kategori standing bukan data yang hilang:
                           ia memang tidak di-SLA-kan. '—' (aturan rumah #7). */}
@@ -185,13 +190,6 @@ export default function ScsKategoriPage() {
                 <input
                   id="nama" required value={form.nama}
                   onChange={(e) => setForm({ ...form, nama: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="subtype">Sub Type</label>
-                <input
-                  id="subtype" value={form.sub_type ?? ''}
-                  onChange={(e) => setForm({ ...form, sub_type: e.target.value || null })}
                 />
               </div>
               <div className="field">

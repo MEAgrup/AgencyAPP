@@ -3,6 +3,11 @@
 **Untuk:** lead Creative (Leader Video). **Nol migrasi, nol deploy** — ini murni
 pengisian data lewat layar admin yang sudah live.
 
+> **Revisi 2026-09-11:** kolom **Sub Type dicabut** dari layar Kategori
+> (`M19-SCS-SUBTYPE-GRAIN` diketok — opsi (a): ia field per-BARIS, diketik di
+> layar Antrean). Instruksi lama "kosongkan kolom Sub Type" **tidak berlaku
+> lagi** karena kolomnya sudah tidak ada. Lihat §4.
+
 Dokumen sumbernya akhirnya masuk repo di sesi ini:
 `docs/prd/CDPS_GapAnalysis_LeaderVideo_CreativeDailyOps.md` (Gap B, "Locked
 Kategori list for the merged role"). Angka "21" di handoff terbukti tepat: daftar
@@ -30,7 +35,6 @@ lahir dari ketokan Gap H-1 2026-09-09 — jadi totalnya nanti **25 baris**, buka
 |---|---|---|
 | **Kode** | wajib, tidak boleh kosong. **Otomatis di-UPPERCASE** server, jadi tidak perlu diketik kapital. Maks 48 karakter. Harus unik | kosong ⇒ `[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]` · sudah dipakai ⇒ `[kode kategori sudah dipakai]` |
 | **Nama** | wajib, tidak boleh kosong/spasi saja. Maks 191 karakter. **Harus unik** (`UNIQUE` di DB) | `[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]` |
-| **Sub Type** | **JANGAN DIISI DI PUTARAN INI** — lihat §4. Kosongkan | — |
 | **Standing** | `ya` = pekerjaan berulang harian (dihitung sebagai *volume*, Speed Score `N/A`). Default `tidak` | — |
 | **SLA (jam)** | bilangan bulat **> 0**. Kosong = tidak di-SLA-kan. **Standing ⇒ WAJIB kosong** | `0`/negatif ⇒ `[data tidak lengkap...]` · standing + SLA ⇒ `[kategori standing tidak boleh punya SLA — pekerjaan berulang tidak diukur kecepatannya]` |
 | **Aktif** | default `ya` | — |
@@ -101,30 +105,44 @@ tidak memuatnya** dan mengarangnya akan langsung masuk ke Speed Score orang:
 
 ---
 
-## 4. Kenapa kolom Sub Type harus DIKOSONGKAN dulu
+## 4. Sub Type SUDAH TIDAK ADA di layar ini — dan itu perbaikan
 
-Delapan label Sub Type-nya ada di sumber dan tidak hilang:
+**Diperbarui 2026-09-11.** Versi pertama runbook ini menyuruh mengosongkan kolom
+Sub Type. Kolomnya sekarang **tidak ada lagi** di `/creative/scs/kategori`, jadi
+instruksi itu gugur dengan sendirinya — tidak ada yang perlu dikosongkan.
+
+Delapan label Sub Type-nya tetap ada dan tidak hilang:
 
 > Brief Feed · Brief Story · Script Video · Content Plan · Caption · Angle Content
 > · Copy SKU · Copy Banner
 
-Tapi **jangan diisi ke tabel Kategori**, karena di sumber Sub Type adalah field
-**per-BARIS pekerjaan**, bukan atribut Kategori — dan sebagaimana terbangun
-sekarang ia kolom di `scs_kategori`. Bedanya bukan kosmetik: seluruh alasan
-`Brief`, `Script`, dan `QC` digabung jadi satu Kategori adalah *"Sub Type carries
-the distinction where it matters (Brief Feed / Brief Story)"*. Dengan Sub Type
-menempel di Kategori, satu baris `Brief` hari Senin tidak bisa `Brief Feed`
-sementara baris `Brief` hari Selasa `Brief Story` — persis pembedaan yang
-penggabungannya mengandalkan.
+Mereka sekarang diketik **per BARIS pekerjaan** di layar Antrean
+(`/creative/scs`), pada field **Sub Type (opsional)** tepat sesudah Kategori.
+Ketokan pemilik 2026-09-11 (`M19-SCS-SUBTYPE-GRAIN`, opsi (a)): di sumber Sub
+Type memang field baris, bukan atribut Kategori. Bedanya bukan kosmetik —
+seluruh alasan `Brief`, `Script`, dan `QC` digabung jadi satu Kategori adalah
+*"Sub Type carries the distinction where it matters (Brief Feed / Brief Story)"*,
+dan pembedaan itu hanya bisa dinyatakan kalau Sub Type menempel di barisnya:
+baris `Brief` hari Senin `Brief Feed`, baris `Brief` hari Selasa `Brief Story`.
 
-Mengisi kolom itu sekarang akan **memaku satu label ke seluruh Kategori** dan
-membuat penggabungan itu tidak bisa dibatalkan tanpa migrasi. Karena itu
-ketidaksesuaiannya dicatat sebagai pertanyaan terbuka `M19-SCS-SUBTYPE-GRAIN`
-di `docs/DECISIONS.md` (§Open) untuk diketok pemilik, bukan ditebak di sini.
+Tiga hal yang perlu diketahui saat mengisinya di Antrean:
 
-Empat baris yang sudah di-seed **sudah** membawa nilai di kolom itu (`Content`,
-`Operasional`) — dan keduanya **bukan** anggota delapan label terkunci di atas.
-Itu bagian dari pertanyaan yang sama; jangan diikuti polanya.
+1. **Kosong itu sah.** Baris posting-ops (`Upload & Checklist`, laporan
+   mingguan/bulanan) memang tidak punya Sub Type — biarkan kosong, jangan
+   dikarang. Layar merendernya `—`.
+2. **Field-nya menyarankan delapan label itu, tapi tidak mengunci.** Ketik
+   sebagian namanya dan saran muncul; teks di luar daftar tetap diterima server
+   (delapan label itu masih bergerak). Yang dibeli saran ini adalah ejaan yang
+   konsisten — `Brief Feed` yang diketik tiga cara berbeda membuat laporannya
+   tidak bisa dikelompokkan sama sekali. **Pakai saran kalau labelnya ada.**
+3. **Ia beku begitu baris mulai dikerjakan.** Sesudah baris meninggalkan
+   `[To Do]`, Sub Type tidak bisa diubah lagi (sama seperti Kategori dan PIC).
+   Betulkan sebelum PIC menekan *Mulai*.
+
+Empat baris Kategori yang sudah di-seed dulu membawa nilai `Content` /
+`Operasional` di kolom lama — keduanya **bukan** anggota delapan label di atas,
+dan keduanya ikut terbuang saat kolomnya dicabut. Tidak ada yang perlu
+dibersihkan manual.
 
 ---
 

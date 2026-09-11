@@ -15,6 +15,13 @@
  * &ldquo;0%&rdquo;, yaitu pernyataan tentang kecepatan seseorang atas pekerjaan
  * yang tidak pernah di-SLA-kan.
  *
+ * ⚠️ SUB TYPE ADALAH FIELD BARIS, BUKAN SIFAT KATEGORI
+ * (<code>M19-SCS-SUBTYPE-GRAIN</code>, ketokan 2026-09-11). Ia yang membuat satu
+ * baris <code>Brief</code> bisa &ldquo;Brief Feed&rdquo; sementara baris
+ * <code>Brief</code> lain &ldquo;Brief Story&rdquo; &mdash; pembedaan yang jadi
+ * SYARAT digabungnya taksonomi Brief/Script/QC. Ia opsional: kosong berarti
+ * &ldquo;tidak relevan untuk baris ini&rdquo; (posting-ops), bukan data hilang.
+ *
  * Tombol aksi mengikuti gerbang peran yang BERBEDA per langkah: memulai dan
  * submit milik PIC baris itu SAJA (lead pun tidak &mdash; ia akan memalsukan
  * jangkar turnaround), review dan blokir milik lead.
@@ -31,6 +38,7 @@ import StatusBadge from '@/components/StatusBadge';
 import {
   DIVISION,
   STATUSES,
+  SUB_TYPES,
   canManageTask,
   canReviewTask,
   canSeeAllPics,
@@ -47,7 +55,7 @@ import {
 } from '@/lib/scs';
 
 const KOSONG: ScsTaskInput = {
-  tanggal: '', kategori_kode: '', judul: '', client_id: null,
+  tanggal: '', kategori_kode: '', sub_type: null, judul: '', client_id: null,
   mendukung_divisi: null, assigned_pic: '', target_qty: 1, catatan: null,
 };
 
@@ -249,6 +257,7 @@ export default function ScsQueuePage() {
                     <th>ID</th>
                     <th>Tanggal</th>
                     <th>Kategori</th>
+                    <th>Sub Type</th>
                     <th>Pekerjaan</th>
                     <th>Klien</th>
                     <th>Mendukung</th>
@@ -272,6 +281,9 @@ export default function ScsQueuePage() {
                           <span className="muted" style={{ fontSize: 12 }}> &middot; standing</span>
                         )}
                       </td>
+                      {/* Sub Type kosong bukan data yang hilang: sumbernya menyebutnya
+                          opsional, "left blank for posting-ops work". '—' (aturan rumah #7). */}
+                      <td>{r.sub_type ?? '—'}</td>
                       <td>{r.judul}</td>
                       <td>
                         {r.client_id === null
@@ -329,6 +341,21 @@ export default function ScsQueuePage() {
                   <option value="">— pilih —</option>
                   {kategori.map((k) => <option key={k.kode} value={k.kode}>{k.nama}</option>)}
                 </select>
+              </div>
+              <div className="field">
+                <label htmlFor="subtype">Sub Type (opsional)</label>
+                <input
+                  id="subtype" list="scs-subtype-suggestions" maxLength={64}
+                  value={form.sub_type ?? ''}
+                  onChange={(e) => setForm({ ...form, sub_type: e.target.value || null })}
+                />
+                {/* Saran pengetikan, BUKAN daftar tertutup — server menerima teks
+                    bebas dengan sengaja (delapan label ini masih bergerak). Yang
+                    dibeli saran ini: ejaan yang konsisten, syarat agar laporan
+                    Brief Feed vs Brief Story bisa dikelompokkan sama sekali. */}
+                <datalist id="scs-subtype-suggestions">
+                  {SUB_TYPES.map((t) => <option key={t} value={t} />)}
+                </datalist>
               </div>
               <EmployeePicker
                 id="pic" label="PIC" required
