@@ -196,6 +196,11 @@ export const EVENTS = {
   BookingJatuhTempo: 'm9.booking.jatuh_tempo',         // -> koordinator KOL + AM
   CampaignMendekatiAkhir: 'm9.campaign.mendekati_akhir', // -> koordinator KOL + AM
 
+  // Bridge MSDPS→CDPS Fase 1 — SATU event, bukan tiga. `[Ditolak]` nol
+  // audiens CDPS di Fase 1 (nol callback ke MSDPS, itu Fase 2); `[Diterima]`
+  // adalah aksi actor sendiri. Emitter: packages/domain/src/bridge.ts intake().
+  BridgeOrderMasuk: 'bridge.order.masuk',               // -> lead Account
+
 } as const;
 
 /** A cataloged event type. */
@@ -319,6 +324,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
     eventCount: 4,
     decisionRef:
       'docs/DECISIONS.md 2026-09-07 (K-1..K-7) + docs/handoff/PARALEL_FEEDBACK_OD_DUA_AKUN.md §1 F-3',
+  },
+  {
+    version: 16,
+    description:
+      'Bridge MSDPS→CDPS Fase 1 — 1 event: bridge.order.masuk (order [Masuk] baru dari MSDPS) → lead Account. Satu event, bukan tiga: [Ditolak] nol audiens CDPS di Fase 1 (nol callback), [Diterima] adalah aksi actor sendiri.',
+    eventCount: 1,
+    decisionRef: 'docs/DECISIONS.md 2026-09-10 (Bridge MSDPS→CDPS Fase 1)',
   },
 ] as const;
 
@@ -481,6 +493,10 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.BriefSelesai]: { description: 'Rollup Brief mencapai selesai — ke AM pemilik klien', resolver: 'explicit', version: 15 },
   [EVENTS.BookingJatuhTempo]: { description: 'Booking KOL mendekati (H-1) atau melewati jatuh tempo — ke koordinator KOL + AM pemilik klien', resolver: 'explicitOrLeads', version: 15 },
   [EVENTS.CampaignMendekatiAkhir]: { description: 'Campaign KOL mendekati tanggal akhir — ke koordinator KOL + AM pemilik klien', resolver: 'explicitOrLeads', version: 15 },
+
+  // --- v16 (Bridge MSDPS→CDPS Fase 1). Description/resolver WAJIB sama
+  // persis dengan seed migrasi 20261007010000_bridge_msdps_fase1.sql. ---
+  [EVENTS.BridgeOrderMasuk]: { description: 'Order baru [Masuk] dari MSDPS — ke lead Account', resolver: 'leadsOfDivision', version: 16 },
 };
 
 /** All registered event types (introspection / tests). */

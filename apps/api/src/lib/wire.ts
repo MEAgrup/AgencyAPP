@@ -10,7 +10,7 @@
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
+import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -8641,5 +8641,153 @@ export function toScsKategoriInput(
     slaJam: sla === null || sla === '' ? null : Number(sla),
     aktif: b.aktif !== false,
     urutan: Number(b.urutan ?? 0),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Bridge MSDPS→CDPS Fase 1 — web-internal/src/lib/bridge.ts is the FE home.
+// ---------------------------------------------------------------------------
+
+/** bridge.BridgeMerchant as web-internal's `BridgeMerchant` expects it. */
+export interface BridgeMerchantWire {
+  external_id: string;
+  nama: string;
+  kota: string;
+  kategori_poi: string;
+  pic_nama: string;
+  pic_whatsapp: string | null;
+  tanggal_mulai_kontrak: string;
+  tanggal_akhir_kontrak: string;
+}
+
+/** bridge.BridgeAttestation as web-internal's `BridgeAttestation` expects it. */
+export interface BridgeAttestationWire {
+  external_trx_ref: string;
+  bentuk_kerjasama: string;
+  nilai: string | null;
+  diverifikasi_pada: string;
+  diverifikasi_oleh_external: string | null;
+}
+
+/** bridge.BridgePayloadLine as web-internal's `BridgeLine` expects it. */
+export interface BridgeLineWire {
+  jenis: string;
+  qty: number | null;
+  catatan: string | null;
+  alasan_non_roster: string | null;
+  nilai_cross_charge: string | null;
+}
+
+/** bridge.BridgeOrderPayloadV1 as web-internal's `BridgeOrderPayload` expects it. */
+export interface BridgeOrderPayloadWire {
+  payload_versi: number;
+  deal_code: string;
+  bd_identitas: string;
+  merchant: BridgeMerchantWire;
+  attestation: BridgeAttestationWire;
+  lines: BridgeLineWire[];
+}
+
+function bridgePayloadToWire(p: bridge.BridgeOrderPayloadV1): BridgeOrderPayloadWire {
+  return {
+    payload_versi: p.payloadVersi,
+    deal_code: p.dealCode,
+    bd_identitas: p.bdIdentitas,
+    merchant: {
+      external_id: p.merchant.externalId,
+      nama: p.merchant.nama,
+      kota: p.merchant.kota,
+      kategori_poi: p.merchant.kategoriPoi,
+      pic_nama: p.merchant.picNama,
+      pic_whatsapp: p.merchant.picWhatsapp,
+      tanggal_mulai_kontrak: p.merchant.tanggalMulaiKontrak,
+      tanggal_akhir_kontrak: p.merchant.tanggalAkhirKontrak,
+    },
+    attestation: {
+      external_trx_ref: p.attestation.externalTrxRef,
+      bentuk_kerjasama: p.attestation.bentukKerjasama,
+      nilai: p.attestation.nilai,
+      diverifikasi_pada: p.attestation.diverifikasiPada,
+      diverifikasi_oleh_external: p.attestation.diverifikasiOlehExternal,
+    },
+    lines: p.lines.map((l) => ({
+      jenis: l.jenis,
+      qty: l.qty,
+      catatan: l.catatan,
+      alasan_non_roster: l.alasanNonRoster,
+      nilai_cross_charge: l.nilaiCrossCharge,
+    })),
+  };
+}
+
+/** bridge.BridgeOrderSummary as web-internal's `BridgeOrderSummary` expects it. */
+export interface BridgeOrderSummaryWire {
+  id: string;
+  sumber: string;
+  external_deal_code: string;
+  status: string;
+  diterima_pada: string;
+  client_id: string | null;
+  ditolak_alasan: string | null;
+  diputus_oleh: string | null;
+  diputus_pada: string | null;
+}
+
+export function bridgeOrderSummaryToWire(o: bridge.BridgeOrderSummary): BridgeOrderSummaryWire {
+  return {
+    id: o.id,
+    sumber: o.sumber,
+    external_deal_code: o.externalDealCode,
+    status: o.status,
+    diterima_pada: o.diterimaPada,
+    client_id: o.clientId,
+    ditolak_alasan: o.ditolakAlasan,
+    diputus_oleh: o.diputusOleh,
+    diputus_pada: o.diputusPada,
+  };
+}
+
+/** bridge.BridgeOrderDetail as web-internal's `BridgeOrderDetail` expects it. */
+export interface BridgeOrderDetailWire extends BridgeOrderSummaryWire {
+  payload_versi: number;
+  payload: BridgeOrderPayloadWire;
+}
+
+export function bridgeOrderDetailToWire(o: bridge.BridgeOrderDetail): BridgeOrderDetailWire {
+  return {
+    ...bridgeOrderSummaryToWire(o),
+    payload_versi: o.payloadVersi,
+    payload: bridgePayloadToWire(o.payload),
+  };
+}
+
+/** bridge.BridgeCandidate as web-internal's `BridgeCandidate` expects it. */
+export interface BridgeCandidateWire {
+  client_id: string;
+  toko: string;
+  kota: string;
+  confidence: string;
+}
+
+export function bridgeCandidateToWire(c: bridge.BridgeCandidate): BridgeCandidateWire {
+  return { client_id: c.clientId, toko: c.toko, kota: c.kota, confidence: c.confidence };
+}
+
+/** bridge.ExternalServiceMap as web-internal's `ExternalServiceMap` expects it. */
+export interface ExternalServiceMapWire {
+  id: number;
+  sumber: string;
+  external_service_type: string;
+  master_service_id: string;
+  aktif: boolean;
+}
+
+export function externalServiceMapToWire(m: bridge.ExternalServiceMap): ExternalServiceMapWire {
+  return {
+    id: m.id,
+    sumber: m.sumber,
+    external_service_type: m.externalServiceType,
+    master_service_id: m.masterServiceId,
+    aktif: m.aktif,
   };
 }

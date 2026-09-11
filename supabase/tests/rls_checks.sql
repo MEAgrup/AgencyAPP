@@ -1190,6 +1190,17 @@ DECLARE
     'master_service_duration_options_select',
     'master_service_versions_select',
     'master_services_select','metric_entries_select','metric_entry_assets_select',
+    -- `external_service_map_select` (Bridge MSDPS→CDPS Fase 1, migrasi
+    -- 20261007010000) masuk daftar ini DENGAN SENGAJA, dicatat di
+    -- `docs/DECISIONS.md` 2026-09-10 — bukan ditambahkan agar tes hijau. Ia
+    -- cermin `master_services_select`/`studios_select` tepat di sekitarnya:
+    -- isinya nama tipe layanan MSDPS + ID Master Service List, tidak lebih
+    -- sensitif daripada `standard_price` yang sudah terbuka bagi seluruh
+    -- staff, dan layar accept `/bridge/inbox` butuh daftarnya untuk
+    -- memvalidasi baris bridge — termasuk pada hari nol baris (tabel ini
+    -- LAHIR KOSONG). Baris KERJA-nya (`external_orders`) TETAP ber-lengan
+    -- lead/divisi dan karena itu tidak ada di daftar ini.
+    'external_service_map_select',
     'negotiation_proposal_lines_select','negotiation_proposals_select','notifications_select',
     'optimization_logs_select','plan_actual_select','plan_flag_select',
     'plan_gate_config_select','plan_review_select','plan_target_select',

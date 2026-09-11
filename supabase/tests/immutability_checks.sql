@@ -129,6 +129,31 @@ BEGIN
           AND action_statement LIKE '%client_pitch_consents_frozen%'
           AND event_manipulation IN ('UPDATE', 'DELETE')
     ) = 2, 'client_pitch_consents must stay frozen against UPDATE and DELETE (consent history is the only proof a pitch figure was allowed)';
+
+    ---------------------------------------------------------------------------
+    -- Bridge MSDPS→CDPS Fase 1 (20261007010000) — two new frozen tables.
+    --
+    -- `external_orders.payload` blocks UPDATE only (the row itself is never
+    -- deleted — house rule #3 inbox history — but a Fase-2 order revision is a
+    -- NEW row with payload_versi+1, never a rewrite of this one).
+    ---------------------------------------------------------------------------
+    ASSERT (
+        SELECT count(*) FROM information_schema.triggers
+        WHERE event_object_table = 'external_orders'
+          AND action_statement LIKE '%external_orders_payload_frozen%'
+          AND event_manipulation = 'UPDATE'
+    ) = 1, 'external_orders must stay frozen against UPDATE (external_orders_payload_frozen)';
+
+    -- `client_external_billing` is an attestation that ANOTHER system already
+    -- verified a payment — the failure mode is the same as
+    -- `client_pitch_consents`, a vanished or silently-edited record of someone
+    -- else's verification, so it blocks DELETE as well as UPDATE.
+    ASSERT (
+        SELECT count(DISTINCT event_manipulation) FROM information_schema.triggers
+        WHERE event_object_table = 'client_external_billing'
+          AND action_statement LIKE '%client_external_billing_frozen%'
+          AND event_manipulation IN ('UPDATE', 'DELETE')
+    ) = 2, 'client_external_billing must stay frozen against UPDATE and DELETE (it records someone else''s payment verification, never CDPS''s own)';
 END $$;
 
 ROLLBACK;

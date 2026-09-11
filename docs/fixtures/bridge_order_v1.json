@@ -1,0 +1,45 @@
+{
+  "payload_versi": 1,
+  "deal_code": "DEAL-202609-0001",
+  "bd_identitas": "Andi Saputra (BD MEAGO — Jakarta)",
+  "merchant": {
+    "external_id": "SHOP-77012345",
+    "nama": "Kedai Kopi Senja",
+    "kota": "Bandung",
+    "kategori_poi": "Dining",
+    "pic_nama": "Budi Santoso",
+    "pic_whatsapp": "081234567890",
+    "tanggal_mulai_kontrak": "2026-09-15",
+    "tanggal_akhir_kontrak": "2027-03-15"
+  },
+  "attestation": {
+    "external_trx_ref": "TRX-202609-0007",
+    "bentuk_kerjasama": "Berbayar",
+    "nilai": "15000000.00",
+    "diverifikasi_pada": "2026-09-10T03:15:00Z",
+    "diverifikasi_oleh_external": "Finance MSDPS — Rina W."
+  },
+  "lines": [
+    {
+      "jenis": "Account",
+      "qty": 1,
+      "catatan": "Strategi + brief bulanan, paket 6 bulan",
+      "alasan_non_roster": null,
+      "nilai_cross_charge": "500000.00"
+    },
+    {
+      "jenis": "Ads",
+      "qty": 1,
+      "catatan": "Iklan TikTok Ads, budget dikelola MEA Agency",
+      "alasan_non_roster": null,
+      "nilai_cross_charge": "300000.00"
+    },
+    {
+      "jenis": "KOL-Non-Roster",
+      "qty": 2,
+      "catatan": "2 video review, creator lokal Bandung",
+      "alasan_non_roster": "Creator lokal tidak terdaftar di roster MCN MEA — dipilih merchant langsung",
+      "nilai_cross_charge": null
+    }
+  ]
+}

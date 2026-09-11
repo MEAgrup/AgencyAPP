@@ -175,10 +175,23 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "156"
-check "entity_prefix"    "select count(*) from entity_prefix"    "43"
-check "sm_machines"      "select count(*) from sm_machines"      "34"
-check "notif_events"     "select count(*) from notif_events"     "73"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "160"
+check "entity_prefix"    "select count(*) from entity_prefix"    "44"
+check "sm_machines"      "select count(*) from sm_machines"      "35"
+check "notif_events"     "select count(*) from notif_events"     "74"
+# --- Bridge MSDPS→CDPS Fase 1 (20261007010000_bridge_msdps_fase1.sql) --------
+# 160 = 156 + 4 tabel: `external_orders` (inbox ORD-), `client_external_ref`
+#       (dedup satu POI MSDPS ⇒ maks satu CLI-), `client_external_billing`
+#       (atestasi append-only pembayaran terverifikasi MSDPS), dan
+#       `external_service_map` (pemetaan admin, LAHIR KOSONG — paket MEAGO
+#       belum ada di MSL). +1 prefix `ORD` ⇒ entity_prefix 43→44. +1 mesin
+#       `external_order` (#35) ⇒ sm_machines 34→35 — gerbang [Masuk]→
+#       [Diterima]/[Ditolak] adalah lead Account ATAU Director (D10 dibaca
+#       ulang: tier "Head Account" terpisah belum ada di model peran — wave
+#       K-1, sengaja ditunda). +1 event katalog v16 (`bridge.order.masuk`) ⇒
+#       notif_events 73→74. Plus dua kolom `clients.sumber`/`services.sumber`
+#       (DUA, bukan satu — komisi dijumlahkan per LAYANAN, lihat komentar
+#       migrasi §4.3) — nol tabel/prefix/mesin/event dari keduanya.
 # --- Adopsi Sistem (20261003010000_adopsi_page_views.sql) --------------------
 # 156 = 155 + `page_views` — satu baris per pembukaan halaman di web-internal,
 #       sumber TUNGGAL laporan Adopsi Sistem (pemilik 2026-09-10). Append-only

@@ -346,6 +346,23 @@ describeDb('band drop (Rule 12) + grace + div-zero', () => {
     expect(snap.finalHealthScore).toBe(100);
     expect(snap.band).toBe(BAND_HEALTHY);
   });
+
+  // ---------------------------------------------------------------------------
+  // Bridge MSDPS→CDPS D6 — sumber='meago' excludes GMV Growth, redistributed,
+  // regardless of baseline/target (this client is neither grace nor div-zero).
+  // ---------------------------------------------------------------------------
+  it('sumber=meago excludes GMV Growth (D6) even with a real baseline/target gap', async () => {
+    const cid = `CLI-MEAGO-${uniq()}`;
+    await insClient(cid, 'ZZ-AM', '50000000.00', '80000000.00', '62000000.00', new Date(Date.UTC(2026, 3, 1)));
+    await sql`update clients set sumber = 'meago' where id = ${cid}`;
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), cid, junePeriod);
+    const gmv = find(snap.components, COMP_GMV_GROWTH)!;
+    expect(gmv.included).toBe(false);
+    expect(gmv.excludedReason).toContain('MEAGO');
+    // Six components, weight still sums to 100 after redistribution (Rule 4).
+    expect(snap.components.reduce((n, c) => n + c.effectiveWeight, 0)).toBeCloseTo(100, 5);
+  });
 });
 
 describeDb('ROAS Inclusion Toggle (Rule 13 / §5.4)', () => {

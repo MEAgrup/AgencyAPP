@@ -192,7 +192,7 @@ const FE_FILES = [
   // itu hidup empat kali (account/tasks/creative/kol) dengan hanya SATU yang
   // di-anchor di sini; lihat `ONE_BRIEF` di bawah, yang menjaga agar tidak
   // lahir yang kelima.
-  'account.ts', 'adopsi.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyops.ts', 'scs.ts',
+  'account.ts', 'adopsi.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'bridge.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyops.ts', 'scs.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
   'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
@@ -376,6 +376,15 @@ const WIRE_TO_FE: Record<string, string> = {
   AdopsiReportWire: 'adopsi.ts::AdopsiReport',
   // Laporan Penjualan (pemilik 2026-09-10, Bagian 3) — salesperf.ts
   SalesReportRowWire: 'salesperf.ts::SalesReportRow',
+  // Bridge MSDPS→CDPS Fase 1 — bridge.ts.
+  BridgeOrderSummaryWire: 'bridge.ts::BridgeOrderSummary',
+  BridgeOrderDetailWire: 'bridge.ts::BridgeOrderDetail',
+  BridgeOrderPayloadWire: 'bridge.ts::BridgeOrderPayload',
+  BridgeMerchantWire: 'bridge.ts::BridgeMerchant',
+  BridgeAttestationWire: 'bridge.ts::BridgeAttestation',
+  BridgeLineWire: 'bridge.ts::BridgeLine',
+  BridgeCandidateWire: 'bridge.ts::BridgeCandidate',
+  ExternalServiceMapWire: 'bridge.ts::ExternalServiceMap',
   SalesReportTotalWire: 'salesperf.ts::SalesReportTotal',
   SalesReportServiceRowWire: 'salesperf.ts::SalesReportServiceRow',
   SalesReportWire: 'salesperf.ts::SalesReport',

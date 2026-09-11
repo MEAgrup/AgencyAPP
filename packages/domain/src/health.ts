@@ -255,13 +255,15 @@ interface ClientInputs {
   currentCents: number;
   createdAt: Date;
   roasOverride: boolean | null; // null = follow default
+  /** Bridge MSDPS→CDPS D6 — 'meago' excludes the GMV Growth component (see gmvCandidate). */
+  sumber: string;
 }
 
 async function loadClientInputs(sql: Queryable, clientId: string): Promise<ClientInputs> {
   const rows = await sql<
-    { gmv_baseline: string; target_gmv: string; total_sales: string; created_at: Date; roas_health_included_override: boolean | null }[]
+    { gmv_baseline: string; target_gmv: string; total_sales: string; created_at: Date; roas_health_included_override: boolean | null; sumber: string }[]
   >`
-    select gmv_baseline, target_gmv, total_sales, created_at, roas_health_included_override
+    select gmv_baseline, target_gmv, total_sales, created_at, roas_health_included_override, sumber
       from clients where id = ${clientId}`;
   if (rows.length === 0) {
     throw new NotFoundError();
@@ -273,6 +275,7 @@ async function loadClientInputs(sql: Queryable, clientId: string): Promise<Clien
     currentCents: Number(money.parse(r.total_sales)),
     createdAt: r.created_at,
     roasOverride: r.roas_health_included_override,
+    sumber: r.sumber,
   };
 }
 
@@ -313,6 +316,14 @@ async function gatherComponents(sql: Queryable, clientId: string, per: Period): 
 
 /** GMV Growth (Rule 5): (Current−Baseline)/(Target−Baseline)×100. Excluded in grace or zero-denominator. */
 function gmvCandidate(ci: ClientInputs, grace: boolean): Candidate {
+  // Bridge MSDPS→CDPS D6 (rencana bridging §4.6/§9): klien MEAGO adalah POI
+  // yang tidak punya baseline GMV marketplace dalam arti CDPS ("GMV bersih").
+  // Dikecualikan + bobot didistribusi ulang — mesinnya (Rule 4) sudah ada,
+  // ini cabang KEDUA dengan alasan berbeda dari pembagi-nol di bawah.
+  if (ci.sumber === 'meago') {
+    return { name: COMP_GMV_GROWTH, included: false, raw: 0,
+      reason: 'klien MEAGO — GMV marketplace tidak berlaku, bobot didistribusi ulang' };
+  }
   if (grace) {
     return { name: COMP_GMV_GROWTH, included: false, raw: 0,
       reason: 'grace period klien baru — GMV Growth dikecualikan pada bulan penuh pertama (Rule 8)' };
