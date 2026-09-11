@@ -699,6 +699,71 @@ export interface CommissionShare {
   recognizedCommission: string;
 }
 
+// ---------------------------------------------------------------------------
+// dealServices — pemetaan Service → TEPAT SATU transaksi (PR3-RNW-TRX).
+//
+// Sampai 2026-09-11 komisi sebuah transaksi adalah Σ komisi SELURUH Service
+// kliennya. Selama satu klien = satu transaksi itu benar dan tidak ambigu.
+// Begitu klien punya dua transaksi (closing + perpanjangan), setiap transaksi
+// melaporkan komisi yang SAMA — dan siapa pun yang menjumlahkan keduanya
+// (Kinerja Sales, Laporan Penjualan) mendapat komisi dua kali lipat. Itu persis
+// kelas bug yang ditutup untuk omzet pada hari yang sama, satu kolom di
+// sebelahnya.
+//
+// Aturannya satu kalimat: sebuah Service milik deal tempat ia lahir.
+//
+//   1. Punya kontrak yang punya transaksi  → transaksi kontrak itu.
+//   2. Selain itu                          → transaksi closing pertama kliennya
+//                                            (clients.transaction_id).
+//
+// Butir 2 memakai `coalesce` ke transaksi TERAWAL kliennya kalau
+// `clients.transaction_id` kosong — bukan kerapian, melainkan yang membuat
+// pemetaan ini TOTAL: setiap Service milik klien yang punya minimal satu
+// transaksi pasti mendapat tepat satu rumah. Karena itu Σ komisi seluruh
+// transaksi seorang klien tetap PERSIS sama dengan Σ komisi seluruh Service-nya,
+// dan untuk setiap klien satu-transaksi — yakni setiap kasus yang selama ini
+// benar — angkanya tidak bergerak satu rupiah pun.
+//
+// Service yang dibatalkan (M4-OA-5) tetap dikecualikan: nol komisi untuk
+// pekerjaan yang tidak akan dikirim.
+// ---------------------------------------------------------------------------
+
+interface DealServiceRow {
+  standard_price: string;
+  commission_rule: string;
+}
+
+async function dealServices(sql: Queryable, transactionIds: readonly string[]): Promise<Map<string, DealServiceRow[]>> {
+  const out = new Map<string, DealServiceRow[]>();
+  if (transactionIds.length === 0) return out;
+  const rows = await sql<{ transaction_id: string; standard_price: string; commission_rule: string }[]>`
+    select tt.id as transaction_id, s.standard_price, s.commission_rule
+      from transactions tt
+      join services s
+        on s.client_id = tt.client_id
+       and s.status <> '[Cancelled — Service Voided]'
+      left join contracts c on c.id = s.contract_id
+      left join clients cl on cl.id = tt.client_id
+     where tt.id = any(${[...transactionIds]})
+       and (
+             c.transaction_id = tt.id
+          or (
+               (s.contract_id is null or c.transaction_id is null)
+               and tt.id = coalesce(
+                     cl.transaction_id,
+                     (select t2.id from transactions t2
+                       where t2.client_id = tt.client_id
+                       order by t2.created_at, t2.id limit 1))
+             )
+           )`;
+  for (const r of rows) {
+    const list = out.get(r.transaction_id) ?? [];
+    list.push({ standard_price: r.standard_price, commission_rule: r.commission_rule });
+    out.set(r.transaction_id, list);
+  }
+  return out;
+}
+
 /** Commission achievement recognized on the actually-verified amount (M0 §5). */
 export interface CommissionAchievementView {
   transactionId: string;
@@ -726,12 +791,12 @@ export async function commissionAchievement(sql: Queryable, transactionId: strin
   const trx = await loadTransaction(sql, transactionId, false);
   const verified = await sumVerified(sql, trx.id);
 
-  // Total deal commission = Σ over services of rule(applied to its agreed price).
-  // A voided Service (M4-OA-5) is excluded — no commission accrues for work that
-  // will not be delivered (the Transaction total itself stays immutable).
-  const svcRows = await sql<{ standard_price: string; commission_rule: string }[]>`
-    select standard_price, commission_rule from services
-    where client_id = ${trx.clientId} and status <> '[Cancelled — Service Voided]'`;
+  // Total deal commission = Σ over THIS DEAL's services of rule(applied to its
+  // agreed price) — lihat `dealServices` untuk kenapa cakupannya deal dan bukan
+  // klien. A voided Service (M4-OA-5) is excluded there — no commission accrues
+  // for work that will not be delivered (the Transaction total itself stays
+  // immutable).
+  const svcRows = (await dealServices(sql, [trx.id])).get(trx.id) ?? [];
   let totalCommission = 0n;
   for (const s of svcRows) {
     totalCommission += computeCommission(parseCommissionRule(s.commission_rule), money.parse(s.standard_price));
@@ -787,15 +852,7 @@ export async function commissionAchievementBatch(
   const verifiedByTrx = new Map(verRows.map((r) => [r.transaction_id, money.parse(r.total ?? '0')]));
 
   const clientIds = [...new Set(trxRows.map((r) => r.client_id))];
-  const svcRows = clientIds.length === 0 ? [] : await sql<{ client_id: string; standard_price: string; commission_rule: string }[]>`
-    select client_id, standard_price, commission_rule from services
-    where client_id = any(${clientIds}) and status <> '[Cancelled — Service Voided]'`;
-  const svcByClient = new Map<string, { standard_price: string; commission_rule: string }[]>();
-  for (const s of svcRows) {
-    const list = svcByClient.get(s.client_id) ?? [];
-    list.push(s);
-    svcByClient.set(s.client_id, list);
-  }
+  const svcByTrx = await dealServices(sql, ids);
 
   const allocRows = clientIds.length === 0 ? [] : await sql<{ client_id: string; salesperson_id: string; basis_points: number }[]>`
     select client_id, salesperson_id, basis_points from client_sales_allocations
@@ -813,7 +870,7 @@ export async function commissionAchievementBatch(
     const totalAgreed = money.parse(trx.total_agreed_value);
     const verified = verifiedByTrx.get(id) ?? 0n;
     let totalCommission = 0n;
-    for (const s of svcByClient.get(trx.client_id) ?? []) {
+    for (const s of svcByTrx.get(id) ?? []) {
       totalCommission += computeCommission(parseCommissionRule(s.commission_rule), money.parse(s.standard_price));
     }
     const recognized = totalAgreed > 0n ? money.proRata(totalCommission, verified, totalAgreed) : 0n;

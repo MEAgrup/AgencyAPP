@@ -731,6 +731,14 @@ export async function executeRenewal(
       values
         (${trxId}, ${row.client_id}, ${input.paymentScheme}, ${money.decimal(total)}, ${includePPN},
          ${money.decimal(totalPPN)}, ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
+    // PR3-RNW-TRX — tautan balik kontrak → transaksi. `tagihanSaja`
+    // (`bayar_komisi`) tidak melahirkan kontrak sama sekali, jadi transaksinya
+    // memang menggantung tanpa kontrak: ia tagihan atas penjualan yang sudah
+    // terjadi, bukan penjualan baru, dan `loadDealFacts` mengecualikannya lewat
+    // `renewal_requests.jenis` — bukan lewat ada-tidaknya kontrak.
+    if (contractId !== null) {
+      await tx`update contracts set transaction_id = ${trxId} where id = ${contractId}`;
+    }
 
     // 4) Installments (INST-) for scheduled schemes.
     const installments = input.installments ?? [];

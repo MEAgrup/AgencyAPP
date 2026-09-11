@@ -1988,6 +1988,14 @@ export async function close(
         (${trxId}, ${clientId}, ${input.paymentScheme}, ${money.decimal(total)}, ${includePPN},
          ${money.decimal(totalPPN)}, ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
     await tx`update clients set transaction_id = ${trxId}, payment_intent = ${input.paymentScheme} where id = ${clientId}`;
+    // PR3-RNW-TRX — tautan balik kontrak → transaksi, ditulis DI SINI dan bukan
+    // pada `insert into contracts` di atas semata karena transaksinya belum
+    // lahir waktu itu, dan memindahkan `identNext('TRX')` ke atas akan menggeser
+    // penomoran setiap CTR/SVC yang sudah ada. Keduanya tetap satu transaksi DB,
+    // jadi tidak ada jendela di mana kontrak ini terlihat tanpa transaksinya.
+    if (contractId !== null) {
+      await tx`update contracts set transaction_id = ${trxId} where id = ${contractId}`;
+    }
 
     // 6) Installments (INST-) for scheduled schemes.
     const installments = input.installments ?? [];
