@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
+import AdopsiTracker from '@/components/AdopsiTracker';
 import styles from '@/components/Shell.module.css';
 
 export default function ShellLayout({ children }: { children: React.ReactNode }) {
@@ -28,6 +29,10 @@ export default function ShellLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className={styles.shell}>
+      {/* Adopsi Sistem (pemilik 2026-09-10) — nol render, satu baris log per
+          perpindahan rute. Di SINI dan bukan di root layout: halaman login dan
+          portal klien bukan pemakaian sistem internal oleh karyawan. */}
+      <AdopsiTracker role={role} />
       <Sidebar role={role} />
       <div className={styles.main}>
         <Header employee={employee} role={role} />

@@ -18,10 +18,13 @@ import {
   bySource,
   byMonth,
   canViewSalesPerf,
+  canViewSalesReport,
   listTargets,
   MSG_FORBIDDEN,
   MSG_INCOMPLETE,
+  reportScopeFor,
   SALES_LEVEL_LABELS,
+  salesReport,
   scopeFor,
   setTarget,
   ForbiddenError,
@@ -32,6 +35,8 @@ import {
 const salesStaff = (id: string): Actor => ({ employeeId: id, role: permission.makeRole({ division: 'Sales', level: 'staff' }) });
 const salesLead = (id: string): Actor => ({ employeeId: id, role: permission.makeRole({ division: 'Sales', level: 'lead' }) });
 const marketingStaff = (id: string): Actor => ({ employeeId: id, role: permission.makeRole({ division: 'Marketing', level: 'staff' }) });
+const financeStaff = (id: string): Actor => ({ employeeId: id, role: permission.makeRole({ division: 'Finance', level: 'staff' }) });
+const financeLead = (id: string): Actor => ({ employeeId: id, role: permission.makeRole({ division: 'Finance', level: 'lead' }) });
 const odActor = (id: string): Actor => ({ employeeId: id, role: permission.makeRole({ division: 'Management', level: 'staff', od: true }) });
 const director = (id: string): Actor => ({ employeeId: id, role: permission.makeRole({ division: 'Management', level: 'staff', director: true }) });
 
@@ -54,6 +59,40 @@ describe('canViewSalesPerf / scopeFor (mirrors RLS S-01)', () => {
     expect(scopeFor(odActor('O'))).toEqual({ ownOnly: false });
     expect(scopeFor(director('D'))).toEqual({ ownOnly: false });
     expect(scopeFor(marketingStaff('M'))).toBeNull();
+  });
+});
+
+describe('canViewSalesReport / reportScopeFor (Laporan Penjualan, pemilik 2026-09-10)', () => {
+  it('Finance boleh membaca LAPORAN, tapi tetap ditolak di Kinerja Sales', () => {
+    // Dua gerbang, sengaja. Finance punya lengan RLS ke tabel UANG saja —
+    // bukan `leads`/`prospect_attempts`. Kalau `canViewSalesPerf` yang
+    // dilebarkan, `bySalesperson` menjawab 200 dengan setiap kolom corong
+    // berisi 0 karena RLS memotongnya: angka nol yang terlihat sah, bentuk
+    // kegagalan yang sama dengan bug Head Sales yang baru ditutup.
+    expect(canViewSalesReport(financeStaff('F'))).toBe(true);
+    expect(canViewSalesReport(financeLead('FL'))).toBe(true);
+    expect(canViewSalesPerf(financeStaff('F'))).toBe(false);
+    expect(canViewSalesPerf(financeLead('FL'))).toBe(false);
+  });
+
+  it('Sales/OD/Director tetap boleh; divisi lain tetap tidak', () => {
+    expect(canViewSalesReport(salesStaff('S'))).toBe(true);
+    expect(canViewSalesReport(salesLead('L'))).toBe(true);
+    expect(canViewSalesReport(odActor('O'))).toBe(true);
+    expect(canViewSalesReport(director('D'))).toBe(true);
+    expect(canViewSalesReport(marketingStaff('M'))).toBe(false);
+  });
+
+  it('Finance SEMUA LEVEL melihat seluruh agensi; Sales staff tetap terkunci ke barisnya sendiri', () => {
+    // Finance semua level, cermin lengan Finance pada
+    // transactions_select/installments_select: penagihan dikerjakan staf.
+    expect(reportScopeFor(financeStaff('F'))).toEqual({ ownOnly: false });
+    expect(reportScopeFor(financeLead('FL'))).toEqual({ ownOnly: false });
+    // Batas ATAS — laporan ini diminta untuk "Finance & Head Sales", bukan
+    // untuk setiap sales staff.
+    expect(reportScopeFor(salesStaff('S'))).toEqual({ ownOnly: true });
+    expect(reportScopeFor(salesLead('L'))).toEqual({ ownOnly: false });
+    expect(reportScopeFor(marketingStaff('M'))).toBeNull();
   });
 });
 
@@ -362,6 +401,198 @@ describeDb('bySalesperson (Kinerja Sales)', () => {
     const f = { period: null, salespersonId: SLS1, source: null, campaignId: null };
     const first = await byMonth(sql, director('ZZSP-DIR'), f);
     const second = await byMonth(sql, director('ZZSP-DIR'), f);
+    expect(second).toEqual(first);
+  });
+});
+
+describeDb('uang milik TRANSAKSI, bukan milik kontrak — regresi penggelembungan omzet', () => {
+  /**
+   * BUG YANG DIJAGA TES INI (dibuktikan dengan probe sebelum ditulis,
+   * 2026-09-10). `gather` dulu membaca satu baris gabungan `clients ⋈
+   * contracts` dan menambahkan uang klien SEKALI PER BARIS. Klien yang pernah
+   * diperpanjang punya DUA kontrak, tapi `clients.transaction_id` hanya
+   * ditulis sekali oleh `sales.close()` — `renewal.eksekusi` sengaja tidak
+   * menyentuhnya. Jadi kedua baris membawa transaksi yang SAMA dan omzet
+   * klien itu tercatat dua kali.
+   *
+   * Probe-nya: satu klien Rp 10.000.000 dengan satu kontrak ⇒ `omzet
+   * 10.000.000,00`; menambahkan satu kontrak `perpanjangan` untuk klien yang
+   * sama — TANPA menyentuh uangnya sama sekali — menaikkannya jadi
+   * `20.000.000,00`. Tanpa galat, tanpa baris ganda di layar.
+   *
+   * Ia bertahan karena hampir setiap fixture punya SATU kontrak, dan karena
+   * filter satu-bulan memisahkan kedua kontrak ke bucket berbeda sehingga tiap
+   * bulan terlihat benar. Yang menggelembung justru tampilan default halaman
+   * ini — yang tanpa filter periode.
+   *
+   * Tes ini memakai `period: null` DENGAN SENGAJA: itulah satu-satunya bentuk
+   * kueri yang memperlihatkannya.
+   */
+  const CTR_PERPANJANGAN = 'CTR-ZZSP-RNW1';
+
+  it('menambah kontrak perpanjangan TIDAK mengubah omzet — jumlah deal-lah yang naik', async () => {
+    const f = { period: null, salespersonId: SLS1, source: null, campaignId: null };
+    const before = await bySalesperson(sql, director('ZZSP-DIR'), f);
+    expect(before).toHaveLength(1);
+
+    await sql`
+      insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_at, created_by)
+      values (${CTR_PERPANJANGAN}, ${CLI}, 3, '2026-09-15', '2026-12-15', 'perpanjangan', '2026-09-15 02:00:00+00', ${SLS1})`;
+    try {
+      const after = await bySalesperson(sql, director('ZZSP-DIR'), f);
+      expect(after).toHaveLength(1);
+
+      // INILAH assertion-nya. Kalau ia memerah dengan angka DUA KALI LIPAT,
+      // uang sudah kembali di-bucket per kontrak.
+      expect(after[0].omzet).toBe(before[0].omzet);
+      expect(after[0].komisiKontrak).toBe(before[0].komisiKontrak);
+      expect(after[0].komisiDiakui).toBe(before[0].komisiDiakui);
+
+      // Dan yang MEMANG milik kontrak tetap bergerak: perpanjangan adalah
+      // deal kedua, jadi bauran jenis dan jumlah deal-nya naik satu.
+      expect(Number(after[0].klienPerpanjangan)).toBe(Number(before[0].klienPerpanjangan) + 1);
+      expect(after[0].totalDeal).toBe(before[0].totalDeal + 1);
+    } finally {
+      await sql`delete from contracts where id = ${CTR_PERPANJANGAN}`;
+    }
+  });
+});
+
+describeDb('salesReport — Laporan Penjualan (pemilik 2026-09-10, Bagian 3)', () => {
+  it('Finance membaca laporannya, dan tetap 403 di Kinerja Sales', async () => {
+    const f = { period: PERIOD, salespersonId: null, source: null, campaignId: null };
+    const r = await salesReport(sql, financeStaff('ZZSP-FIN'), f);
+    expect(r.rows.map((x) => x.salespersonId)).toEqual(expect.arrayContaining([SLS1, SLSLEAD]));
+    // Gerbang yang lain TIDAK ikut terbuka — kalau ini berhenti melempar,
+    // Finance mulai melihat kolom corong yang RLS-nya potong jadi nol.
+    await expect(bySalesperson(sql, financeStaff('ZZSP-FIN'), f)).rejects.toThrow(MSG_FORBIDDEN);
+  });
+
+  it('divisi lain tetap ditolak', async () => {
+    await expect(
+      salesReport(sql, marketingStaff('ZZSP-MKT'), { period: PERIOD, salespersonId: null, source: null, campaignId: null }),
+    ).rejects.toThrow(MSG_FORBIDDEN);
+  });
+
+  it('Sales STAFF hanya barisnya sendiri, dan meminta baris orang lain ditolak', async () => {
+    const own = await salesReport(sql, salesStaff(SLS1), { period: PERIOD, salespersonId: null, source: null, campaignId: null });
+    expect(own.rows.map((x) => x.salespersonId)).toEqual([SLS1]);
+    await expect(
+      salesReport(sql, salesStaff(SLS1), { period: PERIOD, salespersonId: SLSLEAD, source: null, campaignId: null }),
+    ).rejects.toThrow(MSG_FORBIDDEN);
+  });
+
+  it('angka per orang IDENTIK dengan tab Per Sales — dua layar tidak boleh menyebut omzet berbeda', async () => {
+    const f = { period: PERIOD, salespersonId: SLS1, source: null, campaignId: null };
+    const perf = (await bySalesperson(sql, director('ZZSP-DIR'), f))[0];
+    const rep = (await salesReport(sql, director('ZZSP-DIR'), f)).rows[0];
+    expect(rep.omzet).toBe(perf.omzet);
+    expect(rep.komisiKontrak).toBe(perf.komisiKontrak);
+    expect(rep.komisiDiakui).toBe(perf.komisiDiakui);
+    expect(rep.klienBaru).toBe(perf.klienBaru);
+    expect(rep.klienCount).toBe(perf.klienCount);
+    expect(rep.totalDeal).toBe(perf.totalDeal);
+  });
+
+  it('baris TOTAL: uang dijumlahkan, deal & klien di-COUNT DISTINCT — satu deal berdua tetap satu deal', async () => {
+    // Klien kedua dijual BERDUA 60/40. Kalau baris TOTAL menjumlahkan kolom
+    // `total_deal` per orang, deal ini akan dilaporkan DUA KALI (1 + 1) — dan
+    // ketokan pemilik #4 justru meminta "total GMV" yang bisa dipercaya.
+    const CLI3 = 'CLI-ZZSP-0003';
+    const CTR3 = 'CTR-ZZSP-0003';
+    const TRX3 = 'TRX-ZZSP-0003';
+    const SVC3 = 'SVC-ZZSP-0003';
+    const INST3 = 'INST-ZZSP-0003';
+    try {
+      await sql`
+        insert into clients (id, nama_pic, toko, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, transaction_id, created_at, created_by)
+        values (${CLI3}, 'ZZSP3 PIC', 'ZZSP3 Toko', 'Jakarta', 'Fashion', 'https://shopee/zzsp3',
+                '0.00', '0.00', ${SLS1}, ${SLS1}, ${TRX3}, '2026-06-22 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_at, created_by)
+        values (${CTR3}, ${CLI3}, 3, '2026-06-22', '2026-09-22', 'baru', '2026-06-22 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by) values
+          (${CLI3}, ${SLS1}, 6000, ${SLS1}),
+          (${CLI3}, ${SLSLEAD}, 4000, ${SLS1})`;
+      await sql`
+        insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_at, created_by)
+        values (${TRX3}, ${CLI3}, '[Lunas]', '20000000.00', '[Terverifikasi - Penuh]', '2026-06-22 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                              commission_rule, status, created_by)
+        values (${SVC3}, ${CLI3}, 'MSV-ZZSP3', 1, 'ZZSP3 Service', '20000000.00', '10% of standard price', '[Ongoing]', ${SLS1})`;
+      await sql`
+        insert into installments (id, transaction_id, installment_no, amount, status, created_by)
+        values (${INST3}, ${TRX3}, 1, '20000000.00', '[Terverifikasi]', ${SLS1})`;
+      await sql`
+        insert into payment_verifications (transaction_id, installment_id, amount, received_date, verified_by, created_by)
+        values (${TRX3}, ${INST3}, '20000000.00', '2026-06-22', ${SLS1}, ${SLS1})`;
+
+      const r = await salesReport(sql, director('ZZSP-DIR'), { period: PERIOD, salespersonId: null, source: null, campaignId: null });
+      const s1 = r.rows.find((x) => x.salespersonId === SLS1)!;
+      const s2 = r.rows.find((x) => x.salespersonId === SLSLEAD)!;
+
+      // Per orang: keduanya IKUT deal CLI3, jadi masing-masing +1.
+      expect(s1.totalDeal).toBe(2); // CLI (sendiri) + CLI3 (berdua)
+      expect(s2.totalDeal).toBe(1); // CLI3 saja
+
+      // Baris TOTAL: dua kontrak berbeda (CLI, CLI3) — BUKAN tiga, yang akan
+      // muncul kalau kolom di atasnya dijumlahkan (2 + 1).
+      expect(r.total.totalDeal).toBe(2);
+      expect(r.total.klienCount).toBe(2);
+
+      // Uang AMAN dijumlahkan (sudah pro-rata, Σ basis_points = 10000):
+      // Rp 10.000.000 (CLI) + Rp 20.000.000 (CLI3) = Rp 30.000.000.
+      expect(r.total.omzet).toBe('30000000.00');
+      expect(r.total.omzetIdr).toBe('Rp. 30.000.000,00');
+      // Dan total = Σ baris, buktinya keduanya dihitung dari sumber yang sama.
+      const sumRows = r.rows.reduce((n, x) => n + BigInt(x.omzet.replace('.', '')), 0n);
+      expect(sumRows).toBe(BigInt(r.total.omzet.replace('.', '')));
+    } finally {
+      await sql`delete from payment_verifications where transaction_id = ${TRX3}`;
+      await sql`delete from installments where id = ${INST3}`;
+      await sql`delete from transactions where id = ${TRX3}`;
+      await sql`delete from services where id = ${SVC3}`;
+      await sql`delete from client_sales_allocations where client_id = ${CLI3}`;
+      await sql`delete from contracts where id = ${CTR3}`;
+      await sql`delete from clients where id = ${CLI3}`;
+    }
+  });
+
+  it('rekap layanan: dikelompokkan per master_service_id, Σ standard_price, tanpa mengalikan qty', async () => {
+    const r = await salesReport(sql, director('ZZSP-DIR'), { period: PERIOD, salespersonId: SLS1, source: null, campaignId: null });
+    const svc = r.services.find((x) => x.masterServiceId === 'MSV-ZZSP');
+    expect(svc).toBeDefined();
+    expect(svc!.nama).toBe('ZZSP Service');
+    expect(svc!.jumlah).toBe(1);
+    // `standard_price` SUDAH subtotal baris (migrasi 20260925040000) — mengalikannya
+    // dengan `qty` menghitung ganda, dan `qty` NULL berarti "tidak pernah dicatat",
+    // bukan 1.
+    expect(svc!.nilai).toBe('10000000.00');
+    expect(svc!.nilaiIdr).toBe('Rp. 10.000.000,00');
+  });
+
+  it('layanan yang DIBATALKAN tidak dihitung sebagai penjualan', async () => {
+    const SVCX = 'SVC-ZZSP-VOID';
+    try {
+      await sql`
+        insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                              commission_rule, status, created_by)
+        values (${SVCX}, ${CLI}, 'MSV-ZZSP-VOID', 1, 'ZZSP Dibatalkan', '99000000.00',
+                '10% of standard price', '[Cancelled — Service Voided]', ${SLS1})`;
+      const r = await salesReport(sql, director('ZZSP-DIR'), { period: PERIOD, salespersonId: SLS1, source: null, campaignId: null });
+      expect(r.services.find((x) => x.masterServiceId === 'MSV-ZZSP-VOID')).toBeUndefined();
+    } finally {
+      await sql`delete from services where id = ${SVCX}`;
+    }
+  });
+
+  it('recompute-from-log: dipanggil dua kali untuk periode tertutup, hasilnya byte-identik', async () => {
+    const f = { period: PERIOD, salespersonId: null, source: null, campaignId: null };
+    const first = await salesReport(sql, director('ZZSP-DIR'), f);
+    const second = await salesReport(sql, director('ZZSP-DIR'), f);
     expect(second).toEqual(first);
   });
 });

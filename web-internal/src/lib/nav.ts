@@ -171,7 +171,13 @@ const AKUISISI: NavNode[] = [
   // Kinerja Sales (M0 §7.1): dashboard closing rate/deal cycle/OKR. `ownedBy`
   // sudah mencakup OD/Director; scope per-baris (staff = sendiri, lead/SPV =
   // divisi) tugas `salesperf.scopeFor`, bukan tugas menu.
-  { href: '/sales/kinerja', label: 'Kinerja Sales', access: ownedBy(SALES) },
+  //
+  // FINANCE ikut sejak 2026-09-10 (permintaan pemilik, PR-3): halaman ini
+  // memuat tab **Laporan Penjualan** yang gerbangnya `canViewSalesReport`, dan
+  // Finance ada di dalamnya. Tab lain di halaman itu tetap 403 untuk Finance
+  // dan memang tidak dirender untuknya — menyembunyikan seluruh menunya justru
+  // membuat satu-satunya laporan yang diminta pemilik tak bisa dijangkau.
+  { href: '/sales/kinerja', label: 'Kinerja Sales', access: ownedBy(SALES, FINANCE) },
   { href: '/marketing/performance', label: 'Performa Marketing', access: ownedBy(MARKETING) },
 ];
 
@@ -438,6 +444,17 @@ const ADMIN: NavNode[] = [
     label: 'Role Mapping',
     access: (role) => Boolean(role.director || role.od),
   },
+  // Adopsi Sistem (pemilik 2026-09-10): jam pemakaian, sesi, page view, dan
+  // cakupan fitur per anggota per bulan. Gerbangnya SEMPIT dengan sengaja —
+  // cermin `adopsi.canViewAdopsi` (OD atau Director saja), TIDAK termasuk lead
+  // divisi. Ini jejak pemakaian per-orang, dan pemilik menyatakan ia "indikator
+  // adaptasi tim, BUKAN komponen reward": memberikannya ke atasan langsung
+  // menjadikannya alat pengawasan, yaitu hal yang ia katakan ini bukan.
+  {
+    href: '/admin/adopsi',
+    label: 'Adopsi Sistem',
+    access: (role) => Boolean(role.director || role.od),
+  },
   // Kalender hari libur di balik setiap hitungan "hari kerja" (SLA Kelola Klien).
   // Gerbang yang sama dengan sisa bidang admin: Director menulis, OD membaca.
   {
@@ -549,6 +566,41 @@ export function isActiveHref(pathname: string, href: string): boolean {
   if (href.includes('?')) return false;
   if (href === '/') return pathname === '/';
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * Adopsi Sistem (pemilik 2026-09-10, Bagian 1) — dua angka yang HANYA berkas
+ * ini tahu, disediakan untuk pelapor page-view.
+ *
+ * Kenapa di sini dan bukan di server: gerbang visibilitas menu adalah FUNGSI
+ * (`ownedBy(...)`, `divisionQueue(...)`, `canUseSkuScreener`), bukan data.
+ * Menyalinnya ke tabel atau ke `packages/domain` akan menciptakan versi kedua
+ * dari aturan yang sama — dan versi kedua itu akan menyimpang diam-diam,
+ * kelas cacat yang sama yang dilarang kepala `CLAUDE.md` untuk stack Go yang
+ * diarsipkan. Jadi pelapornya yang membawa kedua angka itu.
+ *
+ * `navFeatureOf` memakai `isActiveHref`, penyorot rute yang sama dengan yang
+ * dipakai rail — jadi "menu mana yang sedang dibuka" punya SATU jawaban di
+ * seluruh aplikasi. Konsekuensi yang ikut: item ber-query-string
+ * (`/tasks?division=…`) tidak pernah cocok, persis seperti ia tidak pernah
+ * disorot; yang PALING SPESIFIK menang, supaya `/sales/kinerja` tidak
+ * dilaporkan sebagai `/sales`.
+ *
+ * `null` berarti "rutenya memang bukan entri menu" (halaman detail, rute
+ * dalam) — bukan "tidak diketahui".
+ */
+export function navFeatureOf(role: Role | null, pathname: string): string | null {
+  let best: string | null = null;
+  for (const item of visibleLinks(role)) {
+    if (!isActiveHref(pathname, item.href)) continue;
+    if (best === null || item.href.length > best.length) best = item.href;
+  }
+  return best;
+}
+
+/** Berapa entri menu yang terlihat peran ini — PENYEBUT cakupan fitur (lihat `navFeatureOf`). */
+export function navTotalFor(role: Role | null): number {
+  return visibleLinks(role).length;
 }
 
 /** Semua tautan di dalam satu simpul (satu tautan, atau isi sebuah sub-grup). */

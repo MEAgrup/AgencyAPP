@@ -1,7 +1,9 @@
 /**
  * Lengan Sales-lead & Finance pada `client_sales_allocations_select`,
  * `contracts_select`, `services_select`.
- * Migrasi `20261001010000_rls_kinerja_sales_lead_finance.sql`.
+ * Migrasi `20261001010000_rls_kinerja_sales_lead_finance.sql` dan
+ * `20261002010000_rls_services_sales_lead.sql` (lengan Sales-lead pada
+ * `services_select`, PR-3 — lihat tes "Head Sales melihat ketiganya").
  *
  * ## KENAPA TES INI ADA
  *
@@ -131,11 +133,15 @@ dDb('Kinerja Sales — lengan Sales-lead & Finance pada tiga tabel uang', () => 
 
   it('Head Sales melihat ketiganya — INILAH yang berisi 0.00 sebelum migrasi', async () => {
     const v = await terlihat({ employeeId: 'EMP-ZSP-HEAD', division: 'Sales', level: 'lead' });
-    // `layanan: 0` disengaja dan BUKAN kelalaian: `services_select` sengaja
-    // tidak diberi lengan Sales-lead. Head Sales butuh angka UANG timnya
-    // (alokasi + kontrak); rekap layanan adalah permukaan laporan Finance, dan
-    // melebarkan Sales-lead ke sana tidak diminta siapa pun.
-    expect(v).toEqual({ alokasi: 1, kontrak: 1, layanan: 0 });
+    // `layanan` DULU 0 di sini, dan itu dicatat sebagai disengaja: rekap
+    // layanan dianggap permukaan Finance saja. Pembacaan itu salah terhadap
+    // permintaan pemiliknya, yang berbunyi "laporan penjualan … service list …
+    // bisa diakses Finance & Head Sales" — satu laporan, dua pembaca, dan
+    // `service list` ada di dalamnya. Migrasi `20261002010000` menambahkan
+    // lengan Sales-lead pada `services_select`; tanpa itu bagian Rekap Layanan
+    // pada laporan tampil KOSONG untuk Head Sales, tanpa galat — bentuk
+    // kegagalan yang sama dengan bug yang baru saja ditutup di layar yang sama.
+    expect(v).toEqual({ alokasi: 1, kontrak: 1, layanan: 1 });
   });
 
   it('Director melihat ketiganya lewat jwt_can_read_all — pembanding yang menyembunyikan bug ini', async () => {
@@ -166,6 +172,16 @@ dDb('Kinerja Sales — lengan Sales-lead & Finance pada tiga tabel uang', () => 
     const v = await terlihat({ employeeId: 'EMP-ZSP-CRE', division: 'Creative', level: 'lead' });
     expect(v.alokasi).toBe(0);
     expect(v.kontrak).toBe(0);
+  });
+
+  it('batas ATAS — Sales STAFF tetap nol pada `services` walau lengan Sales-lead dibuka', async () => {
+    // Lengan yang ditambahkan `20261002010000` berbunyi `jwt_is_lead() AND
+    // jwt_division() = 'Sales'`, bukan `jwt_division() = 'Sales'`. Kalau
+    // suatu hari `jwt_is_lead()` terhapus dari lengan itu, setiap sales staff
+    // langsung bisa membaca rincian layanan seluruh agensi — dan tes ini yang
+    // memerah lebih dulu.
+    const v = await terlihat({ employeeId: SALES_LAIN, division: 'Sales', level: 'staff' });
+    expect(v.layanan).toBe(0);
   });
 
   it('batas ATAS — Finance TIDAK diberi corong prospek', async () => {

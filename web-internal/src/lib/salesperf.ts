@@ -10,7 +10,7 @@
 // filter) — render "—" (lib/money.ts formatIDR/formatRatio already do this
 // for the money/ratio cases; null percents/days render "—" directly).
 
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
 // Entity shapes.
@@ -40,6 +40,11 @@ export interface SalesPerfRow {
   klien_perpanjangan: string;
   klien_cross_sell: string;
   klien_count: string;
+  // "Total Sales" (pemilik 2026-09-10) — jumlah deal per orang, bilangan bulat
+  // dan TIDAK dibobot alokasi: deal yang dijual berdua bernilai 1 untuk
+  // masing-masing. Jangan dijumlahkan ke bawah untuk mendapat total agensi —
+  // itu tugas `SalesReportTotal.total_deal` (COUNT DISTINCT kontrak, server).
+  total_deal: number;
   omzet: string;
   omzet_idr: string;
   komisi_kontrak: string;
@@ -78,6 +83,57 @@ export interface LeadSourceRow {
   omzet: string;
   omzet_idr: string;
   nq_breakdown: Record<string, number>;
+}
+
+// ---------------------------------------------------------------------------
+// Laporan Penjualan (pemilik 2026-09-10, Bagian 3) — salesperf.SalesReport.
+// ---------------------------------------------------------------------------
+
+export interface SalesReportRow {
+  salesperson_id: string;
+  nama: string;
+  level_sales: string;
+  total_deal: number;
+  klien_baru: string;
+  klien_perpanjangan: string;
+  klien_cross_sell: string;
+  klien_count: string;
+  omzet: string;
+  omzet_idr: string;
+  komisi_kontrak: string;
+  komisi_kontrak_idr: string;
+  komisi_diakui: string;
+  komisi_diakui_idr: string;
+}
+
+// Baris TOTAL di kaki tabel (ketokan pemilik #4). `total_deal`/`klien_count`
+// datang dari server sebagai COUNT(DISTINCT ...) — JANGAN dihitung ulang di
+// sini dengan menjumlahkan kolom, karena satu deal yang dijual berdua muncul
+// pada dua baris dan penjumlahan itu akan melaporkannya dua kali.
+export interface SalesReportTotal {
+  salesperson_count: number;
+  total_deal: number;
+  klien_count: number;
+  omzet: string;
+  omzet_idr: string;
+  komisi_kontrak: string;
+  komisi_kontrak_idr: string;
+  komisi_diakui: string;
+  komisi_diakui_idr: string;
+}
+
+export interface SalesReportServiceRow {
+  master_service_id: string;
+  nama: string;
+  jumlah: number;
+  nilai: string;
+  nilai_idr: string;
+}
+
+export interface SalesReport {
+  rows: SalesReportRow[];
+  total: SalesReportTotal;
+  services: SalesReportServiceRow[];
 }
 
 // Sales OKR metric catalog (mirrors salesperf.METRIC_KEYS — a closed list,
@@ -157,6 +213,72 @@ export function salesPerfByMonth(f: SalesPerfFilter = {}): Promise<{ data: Sales
 // GET /sales/performance/sources → {data: LeadSourceRow[]} — View 3.
 export function salesPerfBySource(f: SalesPerfFilter = {}): Promise<{ data: LeadSourceRow[] }> {
   return api.get<{ data: LeadSourceRow[] }>(`/sales/performance/sources${toQuery(f)}`);
+}
+
+/**
+ * Filter yang boleh dikirim ke `/sales/report*`.
+ *
+ * `source`/`campaign` sengaja DIBUANG: keduanya menyaring lewat `leads`,
+ * tabel yang Finance tidak boleh baca, dan server memang mengabaikannya.
+ * Membuangnya di sini juga berarti URL unduhan tidak pernah membawa parameter
+ * yang tidak berpengaruh — berkas dan layar selalu bercerita sama.
+ */
+function toReportQuery(f: SalesPerfFilter): string {
+  const p = new URLSearchParams();
+  if (f.from) p.set('from', f.from);
+  if (f.to) p.set('to', f.to);
+  if (f.salesperson) p.set('salesperson', f.salesperson);
+  const qs = p.toString();
+  return qs === '' ? '' : `?${qs}`;
+}
+
+// GET /sales/report → {data: SalesReport} — Laporan Penjualan.
+export function getSalesReport(f: SalesPerfFilter = {}): Promise<{ data: SalesReport }> {
+  return api.get<{ data: SalesReport }>(`/sales/report${toReportQuery(f)}`);
+}
+
+/** URL unduhan CSV — pure, jadi bisa diuji tanpa DOM (pola `exportLeadsCsvUrl`). */
+export function salesReportCsvUrl(f: SalesPerfFilter = {}): string {
+  return `/api/v1/sales/report/export${toReportQuery(f)}`;
+}
+
+/** Ambil `filename="..."` dari `Content-Disposition`, atau nama cadangan. */
+export function reportFilenameFrom(header: string | null): string {
+  const match = /filename="([^"]+)"/.exec(header ?? '');
+  return match?.[1] ?? 'laporan-penjualan.csv';
+}
+
+/**
+ * Unduh Laporan Penjualan sebagai CSV.
+ *
+ * `api.get` tidak bisa dipakai: ia selalu `JSON.parse` badan respons, dan CSV
+ * akan diam-diam jadi `null`. Jadi `fetch()` mentah + blob, mekanika yang sama
+ * dengan `exportLeadsCsv`.
+ */
+export async function downloadSalesReportCsv(f: SalesPerfFilter = {}): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(salesReportCsvUrl(f), { credentials: 'include' });
+  } catch {
+    throw new ApiError('[Terjadi kesalahan, silahkan coba lagi.]', 0);
+  }
+  if (!res.ok) {
+    let message = '[Terjadi kesalahan, silahkan coba lagi.]';
+    try {
+      const body = (await res.json()) as { error?: unknown };
+      if (typeof body.error === 'string') message = body.error;
+    } catch {
+      // badan respons bukan JSON — pakai pesan cadangan.
+    }
+    throw new ApiError(message, res.status);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = reportFilenameFrom(res.headers.get('content-disposition'));
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // GET /sales/targets?period_start=YYYY-MM-DD → {data: SalesTarget[]} — View 4.

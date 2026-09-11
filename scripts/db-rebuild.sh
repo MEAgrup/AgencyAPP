@@ -175,10 +175,17 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "155"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "156"
 check "entity_prefix"    "select count(*) from entity_prefix"    "43"
 check "sm_machines"      "select count(*) from sm_machines"      "34"
 check "notif_events"     "select count(*) from notif_events"     "73"
+# --- Adopsi Sistem (20261003010000_adopsi_page_views.sql) --------------------
+# 156 = 155 + `page_views` — satu baris per pembukaan halaman di web-internal,
+#       sumber TUNGGAL laporan Adopsi Sistem (pemilik 2026-09-10). Append-only
+#       dan terkunci penuh dari `authenticated` (pola O51). Nol prefix: sebuah
+#       page-view tidak pernah dirujuk manusia, hanya diagregasi — `bigint
+#       identity` cukup, pola `strategi_share_access_log`. Nol mesin, nol event.
+#
 # --- M19 separuh SCS (20260928010000_m19_scs_task_engine.sql) ----------------
 # 155 = 153 + `scs_kategori` + `scs_tasks` — baris pekerjaan `SMO & Content
 #       Strategist` plus taksonomi Kategori-nya. Ketokan `M19-SCS-ENGINE`
