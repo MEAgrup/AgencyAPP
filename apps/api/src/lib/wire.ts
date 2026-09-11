@@ -10,7 +10,7 @@
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
+import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -7356,6 +7356,44 @@ export function leadSourceRowToWire(r: salesperf.LeadSourceRow): LeadSourceRowWi
     closing: r.closing, conversion_rate_pct: r.conversionRatePct,
     omzet: r.omzet, omzet_idr: r.omzetIdr, nq_breakdown: r.nqBreakdown,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Adopsi Sistem (pemilik 2026-09-10, Bagian 1) — `adopsi.adopsiReport`.
+// ---------------------------------------------------------------------------
+
+export interface AdopsiRowWire {
+  period: string;
+  employee_id: string;
+  nama: string;
+  role: string;
+  /** Jam pemakaian, 2 desimal. SENGAJA kurang — lihat `adopsi.SESSION_GAP_MINUTES`. */
+  jam: string;
+  sesi: number;
+  page_view: number;
+  fitur_dibuka: number;
+  fitur_tersedia: number;
+  /** `null` saat penyebut 0 — layar render "—", bukan 0% (aturan rumah #7). */
+  cakupan_fitur_pct: number | null;
+}
+
+export interface AdopsiReportWire {
+  rows: AdopsiRowWire[];
+  /** "YYYY-MM-DD" baris paling awal, atau null. Layar memakainya untuk menyatakan bahwa bulan sebelum ini kosong karena BELUM ADA PENCATATAN. */
+  mulai_tercatat: string | null;
+}
+
+export function adopsiRowToWire(r: adopsi.AdopsiRow): AdopsiRowWire {
+  return {
+    period: r.period, employee_id: r.employeeId, nama: r.nama, role: r.role,
+    jam: r.jam, sesi: r.sesi, page_view: r.pageView,
+    fitur_dibuka: r.fiturDibuka, fitur_tersedia: r.fiturTersedia,
+    cakupan_fitur_pct: r.cakupanFiturPct,
+  };
+}
+
+export function adopsiReportToWire(r: adopsi.AdopsiReport): AdopsiReportWire {
+  return { rows: r.rows.map(adopsiRowToWire), mulai_tercatat: r.mulaiTercatat };
 }
 
 // ---------------------------------------------------------------------------

@@ -89,12 +89,20 @@ END $$;
 
 -- 9. Internal tables are locked to `authenticated` entirely (no grant, no policy):
 --    even a director claim cannot read sessions / employee_credentials.
+--
+--    `page_views` (Adopsi Sistem, 20261003010000) masuk daftar ini dan alasannya
+--    BUKAN kerahasiaan skema: barisnya adalah jejak pemakaian PER-ORANG. Tabel
+--    yang terbuka untuk `authenticated` berarti setiap karyawan bisa membaca jam
+--    pemakaian rekannya lewat PostgREST, dan pemilik justru menyatakan angka ini
+--    "indikator adaptasi tim, BUKAN komponen reward". Director pun ditolak DI
+--    SINI — ia membacanya lewat `adopsi.adopsiReport`, yang menegakkan
+--    `canViewAdopsi` lebih dulu.
 SELECT set_config('request.jwt.claims',
   '{"app_metadata":{"employee_id":"EMP-RLS-DIR","director":true}}', true);
 DO $$
 DECLARE t text; denied boolean;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['sessions','employee_credentials','id_sequences','sm_edges','role_mappings','strategi_share_token','strategi_share_access_log'] LOOP
+  FOREACH t IN ARRAY ARRAY['sessions','employee_credentials','id_sequences','sm_edges','role_mappings','strategi_share_token','strategi_share_access_log','page_views'] LOOP
     denied := false;
     BEGIN
       EXECUTE format('SELECT 1 FROM public.%I LIMIT 1', t);

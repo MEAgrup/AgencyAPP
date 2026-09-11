@@ -460,6 +460,15 @@ jobs:
       #       (`PROD-SLOT` sengaja tanpa mesin, PRD Rule 1/D1); nol event
       #       katalog baru ⇒ notif_events TETAP 73 (konflik studio & PIC tidak
       #       tersedia adalah peringatan inline, bukan notifikasi).
+      # 156 = 155 + `page_views` (Adopsi Sistem, 20261003010000_adopsi_page_views.sql):
+      #       satu baris per pembukaan halaman di web-internal, sumber TUNGGAL
+      #       laporan Adopsi Sistem yang diminta pemilik 2026-09-10. Append-only
+      #       + terkunci penuh dari `authenticated` (pola O51). Nol prefix —
+      #       page-view tidak pernah dirujuk manusia, hanya diagregasi, jadi
+      #       `bigint identity` cukup (pola `strategi_share_access_log`) ⇒
+      #       entity_prefix TETAP 43. Nol mesin ⇒ sm_machines TETAP 34; nol
+      #       event katalog ⇒ notif_events TETAP 73 (ini indikator adaptasi,
+      #       bukan sesuatu yang memberi tahu siapa pun).
       # 155 = 153 + `scs_kategori` + `scs_tasks` (M19 separuh SCS,
       #       20260928010000_m19_scs_task_engine.sql): baris pekerjaan `SMO &
       #       Content Strategist` plus taksonomi Kategori-nya. +1 prefix `SCS` ⇒
@@ -468,12 +477,12 @@ jobs:
       #       sama, gerbang sama), yang justru alasannya:
       #       `task.computeMetrics()` dipakai ulang apa adanya ⇒ nol definisi
       #       KEDUA Speed Score. Nol event katalog ⇒ notif_events TETAP 73.
-      - name: Verify table count (expect 155)
+      - name: Verify table count (expect 156)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 155
+          test "$n" -eq 156
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Role } from './types';
 import {
-  filterNav, isActiveHref, isSubGroup, NAV_SECTIONS, sectionOfRoute, visibleLinks, visibleNav,
+  filterNav, isActiveHref, isSubGroup, NAV_SECTIONS, navFeatureOf, navTotalFor, sectionOfRoute,
+  visibleLinks, visibleNav,
   type NavItem, type NavNode,
 } from './nav';
 import { EMBEDDED_TOOLS } from './embedded-tools';
@@ -910,5 +911,71 @@ describe('visibleNav — Showcase Klien Terbaik (C-1)', () => {
       expect(hrefs(role(d, 'staff')), `${d} tidak boleh melihat /showcase`).not.toContain('/showcase');
       expect(hrefs(role(d, 'lead')), `${d} lead tidak boleh melihat /showcase`).not.toContain('/showcase');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Adopsi Sistem (pemilik 2026-09-10, Bagian 1) — dua angka yang HANYA nav.ts
+// tahu, dan yang dilaporkan pelacak page-view.
+// ---------------------------------------------------------------------------
+
+describe('navFeatureOf / navTotalFor — penyedia angka cakupan fitur', () => {
+  it('memilih entri menu yang PALING SPESIFIK, bukan yang pertama cocok', () => {
+    // `/sales/kinerja` juga cocok dengan `/sales` lewat isActiveHref. Kalau
+    // yang pertama menang, setiap kunjungan ke Kinerja Sales akan dilaporkan
+    // sebagai kunjungan ke Sales Workspace — dan "Fitur Dibuka" jadi angka
+    // yang mengukur hal lain.
+    const r = role('Sales', 'lead');
+    expect(navFeatureOf(r, '/sales/kinerja')).toBe('/sales/kinerja');
+    expect(navFeatureOf(r, '/sales')).toBe('/sales');
+  });
+
+  it('rute dalam yang bukan entri menu -> null (bukan tebakan)', () => {
+    // null berarti "rutenya memang bukan entri menu", jadi ia dihitung sebagai
+    // page view tapi bukan sebagai fitur.
+    expect(navFeatureOf(role('Sales', 'staff'), '/sales/PRSP-0001')).toBe('/sales');
+    expect(navFeatureOf(role('Sales', 'staff'), '/rute-yang-tidak-ada')).toBeNull();
+  });
+
+  it('hanya melaporkan menu yang BOLEH dibuka peran itu', () => {
+    // Seorang Creative yang entah bagaimana membuka /finance tidak boleh
+    // membuatnya terhitung sebagai fitur miliknya — penyebutnya tidak memuat
+    // menu itu, jadi pembilangnya juga tidak boleh.
+    expect(navFeatureOf(role('Creative', 'staff'), '/finance')).toBeNull();
+    expect(navFeatureOf(role('Finance', 'staff'), '/finance')).toBe('/finance');
+  });
+
+  it('penyebutnya = jumlah tautan yang terlihat, dan berbeda per peran', () => {
+    const dir = navTotalFor(role('Sales', 'staff', { director: true }));
+    const staf = navTotalFor(role('Creative', 'staff'));
+    expect(dir).toBe(ALL_HREFS.length);
+    expect(staf).toBeGreaterThan(0);
+    expect(staf).toBeLessThan(dir);
+  });
+
+  it('peran null (auth belum termuat) memberi penyebut yang MENYESATKAN — karena itu pelacak menunggu', () => {
+    // `visibleLinks(null)` mengembalikan item universal (yang tanpa gerbang),
+    // jadi penyebutnya kecil tapi BUKAN nol — dan sebuah baris log dengan
+    // penyebut itu akan melaporkan cakupan fitur yang menggelembung. Inilah
+    // alasan `AdopsiTracker` menunggu `role` ada sebelum melapor; tes ini
+    // merekam kenapa penjagaan itu perlu, bukan sekadar bahwa ia ada.
+    const kosong = navTotalFor(null);
+    expect(kosong).toBeGreaterThan(0);
+    expect(kosong).toBeLessThan(navTotalFor(role('Creative', 'staff')));
+    // Dan rute bergerbang tetap tidak pernah cocok tanpa peran.
+    expect(navFeatureOf(null, '/sales')).toBeNull();
+  });
+});
+
+describe('visibleNav — Adopsi Sistem', () => {
+  it('OD dan Director melihat menunya; lead divisi TIDAK, termasuk lead HR', () => {
+    // Cermin `adopsi.canViewAdopsi`. Ini jejak pemakaian per-orang, dan
+    // pemilik menyatakan ia "indikator adaptasi tim, BUKAN komponen reward" —
+    // memberikannya ke atasan langsung menjadikannya alat pengawasan.
+    expect(hrefs(role('Sales', 'staff', { od: true }))).toContain('/admin/adopsi');
+    expect(hrefs(role('Sales', 'staff', { director: true }))).toContain('/admin/adopsi');
+    expect(hrefs(role('Sales', 'lead'))).not.toContain('/admin/adopsi');
+    expect(hrefs(role('HR', 'lead'))).not.toContain('/admin/adopsi');
+    expect(hrefs(role('Finance', 'lead'))).not.toContain('/admin/adopsi');
   });
 });

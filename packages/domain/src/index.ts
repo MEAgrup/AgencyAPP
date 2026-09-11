@@ -147,6 +147,12 @@ export * as req from './req';
 // addition to `sales.ts`), pure read-model over the existing money-path tables
 // + `sales_targets` (new, natural key). See RENCANA_KINERJA_SALES.md.
 export * as salesperf from './salesperf';
+// Adopsi Sistem (pemilik 2026-09-10, Bagian 1) — seberapa jauh tim benar-benar
+// memakai CDPS: jam/sesi/page-view per anggota per bulan + cakupan fitur
+// perannya. Berkas BARU dan jaraknya dari `performance.ts` DISENGAJA: pemilik
+// menyatakan ini "indikator adaptasi, BUKAN komponen reward", jadi modul ini
+// mengembalikan angka mentah dan nol sambungan ke penilaian mana pun.
+export * as adopsi from './adopsi';
 // R-03 (Kinerja Sales) — renewal/cross-sell request on an EXISTING client.
 // Parallel to `sales.ts`'s attempt-anchored negotiation/closing, not a reuse
 // of it (nol LEAD-/PRSP- palsu). See renewal.ts's header + STATE_MACHINES §20.
