@@ -1,4 +1,26 @@
-# Runbook — mengaktifkan fungsi HR di CDPS (jalur A: lewat HRIS), 2026-09-11
+# Runbook — mengaktifkan fungsi HR di CDPS, 2026-09-11
+
+> ## ✅ SUDAH DIEKSEKUSI 2026-09-11 — dan jalannya BUKAN (a)
+>
+> Ketokan pemilik berubah begitu fakta rosternya terlihat: *"divisi HR belum ada
+> usernya saat ini, tim OD adalah bagian dari divisi HR, buat OD jadi HR semua
+> dengan status staf."* Jadi yang dipakai bukan menunggu HRIS, melainkan
+> memetakan divisi `OD` yang SUDAH ADA ke `HR`:
+>
+> | divisi (HRIS) | jabatan (HRIS) | division | level |
+> |---|---|---|---|
+> | `OD` | `SENIOR ORGANIZATION DEVELOPMENT` | `HR` | `staff` |
+> | `OD` | `JR ORGANIZATION DEVELOPMENT` | `HR` | `staff` |
+> | `OD` | `SENIOR DATA ANALYST` | `HR` | `staff` |
+>
+> Diverifikasi lewat `employee_claims()`: ketiganya kini
+> `division: HR, level: staff`, dengan `od: true` dan `director: true` UTUH.
+> Nol karyawan aktif yang tersisa tanpa peran.
+>
+> **🔴 Dua hal yang harus dibaca bersamaan dengan itu — lihat §4.**
+>
+> Sisa berkas ini (langkah HRIS, jebakan sync penuh, verifikasi) tetap berlaku
+> untuk kapan pun MEA benar-benar membuka divisi HR sendiri di HRIS.
 
 Ketokan pemilik 2026-09-11: **jalur (a)** — HRIS menambah divisi HR lalu
 di-sync. Berkas ini menuliskan langkahnya persis, plus jebakan yang sudah
@@ -120,3 +142,43 @@ verifikasi dalam hitungan menit.
 
 Sampai itu ada, Mutasi & Resign permanen tetap **Director-only** — dan itu
 keadaan yang aman, bukan kerusakan.
+
+
+---
+
+## 4 · 🔴 Dua hal yang eksekusi 2026-09-11 justru menyingkap
+
+### 4.1 Pemetaan ini mengubah NOL hak akses — mereka sudah Director
+
+Ketiga orang OD itu sudah memegang layered role **`director`** sejak
+2026-07-30, `created_by = 'C03-OWNER-DECISION'` — keputusan pemilik yang
+tercatat, bukan kecelakaan. Klaim mereka sebelum pemetaan:
+
+```
+{"od": true, "level": "", "director": true, "division": ""}
+```
+
+Karena `canManageEmployeeAssignment` meloloskan Director tanpa syarat, **mereka
+sudah bisa Mutasi & Resign sejak dulu**. Artinya "gerbang HR kosong" yang
+tercatat sebagai utang di beberapa handoff **tidak pernah benar-benar memblokir
+siapa pun** — ia hanya membuat jalur HR-nya tidak terpakai.
+
+Yang berubah oleh pemetaan ini murni **identitas organisasi**: layar yang dulu
+menulis peran mereka `—` sekarang menulis `HR · staff`, dan divisi HR akhirnya
+punya anggota.
+
+### 4.2 Belum ada HR `lead`, dan itu menyisakan satu ketergantungan diam
+
+`role_mappings` HR sekarang **3 baris, ketiganya `staff`, nol `lead`**.
+`canManageEmployeeAssignment` membutuhkan **`lead`**, bukan `staff`. Jadi
+kemampuan Mutasi & Resign ketiga orang itu bertumpu SEPENUHNYA pada layered
+role `director` mereka.
+
+Konsekuensinya: **kalau suatu hari layered `director` itu dicabut dari salah
+satu dari mereka** — misalnya saat merapikan siapa yang benar-benar Director —
+orang itu langsung kehilangan Mutasi & Resign, karena lengan HR-nya `staff` dan
+tidak menangkapnya. Tidak akan ada galat; tombolnya hanya mati.
+
+Kalau niatnya fungsi HR berdiri sendiri (tidak menumpang hak Director),
+naikkan SATU dari ketiganya jadi `HR · lead` lewat `/admin/role-mappings`.
+Itu satu baris, dan sesudahnya hak HR-nya tidak lagi bergantung pada Director.
