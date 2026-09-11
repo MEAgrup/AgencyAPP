@@ -1,4 +1,29 @@
-# Runbook — mengaktifkan fungsi HR di CDPS (jalur A: lewat HRIS), 2026-09-11
+# Runbook — mengaktifkan fungsi HR di CDPS, 2026-09-11
+
+> ## ✅ SUDAH DIEKSEKUSI 2026-09-11 — dan jalannya BUKAN (a)
+>
+> Ketokan pemilik berubah begitu fakta rosternya terlihat: *"divisi HR belum ada
+> usernya saat ini, tim OD adalah bagian dari divisi HR, buat OD jadi HR semua
+> dengan status staf."* Jadi yang dipakai bukan menunggu HRIS, melainkan
+> memetakan divisi `OD` yang SUDAH ADA ke `HR`:
+>
+> | divisi (HRIS) | jabatan (HRIS) | division | level |
+> |---|---|---|---|
+> | `OD` | `SENIOR ORGANIZATION DEVELOPMENT` | `HR` | **`lead`** |
+> | `OD` | `JR ORGANIZATION DEVELOPMENT` | `HR` | `staff` |
+> | `OD` | `SENIOR DATA ANALYST` | `HR` | `staff` |
+>
+> Baris pertama dinaikkan ke `lead` pada ketokan susulan pemilik hari yang sama
+> (*"naikkan user-nya Arsy"*) — lihat §4.2.
+>
+> Diverifikasi lewat `employee_claims()`: Arsy Rizmandha
+> `division: HR, level: lead`, dua lainnya `HR · staff`, dan `od: true` +
+> `director: true` UTUH pada ketiganya. Nol karyawan aktif tersisa tanpa peran.
+>
+> **🔴 Dua hal yang harus dibaca bersamaan dengan itu — lihat §4.**
+>
+> Sisa berkas ini (langkah HRIS, jebakan sync penuh, verifikasi) tetap berlaku
+> untuk kapan pun MEA benar-benar membuka divisi HR sendiri di HRIS.
 
 Ketokan pemilik 2026-09-11: **jalur (a)** — HRIS menambah divisi HR lalu
 di-sync. Berkas ini menuliskan langkahnya persis, plus jebakan yang sudah
@@ -120,3 +145,63 @@ verifikasi dalam hitungan menit.
 
 Sampai itu ada, Mutasi & Resign permanen tetap **Director-only** — dan itu
 keadaan yang aman, bukan kerusakan.
+
+
+---
+
+## 4 · 🔴 Dua hal yang eksekusi 2026-09-11 justru menyingkap
+
+### 4.1 Pemetaan ini mengubah NOL hak akses — mereka sudah Director
+
+Ketiga orang OD itu sudah memegang layered role **`director`** sejak
+2026-07-30, `created_by = 'C03-OWNER-DECISION'` — keputusan pemilik yang
+tercatat, bukan kecelakaan. Klaim mereka sebelum pemetaan:
+
+```
+{"od": true, "level": "", "director": true, "division": ""}
+```
+
+Karena `canManageEmployeeAssignment` meloloskan Director tanpa syarat, **mereka
+sudah bisa Mutasi & Resign sejak dulu**. Artinya "gerbang HR kosong" yang
+tercatat sebagai utang di beberapa handoff **tidak pernah benar-benar memblokir
+siapa pun** — ia hanya membuat jalur HR-nya tidak terpakai.
+
+Yang berubah oleh pemetaan ini murni **identitas organisasi**: layar yang dulu
+menulis peran mereka `—` sekarang menulis `HR · staff`, dan divisi HR akhirnya
+punya anggota.
+
+### 4.2 HR `lead` SUDAH ADA — Arsy, dan itu memutus ketergantungan pada Director
+
+Pada pemetaan pertama ketiganya `staff`, dan itu menyisakan satu ketergantungan
+diam: `canManageEmployeeAssignment` menuntut **`lead`**, jadi hak Mutasi &
+Resign mereka bertumpu SEPENUHNYA pada layered `director` mereka. Kalau layered
+itu suatu hari dicabut saat merapikan siapa yang benar-benar Director, orang itu
+langsung kehilangan kedua tombol — tanpa galat apa pun, tombolnya hanya mati.
+
+Pemilik menutupnya di hari yang sama: **`OD`/`SENIOR ORGANIZATION DEVELOPMENT`
+dinaikkan ke `HR · lead`**, dan pemegangnya satu-satunya adalah **ARSY
+RIZMANDHA** (`2501140493`) — diperiksa sebelum menulis, bukan diasumsikan.
+
+Klaimnya sekarang:
+
+```
+{"od": true, "level": "lead", "director": true, "division": "HR"}
+```
+
+Hak HR-nya kini berdiri di kakinya sendiri: kalau layered `director` dicabut,
+Mutasi & Resign TETAP terbuka untuknya lewat lengan HR. Dua orang OD lainnya
+tetap `staff` — bagi mereka ketergantungan itu masih berlaku, dan itu memang
+konsekuensi yang diinginkan: hanya SATU pemegang fungsi HR.
+
+### ⚠️ 4.3 Pemetaan berkunci JABATAN, bukan orang
+
+`role_mappings` dikunci `(divisi, jabatan)`. Jadi yang dinaikkan sebenarnya
+**jabatannya**, bukan Arsy sebagai pribadi: siapa pun yang kelak masuk ke
+`OD`/`SENIOR ORGANIZATION DEVELOPMENT` otomatis menjadi `HR · lead` dan bisa
+mengubah divisi/jabatan SIAPA PUN — tanpa ada yang perlu menyetujui apa pun.
+
+Itu memang cara kerja modelnya (dan alasan `canManageEmployeeAssignment` ditulis
+sesempit itu), bukan cacat. Tapi ia berarti satu hal praktis: **perlakukan
+jabatan itu sebagai jabatan berwenang.** Kalau kelak ada orang kedua di jabatan
+yang sama dan tidak seharusnya memegang HR, pisahkan jabatannya di HRIS —
+jangan andalkan bahwa hari ini pemegangnya cuma satu.
