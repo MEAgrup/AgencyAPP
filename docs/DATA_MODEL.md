@@ -263,6 +263,31 @@ boleh menolak nilai yang katalognya (`ck_msdo_durasi`, juga `> 0`) terima. Batas
 36 tetap ditegakkan di tempat yang benar — `sales.resolveClosingWindow` menjawab
 dengan pesan `[...]` rumah, dan `ck_contracts_durasi` jadi jaring kedua.
 
+### 3a-2. Layanan multi-platform (PR-5, ketokan `DECISIONS.md` 2026-09-10)
+
+`qualified_form_services` menambah dua kolom (migrasi `20261004010000`):
+`platform varchar(64) NOT NULL` dan `store_link varchar(255) NULL`. `uq_qfs`
+diperlebar dari `(attempt_id, master_service_id)` menjadi `(attempt_id,
+master_service_id, platform)` — baris kedua untuk `master_service_id` yang
+sama sah HANYA kalau platformnya beda (`qty` tetap satu-satunya cara
+menyatakan "lebih banyak unit di toko yang SAMA").
+
+`negotiation_proposal_lines` ikut menambah `platform varchar(64) NOT NULL`
+untuk alasan yang sama seperti kolom `durasi_bulan` di §3a-1: `sales.
+loadApprovedLines` menyambung tiap baris proposal ke snapshot Qualified lewat
+`qfs`, dan sebelum PR-5 `uq_qfs` (dua kolom) menjamin join itu 1:1. Melebarkan
+`uq_qfs` tanpa memberi `negotiation_proposal_lines` kunci platform yang sama
+akan membuat join itu MELIPATGANDAKAN hasilnya untuk deal dua-platform — lihat
+`DECISIONS.md` untuk kronologi lengkapnya. `renewal_proposal_lines` **TIDAK**
+ikut kena — ketokan PR-5 tidak menyebut renewal, dan melebarkannya di sana
+bukan cakupan yang diminta.
+
+Baris `client_platforms` (M4-OA-2) yang dilahirkan `sales.close()` kini
+mendapat `store_link`-nya SENDIRI per platform (dibaca dari
+`qualified_form_services` yang platform-nya cocok), bukan `qualified_forms.
+store_link` yang sama untuk semua baris — melunasi utang yang dicatat
+`DECISIONS.md` 2026-08-27.
+
 Baris **CUSTOM** (harga nego) juga membawa tenor, dan tenornya TIDAK divalidasi
 ke katalog: menegosiasikan harga paket setahun tidak mengubahnya jadi paket tiga
 bulan, dan baris custom memang pintu masuk kesepakatan yang katalognya tak

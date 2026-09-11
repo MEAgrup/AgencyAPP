@@ -552,6 +552,18 @@ export interface ServiceSelection {
    * does not offer is refused (`resolveTenor`), never quietly ignored.
    */
   durasiBulan?: number | null;
+  /**
+   * PR-5 (2026-09-10 ketokan) — which of the form's checked platforms this
+   * line is sold on. Omitted ⇒ the checklist's first platform (`primaryPlatform`),
+   * so a single-platform form needs no change at all. Must name one of the
+   * form's OWN checked platforms; anything else is refused (`IncompleteError`).
+   * This is what lets the SAME `masterServiceId` appear twice — once per
+   * platform, each with its own `storeLink` — without reopening the
+   * 2026-08-07 ban on an undifferentiated duplicate.
+   */
+  platform?: string;
+  /** PR-5 — this line's own store link, e.g. when it differs by platform. */
+  storeLink?: string;
 }
 
 /** resolveLines resolves each selection against the MSL version effective today. */
@@ -752,24 +764,42 @@ export async function submitQualifiedForm(
   if (form.services.length > MAX_SERVICES) {
     throw new TooManyServicesError();
   }
-  // The same service twice is refused HERE, at the door that creates the snapshot.
-  // Closing joins each proposal line to `qualified_form_services` on
-  // master_service_id, so a duplicated snapshot row multiplies that join: the deal
-  // closes with duplicated Service rows and an inflated total_agreed_value, with no
-  // error anywhere. Quantity is the field for "two of this service", not a second row.
+  // The same service twice is refused HERE, at the door that creates the snapshot —
+  // UNLESS the two lines name different platforms (PR-5, 2026-08-07 ketokan
+  // narrowed, not lifted). Closing joins each proposal line to
+  // `qualified_form_services` on (master_service_id, platform), so a duplicate
+  // pair sharing BOTH would still multiply that join: the deal closes with
+  // duplicated Service rows and an inflated total_agreed_value, with no error
+  // anywhere. Quantity is the field for "two of this service on the same
+  // store", not a second row.
+  const checklist = splitPlatforms(form.platform);
+  const fallbackPlatform = primaryPlatform(form.platform);
   const picked = new Set<string>();
+  const platforms: string[] = [];
   for (const sel of form.services) {
     const sid = (sel.masterServiceId ?? '').trim();
-    if (sid === '' || picked.has(sid)) {
+    if (sid === '') {
       throw new IncompleteError();
     }
-    picked.add(sid);
+    const plat = (sel.platform ?? '').trim() || fallbackPlatform;
+    if (checklist.length > 0 && !checklist.includes(plat)) {
+      throw new IncompleteError();
+    }
+    const key = `${sid} ${plat}`;
+    if (picked.has(key)) {
+      throw new IncompleteError();
+    }
+    picked.add(key);
+    platforms.push(plat);
   }
 
   // Resolve MSL versions + compute subtotals BEFORE the write transaction; the
   // pinned snapshot (params + subtotal) is what gets persisted.
   const lines = await resolveLines(sql, form.services, now);
-  const pins = lines.map((l) => ({ line: l, subtotal: lineSubtotal(l) }));
+  const pins = lines.map((l, i) => ({
+    line: l, subtotal: lineSubtotal(l), platform: platforms[i],
+    storeLink: nullString(form.services[i].storeLink),
+  }));
 
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
@@ -788,7 +818,7 @@ export async function submitQualifiedForm(
          ${nullDecimal(form.marketingBudget)}, ${form.platform}, ${nullString(form.storeLink)},
          ${actor.employeeId})`;
 
-    for (const { line: l, subtotal } of pins) {
+    for (const { line: l, subtotal, platform, storeLink } of pins) {
       const p = lineParams(l);
       // `apply_ppn` is NOT written: it is deprecated by D-4 and its column
       // default (false) is now the only value it ever takes. `subtotal` is
@@ -796,12 +826,13 @@ export async function submitQualifiedForm(
       await tx`
         insert into qualified_form_services
           (attempt_id, master_service_id, master_version_no, name, standard_price, commission_rule,
-           quantity, input_amount, unit, min_qty, pricing_mode, subtotal, durasi_bulan, created_by)
+           quantity, input_amount, unit, min_qty, pricing_mode, subtotal, durasi_bulan, platform,
+           store_link, created_by)
         values
           (${attemptId}, ${l.serviceId}, ${l.versionNo}, ${l.name}, ${money.decimal(l.standardPrice)},
            ${l.rule.raw}, ${p.quantity.toString()}, ${inputAmountValue(l)}, ${nullString(l.unit)},
-           ${minQtyValue(l.minQty)}, ${l.mode}, ${money.decimal(subtotal)}, ${l.durasiBulan},
-           ${actor.employeeId})`;
+           ${minQtyValue(l.minQty)}, ${l.mode}, ${money.decimal(subtotal)}, ${l.durasiBulan}, ${platform},
+           ${storeLink}, ${actor.employeeId})`;
     }
 
     await ex.audit.insertAudit({
@@ -948,6 +979,13 @@ export interface ProposalLine {
    * what "custom" means.
    */
   durasiBulan?: number | null;
+  /**
+   * PR-5 (2026-09-10 ketokan) — which of the Qualified Form's checked platforms
+   * this line is sold on. Omitted ⇒ the checklist's first platform
+   * (`primaryPlatform`), matching `qualified_form_services` for the common
+   * single-platform deal. Must name one of the form's own checked platforms.
+   */
+  platform?: string;
 }
 
 /**
@@ -1190,9 +1228,12 @@ export async function acceptCounter(
  */
 async function standardLines(tx: Queryable, attemptId: string): Promise<ProposalLine[]> {
   const rows = await tx<
-    { master_service_id: string; subtotal: string; commission_rule: string; durasi_bulan: number | null }[]
+    {
+      master_service_id: string; subtotal: string; commission_rule: string; durasi_bulan: number | null;
+      platform: string;
+    }[]
   >`
-    select master_service_id, subtotal, commission_rule, durasi_bulan
+    select master_service_id, subtotal, commission_rule, durasi_bulan, platform
     from qualified_form_services where attempt_id = ${attemptId} order by id`;
   if (rows.length === 0) {
     throw new IncompleteError();
@@ -1204,6 +1245,10 @@ async function standardLines(tx: Queryable, attemptId: string): Promise<Proposal
     // catalog at all — if the tenor were dropped here it would be lost for the
     // whole no-negotiation path, which is the path most deals take.
     durasiBulan: r.durasi_bulan === null ? null : Number(r.durasi_bulan),
+    // PR-5 — carried through verbatim, exactly like durasiBulan above: this is
+    // the qfs row's OWN platform, already validated at submitQualifiedForm, so
+    // writeProposal's checklist check below can only ever confirm it.
+    platform: r.platform,
   }));
 }
 
@@ -1308,11 +1353,13 @@ function normalizeTenor(v: number | null | undefined): number | null {
  * are validated and standard ones priced from the MSL (resolveProposalLine); the
  * 1..MAX_SERVICES cap holds here too.
  *
- * The SAME service twice in one set is refused. That is not tidiness: closing
- * enriches each proposal line by joining `qualified_form_services` on
- * master_service_id, so two rows for one service MULTIPLY the join — the deal
- * closes with duplicated Service rows and an inflated `total_agreed_value`, silently.
- * `submitQualifiedForm` refuses duplicates for the same reason.
+ * The SAME service twice in one set is refused UNLESS the two lines name
+ * different checked platforms (PR-5). That is not tidiness: closing enriches
+ * each proposal line by joining `qualified_form_services` on
+ * (master_service_id, platform), so two rows sharing BOTH would still MULTIPLY
+ * the join — the deal closes with duplicated Service rows and an inflated
+ * `total_agreed_value`, silently. `submitQualifiedForm` refuses the same pair
+ * for the same reason.
  */
 async function writeProposal(
   tx: Queryable,
@@ -1330,21 +1377,42 @@ async function writeProposal(
   if (lines.length === 0 || lines.length > MAX_SERVICES) {
     throw lines.length > MAX_SERVICES ? new TooManyServicesError() : new IncompleteError();
   }
+  // PR-5 — same widened rule as submitQualifiedForm: the same master_service_id
+  // twice is refused UNLESS the two lines name different checked platforms.
+  // `standardLines` already stamped a real platform on every line it built (the
+  // qfs row's own), so this only ever has to fill in a default for a line the
+  // CALLER supplied directly (submitNegotiation's custom path, reviseServices,
+  // resubmitNegotiation) without naming one.
+  const qf = await loadQualifiedForm(tx, attemptId);
+  const checklist = splitPlatforms(qf.platform);
+  const fallbackPlatform = primaryPlatform(qf.platform);
   const seen = new Set<string>();
+  const platforms: string[] = [];
   for (const l of lines) {
     const id = (l.masterServiceId ?? '').trim();
-    if (id === '' || seen.has(id)) {
+    if (id === '') {
       throw new IncompleteError();
     }
-    seen.add(id);
+    const plat = (l.platform ?? '').trim() || fallbackPlatform;
+    if (checklist.length > 0 && !checklist.includes(plat)) {
+      throw new IncompleteError();
+    }
+    const key = `${id} ${plat}`;
+    if (seen.has(key)) {
+      throw new IncompleteError();
+    }
+    seen.add(key);
+    platforms.push(plat);
   }
   // Resolve every line BEFORE the first insert: a bad line must not leave a
   // half-written proposal version behind (the whole call is one transaction, but
   // resolving first also means no NEG- id is burned on an invalid set).
-  const resolved: { line: ProposalLine; price: string; rule: string; durasiBulan: number | null }[] = [];
-  for (const l of lines) {
+  const resolved: { line: ProposalLine; price: string; rule: string; durasiBulan: number | null; platform: string }[]
+    = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
     const { price, rule, durasiBulan } = await resolveProposalLine(tx, l, now);
-    resolved.push({ line: l, price, rule, durasiBulan });
+    resolved.push({ line: l, price, rule, durasiBulan, platform: platforms[i] });
   }
 
   const verRows = await tx<{ max: number | null }[]>`
@@ -1356,13 +1424,13 @@ async function writeProposal(
     insert into negotiation_proposals (id, attempt_id, version_no, proposed_by, created_by)
     values (${proposalId}, ${attemptId}, ${version}, ${actor.employeeId}, ${actor.employeeId})`;
 
-  for (const { line: l, price, rule, durasiBulan } of resolved) {
+  for (const { line: l, price, rule, durasiBulan, platform } of resolved) {
     await tx`
       insert into negotiation_proposal_lines
         (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms,
-         durasi_bulan, created_by)
+         durasi_bulan, platform, created_by)
       values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule},
-              ${nullString(l.paymentTerms)}, ${durasiBulan}, ${actor.employeeId})`;
+              ${nullString(l.paymentTerms)}, ${durasiBulan}, ${platform}, ${actor.employeeId})`;
   }
   await ex.audit.insertAudit({
     entityType: 'prospect_attempt', entityId: attemptId, actorEmployeeId: actor.employeeId,
@@ -1831,11 +1899,20 @@ export async function close(
     //    W1-11: that gap was deferred, not endorsed). qf.platform is Sales'
     //    UI-side `join(', ')` of the checklist (sales page PLATFORMS); split it
     //    back apart here so every platform gets its own row/method/baseline.
-    const platformNames = qf.platform.split(',').map((p) => p.trim()).filter((p) => p !== '');
+    //
+    //    PR-5 pays off a debt logged 2026-08-27: every row used to get the SAME
+    //    `qf.store_link`, even though each platform can be a different store.
+    //    `storeLinkByPlatform` is each platform's OWN link — the first
+    //    `qualified_form_services.store_link` a service line actually recorded
+    //    for it — falling back to the form-level `qf.store_link` only for a
+    //    checked platform no line ever named a link for.
+    const platformNames = splitPlatforms(qf.platform);
+    const storeLinkByPlatform = await loadStoreLinkByPlatform(tx, attemptId);
     for (const platformName of platformNames.length ? platformNames : [qf.platform]) {
+      const storeLink = storeLinkByPlatform.get(platformName) ?? qf.store_link;
       await tx`
         insert into client_platforms (client_id, platform, store_link, managed_since, created_by)
-        values (${clientId}, ${platformName}, ${qf.store_link}, ${nullDate(input.managedSince)}, ${actor.employeeId})`;
+        values (${clientId}, ${platformName}, ${storeLink}, ${nullDate(input.managedSince)}, ${actor.employeeId})`;
     }
 
     // 3) Sales allocation (Σ = 100% = 10000 bp, read-only snapshot).
@@ -1986,6 +2063,27 @@ async function loadQualifiedForm(tx: Queryable, attemptId: string): Promise<Qual
 }
 
 /**
+ * loadStoreLinkByPlatform (PR-5) reads each platform's OWN store link off the
+ * Qualified Form's service lines — the first non-null `store_link` recorded for
+ * that platform, oldest row wins. A checked platform no line ever named a link
+ * for is simply absent from the map; `close()` falls back to the form-level
+ * `qf.store_link` for those, exactly as every platform behaved before PR-5.
+ */
+async function loadStoreLinkByPlatform(tx: Queryable, attemptId: string): Promise<Map<string, string | null>> {
+  const rows = await tx<{ platform: string; store_link: string | null }[]>`
+    select platform, store_link from qualified_form_services
+    where attempt_id = ${attemptId} and store_link is not null
+    order by id`;
+  const byPlatform = new Map<string, string | null>();
+  for (const r of rows) {
+    if (!byPlatform.has(r.platform)) {
+      byPlatform.set(r.platform, r.store_link);
+    }
+  }
+  return byPlatform;
+}
+
+/**
  * loadApprovedLines returns the latest proposal version's lines, enriched with the
  * MSL name + version_no + requires_strategy_plan the closing needs.
  *
@@ -2034,8 +2132,15 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
            coalesce(npl.durasi_bulan, qfs.durasi_bulan) as durasi_dipilih
     from negotiation_proposal_lines npl
     join negotiation_proposals np on np.id = npl.proposal_id
+    -- PR-5: the key MUST include platform. Before PR-5, uq_qfs guaranteed at
+    -- most one qfs row per (attempt_id, master_service_id), so this join could
+    -- never fan out. Now the SAME master_service_id can legitimately have two
+    -- qfs rows (one per platform), and npl carries its OWN platform for exactly
+    -- this reason — matching on platform too keeps this a 1:1 join, not a
+    -- silent Σ-multiplying one. See DECISIONS.md 2026-09-10 KETOKAN PR-5.
     left join qualified_form_services qfs
            on qfs.attempt_id = np.attempt_id and qfs.master_service_id = npl.master_service_id
+              and qfs.platform = npl.platform
     left join master_service_versions pinned
            on pinned.service_id = npl.master_service_id and pinned.version_no = qfs.master_version_no
     left join lateral (
@@ -2060,8 +2165,31 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
 }
 
 // ---------------------------------------------------------------------------
-// Storage null helpers.
+// PR-5 (2026-09-10 ketokan) — Platform List parsing, shared by every reader.
 // ---------------------------------------------------------------------------
+
+/**
+ * splitPlatforms parses the Platform List checklist string (`qPlatforms.join(',
+ * ')` on the FE — the SAME format `close()` already split before PR-5) into its
+ * individual platform names. One parser, reused everywhere a platform default or
+ * a checklist membership check is needed, so they can never disagree about what
+ * "the client's platforms" means.
+ */
+function splitPlatforms(raw: string): string[] {
+  return raw.split(',').map((p) => p.trim()).filter((p) => p !== '');
+}
+
+/**
+ * primaryPlatform is the platform a service LINE gets when it names none of its
+ * own — the checklist's first entry. This is what keeps every pre-PR-5 form
+ * (one platform, no line ever names one) behaving byte-for-byte as before: every
+ * line still resolves to that one platform, so `uq_qfs` (now `(attempt_id,
+ * master_service_id, platform)`) still collapses to the old two-column key.
+ */
+function primaryPlatform(raw: string): string {
+  const list = splitPlatforms(raw);
+  return list.length > 0 ? list[0] : raw.trim();
+}
 
 function nullString(s: string | undefined): string | null {
   return s && s.trim() !== '' ? s : null;
@@ -2199,6 +2327,10 @@ export interface QualifiedFormServiceView {
   commissionRule: string;
   /** FS-6b — tenor yang dipilih, atau `null` bila baris ini memakai durasi versi. */
   durasiBulan: number | null;
+  /** PR-5 — platform baris ini terjual di dalamnya (checklist milik formnya sendiri). */
+  platform: string;
+  /** PR-5 — link toko baris ini, atau `null` bila mengikuti `storeLink` form. */
+  storeLink: string | null;
 }
 
 /** The locked Qualified draft carried on an attempt (M0 §4) — Go's QualifiedFormView. */
@@ -2225,6 +2357,8 @@ export interface AttemptProposalLine {
   paymentTerms: string | null;
   /** FS-6b — tenor yang disepakati baris ini, atau `null`. */
   durasiBulan: number | null;
+  /** PR-5 — platform baris ini (selalu terisi; lihat ProposalLine.platform). */
+  platform: string;
 }
 
 /** One versioned negotiation proposal with its lines — Go's ProposalView. */
@@ -2329,10 +2463,11 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
       master_service_id: string; master_version_no: number; name: string; quantity: string;
       unit: string | null; pricing_mode: string; standard_price: string;
       input_amount: string | null; subtotal: string; commission_rule: string;
-      durasi_bulan: number | null;
+      durasi_bulan: number | null; platform: string; store_link: string | null;
     }[]>`
       select master_service_id, master_version_no, name, quantity, unit, pricing_mode,
-             standard_price, input_amount, subtotal, commission_rule, durasi_bulan
+             standard_price, input_amount, subtotal, commission_rule, durasi_bulan,
+             platform, store_link
       from qualified_form_services where attempt_id = ${id} order by id`,
 
     sql<{
@@ -2377,6 +2512,7 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
         standardPrice: s.standard_price, inputAmount: s.input_amount, subtotal: s.subtotal,
         commissionRule: s.commission_rule,
         durasiBulan: s.durasi_bulan === null ? null : Number(s.durasi_bulan),
+        platform: s.platform, storeLink: s.store_link,
       })),
     };
   }
@@ -2393,13 +2529,18 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
       : await sql<{
           proposal_id: string; master_service_id: string; name: string; proposed_price: string;
           commission_rule: string; payment_terms: string | null; durasi_bulan: number | null;
+          platform: string;
         }[]>`
           select npl.proposal_id, npl.master_service_id,
                  coalesce(qfs.name, latest.name, '') as name,
-                 npl.proposed_price, npl.commission_rule, npl.payment_terms, npl.durasi_bulan
+                 npl.proposed_price, npl.commission_rule, npl.payment_terms, npl.durasi_bulan,
+                 npl.platform
           from negotiation_proposal_lines npl
+          -- PR-5: platform in the key too, for the same reason as loadApprovedLines
+          -- — otherwise a two-platform deal would render each line's name TWICE.
           left join qualified_form_services qfs
                  on qfs.attempt_id = ${id} and qfs.master_service_id = npl.master_service_id
+                    and qfs.platform = npl.platform
           -- A service ADDED during negotiation / Edit Service has no Qualified
           -- snapshot row, so its name comes from the MSL. Without this the
           -- negotiation panel renders a priced line with a blank service name.
@@ -2419,6 +2560,7 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
       masterServiceId: ln.master_service_id, name: ln.name, proposedPrice: ln.proposed_price,
       commissionRule: ln.commission_rule, paymentTerms: ln.payment_terms,
       durasiBulan: ln.durasi_bulan === null ? null : Number(ln.durasi_bulan),
+      platform: ln.platform,
     });
     linesByProposal.set(ln.proposal_id, list);
   }

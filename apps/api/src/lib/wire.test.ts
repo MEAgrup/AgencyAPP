@@ -1261,6 +1261,8 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
         subtotal: '9000000',
         commissionRule: '10% of standard price',
         durasiBulan: null,
+        platform: 'Shopee',
+        storeLink: null,
       }],
     },
     proposals: [{
@@ -1277,6 +1279,7 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
         commissionRule: '10% of standard price',
         paymentTerms: null,
         durasiBulan: null,
+        platform: 'Shopee',
       }],
     }],
     nqReasons: [],
@@ -1327,6 +1330,8 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
       // chosen. A missing key is the O43 failure mode — the page reads
       // `undefined` and renders nothing, with the route still answering 200.
       durasi_bulan: null,
+      platform: 'Shopee',
+      store_link: null,
     });
   });
 
@@ -1346,6 +1351,7 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
         commission_rule: '10% of standard price',
         payment_terms: null,
         durasi_bulan: null,
+        platform: 'Shopee',
       }],
     });
   });

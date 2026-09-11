@@ -761,6 +761,52 @@ describeDb('submitQualifiedForm', () => {
     expect(lines[0].n).toBe(0);
   });
 
+  it('PR-5: accepts the SAME service twice when the two lines name different checked platforms', async () => {
+    const svc = await seedService('SVC-ZZ-DUALPLAT-QF');
+    const attemptId = await contactedAttempt(budi());
+    await submitQualifiedForm(sql, budi(), attemptId, {
+      namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+      kategori: 'Fashion', platform: 'TikTok Shop, Shopee', gmvBaseline: '1', targetGmv: '1',
+      services: [
+        { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop', storeLink: 'https://tiktok/a' },
+        { masterServiceId: svc, quantity: 1, platform: 'Shopee', storeLink: 'https://shopee/a' },
+      ],
+    });
+    const rows = await sql<{ platform: string; store_link: string | null }[]>`
+      select platform, store_link from qualified_form_services where attempt_id = ${attemptId} order by platform`;
+    expect(rows).toEqual([
+      { platform: 'Shopee', store_link: 'https://shopee/a' },
+      { platform: 'TikTok Shop', store_link: 'https://tiktok/a' },
+    ]);
+  });
+
+  it('PR-5: still rejects the same service twice on the SAME platform (2026-08-07 ketokan narrowed, not lifted)', async () => {
+    const svc = await seedService('SVC-ZZ-SAMEPLAT');
+    const attemptId = await contactedAttempt(budi());
+    await expect(
+      submitQualifiedForm(sql, budi(), attemptId, {
+        namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+        kategori: 'Fashion', platform: 'TikTok Shop, Shopee', gmvBaseline: '1', targetGmv: '1',
+        services: [
+          { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop' },
+          { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop' },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('PR-5: rejects a line naming a platform outside the form\'s own checklist', async () => {
+    const svc = await seedService('SVC-ZZ-OFFLIST');
+    const attemptId = await contactedAttempt(budi());
+    await expect(
+      submitQualifiedForm(sql, budi(), attemptId, {
+        namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+        kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '1', targetGmv: '1',
+        services: [{ masterServiceId: svc, quantity: 1, platform: 'Lazada' }],
+      }),
+    ).rejects.toBeInstanceOf(IncompleteError);
+  });
+
   it('rejects an incomplete client draft with the exact BI message', async () => {
     const svc = await seedService('SVC-ZZ-INC');
     const attemptId = await contactedAttempt(budi());
@@ -1024,6 +1070,32 @@ describeDb('reviseServices — Edit Service sebelum closing', () => {
     const versions = await sql<{ n: number }[]>`
       select count(*)::int as n from negotiation_proposals where attempt_id = ${attemptId}`;
     expect(versions[0].n).toBe(1);
+  });
+
+  it('PR-5: accepts the same service twice in reviseServices when platforms differ, refused for the same platform', async () => {
+    const svc = await seedService('SVC-ZZ-REV-DUALPLAT');
+    const attemptId = await contactedAttempt(budi());
+    await submitQualifiedForm(sql, budi(), attemptId, {
+      namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+      kategori: 'Fashion', platform: 'TikTok Shop, Shopee', gmvBaseline: '1', targetGmv: '1',
+      services: [{ masterServiceId: svc, quantity: 1, platform: 'TikTok Shop' }],
+    });
+    await submitNegotiation(sql, budi(), attemptId, [], true);
+
+    await expect(reviseServices(sql, budi(), attemptId, [
+      { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop' },
+      { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop' },
+    ])).rejects.toBeInstanceOf(IncompleteError);
+
+    await reviseServices(sql, budi(), attemptId, [
+      { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop' },
+      { masterServiceId: svc, quantity: 1, platform: 'Shopee' },
+    ]);
+    const lines = await sql<{ platform: string }[]>`
+      select npl.platform from negotiation_proposal_lines npl
+      join negotiation_proposals np on np.id = npl.proposal_id
+      where np.attempt_id = ${attemptId} and np.version_no = 2 order by npl.platform`;
+    expect(lines.map((l) => l.platform)).toEqual(['Shopee', 'TikTok Shop']);
   });
 
   it('is refused outside the pre-closing window, and denied to a non-owner staff', async () => {
@@ -1418,6 +1490,43 @@ describeDb('read models', () => {
     // silently hiding the engine baseline UI for every client (the bug this fixes).
     expect(client.platforms.map((p) => p.platform).sort()).toEqual(['Shopee', 'TikTok Shop', 'Tokopedia']);
     expect(client.platforms.every((p) => p.active)).toBe(true);
+  });
+
+  it('PR-5: one service sold on two platforms closes at exactly 2x, NOT 4x, and each platform keeps its own store_link', async () => {
+    // The regression this guards: `loadApprovedLines` LEFT JOINs each proposal
+    // line to `qualified_form_services` by master_service_id. Before PR-5,
+    // `uq_qfs` guaranteed at most one match; widening it to allow a second row
+    // (same service, different platform) without ALSO widening the join key to
+    // include platform would let EVERY proposal line match BOTH qfs rows —
+    // 2 lines × 2 matching qfs rows = 4 approved lines, not 2. Money doubles
+    // silently, with no error anywhere (DECISIONS.md 2026-09-10 KETOKAN PR-5).
+    const svc = await seedService('SVC-ZZ-2X-NOT-4X', '9000000.00');
+    const actor = budi();
+    const attemptId = await contactedAttempt(actor);
+    await submitQualifiedForm(sql, actor, attemptId, {
+      namaPic: 'Ibu Gamma', toko: 'Gamma Store', kota: 'Jakarta', linkToko: 'https://shopee/gamma',
+      kategori: 'Fashion', platform: 'TikTok Shop, Shopee', gmvBaseline: '50000000', targetGmv: '80000000',
+      services: [
+        { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop', storeLink: 'https://tiktok/gamma' },
+        { masterServiceId: svc, quantity: 1, platform: 'Shopee', storeLink: 'https://shopee/gamma' },
+      ],
+    });
+    await submitNegotiation(sql, actor, attemptId, [], true);
+    const res = await close(sql, actor, attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_TERMIN,
+      installments: [{ amount: '18000000', dueDate: '2026-08-01' }],
+    });
+
+    const client = await getClient(sql, res.clientId);
+    // NOT 4 — the widened join must stay 1:1, never fan out.
+    expect(client.services).toHaveLength(2);
+    // 2 × 9,000,000 = 18,000,000 — NOT 4 × (36,000,000).
+    expect(client.transaction?.totalAgreedValue).toBe('18000000.00');
+
+    const byPlatform = new Map(client.platforms.map((p) => [p.platform, p.storeLink]));
+    expect(byPlatform.get('TikTok Shop')).toBe('https://tiktok/gamma');
+    expect(byPlatform.get('Shopee')).toBe('https://shopee/gamma');
   });
 });
 

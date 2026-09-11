@@ -32,6 +32,10 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
         amount?: string;
         /** FS-6b — tenor pilihan, bila katalognya menawarkan lebih dari satu. */
         durasi_bulan?: number | null;
+        /** PR-5 — platform baris ini; kosong ⇒ platform pertama di checklist. */
+        platform?: string;
+        /** PR-5 — link toko baris ini. */
+        store_link?: string;
       }[];
     }>(request);
     const result = await sales.submitQualifiedForm(db(), actor, id, {
@@ -50,6 +54,8 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
         quantity: s.quantity,
         amount: s.amount,
         durasiBulan: s.durasi_bulan,
+        platform: s.platform,
+        storeLink: s.store_link,
       })),
     });
     return transitionResponse(result);
