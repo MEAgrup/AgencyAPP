@@ -9,13 +9,16 @@
 >
 > | divisi (HRIS) | jabatan (HRIS) | division | level |
 > |---|---|---|---|
-> | `OD` | `SENIOR ORGANIZATION DEVELOPMENT` | `HR` | `staff` |
+> | `OD` | `SENIOR ORGANIZATION DEVELOPMENT` | `HR` | **`lead`** |
 > | `OD` | `JR ORGANIZATION DEVELOPMENT` | `HR` | `staff` |
 > | `OD` | `SENIOR DATA ANALYST` | `HR` | `staff` |
 >
-> Diverifikasi lewat `employee_claims()`: ketiganya kini
-> `division: HR, level: staff`, dengan `od: true` dan `director: true` UTUH.
-> Nol karyawan aktif yang tersisa tanpa peran.
+> Baris pertama dinaikkan ke `lead` pada ketokan susulan pemilik hari yang sama
+> (*"naikkan user-nya Arsy"*) — lihat §4.2.
+>
+> Diverifikasi lewat `employee_claims()`: Arsy Rizmandha
+> `division: HR, level: lead`, dua lainnya `HR · staff`, dan `od: true` +
+> `director: true` UTUH pada ketiganya. Nol karyawan aktif tersisa tanpa peran.
 >
 > **🔴 Dua hal yang harus dibaca bersamaan dengan itu — lihat §4.**
 >
@@ -167,18 +170,38 @@ Yang berubah oleh pemetaan ini murni **identitas organisasi**: layar yang dulu
 menulis peran mereka `—` sekarang menulis `HR · staff`, dan divisi HR akhirnya
 punya anggota.
 
-### 4.2 Belum ada HR `lead`, dan itu menyisakan satu ketergantungan diam
+### 4.2 HR `lead` SUDAH ADA — Arsy, dan itu memutus ketergantungan pada Director
 
-`role_mappings` HR sekarang **3 baris, ketiganya `staff`, nol `lead`**.
-`canManageEmployeeAssignment` membutuhkan **`lead`**, bukan `staff`. Jadi
-kemampuan Mutasi & Resign ketiga orang itu bertumpu SEPENUHNYA pada layered
-role `director` mereka.
+Pada pemetaan pertama ketiganya `staff`, dan itu menyisakan satu ketergantungan
+diam: `canManageEmployeeAssignment` menuntut **`lead`**, jadi hak Mutasi &
+Resign mereka bertumpu SEPENUHNYA pada layered `director` mereka. Kalau layered
+itu suatu hari dicabut saat merapikan siapa yang benar-benar Director, orang itu
+langsung kehilangan kedua tombol — tanpa galat apa pun, tombolnya hanya mati.
 
-Konsekuensinya: **kalau suatu hari layered `director` itu dicabut dari salah
-satu dari mereka** — misalnya saat merapikan siapa yang benar-benar Director —
-orang itu langsung kehilangan Mutasi & Resign, karena lengan HR-nya `staff` dan
-tidak menangkapnya. Tidak akan ada galat; tombolnya hanya mati.
+Pemilik menutupnya di hari yang sama: **`OD`/`SENIOR ORGANIZATION DEVELOPMENT`
+dinaikkan ke `HR · lead`**, dan pemegangnya satu-satunya adalah **ARSY
+RIZMANDHA** (`2501140493`) — diperiksa sebelum menulis, bukan diasumsikan.
 
-Kalau niatnya fungsi HR berdiri sendiri (tidak menumpang hak Director),
-naikkan SATU dari ketiganya jadi `HR · lead` lewat `/admin/role-mappings`.
-Itu satu baris, dan sesudahnya hak HR-nya tidak lagi bergantung pada Director.
+Klaimnya sekarang:
+
+```
+{"od": true, "level": "lead", "director": true, "division": "HR"}
+```
+
+Hak HR-nya kini berdiri di kakinya sendiri: kalau layered `director` dicabut,
+Mutasi & Resign TETAP terbuka untuknya lewat lengan HR. Dua orang OD lainnya
+tetap `staff` — bagi mereka ketergantungan itu masih berlaku, dan itu memang
+konsekuensi yang diinginkan: hanya SATU pemegang fungsi HR.
+
+### ⚠️ 4.3 Pemetaan berkunci JABATAN, bukan orang
+
+`role_mappings` dikunci `(divisi, jabatan)`. Jadi yang dinaikkan sebenarnya
+**jabatannya**, bukan Arsy sebagai pribadi: siapa pun yang kelak masuk ke
+`OD`/`SENIOR ORGANIZATION DEVELOPMENT` otomatis menjadi `HR · lead` dan bisa
+mengubah divisi/jabatan SIAPA PUN — tanpa ada yang perlu menyetujui apa pun.
+
+Itu memang cara kerja modelnya (dan alasan `canManageEmployeeAssignment` ditulis
+sesempit itu), bukan cacat. Tapi ia berarti satu hal praktis: **perlakukan
+jabatan itu sebagai jabatan berwenang.** Kalau kelak ada orang kedua di jabatan
+yang sama dan tidak seharusnya memegang HR, pisahkan jabatannya di HRIS —
+jangan andalkan bahwa hari ini pemegangnya cuma satu.
