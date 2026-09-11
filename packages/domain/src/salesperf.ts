@@ -63,6 +63,7 @@ import { money, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { commissionAchievementBatch } from './finance';
 import { SALES_DIVISION } from './leads';
+import { JENIS_BAYAR_KOMISI as RENEWAL_JENIS_BAYAR_KOMISI } from './renewal';
 
 export type Actor = permission.Actor;
 
@@ -646,30 +647,22 @@ async function gather(
     else if (r.activity_type === 'Online Meeting') a.effortOnlineMeeting += 1;
   }
 
-  // --- klien mix (per KONTRAK) + uang (per TRANSAKSI). Lihat loadDealFacts. ---
+  // --- deal (bauran + jumlah) DAN uang, keduanya per TRANSAKSI. Lihat loadDealFacts. ---
   const facts = await loadDealFacts(sql, ids);
 
-  for (const c of facts.contracts) {
-    if (!inPeriod(filter.period, c.at)) continue;
-    for (const alloc of c.allocs) {
+  for (const d of facts.deals) {
+    if (!inPeriod(filter.period, d.at)) continue;
+    for (const alloc of d.allocs) {
       if (!ids.includes(alloc.salespersonId)) continue;
-      const a = get(alloc.salespersonId, c.at);
+      const a = get(alloc.salespersonId, d.at);
       const frac = alloc.basisPoints / 10000;
-      if (c.jenis === 'baru') a.klienBaruFrac += frac;
-      else if (c.jenis === 'perpanjangan') a.klienPerpanjanganFrac += frac;
-      else if (c.jenis === 'cross_sell') a.klienCrossSellFrac += frac;
+      if (d.jenis === 'baru') a.klienBaruFrac += frac;
+      else if (d.jenis === 'perpanjangan') a.klienPerpanjanganFrac += frac;
+      else if (d.jenis === 'cross_sell') a.klienCrossSellFrac += frac;
       a.totalDeal += 1;
-    }
-  }
-
-  for (const m of facts.money) {
-    if (!inPeriod(filter.period, m.at)) continue;
-    for (const alloc of m.allocs) {
-      if (!ids.includes(alloc.salespersonId)) continue;
-      const a = get(alloc.salespersonId, m.at);
-      a.omzet += money.proRata(m.totalAgreedValue, BigInt(alloc.basisPoints), 10000n);
-      a.komisiKontrak += money.proRata(m.totalDealCommission, BigInt(alloc.basisPoints), 10000n);
-      a.komisiDiakui += m.recognized.get(alloc.salespersonId) ?? 0n;
+      a.omzet += money.proRata(d.totalAgreedValue, BigInt(alloc.basisPoints), 10000n);
+      a.komisiKontrak += money.proRata(d.totalDealCommission, BigInt(alloc.basisPoints), 10000n);
+      a.komisiDiakui += d.recognized.get(alloc.salespersonId) ?? 0n;
     }
   }
 
@@ -716,14 +709,39 @@ async function gather(
 // transaksi dalam SATU transaksi DB, jadi untuk kasus satu-kontrak (yakni
 // setiap kasus yang selama ini benar) kedua stempel waktu itu identik.
 //
-// Yang SENGAJA belum ditutup di sini: transaksi milik perpanjangan itu sendiri
-// tetap tak terhitung di mana pun, karena tidak ada `contracts.transaction_id`
-// dan `clients.transaction_id` tidak pernah dipindahkan. Itu utang terpisah —
-// dicatat `DECISIONS.md` 2026-09-10 — dan menutupnya berarti menambah tautan
-// kontrak→transaksi, bukan mengubah penjumlahan ini. Yang penting: laporan
-// sekarang KURANG melaporkan perpanjangan alih-alih MELIPATGANDAKAN penjualan
-// pertama, dan yang kedua jauh lebih berbahaya untuk dipakai mengambil
-// keputusan.
+// ── 2026-09-11, ketokan kedua: SATU DEAL = SATU TRANSAKSI (PR3-RNW-TRX) ──
+//
+// Perbaikan di atas menghentikan penggelembungan, tapi meninggalkan dua lubang
+// yang arahnya berlawanan — laporan KURANG melaporkan penjualan, dan diam:
+//
+//   1. Transaksi milik perpanjangan tak terhitung di mana pun, karena
+//      `clients.transaction_id` hanya menyimpan closing PERTAMA.
+//   2. Uang klien hanya dihitung kalau kliennya kebetulan punya baris
+//      `contracts` — pagar `exists (contracts)` yang diwarisi dari join lama,
+//      bukan yang pernah dipilih siapa pun. Sebuah closing yang semua barisnya
+//      one-off tidak melahirkan kontrak sama sekali, dan uangnya hilang.
+//
+// Diukur di `CDPS SG` sebelum diperbaiki: terlapor Rp 151.075.000 dari
+// penjualan sebenarnya Rp 516.307.615 — 16 dari 25 klien tidak punya kontrak
+// (Rp 359.232.615) dan perpanjangan pertama sudah dieksekusi 2026-08-31
+// (Rp 6.000.000). Pemilik mengetok "hitung semua transaksi penjualan".
+//
+// Karena itu unitnya sekarang TRANSAKSI, bukan klien dan bukan kontrak:
+//
+//   * satu baris per transaksi, di-bucket ke `transactions.created_at`;
+//   * `jenis` (baru / perpanjangan / cross_sell) dibaca dari
+//     `renewal_requests.jenis` kalau transaksinya lahir dari perpanjangan, dari
+//     `contracts.jenis` kalau ada kontraknya, dan `baru` selain itu — sebuah
+//     transaksi closing SELALU deal pertama kliennya;
+//   * `bayar_komisi` DIKECUALIKAN. Ia tagihan atas penjualan yang sudah
+//     terjadi, bukan penjualan baru (FS-4), dan ia dikenali lewat
+//     `renewal_requests.jenis` — bukan lewat ada-tidaknya kontrak, supaya
+//     "tidak punya kontrak" berhenti jadi alasan uang menghilang;
+//   * bauran deal dan uang keluar dari SATU daftar, jadi keduanya tidak bisa
+//     lagi menyebut periode atau himpunan yang berbeda.
+//
+// Komisi tidak ikut berlipat karena `finance.dealServices` memetakan setiap
+// Service ke tepat satu transaksi — lihat komentarnya di `finance.ts`.
 // ---------------------------------------------------------------------------
 
 interface AllocShare {
@@ -731,19 +749,16 @@ interface AllocShare {
   basisPoints: number;
 }
 
-interface ContractFact {
-  contractId: string;
-  clientId: string;
-  /** `contracts.jenis`: 'baru' | 'perpanjangan' | 'cross_sell'. */
-  jenis: string;
-  at: Date;
-  allocs: readonly AllocShare[];
-}
-
-interface MoneyFact {
-  clientId: string;
+/** Satu deal = satu transaksi penjualan. Uang dan bauran deal keluar dari baris yang SAMA. */
+interface DealFact {
+  /** `transactions.id` — identitas deal-nya, dan yang dihitung DISTINCT pada baris TOTAL. */
   transactionId: string;
-  /** `transactions.created_at` — momen uangnya lahir, bukan momen kontraknya. */
+  clientId: string;
+  /** Kontraknya kalau ada; `null` untuk closing yang semua barisnya one-off (sah, dan tetap penjualan). */
+  contractId: string | null;
+  /** 'baru' | 'perpanjangan' | 'cross_sell'. */
+  jenis: string;
+  /** `transactions.created_at` — momen uangnya lahir. */
   at: Date;
   totalAgreedValue: money.Money;
   totalDealCommission: money.Money;
@@ -753,32 +768,31 @@ interface MoneyFact {
 }
 
 interface DealFacts {
-  contracts: ContractFact[];
-  money: MoneyFact[];
+  deals: DealFact[];
 }
 
 async function loadDealFacts(sql: Queryable, ids: readonly string[]): Promise<DealFacts> {
-  if (ids.length === 0) return { contracts: [], money: [] };
+  if (ids.length === 0) return { deals: [] };
 
-  const contractRows = await sql<{ contract_id: string; client_id: string; jenis: string; at: Date }[]>`
-    select c.id as contract_id, c.client_id, c.jenis, c.created_at as at
-      from contracts c
+  // Satu baris per TRANSAKSI penjualan milik klien yang orang-orang ini punya
+  // alokasinya. `left join` ke `renewal_requests` dan `contracts` keduanya
+  // paling banyak satu baris: `renewal_requests` menulis `transaction_id`-nya
+  // sekali saat eksekusi, dan `uq_contracts_transaction` (migrasi
+  // 20261005010000) melarang satu transaksi dipakai dua kontrak. Jadi join ini
+  // tidak bisa mekar — kelas bug yang PR-5 tabrak di sisi Qualified.
+  const dealRows = await sql<{
+    transaction_id: string; client_id: string; contract_id: string | null; jenis: string; at: Date;
+  }[]>`
+    select t.id as transaction_id, t.client_id, ctr.id as contract_id,
+           coalesce(rr.jenis, ctr.jenis, 'baru') as jenis, t.created_at as at
+      from transactions t
+      left join renewal_requests rr on rr.transaction_id = t.id
+      left join contracts ctr on ctr.transaction_id = t.id
      where exists (select 1 from client_sales_allocations a
-                    where a.client_id = c.client_id and a.salesperson_id = any(${ids}))`;
+                    where a.client_id = t.client_id and a.salesperson_id = any(${[...ids]}))
+       and (rr.jenis is null or rr.jenis <> ${RENEWAL_JENIS_BAYAR_KOMISI})`;
 
-  // Uang: satu baris per KLIEN, bukan per kontrak. Pagar `exists (contracts)`
-  // dipertahankan supaya himpunan klien yang menyumbang uang PERSIS sama
-  // dengan sebelumnya — perubahan di sini adalah de-duplikasi, bukan
-  // pelebaran cakupan.
-  const moneyRows = await sql<{ client_id: string; transaction_id: string; at: Date }[]>`
-    select cl.id as client_id, t.id as transaction_id, t.created_at as at
-      from clients cl
-      join transactions t on t.id = cl.transaction_id
-     where exists (select 1 from client_sales_allocations a
-                    where a.client_id = cl.id and a.salesperson_id = any(${ids}))
-       and exists (select 1 from contracts c where c.client_id = cl.id)`;
-
-  const clientIds = [...new Set([...contractRows.map((c) => c.client_id), ...moneyRows.map((m) => m.client_id)])];
+  const clientIds = [...new Set(dealRows.map((d) => d.client_id))];
   const allocRows = clientIds.length === 0 ? [] : await sql<{ client_id: string; salesperson_id: string; basis_points: number }[]>`
     select client_id, salesperson_id, basis_points from client_sales_allocations where client_id = any(${clientIds})`;
   const allocByClient = new Map<string, AllocShare[]>();
@@ -788,26 +802,27 @@ async function loadDealFacts(sql: Queryable, ids: readonly string[]): Promise<De
     allocByClient.set(a.client_id, list);
   }
 
-  // P2 §7 — one batch of 4 queries instead of 4 queries × N transactions.
-  const achByTxn = await commissionAchievementBatch(sql, [...new Set(moneyRows.map((m) => m.transaction_id))]);
+  // P2 §7 — one batch of queries instead of one round per transaction.
+  const achByTxn = await commissionAchievementBatch(sql, dealRows.map((d) => d.transaction_id));
 
   return {
-    contracts: contractRows.map((c) => ({
-      contractId: c.contract_id, clientId: c.client_id, jenis: c.jenis, at: c.at,
-      allocs: allocByClient.get(c.client_id) ?? [],
-    })),
-    money: moneyRows.flatMap((m) => {
-      const ach = achByTxn.get(m.transaction_id);
-      if (ach === undefined) return [];
-      return [{
-        clientId: m.client_id,
-        transactionId: m.transaction_id,
-        at: m.at,
-        totalAgreedValue: money.parse(ach.totalAgreedValue),
-        totalDealCommission: money.parse(ach.totalDealCommission),
-        recognized: new Map(ach.shares.map((sh) => [sh.salespersonId, money.parse(sh.recognizedCommission)])),
-        allocs: allocByClient.get(m.client_id) ?? [],
-      }];
+    deals: dealRows.map((d) => {
+      const ach = achByTxn.get(d.transaction_id);
+      return {
+        transactionId: d.transaction_id,
+        clientId: d.client_id,
+        contractId: d.contract_id,
+        jenis: d.jenis,
+        at: d.at,
+        // `ach` tidak pernah hilang — idnya berasal dari `transactions` itu
+        // sendiri. Nol eksplisit, bukan baris yang dibuang: sebuah deal yang
+        // menghilang dari bauran karena komisinya tidak terbaca adalah bug yang
+        // jauh lebih sulit dilihat daripada satu kolom uang bernilai nol.
+        totalAgreedValue: ach === undefined ? 0n : money.parse(ach.totalAgreedValue),
+        totalDealCommission: ach === undefined ? 0n : money.parse(ach.totalDealCommission),
+        recognized: new Map((ach?.shares ?? []).map((sh) => [sh.salespersonId, money.parse(sh.recognizedCommission)])),
+        allocs: allocByClient.get(d.client_id) ?? [],
+      };
     }),
   };
 }
@@ -1197,48 +1212,39 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
   };
 
   // Himpunan (bukan penjumlahan) — inilah yang membuat baris TOTAL benar
-  // untuk deal yang dijual berdua.
-  const distinctContracts = new Set<string>();
+  // untuk deal yang dijual berdua. Unitnya transaksi: satu klien yang closing
+  // lalu diperpanjang adalah DUA deal, dan tetap SATU klien.
+  const distinctDeals = new Set<string>();
   const distinctClients = new Set<string>();
-
-  for (const c of facts.contracts) {
-    if (!inPeriod(f.period, c.at)) continue;
-    let counted = false;
-    for (const alloc of c.allocs) {
-      if (!idSet.has(alloc.salespersonId)) continue;
-      const b = bucket(alloc.salespersonId);
-      const frac = alloc.basisPoints / 10000;
-      if (c.jenis === 'baru') b.baru += frac;
-      else if (c.jenis === 'perpanjangan') b.perpanjangan += frac;
-      else if (c.jenis === 'cross_sell') b.crossSell += frac;
-      b.totalDeal += 1;
-      counted = true;
-    }
-    if (counted) {
-      distinctContracts.add(c.contractId);
-      distinctClients.add(c.clientId);
-    }
-  }
 
   let totalOmzet = 0n;
   let totalKomisiKontrak = 0n;
   let totalKomisiDiakui = 0n;
-  const clientsInPeriod = new Set<string>();
-  for (const m of facts.money) {
-    if (!inPeriod(f.period, m.at)) continue;
-    clientsInPeriod.add(m.clientId);
-    for (const alloc of m.allocs) {
+  for (const d of facts.deals) {
+    if (!inPeriod(f.period, d.at)) continue;
+    let counted = false;
+    for (const alloc of d.allocs) {
       if (!idSet.has(alloc.salespersonId)) continue;
       const b = bucket(alloc.salespersonId);
-      const omzet = money.proRata(m.totalAgreedValue, BigInt(alloc.basisPoints), 10000n);
-      const komisiKontrak = money.proRata(m.totalDealCommission, BigInt(alloc.basisPoints), 10000n);
-      const komisiDiakui = m.recognized.get(alloc.salespersonId) ?? 0n;
+      const frac = alloc.basisPoints / 10000;
+      if (d.jenis === 'baru') b.baru += frac;
+      else if (d.jenis === 'perpanjangan') b.perpanjangan += frac;
+      else if (d.jenis === 'cross_sell') b.crossSell += frac;
+      b.totalDeal += 1;
+      const omzet = money.proRata(d.totalAgreedValue, BigInt(alloc.basisPoints), 10000n);
+      const komisiKontrak = money.proRata(d.totalDealCommission, BigInt(alloc.basisPoints), 10000n);
+      const komisiDiakui = d.recognized.get(alloc.salespersonId) ?? 0n;
       b.omzet += omzet;
       b.komisiKontrak += komisiKontrak;
       b.komisiDiakui += komisiDiakui;
       totalOmzet += omzet;
       totalKomisiKontrak += komisiKontrak;
       totalKomisiDiakui += komisiDiakui;
+      counted = true;
+    }
+    if (counted) {
+      distinctDeals.add(d.transactionId);
+      distinctClients.add(d.clientId);
     }
   }
 
@@ -1263,13 +1269,13 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
     };
   }).sort((a, b) => money.parse(b.omzet) > money.parse(a.omzet) ? 1 : money.parse(b.omzet) < money.parse(a.omzet) ? -1 : a.nama.localeCompare(b.nama));
 
-  const services = await serviceRecap(sql, [...clientsInPeriod]);
+  const services = await serviceRecap(sql, [...distinctClients]);
 
   return {
     rows,
     total: {
       salespersonCount: rows.length,
-      totalDeal: distinctContracts.size,
+      totalDeal: distinctDeals.size,
       klienCount: distinctClients.size,
       omzet: money.decimal(totalOmzet),
       omzetIdr: money.format(totalOmzet),

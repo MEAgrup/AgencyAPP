@@ -5,10 +5,13 @@
  * `?from=&to=` ("YYYY-MM", inklusif) mempersempit; keduanya boleh diabaikan
  * untuk seluruh riwayat.
  *
- * PERMISSION — `adopsi.canViewAdopsi`: **OD atau Director saja**. Ini jejak
- * pemakaian per-orang, dan pemilik menyatakan ini "indikator adaptasi tim,
- * BUKAN komponen reward" — membukanya ke atasan langsung menjadikannya alat
- * pengawasan, yaitu hal yang ia katakan ini bukan. Lihat kepala `adopsi.ts`.
+ * PERMISSION — `adopsi.canViewAdopsi`: OD/Director (seluruh agensi) atau lead
+ * divisi (divisinya sendiri saja, disaring di `adopsiReport` lewat
+ * `adopsiScopeFor`). Ketokan pemilik 2026-09-11, `PR4-SIAPA-BOLEH-LIHAT`.
+ *
+ * Gerbang di rute ini sengaja hanya menjawab BOLEH/TIDAK; CAKUPANNYA diputuskan
+ * satu kali di domain. Menyalinnya ke sini berarti dua tempat yang bisa
+ * berselisih, dan yang kalah adalah yang tidak diuji. Lihat kepala `adopsi.ts`.
  *
  * ── Kenapa `db()` dan BUKAN `readAsActor` ────────────────────────────────
  *

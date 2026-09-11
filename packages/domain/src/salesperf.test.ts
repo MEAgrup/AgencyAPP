@@ -405,33 +405,37 @@ describeDb('bySalesperson (Kinerja Sales)', () => {
   });
 });
 
-describeDb('uang milik TRANSAKSI, bukan milik kontrak — regresi penggelembungan omzet', () => {
+describeDb('satu deal = satu TRANSAKSI — regresi penggelembungan DAN penyusutan omzet', () => {
   /**
-   * BUG YANG DIJAGA TES INI (dibuktikan dengan probe sebelum ditulis,
-   * 2026-09-10). `gather` dulu membaca satu baris gabungan `clients ⋈
-   * contracts` dan menambahkan uang klien SEKALI PER BARIS. Klien yang pernah
-   * diperpanjang punya DUA kontrak, tapi `clients.transaction_id` hanya
-   * ditulis sekali oleh `sales.close()` — `renewal.eksekusi` sengaja tidak
-   * menyentuhnya. Jadi kedua baris membawa transaksi yang SAMA dan omzet
-   * klien itu tercatat dua kali.
+   * DUA bug uang dijaga blok ini, arahnya berlawanan, dan keduanya sudah
+   * pernah hidup di fungsi yang sama.
    *
-   * Probe-nya: satu klien Rp 10.000.000 dengan satu kontrak ⇒ `omzet
-   * 10.000.000,00`; menambahkan satu kontrak `perpanjangan` untuk klien yang
-   * sama — TANPA menyentuh uangnya sama sekali — menaikkannya jadi
-   * `20.000.000,00`. Tanpa galat, tanpa baris ganda di layar.
+   * 1. PENGGELEMBUNGAN (ditutup 2026-09-10). `gather` dulu membaca satu baris
+   *    gabungan `clients ⋈ contracts` dan menambahkan uang klien SEKALI PER
+   *    BARIS. Klien yang diperpanjang punya DUA kontrak tapi satu
+   *    `clients.transaction_id` — jadi omzetnya tercatat dua kali. Probe-nya:
+   *    satu klien Rp 10.000.000 dengan satu kontrak menghasilkan
+   *    `10.000.000,00`; menambah satu kontrak `perpanjangan` TANPA menyentuh
+   *    uangnya menaikkannya jadi `20.000.000,00`.
    *
-   * Ia bertahan karena hampir setiap fixture punya SATU kontrak, dan karena
-   * filter satu-bulan memisahkan kedua kontrak ke bucket berbeda sehingga tiap
-   * bulan terlihat benar. Yang menggelembung justru tampilan default halaman
-   * ini — yang tanpa filter periode.
+   * 2. PENYUSUTAN (ditutup 2026-09-11, PR3-RNW-TRX). Sesudah (1), uang hanya
+   *    dihitung lewat `clients.transaction_id` DAN hanya untuk klien yang
+   *    kebetulan punya baris `contracts`. Akibatnya transaksi perpanjangan
+   *    tidak terhitung sama sekali, dan closing yang semua barisnya one-off —
+   *    yang memang tidak melahirkan kontrak — uangnya hilang seluruhnya.
+   *    Diukur di live: Rp 151.075.000 terlapor dari Rp 516.307.615 nyata.
    *
-   * Tes ini memakai `period: null` DENGAN SENGAJA: itulah satu-satunya bentuk
-   * kueri yang memperlihatkannya.
+   * Unitnya sekarang TRANSAKSI. Tiap tes di bawah menjaga satu arah, dan
+   * semuanya memakai `period: null` DENGAN SENGAJA: hanya tampilan tanpa
+   * filter periode yang memperlihatkan keduanya.
    */
   const CTR_PERPANJANGAN = 'CTR-ZZSP-RNW1';
+  const TRX_PERPANJANGAN = 'TRX-ZZSP-RNW1';
+  const SVC_PERPANJANGAN = 'SVC-ZZSP-RNW1';
+  const RNW = 'RNW-ZZSP-0001';
+  const f = { period: null, salespersonId: SLS1, source: null, campaignId: null };
 
-  it('menambah kontrak perpanjangan TIDAK mengubah omzet — jumlah deal-lah yang naik', async () => {
-    const f = { period: null, salespersonId: SLS1, source: null, campaignId: null };
+  it('kontrak TANPA transaksi bukan deal — nol gerak di setiap kolom', async () => {
     const before = await bySalesperson(sql, director('ZZSP-DIR'), f);
     expect(before).toHaveLength(1);
 
@@ -440,20 +444,106 @@ describeDb('uang milik TRANSAKSI, bukan milik kontrak — regresi penggelembunga
       values (${CTR_PERPANJANGAN}, ${CLI}, 3, '2026-09-15', '2026-12-15', 'perpanjangan', '2026-09-15 02:00:00+00', ${SLS1})`;
     try {
       const after = await bySalesperson(sql, director('ZZSP-DIR'), f);
+      // INILAH assertion anti-penggelembungan. Kalau omzet memerah dengan
+      // angka DUA KALI LIPAT, uang sudah kembali di-bucket per kontrak.
+      expect(after).toEqual(before);
+    } finally {
+      await sql`delete from contracts where id = ${CTR_PERPANJANGAN}`;
+    }
+  });
+
+  it('perpanjangan dengan transaksinya sendiri: omzet naik TEPAT sekali, dan komisi TIDAK ikut berlipat', async () => {
+    const before = await bySalesperson(sql, director('ZZSP-DIR'), f);
+    expect(before).toHaveLength(1);
+
+    await sql`
+      insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_at, created_by)
+      values (${TRX_PERPANJANGAN}, ${CLI}, '[Lunas]', '6000000.00', '[Menunggu Verifikasi]', '2026-09-15 02:00:00+00', ${SLS1})`;
+    await sql`
+      insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, transaction_id, created_at, created_by)
+      values (${CTR_PERPANJANGAN}, ${CLI}, 3, '2026-09-15', '2026-12-15', 'perpanjangan', ${TRX_PERPANJANGAN}, '2026-09-15 02:00:00+00', ${SLS1})`;
+    await sql`
+      insert into services (id, client_id, contract_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values (${SVC_PERPANJANGAN}, ${CLI}, ${CTR_PERPANJANGAN}, 'MSV-ZZSP', 1, 'ZZSP Service', '6000000.00',
+              '10% of standard price', '[Ongoing]', ${SLS1})`;
+    try {
+      const after = await bySalesperson(sql, director('ZZSP-DIR'), f);
       expect(after).toHaveLength(1);
 
-      // INILAH assertion-nya. Kalau ia memerah dengan angka DUA KALI LIPAT,
-      // uang sudah kembali di-bucket per kontrak.
-      expect(after[0].omzet).toBe(before[0].omzet);
-      expect(after[0].komisiKontrak).toBe(before[0].komisiKontrak);
+      // Uang perpanjangan terhitung — TEPAT sekali. Sebelum PR3-RNW-TRX
+      // angka ini tidak bergerak sama sekali: Rp 6.000.000 penjualan nyata
+      // yang tidak bisa ditemukan siapa pun, tanpa galat di mana pun.
+      expect(after[0].omzet).toBe('16000000.00');
+      expect(Number(after[0].omzet)).toBe(Number(before[0].omzet) + 6_000_000);
+
+      // Dan INILAH penjaga komisinya. `commissionAchievement` menghitung
+      // komisi satu transaksi sebagai Σ komisi seluruh Service KLIENNYA —
+      // dengan dua transaksi, menjumlahkan keduanya melaporkan Rp 3.200.000
+      // (1.600.000 dua kali) alih-alih Rp 1.600.000. `finance.dealServices`
+      // yang mencegahnya, dengan memetakan tiap Service ke tepat satu deal.
+      expect(after[0].komisiKontrak).toBe('1600000.00');
+
+      // Transaksi perpanjangannya belum diverifikasi ⇒ nol komisi DIAKUI
+      // tambahan. Komisi diakui bergerak oleh verifikasi Finance, bukan oleh
+      // lahirnya kesepakatan.
       expect(after[0].komisiDiakui).toBe(before[0].komisiDiakui);
 
-      // Dan yang MEMANG milik kontrak tetap bergerak: perpanjangan adalah
-      // deal kedua, jadi bauran jenis dan jumlah deal-nya naik satu.
+      // Bauran deal ikut bergerak: perpanjangan adalah deal KEDUA.
       expect(Number(after[0].klienPerpanjangan)).toBe(Number(before[0].klienPerpanjangan) + 1);
       expect(after[0].totalDeal).toBe(before[0].totalDeal + 1);
     } finally {
+      await sql`delete from services where id = ${SVC_PERPANJANGAN}`;
       await sql`delete from contracts where id = ${CTR_PERPANJANGAN}`;
+      await sql`delete from transactions where id = ${TRX_PERPANJANGAN}`;
+    }
+  });
+
+  it('tagihan komisi (bayar_komisi) BUKAN penjualan — transaksinya dikecualikan', async () => {
+    const before = await bySalesperson(sql, director('ZZSP-DIR'), f);
+
+    await sql`
+      insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_at, created_by)
+      values (${TRX_PERPANJANGAN}, ${CLI}, '[Lunas]', '6000000.00', '[Menunggu Verifikasi]', '2026-09-15 02:00:00+00', ${SLS1})`;
+    // `ck_rnw_jenis` menolak 'bayar_komisi' pada tabel aslinya (FS-4 menambah
+    // nilainya lewat migrasi 20260925020000), jadi baris ini memang sah.
+    await sql`
+      insert into renewal_requests (id, client_id, jenis, proposed_by, status, transaction_id, created_by)
+      values (${RNW}, ${CLI}, 'bayar_komisi', ${SLS1}, 'Executed', ${TRX_PERPANJANGAN}, ${SLS1})`;
+    try {
+      const after = await bySalesperson(sql, director('ZZSP-DIR'), f);
+      // Ia tagihan atas penjualan yang SUDAH terjadi. Menghitungnya sebagai
+      // penjualan baru berarti melaporkan uang yang sama dua kali — dan
+      // pengecualiannya dikenali lewat `renewal_requests.jenis`, BUKAN lewat
+      // ada-tidaknya kontrak.
+      expect(after).toEqual(before);
+    } finally {
+      await sql`delete from renewal_requests where id = ${RNW}`;
+      await sql`delete from transactions where id = ${TRX_PERPANJANGAN}`;
+    }
+  });
+
+  it('klien TANPA baris Kontrak tetap menyumbang omzet — lubang Rp 359 juta di live', async () => {
+    const before = await bySalesperson(sql, director('ZZSP-DIR'), f);
+    expect(Number(before[0].omzet)).toBeGreaterThan(0);
+
+    // Closing yang semua barisnya one-off tidak melahirkan kontrak sama
+    // sekali, dan itu SAH. Sampai PR3-RNW-TRX, pagar `exists (contracts)`
+    // membuat seluruh uangnya menghilang — 16 dari 25 klien live.
+    await sql`delete from contracts where id = ${CTR}`;
+    try {
+      const after = await bySalesperson(sql, director('ZZSP-DIR'), f);
+      expect(after[0].omzet).toBe(before[0].omzet);
+      expect(after[0].komisiKontrak).toBe(before[0].komisiKontrak);
+      expect(after[0].komisiDiakui).toBe(before[0].komisiDiakui);
+      // Deal-nya juga tetap terhitung, dan tetap 'baru': sebuah transaksi
+      // closing SELALU deal pertama kliennya.
+      expect(after[0].totalDeal).toBe(before[0].totalDeal);
+      expect(after[0].klienBaru).toBe(before[0].klienBaru);
+    } finally {
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_at, created_by)
+        values (${CTR}, ${CLI}, 3, '2026-06-15', '2026-09-15', 'baru', '2026-06-15 02:00:00+00', ${SLS1})`;
     }
   });
 });

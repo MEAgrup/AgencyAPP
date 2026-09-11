@@ -60,16 +60,9 @@ const od = sign({ employeeId: 'ZZAD-OD', division: 'Management', level: 'staff',
 const director = sign({ employeeId: 'ZZAD-DIR', division: 'Management', level: 'staff', director: true });
 
 describe('GET /adopsi — matriks izin (tanpa DB)', () => {
-  it('lead divisi -> 403, termasuk lead HR', async () => {
-    // Sempit dengan SENGAJA. Pemilik: "indikator adaptasi tim ke sistem baru —
-    // BUKAN komponen reward". Lead HR ikut ditolak walau ia mengelola roster:
-    // mengelola siapa yang bekerja bukan hal yang sama dengan melihat berapa
-    // jam tiap orang membuka aplikasi.
-    expect((await GET(get(salesLead))).status).toBe(403);
-    expect((await GET(get(hrLead))).status).toBe(403);
-  });
-
-  it('staff -> 403', async () => {
+  it('staff -> 403, di divisi mana pun', async () => {
+    // Batas BAWAHNYA, dan ia tidak bergerak oleh ketokan 2026-09-11: yang
+    // dilebarkan adalah lead divisi, bukan setiap orang.
     expect((await GET(get(salesStaff))).status).toBe(403);
   });
 
@@ -121,6 +114,26 @@ describeDb('POST /adopsi/page-view + GET /adopsi — DB sungguhan', () => {
     expect(rows[0].path).toBe('/');
     expect(rows[0].nav_href).toBeNull();
     expect(rows[0].nav_total).toBe(0);
+  });
+
+  it('lead divisi membaca laporannya — 200, dan HANYA barisnya divisinya', async () => {
+    // Ketokan pemilik 2026-09-11 (`PR4-SIAPA-BOLEH-LIHAT`). Rutenya hanya
+    // memutuskan BOLEH; cakupannya diputuskan `adopsi.adopsiScopeFor` dan
+    // diuji arm-for-arm di `adopsi.test.ts`. Yang dijaga DI SINI adalah bahwa
+    // rutenya benar-benar meneruskan aktornya, bukan aktor baca-semua.
+    //
+    // Fixture di atas menulis baris untuk EMP-0001 (Sales · staff), jadi Head
+    // Sales harus melihatnya dan lead HR tidak.
+    const sales = await GET(get(salesLead));
+    expect(sales.status).toBe(200);
+    const bodySales = await sales.json() as { data: { rows: { employee_id: string; role: string }[] } };
+    expect(bodySales.data.rows.some((r) => r.employee_id === 'EMP-0001')).toBe(true);
+    expect(bodySales.data.rows.every((r) => r.role.startsWith('Sales'))).toBe(true);
+
+    const hr = await GET(get(hrLead));
+    expect(hr.status).toBe(200);
+    const bodyHr = await hr.json() as { data: { rows: { employee_id: string }[] } };
+    expect(bodyHr.data.rows.some((r) => r.employee_id === 'EMP-0001')).toBe(false);
   });
 
   it('OD dan Director membaca laporannya', async () => {

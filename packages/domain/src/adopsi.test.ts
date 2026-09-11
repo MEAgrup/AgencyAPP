@@ -15,6 +15,7 @@ import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import {
   adopsiReport,
+  adopsiScopeFor,
   canRecordPageView,
   canViewAdopsi,
   MSG_FORBIDDEN,
@@ -34,19 +35,27 @@ const director = (id: string): Actor => ({ employeeId: id, role: permission.make
 // Unit.
 // ===========================================================================
 
-describe('canViewAdopsi — sempit dengan sengaja', () => {
-  it('OD dan Director saja; lead divisi TIDAK', () => {
+describe('canViewAdopsi / adopsiScopeFor — berbatas cakupan (ketokan pemilik 2026-09-11)', () => {
+  it('OD/Director seluruh agensi; lead divisi HANYA divisinya; staff tidak sama sekali', () => {
+    expect(adopsiScopeFor(od('O'))).toEqual({ division: null });
+    expect(adopsiScopeFor(director('D'))).toEqual({ division: null });
+
+    // INILAH batas atasnya, dan itu yang harus tetap memerah kalau suatu hari
+    // seorang lead bisa membaca seluruh agensi. Ketokan pemilik
+    // (`PR4-SIAPA-BOLEH-LIHAT`) menyebut "divisinya sendiri" — bukan semuanya.
+    expect(adopsiScopeFor(lead('L'))).toEqual({ division: 'Sales' });
+    expect(adopsiScopeFor(lead('LH', 'HR'))).toEqual({ division: 'HR' });
+
+    // Staff tidak pernah, di divisi mana pun.
+    expect(adopsiScopeFor(staff('S'))).toBeNull();
+    // Karyawan yang belum ter-map `role_mappings` bukan lead divisi mana pun.
+    expect(adopsiScopeFor(lead('LX', ''))).toBeNull();
+
     expect(canViewAdopsi(od('O'))).toBe(true);
     expect(canViewAdopsi(director('D'))).toBe(true);
-    // INI assertion-nya, bukan kelalaian. Pemilik: "indikator adaptasi tim ke
-    // sistem baru — BUKAN komponen reward". Memberi lead akses ke jam
-    // pemakaian anak buahnya menjadikannya alat pengawasan, yaitu hal yang ia
-    // katakan ini bukan. Kalau baris ini suatu hari dibalik, kalimat pemilik
-    // itulah yang harus dibantah lebih dulu — dan perluasannya tidak bisa
-    // ditarik kembali, karena datanya sudah dilihat.
-    expect(canViewAdopsi(lead('L'))).toBe(false);
-    expect(canViewAdopsi(lead('LH', 'HR'))).toBe(false);
+    expect(canViewAdopsi(lead('L'))).toBe(true);
     expect(canViewAdopsi(staff('S'))).toBe(false);
+    expect(canViewAdopsi(lead('LX', ''))).toBe(false);
   });
 });
 
@@ -180,12 +189,45 @@ describeDb('recordPageView + adopsiReport', () => {
       .rejects.toThrow(MSG_FORBIDDEN);
   });
 
-  it('laporan: hanya OD/Director; lead dan staff ditolak', async () => {
+  it('laporan: OD/Director boleh; staff tetap ditolak', async () => {
     const f = { from: null, to: null };
-    await expect(adopsiReport(sql, lead('ZZAD-LEAD'), f)).rejects.toThrow(MSG_FORBIDDEN);
     await expect(adopsiReport(sql, staff('ZZAD-STAFF'), f)).rejects.toThrow(MSG_FORBIDDEN);
     const r = await adopsiReport(sql, od('ZZAD-OD'), f);
     expect(r.rows.length).toBeGreaterThan(0);
+  });
+
+  it('lead divisi melihat divisinya SAJA — bukan seluruh agensi', async () => {
+    // Fixture sendiri, di bulan sendiri (2026-03 — 05 dan 07 sudah dipakai tes
+    // lain di berkas ini), supaya tes ini tidak bergantung pada urutan `it`.
+    // EMP-0001 = Sales · staff, EMP-0002 = Account · staff (seed Alpha Digital).
+    const at = (menit: number): string => new Date(Date.UTC(2026, 2, 12, 1, menit, 0)).toISOString();
+    await sql`
+      insert into page_views (employee_id, path, nav_href, nav_total, occurred_at) values
+        (${EMP}, '/leads', '/leads', 10, ${at(0)}),
+        (${EMP2}, '/clients', '/clients', 10, ${at(5)})`;
+    const f = { from: '2026-03', to: '2026-03' };
+
+    const semua = await adopsiReport(sql, director('ZZAD-DIR'), f);
+    expect(semua.rows.some((x) => x.employeeId === EMP)).toBe(true);
+    expect(semua.rows.some((x) => x.employeeId === EMP2)).toBe(true);
+
+    // Seorang Head Sales harus melihat yang pertama dan TIDAK yang kedua;
+    // kalau keduanya muncul, cakupannya bocor.
+    const headSales = await adopsiReport(sql, lead('ZZAD-LEAD', 'Sales'), f);
+    expect(headSales.rows.some((x) => x.employeeId === EMP)).toBe(true);
+    expect(headSales.rows.some((x) => x.employeeId === EMP2)).toBe(false);
+    expect(headSales.rows.every((x) => x.role.startsWith('Sales'))).toBe(true);
+
+    // Dan dari sisi seberangnya, supaya tesnya tidak hijau hanya karena
+    // fixture-nya kebetulan Sales semua.
+    const headAccount = await adopsiReport(sql, lead('ZZAD-LEAD2', 'Account'), f);
+    expect(headAccount.rows.some((x) => x.employeeId === EMP2)).toBe(true);
+    expect(headAccount.rows.some((x) => x.employeeId === EMP)).toBe(false);
+
+    // Divisi tanpa satu pun pemakai menjawab daftar kosong, bukan galat — dan
+    // TIDAK diam-diam jatuh ke "semua".
+    const headKosong = await adopsiReport(sql, lead('ZZAD-LEAD3', 'Vendor'), f);
+    expect(headKosong.rows).toEqual([]);
   });
 
   it('laporan: sesi, jam, page view, dan cakupan fitur dihitung per (bulan, anggota)', async () => {

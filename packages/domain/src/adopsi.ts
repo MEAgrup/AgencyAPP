@@ -18,10 +18,15 @@
  *     (M14), nol kontribusi ke Health/Speed Score, nol notifikasi. Angka yang
  *     mengalir ke penilaian akan mengubah perilaku yang diukurnya, dan yang
  *     diukur di sini justru "apakah sistemnya kepakai".
- *  2. **Gerbangnya OD/Director saja** (lihat `canViewAdopsi`). Jejak pemakaian
- *     per-orang adalah data yang berdekatan dengan HR; membukanya ke atasan
- *     langsung menjadikannya alat pengawasan, yaitu hal yang pemilik katakan
- *     ini bukan.
+ *  2. **Gerbangnya berbatas cakupan** (lihat `adopsiScopeFor`): OD/Director
+ *     seluruh agensi, lead divisi HANYA divisinya sendiri. Jejak pemakaian
+ *     per-orang adalah data yang berdekatan dengan HR, jadi sampai 2026-09-11
+ *     modul ini OD/Director saja — bacaan tersempit, dipilih karena
+ *     melebarkannya aditif sedangkan mencabutnya tidak. Pemilik lalu mengetok
+ *     pelebarannya (`PR4-SIAPA-BOLEH-LIHAT`). Yang TIDAK berubah: butir 1 di
+ *     atas. Seorang lead melihat jam anak buahnya tanpa peringkat, skor, atau
+ *     ambang apa pun — itulah yang menjaganya tetap indikator adaptasi dan
+ *     bukan alat penilaian.
  *  3. **Jam yang dilaporkan sengaja KURANG, tidak pernah dikarang** (lihat
  *     `SESSION_GAP_MINUTES`).
  *
@@ -94,21 +99,44 @@ const SESSION_GAP_MS = SESSION_GAP_MINUTES * 60 * 1000;
 // ---------------------------------------------------------------------------
 
 /**
- * canViewAdopsi: **OD atau Director saja** — lapisan baca-semua, dan berhenti
- * di situ.
+ * adopsiScopeFor: SIAPA yang boleh membaca, dan SEBERAPA JAUH.
  *
- * Ini interpretasi yang DICATAT (`DECISIONS.md` 2026-09-11), bukan yang
- * pemilik ketok: ia menyebut pembacanya sebagai "indikator adaptasi tim" tanpa
- * menamai peran. Yang dipilih adalah bacaan paling sempit yang tetap memenuhi
- * permintaannya, karena arah sebaliknya tidak simetris: memberi lead akses ke
- * jam pemakaian anak buahnya, lalu mencabutnya kembali, sudah terlambat —
- * datanya sudah dilihat. Melebarkannya nanti adalah perubahan aditif.
+ * `null` = tidak boleh sama sekali. `{ division: null }` = seluruh agensi
+ * (OD/Director). `{ division: 'Sales' }` = lead divisi itu, barisnya sendiri
+ * saja.
  *
- * Sengaja TIDAK memakai `permission.canReadAll` supaya perluasan apa pun pada
- * helper bersama itu tidak diam-diam membuka modul ini.
+ * Ketokan pemilik 2026-09-11 (`PR4-SIAPA-BOLEH-LIHAT`, DECISIONS.md): lead
+ * divisi boleh melihat DIVISINYA SENDIRI. Implementasi awal (OD/Director saja)
+ * sengaja dipilih sebagai bacaan tersempit justru karena arah ini tidak
+ * simetris — melebarkannya aditif, mencabutnya tidak, karena datanya sudah
+ * terlanjur dilihat. Sekarang pemiliknya sudah mengetok, jadi pelebarannya sah.
+ *
+ * Batas ATASNYA tetap dijaga dan itulah inti fungsi ini: seorang lead melihat
+ * anggota divisinya, BUKAN seluruh agensi. Sengaja TIDAK memakai
+ * `permission.canReadDivision` sebagai gerbang tunggal — helper itu menjawab
+ * "boleh baca divisi X?" dan akan menjawab `true` untuk divisi MANA PUN bagi
+ * OD/Director, sehingga cakupannya harus tetap diputuskan di sini.
  */
+export interface AdopsiScope {
+  /** `null` = seluruh agensi. Selain itu: hanya divisi ini. */
+  division: string | null;
+}
+
+export function adopsiScopeFor(actor: Actor): AdopsiScope | null {
+  if (actor.role.director || actor.role.od) return { division: null };
+  // `permission.isLead` menjawab `true` untuk Director di divisi MANA PUN —
+  // cabang Director sudah ditangani di atas, jadi yang tersisa di sini murni
+  // lead divisi. Divisi kosong (karyawan yang belum ter-map `role_mappings`)
+  // bukan lead divisi mana pun dan tidak mendapat apa-apa.
+  if (actor.role.division !== '' && permission.isLead(actor, actor.role.division)) {
+    return { division: actor.role.division };
+  }
+  return null;
+}
+
+/** canViewAdopsi: OD, Director, atau lead divisi mana pun. Cakupannya `adopsiScopeFor`. */
 export function canViewAdopsi(actor: Actor): boolean {
-  return actor.role.director || actor.role.od;
+  return adopsiScopeFor(actor) !== null;
 }
 
 /**
@@ -232,6 +260,8 @@ function toYyyymm(s: string): string {
 interface RosterEntry {
   nama: string;
   role: string;
+  /** Divisi CDPS mentah — dipakai menyaring cakupan lead. Label `role` sudah digabung dan tidak bisa dibandingkan. */
+  division: string;
 }
 
 /**
@@ -249,6 +279,7 @@ async function loadRoster(sql: Queryable): Promise<Map<string, RosterEntry>> {
   return new Map(rows.map((r) => [r.employee_id, {
     nama: r.nama,
     role: r.division === '' || r.division === null ? EM_DASH : `${r.division} · ${r.level}`,
+    division: r.division ?? '',
   }]));
 }
 
@@ -306,7 +337,8 @@ function jamOf(ms: number): string {
  * adalah "bulan ini bagaimana", bukan "sejak dulu siapa".
  */
 export async function adopsiReport(sql: Queryable, actor: Actor, f: AdopsiFilter): Promise<AdopsiReport> {
-  if (!canViewAdopsi(actor)) throw new ForbiddenError();
+  const scope = adopsiScopeFor(actor);
+  if (scope === null) throw new ForbiddenError();
 
   const rows = await sql<{ employee_id: string; nav_href: string | null; nav_total: number; occurred_at: Date }[]>`
     select employee_id, nav_href, nav_total, occurred_at
@@ -341,8 +373,13 @@ export async function adopsiReport(sql: Queryable, actor: Actor, f: AdopsiFilter
     const sep = key.lastIndexOf('|');
     const employeeId = key.slice(0, sep);
     const period = key.slice(sep + 1);
-    const { sessions, ms } = sessionize(b.views);
     const entry = roster.get(employeeId);
+    // Cakupan lead. Orang yang TIDAK ADA di roster (atau belum ter-map divisi)
+    // tidak bisa dibuktikan anggota divisi si lead, jadi ia tidak ditampilkan —
+    // `undefined` di sini berarti "tidak diketahui", dan menampilkannya berarti
+    // menebak. OD/Director (`division: null`) tetap melihat semuanya.
+    if (scope.division !== null && entry?.division !== scope.division) continue;
+    const { sessions, ms } = sessionize(b.views);
     const dibuka = b.hrefs.size;
     out.push({
       period,
