@@ -6,9 +6,16 @@ import { describe, expect, it } from 'vitest';
 import { canViewAdopsi, labelBulan } from './adopsi';
 
 describe('canViewAdopsi (cermin adopsi.canViewAdopsi)', () => {
-  it('OD atau Director saja', () => {
+  it('OD, Director, atau lead divisi — dan hanya membuka layarnya, tidak menyaring baris', () => {
     expect(canViewAdopsi({ od: true })).toBe(true);
     expect(canViewAdopsi({ director: true })).toBe(true);
+    // Ketokan pemilik 2026-09-11 (`PR4-SIAPA-BOLEH-LIHAT`). Cakupan barisnya —
+    // lead hanya melihat divisinya — diputuskan server, dan sengaja TIDAK
+    // dicerminkan di sini: dua penyaring berarti dua yang bisa berselisih.
+    expect(canViewAdopsi({ level: 'lead', division: 'Sales' })).toBe(true);
+    expect(canViewAdopsi({ level: 'lead', division: 'HR' })).toBe(true);
+    expect(canViewAdopsi({ level: 'staff', division: 'Sales' })).toBe(false);
+    expect(canViewAdopsi({ level: 'lead', division: '' })).toBe(false);
     expect(canViewAdopsi({})).toBe(false);
     expect(canViewAdopsi(null)).toBe(false);
   });

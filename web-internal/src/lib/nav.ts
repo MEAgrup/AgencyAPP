@@ -445,15 +445,15 @@ const ADMIN: NavNode[] = [
     access: (role) => Boolean(role.director || role.od),
   },
   // Adopsi Sistem (pemilik 2026-09-10): jam pemakaian, sesi, page view, dan
-  // cakupan fitur per anggota per bulan. Gerbangnya SEMPIT dengan sengaja —
-  // cermin `adopsi.canViewAdopsi` (OD atau Director saja), TIDAK termasuk lead
-  // divisi. Ini jejak pemakaian per-orang, dan pemilik menyatakan ia "indikator
-  // adaptasi tim, BUKAN komponen reward": memberikannya ke atasan langsung
-  // menjadikannya alat pengawasan, yaitu hal yang ia katakan ini bukan.
+  // cakupan fitur per anggota per bulan. Cermin `adopsi.canViewAdopsi` —
+  // OD/Director seluruh agensi, lead divisi HANYA divisinya (ketokan pemilik
+  // 2026-09-11, `PR4-SIAPA-BOLEH-LIHAT`). Menu ini cuma memutuskan apakah
+  // pintunya terlihat; penyaringan barisnya ada di server (`adopsiScopeFor`),
+  // dan itulah satu-satunya tempat cakupan diputuskan.
   {
     href: '/admin/adopsi',
     label: 'Adopsi Sistem',
-    access: (role) => Boolean(role.director || role.od),
+    access: (role) => Boolean(role.director || role.od) || (role.level === 'lead' && role.division !== ''),
   },
   // Kalender hari libur di balik setiap hitungan "hari kerja" (SLA Kelola Klien).
   // Gerbang yang sama dengan sisa bidang admin: Director menulis, OD membaca.

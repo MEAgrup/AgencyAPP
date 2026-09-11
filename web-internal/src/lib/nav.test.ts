@@ -968,14 +968,18 @@ describe('navFeatureOf / navTotalFor — penyedia angka cakupan fitur', () => {
 });
 
 describe('visibleNav — Adopsi Sistem', () => {
-  it('OD dan Director melihat menunya; lead divisi TIDAK, termasuk lead HR', () => {
-    // Cermin `adopsi.canViewAdopsi`. Ini jejak pemakaian per-orang, dan
-    // pemilik menyatakan ia "indikator adaptasi tim, BUKAN komponen reward" —
-    // memberikannya ke atasan langsung menjadikannya alat pengawasan.
+  it('OD, Director, dan lead divisi mana pun melihat menunya; staff tidak', () => {
+    // Cermin `adopsi.canViewAdopsi` sesudah ketokan pemilik 2026-09-11
+    // (`PR4-SIAPA-BOLEH-LIHAT`): lead divisi boleh, tapi hanya untuk DIVISINYA
+    // — dan penyaringan barisnya ada di server, bukan di menu ini.
     expect(hrefs(role('Sales', 'staff', { od: true }))).toContain('/admin/adopsi');
     expect(hrefs(role('Sales', 'staff', { director: true }))).toContain('/admin/adopsi');
-    expect(hrefs(role('Sales', 'lead'))).not.toContain('/admin/adopsi');
-    expect(hrefs(role('HR', 'lead'))).not.toContain('/admin/adopsi');
-    expect(hrefs(role('Finance', 'lead'))).not.toContain('/admin/adopsi');
+    expect(hrefs(role('Sales', 'lead'))).toContain('/admin/adopsi');
+    expect(hrefs(role('HR', 'lead'))).toContain('/admin/adopsi');
+    expect(hrefs(role('Finance', 'lead'))).toContain('/admin/adopsi');
+    // Batas bawahnya tetap: staff tidak pernah, dan lead tanpa divisi ter-map
+    // bukan lead divisi mana pun.
+    expect(hrefs(role('Sales', 'staff'))).not.toContain('/admin/adopsi');
+    expect(hrefs(role('', 'lead'))).not.toContain('/admin/adopsi');
   });
 });

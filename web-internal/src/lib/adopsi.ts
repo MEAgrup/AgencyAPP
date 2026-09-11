@@ -63,9 +63,16 @@ export interface AdopsiReport {
   mulai_tercatat: string | null; // "YYYY-MM-DD"
 }
 
-/** Cermin `adopsi.canViewAdopsi` — OD atau Director saja. Server tetap otoritasnya. */
-export function canViewAdopsi(role: { od?: boolean; director?: boolean } | null): boolean {
-  return !!(role?.od || role?.director);
+/**
+ * Cermin `adopsi.canViewAdopsi` — OD/Director, atau lead divisi mana pun
+ * (ketokan pemilik 2026-09-11, `PR4-SIAPA-BOLEH-LIHAT`). Server tetap
+ * otoritasnya, dan CAKUPAN barisnya — lead hanya melihat divisinya — diputuskan
+ * di sana saja (`adopsiScopeFor`). Fungsi ini hanya memutuskan apakah layarnya
+ * boleh dibuka; ia tidak pernah menyaring baris, justru supaya tidak ada
+ * penyaringan kedua yang bisa berselisih dengan server.
+ */
+export function canViewAdopsi(role: { od?: boolean; director?: boolean; level?: string; division?: string } | null): boolean {
+  return !!(role?.od || role?.director || (role?.level === 'lead' && role.division !== ''));
 }
 
 /** "202608" → "Agustus 2026". Bulan Indonesia, tanpa menyentuh core/bi.ts (yang bukan milik layar ini). */
