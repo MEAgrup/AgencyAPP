@@ -232,7 +232,6 @@ export function ownRowsOnly(actor: Actor): boolean {
 export interface KategoriRow {
   kode: string;
   nama: string;
-  subType: string | null;
   /** Pekerjaan berulang harian: dihitung sebagai volume, Speed Score N/A. */
   isStanding: boolean;
   /** SLA Target dalam JAM. null ⇒ Speed Score 'N/A' (bukan 0, bukan galat). */
@@ -248,6 +247,11 @@ export interface ScsTaskRow {
   kategoriNama: string;
   /** Disalin dari Kategori saat baca — ia yang menentukan Speed Score N/A. */
   kategoriIsStanding: boolean;
+  /**
+   * Label Sub Type BARIS INI (Gap B: "optional on the merged entity").
+   * null = tidak relevan untuk baris ini (posting-ops), BUKAN data yang hilang.
+   */
+  subType: string | null;
   judul: string;
   /** null = baris "all client" (lintas klien). BUKAN data yang hilang. */
   clientId: string | null;
@@ -296,7 +300,6 @@ export interface ScsPicSummaryRow {
 interface KategoriDbRow {
   kode: string;
   nama: string;
-  sub_type: string | null;
   is_standing: boolean;
   sla_jam: number | string | null;
   aktif: boolean;
@@ -307,7 +310,6 @@ function toKategori(r: KategoriDbRow): KategoriRow {
   return {
     kode: r.kode,
     nama: r.nama,
-    subType: r.sub_type,
     isStanding: r.is_standing,
     slaJam: r.sla_jam === null ? null : Number(r.sla_jam),
     aktif: r.aktif,
@@ -322,6 +324,7 @@ interface TaskDbRow {
   kategori_nama: string | null;
   kategori_is_standing: boolean | null;
   kategori_sla_jam: number | string | null;
+  sub_type: string | null;
   judul: string;
   client_id: string | null;
   client_name: string | null;
@@ -339,7 +342,7 @@ interface TaskDbRow {
 const TASK_COLS = `
   t.id, t.tanggal, t.kategori_kode, k.nama as kategori_nama,
   k.is_standing as kategori_is_standing, k.sla_jam as kategori_sla_jam,
-  t.judul, t.client_id, private.client_toko(t.client_id) as client_name, t.mendukung_divisi,
+  t.sub_type, t.judul, t.client_id, private.client_toko(t.client_id) as client_name, t.mendukung_divisi,
   t.assigned_pic, private.employee_display_name(t.assigned_pic) as pic_nama, t.target_qty, t.status,
   t.link_hasil, t.catatan, t.created_by, t.created_at`;
 
@@ -366,6 +369,7 @@ function toTaskRow(r: TaskDbRow): ScsTaskRow {
     kategoriKode: r.kategori_kode,
     kategoriNama: r.kategori_nama ?? '',
     kategoriIsStanding: r.kategori_is_standing === true,
+    subType: r.sub_type,
     judul: r.judul,
     clientId: r.client_id,
     clientName: r.client_name ?? null,
@@ -388,6 +392,11 @@ function toTaskRow(r: TaskDbRow): ScsTaskRow {
 export interface ScsTaskInput {
   tanggal: string;
   kategoriKode: string;
+  /**
+   * Label Sub Type — OPSIONAL, dan kosong adalah jawaban yang sah.
+   * '' dinormalkan ke null supaya "tidak relevan" punya SATU bentuk di DB.
+   */
+  subType: string | null;
   judul: string;
   /** null / '' ⇒ baris "all client". Sengaja diterima kosong. */
   clientId: string | null;
@@ -400,7 +409,6 @@ export interface ScsTaskInput {
 export interface KategoriInput {
   kode: string;
   nama: string;
-  subType: string | null;
   isStanding: boolean;
   slaJam: number | null;
   aktif: boolean;
@@ -416,6 +424,7 @@ function bersih(v: string | null | undefined): string {
 function validateTask(input: ScsTaskInput): ScsTaskInput {
   const tanggal = bersih(input.tanggal);
   const kategoriKode = bersih(input.kategoriKode);
+  const subType = bersih(input.subType);
   const judul = bersih(input.judul);
   const clientId = bersih(input.clientId);
   const mendukung = bersih(input.mendukungDivisi);
@@ -431,6 +440,9 @@ function validateTask(input: ScsTaskInput): ScsTaskInput {
   return {
     tanggal,
     kategoriKode,
+    // Sub Type kosong TIDAK ditolak: sumbernya menyebutnya *optional*,
+    // "left blank for posting-ops work". Ia dinormalkan ke null, bukan ''.
+    subType: subType === '' ? null : subType,
     judul,
     // '' dinormalkan ke null: baris "all client" harus punya SATU bentuk di DB,
     // bukan dua ('' dan null) yang lolos filter `is not null` secara berbeda.
@@ -445,7 +457,6 @@ function validateTask(input: ScsTaskInput): ScsTaskInput {
 function validateKategori(input: KategoriInput): KategoriInput {
   const kode = bersih(input.kode).toUpperCase();
   const nama = bersih(input.nama);
-  const subType = bersih(input.subType);
   if (kode === '' || nama === '') throw new ValidationError();
   if (!Number.isInteger(input.urutan) || input.urutan <= 0) throw new ValidationError();
   if (input.slaJam !== null && (!Number.isInteger(input.slaJam) || input.slaJam <= 0)) {
@@ -459,7 +470,6 @@ function validateKategori(input: KategoriInput): KategoriInput {
   }
   return {
     kode, nama,
-    subType: subType === '' ? null : subType,
     isStanding: input.isStanding,
     slaJam: input.slaJam,
     aktif: input.aktif,
@@ -474,7 +484,7 @@ function validateKategori(input: KategoriInput): KategoriInput {
  */
 async function ambilKategoriAktif(tx: Queryable, kode: string): Promise<KategoriRow> {
   const rows = await tx<KategoriDbRow[]>`
-    select kode, nama, sub_type, is_standing, sla_jam, aktif, urutan
+    select kode, nama, is_standing, sla_jam, aktif, urutan
       from scs_kategori where kode = ${kode}`;
   if (rows.length === 0) throw new ValidationError(MSG_KATEGORI_TIDAK_DIKENAL);
   const k = toKategori(rows[0]);
@@ -504,10 +514,10 @@ export async function listKategori(
   if (!canReadQueue(actor)) throw new ForbiddenError(MSG_BACA_FORBIDDEN);
   const rows = termasukNonaktif
     ? await sql<KategoriDbRow[]>`
-        select kode, nama, sub_type, is_standing, sla_jam, aktif, urutan
+        select kode, nama, is_standing, sla_jam, aktif, urutan
           from scs_kategori order by urutan, kode`
     : await sql<KategoriDbRow[]>`
-        select kode, nama, sub_type, is_standing, sla_jam, aktif, urutan
+        select kode, nama, is_standing, sla_jam, aktif, urutan
           from scs_kategori where aktif = true order by urutan, kode`;
   return rows.map(toKategori);
 }
@@ -521,14 +531,14 @@ export async function createKategori(
     const ada = await tx<{ kode: string }[]>`select kode from scs_kategori where kode = ${v.kode}`;
     if (ada.length > 0) throw new ValidationError(MSG_KATEGORI_SUDAH_ADA);
     await tx`
-      insert into scs_kategori (kode, nama, sub_type, is_standing, sla_jam, aktif, urutan, created_by)
-      values (${v.kode}, ${v.nama}, ${v.subType}, ${v.isStanding}, ${v.slaJam},
+      insert into scs_kategori (kode, nama, is_standing, sla_jam, aktif, urutan, created_by)
+      values (${v.kode}, ${v.nama}, ${v.isStanding}, ${v.slaJam},
               ${v.aktif}, ${v.urutan}, ${actor.employeeId})`;
     await executors(tx).audit.insertAudit({
       entityType: 'scs_kategori', entityId: v.kode, actorEmployeeId: actor.employeeId,
       action: 'kategori_created', beforeJson: null,
       afterJson: {
-        nama: v.nama, sub_type: v.subType, is_standing: v.isStanding,
+        nama: v.nama, is_standing: v.isStanding,
         sla_jam: v.slaJam, aktif: v.aktif, urutan: v.urutan,
       },
       createdBy: actor.employeeId,
@@ -557,24 +567,24 @@ export async function updateKategori(
   if (!canManageKategori(actor)) throw new ForbiddenError(MSG_KELOLA_KATEGORI_FORBIDDEN);
   return withTransaction(sql, async (tx) => {
     const rows = await tx<KategoriDbRow[]>`
-      select kode, nama, sub_type, is_standing, sla_jam, aktif, urutan
+      select kode, nama, is_standing, sla_jam, aktif, urutan
         from scs_kategori where kode = ${v.kode} for update`;
     if (rows.length === 0) throw new ValidationError(MSG_KATEGORI_TIDAK_DIKENAL);
     const before = toKategori(rows[0]);
     await tx`
       update scs_kategori
-         set nama = ${v.nama}, sub_type = ${v.subType}, is_standing = ${v.isStanding},
+         set nama = ${v.nama}, is_standing = ${v.isStanding},
              sla_jam = ${v.slaJam}, aktif = ${v.aktif}, urutan = ${v.urutan}
        where kode = ${v.kode}`;
     await executors(tx).audit.insertAudit({
       entityType: 'scs_kategori', entityId: v.kode, actorEmployeeId: actor.employeeId,
       action: 'kategori_updated',
       beforeJson: {
-        nama: before.nama, sub_type: before.subType, is_standing: before.isStanding,
+        nama: before.nama, is_standing: before.isStanding,
         sla_jam: before.slaJam, aktif: before.aktif, urutan: before.urutan,
       },
       afterJson: {
-        nama: v.nama, sub_type: v.subType, is_standing: v.isStanding,
+        nama: v.nama, is_standing: v.isStanding,
         sla_jam: v.slaJam, aktif: v.aktif, urutan: v.urutan,
       },
       createdBy: actor.employeeId,
@@ -631,17 +641,17 @@ export async function createScsTask(
     const ex = executors(tx);
     const id = await ident.nextId(ex.ident, PREFIX, now);
     await tx`
-      insert into scs_tasks (id, tanggal, kategori_kode, judul, client_id, mendukung_divisi,
-                             assigned_pic, target_qty, catatan, created_by)
-      values (${id}, ${v.tanggal}::date, ${v.kategoriKode}, ${v.judul}, ${v.clientId},
-              ${v.mendukungDivisi}, ${v.assignedPic}, ${v.targetQty},
+      insert into scs_tasks (id, tanggal, kategori_kode, sub_type, judul, client_id,
+                             mendukung_divisi, assigned_pic, target_qty, catatan, created_by)
+      values (${id}, ${v.tanggal}::date, ${v.kategoriKode}, ${v.subType}, ${v.judul},
+              ${v.clientId}, ${v.mendukungDivisi}, ${v.assignedPic}, ${v.targetQty},
               ${v.catatan ?? ''}, ${actor.employeeId})`;
     await ex.audit.insertAudit({
       entityType: ENTITY_TYPE, entityId: id, actorEmployeeId: actor.employeeId,
       action: 'scs_created', beforeJson: null,
       afterJson: {
-        tanggal: v.tanggal, kategori_kode: v.kategoriKode, judul: v.judul,
-        client_id: v.clientId, mendukung_divisi: v.mendukungDivisi,
+        tanggal: v.tanggal, kategori_kode: v.kategoriKode, sub_type: v.subType,
+        judul: v.judul, client_id: v.clientId, mendukung_divisi: v.mendukungDivisi,
         assigned_pic: v.assignedPic, target_qty: v.targetQty,
       },
       createdBy: actor.employeeId,
@@ -677,7 +687,7 @@ export async function updateScsTask(
     await tx`
       update scs_tasks
          set tanggal = ${v.tanggal}::date, kategori_kode = ${v.kategoriKode},
-             judul = ${v.judul}, client_id = ${v.clientId},
+             sub_type = ${v.subType}, judul = ${v.judul}, client_id = ${v.clientId},
              mendukung_divisi = ${v.mendukungDivisi}, assigned_pic = ${v.assignedPic},
              target_qty = ${v.targetQty}, catatan = ${v.catatan ?? ''}
        where id = ${id}`;
@@ -686,13 +696,13 @@ export async function updateScsTask(
       action: 'scs_updated',
       beforeJson: {
         tanggal: ymd(before.tanggal), kategori_kode: before.kategori_kode,
-        judul: before.judul, client_id: before.client_id,
+        sub_type: before.sub_type, judul: before.judul, client_id: before.client_id,
         mendukung_divisi: before.mendukung_divisi, assigned_pic: before.assigned_pic,
         target_qty: Number(before.target_qty),
       },
       afterJson: {
-        tanggal: v.tanggal, kategori_kode: v.kategoriKode, judul: v.judul,
-        client_id: v.clientId, mendukung_divisi: v.mendukungDivisi,
+        tanggal: v.tanggal, kategori_kode: v.kategoriKode, sub_type: v.subType,
+        judul: v.judul, client_id: v.clientId, mendukung_divisi: v.mendukungDivisi,
         assigned_pic: v.assignedPic, target_qty: v.targetQty,
       },
       createdBy: actor.employeeId,

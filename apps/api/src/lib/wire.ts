@@ -8470,7 +8470,6 @@ export function toUnavailabilityInput(b: Partial<UnavailabilityBody>): dailyops.
 export interface ScsKategoriWire {
   kode: string;
   nama: string;
-  sub_type: string | null;
   is_standing: boolean;
   sla_jam: number | null;
   aktif: boolean;
@@ -8481,7 +8480,6 @@ export function scsKategoriToWire(k: scs.KategoriRow): ScsKategoriWire {
   return {
     kode: k.kode,
     nama: k.nama,
-    sub_type: k.subType,
     is_standing: k.isStanding,
     sla_jam: k.slaJam,
     aktif: k.aktif,
@@ -8495,6 +8493,9 @@ export interface ScsTaskWire {
   kategori_kode: string;
   kategori_nama: string;
   kategori_is_standing: boolean;
+  // null = Sub Type tidak relevan untuk baris ini (posting-ops) — SAH, bukan
+  // hilang. Dikirim eksplisit `null`, tidak di-omit (kelas O43).
+  sub_type: string | null;
   judul: string;
   client_id: string | null;     // null = baris "all client" — SAH, bukan hilang
   client_name: string | null;
@@ -8520,6 +8521,7 @@ export function scsTaskToWire(r: scs.ScsTaskRow): ScsTaskWire {
     // pencarian di halaman akan gagal diam-diam untuk Kategori yang sudah
     // dinonaktifkan (yang tidak ikut di daftar picker).
     kategori_is_standing: r.kategoriIsStanding,
+    sub_type: r.subType,
     judul: r.judul,
     client_id: r.clientId,
     client_name: r.clientName,
@@ -8581,6 +8583,7 @@ export function scsPicSummaryToWire(r: scs.ScsPicSummaryRow): ScsPicSummaryWire 
 export interface ScsTaskBody {
   tanggal: string;
   kategori_kode: string;
+  sub_type: string | null;
   judul: string;
   client_id: string | null;
   mendukung_divisi: string | null;
@@ -8595,6 +8598,9 @@ export function toScsTaskInput(
   return {
     tanggal: b.tanggal ?? '',
     kategoriKode: b.kategori_kode ?? '',
+    // `?? null`, BUKAN `?? ''`: Sub Type yang tidak dikirim berarti "tidak
+    // relevan untuk baris ini", yang di modul ini adalah jawaban yang sah.
+    subType: b.sub_type ?? null,
     judul: b.judul ?? '',
     // `?? null` dan BUKAN `?? ''`: kunci yang tidak dikirim sama sekali berarti
     // "tidak ada klien", yang di modul ini adalah jawaban yang sah.
@@ -8611,7 +8617,6 @@ export function toScsTaskInput(
 export interface ScsKategoriBody {
   kode: string;
   nama: string;
-  sub_type: string | null;
   is_standing: boolean;
   sla_jam: number | null;
   aktif: boolean;
@@ -8632,7 +8637,6 @@ export function toScsKategoriInput(
   return {
     kode: b.kode ?? '',
     nama: b.nama ?? '',
-    subType: b.sub_type ?? null,
     isStanding: b.is_standing === true,
     slaJam: sla === null || sla === '' ? null : Number(sla),
     aktif: b.aktif !== false,

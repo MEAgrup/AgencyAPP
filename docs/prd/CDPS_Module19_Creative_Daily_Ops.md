@@ -464,15 +464,27 @@ Realisasi Gap B/G/I sesudah ketokan §12. Migrasi
    AM"*. Yang membedakan Brief SMO dari Brief Strategist karena itu adalah
    `mendukung_divisi` pada BARISNYA. Menandai Kategorinya standing akan membuat
    deliverable Brief Strategist yang sungguhan HILANG dari seri deliverable.
-7. **Baris beku begitu ia meninggalkan `[To Do]`.** Tanggal, Kategori, PIC,
-   target qty, dan klien tidak bisa disunting sesudahnya — Kategori membawa SLA
+7. **Baris beku begitu ia meninggalkan `[To Do]`.** Tanggal, Kategori, Sub Type,
+   PIC, target qty, dan klien tidak bisa disunting sesudahnya — Kategori membawa SLA
    yang dipakai menghitung Speed Score baris yang sedang dinilai. Sebelum itu ia
    bebas diperbaiki: baris SCS diketik cepat di awal hari dan salah ketik nyata
    harus bisa dibetulkan sebelum ada satu pun jejak pengerjaan. Ditegakkan DUA
    kali (pesan BI + trigger `scs_tasks_beku()`).
 8. **Taksonomi Kategori adalah DATA, bukan skema** (`M19-SCS-KATEGORI-DATA`).
    Hanya empat Kategori yang TERBUKTI di sumber yang di-seed; sisanya diisi lead
-   Creative lewat layar admin. `sub_type` sengaja teks bebas.
+   Creative lewat layar admin.
+   **`sub_type` BUKAN bagian dari taksonomi ini** — ia field BARIS
+   (`M19-SCS-SUBTYPE-GRAIN`, ketokan pemilik 2026-09-11 — opsi (a)). Gap B
+   menyebutnya *optional on the merged entity*, dan itulah yang membuat satu
+   baris `Brief` bisa `Brief Feed` sementara baris `Brief` lain `Brief Story` —
+   pembedaan yang justru jadi SYARAT digabungnya `Brief`/`Script`/`QC` jadi satu
+   Kategori masing-masing. Ia tetap **teks bebas**, bukan enum tertutup: delapan
+   label worksheet masih bergerak, jadi mengunci mereka di CHECK berarti satu
+   migrasi per koreksi label. Ejaan konsisten dibeli lewat **saran** di layar
+   (`SUB_TYPES` + `<datalist>`), bukan penegakan server. Ia ikut **beku** sesudah
+   baris meninggalkan `[To Do]` (Rule 7): ia mengelompokkan laporan, jadi
+   mengubahnya pada baris yang sudah dinilai menulis ulang periode yang sudah
+   dibaca orang.
 9. **Angka turunan dari `audit_log`, nol kolom jangkar.** Turnaround, Speed
    Score, dan jumlah revisi dihitung ulang lewat `task.computeMetrics()`
    (aturan rumah #3/#4).
@@ -487,7 +499,6 @@ Realisasi Gap B/G/I sesudah ketokan §12. Migrasi
 |---|---|---|
 | `kode` | varchar PK | dinormalkan huruf besar |
 | `nama` | text | unik |
-| `sub_type` | text, nullable | label worksheet. **Bukan** enum tertutup (Rule 8) |
 | `is_standing` | bool | Rule 5 |
 | `sla_jam` | int, nullable | satuan sama dengan `briefs.sla_target_hours`. NULL ⇒ Speed Score `N/A` |
 | `aktif` · `urutan` | bool · int | nonaktif = hilang dari picker, tetap terbaca di baris lama |
@@ -505,6 +516,7 @@ CASCADE, nol SET NULL). Menonaktifkan lewat `aktif = false`.
 | `id` | `SCS-YYYYMM-NNNN` | di-mint HANYA sesudah validasi lolos |
 | `tanggal` | date | hari kerja baris ini |
 | `kategori_kode` | ref `scs_kategori` | membawa SLA-nya |
+| `sub_type` | varchar(64), nullable | label Sub Type BARIS ini. Opsional; **bukan** enum tertutup (Rule 8) |
 | `judul` | text | pekerjaannya |
 | `client_id` | ref `clients`, **nullable** | NULL = "all client" (Rule 4) |
 | `mendukung_divisi` | ref `division_registry`, nullable | Rule 6 |
