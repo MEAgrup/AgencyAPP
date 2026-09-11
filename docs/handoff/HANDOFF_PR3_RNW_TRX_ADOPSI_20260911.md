@@ -1,4 +1,4 @@
-# Handoff — utang uang terakhir LUNAS + ketokan Adopsi; sisa murni UAT & konfigurasi (2026-09-11)
+# Handoff — utang uang LUNAS, migrasi DI LIVE, UAT LOLOS; sisa satu ketokan pemilik (2026-09-11)
 
 > **Baca ini lebih dulu.** Ia menggantikan §4 dari `HANDOFF_PR5_20260911.md`
 > (sesi sebelumnya), yang tetap berguna untuk §1–§3 isi PR-5 dan §5 lingkungan.
@@ -8,14 +8,15 @@
 
 | Butir §4 handoff sebelumnya | Status sesudah sesi ini |
 |---|---|
-| 1. UAT peramban PR-3 / PR-4 | ⬜ **masih belum dijalankan** — butuh manusia di peramban |
-| 2. `role_mappings` → `Finance` | ⬜ konfigurasi Director lewat `/admin/role-mappings` |
-| 3. `role_mappings` → `HR` | ⬜ sama |
-| 4. Ketokan `PR4-SIAPA-BOLEH-LIHAT` | ✅ **DIKETOK & DIBANGUN sesi ini** — lead divisi boleh, divisinya sendiri |
-| 5. `PR3-RNW-TRX` (utang uang) | ✅ **LUNAS sesi ini**, dan cakupannya jauh lebih besar dari dugaan baris Open-nya |
+| 1. UAT peramban PR-3 / PR-4 | ✅ **DIJALANKAN** — 43 butir · 43 PASS · 0 FAIL (`UAT_PR3_PR4_BROWSER_20260911.md`) |
+| 2. `role_mappings` → `Finance` | ✅ **TUTUP** — tiga pemetaan nyata sudah ada di live |
+| 3. `role_mappings` → `HR` | 🟠 **BUKAN konfigurasi** — tidak ada divisi HR di roster HRIS sama sekali. Butuh ketokan pemilik (§5.5) |
+| 4. Ketokan `PR4-SIAPA-BOLEH-LIHAT` | ✅ **DIKETOK & DIBANGUN** — lead divisi boleh, divisinya sendiri |
+| 5. `PR3-RNW-TRX` (utang uang) | ✅ **LUNAS**, migrasinya **sudah di live**, cakupannya jauh lebih besar dari dugaan baris Open-nya |
+| + (tidak diminta) migrasi PR-5 | 🔴 **ternyata belum di live walau PR-nya sudah merged** — sudah diterapkan sesi ini (§5.2) |
 
-**Tidak ada lagi utang kode yang terbuka.** Yang tersisa adalah UAT manual dan
-dua baris `role_mappings` — keduanya pekerjaan manusia, bukan sesi coding.
+**Tidak ada lagi utang kode yang terbuka, dan tidak ada lagi UAT yang tertunda.**
+Yang tersisa satu: siapa yang memegang fungsi HR di CDPS (§5.5).
 
 ---
 
@@ -167,29 +168,56 @@ kalau suite ini memerah secara luas.
 
 ---
 
-## 5. Yang masih menggantung — semuanya pekerjaan manusia
+## 5. Yang masih menggantung — SESUDAH migrasi diterapkan & UAT dijalankan
 
-1. **🔴 Migrasi `20261005010000` BELUM diterapkan ke live.** Sengaja: ia jalur
-   uang, dan menerapkannya sebelum PR-nya ditinjau menciptakan drift
-   repo↔live (kelas O38). Sesudah ditinjau, terapkan lewat
-   `supabase db push` / `apply_migration` — **jangan** `psql -f` — lalu
-   buktikan dengan kueri, bukan dengan `success: true`. Backfill-nya akan
-   menyentuh 9 kontrak live: `CTR-202608-0003` → `TRX-202608-0011` (tahap A,
-   dari `renewal_requests`), delapan sisanya → `clients.transaction_id`
-   (tahap B).
-2. **🔴 Angka di layar akan BERUBAH besar** begitu ini live: omzet Kinerja
-   Sales & Laporan Penjualan naik dari Rp 151.075.000 ke Rp 516.307.615.
-   Itu koreksi, bukan regresi — tapi beri tahu Finance & Head Sales SEBELUM
-   mereka melihatnya sendiri.
-3. **🔴 UAT peramban PR-3 (`/sales/kinerja`) & PR-4 (`/admin/adopsi`)** —
-   langkah per aktor di `HANDOFF_PR3_PR4_20260911.md` §6a/§6b. Tambahkan satu
-   aktor baru: **lead divisi mana pun** harus melihat menu *Adopsi Sistem* dan
-   HANYA baris divisinya.
-4. **`role_mappings` → `Finance` dan `HR`.** Tanpa keduanya, Laporan Penjualan
-   dan mutasi/resign praktis Director-only dan akan TERBACA seperti tidak
-   jalan. Periksa SEBELUM UAT.
+> Ditulis ulang 2026-09-11 sesudah keduanya benar-benar dikerjakan. Versi
+> pertamanya (empat butir "belum") sudah usang.
+
+1. ✅ **Migrasi SUDAH di live.** `pr3_rnw_trx_contract_transaction`
+   (`20260911070734`). Backfill dibuktikan dengan kueri, bukan `success: true`:
+   9/9 kontrak tertaut, nol salah-klien, nol transaksi dipakai dua kontrak,
+   `CTR-202608-0003` → `TRX-202608-0011` lewat `renewal_requests` (tahap A) dan
+   delapan sisanya lewat `clients.transaction_id` (tahap B). Omzet model baru di
+   live: **Rp 516.307.615**.
+
+2. 🔴 **Migrasi PR-5 ternyata BELUM di live — ditemukan sambil menerapkan yang
+   ini, dan sudah diterapkan juga** (`pr5_multi_platform_services`,
+   `20260911070658`). PR-5 sudah MERGED ke `main` sejak `2a7b751`, jadi kode
+   produksi menulis `qualified_form_services.platform` ke kolom yang TIDAK ADA —
+   Form Qualified, negosiasi, dan closing pasti gagal. Gerbang per-slug yang
+   menemukannya sama persis dengan yang dipakai sesi sebelumnya; sekarang **nol
+   MISSING**, satu EXTRA, dan EXTRA itu memang
+   `d3_tutup_buku_pulihkan_komentar_jaga_transisi` yang ada di
+   `scripts/known-live-drift.txt`.
+   **Pelajarannya: merge TIDAK menerapkan migrasi.** Jalankan gerbang per-slug
+   sesudah setiap merge yang membawa migrasi.
+
+3. ✅ **UAT peramban PR-3 & PR-4 SUDAH dijalankan** —
+   `UAT_PR3_PR4_BROWSER_20260911.md`: **43 butir · 43 PASS · 0 FAIL**, tujuh
+   aktor. Termasuk bukti PR3-RNW-TRX di layar (klien tanpa kontrak: Rp 20jt →
+   Rp 24jt) dan cakupan divisi Adopsi yang benar-benar menggigit (Head Sales
+   melihat 2 baris Sales padahal baris Finance & HR ADA di DB saat itu).
+
+4. ✅ **`role_mappings` → `Finance`: TUTUP.** Tiga pemetaan nyata sudah ada di
+   live (`FINANCE AND ACCOUNTING` → 1 lead + 2 staff), semuanya menunjuk
+   karyawan aktif. Nol pekerjaan tersisa.
+
+5. 🟠 **`role_mappings` → `HR`: BUKAN konfigurasi yang lupa dibuat — tidak ada
+   yang bisa dipetakan.** Roster HRIS live TIDAK punya divisi HR sama sekali
+   (`ACCOUNT` 19 · `ADVERTISER` 8 · `BUSINESS DEVELOPMENT` 1 · `CREATIVE` 10 ·
+   `FINANCE AND ACCOUNTING` 3 · `MARKETING` 1 · `SALES` 13, plus `Director` 3
+   dan `OD` 3 yang memang datang dari `employee_layered_roles`). Mutasi & resign
+   permanen tetap Director-only sampai ada **ketokan pemilik**: (a) HRIS
+   menambah divisi HR lalu sync, (b) satu jabatan yang sudah ada dipetakan ke
+   `HR`, atau (c) Director-only memang praktiknya.
+
+6. 🟠 **Angka di layar berubah besar begitu kode ini rilis**: omzet Kinerja
+   Sales & Laporan Penjualan naik Rp 151.075.000 → Rp 516.307.615. Koreksi,
+   bukan regresi — tapi beri tahu Finance & Head Sales sebelum mereka
+   melihatnya sendiri.
 
 ---
+
 
 ## 6. Lingkungan (biar tidak dicari ulang)
 
