@@ -7282,6 +7282,8 @@ export interface SalesPerfRowWire {
   klien_perpanjangan: string;
   klien_cross_sell: string;
   klien_count: string;
+  /** "Total Sales" (pemilik 2026-09-10) — jumlah deal per orang, tidak dibobot. Jangan dijumlahkan ke bawah; total agensi ada di `SalesReportTotalWire.total_deal`. */
+  total_deal: number;
   omzet: string;
   omzet_idr: string;
   komisi_kontrak: string;
@@ -7311,6 +7313,7 @@ export function salesPerfRowToWire(r: salesperf.SalesPerfRow): SalesPerfRowWire 
     avg_deal_cycle_days: r.avgDealCycleDays,
     effort_follow_up: r.effortFollowUp, effort_visit: r.effortVisit, effort_online_meeting: r.effortOnlineMeeting,
     klien_baru: r.klienBaru, klien_perpanjangan: r.klienPerpanjangan, klien_cross_sell: r.klienCrossSell, klien_count: r.klienCount,
+    total_deal: r.totalDeal,
     omzet: r.omzet, omzet_idr: r.omzetIdr,
     komisi_kontrak: r.komisiKontrak, komisi_kontrak_idr: r.komisiKontrakIdr,
     komisi_diakui: r.komisiDiakui, komisi_diakui_idr: r.komisiDiakuiIdr,
@@ -7352,6 +7355,84 @@ export function leadSourceRowToWire(r: salesperf.LeadSourceRow): LeadSourceRowWi
     salesperson_id: r.salespersonId, leads: r.leads, qualified: r.qualified, non_qualified: r.nonQualified,
     closing: r.closing, conversion_rate_pct: r.conversionRatePct,
     omzet: r.omzet, omzet_idr: r.omzetIdr, nq_breakdown: r.nqBreakdown,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Laporan Penjualan (pemilik 2026-09-10, Bagian 3) — `salesperf.salesReport`.
+// ---------------------------------------------------------------------------
+
+export interface SalesReportRowWire {
+  salesperson_id: string;
+  nama: string;
+  level_sales: string;
+  total_deal: number;
+  klien_baru: string;
+  klien_perpanjangan: string;
+  klien_cross_sell: string;
+  klien_count: string;
+  omzet: string;
+  omzet_idr: string;
+  komisi_kontrak: string;
+  komisi_kontrak_idr: string;
+  komisi_diakui: string;
+  komisi_diakui_idr: string;
+}
+
+export interface SalesReportTotalWire {
+  salesperson_count: number;
+  /** COUNT(DISTINCT contract) — bukan Σ kolom `total_deal` di atasnya. */
+  total_deal: number;
+  klien_count: number;
+  omzet: string;
+  omzet_idr: string;
+  komisi_kontrak: string;
+  komisi_kontrak_idr: string;
+  komisi_diakui: string;
+  komisi_diakui_idr: string;
+}
+
+export interface SalesReportServiceRowWire {
+  master_service_id: string;
+  nama: string;
+  jumlah: number;
+  nilai: string;
+  nilai_idr: string;
+}
+
+export interface SalesReportWire {
+  rows: SalesReportRowWire[];
+  total: SalesReportTotalWire;
+  services: SalesReportServiceRowWire[];
+}
+
+export function salesReportRowToWire(r: salesperf.SalesReportRow): SalesReportRowWire {
+  return {
+    salesperson_id: r.salespersonId, nama: r.nama, level_sales: r.levelSales,
+    total_deal: r.totalDeal,
+    klien_baru: r.klienBaru, klien_perpanjangan: r.klienPerpanjangan,
+    klien_cross_sell: r.klienCrossSell, klien_count: r.klienCount,
+    omzet: r.omzet, omzet_idr: r.omzetIdr,
+    komisi_kontrak: r.komisiKontrak, komisi_kontrak_idr: r.komisiKontrakIdr,
+    komisi_diakui: r.komisiDiakui, komisi_diakui_idr: r.komisiDiakuiIdr,
+  };
+}
+
+export function salesReportToWire(r: salesperf.SalesReport): SalesReportWire {
+  return {
+    rows: r.rows.map(salesReportRowToWire),
+    total: {
+      salesperson_count: r.total.salespersonCount,
+      total_deal: r.total.totalDeal,
+      klien_count: r.total.klienCount,
+      omzet: r.total.omzet, omzet_idr: r.total.omzetIdr,
+      komisi_kontrak: r.total.komisiKontrak, komisi_kontrak_idr: r.total.komisiKontrakIdr,
+      komisi_diakui: r.total.komisiDiakui, komisi_diakui_idr: r.total.komisiDiakuiIdr,
+    },
+    services: r.services.map((s) => ({
+      master_service_id: s.masterServiceId, nama: s.nama, jumlah: s.jumlah,
+      nilai: s.nilai, nilai_idr: s.nilaiIdr,
+    })),
   };
 }
 

@@ -5,6 +5,8 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { SOURCES } from '@/lib/leads';
 import {
+  downloadSalesReportCsv,
+  getSalesReport,
   listSalesTargets,
   METRIC_KEYS,
   METRIC_LABELS,
@@ -17,10 +19,11 @@ import {
   type MetricKey,
   type SalesPerfMonthRow,
   type SalesPerfRow,
+  type SalesReport,
   type SalesTarget,
 } from '@/lib/salesperf';
 
-type Tab = 'sales' | 'bulan' | 'sumber' | 'target';
+type Tab = 'laporan' | 'sales' | 'bulan' | 'sumber' | 'target';
 
 /** "—" for a null ratio/day/money field — the server already decided division-by-zero, never recompute. */
 function dash(v: string | number | null): string {
@@ -36,15 +39,27 @@ function formatMetricValue(value: string | null, valueIdr: string | null, metric
 
 export default function KinerjaSalesPage() {
   const { role } = useAuth();
-  const canView = !!(role?.director || role?.od || (role?.division ?? '').toLowerCase() === 'sales');
+  const division = (role?.division ?? '').toLowerCase();
+  const isFinance = division === 'finance';
+  // Cermin `salesperf.canViewSalesPerf` — corong prospek + OKR.
+  const canViewPerf = !!(role?.director || role?.od || division === 'sales');
+  // Cermin `salesperf.canViewSalesReport` — Finance ikut, karena laporan
+  // penjualan hanya menyentuh tabel uang + layanan yang memang boleh ia baca.
+  const canViewReport = canViewPerf || isFinance;
   const canManageTarget = !!(role?.director || role?.od);
 
-  const [tab, setTab] = useState<Tab>('sales');
+  // Finance HANYA punya tab Laporan. Tab lain akan menjawab 403 untuknya (dan
+  // itu benar — ia tidak punya lengan RLS ke `leads`/`prospect_attempts`), jadi
+  // membukanya sebagai tab yang bisa diklik hanya menawarkan galat.
+  const [tab, setTab] = useState<Tab>(isFinance ? 'laporan' : 'sales');
   const [from, setFrom] = useState(''); // "YYYY-MM"
   const [to, setTo] = useState('');
   const [salesperson, setSalesperson] = useState('');
   const [source, setSource] = useState('');
 
+  const [report, setReport] = useState<SalesReport | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [salesRows, setSalesRows] = useState<SalesPerfRow[]>([]);
   const [monthRows, setMonthRows] = useState<SalesPerfMonthRow[]>([]);
   const [sourceRows, setSourceRows] = useState<LeadSourceRow[]>([]);
@@ -55,14 +70,20 @@ export default function KinerjaSalesPage() {
   const filter = { from: from || undefined, to: to || undefined, salesperson: salesperson || undefined, source: source || undefined };
 
   const load = useCallback(async () => {
-    if (!canView) {
+    if (!canViewReport) {
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
+    // Galat ekspor menempel pada tab Laporan; berpindah tab (atau mengubah
+    // filter) membuatnya usang, dan galat usang lebih membingungkan daripada
+    // tidak ada galat sama sekali.
+    setExportError(null);
     try {
-      if (tab === 'sales') {
+      if (tab === 'laporan') {
+        setReport((await getSalesReport(filter)).data);
+      } else if (tab === 'sales') {
         setSalesRows((await salesPerfBySalesperson(filter)).data);
       } else if (tab === 'bulan') {
         setMonthRows((await salesPerfByMonth(filter)).data);
@@ -78,7 +99,7 @@ export default function KinerjaSalesPage() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canView, tab, from, to, salesperson, source]);
+  }, [canViewReport, tab, from, to, salesperson, source]);
 
   useEffect(() => {
     load();
@@ -120,7 +141,21 @@ export default function KinerjaSalesPage() {
     }
   }
 
-  if (!canView) {
+  async function handleExport() {
+    setExportError(null);
+    setExporting(true);
+    try {
+      // Filter yang SAMA dengan yang sedang ditampilkan — berkasnya tidak
+      // pernah berisi lebih (atau kurang) dari tabel di atasnya.
+      await downloadSalesReportCsv(filter);
+    } catch (err) {
+      setExportError(errorMessage(err));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  if (!canViewReport) {
     return (
       <div className="stack">
         <div>
@@ -142,16 +177,30 @@ export default function KinerjaSalesPage() {
           Dashboard M0 §7.1: closing rate, deal cycle, lead per sumber, dan OKR per sales. Sales staff
           otomatis hanya melihat barisnya sendiri — server yang membatasi.
         </p>
+        <p className="muted">
+          Tab <strong>Laporan Penjualan</strong> (uang + rekap layanan, bisa diekspor) terbuka untuk
+          Finance dan Head Sales. Tab lainnya berisi corong prospek dan tetap milik Sales/OD/Director.
+        </p>
       </div>
 
       <section className="card">
         <div className="cardHeader">
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className={`btn btnSm ${tab === 'sales' ? 'btnPrimary' : 'btnSecondary'}`} onClick={() => setTab('sales')}>Per Sales</button>
-            <button className={`btn btnSm ${tab === 'bulan' ? 'btnPrimary' : 'btnSecondary'}`} onClick={() => setTab('bulan')}>Per Bulan</button>
-            <button className={`btn btnSm ${tab === 'sumber' ? 'btnPrimary' : 'btnSecondary'}`} onClick={() => setTab('sumber')}>Sumber Lead</button>
-            <button className={`btn btnSm ${tab === 'target' ? 'btnPrimary' : 'btnSecondary'}`} onClick={() => setTab('target')}>Target</button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className={`btn btnSm ${tab === 'laporan' ? 'btnPrimary' : 'btnSecondary'}`} onClick={() => setTab('laporan')}>Laporan Penjualan</button>
+            {canViewPerf && (
+              <>
+                <button className={`btn btnSm ${tab === 'sales' ? 'btnPrimary' : 'btnSecondary'}`} onClick={() => setTab('sales')}>Per Sales</button>
+                <button className={`btn btnSm ${tab === 'bulan' ? 'btnPrimary' : 'btnSecondary'}`} onClick={() => setTab('bulan')}>Per Bulan</button>
+                <button className={`btn btnSm ${tab === 'sumber' ? 'btnPrimary' : 'btnSecondary'}`} onClick={() => setTab('sumber')}>Sumber Lead</button>
+                <button className={`btn btnSm ${tab === 'target' ? 'btnPrimary' : 'btnSecondary'}`} onClick={() => setTab('target')}>Target</button>
+              </>
+            )}
           </div>
+          {tab === 'laporan' && (
+            <button className="btn btnSm btnSecondary" onClick={handleExport} disabled={exporting || loading}>
+              {exporting ? 'Menyiapkan...' : 'Ekspor CSV'}
+            </button>
+          )}
         </div>
 
         <div className="formRow" style={{ marginBottom: 16 }}>
@@ -175,6 +224,11 @@ export default function KinerjaSalesPage() {
               />
             </div>
           )}
+          {/* Sumber Lead menyaring lewat `leads`, tabel yang Finance tidak boleh
+              baca dan yang memang tidak ikut dalam laporan penjualan. Karena
+              itu filter ini sengaja tidak muncul pada tab Laporan — kalau ia
+              muncul dan tidak berpengaruh, pembacanya akan menyimpulkan
+              angkanya yang salah. */}
           {(tab === 'sales' || tab === 'bulan' || tab === 'sumber') && (
             <div className="field">
               <label htmlFor="kinerja-source">Sumber Lead</label>
@@ -190,6 +244,83 @@ export default function KinerjaSalesPage() {
 
         {loading && <p className="muted">Memuat...</p>}
         {error && <div className="alert alertError" role="alert">{error}</div>}
+        {exportError && <div className="alert alertError" role="alert">{exportError}</div>}
+
+        {!loading && !error && tab === 'laporan' && (
+          report === null ? (
+            <div className="emptyState">Tidak ada data untuk filter ini.</div>
+          ) : (
+            <>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Sales</th><th>Level</th><th>Total Sales (deal)</th>
+                      <th>Klien Baru</th><th>Perpanjangan</th><th>Cross Sell</th><th>Klien</th>
+                      <th>Omzet (GMV)</th><th>Komisi Kontrak</th><th>Komisi Diakui</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.rows.map((r) => (
+                      <tr key={r.salesperson_id}>
+                        <td>{r.nama} <span className="muted">({r.salesperson_id})</span></td>
+                        <td>{r.level_sales}</td>
+                        <td>{r.total_deal}</td>
+                        <td>{r.klien_baru}</td>
+                        <td>{r.klien_perpanjangan}</td>
+                        <td>{r.klien_cross_sell}</td>
+                        <td>{r.klien_count}</td>
+                        <td>{r.omzet_idr}</td>
+                        <td>{r.komisi_kontrak_idr}</td>
+                        <td>{r.komisi_diakui_idr}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {/* Baris TOTAL (ketokan pemilik #4). Setiap angka di sini
+                      datang APA ADANYA dari server: `total_deal`/`klien_count`
+                      adalah COUNT(DISTINCT ...), bukan penjumlahan kolom di
+                      atasnya — satu deal yang dijual berdua muncul pada dua
+                      baris dan menjumlahkannya akan melaporkannya dua kali. */}
+                  <tfoot>
+                    <tr>
+                      <th>TOTAL</th>
+                      <th className="muted">{report.total.salesperson_count} sales</th>
+                      <th>{report.total.total_deal}</th>
+                      <th colSpan={3}></th>
+                      <th>{report.total.klien_count}</th>
+                      <th>{report.total.omzet_idr}</th>
+                      <th>{report.total.komisi_kontrak_idr}</th>
+                      <th>{report.total.komisi_diakui_idr}</th>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <h3 style={{ marginTop: 24 }}>Rekap Layanan Terjual</h3>
+              {report.services.length === 0 ? (
+                <div className="emptyState">Belum ada layanan terjual untuk filter ini.</div>
+              ) : (
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr><th>Layanan</th><th>Master Service ID</th><th>Jumlah</th><th>Nilai</th></tr>
+                    </thead>
+                    <tbody>
+                      {report.services.map((s) => (
+                        <tr key={s.master_service_id}>
+                          <td>{s.nama}</td>
+                          <td className="muted">{s.master_service_id}</td>
+                          <td>{s.jumlah}</td>
+                          <td>{s.nilai_idr}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )
+        )}
 
         {!loading && !error && tab === 'sales' && (
           salesRows.length === 0 ? (
@@ -203,6 +334,7 @@ export default function KinerjaSalesPage() {
                     <th>Qualified</th><th>Non-Qualified</th><th>Negotiating</th><th>Closed</th><th>Lost</th>
                     <th>Closing Rate</th><th>Qualified Rate</th><th>Deal Cycle (hari)</th>
                     <th>Follow Up</th><th>Visit</th><th>Online Meeting</th>
+                    <th>Total Sales (deal)</th>
                     <th>Klien Baru</th><th>Perpanjangan</th><th>Cross Sell</th>
                     <th>Omzet</th><th>Komisi Kontrak</th><th>Komisi Diakui</th>
                     <th>Target</th><th>Pencapaian</th><th>Sisa Target</th><th>MoM</th>
@@ -227,6 +359,7 @@ export default function KinerjaSalesPage() {
                       <td>{r.effort_follow_up}</td>
                       <td>{r.effort_visit}</td>
                       <td>{r.effort_online_meeting}</td>
+                      <td>{r.total_deal}</td>
                       <td>{r.klien_baru}</td>
                       <td>{r.klien_perpanjangan}</td>
                       <td>{r.klien_cross_sell}</td>

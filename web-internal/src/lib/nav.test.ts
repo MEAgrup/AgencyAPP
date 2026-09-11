@@ -547,6 +547,23 @@ describe('visibleNav — Marketing & Finance', () => {
     expect(seen).not.toContain('/creative');
     expect(seen).not.toContain('/health');
   });
+
+  it('Finance (staff maupun lead) MELIHAT Kinerja Sales — pintu ke Laporan Penjualan', () => {
+    // Permintaan pemilik 2026-09-10: laporan penjualan "bisa diakses Finance &
+    // Head Sales, di halaman /sales/kinerja". Halaman itu memang berisi tab
+    // lain yang 403 untuk Finance, tapi menyembunyikan seluruh menunya
+    // membuat satu-satunya laporan yang diminta jadi tak punya pintu — persis
+    // kegagalan yang dilarang kepala berkas nav.ts ("hiding something
+    // reachable = a silent functional regression").
+    expect(hrefs(role('Finance', 'staff'))).toContain('/sales/kinerja');
+    expect(hrefs(role('Finance', 'lead'))).toContain('/sales/kinerja');
+    // Batas atas: Finance TETAP bukan pemilik Sales Workspace / Kalkulator.
+    expect(hrefs(role('Finance', 'staff'))).not.toContain('/sales');
+    expect(hrefs(role('Finance', 'staff'))).not.toContain('/sales/kalkulator');
+    // Dan divisi lain tetap tidak melihatnya sama sekali.
+    expect(hrefs(role('Creative', 'lead'))).not.toContain('/sales/kinerja');
+    expect(hrefs(role('Marketing', 'lead'))).not.toContain('/sales/kinerja');
+  });
 });
 
 describe('visibleNav — layered OD / Director', () => {

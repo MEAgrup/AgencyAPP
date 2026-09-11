@@ -171,7 +171,13 @@ const AKUISISI: NavNode[] = [
   // Kinerja Sales (M0 §7.1): dashboard closing rate/deal cycle/OKR. `ownedBy`
   // sudah mencakup OD/Director; scope per-baris (staff = sendiri, lead/SPV =
   // divisi) tugas `salesperf.scopeFor`, bukan tugas menu.
-  { href: '/sales/kinerja', label: 'Kinerja Sales', access: ownedBy(SALES) },
+  //
+  // FINANCE ikut sejak 2026-09-10 (permintaan pemilik, PR-3): halaman ini
+  // memuat tab **Laporan Penjualan** yang gerbangnya `canViewSalesReport`, dan
+  // Finance ada di dalamnya. Tab lain di halaman itu tetap 403 untuk Finance
+  // dan memang tidak dirender untuknya — menyembunyikan seluruh menunya justru
+  // membuat satu-satunya laporan yang diminta pemilik tak bisa dijangkau.
+  { href: '/sales/kinerja', label: 'Kinerja Sales', access: ownedBy(SALES, FINANCE) },
   { href: '/marketing/performance', label: 'Performa Marketing', access: ownedBy(MARKETING) },
 ];
 
