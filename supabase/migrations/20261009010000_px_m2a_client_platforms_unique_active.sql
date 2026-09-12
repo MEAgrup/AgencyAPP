@@ -1,0 +1,21 @@
+-- ============================================================================
+-- PX-M2a §4b — tiket terbuka DITUTUP: "kunci sekarang, bersihkan kemudian"
+-- (docs/DECISIONS.md 2026-09-12, baris `PX-M2a §4b`). Aturan "1 klien = 1 toko
+-- AKTIF per platform" sekarang ditegakkan di DB, bukan cuma di domain
+-- (packages/domain/src/client.ts addPlatform).
+--
+-- PRASYARAT: kedua pasang baris kembar live sudah dibersihkan (ketokan
+-- Nerissa, 2026-09-12) — `client_platforms.id 13` (CLI-202608-0010,
+-- lindahijab.id, TikTok Shop, tanpa store_link) dan `id 16` (CLI-202609-0002,
+-- efgh clothing, Shopee, store_link "www.testingcloth1.com" — data test)
+-- dinonaktifkan (`active = false`) lewat transaksi yang sama pola dengan
+-- `client.updatePlatform` (before/after di `audit_log`, actor Nerissa
+-- 200000002). id 14 dan id 17 tetap aktif sebagai baris kanonik. Tanpa
+-- pembersihan itu, index ini akan menggagalkan migrasi.
+--
+-- Gerbang domain (`PlatformDuplicateError`) TETAP ada — index ini jadi
+-- pengaman KEDUA, bukan satu-satunya (persis seperti dicatat sebagai rencana
+-- di komentar `20261008010000_px_m2a_shop_id_eligibility_policy.sql`).
+-- ============================================================================
+CREATE UNIQUE INDEX uq_client_platforms_active_platform
+  ON client_platforms (client_id, platform) WHERE active;

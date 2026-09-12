@@ -225,18 +225,27 @@ async function seedClient(opts: { am?: string | null; toko?: string } = {}): Pro
   return id;
 }
 
-/** Sisipkan laporan ber-skor langsung — untuk menguji AMBANG, bukan mesinnya. */
+/** Sisipkan laporan ber-skor langsung — untuk menguji AMBANG, bukan mesinnya.
+ *  Beberapa periode (`bulan`) untuk KLIEN YANG SAMA berbagi SATU baris
+ *  `client_platforms` — persis seperti realita (satu toko, banyak laporan
+ *  bulanan) dan seperti yang ditegakkan `uq_client_platforms_active_platform`
+ *  (PX-M2a §4b): tidak boleh dua baris aktif untuk (client_id, platform) yang
+ *  sama. */
 async function seedLaporan(client: string, skor: number | null, bulan: number, gmv = 100_000_000): Promise<void> {
-  const rows = await sql<{ id: number }[]>`
-    insert into client_platforms (client_id, platform, active, created_by)
-    values (${client}, 'TikTok Shop', true, ${OWNER}) returning id`;
+  const existing = await sql<{ id: number }[]>`
+    select id from client_platforms where client_id = ${client} and platform = 'TikTok Shop' and active`;
+  const platformId = existing.length > 0
+    ? Number(existing[0].id)
+    : Number((await sql<{ id: number }[]>`
+        insert into client_platforms (client_id, platform, active, created_by)
+        values (${client}, 'TikTok Shop', true, ${OWNER}) returning id`)[0].id);
   const mm = String(bulan).padStart(2, '0');
   await sql`
     insert into client_reports (client_id, client_platform_id, platform, periode_tipe,
                                 periode_mulai, periode_akhir, hari_periode, payload,
                                 skor, skor_label, gmv_net, gmv_kotor, gmv_runrate_bulanan,
                                 engine_versi, payload_schema, created_by, benchmark_versi)
-    values (${client}, ${rows[0].id}, 'TikTok Shop', 'bulanan',
+    values (${client}, ${platformId}, 'TikTok Shop', 'bulanan',
             ${`2026-${mm}-01`}, ${`2026-${mm}-28`}, 28, '{}'::jsonb,
             ${skor}, ${skor === null ? null : skor >= 8 ? 'SEHAT' : skor >= 6 ? 'PERLU PERHATIAN' : 'KRITIS'},
             ${gmv}, ${gmv}, ${gmv},
