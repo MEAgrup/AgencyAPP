@@ -62,7 +62,7 @@ Response: `{ "ord_code": "ORD-202609-0001", "status": "[Masuk]" }`.
   },
   "lines": [                        // at least 1
     {
-      "jenis": "Account" | "Ads" | "Creative" | "Store Operation" | "KOL-Non-Roster",
+      "jenis": "Account" | "Ads" | "Creative" | "Store Operation" | "KOL-Non-Roster" | "Live Stream",
       "qty": 1 | null,
       "catatan": "…" | null,
       "alasan_non_roster": "…" | null,  // REQUIRED when jenis = "KOL-Non-Roster"
@@ -84,9 +84,15 @@ Response: `{ "ord_code": "ORD-202609-0001", "status": "[Masuk]" }`.
    — the payment gate (D4+D13) lives at the MSDPS source (`deal_bridge_lines`
    triggers); CDPS re-asserts it on every read of the stored payload
    (`bridge.parsePayloadV1`), not only at intake.
-4. **`jenis` is the closed set of five values above.** `"Live Stream"` is
-   never a valid value (D2 — MSDPS keeps Live Stream as its own vendor
-   tracker). `"KOL-Non-Roster"` without `alasan_non_roster` is rejected.
+4. **`jenis` is the closed set of six values above.** D2 (2026-09-10) originally
+   excluded `"Live Stream"` (MSDPS keeping it as its own vendor tracker); the
+   owner reversed that 2026-09-12 (`docs/DECISIONS.md` D2 amendment) — Live
+   Stream work is now bridged like the rest. The closed set is enforced ONLY
+   as a MSDPS CHECK constraint (`deal_bridge_lines`, migration
+   `0362_bridge_livestream_jenis.sql`); this parser accepts `jenis` as a free
+   string matched against `external_service_map.external_service_type`, so no
+   CDPS-side code changed when the set grew. `"KOL-Non-Roster"` without
+   `alasan_non_roster` is rejected.
 5. **The `merchant` glossary trap**: `nama`/`kota` etc. describe the
    brand/POI. MSDPS's `otaPlatformsRaw` "Merchant" column (TikTok export,
    OTA/delivery platforms) must NEVER reach this payload — see MSDPS

@@ -35,7 +35,8 @@ Volume 10–20 deal/bulan.
 ### Keputusan pemilik yang sudah diambil
 
 D1 divisi penerima (Account/Ads/Creative/Store Operation + KOL non-roster) ·
-D2 Live Stream tetap di MSDPS · D3 merchant jadi `CLI-` penuh · D4+D13 hanya
+D2 Live Stream tetap di MSDPS **(DIBALIK 2026-09-12 — Live Stream kini ikut
+dibridge, lihat "Bagian B" di bawah + `docs/DECISIONS.md`)** · D3 merchant jadi `CLI-` penuh · D4+D13 hanya
 deal berbayar+terverifikasi, gerbang di sumber · D6 GMV component
 dikecualikan + redistribusi bobot · D7 GMV baseline/target diketik manusia ·
 D9/D8/D11/D12/D15/D16 (lihat `docs/DECISIONS.md` 2026-09-10) · **D5 diamandemen
@@ -142,13 +143,37 @@ keputusan + 3 amandemen tercatat baris-per-baris) · `docs/DATA_MODEL.md` §1 ·
 4. Transaksi Finance MSDPS untuk deal pilot (lewat B0, Bagian B) diverifikasi
    sebelum accept pertama dicoba.
 
-## Bagian B — MSDPS (`MEAgrup/MEAGO_MSDPS`) · belum dimulai
+## Bagian B — MSDPS (`MEAgrup/MEAGO_MSDPS`) · ✅ RILIS 2026-09-11/12 (kode); prasyarat non-kode masih terbuka
 
-Menunggu Bagian A merge + `docs/BRIDGE_MSDPS_CONTRACT.md` tersedia (sudah).
-B0 (sambungkan `create_poi_finance()` ke UI, nol SQL baru) adalah prasyarat
-TEKNIS yang ditemukan lewat pengukuran langsung production MSDPS: gerbang
-D13 hari ini menolak 100% deal (nol `transaction_id` terisi dari 82 deal,
-17 Berbayar). Rincian lengkap B0–B6: lihat Bagian IV rencana
+Baris ini sempat menulis "belum dimulai" — itu sudah usang sejak
+`MEAGO_MSDPS#38` (`aa5d0a9`, 2026-09-11) merge ke `main`: `deal_bridge_lines` +
+`cdps_outbox` (migr. `0360`), gerbang D4+D13 lewat trigger (`IS DISTINCT
+FROM`), `can_manage_bridge()` coalesce-safe, payload builder
+`lib/bridge/payload.ts` persis kontrak ini + fixture identik, server action
+`addBridgeLines`, delivery job `app/api/internal/bridge/deliver` (Vercel Cron,
+bukan pg_cron/pg_net — alasan didokumentasikan di header migrasi 0360), UI
+`/deals` "Teruskan ke CDPS" + modal pilih baris + badge status, B0
+(`create_poi_finance()` disambungkan ke UI). Tes: `test_bridge_gates.sql` (25
+assertion), `qc_bridge_payload.mjs` (50), `test_bridge_delivery.mjs` (16).
+`MEAGO_MSDPS#39` (`fb1a10d`, 2026-09-12) menambah panel referensi harga di
+modal + memperbaiki bug produksi nyata: `middleware.ts` me-redirect 307
+`/api/**` ke `/login` sebelum `deliverSecretOk()` sempat jalan, yang
+menggagalkan setiap delivery Vercel Cron tanpa error yang jelas.
+
+**2026-09-12, MSDPS#40 (`bd84c69`) — D2 dibalik:** owner memutuskan pekerjaan
+live-stream merchant MEAGO tetap diteruskan ke CDPS juga, bukan dikerjakan
+sendiri di MSDPS (lihat amandemen D2 di `docs/DECISIONS.md`). `jenis` bridge
+naik dari lima ke ENAM nilai (+ `Live Stream`, migrasi
+`0362_bridge_livestream_jenis.sql` sisi MSDPS). Nol perubahan kode CDPS —
+`jenis` sudah string bebas yang dicocokkan ke
+`external_service_map.external_service_type` di sini.
+
+**Yang MASIH belum terjadi (data/ops, bukan kode) — lihat "Prasyarat go-live"
+di atas:** belum ada paket MEAGO di Master Service List ⇒
+`external_service_map` masih kosong ⇒ setiap `accept()` hari ini masih gagal
+dengan `[layanan MEAGO belum dipetakan ke Master Service List]`; employee
+layanan "MEAGO Bridge" belum dibuat; nol deal pilot yang sudah dicoba
+end-to-end. Rincian lengkap B0–B6: lihat Bagian IV rencana
 `RENCANA_BRIDGE_MSDPS_CDPS_FASE1.md`.
 
 ## Exit criteria Fase 1
