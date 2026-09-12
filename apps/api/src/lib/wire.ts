@@ -10,7 +10,7 @@
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
+import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, productexchange, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -2700,6 +2700,9 @@ export interface PlatformWire {
   /** R3 — 'awareness' | 'consideration' | 'conversion', or null when the AM has not set one.
    *  Explicit null, never omitted: a missing key blanks the selector on a 200 (O43). */
   tahap_fokus: string | null;
+  /** PX-M2a — TERISI = toko ini punya agency plan TAP/SAP, boleh diproses Product
+   *  Exchange M3 (docs/DECISIONS.md 2026-09-12). Explicit null, never omitted (O43). */
+  shop_id: string | null;
 }
 
 /** client_sales_allocations row — web-internal's `Allocation` (lib/clients.ts). */
@@ -2796,6 +2799,7 @@ export function clientDetailToWire(c: sales.ClientDetail): ClientDetailWire {
       managed_since: p.managedSince ? tz.dateString(p.managedSince) : null,
       active: p.active,
       tahap_fokus: p.tahapFokus ?? null,
+      shop_id: p.shopId ?? null,
     })),
     sales_allocation: c.allocations.map((a) => ({
       salesperson_id: a.salespersonId,
@@ -6268,6 +6272,44 @@ export function hariLiburToWire(h: admin.HariLibur): HariLiburWire {
     keterangan: h.keterangan,
     created_at: h.createdAt,
     created_by: h.createdBy,
+  };
+}
+
+/** PX-M2a — the calibration value shape, apa adanya (PRD §4.5). */
+export interface EligibilityPolicyValueWire {
+  sales_threshold_idr: number;
+  threshold_basis: string;
+  threshold_window_days: number;
+  commission_floor_pct: number | null;
+  require_stock_in: boolean;
+  platforms: string[];
+}
+
+/** One versioned Product Exchange eligibility-policy row (Director-only, PX-M2a). */
+export interface EligibilityPolicyWire {
+  versi: number;
+  nilai: EligibilityPolicyValueWire;
+  aktif: boolean;
+  catatan: string | null;
+  dibuat_pada: string;
+  dibuat_oleh: string;
+}
+
+export function eligibilityPolicyToWire(p: productexchange.EligibilityPolicy): EligibilityPolicyWire {
+  return {
+    versi: p.versi,
+    nilai: {
+      sales_threshold_idr: p.nilai.salesThresholdIdr,
+      threshold_basis: p.nilai.thresholdBasis,
+      threshold_window_days: p.nilai.thresholdWindowDays,
+      commission_floor_pct: p.nilai.commissionFloorPct,
+      require_stock_in: p.nilai.requireStockIn,
+      platforms: p.nilai.platforms,
+    },
+    aktif: p.aktif,
+    catatan: p.catatan,
+    dibuat_pada: p.dibuatPada.toISOString(),
+    dibuat_oleh: p.dibuatOleh,
   };
 }
 

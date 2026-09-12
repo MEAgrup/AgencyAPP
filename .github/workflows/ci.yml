@@ -486,12 +486,18 @@ jobs:
       #       `client_external_ref`, `client_external_billing`,
       #       `external_service_map`. Lihat komentar migrasi untuk kenapa
       #       empat, bukan kurang/lebih.
-      - name: Verify table count (expect 160)
+      # 161 = 160 + 1 tabel PX-M2a (20261008010000_px_m2a_shop_id_eligibility_policy.sql):
+      #       `px_eligibility_policy` (kalibrasi kelayakan SKU Product
+      #       Exchange, berversi, Director-only). `client_platforms.shop_id`
+      #       adalah ALTER, bukan tabel baru. Modul consent PRD asli
+      #       (`px_consents`) DIHAPUS oleh ketokan pemilik 2026-09-12 —
+      #       docs/DECISIONS.md.
+      - name: Verify table count (expect 161)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 160
+          test "$n" -eq 161
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

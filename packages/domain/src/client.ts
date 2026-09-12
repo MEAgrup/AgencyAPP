@@ -57,6 +57,17 @@ export const MSG_FIELD_LOCKED = '[field ini terkunci dan tidak dapat diubah]';
  */
 export const MSG_INTENT_LOCKED =
   '[transaksi sudah diverifikasi, perubahan skema pembayaran selanjutnya melalui Finance]';
+/**
+ * PX-M2a §4b — satu klien hanya boleh mendaftarkan SATU toko aktif per
+ * platform (ketokan Hans + Nerissa, 2026-09-12; klien dengan 2 platform tetap
+ * punya 2 baris — itu normal). Ditegakkan DI DOMAIN, belum di DB: Postgres
+ * tidak punya UNIQUE "NOT VALID" (hanya CHECK/FK), dan live punya baris kembar
+ * hari ini (lihat docs/DECISIONS.md 2026-09-12) — memasang UNIQUE sekarang
+ * akan menggagalkan migrasi. Tiket pemasangan UNIQUE parsial menyusul setelah
+ * baris kembar dibersihkan (butuh konfirmasi manusia, lihat berkas yang sama).
+ */
+export const MSG_PLATFORM_DUPLIKAT =
+  '[klien ini sudah punya toko aktif di platform tersebut — nonaktifkan dulu sebelum menambah yang baru]';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -121,6 +132,14 @@ export class IntentLockedError extends Error {
   constructor() {
     super(MSG_INTENT_LOCKED);
     this.name = 'IntentLockedError';
+  }
+}
+
+/** PX-M2a §4b — the client already has an active platform row for this platform (→ 409). */
+export class PlatformDuplicateError extends Error {
+  constructor() {
+    super(MSG_PLATFORM_DUPLIKAT);
+    this.name = 'ClientPlatformDuplicateError';
   }
 }
 
@@ -317,6 +336,15 @@ export async function addPlatform(sql: Sql, actor: Actor, clientId: string, inpu
     const exists = await tx<{ id: string }[]>`select id from clients where id = ${clientId} for update`;
     if (exists.length === 0) {
       throw new NotFoundError();
+    }
+    // PX-M2a §4b — one active platform row per (client, platform). Checked
+    // inside the same transaction that inserts, so two concurrent adds cannot
+    // both pass the check (the earlier `for update` on `clients` already
+    // serializes writers for this client).
+    const dup = await tx<{ id: string }[]>`
+      select id from client_platforms where client_id = ${clientId} and platform = ${platform} and active`;
+    if (dup.length > 0) {
+      throw new PlatformDuplicateError();
     }
     const rows = await tx<{ id: string }[]>`
       insert into client_platforms (client_id, platform, store_link, managed_since, active, created_by)
