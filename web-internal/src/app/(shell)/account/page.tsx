@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
@@ -12,6 +12,7 @@ import {
   assignAM,
   canManageAssignment,
   canReadIntake,
+  groupServiceQueueByClient,
   listIntake,
   listServiceQueue,
   listStrategies,
@@ -353,48 +354,59 @@ export default function AccountWorkspacePage() {
                 </tr>
               </thead>
               <tbody>
-                {visibleServices.map((s) => {
-                  const step = nextOnboardingStep(s);
-                  return (
-                    <tr key={s.service_id}>
-                      <td>
-                        <Link href={`/clients/${encodeURIComponent(s.client_id)}`}>{s.toko || s.client_id}</Link>
-                      </td>
-                      <td>{s.name}</td>
-                      <td>{s.service_id}</td>
-                      <td>
-                        {s.requires_strategy_plan ? (
-                          <span className="badge badge-purple">Plan-gated</span>
-                        ) : (
-                          <span className="badge badge-gray">Direct</span>
-                        )}
-                        {s.overridden && (
-                          <span className="muted" style={{ fontSize: 11, marginLeft: 6 }} title="Kebutuhan Strategy & Plan di-override dari pin Master Service List">
-                            override
-                          </span>
-                        )}
-                      </td>
-                      <td><StatusBadge status={s.status} /></td>
-                      <td>{s.brief_count}</td>
-                      <td>
-                        {step.label}
-                        {s.strategy_id && (
-                          <div className="muted" style={{ fontSize: 11 }}>
-                            <Link href={`/account/strategies/${s.strategy_id}`}>{s.strategy_id}</Link>
-                          </div>
-                        )}
-                      </td>
-                      <td>
-                        <Link
-                          href={`/account/services/${encodeURIComponent(s.service_id)}`}
-                          className="btn btnPrimary btnSm"
-                        >
-                          {step.kind === 'monitor' || step.kind === 'none' ? 'Buka' : 'Kelola'}
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {groupServiceQueueByClient(visibleServices).map((group, groupIdx) => (
+                  <Fragment key={group.clientId}>
+                    {group.rows.map((s, idx) => {
+                      const step = nextOnboardingStep(s);
+                      return (
+                        <tr key={s.service_id} className={groupIdx > 0 && idx === 0 ? 'group-start' : undefined}>
+                          {idx === 0 && (
+                            <td rowSpan={group.rows.length}>
+                              <Link href={`/clients/${encodeURIComponent(s.client_id)}`}>{s.toko || s.client_id}</Link>
+                              {group.rows.length > 1 && (
+                                <div className="muted" style={{ fontSize: 11 }}>
+                                  {group.rows.length} layanan dalam 1 order
+                                </div>
+                              )}
+                            </td>
+                          )}
+                          <td>{s.name}</td>
+                          <td>{s.service_id}</td>
+                          <td>
+                            {s.requires_strategy_plan ? (
+                              <span className="badge badge-purple">Plan-gated</span>
+                            ) : (
+                              <span className="badge badge-gray">Direct</span>
+                            )}
+                            {s.overridden && (
+                              <span className="muted" style={{ fontSize: 11, marginLeft: 6 }} title="Kebutuhan Strategy & Plan di-override dari pin Master Service List">
+                                override
+                              </span>
+                            )}
+                          </td>
+                          <td><StatusBadge status={s.status} /></td>
+                          <td>{s.brief_count}</td>
+                          <td>
+                            {step.label}
+                            {s.strategy_id && (
+                              <div className="muted" style={{ fontSize: 11 }}>
+                                <Link href={`/account/strategies/${s.strategy_id}`}>{s.strategy_id}</Link>
+                              </div>
+                            )}
+                          </td>
+                          <td>
+                            <Link
+                              href={`/account/services/${encodeURIComponent(s.service_id)}`}
+                              className="btn btnPrimary btnSm"
+                            >
+                              {step.kind === 'monitor' || step.kind === 'none' ? 'Buka' : 'Kelola'}
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>

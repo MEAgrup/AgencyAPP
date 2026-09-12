@@ -505,6 +505,35 @@ export function needsOnboarding(s: ServiceQueueRow): boolean {
   return step !== 'monitor' && step !== 'none';
 }
 
+export interface ServiceQueueGroup {
+  clientId: string;
+  toko: string;
+  rows: ServiceQueueRow[];
+}
+
+/**
+ * Groups Antrean Layanan Klien rows by client, preserving each client's
+ * first-appearance order. Several Services created together for one client
+ * (e.g. the Account/Ads/Creative/Store Operation lines a single bridged
+ * MEAGO order produces, one Service per line — see docs/BRIDGE_MSDPS_CONTRACT.md)
+ * otherwise render as unrelated rows with no visual link back to the one
+ * order they came from.
+ */
+export function groupServiceQueueByClient(rows: ServiceQueueRow[]): ServiceQueueGroup[] {
+  const order: string[] = [];
+  const byClient = new Map<string, ServiceQueueGroup>();
+  for (const row of rows) {
+    let group = byClient.get(row.client_id);
+    if (!group) {
+      group = { clientId: row.client_id, toko: row.toko, rows: [] };
+      byClient.set(row.client_id, group);
+      order.push(row.client_id);
+    }
+    group.rows.push(row);
+  }
+  return order.map((id) => byClient.get(id)!);
+}
+
 // ---------------------------------------------------------------------------
 // Cluster 2 — API functions
 // ---------------------------------------------------------------------------

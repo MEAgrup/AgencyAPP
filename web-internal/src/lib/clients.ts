@@ -134,8 +134,8 @@ export function getClient(id: string): Promise<{ client: Client }> {
   return api.get<{ client: Client }>(`/clients/${id}`);
 }
 
-export function voidService(serviceId: string): Promise<VoidResult> {
-  return api.post<VoidResult>(`/services/${serviceId}/void`);
+export function voidService(serviceId: string, reason: string): Promise<VoidResult> {
+  return api.post<VoidResult>(`/services/${serviceId}/void`, { reason });
 }
 
 // client.PendingHoldRequest — one Service in [Hold Requested], for the

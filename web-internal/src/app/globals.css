@@ -387,6 +387,13 @@ table {
   background: var(--color-bg);
 }
 
+/* Marks the first row of a new client/order group in a grouped queue table
+   (e.g. Antrean Layanan Klien) so several Services belonging to one order
+   read as one group instead of unrelated rows. */
+.table tbody tr.group-start td {
+  border-top: 2px solid var(--color-border);
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--color-border);
