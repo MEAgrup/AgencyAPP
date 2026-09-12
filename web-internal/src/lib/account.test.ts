@@ -18,6 +18,7 @@ import {
   STRATEGY_DRAFTING,
   STRATEGY_SUBMITTED,
   canEditClientProfile,
+  groupServiceQueueByClient,
   needsOnboarding,
   nextOnboardingStep,
   type ServiceQueueRow,
@@ -270,5 +271,45 @@ describe('A-3 — STRG- path (nextOnboardingStep)', () => {
         }),
       ).kind,
     ).toBe('determine_plan');
+  });
+});
+
+describe('groupServiceQueueByClient — Antrean Layanan Klien grouping', () => {
+  it('keeps a single-Service client as its own one-row group', () => {
+    const groups = groupServiceQueueByClient([svc()]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].rows).toHaveLength(1);
+  });
+
+  it('groups several Services of the same client together, in first-appearance order', () => {
+    const rows = [
+      svc({ service_id: 'SVC-202609-0020', client_id: 'CLI-202609-0017', name: 'Bridge MEAGO — Account' }),
+      svc({ service_id: 'SVC-202609-0021', client_id: 'CLI-202609-0017', name: 'Bridge MEAGO — Creative' }),
+      svc({ service_id: 'SVC-202609-0022', client_id: 'CLI-202609-0017', name: 'Bridge MEAGO — Store Operation' }),
+    ];
+    const groups = groupServiceQueueByClient(rows);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].clientId).toBe('CLI-202609-0017');
+    expect(groups[0].rows.map((r) => r.service_id)).toEqual([
+      'SVC-202609-0020',
+      'SVC-202609-0021',
+      'SVC-202609-0022',
+    ]);
+  });
+
+  it('does not merge different clients, and preserves the order clients first appear in', () => {
+    const rows = [
+      svc({ service_id: 'SVC-1', client_id: 'CLI-A', toko: 'Toko A' }),
+      svc({ service_id: 'SVC-2', client_id: 'CLI-B', toko: 'Toko B' }),
+      svc({ service_id: 'SVC-3', client_id: 'CLI-A', toko: 'Toko A' }),
+    ];
+    const groups = groupServiceQueueByClient(rows);
+    expect(groups.map((g) => g.clientId)).toEqual(['CLI-A', 'CLI-B']);
+    expect(groups[0].rows.map((r) => r.service_id)).toEqual(['SVC-1', 'SVC-3']);
+    expect(groups[1].rows.map((r) => r.service_id)).toEqual(['SVC-2']);
+  });
+
+  it('returns an empty list for an empty queue', () => {
+    expect(groupServiceQueueByClient([])).toEqual([]);
   });
 });

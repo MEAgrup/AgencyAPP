@@ -157,14 +157,19 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   }, [load, loadInterviews]);
 
   async function handleVoid(serviceId: string, serviceName: string) {
-    if (!window.confirm(`Yakin ingin void service "${serviceName}"? Brief non-Approved akan ikut dibatalkan.`)) {
+    const reason = window.prompt(
+      `Alasan void service "${serviceName}" (wajib diisi — Brief non-Approved akan ikut dibatalkan):`,
+    );
+    if (reason === null) return; // dibatalkan pengguna
+    if (reason.trim() === '') {
+      setVoidError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
       return;
     }
     setVoidError(null);
     setVoidMessage(null);
     setVoidPendingId(serviceId);
     try {
-      const res = await voidService(serviceId);
+      const res = await voidService(serviceId, reason.trim());
       setVoidMessage(
         `Service berhasil di-void. Brief dibatalkan: ${res.voided_briefs.length}, brief Approved dipertahankan: ${res.skipped_approved_briefs.length}.`,
       );
