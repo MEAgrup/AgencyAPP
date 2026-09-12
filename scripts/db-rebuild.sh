@@ -175,10 +175,22 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "160"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "161"
 check "entity_prefix"    "select count(*) from entity_prefix"    "44"
 check "sm_machines"      "select count(*) from sm_machines"      "35"
 check "notif_events"     "select count(*) from notif_events"     "74"
+# --- PX-M2a — Shop ID Gate & Eligibility Policy
+#     (20261008010000_px_m2a_shop_id_eligibility_policy.sql) -----------------
+# 161 = 160 + 1 tabel: `px_eligibility_policy` — kalibrasi kelayakan SKU
+#       Product Exchange, berversi (Director-only). Plus `client_platforms.
+#       shop_id` (ALTER, bukan tabel baru). entity_prefix TETAP 44 —
+#       `px_eligibility_policy` ber-PK `versi integer`, tidak pernah disebut
+#       manusia lewat ID-nya (preseden nol-prefix: `adsscanner_benchmark`,
+#       `report_benchmark`). sm_machines TETAP 35 — tabel kalibrasi berversi
+#       bukan entitas ber-lifecycle (preseden: `adsscanner_benchmark`,
+#       `client_pitch_consents`, `page_views`). notif_events TETAP 74 — nol
+#       yang perlu diberitahu. Modul consent PRD (`px_consents`) DIHAPUS oleh
+#       ketokan pemilik 2026-09-12 — lihat docs/DECISIONS.md.
 # --- Bridge MSDPS→CDPS Fase 1 (20261007010000_bridge_msdps_fase1.sql) --------
 # 160 = 156 + 4 tabel: `external_orders` (inbox ORD-), `client_external_ref`
 #       (dedup satu POI MSDPS ⇒ maks satu CLI-), `client_external_billing`

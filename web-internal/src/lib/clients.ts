@@ -14,6 +14,9 @@ export interface Platform {
   active: boolean;
   /** R3 — tahap perjalanan pembeli yang sedang dikejar toko ini; null = belum ditetapkan. */
   tahap_fokus: string | null;
+  /** PX-M2a — TERISI = toko ini punya agency plan TAP/SAP, boleh diproses Product
+   *  Exchange M3. null = belum ikut Product Exchange. */
+  shop_id: string | null;
 }
 
 export interface Allocation {
@@ -256,4 +259,16 @@ export function updatePlatform(
   patchInput: { store_link?: string; managed_since?: string; active?: boolean },
 ): Promise<{ ok: boolean }> {
   return patch<{ ok: boolean }>(`/clients/${clientId}/platforms/${platformId}`, patchInput);
+}
+
+/**
+ * PUT /clients/{id}/platforms/{pid}/shop-id — PX-M2a: set or clear the Shop ID
+ * gate value (Account Lead/Director OR the client's owning AM — a wider gate
+ * than `updatePlatform`'s Account Lead/OD/Director, see
+ * `productexchange.canIsiShopId`). Sent as `''` to clear, same convention as
+ * `report.setTahapFokus`; the server echoes what it stored.
+ */
+export function setShopId(clientId: string, platformId: number, shopId: string): Promise<{ shop_id: string | null }> {
+  return api.put<{ shop_id: string | null }>(
+    `/clients/${clientId}/platforms/${platformId}/shop-id`, { shop_id: shopId });
 }

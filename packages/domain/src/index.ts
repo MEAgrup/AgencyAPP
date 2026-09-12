@@ -186,3 +186,10 @@ export * as scs from './scs';
 // reuse — preseden `renewal.ts`. Lihat header `bridge.ts` untuk amandemen
 // D5/§4.3 terhadap rencana bridging asli.
 export * as bridge from './bridge';
+// PX-M2a — Shop ID Gate & Eligibility Policy (Product Exchange, sisi MEA
+// Agency). Modul consent PRD asli (`px_consents`) DIHAPUS oleh ketokan
+// pemilik 2026-09-12 — `client_platforms.shop_id` adalah gerbangnya sekarang.
+// `px_eligibility_policy` Director-only, append-only, preseden
+// `adsscanner_benchmark`. Pembaca kelayakan SKU (Flow D PRD) lahir di PX-M2b
+// bersama M3 (`px_sku`). Lihat `docs/DECISIONS.md` 2026-09-12.
+export * as productexchange from './productexchange';

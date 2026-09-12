@@ -623,6 +623,13 @@ describe('visibleNav — layered OD / Director', () => {
     expect(seen).toContain('/creative');
     expect(seen).toContain('/tasks');
   });
+
+  it('OD does NOT gain PX-M2a Kebijakan Kelayakan SKU (Director-only, preseden adsscanner_benchmark)', () => {
+    // Deliberately NOT the usual OD-read/Director-write admin pattern: this
+    // calibration drives the Product Exchange M3 money gate directly.
+    expect(hrefs(role('Account', 'lead', { od: true }))).not.toContain('/px/eligibility-policy');
+    expect(hrefs(role('Account', 'staff', { director: true }))).toContain('/px/eligibility-policy');
+  });
 });
 
 describe('visibleNav — section shape', () => {
@@ -705,7 +712,7 @@ describe('Sidebar IA v3 — struktur 9 grup', () => {
       '/finance', '/finance/reminders',
       '/penugasan', '/portal/team', '/performance',
       '/admin/employees', '/admin/role-mappings', '/admin/hari-libur',
-      '/admin/vendor-accounts', '/admin/client-contacts',
+      '/admin/vendor-accounts', '/admin/client-contacts', '/px/eligibility-policy',
     ]) {
       expect(ALL_HREFS, `${href} hilang dari model navigasi`).toContain(href);
     }

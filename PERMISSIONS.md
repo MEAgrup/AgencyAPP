@@ -129,6 +129,7 @@
 | M13 Health | Visibility: AM/SPV/OD/Director. **Not client-facing** except band label via M15. ROAS toggle: AM/SPV per client. |
 | M14 Performance | Staff: own score (always with full breakdown); Leader/SPV: team; OD/Director: everyone. KPI weight config: **admin UI** (Yohan/HR-level). |
 | M15 Portals | Client contacts: strict allow-list only (Service Progress relabeled, embedded reports, Health band, complaint form). **Block-approval queue: SPV/Lead.** Management Dashboard: Director/OD/management, read-only. |
+| PX-M2a Product Exchange | **Eligibility policy (`px_eligibility_policy`): Director ONLY** — read AND write, `productexchange.canKelolaPolicy` (preseden `adsscanner_benchmark`, BUKAN pola OD-baca/Director-tulis — kalibrasi ini langsung menggerakkan gerbang uang M3). Append-only: `aktif` tidak pernah dibalik, versi aktif = versi tertinggi yang aktif. **Shop ID (`client_platforms.shop_id`): Account Lead/Director OR the client's owning AM** (`productexchange.canIsiShopId`) — WIDER than `client.canEditProfile` (Account Lead/OD/Director only) used for the rest of the Platform row, a deliberate separate gate (docs/DECISIONS.md 2026-09-12), not a piggyback. |
 
 ## Test-suite note
 For every endpoint, generate cases: (allow) the named role, (deny) one role below it, (deny) cross-division same-level, (allow-read-only) OD, (allow) Director. Layered-role case: one fixture employee who is Staff+OD must get write access from Staff scope and read access from OD scope, never write from OD.

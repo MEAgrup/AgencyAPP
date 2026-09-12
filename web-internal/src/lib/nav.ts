@@ -468,6 +468,15 @@ const ADMIN: NavNode[] = [
     label: 'Hari Libur',
     access: (role) => Boolean(role.director || role.od),
   },
+  // PX-M2a — kalibrasi kelayakan SKU Product Exchange. Director-only untuk
+  // MEMBACA dan MENULIS (`productexchange.canKelolaPolicy`), preseden
+  // `adsscanner_benchmark` — BUKAN pola OD-baca/Director-tulis di atas: nilai
+  // ini langsung menggerakkan gerbang uang Product Exchange M3.
+  {
+    href: '/px/eligibility-policy',
+    label: 'Kebijakan Kelayakan SKU',
+    access: (role) => Boolean(role.director),
+  },
   // Tindak lanjut LT-61: menyediakan login vendor sendiri. Otoritas yang sama
   // dengan vendor.canManageVendor (Account lead / Director) — yang mengelola
   // catatan vendor mengelola apakah ia bisa login — plus OD read-only.

@@ -30,6 +30,7 @@ import {
   rejectHoldService,
   resumeService,
   setPaymentIntent,
+  setShopId,
   updatePlatform,
   voidService,
   type Client,
@@ -120,6 +121,17 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [platformSubmitting, setPlatformSubmitting] = useState(false);
   const [platformError, setPlatformError] = useState<string | null>(null);
   const [platformDeactivatingId, setPlatformDeactivatingId] = useState<number | null>(null);
+
+  // Shop ID (PX-M2a) — wider gate than canEditPlatforms: the client's owning
+  // AM may fill this even without profile-edit rights (productexchange.
+  // canIsiShopId). The FE cannot know THIS client's specific assigned AM
+  // without another read, so — same approximation the page already uses for
+  // "Kelola Klien"/Hold above — it offers the control to any Account staff,
+  // Account lead, or Director, and lets the server enforce real ownership.
+  const canIsiShopId = isAccountStaff(role) || isAccountLead(role) || !!role?.director;
+  const [shopIdDraft, setShopIdDraft] = useState<Record<number, string>>({});
+  const [shopIdSavingId, setShopIdSavingId] = useState<number | null>(null);
+  const [shopIdError, setShopIdError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -273,6 +285,25 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       setPlatformError(errorMessage(err));
     } finally {
       setPlatformSubmitting(false);
+    }
+  }
+
+  async function handleSetShopId(platformId: number) {
+    const nilai = shopIdDraft[platformId] ?? '';
+    setShopIdError(null);
+    setShopIdSavingId(platformId);
+    try {
+      await setShopId(id, platformId, nilai);
+      await load();
+      setShopIdDraft((m) => {
+        const next = { ...m };
+        delete next[platformId];
+        return next;
+      });
+    } catch (err) {
+      setShopIdError(errorMessage(err));
+    } finally {
+      setShopIdSavingId(null);
     }
   }
 
@@ -458,6 +489,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           <h2>Platform</h2>
         </div>
         {platformError && <div className="alert alertError" role="alert">{platformError}</div>}
+        {shopIdError && <div className="alert alertError" role="alert">{shopIdError}</div>}
+        <div className="alert alertInfo" style={{ fontSize: 13 }}>
+          <strong>Shop ID (isi hanya bila agency plan TAP/SAP sudah dibuat)</strong> — mengisinya
+          adalah pernyataan bahwa toko ini boleh diproses Product Exchange (MCN MEA). Kosongkan
+          untuk toko yang belum ikut program ini.
+        </div>
         {client.platforms.some((p) => p.platform.includes(',')) && (
           <div className="alert alertInfo" style={{ fontSize: 13 }}>
             Baris platform di bawah berisi lebih dari satu nama (mis. &ldquo;TikTok Shop, Shopee&rdquo;) —
@@ -476,6 +513,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   <th>Link Toko</th>
                   <th>Dikelola Sejak</th>
                   <th>Aktif</th>
+                  <th>Shop ID (Product Exchange)</th>
                   {canEditPlatforms && <th></th>}
                 </tr>
               </thead>
@@ -486,6 +524,31 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     <td>{p.store_link || '—'}</td>
                     <td>{formatDate(p.managed_since)}</td>
                     <td>{p.active ? 'Aktif' : 'Nonaktif'}</td>
+                    <td>
+                      {canIsiShopId ? (
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <input
+                            aria-label={`Shop ID ${p.platform}`}
+                            value={shopIdDraft[p.client_platform_id] ?? p.shop_id ?? ''}
+                            disabled={shopIdSavingId === p.client_platform_id}
+                            onChange={(e) =>
+                              setShopIdDraft((m) => ({ ...m, [p.client_platform_id]: e.target.value }))
+                            }
+                            style={{ width: 160 }}
+                          />
+                          <button
+                            type="button"
+                            className="btn btnGhost btnSm"
+                            disabled={shopIdSavingId === p.client_platform_id}
+                            onClick={() => handleSetShopId(p.client_platform_id)}
+                          >
+                            {shopIdSavingId === p.client_platform_id ? 'Menyimpan...' : 'Simpan'}
+                          </button>
+                        </div>
+                      ) : (
+                        p.shop_id || '—'
+                      )}
+                    </td>
                     {canEditPlatforms && (
                       <td>
                         {p.active && (

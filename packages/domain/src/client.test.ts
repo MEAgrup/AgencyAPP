@@ -38,6 +38,7 @@ import {
   LockedFieldError,
   MSG_INTENT_LOCKED,
   NotFoundError,
+  PlatformDuplicateError,
   resumeService,
   ServiceStateError,
   setPaymentIntent,
@@ -373,6 +374,24 @@ describeDb('Platform List (M4 §3/§4)', () => {
     const id = await closedClient();
     await expect(updatePlatform(sql, accountLead(), id, 99999999, { active: false }))
       .rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  // PX-M2a §4b — one active platform row per (client, platform). Ketokan Hans +
+  // Nerissa 2026-09-12: "kunci sekarang, bersihkan kemudian" — enforced in the
+  // domain (client_platforms cannot carry a NOT VALID unique index yet, live has
+  // duplicate rows already; see docs/DECISIONS.md).
+  it('rejects a second ACTIVE platform row for a platform the client already has', async () => {
+    const id = await closedClient(); // born with an active 'Shopee' row
+    await expect(addPlatform(sql, accountLead(), id, { platform: 'Shopee' }))
+      .rejects.toBeInstanceOf(PlatformDuplicateError);
+  });
+
+  it('allows a second platform row once the first is deactivated (not a live duplicate)', async () => {
+    const id = await closedClient();
+    const pid = await primaryPlatformId(id);
+    await updatePlatform(sql, accountLead(), id, pid, { active: false });
+    const newPid = await addPlatform(sql, accountLead(), id, { platform: 'Shopee' });
+    expect(newPid).toBeGreaterThan(0);
   });
 });
 

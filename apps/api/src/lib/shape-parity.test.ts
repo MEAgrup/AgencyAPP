@@ -195,7 +195,7 @@ const FE_FILES = [
   'account.ts', 'adopsi.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'bridge.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyops.ts', 'scs.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
-  'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'px.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
   // web-client-portal (M15-C2) — the external realm's own app, see FE_LIB_PORTAL.
   'klien/types.ts',
 ];
@@ -600,6 +600,8 @@ const WIRE_TO_FE: Record<string, string> = {
   TimelineStepWire: 'interview.ts::TimelineStep',
   KelolaKlienTimelineWire: 'interview.ts::KelolaKlienTimeline',
   HariLiburWire: 'types.ts::HariLibur',
+  EligibilityPolicyWire: 'px.ts::PxEligibilityPolicy',
+  EligibilityPolicyValueWire: 'px.ts::PxEligibilityPolicyValue',
   InterviewJadwalWire: 'interview.ts::InterviewJadwal',
   InterviewKualifikasiWire: 'interview.ts::InterviewKualifikasi',
   InterviewAnswerWire: 'interview.ts::InterviewAnswer',

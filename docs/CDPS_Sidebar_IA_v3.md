@@ -108,6 +108,7 @@ ADMIN
   Karyawan
   Role Mapping
   Hari Libur
+  Kebijakan Kelayakan SKU      (PX-M2a, Director-only — added 2026-09-12)
   Akun Vendor
   Akses Portal Klien          (was Kontak Klien (Portal))
 ```

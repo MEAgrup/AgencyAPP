@@ -101,6 +101,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   OverVerificationError: 400, // finance.OverVerificationError
   PageCursorError: 400, // core page.PageCursorError — a cursor this server did not mint
   PerformanceValidationError: 400, // performance.ValidationError
+  ProductExchangeValidationError: 400, // productexchange.ValidationError (PX-M2a)
   ReqValidationError: 400, // req.ValidationError
   SalesIncompleteError: 400, // sales.IncompleteError
   SalesPerfValidationError: 400, // salesperf.ValidationError
@@ -140,6 +141,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   MslForbiddenError: 403, // msl.ForbiddenError
   PerformanceForbiddenError: 403, // performance.ForbiddenError
   PortalForbiddenError: 403, // portal.ForbiddenError
+  ProductExchangeForbiddenError: 403, // productexchange.ForbiddenError (PX-M2a)
   ReqForbiddenError: 403, // req.ForbiddenError
   SalesForbiddenError: 403, // sales.ForbiddenError
   SalesPerfForbiddenError: 403, // salesperf.ForbiddenError
@@ -169,6 +171,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   MilestoneNotFoundError: 404, // milestone.NotFoundError
   NotFoundError: 404, // demo.NotFoundError (see auth.NotFoundError note above)
   PerformanceNotFoundError: 404, // performance.NotFoundError
+  ProductExchangeNotFoundError: 404, // productexchange.NotFoundError (PX-M2a)
   ReqNotFoundError: 404, // req.NotFoundError
   SalesNotFoundError: 404, // sales.NotFoundError
   ServiceNotFoundError: 404, // msl.ServiceNotFoundError
@@ -187,6 +190,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   BoardConflictError: 409, // board.ConflictError
   ChangeDecidedError: 409, // finance.ChangeDecidedError
   ChangePendingError: 409, // finance.ChangePendingError
+  ClientPlatformDuplicateError: 409, // client.PlatformDuplicateError (PX-M2a §4b)
   ContractRequiredError: 409, // finance.ContractRequiredError
   CreativeConflictError: 409, // creative.ConflictError
   DailyOpsConflictError: 409, // dailyops.ConflictError (M19)
@@ -201,6 +205,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   MilestoneConflictError: 409, // milestone.ConflictError
   NoOutstandingError: 409, // finance.NoOutstandingError
   NotClosableError: 409, // sales.NotClosableError
+  ProductExchangeConflictError: 409, // productexchange.ConflictError (PX-M2a, dicadangkan PX-M2b)
   ReqConflictError: 409, // req.ConflictError
   ScheduleExistsError: 409, // finance.ScheduleExistsError
   SchemeLockedError: 409, // finance.SchemeLockedError
