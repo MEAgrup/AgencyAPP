@@ -157,11 +157,41 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!sql) return;
-  await sql`delete from interview where id = ${ITV}`;
-  await sql`delete from client_platforms where client_id = ${CLI}`;
-  await sql`delete from clients where id = ${CLI}`;
+  await sql`delete from interview where id like 'ITV-ZZI-%'`;
+  await sql`delete from client_platforms where client_id like 'CLI-ZZI-%'`;
+  await sql`delete from clients where id like 'CLI-ZZI-%'`;
   await sql.end();
 });
+
+// A handful of tests need an ISOLATED platform row (its own submission state,
+// untouched by the shared TikTok Shop/Shopee rows above) but must still carry
+// the real platform label so the right engine is derived. Since PX-M2a §4b
+// (`uq_client_platforms_active_platform`) now forbids two ACTIVE rows for the
+// same (client_id, platform) — exactly the "2 klien = 1 toko" invariant this
+// index exists to enforce — each such case gets its OWN scratch client
+// instead of piling a second active row onto the shared `CLI` fixture.
+let scratchSeq = 1;
+async function freshInterviewWithPlatform(platform: string): Promise<{ interviewId: string; platformId: number }> {
+  scratchSeq += 1;
+  const seq = String(scratchSeq).padStart(4, '0');
+  const clientId = `CLI-ZZI-${seq}`;
+  const interviewId = `ITV-ZZI-${seq}`;
+  await sql`
+    insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                         sales_pic_id, commission_payment_pic_id, assigned_am_id, created_by)
+    values (${clientId}, 'PIC', 'Toko', 'Jakarta', 'https://t.example', 'Fashion', 0, 0,
+            ${SALES}, ${SALES}, ${OWNER_AM}, ${OWNER_AM})`;
+  await sql`
+    insert into interview (id, client_id, am_pengisi_id, sales_closing_id, status, created_by)
+    values (${interviewId}, ${clientId}, ${OWNER_AM}, ${SALES}, 'Selesai', ${OWNER_AM})`;
+  await sql`
+    insert into interview_riset_awal (interview_id, dimulai_oleh)
+    values (${interviewId}, ${OWNER_AM})`;
+  const rows = await sql<{ id: number }[]>`
+    insert into client_platforms (client_id, platform, active, created_by)
+    values (${clientId}, ${platform}, true, ${OWNER_AM}) returning id`;
+  return { interviewId, platformId: Number(rows[0].id) };
+}
 
 dDb('submitBaseline — per-platform baseline + auto-fill', () => {
   it('TikTok Shop analisa_penuh: engine runs server-side, scored, isian sumber=analisa', async () => {
@@ -251,24 +281,19 @@ dDb('submitBaseline — per-platform baseline + auto-fill', () => {
   });
 
   it('Shopee tanpa berkas Bisnis — Home ditolak dengan pesan BI', async () => {
-    const fresh = await sql<{ id: number }[]>`
-      insert into client_platforms (client_id, platform, active, created_by)
-      values (${CLI}, 'Shopee', true, ${OWNER_AM}) returning id`;
+    const { interviewId, platformId } = await freshInterviewWithPlatform('Shopee');
     await expect(
-      submitBaseline(sql, owner, ITV, {
-        clientPlatformId: Number(fresh[0].id),
+      submitBaseline(sql, owner, interviewId, {
+        clientPlatformId: platformId,
         analisa: { files: [{ filename: 'entah.xlsx', aoa: [['a']], sha256: 'd'.repeat(64), ukuranBytes: 10 }] },
       }),
     ).rejects.toThrow('[tipe berkas Shopee tidak dikenali');
   });
 
   it('TikTok Shop with manualOverride: opts out of the engine, treated as manual (owner QA 2026-08-27)', async () => {
-    const fresh = await sql<{ id: number }[]>`
-      insert into client_platforms (client_id, platform, active, created_by)
-      values (${CLI}, 'TikTok Shop', true, ${OWNER_AM}) returning id`;
-    const overrideId = Number(fresh[0].id);
+    const { interviewId, platformId: overrideId } = await freshInterviewWithPlatform('TikTok Shop');
     // No files at all — an AM using the shortcut never uploads an export.
-    const view = await submitBaseline(sql, owner, ITV, {
+    const view = await submitBaseline(sql, owner, interviewId, {
       clientPlatformId: overrideId,
       manual: { gmvBulan: 5_000_000, order: 120, aov: 41_666, skuTotal: 15, belanjaIklan: 500_000, roas: 3.2 },
       manualOverride: true,
@@ -302,11 +327,8 @@ dDb('submitBaseline — per-platform baseline + auto-fill', () => {
   });
 
   it('manualOverride is ignored for a platform that is already manual (nothing to opt out of)', async () => {
-    const fresh = await sql<{ id: number }[]>`
-      insert into client_platforms (client_id, platform, active, created_by)
-      values (${CLI}, 'Lazada', true, ${OWNER_AM}) returning id`;
-    const lazadaId = Number(fresh[0].id);
-    const view = await submitBaseline(sql, owner, ITV, {
+    const { interviewId, platformId: lazadaId } = await freshInterviewWithPlatform('Lazada');
+    const view = await submitBaseline(sql, owner, interviewId, {
       clientPlatformId: lazadaId,
       manual: { gmvBulan: 1_000_000, order: 10, aov: 100_000, skuTotal: 5, belanjaIklan: 0, roas: 0 },
       manualOverride: true,
@@ -315,19 +337,16 @@ dDb('submitBaseline — per-platform baseline + auto-fill', () => {
   });
 
   it('an ambiguous own-vs-affiliate file is rejected until the AM confirms its type', async () => {
-    const fresh = await sql<{ id: number }[]>`
-      insert into client_platforms (client_id, platform, active, created_by)
-      values (${CLI}, 'TikTok Shop', true, ${OWNER_AM}) returning id`;
-    const freshId = Number(fresh[0].id);
+    const { interviewId, platformId: freshId } = await freshInterviewWithPlatform('TikTok Shop');
     // No linkedAccounts, no override → detect flags the video file ambiguous.
     await expect(
-      submitBaseline(sql, owner, ITV, {
+      submitBaseline(sql, owner, interviewId, {
         clientPlatformId: freshId,
         analisa: { files: [{ filename: 'video.xlsx', aoa: videoAoa(), sha256: 'b'.repeat(64), ukuranBytes: 512 }] },
       }),
     ).rejects.toThrow(MSG_AMBIGU);
     // With an explicit type override the same file is accepted.
-    const view = await submitBaseline(sql, owner, ITV, {
+    const view = await submitBaseline(sql, owner, interviewId, {
       clientPlatformId: freshId,
       analisa: { files: [{ filename: 'video.xlsx', aoa: videoAoa(), sha256: 'b'.repeat(64), ukuranBytes: 512, tipeOverride: 'vid_toko' }] },
     });
