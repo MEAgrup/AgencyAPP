@@ -74,11 +74,26 @@ const LABEL_KUNCI: Record<string, keyof Omit<PdtPreambleShopee, 'periode'> | 'pe
   periode: 'periode',
 };
 
+const isBlank = (v: unknown): boolean => v === null || v === undefined || String(v).trim() === '';
+
 /**
  * Baca preamble Shopee (`ID Toko`/`Username`/`Nama Toko`/`Periode`, Rule 2/5,
  * baris 1-6 sebelum header) dari SELURUH baris sebelum `barisHeader` (1-terindeks,
  * `PdtModuleDef.barisHeaderHint`). Menerima dua bentuk baris (lihat docblock
  * berkas): satu-sel `"Label: value"` maupun dua-sel `["Label", "value"]`.
+ *
+ * **Bentuk satu-sel dideteksi dari sel KEDUA kosong (`isBlank(row[1])`), BUKAN
+ * `row.length === 1`.** Ditemukan menulis route commit G1-09 sungguhan
+ * (bukan ditebak, `docs/DECISIONS.md`): pipa NYATA (`XLSX.utils.sheet_to_json`
+ * dengan `defval:''`, G1-05) memadatkan SETIAP baris ke lebar sheet PENUH
+ * (lebar baris header, biasanya >1 kolom) — baris preamble satu-sel yang di
+ * unit test G1-02/G1-05 memang literal panjang 1 (`['ID Toko: 938284780']`)
+ * pada berkas XLSX SUNGGUHAN selalu berakhir panjang N dengan sel ke-2..N
+ * berisi string kosong, bukan sungguh-sungguh berhenti di sel pertama. Cek
+ * `row.length === 1` yang lama SELALU salah untuk berkas nyata — jatuh ke
+ * cabang dua-sel dan membaca teks "Label: value" utuh sebagai label, gagal
+ * cocok `LABEL_KUNCI` mana pun, dan preamble (identitas + periode) diam-diam
+ * hilang untuk SETIAP upload Shopee sungguhan.
  */
 export function ekstrakPreambleShopee(aoa: readonly (readonly unknown[])[], barisHeader: number): PdtPreambleShopee {
   const hasil: PdtPreambleShopee = { idToko: null, username: null, namaToko: null, periode: null };
@@ -87,7 +102,7 @@ export function ekstrakPreambleShopee(aoa: readonly (readonly unknown[])[], bari
     if (!row || row.length === 0) continue;
     let label: string;
     let nilai: string;
-    if (row.length === 1) {
+    if (isBlank(row[1])) {
       const cell = String(row[0] ?? '');
       const idx = cell.indexOf(':');
       if (idx === -1) continue;

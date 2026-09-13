@@ -8938,3 +8938,25 @@ export interface PdtUploadUrlWire {
 export function pdtUploadUrlToWire(h: pdt.PdtSiapkanUploadHasil, uploadUrl: string): PdtUploadUrlWire {
   return { client_platform_id: h.clientPlatformId, storage_path: h.stagingPath, upload_url: uploadUrl };
 }
+
+/** G1-09 sub-langkah 2 — hasil commit (Flow A langkah 6-9, `POST /account/pdt/batches/commit`). */
+export interface PdtCommitBatchWire {
+  batch_id: number;
+  client_platform_id: number;
+  platform: string;
+  periode_selesai: string;
+  status: string; // 'verified' | 'identitas_belum_terikat' | 'ditolak'
+  /** `null` kecuali `status === 'ditolak'`. */
+  alasan_ditolak: string | null;
+}
+
+export function pdtCommitBatchToWire(h: pdt.PdtCommitHasil): PdtCommitBatchWire {
+  return {
+    batch_id: h.batchId,
+    client_platform_id: h.clientPlatformId,
+    platform: h.platform,
+    periode_selesai: h.periodeSelesai,
+    status: h.status,
+    alasan_ditolak: h.alasanDitolak,
+  };
+}

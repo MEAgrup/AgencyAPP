@@ -21,3 +21,4 @@ export * from './identitas';
 export * from './rekonsiliasi';
 export * from './parsestatus';
 export * from './header';
+export * from './retensi';

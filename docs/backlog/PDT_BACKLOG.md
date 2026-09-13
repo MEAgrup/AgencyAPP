@@ -337,6 +337,24 @@ punya `null` eksplisit.
 > sudah ada berjalan TIDAK BERUBAH. Ini menutup risiko 413 produksi untuk pratinjau, BUKAN cuma
 > untuk commit seperti dugaan Open row semula. Sub-langkah 2 (commit) sekarang tinggal
 > memindahkan objek staging ke path final Rule 44 (bukan mengunggah ulang dari nol).
+>
+> **Status 2026-09-13 (sub-langkah 2/3 SELESAI — lingkup 2a, lihat `docs/DECISIONS.md` baris
+> teratas + `docs/handoff/HANDOFF_PDT_SESI12.md`)** — `POST /account/pdt/batches/commit` (BARU,
+> `pdt.commitUploadBatch`) menutup bullet 3 (override AM per berkas, `deteksi_oleh` akhirnya
+> ditulis), separuh bullet 4 (batch `pdt_upload_batch`/`pdt_file` sekarang benar-benar ADA untuk
+> UI status paket dibangun di atasnya), dan bullet 5 (error path — kegagalan identitas/
+> rekonsiliasi/pemindahan Storage semua menyisakan batch `ditolak` TETAP tersimpan). Paket ZIP
+> dipindah dari staging ke path final Rule 44 (`pindahkanPdtRawObjek`, Storage `/object/move`
+> DIVERIFIKASI ke sumber `storage-js`, bukan ditebak). **Sengaja BELUM (lingkup 2b):** baris
+> fakta `pdt_fact_*` (peta kolom→tabel belum ada), `pdt_usulan` (G4), `pdt_laporan_kiriman` (G2).
+> **Dua bug NYATA ditemukan+diperbaiki saat pipa G1-04→05→06 pertama kali dirangkai end-to-end
+> sungguhan** (XLSX ditulis+dibaca betulan, bukan AoA siap-pakai): `ekstrakPreambleShopee`
+> kehilangan SELURUH preamble Shopee (identitas+periode) pada berkas nyata (heuristik
+> `row.length===1` tidak pernah cocok sesudah `sheet_to_json` memadatkan baris ke lebar sheet
+> penuh — diperbaiki ke `isBlank(row[1])`), dan tanda tangan `shopee_ams_afiliasi` bentrok
+> dengan `shopee_ads_cpc`/`shopee_ads_live` pada data realistis (Open row baru
+> `G1-09-SIGNATURE-AMS-COLLISION`, dampak produksi — lihat DECISIONS.md). Halaman upload
+> `web-internal` (sub-langkah 3) masih BELUM dibangun.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

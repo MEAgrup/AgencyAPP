@@ -57,3 +57,17 @@ export interface PdtUploadUrl {
   storage_path: string;
   upload_url: string;
 }
+
+// G1-09 sub-langkah 2 — commit (POST /account/pdt/batches/commit), Flow A
+// langkah 6-9: menulis pdt_upload_batch/pdt_file sungguhan. Halaman upload
+// (tabel hasil deteksi + dropdown override + tombol submit) BELUM dibangun —
+// ini kontrak datanya lebih dulu, sama seperti PdtPreviewBatch/PdtUploadUrl
+// sebelumnya (sub-langkah 3, lihat docs/backlog/PDT_BACKLOG.md G1-09).
+export interface PdtCommitBatch {
+  batch_id: number;
+  client_platform_id: number;
+  platform: string;
+  periode_selesai: string;
+  status: string; // 'verified' | 'identitas_belum_terikat' | 'ditolak'
+  alasan_ditolak: string | null;
+}

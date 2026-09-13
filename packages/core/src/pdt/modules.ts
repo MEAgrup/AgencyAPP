@@ -57,6 +57,19 @@ export const UNVERIFIED_SIGNATURE: PdtSignature = {
   must: ['__pdt_g1_02_belum_ada_sinyal_isi_terverifikasi__'],
 };
 
+/**
+ * Versi pipeline parser PDT (Rule 11 — dicatat PER BATCH dan PER BARIS
+ * FAKTA, "bila parser diperbaiki... batch lama dapat di-reparse... menaikkan
+ * `parser_versi`"). SATU angka untuk seluruh registry `PDT_MODULES` +
+ * `pdt_kolom_alias` — naik bila salah satu berubah dengan cara yang
+ * mengubah angka hasil parse batch LAMA (kolom whitelist bertambah/berubah,
+ * alias baru, perbaikan bug parse). G1-11 (job reparse, belum dibangun) yang
+ * membandingkan angka ini ke `pdt_upload_batch.parser_versi`/
+ * `pdt_fact_*.parser_versi` tersimpan untuk memutuskan batch mana yang perlu
+ * diparse ulang.
+ */
+export const PDT_PARSER_VERSI = 1;
+
 export const PDT_MODULES: readonly PdtModuleDef[] = [
   // ===========================================================================
   // TikTok (PRD §7.1 / PDT_KOLOM_DIPANEN §1) — 9 modul

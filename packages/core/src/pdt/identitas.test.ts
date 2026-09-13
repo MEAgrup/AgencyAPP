@@ -63,6 +63,33 @@ describe('ekstrakPreambleShopee — bentuk satu-sel "Label: value" (fixture G1-0
   });
 });
 
+describe('ekstrakPreambleShopee — bentuk satu-sel DIPADATKAN ke lebar sheet penuh (G1-09: bentuk NYATA XLSX.utils.sheet_to_json({defval:\'\'}), bukan literal panjang 1)', () => {
+  // Ditemukan menulis route commit G1-09 sungguhan: sheet_to_json memadatkan SETIAP baris ke
+  // lebar sheet (kolom terlebar — baris header), jadi baris preamble "satu sel" TIDAK PERNAH
+  // benar-benar panjang 1 pada berkas XLSX asli. row.length === 1 (perilaku LAMA) gagal total di
+  // sini; deteksi sekarang dari sel KEDUA kosong (isBlank(row[1])).
+  const aoa = [
+    ['ID Toko: 938284780', '', '', '', ''],
+    ['Username: tokoku', '', '', '', ''],
+    ['Nama Toko: Toko Saya', '', '', '', ''],
+    ['Periode: 01/07/2026 - 31/07/2026', '', '', '', ''],
+    ['', '', '', '', ''],
+    ['', '', '', '', ''],
+    ['', '', '', '', ''],
+    ['Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya'],
+    ['SKU-A', '50000', '2000', '80', '5000000'],
+  ];
+
+  it('membaca keempat field preamble walau tiap baris dipadatkan ke 5 kolom', () => {
+    expect(ekstrakPreambleShopee(aoa, 8)).toEqual({
+      idToko: '938284780',
+      username: 'tokoku',
+      namaToko: 'Toko Saya',
+      periode: { mulai: '2026-07-01', selesai: '2026-07-31' },
+    });
+  });
+});
+
 describe('ekstrakPreambleShopee — bentuk dua-sel ["Label", "value"] (pola report/shopee lama)', () => {
   const aoa = [
     ['ID Toko', 'SHOP-1'],
@@ -78,6 +105,16 @@ describe('ekstrakPreambleShopee — bentuk dua-sel ["Label", "value"] (pola repo
 
   it('membaca keempat field preamble', () => {
     expect(ekstrakPreambleShopee(aoa, 8)).toEqual({
+      idToko: 'SHOP-1',
+      username: 'ezzystore',
+      namaToko: 'Ezzy Store',
+      periode: { mulai: '2026-08-01', selesai: '2026-08-31' },
+    });
+  });
+
+  it('tetap terbaca walau dipadatkan ke lebar sheet penuh (sel kedua TERISI, bukan blank — beda dari bentuk satu-sel)', () => {
+    const dipadatkan = aoa.map((row) => [...row, '', '', '']);
+    expect(ekstrakPreambleShopee(dipadatkan, 8)).toEqual({
       idToko: 'SHOP-1',
       username: 'ezzystore',
       namaToko: 'Ezzy Store',

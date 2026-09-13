@@ -13,7 +13,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { pdt, permission } from '@cdps/core';
-import type { Sql } from '@cdps/db';
+import { withTransaction, type Sql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
 
 /**
@@ -391,4 +391,262 @@ export async function siapkanUploadBatch(
 
   const stagingPath = `_staging/${row.client_id}/${clientPlatformId}/${randomUUID()}.zip`;
   return { clientPlatformId, stagingPath };
+}
+
+// ===========================================================================
+// G1-09 sub-langkah 2 — commit (Flow A langkah 6-9). `previewUploadBatch` di
+// atas sengaja nol tulis DB; ini pemanggil NYATA pertama yang menulis
+// `pdt_upload_batch`/`pdt_file` dan (bila AM konfirmasi) `client_platforms`.
+//
+// Storage (memindahkan objek staging → path final Rule 44) TIDAK dilakukan
+// di sini — paket ini tidak boleh bergantung pada jaringan (larangan yang
+// sama dengan fs/yauzl di kepala berkas). Urutan yang benar (dijalankan
+// route, `apps/api/.../pdt/batches/commit/route.ts`):
+//   1. `commitUploadBatch` (di sini) — INSERT batch (`raw_path` masih NULL —
+//      path final butuh `batch_id`, yang baru lahir DI SINI) + `pdt_file` +
+//      (opsional) ikat identitas. Return `batchId`/`periodeSelesai`.
+//   2. Route memanggil `pindahkanPdtRawObjek` (apps/api/src/lib/pdt-storage.ts)
+//      dari path staging ke `{client_id}/{client_platform_id}/{periodeSelesai}/{batchId}.zip`.
+//   3. Berhasil → `tandaiRawTersimpan` (di sini) mengisi `raw_path`.
+//      Gagal → `tandaiBatchGagalRaw` (di sini): Flow A langkah 9 — kegagalan
+//      di langkah manapun menyisakan batch `ditolak` yang TETAP tersimpan,
+//      bukan rollback total.
+//
+// **Belum dilakukan di sini (sengaja, sub-langkah 2a — lihat
+// docs/backlog/PDT_BACKLOG.md G1-09 §status + handoff sesi ini):** baris
+// fakta (`pdt_fact_*` — peta kolom→tabel belum ada), `pdt_usulan` (G4),
+// `pdt_laporan_kiriman` (G2).
+//
+// **Tiga ketidakpastian PRD ditemukan menulis fungsi ini — DICATAT
+// (`docs/DECISIONS.md`), bukan ditebak diam-diam:**
+//  1. Identitas `tidak_dapat_divalidasi` (nol berkas 'ok' membawa sinyal
+//     identitas platform ini sama sekali) DIPERLAKUKAN sebagai LOLOS (bukan
+//     ditolak) — `canUploadBatch` sudah menggerbang kepemilikan toko; ini
+//     murni ketiadaan cross-check TAMBAHAN, bukan bukti kesalahan.
+//  2. Σ pesanan per-SKU `shopee_parent_sku` (Rule 13) — kolom itu TIDAK ada
+//     di whitelist modul ini (beda dari G1-07-PERSKU-DIBAYAR, yang soal
+//     basis `dibayar`; ini soal metrik pesanan sama sekali, basis apa pun).
+//     Gerbang rekonsiliasi di bawah HANYA membandingkan GMV (bukan GMV+pesanan
+//     seperti Rule 13/14 sebut) pada basis `siap_dikirim` (Rule 16 — basis
+//     default laporan klien Shopee, gerbang Flow A langkah 7).
+//  3. periode `null`/`{status:'tolak'}` (Rule 5 — nol berkas 'ok' SAMA
+//     SEKALI, atau berkas ada tapi nol satu pun membawa periode terbaca) TIDAK
+//     bisa dipersist sebagai batch (`periode_mulai`/`periode_selesai` NOT
+//     NULL) — 400 tanpa baris, beda dari identitas/rekonsiliasi `ditolak`
+//     yang tetap tersimpan (di sana periode SUDAH resolve, jadi ada baris
+//     yang valid untuk menyimpan penolakannya).
+// ===========================================================================
+
+/** Meta paket ZIP (G1-04 `bacaDanEkstrakPdtZip`) — kolom `raw_*` `pdt_upload_batch` yang independen dari isi per-berkas. */
+export interface PdtCommitPaketMeta {
+  sha256Paket: string;
+  bytesPaket: number;
+  /** Total entri non-direktori (ditolak+dilewati+diproses) — `raw_entri`. */
+  entriTotal: number;
+  /** Subset junk macOS (Rule 41, dilewati tanpa peringatan) — `raw_entri_dilewati`. */
+  entriDilewati: number;
+}
+
+export type PdtCommitStatus = 'verified' | 'identitas_belum_terikat' | 'ditolak';
+
+export interface PdtCommitHasil {
+  batchId: number;
+  clientId: string;
+  clientPlatformId: number;
+  platform: pdt.PdtPlatform;
+  periodeSelesai: string;
+  status: PdtCommitStatus;
+  /** `null` kecuali `status === 'ditolak'`. */
+  alasanDitolak: string | null;
+}
+
+/** Cermin `PdtPreviewBerkasStatus` (tampilan) → `pdt_file.parse_status` (DB, Rule 10). `perlu_pilih_modul` TIDAK PERNAH sampai sini — `commitUploadBatch` menolak SEBELUM menulis DB bila masih ada berkas berstatus itu. */
+function keParseStatusDb(status: PdtPreviewBerkasStatus): 'ok' | 'gagal' {
+  return status === 'ok' ? 'ok' : 'gagal';
+}
+
+/**
+ * commitUploadBatch — Flow A langkah 6-9, menulis DB (lihat catatan §komit
+ * di atas untuk pembagian tanggung jawab dengan Storage). `moduleOverrides`
+ * (Rule 4): nama berkas → kode modul yang AM pilih dari dropdown, menimpa
+ * deteksi tanda tangan. `konfirmasiIkatIdentitas` (Rule 4): AM mengonfirmasi
+ * usulan pengikatan `shop_id`/`akun_konten_toko` — hanya bermakna bila
+ * `identitas.status === 'usulkan_ikat'`.
+ */
+export async function commitUploadBatch(
+  sql: Sql,
+  actor: Actor,
+  clientPlatformId: number,
+  berkas: readonly PdtPreviewBerkasInput[],
+  opts: {
+    moduleOverrides?: Readonly<Record<string, string>>;
+    konfirmasiIkatIdentitas?: boolean;
+    paket: PdtCommitPaketMeta;
+    /** Jam SERVER (Rule 37) — disuntik, bukan `new Date()` dibaca di sini, supaya diuji deterministik. */
+    sekarang: Date;
+  },
+): Promise<PdtCommitHasil> {
+  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
+  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+
+  const platform = platformKeVokabPdt(row.platform);
+  if (!platform) {
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+  }
+
+  const overrides = opts.moduleOverrides ?? {};
+  const deteksiOlehByNama = new Map<string, 'tanda_tangan' | 'override_am'>();
+  const berkasEfektif: PdtPreviewBerkasInput[] = berkas.map((b) => {
+    const override = overrides[b.nama];
+    if (override == null) {
+      deteksiOlehByNama.set(b.nama, 'tanda_tangan');
+      return b;
+    }
+    if (b.aoa == null) {
+      throw new ValidationError(`[berkas '${b.nama}' gagal diekstrak/didekode, tidak bisa menimpa modulnya]`);
+    }
+    const modul = modulPlatform(override);
+    if (!modul || modul.platform !== platform) {
+      throw new ValidationError(`[modul override '${override}' untuk berkas '${b.nama}' tidak valid untuk platform ini]`);
+    }
+    deteksiOlehByNama.set(b.nama, 'override_am');
+    return { ...b, modulTerdeteksi: override, ambiguous: false, matches: [override] };
+  });
+
+  const hasilBerkas: PdtPreviewBerkasHasil[] = [];
+  const terparse: BerkasTerparse[] = [];
+  for (const b of berkasEfektif) {
+    const { hasil, terparse: t } = bangunSatuPreviewBerkas(b);
+    hasilBerkas.push(hasil);
+    if (t) terparse.push(t);
+  }
+
+  const belumTerpilih = hasilBerkas.filter((h) => h.status === 'perlu_pilih_modul');
+  if (belumTerpilih.length > 0) {
+    throw new ValidationError(`[pilih modul untuk berkas: ${belumTerpilih.map((h) => h.nama).join(', ')}]`);
+  }
+
+  const periode = resolvePeriodePreview(platform, terparse);
+  if (periode == null) {
+    throw new ValidationError('[tidak ada berkas ber-status ok dalam batch ini, periksa kelengkapan unggahan]');
+  }
+  if (periode.status === 'tolak') {
+    throw new ValidationError(periode.pesan);
+  }
+
+  const identitas = resolveIdentitasPreview(platform, terparse, row.shop_id, row.akun_konten_toko);
+
+  let identitasSumber: { shop_id: string | null; username: string | null; nama_toko: string | null } | null = null;
+  if (platform === 'shopee') {
+    const berkasPreamble = terparse.find((b) => MODUL_PREAMBLE_SHOPEE.includes(b.modul.kode));
+    if (berkasPreamble) identitasSumber = pdt.bangunIdentitasSumberShopee(pdt.ekstrakPreambleShopee(berkasPreamble.aoa, berkasPreamble.barisHeader));
+  }
+
+  let status: PdtCommitStatus;
+  let alasanDitolak: string | null = null;
+  let reconcileDeltaPct: number | null = null;
+
+  if (identitas.status === 'tolak') {
+    status = 'ditolak';
+    alasanDitolak = identitas.pesan;
+  } else {
+    const shopStatsBerkas = platform === 'shopee' ? terparse.find((b) => b.modul.kode === 'shopee_shop_stats') : undefined;
+    const parentSkuBerkas = platform === 'shopee' ? terparse.find((b) => b.modul.kode === 'shopee_parent_sku') : undefined;
+
+    if (shopStatsBerkas && parentSkuBerkas) {
+      const basisSiapDikirim = pdt.parseShopeeShopStatsPerBasis(shopStatsBerkas.aoa).siap_dikirim;
+      if (basisSiapDikirim) {
+        const perSkuGmv = pdt.sumShopeeParentSkuGmv(parentSkuBerkas.aoa, 'Penjualan (Pesanan Siap Dikirim) (IDR)', parentSkuBerkas.barisHeader);
+        const deltaGmvPct = pdt.hitungDeltaPersen(perSkuGmv, basisSiapDikirim.gmv);
+        reconcileDeltaPct = deltaGmvPct; // Rule 14 — tersimpan baik lolos maupun ditolak (sinyal diagnostik, bukan hanya penanda kegagalan).
+        if (deltaGmvPct > pdt.AMBANG_REKONSILIASI_PERSEN) {
+          alasanDitolak = `[selisih rekonsiliasi GMV ${deltaGmvPct.toFixed(2)}% melebihi ambang ${pdt.AMBANG_REKONSILIASI_PERSEN}% (basis Pesanan Siap Dikirim, Rule 16)]`;
+        }
+      }
+      // basisSiapDikirim tidak ditemukan meski shopee_shop_stats parse_status='ok' — rekonsiliasi
+      // DILEWATI (bukan digagalkan): section basis ini bisa hilang di sheet tanpa membuat parse
+      // modul itu sendiri gagal (Rule 9 hanya menjaga kolom WAJIB header, bukan tiap section).
+    }
+
+    status = alasanDitolak != null ? 'ditolak' : identitas.status === 'usulkan_ikat' && !opts.konfirmasiIkatIdentitas ? 'identitas_belum_terikat' : 'verified';
+  }
+
+  const retensi = pdt.hitungRetensiSampai(status === 'ditolak' ? 'ditolak' : 'default', opts.sekarang);
+
+  const batchId = await withTransaction(sql, async (tx) => {
+    const rows = await tx<{ id: number }[]>`
+      insert into pdt_upload_batch (
+        client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, reconcile_delta_pct, alasan_ditolak, parser_versi, identitas_sumber,
+        raw_sha256, raw_bytes, raw_entri, raw_entri_dilewati, retensi_sampai, retensi_alasan,
+        dibuat_oleh
+      ) values (
+        ${row.client_id}, ${clientPlatformId}, ${platform}, ${periode.mulai}, ${periode.selesai},
+        ${status}, ${reconcileDeltaPct}, ${alasanDitolak}, ${pdt.PDT_PARSER_VERSI},
+        ${identitasSumber ? JSON.stringify(identitasSumber) : null}::jsonb,
+        ${opts.paket.sha256Paket}, ${opts.paket.bytesPaket}, ${opts.paket.entriTotal}, ${opts.paket.entriDilewati},
+        ${retensi.sampai}, ${retensi.alasan}, ${actor.employeeId}
+      )
+      returning id`;
+    const batchId = Number(rows[0].id); // bigint identity ⇒ postgres.js decodes as string (pola sama route.test.ts lain)
+
+    for (const h of hasilBerkas) {
+      await tx`
+        insert into pdt_file (
+          batch_id, modul_kode, nama_entri, sha256, bytes, baris_header,
+          deteksi_oleh, kolom_dipanen, kolom_baru, parse_status, parse_error
+        ) values (
+          ${batchId}, ${h.modulKode}, ${h.nama}, ${h.sha256}, ${h.bytes}, ${h.barisHeader},
+          ${deteksiOlehByNama.get(h.nama) ?? 'tanda_tangan'}, ${h.kolomDipanen}, ${h.kolomBaru},
+          ${keParseStatusDb(h.status)}, ${h.status === 'ok' ? null : h.pesan}
+        )`;
+    }
+
+    if (identitas.status === 'usulkan_ikat' && opts.konfirmasiIkatIdentitas) {
+      if (platform === 'shopee') {
+        await tx`update client_platforms set shop_id = ${identitas.usulan}, shop_username = ${identitasSumber?.username ?? null} where id = ${clientPlatformId}`;
+      } else {
+        // Array JS MENTAH (bukan JSON.stringify manual) — postgres.js men-serialize sendiri ke
+        // jsonb saat menemui `::jsonb`; stringify manual + cast akan meng-encode DUA KALI (jadi
+        // string tunggal berisi teks JSON, bukan array) — ditemukan lewat tes ini, bukan ditebak.
+        await tx`update client_platforms set akun_konten_toko = coalesce(akun_konten_toko, '[]'::jsonb) || ${[identitas.usulan]}::jsonb where id = ${clientPlatformId}`;
+      }
+    }
+
+    return batchId;
+  });
+
+  return { batchId, clientId: row.client_id, clientPlatformId, platform, periodeSelesai: periode.selesai, status, alasanDitolak };
+}
+
+/**
+ * Dipanggil route SESUDAH `pindahkanPdtRawObjek` (apps/api) berhasil —
+ * mengisi `raw_path` dengan path FINAL Rule 44. Terpisah dari INSERT
+ * `commitUploadBatch` karena `batch_id` (bagian dari path final) baru ada
+ * SESUDAH baris itu di-insert.
+ */
+export async function tandaiRawTersimpan(sql: Sql, batchId: number, rawPath: string): Promise<void> {
+  await sql`update pdt_upload_batch set raw_path = ${rawPath} where id = ${batchId}`;
+}
+
+/**
+ * Dipanggil route bila `pindahkanPdtRawObjek` GAGAL (kegagalan infra
+ * SESUDAH baris batch ada) — Flow A langkah 9: kegagalan di langkah manapun
+ * menyisakan batch `ditolak` yang TETAP tersimpan, bukan rollback total.
+ * `raw_path` tetap `NULL` (paket masih di path staging — job purge G1-10
+ * membaca `retensi_sampai`/`raw_dihapus_pada`, bukan `raw_path`, jadi baris
+ * ini tetap kandidat purge yang benar walau `raw_path` kosong). Retensi
+ * HANYA diperpanjang (`greatest`, Rule 45 "tidak pernah diperpendek") — batch
+ * yang sudah `verified` (120 hari) yang belakangan gagal dipindah TIDAK
+ * kehilangan jendela diagnosa yang sudah dijanjikan.
+ */
+export async function tandaiBatchGagalRaw(sql: Sql, batchId: number, pesan: string, sekarang: Date): Promise<void> {
+  const retensi = pdt.hitungRetensiSampai('ditolak', sekarang);
+  await sql`
+    update pdt_upload_batch
+       set status = 'ditolak',
+           alasan_ditolak = ${pesan},
+           retensi_sampai = greatest(retensi_sampai, ${retensi.sampai}::date),
+           retensi_alasan = case when ${retensi.sampai}::date > retensi_sampai then ${retensi.alasan} else retensi_alasan end
+     where id = ${batchId}`;
 }

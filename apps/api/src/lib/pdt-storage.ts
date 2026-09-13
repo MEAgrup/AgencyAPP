@@ -14,7 +14,9 @@
  * AM mengklik "unduh paket asli"; `buatPdtRawSignedUploadUrl` (unggah) dan
  * `unduhPdtRawObjek` (unduh server-ke-server) dipanggil dari route
  * preview/commit — lihat catatan G1-09-BODY-BESAR di kepala masing-masing
- * fungsi. Pengecekan `canUploadBatch`/`canReadBatch` ada di lapisan pemanggil
+ * fungsi. `pindahkanPdtRawObjek` (G1-09 sub-langkah 2, commit) memindahkan
+ * objek staging ke path final Rule 44 sesudah `pdt_upload_batch` dibuat.
+ * Pengecekan `canUploadBatch`/`canReadBatch` ada di lapisan pemanggil
  * (`packages/domain`), BUKAN di sini — berkas ini murni pembungkus REST, nol
  * keputusan otorisasi.
  */
@@ -129,4 +131,45 @@ export async function unduhPdtRawObjek(path: string, fetchImpl?: FetchLike): Pro
     throw new Error(`gagal mengunduh pdt-raw/${path}: ${res.status}`);
   }
   return Buffer.from(await res.arrayBuffer());
+}
+
+interface MoveResponse {
+  message?: string;
+}
+
+/**
+ * Pindahkan satu objek DI DALAM bucket `pdt-raw` dari path staging ke path
+ * final Rule 44 (G1-09 sub-langkah 2, commit — sesudah `pdt_upload_batch`
+ * dibuat dan `periode_selesai`/`batch_id` diketahui). Endpoint Storage REST
+ * `POST /object/move`, body `{bucketId, sourceKey, destinationKey}` —
+ * **DIVERIFIKASI ke sumber `@supabase/storage-js` (`StorageFileApi.move`,
+ * `src/packages/StorageFileApi.ts` versi `master` GitHub saat sesi ini
+ * berjalan), BUKAN ditebak**: client resmi memanggil endpoint dan bentuk
+ * body persis ini, jadi kontraknya seotoritatif dokumentasi REST (client itu
+ * yang benar-benar bicara ke API di produksi). `destinationBucket` SENGAJA
+ * tidak dikirim — pindah di bucket YANG SAMA, bukan lintas bucket.
+ *
+ * Beda dari `buatPdtRawSignedUploadUrl`/`unduhPdtRawObjek`: ini BUKAN operasi
+ * yang tersentuh limit badan request 4,5 MB (paket ZIP tidak lewat sini sama
+ * sekali — Storage memindahkan objeknya sendiri di sisi server, badan
+ * request panggilan ini hanya dua path teks).
+ */
+export async function pindahkanPdtRawObjek(sourcePath: string, destinationPath: string, fetchImpl?: FetchLike): Promise<void> {
+  const { url, serviceRoleKey } = config();
+  const doFetch = fetchImpl ?? fetch;
+
+  const res = await doFetch(`${url}/storage/v1/object/move`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+    },
+    body: JSON.stringify({ bucketId: 'pdt-raw', sourceKey: sourcePath, destinationKey: destinationPath }),
+  });
+
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as MoveResponse;
+    throw new Error(`gagal memindahkan pdt-raw/${sourcePath} → ${destinationPath}: ${res.status} ${body.message ?? ''}`.trim());
+  }
 }

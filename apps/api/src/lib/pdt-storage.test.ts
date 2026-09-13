@@ -8,7 +8,7 @@
  * di sini — lihat handoff untuk siapa yang perlu menjalankannya.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buatPdtRawSignedUploadUrl, buatPdtRawSignedUrl, PDT_RAW_SIGNED_URL_MAX_DETIK, unduhPdtRawObjek } from './pdt-storage';
+import { buatPdtRawSignedUploadUrl, buatPdtRawSignedUrl, PDT_RAW_SIGNED_URL_MAX_DETIK, pindahkanPdtRawObjek, unduhPdtRawObjek } from './pdt-storage';
 
 const prevUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const prevKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -133,6 +133,36 @@ describe('unduhPdtRawObjek (G1-09-BODY-BESAR) — bentuk request (fetch disuntik
   });
 });
 
+describe('pindahkanPdtRawObjek (G1-09 sub-langkah 2, commit) — bentuk request (fetch disuntik)', () => {
+  it('POST ke /object/move dengan bucketId/sourceKey/destinationKey (bentuk diverifikasi ke storage-js StorageFileApi.move)', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://proj.supabase.co/storage/v1/object/move');
+      expect(init?.method).toBe('POST');
+      const headers = init?.headers as Record<string, string>;
+      expect(headers.apikey).toBe('service-role-key');
+      expect(headers.Authorization).toBe('Bearer service-role-key');
+      expect(JSON.parse(init?.body as string)).toEqual({
+        bucketId: 'pdt-raw',
+        sourceKey: '_staging/CLI-1/1/abc.zip',
+        destinationKey: 'CLI-1/1/2026-07-31/42.zip',
+      });
+      return jsonResponse({ message: 'Successfully moved' });
+    });
+    await pindahkanPdtRawObjek('_staging/CLI-1/1/abc.zip', 'CLI-1/1/2026-07-31/42.zip', fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('melempar error yang menyebut status saat Storage API menolak (mis. objek staging sudah tidak ada)', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: 'not_found' }, 404));
+    await expect(pindahkanPdtRawObjek('_staging/tidak-ada.zip', 'CLI-1/1/2026-07-31/42.zip', fetchImpl)).rejects.toThrow(/404/);
+  });
+
+  it('melempar error server saat Supabase belum dikonfigurasi', async () => {
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    await expect(pindahkanPdtRawObjek('a.zip', 'b.zip', vi.fn())).rejects.toThrow(/tidak dikonfigurasi/);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // DoD G1-04: "signed URL kedaluwarsa benar-benar menolak" — terhadap Storage
 // REST SUNGGUHAN di CDPS SG. Butuh SUPABASE_SERVICE_ROLE_KEY (dan
@@ -202,6 +232,50 @@ describeLive('buatPdtRawSignedUploadUrl + unduhPdtRawObjek — Storage REST sung
         method: 'DELETE',
         headers: { apikey: key, Authorization: `Bearer ${key}` },
       });
+    }
+  }, 20_000);
+});
+
+// ---------------------------------------------------------------------------
+// G1-09 sub-langkah 2 (commit): "pindahkanPdtRawObjek benar-benar memindahkan
+// objek di Storage sungguhan" — bentuk `/object/move` diverifikasi ke sumber
+// storage-js (lihat docblock `pindahkanPdtRawObjek`), TAPI belum pernah
+// dijalankan terhadap Storage REST sungguhan (sama seperti dua suite
+// describeLive di atas — nol SUPABASE_SERVICE_ROLE_KEY di sandbox sesi ini).
+// ---------------------------------------------------------------------------
+describeLive('pindahkanPdtRawObjek — Storage REST sungguhan (pdt-raw)', () => {
+  const sourcePath = `_g1_09_commit_selftest/${Date.now()}-src.zip`;
+  const destPath = `_g1_09_commit_selftest/${Date.now()}-dest.zip`;
+  const isi = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...new Array(18).fill(0)]); // EOCD ZIP kosong minimal
+
+  it('objek benar-benar berpindah path — sumber lenyap, tujuan membawa isi yang sama', async () => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
+
+    try {
+      const upload = await fetch(`${url}/storage/v1/object/pdt-raw/${sourcePath}`, {
+        method: 'POST',
+        headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/zip' },
+        body: isi,
+      });
+      expect(upload.ok).toBe(true);
+
+      await pindahkanPdtRawObjek(sourcePath, destPath);
+
+      const sumberSesudah = await fetch(`${url}/storage/v1/object/pdt-raw/${sourcePath}`, {
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+      });
+      expect(sumberSesudah.ok).toBe(false);
+
+      const tujuan = await unduhPdtRawObjek(destPath);
+      expect(tujuan).toEqual(Buffer.from(isi));
+    } finally {
+      for (const p of [sourcePath, destPath]) {
+        await fetch(`${url}/storage/v1/object/pdt-raw/${p}`, {
+          method: 'DELETE',
+          headers: { apikey: key, Authorization: `Bearer ${key}` },
+        });
+      }
     }
   }, 20_000);
 });
