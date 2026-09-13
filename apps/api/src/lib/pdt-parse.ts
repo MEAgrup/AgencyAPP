@@ -1,0 +1,104 @@
+/**
+ * PDT (Pusat Data Toko) — dekode berkas + deteksi modul DI SERVER (G1-05, PRD §6.7).
+ *
+ * Ini pemindahan arsitektur yang PRD §6.7 minta: `XLSX.read` hari ini jalan di
+ * BROWSER (`web-internal/src/lib/{riset-awal,report,skuscreener,adsscanner}.ts`,
+ * pola `XLSX.read(buf, {type:'array'})` → `XLSX.utils.sheet_to_json(ws,
+ * {header:1, raw:false, defval:''})`) — modul ini adalah salinan SERVER dari
+ * pola dekode yang SAMA PERSIS (bukan reimplementasi baru), dipasang di atas
+ * entri yang `bacaDanEkstrakPdtZip` (G1-04) sudah ekstrak ke disk sementara.
+ *
+ * Seluruh engine `packages/core` (deteksi, normalisasi angka) SUDAH murni/
+ * DOM-free/menerima AoA sejak G1-02/G1-03 — yang pindah HANYA dekode
+ * berkasnya, persis seperti yang backlog G1-05 catat. `detectPdtModule`
+ * (G1-02) BENAR-BENAR dipanggil di sini untuk pertama kalinya di luar tes.
+ *
+ * ⚠️ **Yang BELUM dilakukan di sini (sengaja, lihat `docs/DECISIONS.md`
+ * G1-05):** memetakan `kolomDipanen` ke baris tabel fakta bertipe dan
+ * memanggil `parsePdtAngka` per sel. Itu butuh metadata "kolom mana angka,
+ * kolom mana teks, konvensi locale mana (`raw` true/false) per modul" yang
+ * TIDAK ADA di `PdtModuleDef` hari ini (`kolomDipanen` cuma whitelist nama,
+ * bukan peta tipe) — menebak peta itu sekarang berarti mengarang kontrak
+ * yang G1-06 (identitas dari berkas) dan G1-07 (rekonsiliasi) baru akan
+ * tentukan. Modul ini menyediakan AoA + modul terdeteksi; pemanggil
+ * (G1-06/07/08) yang membaca selnya lewat `parsePdtAngka`.
+ *
+ * Kegagalan dekode SATU entri TIDAK menjatuhkan seluruh batch (Rule 10,
+ * cermin `gagalEkstrak` G1-04) — ditangkap ke `gagal`, entri lain tetap
+ * diproses.
+ */
+import { readFile } from 'node:fs/promises';
+import * as XLSX from 'xlsx';
+import { pdt } from '@cdps/core';
+import type { PdtZipEntriTerekstrak } from './pdt-zip';
+
+type PdtModuleDef = pdt.PdtModuleDef;
+const { detectPdtModule } = pdt;
+
+/** Satu entri (xlsx/xls/csv) berhasil didekode + dicocokkan terhadap registry modul. */
+export interface PdtParsedFile {
+  /** Nama entri di dalam ZIP (`meta.nama` — lihat `pdt-zip.ts`, TIDAK dipercaya sebagai path). */
+  nama: string;
+  /** Sheet PERTAMA, array-of-arrays — sama bentuk yang `readSheet`/`detectPdtModule` konsumsi housewide. */
+  aoa: unknown[][];
+  /** Kode modul bila TEPAT satu tanda tangan cocok; `null` bila nol atau ambigu (lihat `matches`/`ambiguous`). */
+  modul: string | null;
+  ambiguous: boolean;
+  matches: readonly string[];
+}
+
+/** Satu entri gagal didekode (berkas rusak/kosong) — TIDAK menjatuhkan batch. */
+export interface PdtParseGagal {
+  nama: string;
+  pesan: string;
+}
+
+export interface PdtParseBatchHasil {
+  berkas: readonly PdtParsedFile[];
+  gagal: readonly PdtParseGagal[];
+  /** Waktu dekode + deteksi SELURUH batch (target G1-05: < 45 detik / 13 berkas). */
+  durasiMs: number;
+}
+
+/**
+ * Dekode satu berkas (`.xlsx`/`.xls`/`.csv` — satu-satunya ekstensi yang lolos
+ * pagar `evaluatePdtZipPagar`, Rule 41) jadi array-of-arrays. `XLSX.read`
+ * mengendus format lewat ISI berkas, bukan ekstensi (pola SAMA dengan
+ * `web-internal`'s `parseExportFile`, yang juga tidak pernah memeriksa
+ * ekstensi sebelum memanggil `XLSX.read`) — jadi satu fungsi menangani
+ * ketiganya.
+ */
+export function decodePdtAoa(bytes: Buffer): unknown[][] {
+  const wb = XLSX.read(bytes, { type: 'buffer' });
+  const namaSheet = wb.SheetNames[0];
+  if (!namaSheet) throw new Error('berkas tidak berisi sheet apa pun');
+  const ws = wb.Sheets[namaSheet];
+  return XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: false, defval: '' }) as unknown[][];
+}
+
+/**
+ * Dekode + deteksi modul untuk SELURUH entri yang `bacaDanEkstrakPdtZip`
+ * (G1-04) ekstrak ke disk sementara (`diekstrak`, sudah difilter keputusan
+ * `diproses` oleh pagar — modul ini tidak mengulang keputusan Rule 41/42).
+ */
+export async function parsePdtZipEntries(
+  diekstrak: readonly PdtZipEntriTerekstrak[],
+  modules: readonly PdtModuleDef[],
+): Promise<PdtParseBatchHasil> {
+  const mulai = Date.now();
+  const berkas: PdtParsedFile[] = [];
+  const gagal: PdtParseGagal[] = [];
+
+  for (const entri of diekstrak) {
+    try {
+      const bytes = await readFile(entri.pathSementara);
+      const aoa = decodePdtAoa(bytes);
+      const deteksi = detectPdtModule(aoa, modules);
+      berkas.push({ nama: entri.meta.nama, aoa, modul: deteksi.kode, ambiguous: deteksi.ambiguous, matches: deteksi.matches });
+    } catch (err) {
+      gagal.push({ nama: entri.meta.nama, pesan: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return { berkas, gagal, durasiMs: Date.now() - mulai };
+}
