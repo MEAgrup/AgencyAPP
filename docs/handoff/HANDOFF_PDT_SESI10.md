@@ -6,6 +6,19 @@
 > di GitHub) → sesi 9 §3 merekomendasikan mulai **G1-09**, tiket besar, dan
 > secara eksplisit menyarankan memecahnya jadi sub-langkah. **Sub-langkah
 > 1 dari ~3 SELESAI sesi ini.**
+>
+> **Status: G1-09 sub-langkah 1 SELESAI DAN SUDAH MERGE.** PR #364
+> (`claude/handoff-sesi9-build-1gh3ad` → `main`) di-squash-merge 2026-09-13
+> (commit `0d05dd2`, "PDT G1-09 sub-langkah 1: pratinjau deteksi batch (Flow
+> A langkah 2-5)"). CI `db-and-migrations` merah di PR itu sampai merge — bug
+> pra-ada TERKONFIRMASI ULANG (`gelombang-c-showcase.e2e.test.ts`/fixture
+> `client_platforms` collision — sama persis yang sesi 2-9 dokumentasikan,
+> lihat komentar penjelasan di PR #364), **bukan** diblokir karenanya; empat
+> job lain (`api`/`core-engines`/`web-internal`/`web-client-portal`) hijau.
+> Masih merah di `main` — belum ada yang menanganinya, di luar cakupan
+> seluruh rangkaian PDT G1-0x. **Sesi berikutnya mulai dari `main` segar** —
+> branch `claude/handoff-sesi9-build-1gh3ad` sudah di-reset ke `main`
+> pasca-merge (instruksi sistem: PR yang sudah merge tidak ditumpuk lagi).
 
 ---
 
