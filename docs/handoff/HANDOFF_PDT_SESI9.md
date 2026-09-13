@@ -4,10 +4,14 @@
 > sesi 9, berkas ini; `docs/handoff/HANDOFF_PDT_SESI8.md` untuk riwayat
 > G1-07 kalau perlu konteks lebih dalam).
 >
-> **Status: G1-08 SELESAI** (`packages/core` — nol migrasi, nol route baru).
-> Branch sesi ini SAMA dengan G1-06/G1-07 (`claude/lucid-goldberg-0ekacu`,
-> instruksi sistem) — commit G1-08 masuk PR #362 yang sudah ada, belum
-> di-push di awal sesi ini.
+> **Status: G1-06+G1-07+G1-08 SELESAI DAN SUDAH MERGE.** PR #362
+> (`claude/lucid-goldberg-0ekacu` → `main`) di-squash-merge 2026-09-13
+> (commit `6d11d18`, "PDT G1-06+G1-07+G1-08: identitas/periode,
+> rekonsiliasi, parse_status & skor netral (#362)"). CI `db-and-migrations`
+> tetap merah di PR itu sampai merge — bug pra-ada TERKONFIRMASI (lihat §1
+> butir 2), bukan diblokir karenanya. **Sesi berikutnya mulai dari `main`
+> segar** — branch `claude/lucid-goldberg-0ekacu` sudah di-reset ke `main`
+> pasca-merge (instruksi sistem: PR yang sudah merge tidak ditumpuk lagi).
 
 ---
 
@@ -40,11 +44,32 @@ ini.
 
 ## 1. Yang perlu ditindaklanjuti sesi ini/berikutnya
 
-1. **Commit + push G1-08 belum dilakukan di awal sesi ini** — masuk PR #362
-   yang sudah ada, lakukan sebelum lanjut ke G1-09.
-2. **PR #362 (G1-06+G1-07+G1-08) masih terbuka, masih diawasi.** CI
-   `db-and-migrations` merah adalah bug pra-ada TERKONFIRMASI (lihat
-   handoff sesi 7/8) — jangan diperbaiki di PR ini.
+1. ✅ **SELESAI** — PR #362 (G1-06+G1-07+G1-08) sudah di-squash-merge ke
+   `main` (`6d11d18`, 2026-09-13). Nol tindak lanjut.
+2. ✅ **SELESAI** — CI `db-and-migrations` merah di PR #362 dikonfirmasi
+   bug pra-ada (lihat komentar PR + handoff sesi 7/8), TIDAK diperbaiki di
+   PR itu (di luar cakupan G1-06/07/08). Masih merah di `main` — **belum
+   ada yang menanganinya**, siapa pun yang membangun G1-09 akan tetap
+   melihat job ini merah dan itu BUKAN regresi dari pekerjaannya.
+2b. **BARU ditemukan sesi ini — sandbox punya PostgreSQL 16 lokal (bukan
+   cuma via docker):** `service postgresql start` lalu
+   `bash scripts/db-rebuild.sh --yes` membangun `cdps` dari 232 migrasi
+   (gate + invariant lolos). **Password TCP untuk user `postgres` HARUS
+   di-set manual sekali per sandbox baru** — `db-rebuild.sh` sendiri
+   connect lewat `su postgres` (peer auth socket, tanpa password), tapi
+   test suite (`DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/cdps`)
+   connect lewat TCP yang butuh password: jalankan
+   `su postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'postgres';\""`
+   sekali sesudah start service, SEBELUM `npm test` dengan `DATABASE_URL`
+   itu — kalau tidak, seluruh suite `packages/domain`/`apps/api` yang butuh
+   DB akan gagal `password authentication failed`, bukan karena kode salah.
+   Dengan `DATABASE_URL` terpasang: **`packages/domain` 2502/2503 lulus**
+   (1 skip `wave1_uat.e2e`), **`apps/api` 516/529 lulus** — SATU-SATUNYA
+   yang gagal adalah `gelombang-c-showcase.e2e.test.ts` (bug pra-ada yang
+   sama). Ini artinya **G1-09 (yang butuh menulis `pdt_upload_batch`/
+   `pdt_file` sungguhan) BISA divalidasi penuh lokal** di sandbox — jangan
+   asumsikan terblokir seperti G1-04's signed-URL (`SUPABASE_SERVICE_ROLE_KEY`
+   itu kasus BEDA, khusus Storage REST, bukan Postgres).
 3. **`G1-08-SEBAGIAN` (baru sesi ini)** — pemicu `parse_status='sebagian'`
    belum terdefinisi. Tidak memblokir G1-09, tapi kalau sesi berikutnya
    (atau pemilik) memutuskan menambah bucket wajib/opsional per kolom ke
