@@ -3,17 +3,25 @@
  * SEBELUM disimpan (PRD `docs/prd/CDPS_PDT_Pusat_Data_Toko.md`, backlog
  * `docs/backlog/PDT_BACKLOG.md` G1-09).
  *
- * Body: bytes ZIP MENTAH (`application/zip`/`application/octet-stream`), query
- * `client_platform_id`. Route ini HANYA membaca+memparse+mendeteksi (G1-04
+ * Body: JSON `{ client_platform_id, storage_path }` — BUKAN bytes ZIP mentah
+ * lagi (`G1-09-BODY-BESAR`, `docs/DECISIONS.md` 2026-09-13: limit keras
+ * badan request platform deploy 4,5 MB, jauh di bawah Rule 42 ≤ 50 MB). AM
+ * sudah meng-PUT ZIP LANGSUNG ke bucket `pdt-raw` lewat signed upload URL
+ * (`POST .../upload-url`); route ini mengunduhnya balik SERVER-KE-SERVER
+ * (`unduhPdtRawObjek`, service-role, bukan lewat badan request masuk — jadi
+ * tidak tersentuh limit yang sama) lalu membaca+memparse+mendeteksi (G1-04
  * `bacaDanEkstrakPdtZip` → G1-05 `parsePdtZipEntries` → G1-09
- * `previewUploadBatch`) dan mengembalikan tabel hasil deteksi — nol tulis DB,
- * nol upload ke bucket `pdt-raw`. Sub-langkah commit (menulis
- * `pdt_upload_batch`/`pdt_file`, mengunggah paket) BELUM ada di sini — lihat
- * handoff sesi ini untuk batasnya.
+ * `previewUploadBatch`) dan mengembalikan tabel hasil deteksi — nol tulis DB.
+ * Sub-langkah commit (menulis `pdt_upload_batch`/`pdt_file`, memindahkan
+ * objek staging ke path final Rule 44) BELUM ada di sini — lihat handoff
+ * sesi ini untuk batasnya.
  *
  * Direktori sementara G1-04 (`zipHasil.direktoriSementara`) SELALU dibersihkan
  * di `finally` — pratinjau tidak pernah menyisakan file di disk sementara
- * server, apa pun hasilnya (sukses, gagal domain, atau exception).
+ * server, apa pun hasilnya (sukses, gagal domain, atau exception). Objek
+ * STAGING di `pdt-raw` sendiri TIDAK dihapus di sini — bila AM tidak pernah
+ * lanjut ke commit, objek itu adalah objek "yatim" yang Rule 49 sudah
+ * antisipasi (purge otomatis > 7 hari), bukan tanggung jawab route ini.
  */
 import { pdt } from '@cdps/core';
 import { pdt as pdtDomain } from '@cdps/domain';
@@ -21,6 +29,7 @@ import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { BadRequestError, handle, json } from '@/lib/http';
 import { bangunPreviewBerkasInputs } from '@/lib/pdt-preview';
+import { unduhPdtRawObjek } from '@/lib/pdt-storage';
 import { pdtPreviewBatchToWire } from '@/lib/wire';
 import { bacaDanEkstrakPdtZip, bersihkanDirektoriSementaraPdt } from '@/lib/pdt-zip';
 import { parsePdtZipEntries } from '@/lib/pdt-parse';
@@ -31,13 +40,25 @@ export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
 
-    const clientPlatformIdRaw = new URL(request.url).searchParams.get('client_platform_id');
-    const clientPlatformId = clientPlatformIdRaw ? Number(clientPlatformIdRaw) : NaN;
-    if (!clientPlatformIdRaw || !Number.isInteger(clientPlatformId) || clientPlatformId <= 0) {
+    const body = (await request.json().catch(() => ({}))) as { client_platform_id?: unknown; storage_path?: unknown };
+    const clientPlatformId = typeof body.client_platform_id === 'number' ? body.client_platform_id : NaN;
+    if (!Number.isInteger(clientPlatformId) || clientPlatformId <= 0) {
       throw new BadRequestError('client_platform_id is required (positive integer)');
     }
+    const storagePath = body.storage_path;
+    if (typeof storagePath !== 'string' || storagePath === '') {
+      throw new BadRequestError('storage_path is required');
+    }
 
-    const buf = Buffer.from(await request.arrayBuffer());
+    let buf: Buffer;
+    try {
+      buf = await unduhPdtRawObjek(storagePath);
+    } catch {
+      // Path kedaluwarsa/salah/belum pernah selesai di-PUT AM — bisa
+      // dikoreksi dengan mengunggah ulang, bukan kegagalan server.
+      throw new BadRequestError('[berkas yang diunggah tidak ditemukan di penyimpanan sementara, unggah ulang]');
+    }
+
     let zipHasil;
     try {
       zipHasil = await bacaDanEkstrakPdtZip(buf);

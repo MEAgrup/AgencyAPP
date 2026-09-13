@@ -21,6 +21,7 @@ import {
   canUploadBatch,
   platformKeVokabPdt,
   previewUploadBatch,
+  siapkanUploadBatch,
   type PdtPreviewBerkasInput,
 } from './pdt';
 
@@ -227,6 +228,58 @@ describeDb('previewUploadBatch (G1-09) — gerbang izin + platform', () => {
     expect(hasil.moduleOptions.length).toBeGreaterThan(0);
     expect(hasil.moduleOptions.some((m) => m.kode === 'shopee_shop_stats')).toBe(false);
     expect(hasil.moduleOptions.some((m) => m.kode === 'tt_video')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// siapkanUploadBatch (G1-09-BODY-BESAR, docs/DECISIONS.md 2026-09-13) — gerbang
+// izin + path staging SEBELUM upload. Gerbang identik previewUploadBatch;
+// cakupan di sini murni memastikan fungsi BARU ini memakai gerbang yang sama
+// (bukan menduplikasi logikanya dengan bug baru) + bentuk path staging.
+// ---------------------------------------------------------------------------
+describeDb('siapkanUploadBatch (G1-09-BODY-BESAR) — gerbang izin + path staging', () => {
+  it('404 pada client_platform_id yang tidak ada', async () => {
+    await expect(siapkanUploadBatch(sql, ownerActor(), 999999999)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('403 untuk AM yang bukan pemilik klien (dan bukan lead/Director)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    await expect(siapkanUploadBatch(sql, otherAm(), cpId)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('platform Tokopedia/Lazada/Blibli ⇒ ValidationError (PDT-22, manual saja) — SEBELUM path staging dibuat', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Tokopedia');
+    await expect(siapkanUploadBatch(sql, ownerActor(), cpId)).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('AM pemilik ⇒ path staging di bawah _staging/{client_id}/{client_platform_id}/, bukan path final Rule 44', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const hasil = await siapkanUploadBatch(sql, ownerActor(), cpId);
+    expect(hasil.clientPlatformId).toBe(cpId);
+    expect(hasil.stagingPath).toMatch(new RegExp(`^_staging/${clientId}/${cpId}/[0-9a-f-]{36}\\.zip$`));
+  });
+
+  it('dua panggilan berturut-turut ⇒ path staging berbeda (nol tabrakan)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const a = await siapkanUploadBatch(sql, ownerActor(), cpId);
+    const b = await siapkanUploadBatch(sql, ownerActor(), cpId);
+    expect(a.stagingPath).not.toBe(b.stagingPath);
+  });
+
+  it('lead Account boleh menyiapkan upload batch klien siapa pun', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const hasil = await siapkanUploadBatch(sql, leadActor(), cpId);
+    expect(hasil.stagingPath).toContain(`_staging/${clientId}/${cpId}/`);
   });
 });
 

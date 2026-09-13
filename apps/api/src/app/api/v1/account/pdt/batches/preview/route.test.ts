@@ -1,25 +1,38 @@
 /**
- * POST /api/v1/account/pdt/batches/preview (G1-09) — route wiring: auth,
- * `client_platform_id`, pagar paket (Rule 42), dan bentuk wire (snake_case,
- * `null` eksplisit). Cakupan per-baris/identitas/periode yang lebih dalam ada
- * di `packages/domain/src/pdt.test.ts` (`previewUploadBatch` langsung) — di
- * sini cukup bukti bahwa route SUNGGUHAN menyambungkannya (bukan lagi hanya
- * dipanggil dari tes, PDT_BACKLOG.md G1-09).
+ * POST /api/v1/account/pdt/batches/preview (G1-09 + G1-09-BODY-BESAR) — route
+ * wiring: auth, `client_platform_id`/`storage_path`, unduh dari Storage
+ * (service-role, `unduhPdtRawObjek`), pagar paket (Rule 42), dan bentuk wire
+ * (snake_case, `null` eksplisit). Cakupan per-baris/identitas/periode yang
+ * lebih dalam ada di `packages/domain/src/pdt.test.ts` (`previewUploadBatch`
+ * langsung) — di sini cukup bukti bahwa route SUNGGUHAN menyambungkannya
+ * (bukan lagi hanya dipanggil dari tes, PDT_BACKLOG.md G1-09).
  *
- * Permission/400 (client_platform_id hilang, pagar paket menolak) berjalan
- * TANPA `DATABASE_URL` (pola sama `leads/export/route.test.ts`) — keduanya
- * gagal sebelum database tersentuh sama sekali kecuali disebut lain. Jalur
- * 200/403/404 butuh Postgres nyata (di-skip tanpa `DATABASE_URL`).
+ * Sejak G1-09-BODY-BESAR (`docs/DECISIONS.md` 2026-09-13) body TIDAK LAGI
+ * bytes ZIP mentah — route mengunduh ZIP dari bucket `pdt-raw` SENDIRI lewat
+ * `unduhPdtRawObjek` (`@/lib/pdt-storage`). Di sini `globalThis.fetch`
+ * DISUNTIK (disimpan/dipulihkan tiap tes) untuk mensimulasikan respons
+ * Storage tanpa jaringan/kredensial sungguhan — pola sama
+ * `pdt-storage.test.ts` (`fetchImpl`), hanya saja route.ts sendiri tidak
+ * menerima parameter DI (kontrak Next.js `POST(request)` tetap), jadi seam-
+ * nya di `fetch` global, bukan argumen fungsi.
+ *
+ * Permission/400 (client_platform_id/storage_path hilang, pagar paket
+ * menolak) berjalan TANPA `DATABASE_URL` (pola sama `leads/export/route.test.ts`)
+ * — keduanya gagal sebelum database tersentuh sama sekali kecuali disebut
+ * lain. Jalur 200/403/404 butuh Postgres nyata (di-skip tanpa `DATABASE_URL`).
  */
 import { createHmac } from 'node:crypto';
 import { ZipFile } from 'yazl';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 import { createClient, type Sql } from '@cdps/db';
 import { POST } from './route';
 
 const SECRET = 'test-jwt-secret-pdt-preview';
 const prevSecret = process.env.SUPABASE_JWT_SECRET;
+const prevSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const prevServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const prevFetch = globalThis.fetch;
 
 function b64url(buf: Buffer | string): string {
   return Buffer.from(buf).toString('base64url');
@@ -37,12 +50,20 @@ function sign(c: Claims): string {
   return `${header}.${payload}.${sig}`;
 }
 
-function req(token: string, qs: string, body: Buffer): Request {
-  return new Request(`http://localhost/api/v1/account/pdt/batches/preview${qs}`, {
+function req(token: string, body: { client_platform_id?: unknown; storage_path?: unknown }): Request {
+  return new Request('http://localhost/api/v1/account/pdt/batches/preview', {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/zip' },
-    body: body as unknown as BodyInit,
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
   });
+}
+
+/** Objek staging bertuah — dipakai apa adanya oleh seluruh tes di berkas ini kecuali disebut lain (isi buffernya yang membedakan skenario). */
+const STORAGE_PATH = '_staging/CLI-PDTRT/1/abc.zip';
+
+/** Menyuntik `globalThis.fetch` supaya `unduhPdtRawObjek` (dipanggil route) mengembalikan `buf` tanpa jaringan sungguhan. */
+function stubStorageDownload(buf: Buffer | null, status = 200): void {
+  globalThis.fetch = (async () => new Response((buf ?? undefined) as unknown as BodyInit, { status })) as typeof fetch;
 }
 
 function zipkan(entries: { nama: string; isi: Buffer }[]): Promise<Buffer> {
@@ -64,28 +85,54 @@ function xlsxDariAoa(aoa: unknown[][]): Buffer {
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 }
 
-beforeAll(() => { process.env.SUPABASE_JWT_SECRET = SECRET; });
+beforeAll(() => {
+  process.env.SUPABASE_JWT_SECRET = SECRET;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://proj.supabase.co';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
+});
 afterAll(() => {
   if (prevSecret === undefined) delete process.env.SUPABASE_JWT_SECRET;
   else process.env.SUPABASE_JWT_SECRET = prevSecret;
+  if (prevSupabaseUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  else process.env.NEXT_PUBLIC_SUPABASE_URL = prevSupabaseUrl;
+  if (prevServiceRoleKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  else process.env.SUPABASE_SERVICE_ROLE_KEY = prevServiceRoleKey;
 });
+beforeEach(() => { stubStorageDownload(Buffer.from('')); });
+afterEach(() => { globalThis.fetch = prevFetch; });
 
 const owner = sign({ employeeId: 'ZZ-PDTRT-AM', division: 'Account', level: 'staff', od: false, director: false });
 const otherAm = sign({ employeeId: 'ZZ-PDTRT-LAIN', division: 'Account', level: 'staff', od: false, director: false });
 
-describe('POST /pdt/batches/preview — gagal sebelum DB tersentuh', () => {
+describe('POST /pdt/batches/preview — gagal sebelum Storage/DB tersentuh', () => {
   it('client_platform_id hilang ⇒ 400', async () => {
-    const res = await POST(req(owner, '', Buffer.from('')));
+    const res = await POST(req(owner, { storage_path: STORAGE_PATH }));
     expect(res.status).toBe(400);
   });
 
   it('client_platform_id bukan integer positif ⇒ 400', async () => {
-    const res = await POST(req(owner, '?client_platform_id=abc', Buffer.from('')));
+    const res = await POST(req(owner, { client_platform_id: 'abc', storage_path: STORAGE_PATH }));
     expect(res.status).toBe(400);
   });
 
-  it('badan request bukan ZIP sama sekali (berkas salah/rusak) ⇒ 400, bukan 500', async () => {
-    const res = await POST(req(owner, '?client_platform_id=1', Buffer.from('bukan zip sama sekali')));
+  it('storage_path hilang ⇒ 400', async () => {
+    const res = await POST(req(owner, { client_platform_id: 1 }));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /pdt/batches/preview — gagal setelah unduh Storage (G1-09-BODY-BESAR)', () => {
+  it('objek Storage tidak ditemukan (path kedaluwarsa/salah) ⇒ 400 BI, bukan 500', async () => {
+    stubStorageDownload(null, 404);
+    const res = await POST(req(owner, { client_platform_id: 1, storage_path: STORAGE_PATH }));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('[berkas yang diunggah tidak ditemukan di penyimpanan sementara, unggah ulang]');
+  });
+
+  it('badan objek bukan ZIP sama sekali (berkas salah/rusak) ⇒ 400, bukan 500', async () => {
+    stubStorageDownload(Buffer.from('bukan zip sama sekali'));
+    const res = await POST(req(owner, { client_platform_id: 1, storage_path: STORAGE_PATH }));
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('[berkas yang diunggah bukan paket ZIP yang valid]');
@@ -93,8 +140,8 @@ describe('POST /pdt/batches/preview — gagal sebelum DB tersentuh', () => {
 
   it('paket ZIP > 40 entri ⇒ 400 dengan pesan Rule 42 (pagar, sebelum satu entri pun dibaca)', async () => {
     const entries = Array.from({ length: 41 }, (_, i) => ({ nama: `f${i}.xlsx`, isi: Buffer.from('x') }));
-    const buf = await zipkan(entries);
-    const res = await POST(req(owner, '?client_platform_id=1', buf));
+    stubStorageDownload(await zipkan(entries));
+    const res = await POST(req(owner, { client_platform_id: 1, storage_path: STORAGE_PATH }));
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('[paket ZIP berisi lebih dari 40 entri]');
@@ -131,13 +178,19 @@ async function insertClientPlatform(clientId: string, platform: string): Promise
 afterAll(async () => { if (sql) await sql.end(); });
 afterEach(async () => {
   if (!sql) return;
-  await sql`delete from client_platforms where created_by like 'ZZ-%'`;
-  await sql`delete from clients where created_by like 'ZZ-%'`;
+  // Prefix client_id ('CLI-PDTRT-'), BUKAN created_by ('ZZ-TEST' generik) —
+  // apps/api/route.test.ts lain (mis. upload-url/route.test.ts) memakai
+  // literal created_by yang SAMA dan berjalan BERSAMAAN (vitest paralel
+  // antar-berkas), jadi cleanup ber-created_by bisa menghapus baris berkas
+  // lain yang sedang dipakai (FK violation) — lihat komentar sama di sana.
+  await sql`delete from client_platforms where client_id like 'CLI-PDTRT-%'`;
+  await sql`delete from clients where id like 'CLI-PDTRT-%'`;
 });
 
 describeDb('POST /pdt/batches/preview — real DB', () => {
   it('404 pada client_platform_id yang tidak ada', async () => {
-    const res = await POST(req(owner, '?client_platform_id=999999999', await zipkan([])));
+    stubStorageDownload(await zipkan([]));
+    const res = await POST(req(owner, { client_platform_id: 999999999, storage_path: STORAGE_PATH }));
     expect(res.status).toBe(404);
   });
 
@@ -145,7 +198,8 @@ describeDb('POST /pdt/batches/preview — real DB', () => {
     const clientId = nextClientId();
     await insertClient(clientId, 'ZZ-PDTRT-AM');
     const cpId = await insertClientPlatform(clientId, 'Shopee');
-    const res = await POST(req(otherAm, `?client_platform_id=${cpId}`, await zipkan([])));
+    stubStorageDownload(await zipkan([]));
+    const res = await POST(req(otherAm, { client_platform_id: cpId, storage_path: STORAGE_PATH }));
     expect(res.status).toBe(403);
   });
 
@@ -160,9 +214,9 @@ describeDb('POST /pdt/batches/preview — real DB', () => {
       'repeat order', 'Pengunjung Produk (Kunjungan)',
     ];
     const aoa = [header, ['P1', 'V1', 'SKU1', '100000', '90000', '500', '50', '10%', '2', '400']];
-    const buf = await zipkan([{ nama: 'parent_sku.xlsx', isi: xlsxDariAoa(aoa) }]);
+    stubStorageDownload(await zipkan([{ nama: 'parent_sku.xlsx', isi: xlsxDariAoa(aoa) }]));
 
-    const res = await POST(req(owner, `?client_platform_id=${cpId}`, buf));
+    const res = await POST(req(owner, { client_platform_id: cpId, storage_path: STORAGE_PATH }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({

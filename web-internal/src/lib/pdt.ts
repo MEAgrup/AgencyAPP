@@ -47,3 +47,13 @@ export interface PdtPreviewBatch {
   periode: PdtPreviewPeriode | null;
   module_options: PdtModuleOption[];
 }
+
+// G1-09-BODY-BESAR — siapkan unggah (POST /account/pdt/batches/upload-url),
+// mendahului langkah 2: browser meng-PUT ZIP LANGSUNG ke `upload_url` (bukan
+// lewat route CDPS — limit keras platform 4,5 MB, Rule 42 ≤ 50 MB), lalu
+// memanggil POST .../preview dengan `storage_path` yang sama.
+export interface PdtUploadUrl {
+  client_platform_id: number;
+  storage_path: string;
+  upload_url: string;
+}

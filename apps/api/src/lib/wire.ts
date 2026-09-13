@@ -8836,10 +8836,11 @@ export function externalServiceMapToWire(m: bridge.ExternalServiceMap): External
 
 // ===========================================================================
 // PDT (Pusat Data Toko) — G1-09 pratinjau deteksi batch (Flow A langkah 2-5,
-// SEBELUM disimpan). `pdt.previewUploadBatch` nol tulis DB — belum ada baris
+// SEBELUM disimpan) + G1-09-BODY-BESAR (siapkan unggah, mendahului langkah
+// 2). `pdt.previewUploadBatch` nol tulis DB — belum ada baris
 // `pdt_upload_batch`/`pdt_file` untuk dipetakan; wire di bawah HANYA membawa
-// hasil pratinjau. Sub-langkah commit (menulis batch sungguhan) menyusul di
-// sesi berikutnya, dengan wire-nya sendiri.
+// hasil pratinjau + URL unggah. Sub-langkah commit (menulis batch sungguhan)
+// menyusul di sesi berikutnya, dengan wire-nya sendiri.
 // ===========================================================================
 
 /** Satu baris tabel hasil deteksi (PRD Flow A langkah 3) — status TAMPILAN, bukan `pdt_file.parse_status` DB (dua status tambahan di sini belum berhak jadi baris DB). */
@@ -8923,4 +8924,17 @@ export function pdtPreviewBatchToWire(h: pdt.PdtPreviewBatchHasil): PdtPreviewBa
     periode: pdtPreviewPeriodeToWire(h.periode),
     module_options: h.moduleOptions.map((m) => ({ kode: m.kode, nama_tampilan: m.namaTampilan })),
   };
+}
+
+/** G1-09-BODY-BESAR — mendahului Flow A langkah 2 (`POST /account/pdt/batches/upload-url`). */
+export interface PdtUploadUrlWire {
+  client_platform_id: number;
+  /** Path OBJEK staging di bucket privat `pdt-raw` — dikirim balik APA ADANYA ke `POST .../preview` setelah browser PUT selesai. */
+  storage_path: string;
+  /** URL absolut siap-PUT (token sudah tersemat di query string) — browser meng-unggah ZIP LANGSUNG ke sini, bukan lewat route ini. */
+  upload_url: string;
+}
+
+export function pdtUploadUrlToWire(h: pdt.PdtSiapkanUploadHasil, uploadUrl: string): PdtUploadUrlWire {
+  return { client_platform_id: h.clientPlatformId, storage_path: h.stagingPath, upload_url: uploadUrl };
 }
