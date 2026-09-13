@@ -202,7 +202,7 @@ describeDb('createReport — score, store, and write total_sales', () => {
   it('total_sales = Σ latest run-rate across a client\'s active platforms', async () => {
     const client = await seedClient();
     const a = await seedPlatform(client, 'TikTok Shop');
-    const b = await seedPlatform(client, 'TikTok Shop 2');
+    const b = await seedPlatform(client, 'Shopee');
     const da = await createReport(sql, actorAm, client, {
       clientPlatformId: a, periodeTipe: 'bulanan', files: [fileFrom('toko.xlsx', shopTtAoa())],
     });
