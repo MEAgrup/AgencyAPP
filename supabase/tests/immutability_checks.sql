@@ -154,6 +154,106 @@ BEGIN
           AND action_statement LIKE '%client_external_billing_frozen%'
           AND event_manipulation IN ('UPDATE', 'DELETE')
     ) = 2, 'client_external_billing must stay frozen against UPDATE and DELETE (it records someone else''s payment verification, never CDPS''s own)';
+
+    ---------------------------------------------------------------------------
+    -- PDT G1-01 — three bespoke-frozen tables (PDT_BACKLOG.md G1-01 DoD:
+    -- "tes immutability (pdt_benchmark, pdt_laporan_kiriman tanpa jalur
+    -- UPDATE/DELETE)"). `pdt_kolom_alias` added for the same reason: Rule 9
+    -- says alias mappings are append-only, and a mapping that silently changed
+    -- would make historical column-drift unreadable in exactly the way the
+    -- whole PDT-27 whitelist exists to prevent.
+    ---------------------------------------------------------------------------
+    -- `pdt_benchmark` mirrors `adsscanner_benchmark`/`px_eligibility_policy`
+    -- letter-for-letter (PDT_BACKLOG.md G1-01): blocks BOTH UPDATE and DELETE,
+    -- `aktif` is never flipped — a new calibration is a new `versi`.
+    ASSERT (
+        SELECT count(DISTINCT event_manipulation) FROM information_schema.triggers
+        WHERE event_object_table = 'pdt_benchmark'
+          AND action_statement LIKE '%pdt_benchmark_frozen%'
+          AND event_manipulation IN ('UPDATE', 'DELETE')
+    ) = 2, 'pdt_benchmark must stay frozen against UPDATE and DELETE (preseden adsscanner_benchmark)';
+
+    ASSERT (
+        SELECT count(DISTINCT event_manipulation) FROM information_schema.triggers
+        WHERE event_object_table = 'pdt_kolom_alias'
+          AND action_statement LIKE '%pdt_kolom_alias_frozen%'
+          AND event_manipulation IN ('UPDATE', 'DELETE')
+    ) = 2, 'pdt_kolom_alias must stay frozen against UPDATE and DELETE (Rule 9 — alias lama tidak pernah dihapus/diubah)';
+
+    -- `pdt_laporan_kiriman` mirrors `client_reports_frozen`: UPDATE-only (a
+    -- revision is a NEW row pointing at `menggantikan_kiriman_id`, Rule 22-23 —
+    -- DELETE is not blocked here, same asymmetry as `client_reports`).
+    ASSERT (
+        SELECT count(*) FROM information_schema.triggers
+        WHERE event_object_table = 'pdt_laporan_kiriman'
+          AND action_statement LIKE '%pdt_laporan_kiriman_frozen%'
+          AND event_manipulation = 'UPDATE'
+    ) = 1, 'pdt_laporan_kiriman must stay frozen against UPDATE (preseden client_reports_frozen)';
+
+    -- `pdt_usulan_katalog` is DELIBERATELY NOT frozen (unlike its sibling
+    -- `pdt_benchmark`) — G4-01 edits it live via an admin UI, and the PRD never
+    -- calls it append-only the way it does for benchmark/kolom_alias/laporan.
+    ASSERT (
+        SELECT count(*) FROM information_schema.triggers
+        WHERE event_object_table = 'pdt_usulan_katalog' AND action_statement LIKE '%frozen%'
+    ) = 0, 'pdt_usulan_katalog must NOT be frozen — it is edited live via the G4-01 admin UI, unlike pdt_benchmark';
+END $$;
+
+---------------------------------------------------------------------------
+-- PDT G1-01 — unique partial index bites at the DB level (PDT_BACKLOG.md
+-- G1-01 DoD: "tes unique-partial menggigit di DB — batch ditolak boleh
+-- diganti, batch verified tidak"). Rule 36: a rejected/superseded batch must
+-- never block its replacement, but two VERIFIED batches for the same
+-- (toko, periode) is a real conflict.
+---------------------------------------------------------------------------
+DO $$
+DECLARE
+    guarded boolean;
+BEGIN
+    INSERT INTO clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                          sales_pic_id, commission_payment_pic_id, created_by)
+    VALUES ('ZPDT-IMMUT-0001', 'PIC PDT IMMUT', 'Toko PDT IMMUT', 'Jakarta',
+            'https://example.test/pdt-immut', 'Fashion', 0, 0, 'EMP-0001', 'EMP-0001', 'SYSTEM');
+
+    INSERT INTO client_platforms (client_id, platform, active, created_by)
+    VALUES ('ZPDT-IMMUT-0001', 'TikTok Shop', true, 'SYSTEM');
+
+    -- Batch 1: `ditolak` — must NOT block a later verified batch for the same period.
+    INSERT INTO pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai,
+                                   periode_selesai, status, alasan_ditolak, parser_versi,
+                                   retensi_sampai, dibuat_oleh)
+    SELECT 'ZPDT-IMMUT-0001', cp.id, 'tiktok', '2026-07-01', '2026-07-31', 'ditolak',
+           'rekonsiliasi > 0.5% (fixture tes)', 1, '2026-08-30', 'EMP-0002'
+      FROM client_platforms cp WHERE cp.client_id = 'ZPDT-IMMUT-0001';
+
+    -- Batch 2: `verified`, SAMA (client_platform_id, periode_mulai, periode_selesai) —
+    -- harus BOLEH, karena batch 1 bukan `verified`.
+    guarded := false;
+    BEGIN
+        INSERT INTO pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai,
+                                       periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+        SELECT 'ZPDT-IMMUT-0001', cp.id, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1,
+               '2026-11-30', 'EMP-0002'
+          FROM client_platforms cp WHERE cp.client_id = 'ZPDT-IMMUT-0001';
+        guarded := true; -- reached ⇒ insert benar-benar diterima
+    EXCEPTION WHEN unique_violation THEN
+        guarded := false;
+    END;
+    ASSERT guarded, 'pdt_upload_batch: batch ditolak TIDAK BOLEH memblokir batch verified pengganti (Rule 36)';
+
+    -- Batch 3: KEDUA `verified` untuk (toko, periode) yang SAMA — harus DITOLAK.
+    guarded := true;
+    BEGIN
+        INSERT INTO pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai,
+                                       periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+        SELECT 'ZPDT-IMMUT-0001', cp.id, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1,
+               '2026-11-30', 'EMP-0002'
+          FROM client_platforms cp WHERE cp.client_id = 'ZPDT-IMMUT-0001';
+        guarded := false; -- reached hanya bila unique partial GAGAL menggigit
+    EXCEPTION WHEN unique_violation THEN
+        guarded := true;
+    END;
+    ASSERT guarded, 'pdt_upload_batch: DUA batch verified untuk (client_platform_id, periode_mulai, periode_selesai) yang sama harus ditolak unique partial';
 END $$;
 
 ROLLBACK;

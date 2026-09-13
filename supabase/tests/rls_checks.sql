@@ -90,6 +90,13 @@ END $$;
 -- 9. Internal tables are locked to `authenticated` entirely (no grant, no policy):
 --    even a director claim cannot read sessions / employee_credentials.
 --
+--    `pdt_benchmark`/`pdt_usulan_katalog` (PDT G1-01, 20261011010000) masuk
+--    daftar ini — RLS variant A (nol GRANT SELECT sama sekali, bukan cuma nol
+--    policy): kalibrasi skor dan katalog aksi dibaca/ditulis HANYA lewat
+--    service-role, gerbang Director ada di domain (`pdt.canKelolaBenchmark`),
+--    persis preseden `adsscanner_benchmark`/`px_eligibility_policy` yang juga
+--    tidak diberi `GRANT SELECT TO authenticated` sama sekali.
+--
 --    `page_views` (Adopsi Sistem, 20261003010000) masuk daftar ini dan alasannya
 --    BUKAN kerahasiaan skema: barisnya adalah jejak pemakaian PER-ORANG. Tabel
 --    yang terbuka untuk `authenticated` berarti setiap karyawan bisa membaca jam
@@ -102,7 +109,7 @@ SELECT set_config('request.jwt.claims',
 DO $$
 DECLARE t text; denied boolean;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['sessions','employee_credentials','id_sequences','sm_edges','role_mappings','strategi_share_token','strategi_share_access_log','page_views'] LOOP
+  FOREACH t IN ARRAY ARRAY['sessions','employee_credentials','id_sequences','sm_edges','role_mappings','strategi_share_token','strategi_share_access_log','page_views','pdt_benchmark','pdt_usulan_katalog'] LOOP
     denied := false;
     BEGIN
       EXECUTE format('SELECT 1 FROM public.%I LIMIT 1', t);
@@ -1202,7 +1209,20 @@ DECLARE
     -- lead/divisi dan karena itu tidak ada di daftar ini.
     'external_service_map_select',
     'negotiation_proposal_lines_select','negotiation_proposals_select','notifications_select',
-    'optimization_logs_select','plan_actual_select','plan_flag_select',
+    'optimization_logs_select',
+    -- `pdt_parser_modul_sel`/`pdt_kolom_alias_sel` (PDT G1-01, migrasi
+    -- 20261011010000) masuk daftar ini DENGAN SENGAJA, dicatat di
+    -- `docs/DECISIONS.md` 2026-09-13 — bukan ditambahkan agar tes hijau.
+    -- Keduanya cermin `studios_select`/`scs_kategori_select`/
+    -- `master_service_duration_options_select`: registry TANDA TANGAN KOLOM
+    -- dan ALIAS per modul export, bukan data klien — tidak ada satu kolom pun
+    -- yang lebih sensitif daripada `standard_price` yang sudah terbuka bagi
+    -- seluruh staff, dan layar upload G1-09 butuh dropdown "SELURUH modul"
+    -- (Rule G1-09) untuk override AM, termasuk pada hari nol baris. Baris
+    -- KERJA-nya (`pdt_upload_batch`, `pdt_fact_*`, dst.) TETAP ber-lengan
+    -- AM-pemilik/lead-Account dan karena itu tidak ada di daftar ini.
+    'pdt_kolom_alias_sel','pdt_parser_modul_sel',
+    'plan_actual_select','plan_flag_select',
     'plan_gate_config_select','plan_review_select','plan_target_select',
     'prospect_attempt_nq_reasons_select',
     'qualified_form_services_select','qualified_forms_select',
@@ -1307,6 +1327,11 @@ DECLARE
     'jwt_owns_lead',
     'jwt_owns_client_am',   -- 20260811030000 (Interview) — 2 policy
     'jwt_owns_interview_am', -- 20260811030000 (Interview) — 8 policy
+    -- PDT G1-01 (20261011010000) — tiga helper baru, pola sama
+    -- jwt_owns_client_am/jwt_owns_interview_am: dipanggil LANGSUNG dari
+    -- ekspresi policy `TO authenticated` tabel anak PDT yang tidak membawa
+    -- client_id langsung (client_platform_id/sku_id/batch_id).
+    'jwt_owns_pdt_batch_am', 'jwt_owns_client_platform_am', 'jwt_owns_pdt_sku_am',
     -- KATEGORI KEDUA (ditambahkan 2026-09-04) — bukan predikat policy, tapi
     -- HELPER HITUNG SEMPIT yang dipanggil route di bawah `readAsActor`.
     -- Dibedakan di komentar, bukan di array terpisah, karena ketiga assert di
@@ -1446,6 +1471,94 @@ DO $$ BEGIN
   -- "membersihkan" predikatnya dengan menambah filter status:
   IF NOT EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-DONE')
   THEN RAISE EXCEPTION 'SCR-UI-1: klien yang layanan Ads-nya sudah Done HARUS tetap terlihat (keputusan pemilik 2026-09-06: riwayat tetap terbaca)'; END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 46. PDT G1-01 — RLS variant A (default-deny, zero policy) vs variant B
+--     (GRANT SELECT + Account-scoped policy) vs kelas ketiga (reference table
+--     lintas-divisi, `USING (true)`).
+--
+--     Dua kelas diuji di sini: (a) `pdt_upload_batch`/`pdt_fact_shop_daily` —
+--     AM pemilik klien, lead Account, Director/OD lihat; staf divisi lain
+--     nol; (b) `pdt_parser_modul` — SIAPA PUN authenticated membaca (dropdown
+--     "seluruh modul" G1-09), termasuk staf divisi yang tidak punya urusan
+--     dengan klien mana pun. Kelas ketiga, `pdt_benchmark`/`pdt_usulan_katalog`
+--     (variant A, nol GRANT sama sekali — bukan cuma nol policy), diuji di
+--     §9 di atas bersama tabel internal lain: SELECT sebagai `authenticated`
+--     gagal dengan `insufficient_privilege` SEBELUM RLS sempat dievaluasi,
+--     bukan mengembalikan nol baris — dua kegagalan yang berbeda, dan §9
+--     sudah punya pola yang benar untuk yang pertama.
+-- ---------------------------------------------------------------------------
+RESET ROLE;
+
+INSERT INTO clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                      sales_pic_id, commission_payment_pic_id, assigned_am_id, created_by)
+VALUES ('ZPDT-RLS-0001', 'PIC PDT RLS', 'Toko PDT RLS', 'Jakarta', 'https://example.test/pdt-rls',
+        'Fashion', 0, 0, 'EMP-0001', 'EMP-0001', 'EMP-0002', 'SYSTEM');
+
+INSERT INTO client_platforms (client_id, platform, active, created_by)
+VALUES ('ZPDT-RLS-0001', 'TikTok Shop', true, 'SYSTEM');
+
+-- id `client_platforms`/`pdt_upload_batch` bigint identity — diambil lewat subquery kunci
+-- alami (client_id), bukan ditebak/di-hardcode (OVERRIDING SYSTEM VALUE tidak dipakai).
+INSERT INTO pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai,
+                               periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+SELECT 'ZPDT-RLS-0001', cp.id, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2026-11-30', 'EMP-0002'
+  FROM client_platforms cp WHERE cp.client_id = 'ZPDT-RLS-0001';
+
+INSERT INTO pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan)
+SELECT b.client_platform_id, '2026-07-15', 'net', b.id, 1, 1000000, 3
+  FROM pdt_upload_batch b WHERE b.client_id = 'ZPDT-RLS-0001';
+
+INSERT INTO pdt_parser_modul (kode, platform, nama_tampilan, tanda_tangan_kolom, baris_header_hint)
+VALUES ('zpdt_rls_test_modul', 'tiktok', 'Modul Tes RLS PDT', '{}'::jsonb, 1);
+
+SET LOCAL ROLE authenticated;
+
+-- (a) AM pemilik toko (EMP-0002) melihat batch + fakta kliennya.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-0002","division":"Account","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM pdt_upload_batch WHERE client_id = 'ZPDT-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'pdt_upload_batch: AM pemilik klien harus melihat batch kliennya'; END IF;
+  IF (SELECT count(*) FROM pdt_fact_shop_daily WHERE tanggal = '2026-07-15' AND gmv = 1000000) <> 1
+  THEN RAISE EXCEPTION 'pdt_fact_shop_daily: AM pemilik klien harus melihat fakta kliennya'; END IF;
+END $$;
+
+-- Staf divisi LAIN, bukan pemilik, TIDAK melihat.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-0004","division":"Ads","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM pdt_upload_batch WHERE client_id = 'ZPDT-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'pdt_upload_batch: staf divisi lain yang bukan pemilik tidak boleh melihat'; END IF;
+  IF (SELECT count(*) FROM pdt_fact_shop_daily WHERE tanggal = '2026-07-15' AND gmv = 1000000) <> 0
+  THEN RAISE EXCEPTION 'pdt_fact_shop_daily: staf divisi lain yang bukan pemilik tidak boleh melihat'; END IF;
+END $$;
+
+-- Lead Account (bukan pemilik baris) tetap melihat — divisi-wide.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-RLS-ACCLEAD","division":"Account","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM pdt_upload_batch WHERE client_id = 'ZPDT-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'pdt_upload_batch: lead Account harus melihat seluruh batch divisinya'; END IF;
+END $$;
+
+-- Director membaca lintas-divisi.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-0008","director":true}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM pdt_upload_batch WHERE client_id = 'ZPDT-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'pdt_upload_batch: Director harus membaca lintas-divisi'; END IF;
+END $$;
+
+-- Klaim kosong ⇒ default deny.
+SELECT set_config('request.jwt.claims', '{}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM pdt_upload_batch WHERE client_id = 'ZPDT-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'pdt_upload_batch: klaim kosong harus melihat nol baris'; END IF;
+END $$;
+
+-- (b) pdt_parser_modul — reference table lintas-divisi, SIAPA PUN authenticated membaca.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-0004","division":"Ads","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM pdt_parser_modul WHERE kode = 'zpdt_rls_test_modul') <> 1
+  THEN RAISE EXCEPTION 'pdt_parser_modul: SIAPA PUN authenticated harus bisa membaca katalog modul (dropdown G1-09)'; END IF;
 END $$;
 
 RESET ROLE;
