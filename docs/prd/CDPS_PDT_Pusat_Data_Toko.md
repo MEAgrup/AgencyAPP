@@ -1,7 +1,13 @@
 # PRD — PDT (Pusat Data Toko)
-**Versi 1.1 · 12 September 2026 · PT MEA Agensi Digital**
+**Versi 1.2 · 13 September 2026 · PT MEA Agensi Digital**
 *Revisi 1.1: strategi storage berubah — raw disimpan sebagai paket ZIP dengan purge otomatis,
 parse menjadi selektif, `extras jsonb` dibatalkan (PDT-15 revisi 2, PDT-25 s/d PDT-27).*
+*Revisi 1.2 (sesi 2, ketokan Nerissa 2026-09-13): §7 mendapat 27 kolom ber-konsumen nyata yang
+sesi 1 lewatkan + modul baru `shopee_kesehatan` (daftar mengikat sekarang di
+`docs/backlog/PDT_KOLOM_DIPANEN.md`); Rule 2 (pengikatan `shop_id` dari preamble Shopee),
+Rule 5 (toleransi bulan-sama), dan Rule 11 (status `tidak_dapat_dipulihkan` per platform)
+direvisi; `pdt_satuan_t` dapat nilai `rasio`; lima Open Assumption lagi tertutup, total sembilan
+dari sebelas (§9) — lihat `docs/handoff/HANDOFF_PDT_SESI1.md`.*
 **Repo:** `MEAgrup/AgencyAPP` (CDPS) · **Supabase:** `egddxfcnrtecheiykhlf` (`ap-southeast-1`) · **Schema:** `public`, prefiks `pdt_`
 
 Satu subsistem yang menggantikan **AM Baseline (Riset Awal + Video Factory)**, **AM Co-Pilot**,
@@ -157,6 +163,16 @@ Kesepuluhnya wajib masuk entri `AgencyAPP/docs/DECISIONS.md` sebelum migrasi per
 2. **Identitas toko divalidasi dari berkas, bukan dari pilihan AM.** Ketiga export iklan Shopee
    membawa preamble `Username`, `Nama Toko`, `ID Toko`, dan `Periode` (baris 1–6). Bila `ID Toko`
    di berkas ≠ `client_platforms.shop_id`, batch **ditolak** dengan pesan yang menyebut kedua nilai.
+
+   **Pengikatan `shop_id` (direvisi sesi 2, ketokan Nerissa Q-1 opsi A — simetris Rule 4).**
+   Bila `client_platforms.shop_id` **masih kosong** (kasus F-4: Product Exchange belum dimulai,
+   jadi belum pernah diisi), batch Shopee **pertama** boleh masuk berstatus
+   `identitas_belum_terikat` — bukan ditolak. Sistem mengusulkan `ID Toko` dari preamble berkas,
+   AM mengonfirmasi **sekali**, nilainya terikat permanen ke `client_platforms.shop_id`. `shop_id`
+   dengan demikian terisi sebagai **efek samping** validasi identitas PDT — bukan field yang AM
+   ketik terpisah — dan Product Exchange (yang memakai kolom yang sama untuk gerbang M3) ikut siap
+   begitu batch pertama terverifikasi. Setelah terikat, kembali ke jalur normal ayat pertama Rule
+   ini: `ID Toko` berkas vs `shop_id` tersimpan, bukan lagi diusulkan ulang.
 3. Export TikTok **tidak membawa shop_id sama sekali** (fakta terverifikasi dari sample). Identitas
    TikTok divalidasi dari `ID Kreator` akun toko terhadap `client_platforms.akun_konten_toko`.
    Kolom itu diisi **sekali** saat onboarding dan tidak pernah diketik ulang — ini yang
@@ -165,9 +181,21 @@ Kesepuluhnya wajib masuk entri `AgencyAPP/docs/DECISIONS.md` sebelum migrasi per
    `identitas_belum_terikat`; sistem mengusulkan `ID Kreator` yang paling sering muncul di berkas,
    AM mengonfirmasi satu kali, lalu nilainya terikat permanen.
 5. **Periode diambil dari berkas, tidak dari input AM**, bila berkasnya membawanya (preamble Shopee,
-   `Date Range`/`Rentang Tanggal` TikTok, `Tanggal analisis` Shop Analytics). Bila dua berkas dalam
-   satu batch membawa periode berbeda ⇒ batch ditolak. Untuk modul Shopee yang memang tidak membawa
-   tanggal terbaca, periode diwarisi dari berkas lain di batch yang sama — **bukan** diketik AM.
+   `Date Range`/`Rentang Tanggal` TikTok, `Tanggal analisis` Shop Analytics). Untuk modul Shopee
+   yang memang tidak membawa tanggal terbaca, periode diwarisi dari berkas lain di batch yang sama
+   — **bukan** diketik AM.
+
+   **Toleransi bulan-sama (direvisi sesi 2, ketokan: "export sesuai sample, ada yang 28 hari ada
+   yang 1 bulan, cek saja dari sample").** Batch **ditolak hanya bila berkas-berkasnya berasal dari
+   BULAN kalender berbeda** (mencegah Juli tercampur Agustus — maksud asli rule ini utuh). Rentang
+   yang berbeda **di dalam bulan yang sama** (mis. satu berkas 1–31 Juli, berkas lain 1–28 Juli)
+   **diterima**; `periode_mulai`/`periode_selesai` batch diambil sebagai **rentang terluas** di
+   antara seluruh berkas dalam batch itu. ⛔ **Jangan hardcode angka 28** — rentang per modul yang
+   sebenarnya (28 hari vs 1 bulan penuh) seharusnya diturunkan dari sample dan dicatat di
+   `pdt_parser_modul`, bukan sebagai konstanta di kode. **Catatan jujur:** rentang per modul belum
+   bisa dicek hari ini — export asli tidak disimpan di repo (lihat A-3, §9). Toleransi bulan-sama
+   di atas sudah membuat gerbang ini aman tanpa mengetahui angka pastinya, dan **tidak** memblokir
+   G1; presisi `pdt_parser_modul` menyusul setelah A-3 terjawab.
 
 ### 3.2 Parse
 
@@ -196,6 +224,17 @@ Kesepuluhnya wajib masuk entri `AgencyAPP/docs/DECISIONS.md` sebelum migrasi per
     diperluas, batch lama dapat **di-reparse dari paket ZIP** selama paket itu **masih dalam masa
     retensi**, dengan entri `audit_logs`. Paket yang sudah dipurge ⇒ batch ditandai
     `perlu_upload_ulang`; UI wajib menyebut tanggal purge-nya, bukan hanya "tidak tersedia".
+
+    **Status `tidak_dapat_dipulihkan` (ditambahkan sesi 2, §2.4 — retensi CDPS tetap 120 hari,
+    lihat PDT-26; ini bukan penurunan retensi, melainkan pasangan status untuk kasus di luar
+    jendela platform).** `perlu_upload_ulang` mengasumsikan berkas aslinya **masih bisa** diunggah
+    ulang dari Seller Center/Shopee Seller Center — sebuah janji yang hanya benar selama jendela
+    mundur platform belum lewat. Bila umur batch (dihitung dari `periode_selesai`) melewati ambang
+    **per platform** — **TikTok > 180 hari**, **Shopee > 90 hari** — batch ditandai
+    `tidak_dapat_dipulihkan`, bukan `perlu_upload_ulang`: menyuruh AM "upload ulang" di luar jendela
+    itu adalah instruksi yang mustahil dijalankan, karena platformnya sendiri sudah tidak
+    menyimpan berkasnya. UI wajib membedakan ketiganya (`tersedia` / `perlu_upload_ulang` /
+    `tidak_dapat_dipulihkan`), bukan menyamaratakan jadi "tidak tersedia".
 12. **Skor netral 5/10 dihapus.** Dimensi yang berkasnya tidak ada ⇒ `null` + label
     `data tidak tersedia`, dan dimensi itu **dikeluarkan dari pembobotan** (bobot dinormalisasi
     ulang). Kelengkapan berkas tidak boleh lagi menurunkan skor performa klien.
@@ -249,8 +288,9 @@ Kesepuluhnya wajib masuk entri `AgencyAPP/docs/DECISIONS.md` sebelum migrasi per
 26. Katalog aksi hidup di **DB** (`pdt_usulan_katalog`), bukan di dua tempat (server + HTML).
     Nol logika perhitungan di berkas HTML mandiri.
 27. **Setiap metrik dan target wajib punya satuan bertipe** (`rupiah` / `persen` / `hitungan` /
-    `jam` / `hari` / `views`). Target disimpan sebagai `(nilai numeric, satuan enum)`. Ini yang
-    menutup bug "20 sesi live dicetak Rp 20,00" dan "CTOR 1,5% dicetak sebagai Rupiah".
+    `jam` / `hari` / `views` / **`rasio`** *(§6.3, ditambahkan sesi 2 — ROAS `x` butuh slotnya
+    sendiri)*. Target disimpan sebagai `(nilai numeric, satuan enum)`. Ini yang menutup bug
+    "20 sesi live dicetak Rp 20,00" dan "CTOR 1,5% dicetak sebagai Rupiah".
 28. Rendering target ke brief divisi **wajib** lewat satu formatter yang membaca `satuan`.
     Formatter bebas-satuan dilarang.
 29. Setiap aksi menyatakan `platform_berlaku` secara eksplisit. **Aksi yang hanya berlaku TikTok
@@ -532,7 +572,11 @@ Bila AM keliru memasukkan export Agustus ke batch Juli, langkah 5 menolaknya. Bi
   partial unique.
 - **`pdt_usulan_katalog`**: `kode` PK, `platform_berlaku text[]`, `kondisi jsonb`, `metrik_kunci`,
   `satuan pdt_satuan_t`, `target_formula jsonb`, `divisi_tujuan`, `aktif`.
-- ENUM baru: `pdt_satuan_t` = (`rupiah`, `persen`, `hitungan`, `jam`, `hari`, `views`).
+- ENUM baru: `pdt_satuan_t` = (`rupiah`, `persen`, `hitungan`, `jam`, `hari`, `views`, **`rasio`**
+  *(ditambahkan sesi 2, ketokan F-6)*. Katalog Co-Pilot memakai **7** satuan (`Rp`, `%`, `x`,
+  `kreator`, `VV`, `video`, `jam`) — enum v1.1 tidak punya slot untuk `x` (mis. ROAS `9,63×`).
+  Memaksanya ke `hitungan` mencetak "9,63" tanpa satuan; ke `rupiah` mencetak "Rp. 9,63" — persis
+  bug yang Rule 27 ada untuk mencegah. `rasio` mengisi slot itu.
 
 ### 6.4 Tabel usulan & laporan
 
@@ -593,6 +637,17 @@ angka rupiah; yang mengikat di sini adalah ukurannya, bukan tarifnya.
 
 ## 7. Modul & Peta Kolom dari Export Asli
 
+> **§7 diturunkan dari konsumen nyata, bukan sebaliknya — daftar yang mengikat ada di
+> `docs/backlog/PDT_KOLOM_DIPANEN.md`.** Revisi sesi 2 (`docs/handoff/HANDOFF_PDT_SESI1.md` §3):
+> verifikasi langsung ke `requireCols`/pemanggil kolom di `packages/core` menemukan **27 kolom
+> ber-konsumen nyata** yang §7 (versi sesi 1) lewatkan — tiga di antaranya (`Pendapatan kotor`
+> di dua modul Ads, `GPM (Rp)`/`GMV dari video (Rp)` di `tt_video`) adalah kolom yang
+> **`requireCols` wajibkan**, sehingga menyusun whitelist harfiah dari tabel di bawah **tanpa**
+> merujuk `PDT_KOLOM_DIPANEN.md` akan mematikan parse tiga modul. Satu modul, `shopee_kesehatan`,
+> **tidak ada sama sekali** di versi sesi 1 — ditambahkan di §7.2. Tabel di bawah sudah memuat
+> penambahan itu; rincian per-kolom dengan kutipan `file:baris` dan bucket
+> (derived-keep/derived-add/human-call) ada di `PDT_KOLOM_DIPANEN.md`, bukan diulang di sini.
+
 Terverifikasi terhadap 28 berkas sample (Fim Motor/Shopee, Avitaskin/TikTok), Juli 2026.
 
 ### 7.1 TikTok
@@ -600,14 +655,14 @@ Terverifikasi terhadap 28 berkas sample (Fim Motor/Shopee, Avitaskin/TikTok), Ju
 | Modul | Berkas sample | Kunci yang dipanen | Mengisi |
 |---|---|---|---|
 | `tt_orders` | `Semua pesanan-*.csv` (65 kolom) | `Order ID`, **`SKU ID`**, `Seller SKU`, `Product Name`, `Variation`, `Quantity`, `SKU Unit Original Price`, `SKU Subtotal After Discount`, `Order Status`, `Paid Time`, `Product Category`, `Creator Handle` | `pdt_sku_master` (harga ⇒ `price_segment`), `pdt_fact_sku_period` basis **dibayar**, atribusi kreator |
-| `tt_product_analytics` | `product_list_20260701.xlsx` (176 kolom, header baris 4) | `ID Produk`, `GMV`, `GMV dari kreator`, `GMV dari video/LIVE penjual`, `Pesanan SKU`, `AOV`, `CTR`, `CTOR`, `Impresi produk` | `pdt_fact_sku_period` (≈14 dari 176 kolom dipanen; sisanya hanya di paket ZIP) |
+| `tt_product_analytics` | `product_list_20260701.xlsx` (176 kolom, header baris 4) | `ID Produk`, `GMV`, `GMV dari kreator`, `GMV dari video/LIVE penjual`, `Pesanan SKU`, `AOV`, `CTR`, `CTOR`, `Impresi produk`, **`Nama`, `Klik produk`** *(sesi 2)* | `pdt_fact_sku_period` (≈16 dari 176 kolom dipanen; sisanya hanya di paket ZIP); `Klik produk`/`Nama` = sumbu X kuadran SKU, dimensi Portfolio Produk 0,12 |
 | `tt_transaction_product` | `Transaction_Analysis_Product_List_*.xlsx` | `Product ID`, **`Product category`**, `GMV dari kreator`, `CTOR`, `Video`, `Siaran LIVE`, `Sampel terkirim` | kategori SKU, sinyal PX ("SKU ini sudah jalan di afiliasi") |
-| `tt_transaction_creator` | `Transaction_Analysis_Creator_List_*.xlsx` | `Creator name`, `GMV dari kreator`, `AOV`, `CTOR`, jumlah LIVE/video | `pdt_fact_creator_period`, deteksi kebocoran GMV |
-| `tt_video` | `Video Performance List_*.xlsx` (header baris 3) | `ID Kreator`, **`ID Video`**, `Waktu`, `Produk`, `VV`, `Likes`, `Dibagikan`, `Klik Produk` | `pdt_fact_content`; menutup GMV Impact organik |
-| `tt_live` | `Live Analysis*.xlsx` (header baris 3) | `ID Kreator`, `Waktu Live`, `Durasi`, `GMV dari LIVE`, `Produk Terjual` | `pdt_fact_content` jenis `live` |
-| `tt_shop_analytics` | `Shop Analytics_Key metrics_*.xlsx` | `GMV`, `Pesanan`, `Pembeli`, `Pesanan SKU`, `Pengunjung`, `Persentase konversi`, `Pendapatan bruto` | `pdt_fact_shop_daily`, sisi rekonsiliasi |
-| `tt_ads_product` | `creative data for product campaigns *.xlsx` | `ID Campaign`, **`ID produk`**, **`ID video`**, `Akun TikTok`, `Biaya`, `Pesanan SKU`, `Biaya per pesanan` | `pdt_fact_ads` tersambung ke SKU **dan** konten |
-| `tt_ads_live` | `livestream data for live campaigns *.xlsx` | `Nama LIVE`, `ID Campaign`, `Biaya`, `Pesanan SKU`, `ROI` | `pdt_fact_ads` |
+| `tt_transaction_creator` | `Transaction_Analysis_Creator_List_*.xlsx` | `Creator name`, `GMV dari kreator`, `AOV`, `CTOR`, `Video`, `Siaran LIVE`, **`Perkiraan komisi`** *(sesi 2)* | `pdt_fact_creator_period`, deteksi kebocoran GMV; `Perkiraan komisi` = sumber `commission_pct` PX Flow D |
+| `tt_video` | `Video Performance List_*.xlsx` (header baris 3) | `ID Kreator`, **`ID Video`**, `Waktu`, `Produk`, `VV`, `Likes`, `Dibagikan`, `Klik Produk`, **`Informasi Video`, `GPM (Rp)`, `GMV dari video (Rp)`** *(sesi 2 — `requireCols` wajib)* | `pdt_fact_content`; menutup GMV Impact organik; tiga kolom sesi 2 menutup dimensi Video 0,18 (tanpanya `requireCols` gagal dan modul ini tidak terparse sama sekali) |
+| `tt_live` | `Live Analysis*.xlsx` (header baris 3) | `ID Kreator`, `Waktu Live`, `Durasi`, `GMV dari LIVE`, `Produk Terjual`, **`Penonton`, `CTOR`, `Kreator`/`Nama panggilan`** *(sesi 2)* | `pdt_fact_content` jenis `live`; tiga kolom sesi 2 = Co-Pilot L3 + pemisah toko-vs-afiliasi |
+| `tt_shop_analytics` | `Shop Analytics_Key metrics_*.xlsx` | `GMV`, `Pesanan`, `Pembeli`, `Pesanan SKU`, `Pengunjung`, `Persentase konversi`, `Pendapatan bruto`, **`Pengembalian dana`, `GMV dari LIVE kreator`, `GMV dari LIVE akun tertaut` (alias `GMV LIVE penjual`/`GMV tidak langsung dari LIVE penjual`), `GMV dari video afiliasi`, `GMV dari video akun tertaut`** *(sesi 2)* | `pdt_fact_shop_daily`, sisi rekonsiliasi; lima kolom sesi 2 = `gmvNet` (standar GMV MEA = GMV − refund) + channel-mix live/video/kartu (dimensi Kartu Produk & Shop Tab 0,14) + Section B-2.3 |
+| `tt_ads_product` | `creative data for product campaigns *.xlsx` | `ID Campaign`, **`ID produk`**, **`ID video`**, `Akun TikTok`, `Biaya`, `Pesanan SKU`, `Biaya per pesanan`, **`Pendapatan kotor`** *(sesi 2 — `requireCols` wajib)* | `pdt_fact_ads` tersambung ke SKU **dan** konten; `Pendapatan kotor` = sisi pendapatan ROAS, dimensi GMV Max Ads 0,22 |
+| `tt_ads_live` | `livestream data for live campaigns *.xlsx` | `Nama LIVE`, `ID Campaign`, `Biaya`, `Pesanan SKU`, `ROI`, **`Pendapatan kotor`** *(sesi 2 — `requireCols` wajib)* | `pdt_fact_ads`; `Pendapatan kotor` = sisi pendapatan ROAS, dimensi GMV Max Ads 0,22 |
 
 ⚠️ Dua `Shop Analytics_Key metrics` di sample punya **jumlah kolom berbeda (11 vs 14)** dan angka
 berbeda jauh (Rp 130.097 vs Rp 26.560.049). **Perlu dicek** apakah salah satu hasil filter produk.
@@ -619,8 +674,8 @@ pakai `tt_orders` sebagai sisi kanonik.
 | Modul | Berkas sample | Kunci yang dipanen | Mengisi |
 |---|---|---|---|
 | `shopee_shop_stats` | `*.shopee-shop-stats.*.xlsx` (12 sheet) | 3 basis × 14 metrik + asal kunjungan + asal penjualan | `pdt_fact_shop_daily` per basis (Rule 15) |
-| `shopee_parent_sku` | `parentskudetail.*.xlsx` (7 sheet, 40 kolom, 1.504 baris) | `Kode Produk`, `Kode Variasi`, **`SKU Induk`**, penjualan 2 basis, views, klik, CTR, CR, repeat order | `pdt_sku_master`, `pdt_fact_sku_period` |
-| `shopee_ads_cpc` | `Data+Keseluruhan+Iklan+Shopee-*.csv` (header **baris 8**) | preamble `ID Toko`/`Periode`; `Kode Produk`, `Dilihat`, `Klik`, `Konversi`, `Biaya`, omzet | identitas + `pdt_fact_ads` per SKU |
+| `shopee_parent_sku` | `parentskudetail.*.xlsx` (7 sheet, 40 kolom, 1.504 baris) | `Kode Produk`, `Kode Variasi`, **`SKU Induk`**, penjualan 2 basis, views, klik, CTR, CR, repeat order, **`Pengunjung Produk (Kunjungan)`** *(sesi 2)* | `pdt_sku_master`, `pdt_fact_sku_period`; `Pengunjung Produk (Kunjungan)` = sumbu X 4-kuadran Shopee, dimensi Product Performance 0,14 |
+| `shopee_ads_cpc` | `Data+Keseluruhan+Iklan+Shopee-*.csv` (header **baris 8**) | preamble `ID Toko`/`Periode`; `Kode Produk`, `Dilihat`, `Klik`, `Konversi`, `Biaya`, omzet, **`nama iklan`, `omzet penjualan`, `Efektifitas Iklan` (ROAS), kolom `(ACOS)`** *(sesi 2)* | identitas + `pdt_fact_ads` per SKU; empat kolom sesi 2 = dimensi ROAS & Channel 0,22 |
 | `shopee_ads_search` | `Search-Ads-Overall-Data-*.csv` (header baris 8) | `Kata Pencarian`, `SOV`, klik, konversi | `pdt_fact_ads` + riset keyword |
 | `shopee_ads_live` | `Data-Semua-Iklan-Live-*.csv` (header baris 7) | `ID Iklan`, `Penonton`, `Pesanan`, `Omzet`, `Biaya`, `Efektifitas Iklan` | `pdt_fact_ads` |
 | `shopee_live` | `live_streaming_*.xlsx` (3 sheet) | `Informasi Streaming`, `Waktu Mulai`, `Pengunjung`, `Penjualan` | `pdt_fact_content` jenis `live` — **menutup dimensi Live Shopee yang hari ini struktural maks 5/10** |
@@ -628,14 +683,15 @@ pakai `tt_orders` sebagai sisi kanonik.
 | `shopee_voucher` / `shopee_diskon` / `shopee_flash_sale` | `voucher_*`, `discount_*`, `In_Shop_Flash_Sale_*` | penjualan 2 basis, klaim, tingkat penggunaan, biaya promo | dimensi promo + biaya promo |
 | `shopee_chat` | `chat_*.xlsx` (5 sheet) | waktu respon, % dibalas, CSAT, konversi chat | dimensi layanan |
 | `shopee_chat_broadcast` | `Chat_Broadcast_overview_*.xlsx` | penerima, dibaca, diklik, pesanan | dimensi CRM |
-| `shopee_ams_produk` | `ProductPerformance_*.csv` | `Kode Item`, omzet, komisi, ROI | sinyal PX sisi Shopee |
+| `shopee_ams_produk` | `ProductPerformance_*.csv` | `Kode Item`, omzet, komisi, ROI | sinyal PX sisi Shopee; `komisi` = sumber `commission_pct` PX Shopee |
 | `shopee_ams_afiliasi` | `AMSAffiliatePerformance_*.csv` | `ID Affiliates`, omzet, komisi, ROI | `pdt_fact_creator_period` Shopee |
+| **`shopee_kesehatan`** *(modul baru, sesi 2 — tidak ada di v1.1)* | tersirat dalam paket ZIP Bisnis Saya (header sheet: `Poin Penalti`, `Deskripsi`, `Durasi`) | `Poin Penalti`, `Deskripsi`, `Durasi` — seluruh modul, tiga kolom | dimensi Kesehatan Toko 0,12 (`report/shopee/skor.ts:104-111`), Section B-4.3 poin penalti; modul ini **tidak ada sama sekali** di §7 v1.1, bukan kasus "kolom hilang dari modul yang sudah terdaftar" |
 
 ### 7.3 Lintas platform
 
 | Modul | Berkas sample | Catatan |
 |---|---|---|
-| `meta_ads` | `Laporan-tanpa-judul-Jul-*.xlsx` | **Fakta baru:** klien Shopee ini menjalankan Meta Ads. Kolom: `Nama kampanye`, `Nama iklan`, `Jumlah yang dibelanjakan`, `Nilai Konversi Pembelian`, `ROAS`, `Impresi`, `Klik tautan`, `CTR`, `CPM`, `CPC`. Modul **opsional** (PDT-22); tidak masuk rekonsiliasi karena bukan sumber GMV toko |
+| `meta_ads` | `Laporan-tanpa-judul-Jul-*.xlsx` | **Fakta baru:** klien Shopee ini menjalankan Meta Ads. Kolom: `Nama kampanye`, `Nama iklan`, `Jumlah yang dibelanjakan`, `Nilai Konversi Pembelian`, `ROAS`, `Impresi`, `Klik tautan`, `CTR`, `CPM`, `CPC`, **`Minggu`** *(sesi 2)*. Modul **opsional** (PDT-22); tidak masuk rekonsiliasi karena bukan sumber GMV toko; `Minggu` = kunci baris pemisah ringkasan vs mingguan saat parse |
 
 ---
 
@@ -665,20 +721,29 @@ Wajib dijawab sebelum coding modul terkait.
 > **Status verifikasi ditambahkan saat PRD masuk repo.** Empat dari sebelas sudah bisa dijawab
 > dari kode hari ini — tiga di antaranya ternyata **premisnya keliru**, dan itu justru alasan
 > kenapa kolom ini ada. Rinciannya `docs/backlog/PDT_BACKLOG.md` §5.
+>
+> **Update sesi 2 (2026-09-13, ketokan Nerissa — `docs/handoff/HANDOFF_PDT_SESI1.md` §2–§2.4).**
+> Lima lagi tertutup: **P-01** (verifikasi kode), **P-06** (tertutup F-9), **P-08** (§2.4 — retensi
+> **tidak** diturunkan), **P-10** (150–300 klien, dikunci ke 300), **P-11** (SOP, bersyarat).
+> **Sembilan dari sebelas** sekarang punya jawaban tertulis — termasuk **P-02/P-03**, yang
+> jawabannya memblokir **G5 saja** (taksonomi lintas-sistem belum diputuskan bagaimana masuk
+> CDPS), bukan G1–G4. Sisa **dua yang benar-benar belum terjawab**: **P-04** (🟠 sebagian —
+> lingkup G1-02/G1-03 sudah melebar mengikutinya) dan **P-07** (kapasitas partisi, menunggu Hans)
+> — **tidak satu pun dari sebelas memblokir G1**.
 
 | # | Asumsi | Status | Penjawab | Dampak bila salah |
 |---|---|---|---|---|
-| P-01 | Dua `Shop Analytics_Key metrics` berbeda kolom (11 vs 14) karena filter produk, bukan versi export berbeda | 🟡 terbuka | Hans / AM | sisi rekonsiliasi TikTok salah pilih |
+| P-01 | Dua `Shop Analytics_Key metrics` berbeda kolom (11 vs 14) karena filter produk, bukan versi export berbeda | ✅ **terjawab (sesi 2)** — **premis salah, tapi jinak.** Kedua sample adalah `shop_tt` (TikTok) vs `shop_tp` (Tokopedia) — **35 baris sama, periode sama** — bukan filter produk. Pembeda: `GMV dari LIVE kreator` (TikTok) vs `Pendapatan bruto` (Tokopedia), `packages/core/src/baseline/detect.ts:26-27`. Rp 130.097 = kanal Tokopedia yang nyaris mati | Claude (verifikasi kode) | ⇒ **`tt_orders` tetap sisi rekonsiliasi kanonik TikTok** (tidak berubah); `tt_shop_analytics` tetap **bukan** satu-satunya sisi rekonsiliasi (Rule di G1-07) |
 | P-02 | `Product category` TikTok (mis. "Perawatan & Kecantikan") dapat dipetakan ke `level2_category` taksonomi MCN (198 nilai). **Kemungkinan besar tidak** — granularitasnya beda | 🔴 **premis salah** — `level2_category` nol hasil di `supabase/migrations/**`; ia hidup di MCN. Blokir **G5** | Hans | gerbang PX tidak bisa mencocokkan kategori; lihat PRD M3 §Rules 7 |
 | P-03 | Nilai enum `price_segment_t` di MCN cukup untuk sebaran harga SKU klien agency (A-01 masih terbuka sejak PRD M1) | 🔴 **premis salah** — enum `price_segment_t` tidak ada di CDPS sama sekali. Blokir **G5** | Hans | `price_segment` SKU tidak bisa dihitung |
 | P-04 | Tiga tool lama benar melewati jalur parse yang sama di `packages/core` (A-09) | 🟠 **sebagian terjawab dari kode** — `baseline/sheet.ts readSheet` memang dipakai bersama, tapi ada **4 registry tanda tangan terpisah** + **2 parser angka berbeda perilaku** | Hans | lingkup G1 melebar |
-| P-05 | `optimization_tracker` (PK `screening_id, product_code`) dapat di-migrasi ke `pdt_sku_master` tanpa kehilangan riwayat (A-10) | 🔴 **premis salah** — `optimization_tracker` adalah tracker A/B before-after yang **mutable**, bukan master SKU; `product_code`-nya jatuh balik ke **nama produk**, melanggar Rule 20 | Hans | master SKU mulai dari nol; kehilangan riwayat kuadran |
-| P-06 | Shopee `Kode Produk` stabil antar periode (tidak berubah saat produk di-edit penjual) | 🟡 terbuka | Hans / AM | master SKU pecah jadi baris ganda |
+| P-05 | `optimization_tracker` (PK `screening_id, product_code`) dapat di-migrasi ke `pdt_sku_master` tanpa kehilangan riwayat (A-10) | ✅ **terjawab — premis salah, dan itu bukan kerugian.** `optimization_tracker` adalah tracker A/B before-after yang **mutable**, bukan master SKU; `product_code`-nya jatuh balik ke **nama produk**, melanggar Rule 20. "Kehilangan riwayat kuadran" yang P-05 khawatirkan **tidak terjadi** — riwayat kuadran memang tidak pernah ada di sana | Claude (verifikasi kode) | ⇒ **tidak dimigrasi.** `optimization_tracker` kelak *menunjuk* ke `pdt_sku_master.id`; baris ber-kunci-nama diperlakukan sebagai yatim yang di-*resolve*, bukan diimpor |
+| P-06 | Shopee `Kode Produk` stabil antar periode (tidak berubah saat produk di-edit penjual) | ✅ **tertutup (F-9)** — pertanyaan stabilitas jadi tidak-memblokir: ketokan F-9 ("SKU tanpa Kode Produk tidak dimasukkan ke Product Exchange") sudah menegaskan **Rule 20 menang** — `skuKey` fallback-nama **tidak** dipakai di `pdt_sku_master` apa pun jawabannya. SKU yang `Kode Produk`-nya berubah/hilang antar periode cukup diperlakukan sebagai baris baru/yatim yang di-*resolve*, bukan alasan menunda desain master SKU | Nerissa (ketokan F-9, 2026-09-13) | tidak lagi memblokir — stabilitas empirisnya tetap berguna untuk dipantau AM/Hans, tapi bukan prasyarat G1 |
 | P-07 | Kapasitas Supabase cukup untuk ~1.500 baris SKU × ~500 klien × 12 bulan (≈9 juta baris/tahun di `pdt_fact_sku_period`) | 🟡 terbuka | Hans | butuh partisi per tahun sejak awal |
-| P-08 | **Jendela retensi export di Seller Center TikTok & Shopee ≥ 120 hari.** Bila lebih pendek, retensi default PDT-26 harus diturunkan ke jendela itu — menyimpan paket lebih lama dari kemampuan platform mengganti berkasnya tetap berguna (reparse), tapi klaim "bisa upload ulang" jadi tidak benar | 🟡 terbuka — memblokir angka retensi 120 hari (PDT-26) | Anty + Hans | janji reparse/upload ulang tidak dapat ditepati |
+| P-08 | **Jendela retensi export di Seller Center TikTok & Shopee ≥ 120 hari.** Bila lebih pendek, retensi default PDT-26 harus diturunkan ke jendela itu — menyimpan paket lebih lama dari kemampuan platform mengganti berkasnya tetap berguna (reparse), tapi klaim "bisa upload ulang" jadi tidak benar | ✅ **terjawab (§2.4) — dan saran PRD ("turunkan retensi") SENGAJA tidak dijalankan.** TikTok 180 hari mundur > retensi 120 hari (aman); **Shopee 90 hari < 120 hari** — ada **30 hari** di mana paket ZIP kita satu-satunya salinan. Menurunkan retensi ke jendela platform berarti menghapus salinan itu **tepat saat ia mulai jadi satu-satunya** | Nerissa (ketokan, 2026-09-13) | **Retensi TETAP 120 hari** (PDT-26 tidak berubah). Yang berubah: status `perlu_upload_ulang` (Rule 11) butuh pasangan **`tidak_dapat_dipulihkan`**, ambang per platform TikTok >180h / Shopee >90h |
 | P-09 | Supabase Storage (bucket privat + signed URL) tersedia dan dapat dipakai dari `AgencyAPP`; belum ada preseden bucket di repo ini | ✅ **terkonfirmasi** — nol bucket, nol `supabase/functions/`, `storage.objects` kosong. Konsekuensi: job purge **tidak bisa pure SQL** | Hans | butuh penyimpanan objek alternatif; anggaran storage berubah |
-| P-10 | Jumlah klien aktif ~500 (asumsi gue, belum diverifikasi) | 🟡 terbuka | Anty | seluruh §6.8 salah skala |
-| P-11 | AM sanggup mengubah kebiasaan jadi "zip dulu, upload sekali" tanpa tool bantu. Bila tidak, butuh 1 halaman panduan + tombol "cek paket" sebelum upload | 🟡 terbuka | Nerissa + Anty | kepatuhan PDT-25 rendah, AM kembali minta upload longgar |
+| P-10 | Jumlah klien aktif ~500 (asumsi gue, belum diverifikasi) | ✅ **terjawab (150–300)** — desain dikunci ke **batas atas 300** klien: ≈5,4 jt baris/tahun `pdt_fact_sku_period`, ≈0,72 GB ZIP pasca-purge, ≈5,3 GB fakta | Anty (ketokan, 2026-09-13) | §6.8 di bawah masih dihitung di atas asumsi 500 klien — **butuh direvisi turun** mengikuti 300 sebagai patokan baru; dicatat sebagai gap dokumentasi terbuka, bukan diubah di revisi ini (di luar cakupan Tugas §4 sesi 2) |
+| P-11 | AM sanggup mengubah kebiasaan jadi "zip dulu, upload sekali" tanpa tool bantu. Bila tidak, butuh 1 halaman panduan + tombol "cek paket" sebelum upload | ✅ **terjawab (SOP) — bersyarat, bukan tanpa syarat.** Jawabannya bukan "AM pasti bisa tanpa bantuan": F-3/F-10 menegaskan adopsi rendah tool lama justru **gejala** tool HTML lama yang tidak membantu (AM berulang kali mengisi kolom yang sama), bukan bukti AM menolak berubah. Syaratnya dua: SOP tertulis (satu batch per toko per periode + arti mengisi Shop ID) **dan** tombol "cek paket" sebelum upload (sudah masuk desain G1-09) | Nerissa + Anty (ketokan F-3/F-10, 2026-09-13) | Tiket SOP non-coding ada di `PDT_BACKLOG.md` §7 butir 5 — owner Nerissa + Anty, bukan Claude; **wajib selesai sebelum G1 merge** |
 
 ---
 

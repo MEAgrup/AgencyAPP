@@ -11,6 +11,15 @@
 >
 > **Jangan mulai G1 sebelum §5 dan §6 di bawah tertutup.** Verifikasi ke kode menemukan **tiga dari
 > sebelas asumsi premisnya keliru**; dua di antaranya menyebut tipe kolom yang tidak ada di CDPS.
+>
+> ### Update sesi 2 (2026-09-13, ketokan Nerissa — masih **NOL KODE, NOL MIGRASI**)
+> Sembilan dari sebelas Open Assumptions sekarang tertutup (§6 di bawah) — P-01/P-06/P-08/P-10/P-11
+> ditutup sesi ini, di atas empat yang sesi 1 sudah jawab. **Daftar `kolom_dipanen`
+> (`docs/backlog/PDT_KOLOM_DIPANEN.md`) sudah ada**, tapi **belum lengkap secara sengaja**: bucket
+> "human call" (11 kolom tanpa konsumen ⇒ buang, ketokan Q-6) tidak ditulis karena rekomendasi
+> aslinya tidak ditemukan di repo mana pun — lihat berkas itu §7. Ini **tidak** memblokir G1 (G1-02
+> sudah punya bucket 1 + bucket 2 lengkap, yang memang whitelist-nya); ia memblokir kelengkapan
+> penuh `pdt_parser_modul.kolom_dipanen` sebelum daftar itu jadi kanonik selamanya.
 
 ---
 
@@ -51,6 +60,34 @@ CI merah, bukan diskusi gaya.
 
 > **Gerbang keluar G1:** ≥ **10 klien nyata** berstatus `verified` (campuran TikTok & Shopee),
 > rekonsiliasi ≤ 0,5% — **bukan** data seed. Dan sejak G1 merge: **nol batch baru** lewat tool lama.
+
+### G1-00 · Prasyarat data ("G0") — **sebelum G1 bisa lulus UAT**
+Ditambahkan sesi 2 (`docs/handoff/HANDOFF_PDT_SESI1.md` §5 menyebutnya "G0"; nomor tiketnya
+`G1-00` supaya tetap satu urutan dengan G1-01…G1-11 di backlog ini). ⚠️ **G1 tidak bisa lulus UAT
+sebelum tiket ini selesai** — gerbang keluar G1 (≥10 klien nyata `verified`) tidak tercapai kalau
+data klien di bawahnya masih kotor.
+
+Fakta hari ini (§7.1 handoff, query read-only 2026-09-12): **16 dari 27** klien tanpa AM
+(mayoritas testing, ketokan F-8); kosakata `client_platforms.platform` = `Shopee | TikTok Shop |
+TikTok Shop, Shopee | TikTok Shop, Shopee, Tokopedia | Tokopedia` dengan **nol CHECK**.
+
+- **Hapus klien testing** (ketokan F-8: *"Klien tanpa AM mayoritas testing. Yang testing dihapus,
+  yang belum di-assign."*). Ini keputusan **manusia per baris** (Nerissa/Anty menentukan mana
+  testing, mana belum sempat di-assign) — dieksekusi sebagai transaksi SQL langsung + baris
+  `audit_log` per penghapusan/nonaktivasi, pola yang sama dengan pembersihan baris kembar
+  `client_platforms` di PX-M2a §4b (`DECISIONS.md` 2026-09-12). **Bukan** DELETE mentah tanpa jejak.
+- **Assign AM ke klien real** yang tersisa tanpa AM — prasyarat `canUploadBatch(actor, ownerAm)`
+  (K-3) punya `ownerAm` untuk digigit; klien tanpa AM tidak bisa punya batch PDT yang sah.
+- **`client_platforms.platform` jadi pilihan** — migrasi kecil: enum/CHECK ke
+  (`tiktok`/`shopee`/`meta`/`tokopedia`), plus normalisasi baris live yang hari ini menyimpan
+  gabungan teks bebas (`"TikTok Shop, Shopee"` dll., ketokan F-5: *"toko yang melanggar itu toko
+  testing"* — dua baris gabungan diperkirakan terhapus bersama data testing di atas, bukan
+  dinormalisasi terpisah). ⚠️ Ini **satu-satunya** bagian tiket ini yang benar-benar migrasi;
+  pembersihan datanya sendiri manual/SOP, bukan kode aplikasi.
+
+**DoD:** nol klien testing tersisa · nol klien real tanpa AM · `client_platforms.platform` ber-CHECK
+· nol baris `platform` bergabung tersisa · baseline "10 klien nyata `verified`" (gerbang G1) diukur
+dari data yang sudah bersih ini, bukan dari 27 klien hari ini yang 16-nya testing.
 
 ### G1-01 · Migrasi tabel `pdt_*` + RLS + gerbang CI
 Tabel dari PRD §6.1–§6.4. Semua `bigint GENERATED ALWAYS AS IDENTITY` (koreksi K-2).
@@ -96,6 +133,13 @@ naik dalam satu commit · tes RLS per peran · tes immutability (`pdt_benchmark`
 (batch `ditolak` boleh diganti, batch `verified` tidak).
 
 ### G1-02 · Seed `pdt_parser_modul` — **menyatukan EMPAT registry, bukan satu**
+> **`kolom_dipanen` per modul sudah disusun** di `docs/backlog/PDT_KOLOM_DIPANEN.md` (sesi 2,
+> Task §4 Tugas 2) — pakai berkas itu, jangan menyusun ulang whitelist dari §7 PRD secara harfiah
+> (§7 PRD sendiri sekarang menunjuk balik ke `PDT_KOLOM_DIPANEN.md` sebagai daftar yang mengikat).
+> Satu bucket di berkas itu **belum lengkap secara sengaja** — bucket 3 "human call" (11 kolom
+> tanpa konsumen ⇒ buang) menunggu rekomendasi asli Hans/Anty; itu tidak menghalangi seed modul,
+> karena bucket 1 + bucket 2 (yang justru harus **masuk** whitelist) sudah lengkap.
+
 Konsekuensi P-04 (🟠 sebagian, §5). Yang harus disatukan ke `tanda_tangan_kolom jsonb`:
 
 | Registry hari ini | Isi |
@@ -189,6 +233,12 @@ lewat · waktu diukur dan dicatat.
 - **Shopee** (Rule 2): preamble tiga CSV iklan membawa `Username`, `Nama Toko`, `ID Toko`,
   `Periode` (baris 1–6). `ID Toko` ≠ `client_platforms.shop_id` ⇒ batch **ditolak** dengan pesan
   yang **menyebut kedua nilai**.
+  - **Pengikatan `shop_id` (Q-1 opsi A, sesi 2 — simetris Rule 4 TikTok).** Bila `shop_id` toko itu
+    **masih kosong** (F-4: Product Exchange belum dimulai untuk toko ini), batch Shopee pertama
+    masuk berstatus `identitas_belum_terikat` → sistem mengusulkan `ID Toko` dari preamble → AM
+    mengonfirmasi **sekali** → nilai terikat permanen ke `client_platforms.shop_id`. `shop_id`
+    terisi sebagai **efek samping** validasi PDT, bukan field AM ketik terpisah — dan Product
+    Exchange (konsumen lain kolom yang sama) ikut siap begitu batch pertama `verified`.
 - **TikTok** (Rule 3–4): export TikTok **tidak membawa shop_id sama sekali** (fakta terverifikasi).
   Identitas divalidasi dari `ID Kreator` akun toko terhadap `client_platforms.akun_konten_toko`.
   Bila masih kosong: batch pertama boleh masuk berstatus `identitas_belum_terikat`, sistem
@@ -210,6 +260,11 @@ lewat · waktu diukur dan dicatat.
 kedua nilai · `linked_accounts` tidak lagi diketik di jalur PDT.
 
 ### G1-07 · Rekonsiliasi (PDT-16) — dan larangan mencampur basis
+- **Toleransi Rule 5 bulan-sama (sesi 2, §2.4 handoff).** Batch ditolak **hanya** bila
+  berkas-berkasnya berasal dari BULAN kalender berbeda, bukan lagi setiap kali rentang tanggalnya
+  sedikit berbeda (1–31 vs 1–28 Juli **diterima**, keduanya sama-sama Juli). `periode_mulai`/
+  `periode_selesai` batch = rentang **terluas** di antara berkas dalam batch itu. ⛔ Jangan
+  hardcode ambang 28 hari — rentang per modul dicatat di `pdt_parser_modul`, ditinjau setelah A-3.
 - Σ GMV per-SKU vs GMV shop-level **pada basis yang sama**; Σ pesanan per-SKU vs shop-level.
 - ≤ 0,5% ⇒ `verified`. > 0,5% ⇒ `ditolak` + `reconcile_delta_pct` tersimpan + UI menunjuk modul
   penyebab (modul ber-`parse_status != 'ok'` disebut lebih dulu).
@@ -281,6 +336,16 @@ Urutan kerja (Flow E):
 ⛔ **Purge menghapus OBJEK STORAGE saja.** Baris fakta, laporan, verdict, dan `pdt_file`
 **tidak pernah** ikut terhapus — purge storage bukan penghapusan data. Aturan rumah #3 utuh:
 `audit_log` tidak pernah disentuh.
+
+**Retensi TETAP 120 hari (P-08 tertutup, §2.4 sesi 2) — saran PRD "turunkan ke jendela platform"
+SENGAJA tidak dijalankan.** TikTok mundur 180 hari (> 120, aman); Shopee mundur 90 hari
+(**< 120** — 30 hari di mana paket ZIP kita satu-satunya salinan). Menurunkan retensi akan
+menghapus salinan itu tepat saat ia mulai jadi satu-satunya. Yang **ditambahkan** sebagai
+gantinya: status batch **`tidak_dapat_dipulihkan`**, ambang **per platform** (TikTok umur batch
+> 180 hari, Shopee > 90 hari, dihitung dari `periode_selesai`) — dipasangkan dengan
+`perlu_upload_ulang` (Rule 11 PRD, direvisi sesi 2). Batch di luar ambang platformnya ditandai
+`tidak_dapat_dipulihkan`, bukan `perlu_upload_ulang`: menyuruh AM "upload ulang" di luar jendela
+mundur platform adalah instruksi yang mustahil dijalankan.
 
 **DoD:** purge jalan di staging, `audit_logs` terisi · pagar 5% diuji dengan sengaja
 melampauinya (harus berhenti di nol objek) · selesai < 2 menit pada 500 klien × 12 bulan riwayat.
@@ -441,22 +506,25 @@ Keduanya hidup di sisi **MCN/MSDPS** (`bridge.px_creator_capability`,
 
 ## 6. Open Assumptions — status verifikasi
 
-Empat dari sebelas sudah terjawab dari kode. **Tiga di antaranya premisnya keliru.**
-Enam sisanya butuh manusia dan **tidak bisa** dijawab dari repo.
+Empat dari sebelas sudah terjawab dari kode (sesi 1). **Tiga di antaranya premisnya keliru.**
+**Update sesi 2 (ketokan Nerissa 2026-09-13):** lima lagi tertutup — P-01 (verifikasi kode),
+P-06/P-08/P-10/P-11 (ketokan pemilik, `HANDOFF_PDT_SESI1.md` §2–§2.4). **Sembilan dari sebelas**
+sekarang tertutup. Sisa dua: **P-04** (🟠 sebagian) dan **P-07** (🟡 terbuka, kapasitas partisi) —
+**tidak satu pun dari sebelas memblokir G1.**
 
 | # | Status | Temuan | Penjawab | Memblokir |
 |---|---|---|---|---|
-| **P-01** | 🟡 terbuka | dua `Shop Analytics_Key metrics` 11 vs 14 kolom, angka jauh beda (Rp 130.097 vs Rp 26.560.049) | Hans / AM | sisi rekonsiliasi TikTok (G1-07) |
+| **P-01** | ✅ **tertutup (sesi 2)** | Dua sample adalah **TikTok vs Tokopedia** (`shop_tt`/`shop_tp`, 35 baris sama, periode sama), bukan filter produk — `baseline/detect.ts:26-27`. `tt_orders` tetap kanonik | Claude (verifikasi kode) | selesai — G1-07 memakai `tt_orders`, bukan `tt_shop_analytics`, sebagai sisi rekonsiliasi TikTok |
 | **P-02** | 🔴 **premis salah** | `level2_category` **nol hasil** di `supabase/migrations/**`; ia hidup di MCN | Hans | **G5** |
 | **P-03** | 🔴 **premis salah** | enum `price_segment_t` **tidak ada di CDPS sama sekali** | Hans | **G5** |
 | **P-04** | 🟠 **sebagian** | `readSheet` memang dipakai bersama — tapi ada **4 registry tanda tangan terpisah** + **2 parser angka beda perilaku** (`n()`→0 vs `parseIndonesianNumber()`→NaN) | — | melebarkan **G1-02/G1-03** |
-| **P-05** | 🔴 **premis salah** | `optimization_tracker` = tracker A/B before-after, **mutable**, `product_code` jatuh balik ke **nama produk** ⇒ melanggar Rule 20. **Bukan** master SKU, **tidak dimigrasi** | — | tidak memblokir |
-| **P-06** | 🟡 terbuka | stabilitas `Kode Produk` Shopee antar periode | Hans / AM | `pdt_sku_master` pecah jadi baris ganda |
+| **P-05** | ✅ **tertutup (premis salah)** | `optimization_tracker` = tracker A/B before-after, **mutable**, `product_code` jatuh balik ke **nama produk** ⇒ melanggar Rule 20. **Bukan** master SKU, **tidak dimigrasi**; riwayat kuadran yang dikhawatirkan hilang **tidak pernah ada** di sana | Claude (verifikasi kode) | tidak memblokir |
+| **P-06** | ✅ **tertutup (F-9, sesi 2)** | Ketokan F-9 ("SKU tanpa Kode Produk tidak dimasukkan ke Product Exchange") membuat stabilitas `Kode Produk` **tidak lagi jadi prasyarat**: Rule 20 menang apa pun jawabannya — SKU dengan kunci tak stabil/hilang jadi baris yatim yang di-*resolve*, bukan alasan menunda `pdt_sku_master` | Nerissa (ketokan 2026-09-13) | tidak memblokir — stabilitas empirisnya tetap layak dipantau AM/Hans, di luar jalur kritis |
 | **P-07** | 🟡 terbuka | ≈9 juta baris/tahun di `pdt_fact_sku_period` | Hans | butuh partisi per tahun **sejak awal** |
-| **P-08** | 🟡 terbuka | jendela retensi Seller Center ≥ 120 hari? | Anty + Hans | **angka 120 hari PDT-26** |
+| **P-08** | ✅ **tertutup (§2.4, sesi 2)** | TikTok 180 hari mundur > retensi 120 hari (aman); **Shopee 90 hari < 120 hari** — 30 hari paket ZIP jadi satu-satunya salinan. Saran PRD ("turunkan retensi") **sengaja tidak dijalankan** — itu menghapus salinan tepat saat ia mulai jadi satu-satunya | Nerissa (ketokan 2026-09-13) | **retensi TETAP 120 hari**; G1-10 menambah status `tidak_dapat_dipulihkan` per platform (TikTok >180h, Shopee >90h) sebagai gantinya |
 | **P-09** | ✅ **terkonfirmasi** | nol bucket, nol `supabase/functions/`, `storage.objects` kosong ⇒ **purge tidak bisa pure SQL** | — | memindahkan **G1-10** ke Vercel Cron |
-| **P-10** | 🟡 terbuka | ~500 klien aktif (belum diverifikasi) | Anty | seluruh anggaran storage §6.8 |
-| **P-11** | 🟡 terbuka | AM sanggup "zip dulu, upload sekali" tanpa tool bantu? | **Nerissa** + Anty | kepatuhan PDT-25; bila tidak ⇒ butuh 1 halaman panduan + tombol "cek paket" |
+| **P-10** | ✅ **tertutup (150–300, sesi 2)** | Desain dikunci ke **batas atas 300 klien**: ≈5,4 jt baris/tahun `pdt_fact_sku_period`, ≈0,72 GB ZIP pasca-purge, ≈5,3 GB fakta | Anty (ketokan 2026-09-13) | §6.8 PRD masih terhitung di atas asumsi 500 klien — revisi angka itu dicatat sebagai gap terbuka, di luar cakupan sesi 2 |
+| **P-11** | ✅ **tertutup (SOP, sesi 2) — bersyarat** | Jawabannya bukan "AM pasti bisa tanpa bantuan": F-3/F-10 — adopsi rendah tool lama adalah **gejala** tool HTML lama yang tidak membantu, bukan bukti AM menolak berubah. Syarat: SOP tertulis **dan** tombol "cek paket" (sudah di desain G1-09) | Nerissa + Anty (ketokan F-3/F-10) | tiket SOP non-coding tetap di §7 butir 5 — **wajib selesai sebelum G1 merge** |
 
 ---
 
@@ -464,17 +532,24 @@ Enam sisanya butuh manusia dan **tidak bisa** dijawab dari repo.
 
 | # | Pekerjaan | Owner | Kenapa bukan Claude |
 |---|---|---|---|
-| 1 | **Daftar `kolom_dipanen` per modul (PDT-27)** | Hans + Anty | Ia gabungan **lima konsumen nyata**. Menebaknya = whitelist salah yang memegang data. **Wajib memuat field Product Exchange** (`SKU ID`/`Product ID`, `Seller SKU`, harga satuan, `Product category`, `gmv_dari_kreator`, `Sampel terkirim`, `ID Video`, `ID Kreator`, GMV basis **pesanan dibayar**) meski laporan klien tidak memakainya — menghapusnya karena "tidak ada di report" akan mematikan M3 |
-| 2 | Jawab P-01, P-06, P-07, P-08, P-10 | Hans + Anty | butuh fakta operasional & platform |
-| 3 | Jawab P-11 | **Nerissa** + Anty | keputusan perubahan kebiasaan AM |
-| 4 | Kumpulkan sample ≥ 2 klien lain per platform | Anty | ≥ 4 set sample supaya tanda tangan kolom tidak overfit ke 2 klien |
-| 5 | **SOP AM**: satu batch per toko per periode + arti mengisi Shop ID | **Nerissa** + Anty | 100% AM tersosialisasi **sebelum** G1 merge |
+| 1 | **Daftar `kolom_dipanen` per modul (PDT-27) — bucket 1+2 SELESAI sesi 2** (`docs/backlog/PDT_KOLOM_DIPANEN.md`), **bucket 3 belum** | Hans + Anty | Bucket 3 ("human call", 11 kolom tanpa konsumen ⇒ buang, ketokan Q-6) butuh rekomendasi asli — tidak tertulis di repo mana pun yang sesi 2 temukan. Menebaknya = whitelist salah yang memegang data. Field Product Exchange (`SKU ID`/`Product ID`, `Seller SKU`, harga satuan, `Product category`, `gmv_dari_kreator`, `Sampel terkirim`, `ID Video`, `ID Kreator`, GMV basis **pesanan dibayar**) sudah masuk bucket 1, ditandai `[PX]` |
+| 2 | Jawab P-07 | Hans | butuh fakta kapasitas operasional; **P-01/P-06/P-08/P-10 sudah tertutup sesi 2** (§6) |
+| ~~3~~ | ~~Jawab P-11~~ | — | **tertutup sesi 2** (§6) — bersyarat SOP + tombol "cek paket", lihat butir 5 di bawah |
+| 4 | Kumpulkan sample ≥ 2 klien lain per platform | Anty | ≥ 4 set sample supaya tanda tangan kolom tidak overfit ke 2 klien; juga menjawab A-3 (rentang per modul, §2.4 handoff) |
+| 5 | **SOP AM**: satu batch per toko per periode + arti mengisi Shop ID | **Nerissa** + Anty | 100% AM tersosialisasi **sebelum** G1 merge — prasyarat P-11 (§6) |
 | 6 | Matikan tulis di tool lama saat G1 merge | Hans | aturan strangler §8 |
-| 7 | Cek tarif per GB Supabase | Hans | §6.8 mengikat pada **ukuran**, bukan tarif — jangan kutip rupiah sebelum dicek |
+| 7 | Cek tarif per GB Supabase | Hans | §6.8 mengikat pada **ukuran**, bukan tarif — jangan kutip rupiah sebelum dicek; §6.8 juga masih terhitung di atas asumsi 500 klien, bukan 300 (P-10, §6) |
 
 ---
 
 ## 8. Aturan strangler yang tidak boleh dilanggar (PDT-17)
+
+> **Dibiarkan apa adanya (ketokan F-3/F-10, sesi 2).** Nerissa: *"Kita sedang mulai pakai CDPS,
+> bertahap; 12 bulan adaptasi 100%. Adopsi rendah justru KARENA tool HTML lama tidak membantu — AM
+> berulang kali mengisi kolom yang sama."* Adopsi rendah tool lama dengan demikian dibaca sebagai
+> **gejala yang PDT obati**, bukan bukti bahwa strangler-nya harus dilonggarkan atau jadwalnya
+> dipercepat/ditunda. Aturan di bawah **tidak direvisi** oleh ketokan ini — dicatat di sini supaya
+> jelas bahwa itu keputusan sadar, bukan terlewat dipertimbangkan.
 
 Sejak **G1 merge**: **nol batch baru** boleh masuk lewat tool lama. Tool lama hanya boleh
 **dibaca** (data historis), tidak ditulis.
