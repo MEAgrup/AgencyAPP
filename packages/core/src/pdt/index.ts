@@ -7,7 +7,8 @@
  * evaluasi Rule 41-42 (pembaca ZIP sungguhan ada di `apps/api`, bukan di sini),
  * `identitas.ts` untuk Rule 2-5 (preamble Shopee, `ID Kreator` TikTok, resolusi
  * periode batch), `rekonsiliasi.ts` untuk Rule 13-16 (gerbang 0,5%, larangan
- * campur basis).
+ * campur basis), `parsestatus.ts` untuk Rule 9-10 (kolom wajib + parse_status)
+ * dan Rule 12 (skor netral dihapus, renormalisasi bobot dimensi).
  */
 export * from './types';
 export * from './modules';
@@ -16,3 +17,4 @@ export * from './angka';
 export * from './zip-pagar';
 export * from './identitas';
 export * from './rekonsiliasi';
+export * from './parsestatus';
