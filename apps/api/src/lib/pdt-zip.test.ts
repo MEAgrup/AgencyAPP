@@ -28,7 +28,7 @@ function bangunZip(entries: { nama: string; isi: Buffer; compress?: boolean }[])
     const chunks: Buffer[] = [];
     zip.outputStream.on('data', (c: Buffer) => chunks.push(c));
     zip.outputStream.on('end', () => {
-      let buf = Buffer.concat(chunks);
+      const buf = Buffer.concat(chunks);
       for (const { placeholder, asli } of tukar) {
         const idx = buf.indexOf(placeholder);
         if (idx === -1) return reject(new Error(`placeholder ${placeholder.toString()} tidak ditemukan di buffer zip`));
