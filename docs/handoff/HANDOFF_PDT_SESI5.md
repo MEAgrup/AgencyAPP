@@ -1,48 +1,57 @@
 # HANDOFF — PDT (Pusat Data Toko) SESI 5 → SESI 6
 
-> **Dibuat 2026-09-13.** Baca berkas ini sebelum lanjut. Cabang kerja sesi ini:
+> **Dibuat 2026-09-13, diperbarui sesi yang sama setelah G1-04 selesai.** Baca
+> berkas ini sebelum lanjut. Cabang kerja sesi ini:
 > `claude/inspiring-lovelace-d9x7tl`.
 >
-> **Status: G1-03 SELESAI** (`parsePdtAngka`, `packages/core/src/pdt/angka.ts`
-> + 25 tes). Belum di-PR/merge saat berkas ini ditulis — lihat §1. Sesi 6
-> lanjut ke **G1-04** (bucket `pdt-raw` + pagar paket ZIP) — lihat §3.
+> **Status: G1-03 SELESAI dan G1-04 SELESAI**, keduanya dalam SATU sesi (PR
+> #359 — awalnya dibuka untuk G1-03, diperluas dengan komit G1-04 di branch
+> yang sama, bukan dua PR terpisah; lihat §0). Sesi 6 lanjut ke **G1-05**
+> (parse **di server**, DI SINI-lah `bacaDanEkstrakPdtZip` dan
+> `parsePdtAngka` yang sesi ini bangun BENAR-BENAR dipakai membaca upload
+> nyata) — lihat §4.
 
 ---
 
 ## 0. Ringkasan 60 detik
 
-Instruksi sesi ini: "baca handoff sesi 4 dan lanjutkan". Handoff SESI4
-merekomendasikan mulai **G1-03 — normalisasi angka terpusat (pilih NaN, bukan
-0)** (`docs/backlog/PDT_BACKLOG.md` §1). Sesi ini menulis satu fungsi baru,
-`parsePdtAngka` (`packages/core/src/pdt/angka.ts`), diekspor lewat
-`packages/core/src/pdt/index.ts`, dengan 25 tes
-(`packages/core/src/pdt/angka.test.ts`). **Nol migrasi, nol perubahan gerbang
-CI** — G1-03 murni fungsi TS baru, tidak menyentuh DB.
+Instruksi sesi ini: "baca handoff sesi 4 dan lanjutkan" → G1-03 selesai (lihat
+§2) → user minta "lanjut g1-04" di percakapan yang sama → G1-04 juga selesai
+(§3), semuanya di satu sesi/branch berkelanjutan.
 
-Keputusan desain intinya (dicatat penuh di `docs/DECISIONS.md`, baris paling
-atas): fungsi ini membedakan **TIGA** keadaan, bukan dua — sel kosong ⇒ `0`,
-nilai ada-tapi-tak-terbaca ⇒ `NaN`, kolom tak ada sama sekali ⇒ di luar
-cakupan fungsi ini (ditangani G1-08). Lihat §2 untuk detail.
+**Cek sebelum sesi 6 mulai:** PR #359 statusnya saat berkas ini ditulis
+**open, belum di-merge** (title masih menyebut "G1-03" saja — perlu
+diperbarui menyebut G1-04 juga, atau dipecah kalau reviewer minta). Kalau
+sesi 6 mulai dan PR #359 SUDAH di-merge: lanjut normal dari `main`. Kalau
+BELUM: cek CI-nya dulu (kemungkinan flake `gelombang-c-showcase.e2e.test.ts`
+yang sama seperti PR #356/#357, root-cause `HANDOFF_PDT_SESI2.md` §4 — bukan
+punya G1-03/G1-04).
+
+**G1-03** — `parsePdtAngka` (`packages/core/src/pdt/angka.ts`): normalisasi
+angka terpusat PDT, tiga keadaan (sel kosong ⇒ 0, tak-terbaca ⇒ NaN, kolom
+tak ada ⇒ di luar cakupan). Nol migrasi, nol pemanggil (menunggu G1-05).
+
+**G1-04** — bucket `pdt-raw` + pagar ZIP (Rule 41-42) + pembaca sungguhan +
+signed URL. **Dua temuan teknis penting** ditemukan lewat percobaan nyata
+(bukan dari dokumentasi) — dicatat penuh di `docs/DECISIONS.md`, ringkasannya
+di §3.2 di bawah supaya sesi 6 tidak mengulang biaya penemuannya. **Satu gap
+jujur:** signed URL BELUM diuji terhadap Storage live (nol
+`SUPABASE_SERVICE_ROLE_KEY` di sandbox sesi ini) — lihat §3.4.
 
 ---
 
-## 1. Yang perlu ditindaklanjuti sesi ini (sebelum atau sambil mulai G1-04)
+## 1. Yang perlu ditindaklanjuti sesi ini (sebelum atau sambil mulai G1-05)
 
-Sesi ini **belum membuat PR**. Sebelum lanjut G1-04, sesi 6 (atau sesi ini
-sendiri bila masih berjalan) perlu:
-
-1. Commit perubahan §2 di bawah (belum di-commit saat berkas ini ditulis —
-   cek `git status`).
-2. Push ke `claude/inspiring-lovelace-d9x7tl`, buka PR (pola PR kecil per
-   tiket — `#356` G1-01, `#357` G1-02 — CLAUDE.md "Small PRs per Rule/Flow
-   cluster").
-3. Kalau CI `db-and-migrations` merah lagi dengan error `gelombang-c-showcase.e2e.test.ts`
-   / fixture `client_platforms` collision: itu bug pra-ada yang SAMA seperti
-   PR #356/#357 (root-cause sudah dicatat `HANDOFF_PDT_SESI2.md` §4). G1-03
-   nol sentuh migrasi/DB, jadi kemunculannya di sini murni flakiness urutan
-   test suite yang sudah ada, bukan sesuatu yang G1-03 sebabkan — standing-down
-   + satu re-run sesuai aturan CI-merah, JANGAN diperbaiki di PR ini (di luar
-   cakupan).
+1. Cek status PR #359 (lihat §0). Kalau CI merah dengan
+   `gelombang-c-showcase.e2e.test.ts` / fixture `client_platforms` collision:
+   bug pra-ada yang sama, standing-down + satu re-run, JANGAN diperbaiki di
+   PR ini.
+2. **Jalankan tes `describeLive` di `apps/api/src/lib/pdt-storage.test.ts`**
+   di lingkungan yang punya `SUPABASE_SERVICE_ROLE_KEY` +
+   `NEXT_PUBLIC_SUPABASE_URL` sungguhan (project `CDPS SG`,
+   `egddxfcnrtecheiykhlf`) — sandbox sesi G1-04 TIDAK punya kredensial itu,
+   jadi tes itu di-skip, bukan lolos. Ini satu-satunya bagian DoD G1-04 yang
+   belum diverifikasi nyata ("signed URL kedaluwarsa benar-benar menolak").
 
 ---
 
@@ -50,105 +59,141 @@ sendiri bila masih berjalan) perlu:
 
 | Berkas | Isi |
 |---|---|
-| `packages/core/src/pdt/angka.ts` | `parsePdtAngka(v, raw?)` — normalisasi angka terpusat PDT |
-| `packages/core/src/pdt/angka.test.ts` | 25 tes — blank→0, tak-terbaca→NaN, dua konvensi locale, persen, negatif berkurung, passthrough |
+| `packages/core/src/pdt/angka.ts` | `parsePdtAngka(v, raw?)` |
+| `packages/core/src/pdt/angka.test.ts` | 25 tes |
 | `packages/core/src/pdt/index.ts` | tambah `export * from './angka'` |
-| `docs/DECISIONS.md` | 1 baris baru (2026-09-13, PDT G1-03, di ATAS baris G1-02) |
 
-### 2.1 Kontrak `parsePdtAngka(v: unknown, raw?: boolean): number`
+Kontrak: sel kosong (`null`/`undefined`/`''`) ⇒ `0`; nilai ada tapi tak
+terbaca (`'-'`, `'N/A'`, teks acak, `NaN`/`Infinity`) ⇒ `NaN`; kolom tak ada
+sama sekali ⇒ di luar cakupan (G1-08). `raw` sama semantik `n(v,raw)`
+housewide. Rp-prefix, persen (÷100), negatif berkurung diikutkan — semua
+terverifikasi perlu di data Shopee/TikTok nyata. **Berdiri sendiri** — tidak
+memanggil/mengubah `n()`/`parseIndonesianNumber()` (backlog melarang
+mengubah `n()`). **Belum ada pemanggil** — menunggu G1-05.
 
-Tiga keadaan (bukan dua — lihat `docs/DECISIONS.md` untuk penalaran penuh +
-alternatif yang ditolak):
-
-| Keadaan | Contoh | Hasil |
-|---|---|---|
-| Sel kosong | `null`, `undefined`, `''`, `'   '` | `0` |
-| Nilai ada tapi tak terbaca | `'-'`, `'—'`, `'N/A'`, `'tidak terbatas'`, teks acak, `NaN`/`Infinity` sebagai input | `NaN` |
-| Kolom tak ada sama sekali | — (bukan urusan fungsi SEL ini) | di luar cakupan — G1-08 |
-
-`raw` mengikuti nama/semantik `n(v, raw)` yang sudah ada housewide: falsy/omit
-= Seller Center (titik = ribuan, koma = desimal, format `1.234,56`); `raw=true`
-= Ads Manager (titik = desimal, koma = ribuan). Plus: prefiks `Rp` dibuang,
-akhiran `%` dibagi 100 (fraksi, bukan 0–100), negatif berkurung `"(1.234)"` →
-`-1234` (refund Shopee).
-
-**Fungsi ini BERDIRI SENDIRI** — tidak memanggil `n()` atau
-`parseIndonesianNumber()`, dan sebaliknya. `n()`/`parseIndonesianNumber()`
-TIDAK disentuh (backlog G1-03 eksplisit melarang mengubah `n()`; keduanya
-tetap dipakai jalur non-PDT yang sudah berjalan).
-
-### 2.2 Verifikasi
-
-- `packages/core`: **1040/1040** lolos (1015 sebelumnya + 25 tes
-  `pdt/angka.test.ts` baru).
-- `npm run typecheck` bersih di `@cdps/core`, `@cdps/domain`, `@cdps/db`.
-- `packages/domain`: 482 lolos (2021 skip — butuh `DATABASE_URL`, sama pola
-  seperti sesi sebelumnya), nol regresi dari `packages/core/src/pdt/index.ts`.
-- **Belum ada pemanggil** — fungsi ini menunggu G1-05 (parse di server) untuk
-  betulan dipakai membaca sel. Sesi ini murni menyediakan fungsi + kontrak +
-  tes, sesuai urutan G1-03 → G1-04 → G1-05 di backlog (§0 build order:
-  **jangan lompat**).
-
-### 2.3 Yang SENGAJA tidak dilakukan sesi ini
-
-- **Tidak menyatukan `n()`/`toNum()`/`pn()`/`parseIndonesianNumber()` ke
-  `parsePdtAngka`** — backlog G1-03 hanya minta jalur PDT (modul baru) pakai
-  NaN; ia eksplisit TIDAK meminta migrasi pemakai lama (`baseline`, `report`,
-  `report/shopee`, `adsscanner/tiktok`, `skuscreener`) ke fungsi baru, karena
-  itu akan menggeser angka skor yang sudah berjalan tanpa data nyata baru untuk
-  memverifikasinya ulang. Kalau owner/pemilik memutuskan sebaliknya, itu
-  keputusan baru yang butuh entri `docs/DECISIONS.md` sendiri.
-- **Tidak menambahkan `sumOpt`/agregasi apa pun yang tahu cara memperlakukan
-  `NaN`** — itu tanggung jawab G1-05+ (parser sungguhan) dan/atau G1-08
-  (kegagalan parse tidak ditelan), bukan fungsi normalisasi sel ini.
+Rasional lengkap + alternatif ditolak: `docs/DECISIONS.md` 2026-09-13 baris
+G1-03.
 
 ---
 
-## 3. Rekomendasi sesi 6 — mulai G1-04
+## 3. G1-04 — SELESAI
 
-`docs/backlog/PDT_BACKLOG.md` §1 G1-04: **"Bucket `pdt-raw` + pagar paket
-ZIP — infrastruktur pertama di repo ini."**
+### 3.1 Berkas
 
-Poin kunci sebelum mulai:
+| Berkas | Isi |
+|---|---|
+| `packages/core/src/pdt/zip-pagar.ts` | `evaluatePdtZipPagar` — Rule 41-42, MURNI (nol I/O) |
+| `packages/core/src/pdt/zip-pagar.test.ts` | 32 tes (metadata sintetis) |
+| `packages/core/src/pdt/index.ts` | tambah `export * from './zip-pagar'` |
+| `apps/api/src/lib/pdt-zip.ts` | `bacaDanEkstrakPdtZip`/`bersihkanDirektoriSementaraPdt` — pembaca ZIP sungguhan (`yauzl`) |
+| `apps/api/src/lib/pdt-zip.test.ts` | 8 tes fixture ZIP sungguhan (`yazl`) |
+| `apps/api/src/lib/pdt-storage.ts` | `buatPdtRawSignedUrl` — Storage REST langsung, klem ≤15 menit |
+| `apps/api/src/lib/pdt-storage.test.ts` | 6 tes unit (fetch disuntik) + 1 tes `describeLive` (skip di sandbox) |
+| `apps/api/package.json` | + `yauzl` (runtime), `yazl`/`@types/yauzl`/`@types/yazl` (dev) |
+| `supabase/migrations/20261013010000_g1_04_pdt_raw_bucket.sql` | bucket `pdt-raw` + policy `storage.objects` |
+| `supabase/tests/rls_checks.sql` | §47 baru — RLS bucket `pdt-raw` |
+| `docs/DECISIONS.md` | 1 baris baru (di ATAS baris G1-03) |
+| `docs/DATA_MODEL.md` | 1 baris baru setelah "Batch upload PDT" |
 
-1. **P-09 sudah terkonfirmasi** (`docs/DECISIONS.md` 2026-09-12): nol bucket,
-   nol `supabase/functions/`, nol `createSignedUrl` di seluruh repo hari ini
-   — ini betul-betul infrastruktur pertama, tidak ada pola existing untuk
-   dicontek secara langsung di repo ini sendiri (beda dari G1-01/02/03 yang
-   semuanya punya preseden kuat).
-2. Bucket **privat**, path
-   `{client_id}/{client_platform_id}/{periode_selesai}/{batch_id}.zip`. Akses
-   HANYA lewat signed URL **≤ 15 menit**.
-3. **Pagar sebelum satu entri pun dibaca** (Rule 42): ≤ 50 MB · ≤ 40 entri ·
-   rasio dekompresi ≤ 100:1. **Entri ditolak** (Rule 41): ZIP bersarang, entri
-   terenkripsi/berkata sandi, ekstensi di luar `.xlsx`/`.xls`/`.csv`, zip-slip
-   (path keluar akar arsip). **Entri dilewati tanpa peringatan:** `__MACOSX/`,
-   `.DS_Store`, `._*` (sample nyata membawanya, itu normal untuk zip macOS).
-4. Ekstraksi **streaming ke disk sementara**, bukan seluruhnya ke memori.
-   `sha256` dihitung untuk paket DAN tiap entri (sidik jari entri sama pada
-   `client_platform_id` berbeda ⇒ peringatan keras).
-5. Job purge harian (G1-10) menyusul terpisah — jangan gabung ke G1-04.
-   `docs/DECISIONS.md` 2026-09-12 P-09 sudah menetapkan job purge lewat
-   **Vercel Cron + `tickSecretOk`** (pola 3-tick yang sudah jalan
-   `apps/api/vercel.json`), **BUKAN** `pg_cron` — pagar storage butuh
-   panggilan API, bukan cuma baris DB.
+Diterapkan ke live `CDPS SG` (`egddxfcnrtecheiykhlf`) via `apply_migration`.
+Diverifikasi: bucket + policy ada (`execute_sql`), `get_advisors` security
+**nol temuan baru**.
 
-**DoD G1-04:** bucket ada di staging · pagar diuji dengan zip bomb sintetis +
-zip-slip + ZIP bersarang · signed URL kedaluwarsa benar-benar menolak.
+### 3.2 Dua temuan teknis — BACA sebelum menyentuh `pdt-zip.ts` atau migrasi storage lain
 
-**Jangan lompat ke G1-05/06/…** sebelum G1-04 lulus DoD-nya — build order
-eksplisit `PDT_BACKLOG.md` §0.
+1. **yauzl `decodeStrings:true` (default) melempar error untuk SELURUH
+   pembacaan ZIP** (bukan per-entri) begitu satu entri bernama zip-slip
+   (`../`, path absolut) ditemukan — `validateFileName()` bawaannya sendiri
+   yang melempar. Itu akan menjadikan zip-slip kegagalan PAKET, padahal
+   Rule 41 memperlakukannya sebagai kegagalan ENTRI (paket lain tetap
+   diproses). **Solusi:** `decodeStrings:false` + dekode manual pakai
+   `yauzl.getFileNameLowLevel(entry.generalPurposeBitFlag, entry.fileNameRaw, entry.extraFields, false)`
+   (primitif yauzl sendiri, TANPA validasinya). Keputusan zip-slip 100% di
+   `evaluatePdtZipPagar`, bukan terpecah dengan yauzl.
+2. **`CREATE TABLE/SCHEMA IF NOT EXISTS` di Postgres TETAP memeriksa
+   privilese CREATE pada skema target SEBELUM mengecek keberadaan objek.**
+   Migrasi yang menstub `storage.*` untuk `scripts/db-rebuild.sh` (Postgres
+   baru, skema `storage` platform Supabase tidak ada di sana) gagal
+   `permission denied for schema storage` di LIVE walau objeknya sudah ada
+   dan seharusnya di-skip — peran migrasi bukan pemilik skema `storage` di
+   live. **Solusi:** cek keberadaan SENDIRI (`pg_namespace`/`pg_class`/
+   `pg_proc`) di dalam blok `DO`, `EXECUTE` DDL hanya bila benar-benar belum
+   ada. Kalau menulis migrasi storage LAIN di masa depan: pakai pola yang
+   sama persis (lihat `20261013010000_g1_04_pdt_raw_bucket.sql`), jangan
+   `IF NOT EXISTS` polos.
+
+### 3.3 Kontrak pagar (Rule 41-42)
+
+`evaluatePdtZipPagar({ukuranPaketBytes, entries})` → gerbang PAKET (Rule 42)
+diperiksa lebih dulu: >50MB, >40 entri (MENTAH, termasuk junk macOS — metrik
+termurah sebelum tahu mana yang junk), rasio dekompresi total >100:1 ⇒
+`{ok:false, alasanTolakPaket, entri:[]}` (entri SENGAJA tidak diklasifikasi).
+Kalau lolos, tiap entri diklasifikasi (Rule 41): `dilewati` (macOS junk,
+silent) / `ditolak` (zip bersarang/terenkripsi/ekstensi tak didukung/zip-slip
+— TIDAK menggagalkan paket) / `diproses`.
+
+`bacaDanEkstrakPdtZip(buffer)` — dua lewatan atas satu `ZipFile`: lewatan 1
+kumpulkan metadata (nol dekompresi), panggil pagar; lewatan 2 ekstrak
+STREAMING (Transform pass-through hash) ke direktori sementara HANYA entri
+`diproses`. `validateEntrySizes:true` (default yauzl) = lapis kedua terhadap
+metadata bohong — mismatch ditangkap per-entri ke `gagalEkstrak`, tidak
+menjatuhkan batch.
+
+### 3.4 Yang BELUM diverifikasi (gap jujur, bukan diklaim selesai)
+
+- **Signed URL vs live Storage** — `buatPdtRawSignedUrl` benar secara bentuk
+  request (6 tes unit lolos), tapi DoD "kedaluwarsa benar-benar menolak"
+  BELUM dijalankan terhadap Storage sungguhan (nol
+  `SUPABASE_SERVICE_ROLE_KEY` di sandbox). Tes `describeLive` di
+  `pdt-storage.test.ts` sudah ditulis lengkap (upload objek kecil, sign
+  `expiresIn=1`, tunggu 2 detik, assert ditolak, cleanup) — tinggal
+  dijalankan di lingkungan yang punya kredensialnya.
+- **Belum ada pemanggil** untuk `bacaDanEkstrakPdtZip`/`buatPdtRawSignedUrl`
+  dari route manapun — G1-04 menyediakan alat, G1-05/09 yang memasangnya ke
+  endpoint upload sungguhan.
 
 ---
 
-## 4. Rujukan
+## 4. Rekomendasi sesi 6 — mulai G1-05
 
-- `docs/prd/CDPS_PDT_Pusat_Data_Toko.md` (v1.2) — PRD, §6.7 (normalisasi
-  angka), §6.8 (anggaran storage, relevan G1-04).
-- `docs/backlog/PDT_BACKLOG.md` — G1-03 (sesi ini) → G1-04 (sesi berikutnya).
-- `docs/DECISIONS.md` — baris teratas (2026-09-13, PDT G1-03).
-- `packages/core/src/pdt/angka.ts` + `angka.test.ts`.
-- `packages/core/src/baseline/angka.ts` (`n()`, TIDAK disentuh),
-  `packages/core/src/skuscreener/parse.ts` (`parseIndonesianNumber()`, TIDAK
-  disentuh) — dua preseden yang jadi dasar desain, dikutip penuh di
-  docblock `angka.ts` dan `docs/DECISIONS.md`.
+`docs/backlog/PDT_BACKLOG.md` §1 G1-05: **"Parse di server — pemindahan
+arsitektur yang sesungguhnya."**
+
+1. `XLSX.read` hari ini jalan **di browser**
+   (`web-internal/src/lib/{riset-awal,report,skuscreener,adsscanner}.ts`);
+   PRD §6.7 minta parse di server. Seluruh engine `packages/core` SUDAH
+   murni/DOM-free/menerima AoA — yang pindah HANYA dekode berkasnya.
+2. `xlsx@0.18.5` hari ini dependensi **`web-internal` saja** — perlu masuk
+   `apps/api`. ⚠️ Lisensi SheetJS pernah jadi ketidakpastian terbuka
+   (`RISET_AWAL_BASELINE_BACKLOG.md` §0) — **pastikan terjawab dulu**
+   sebelum menambah dependensi.
+3. Di sinilah `bacaDanEkstrakPdtZip` (G1-04) dan `parsePdtAngka` (G1-03)
+   BENAR-BENAR dipakai: entri yang diekstrak G1-04 (path di
+   `pathSementara`) dibaca `XLSX.read` di server, dikonversi ke AoA, lalu
+   `detectPdtModule` (G1-02) mencocokkan modul, `parsePdtAngka` (G1-03)
+   menormalkan selnya.
+4. Target < 45 detik batch 13 berkas (~1.500 baris SKU + ~2.000 baris
+   konten). Bila lebih: job asinkron + status polling — BUKAN mengurangi
+   kedalaman parse.
+5. Setelah G1-05: G1-06 (identitas toko dari berkas) → G1-07 (rekonsiliasi)
+   → G1-08 (kegagalan parse tidak ditelan) → G1-09 (halaman upload +
+   dropdown override manual, termasuk 3 modul unverified G1-02 §2.3).
+
+**Jangan lompat ke G1-09** sebelum G1-05..08 — build order eksplisit
+`PDT_BACKLOG.md` §0.
+
+---
+
+## 5. Rujukan
+
+- `docs/prd/CDPS_PDT_Pusat_Data_Toko.md` — §6.7 (angka), Rule 38-44 (ZIP),
+  §7 (modul).
+- `docs/backlog/PDT_BACKLOG.md` — G1-04 (sesi ini) → G1-05 (sesi berikutnya).
+- `docs/DECISIONS.md` — dua baris teratas (2026-09-13, PDT G1-04 lalu G1-03).
+- `docs/DATA_MODEL.md` — baris "Bucket storage `pdt-raw` PDT" baru.
+- `packages/core/src/pdt/angka.ts`, `zip-pagar.ts` + tes.
+- `apps/api/src/lib/pdt-zip.ts`, `pdt-storage.ts` + tes.
+- `supabase/migrations/20261013010000_g1_04_pdt_raw_bucket.sql`.
+- `supabase/tests/rls_checks.sql` §47.
+- Live: `CDPS SG` (`egddxfcnrtecheiykhlf`) — bucket `pdt-raw` + policy
+  `pdt_raw_objects_select` sudah live, `get_advisors` nol temuan baru.

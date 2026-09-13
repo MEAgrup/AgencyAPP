@@ -1563,6 +1563,58 @@ END $$;
 
 RESET ROLE;
 
+-- ---------------------------------------------------------------------------
+-- 47. PDT G1-04 — RLS `storage.objects` bucket `pdt-raw` (migrasi
+--     20261013010000). Ownership dari segmen path PERTAMA (client_id) lewat
+--     `(storage.foldername(name))[1]` + `jwt_owns_client_am` yang SUDAH ADA
+--     (bukan helper baru) — cermin persis `pdt_upload_batch_sel` §46. Fixture
+--     memakai klien + batch ZPDT-RLS-0001 yang sudah diinsert di §46 di atas.
+--     Baris `storage.objects` di sini murni METADATA (nol byte sungguhan
+--     diunggah) — cukup untuk menguji predikat policy, bukan isi bucket.
+-- ---------------------------------------------------------------------------
+INSERT INTO storage.objects (bucket_id, name)
+SELECT 'pdt-raw', b.client_id || '/' || b.client_platform_id || '/' || b.periode_selesai || '/' || b.id || '.zip'
+  FROM pdt_upload_batch b WHERE b.client_id = 'ZPDT-RLS-0001';
+
+SET LOCAL ROLE authenticated;
+
+-- AM pemilik toko (EMP-0002) melihat objek kliennya.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-0002","division":"Account","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM storage.objects WHERE bucket_id = 'pdt-raw' AND name LIKE 'ZPDT-RLS-0001/%') <> 1
+  THEN RAISE EXCEPTION 'storage.objects pdt-raw: AM pemilik klien harus melihat objek kliennya'; END IF;
+END $$;
+
+-- Staf divisi LAIN, bukan pemilik, TIDAK melihat.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-0004","division":"Ads","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM storage.objects WHERE bucket_id = 'pdt-raw' AND name LIKE 'ZPDT-RLS-0001/%') <> 0
+  THEN RAISE EXCEPTION 'storage.objects pdt-raw: staf divisi lain yang bukan pemilik tidak boleh melihat'; END IF;
+END $$;
+
+-- Lead Account (bukan pemilik baris) tetap melihat — divisi-wide.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-RLS-ACCLEAD","division":"Account","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM storage.objects WHERE bucket_id = 'pdt-raw' AND name LIKE 'ZPDT-RLS-0001/%') <> 1
+  THEN RAISE EXCEPTION 'storage.objects pdt-raw: lead Account harus melihat objek divisinya'; END IF;
+END $$;
+
+-- Director membaca lintas-divisi.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-0008","director":true}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM storage.objects WHERE bucket_id = 'pdt-raw' AND name LIKE 'ZPDT-RLS-0001/%') <> 1
+  THEN RAISE EXCEPTION 'storage.objects pdt-raw: Director harus membaca lintas-divisi'; END IF;
+END $$;
+
+-- Klaim kosong ⇒ default deny.
+SELECT set_config('request.jwt.claims', '{}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM storage.objects WHERE bucket_id = 'pdt-raw' AND name LIKE 'ZPDT-RLS-0001/%') <> 0
+  THEN RAISE EXCEPTION 'storage.objects pdt-raw: klaim kosong harus melihat nol baris'; END IF;
+END $$;
+
+RESET ROLE;
+
 ROLLBACK;
 
 \echo 'rls_checks: PASS'
