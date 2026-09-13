@@ -1,6 +1,7 @@
 /**
- * PDT (Pusat Data Toko) — signed URL untuk bucket privat `pdt-raw` (G1-04,
- * PRD Rule 44: "akses hanya lewat signed URL berumur ≤ 15 menit").
+ * PDT (Pusat Data Toko) — akses ke bucket privat `pdt-raw` (G1-04 unduh, Rule
+ * 44: "akses hanya lewat signed URL berumur ≤ 15 menit"; G1-09-BODY-BESAR
+ * unggah + unduh-server-ke-server, `docs/DECISIONS.md` 2026-09-13).
  *
  * Framework-free (pola sama `gotrue.ts`): hanya Web `fetch`/`Response`,
  * `fetchImpl` bisa disuntik supaya diuji tanpa jaringan nyata. Memanggil
@@ -9,9 +10,13 @@
  * pun bicara Postgres murni lewat `postgres`, bukan client Supabase).
  *
  * Service-role key TIDAK PERNAH sampai ke browser — fungsi ini hanya dipanggil
- * dari route handler server (mis. AM mengklik "unduh paket asli" pada batch
- * yang boleh ia baca; pengecekan `canReadBatch`-nya di lapisan pemanggil,
- * BUKAN di sini — fungsi ini murni pembungkus REST, nol keputusan otorisasi).
+ * dari route handler server. `buatPdtRawSignedUrl` (unduh) dipanggil mis. saat
+ * AM mengklik "unduh paket asli"; `buatPdtRawSignedUploadUrl` (unggah) dan
+ * `unduhPdtRawObjek` (unduh server-ke-server) dipanggil dari route
+ * preview/commit — lihat catatan G1-09-BODY-BESAR di kepala masing-masing
+ * fungsi. Pengecekan `canUploadBatch`/`canReadBatch` ada di lapisan pemanggil
+ * (`packages/domain`), BUKAN di sini — berkas ini murni pembungkus REST, nol
+ * keputusan otorisasi.
  */
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -62,4 +67,66 @@ export async function buatPdtRawSignedUrl(
     throw new Error(`gagal membuat signed URL pdt-raw/${path}: ${res.status} ${body.message ?? ''}`.trim());
   }
   return `${url}/storage/v1${body.signedURL}`;
+}
+
+interface UploadSignResponse {
+  url?: string;
+  message?: string;
+}
+
+/**
+ * Buat signed URL UNGGAH untuk satu objek di bucket `pdt-raw` — pasangan
+ * `buatPdtRawSignedUrl` (yang untuk UNDUH). Penutup `G1-09-BODY-BESAR`
+ * (`docs/DECISIONS.md` 2026-09-13): browser meng-unggah ZIP LANGSUNG ke
+ * Storage lewat URL ini — ZIP TIDAK PERNAH lewat badan request route Next.js
+ * (limit keras platform 4,5 MB, jauh di bawah Rule 42 ≤ 50 MB).
+ *
+ * BEDA dari signed URL unduh: endpoint Storage untuk upload-sign
+ * (`/object/upload/sign/...`) TIDAK menerima parameter `expiresIn` di badan
+ * request seperti `/object/sign/...` (Rule 44) — durasi token unggah
+ * ditentukan Storage sendiri, bukan pemanggil. Bentuk request/response ini
+ * BELUM diverifikasi ke Storage REST sungguhan (lihat `describeLive` di
+ * bawah — di-skip tanpa `SUPABASE_SERVICE_ROLE_KEY`, pola sama G1-04).
+ */
+export async function buatPdtRawSignedUploadUrl(path: string, fetchImpl?: FetchLike): Promise<string> {
+  const { url, serviceRoleKey } = config();
+  const doFetch = fetchImpl ?? fetch;
+
+  const res = await doFetch(`${url}/storage/v1/object/upload/sign/pdt-raw/${path.split('/').map(encodeURIComponent).join('/')}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+    },
+    body: JSON.stringify({}),
+  });
+
+  const body = (await res.json().catch(() => ({}))) as UploadSignResponse;
+  if (!res.ok || !body.url) {
+    throw new Error(`gagal membuat signed upload URL pdt-raw/${path}: ${res.status} ${body.message ?? ''}`.trim());
+  }
+  return `${url}/storage/v1${body.url}`;
+}
+
+/**
+ * Unduh isi objek dari bucket `pdt-raw` LANGSUNG dengan service-role key
+ * (server-ke-server, nol token sementara — beda dari `buatPdtRawSignedUrl`
+ * yang untuk browser). Dipakai route preview/commit untuk membaca ZIP yang
+ * sudah diunggah AM lewat `buatPdtRawSignedUploadUrl`. Panggilan fetch INI
+ * adalah OUTBOUND dari function serverless (bukan badan request MASUK) —
+ * tidak tersentuh limit 4,5 MB Vercel yang memicu `G1-09-BODY-BESAR`.
+ */
+export async function unduhPdtRawObjek(path: string, fetchImpl?: FetchLike): Promise<Buffer> {
+  const { url, serviceRoleKey } = config();
+  const doFetch = fetchImpl ?? fetch;
+
+  const res = await doFetch(`${url}/storage/v1/object/pdt-raw/${path.split('/').map(encodeURIComponent).join('/')}`, {
+    method: 'GET',
+    headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+  });
+  if (!res.ok) {
+    throw new Error(`gagal mengunduh pdt-raw/${path}: ${res.status}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
 }

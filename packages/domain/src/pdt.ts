@@ -11,6 +11,7 @@
  * Predikat-predikat ini BERDIRI SENDIRI — tidak menumpang predikat modul
  * lain — konsisten dengan ketokan PX-M2a (`docs/DECISIONS.md` 2026-09-12).
  */
+import { randomUUID } from 'node:crypto';
 import { pdt, permission } from '@cdps/core';
 import type { Sql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
@@ -288,6 +289,18 @@ interface ClientPlatformRow {
   assigned_am_id: string | null;
 }
 
+/** Dipakai bersama oleh `previewUploadBatch`/`siapkanUploadBatch` — satu-satunya lookup+gerbang izin baris `client_platforms`. */
+async function loadClientPlatformUntukPdt(sql: Sql, clientPlatformId: number): Promise<ClientPlatformRow> {
+  const rows = await sql<ClientPlatformRow[]>`
+    select cp.id, cp.client_id, cp.platform, cp.shop_id, cp.akun_konten_toko, c.assigned_am_id
+      from client_platforms cp
+      join clients c on c.id = cp.client_id
+     where cp.id = ${clientPlatformId}`;
+  const row = rows[0];
+  if (!row) throw new NotFoundError();
+  return row;
+}
+
 /**
  * previewUploadBatch — Flow A langkah 2-5 SEBELUM disimpan: nol tulis DB, nol
  * upload storage (lihat catatan di kepala §G1-09 di atas untuk batas
@@ -302,13 +315,7 @@ export async function previewUploadBatch(
   clientPlatformId: number,
   berkas: readonly PdtPreviewBerkasInput[],
 ): Promise<PdtPreviewBatchHasil> {
-  const rows = await sql<ClientPlatformRow[]>`
-    select cp.id, cp.client_id, cp.platform, cp.shop_id, cp.akun_konten_toko, c.assigned_am_id
-      from client_platforms cp
-      join clients c on c.id = cp.client_id
-     where cp.id = ${clientPlatformId}`;
-  const row = rows[0];
-  if (!row) throw new NotFoundError();
+  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
 
   if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
 
@@ -335,4 +342,53 @@ export async function previewUploadBatch(
     periode: resolvePeriodePreview(platform, terparse),
     moduleOptions,
   };
+}
+
+// ===========================================================================
+// G1-09 — siapkan unggah (penutup `G1-09-BODY-BESAR`, `docs/DECISIONS.md`
+// 2026-09-13). ZIP TIDAK PERNAH lewat badan request route Next.js — limit
+// keras platform deploy (Vercel Serverless Functions) untuk badan request
+// adalah 4,5 MB, jauh di bawah Rule 42 (paket ZIP boleh sampai 50 MB).
+// Browser mengunggah LANGSUNG ke bucket privat `pdt-raw` lewat signed upload
+// URL (route pemanggil yang meminta URL-nya ke Storage — lihat
+// `apps/api/src/lib/pdt-storage.ts` `buatPdtRawSignedUploadUrl`); fungsi di
+// sini HANYA menegakkan gerbang izin (sama seperti `previewUploadBatch`) dan
+// menentukan PATH staging-nya — nol panggilan Storage/fetch (paket ini tidak
+// boleh bergantung pada jaringan, arah dependensi sama seperti larangan
+// fs/yauzl di kepala berkas).
+//
+// Path staging BUKAN path final Rule 44
+// (`{client_id}/{client_platform_id}/{periode_selesai}/{batch_id}.zip`) —
+// `periode_selesai`/`batch_id` belum diketahui sebelum paket diparse (batch
+// belum dibuat). Objek staging yang tidak pernah dipakai (AM batal upload,
+// preview berulang, commit gagal sebelum sempat memindahkan objek) adalah
+// PERSIS objek "yatim" yang Rule 49 sudah antisipasi (purge otomatis > 7
+// hari, nol baris `pdt_upload_batch`) — nol aturan retensi baru dibutuhkan.
+// ===========================================================================
+
+export interface PdtSiapkanUploadHasil {
+  clientPlatformId: number;
+  /** Path OBJEK di bucket privat `pdt-raw` (Rule 44) — staging, BUKAN path final Rule 44. */
+  stagingPath: string;
+}
+
+/**
+ * siapkanUploadBatch — gerbang izin + path staging SEBELUM AM mengunggah
+ * apa pun (mendahului Flow A langkah 2). Sama sekali tidak membaca isi
+ * berkas — itu baru terjadi setelah AM selesai PUT ke Storage dan memanggil
+ * `previewUploadBatch` dengan hasilnya.
+ */
+export async function siapkanUploadBatch(
+  sql: Sql,
+  actor: Actor,
+  clientPlatformId: number,
+): Promise<PdtSiapkanUploadHasil> {
+  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
+  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+  if (!platformKeVokabPdt(row.platform)) {
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+  }
+
+  const stagingPath = `_staging/${row.client_id}/${clientPlatformId}/${randomUUID()}.zip`;
+  return { clientPlatformId, stagingPath };
 }

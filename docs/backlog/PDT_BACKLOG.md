@@ -324,6 +324,19 @@ punya `null` eksplisit.
 > butuh commit endpoint), UI status paket (bullet 4, batch belum ada untuk dibaca statusnya),
 > commit sungguhan (menulis `pdt_upload_batch`/`pdt_file`, upload ke `pdt-raw`, rekonsiliasi
 > Rule 13-16), dan error path bullet 5 (butuh baris batch untuk ditandai `ditolak`).
+>
+> **Status 2026-09-13 (G1-09-BODY-BESAR DITUTUP, sesi sama — lihat `docs/DECISIONS.md` baris
+> teratas)** — dikonfirmasi (riset dokumentasi Vercel): platform deploy membatasi badan
+> request/respons ke **4,5 MB keras**, jauh di bawah Rule 42 (≤50 MB). Route `preview` di atas
+> **DIRETROFIT**: body sekarang JSON `{client_platform_id, storage_path}`, bukan bytes ZIP
+> mentah. Endpoint BARU `POST /account/pdt/batches/upload-url` (gerbang izin
+> `pdt.siapkanUploadBatch` + signed upload URL Storage `buatPdtRawSignedUploadUrl`) mendahului
+> Flow A langkah 2: AM/browser meng-PUT ZIP LANGSUNG ke bucket `pdt-raw` (path staging, BUKAN
+> path final Rule 44), lalu memanggil `preview` dengan `storage_path` yang sama — route itu
+> mengunduhnya balik server-ke-server (`unduhPdtRawObjek`) sebelum pipeline G1-04/05/09 yang
+> sudah ada berjalan TIDAK BERUBAH. Ini menutup risiko 413 produksi untuk pratinjau, BUKAN cuma
+> untuk commit seperti dugaan Open row semula. Sub-langkah 2 (commit) sekarang tinggal
+> memindahkan objek staging ke path final Rule 44 (bukan mengunggah ulang dari nol).
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

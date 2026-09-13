@@ -780,6 +780,8 @@ const WIRE_TO_FE: Record<string, string> = {
   PdtPreviewIdentitasWire: 'pdt.ts::PdtPreviewIdentitas',
   PdtPreviewPeriodeWire: 'pdt.ts::PdtPreviewPeriode',
   PdtModuleOptionWire: 'pdt.ts::PdtModuleOption',
+  // PDT G1-09-BODY-BESAR — siapkan unggah (signed upload URL), mendahului langkah 2.
+  PdtUploadUrlWire: 'pdt.ts::PdtUploadUrl',
 };
 
 /**
