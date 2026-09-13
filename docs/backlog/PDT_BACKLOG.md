@@ -355,6 +355,16 @@ punya `null` eksplisit.
 > dengan `shopee_ads_cpc`/`shopee_ads_live` pada data realistis (Open row baru
 > `G1-09-SIGNATURE-AMS-COLLISION`, dampak produksi — lihat DECISIONS.md). Halaman upload
 > `web-internal` (sub-langkah 3) masih BELUM dibangun.
+>
+> **Status 2026-09-13 (sesi 13) — TIGA Open row §1 handoff SESI12 DITUTUP sekaligus** (lihat
+> `docs/DECISIONS.md` baris teratas): Nerissa menjawab ketiga pertanyaan (1a=A, 1b=B+upload
+> sample asli, 1c=A). `G1-09-SIGNATURE-AMS-COLLISION` ditutup — `'ID Affiliates'` dikonfirmasi
+> jadi pembeda bersih ke sample ASLI Fim Motor, ditambahkan ke `must` `shopee_ams_afiliasi`.
+> `G1-09-PARENTSKU-PESANAN` ditutup — kolom `Pesanan Dibuat`/`Pesanan Siap Dikirim` per-SKU
+> TERNYATA ADA di `parentskudetail.xlsx` asli, rekonsiliasi commit Rule 13/14 sekarang GMV+pesanan
+> penuh (bukan GMV-only). `G1-09-TIDAKDAPATDIVALIDASI-LOLOS` ditutup — pemilik konfirmasi
+> pertahankan LOLOS, nol perubahan kode. `PDT_PARSER_VERSI` naik ke 2. **Masih BELUM (lingkup
+> 2b/3, sama seperti sebelumnya):** baris fakta `pdt_fact_*`, halaman upload `web-internal`.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

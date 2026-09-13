@@ -256,10 +256,41 @@ describe('detectPdtModule — Shopee (15 modul, 2 belum terverifikasi)', () => {
   it('shopee_ams_afiliasi (AMSAffiliatePerformance)', () => {
     expectExactMatch(
       [
-        ['Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Click', 'Komisi', 'ROI', 'Total Pembeli', 'Pembeli Baru'],
-        ['@kreator1', '10000000', '20', '18', '500', '1000000', '3.5', '15', '4'],
+        ['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Click', 'Komisi', 'ROI', 'Total Pembeli', 'Pembeli Baru'],
+        ['11339711407', '@kreator1', '10000000', '20', '18', '500', '1000000', '3.5', '15', '4'],
       ],
       'shopee_ams_afiliasi',
+    );
+  });
+
+  // G1-09-SIGNATURE-AMS-COLLISION (docs/DECISIONS.md 2026-09-13) — sebelum
+  // `ID Affiliates` masuk `must` shopee_ams_afiliasi, KEDUA fixture di bawah
+  // (preamble `Username` Rule 2 + kolom ber-substring 'omzet') cocok JUGA ke
+  // shopee_ams_afiliasi, bukan cuma modul iklannya sendiri — dibuktikan lewat
+  // XLSX SUNGGUHAN (XLSX.write/XLSX.read) di `apps/api/src/lib/pdt-parse.test.ts`
+  // (pipeline server penuh) dan `apps/api/.../pdt/batches/commit/route.test.ts`
+  // (`adsCpcXlsx`, yang lebih dulu memaksa `module_overrides` justru karena
+  // ambiguitas ini). Fixture AoA di sini membuktikan hal yang sama pada lapis
+  // `detectPdtModule` murni, tanpa bergantung pipeline XLSX.
+  it('shopee_ads_cpc dengan preamble Username (Rule 2) TIDAK LAGI bentrok dengan shopee_ams_afiliasi', () => {
+    expectExactMatch(
+      [
+        ['Username: fim_motor'], ['Nama Toko: Fim_Motor'], ['ID Toko: 938284780'], ['Periode: 01/07/2026 - 31/07/2026'], [], [], [],
+        ['Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya', 'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Biaya Iklan Terhadap Omzet (ACOS) (%)'],
+        ['SKU-A', '50000', '2000', '80', '5000000', 'Kampanye A', '40000000', '8,00', '12,50%'],
+      ],
+      'shopee_ads_cpc',
+    );
+  });
+
+  it('shopee_ads_search dengan preamble Username (Rule 2) TIDAK LAGI bentrok dengan shopee_ams_afiliasi', () => {
+    expectExactMatch(
+      [
+        ['Username: fim_motor'], ['Nama Toko: Fim_Motor'], ['ID Toko: 938284780'], ['Periode: 01/07/2026 - 31/07/2026'], [], [], [],
+        ['Kata Pencarian', 'SOV', 'Klik', 'Konversi', 'Biaya', 'Omzet Penjualan'],
+        ['baju flanel', '12%', '100', '8', '200000', '150000'],
+      ],
+      'shopee_ads_search',
     );
   });
 

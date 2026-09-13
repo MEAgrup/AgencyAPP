@@ -417,24 +417,28 @@ export async function siapkanUploadBatch(
 // fakta (`pdt_fact_*` — peta kolom→tabel belum ada), `pdt_usulan` (G4),
 // `pdt_laporan_kiriman` (G2).
 //
-// **Tiga ketidakpastian PRD ditemukan menulis fungsi ini — DICATAT
-// (`docs/DECISIONS.md`), bukan ditebak diam-diam:**
+// **Ketidakpastian PRD ditemukan menulis fungsi ini:**
 //  1. Identitas `tidak_dapat_divalidasi` (nol berkas 'ok' membawa sinyal
 //     identitas platform ini sama sekali) DIPERLAKUKAN sebagai LOLOS (bukan
 //     ditolak) — `canUploadBatch` sudah menggerbang kepemilikan toko; ini
 //     murni ketiadaan cross-check TAMBAHAN, bukan bukti kesalahan.
-//  2. Σ pesanan per-SKU `shopee_parent_sku` (Rule 13) — kolom itu TIDAK ada
-//     di whitelist modul ini (beda dari G1-07-PERSKU-DIBAYAR, yang soal
-//     basis `dibayar`; ini soal metrik pesanan sama sekali, basis apa pun).
-//     Gerbang rekonsiliasi di bawah HANYA membandingkan GMV (bukan GMV+pesanan
-//     seperti Rule 13/14 sebut) pada basis `siap_dikirim` (Rule 16 — basis
-//     default laporan klien Shopee, gerbang Flow A langkah 7).
-//  3. periode `null`/`{status:'tolak'}` (Rule 5 — nol berkas 'ok' SAMA
+//     **Ditokan Nerissa 2026-09-13: (A), pertahankan seperti sekarang** —
+//     lihat baris Decided `docs/DECISIONS.md` (dulu Open row
+//     G1-09-TIDAKDAPATDIVALIDASI-LOLOS). Nol perubahan kode dari ketokan ini.
+//  2. periode `null`/`{status:'tolak'}` (Rule 5 — nol berkas 'ok' SAMA
 //     SEKALI, atau berkas ada tapi nol satu pun membawa periode terbaca) TIDAK
 //     bisa dipersist sebagai batch (`periode_mulai`/`periode_selesai` NOT
 //     NULL) — 400 tanpa baris, beda dari identitas/rekonsiliasi `ditolak`
 //     yang tetap tersimpan (di sana periode SUDAH resolve, jadi ada baris
 //     yang valid untuk menyimpan penolakannya).
+//
+// Σ pesanan per-SKU `shopee_parent_sku` (Rule 13) — DITUTUP 2026-09-13
+// (G1-09-PARENTSKU-PESANAN): sample `parentskudetail.xlsx` ASLI (Fim Motor,
+// diunggah pemilik) membuktikan kolom `Pesanan Dibuat`/`Pesanan Siap Dikirim`
+// per-SKU ADA (`modules.ts` kolomDipanen, PDT_PARSER_VERSI naik ke 2).
+// Gerbang rekonsiliasi di bawah sekarang memanggil `rekonsiliasiGmvPesanan`
+// PENUH (GMV DAN pesanan, Rule 13/14) pada basis `siap_dikirim` (Rule 16 —
+// basis default laporan klien Shopee, gerbang Flow A langkah 7).
 // ===========================================================================
 
 /** Meta paket ZIP (G1-04 `bacaDanEkstrakPdtZip`) — kolom `raw_*` `pdt_upload_batch` yang independen dari isi per-berkas. */
@@ -556,11 +560,24 @@ export async function commitUploadBatch(
     if (shopStatsBerkas && parentSkuBerkas) {
       const basisSiapDikirim = pdt.parseShopeeShopStatsPerBasis(shopStatsBerkas.aoa).siap_dikirim;
       if (basisSiapDikirim) {
+        // Rule 13/14 PENUH (G1-09-PARENTSKU-PESANAN, ditutup 2026-09-13) — Σ GMV
+        // DAN Σ pesanan per-SKU vs shop-level, basis Siap Dikirim (Rule 16).
+        // `sumShopeeParentSkuGmv` generik (nama historis, sumber sejak G1-07) —
+        // dipanggil dua kali dengan literal kolom berbeda, bukan fungsi baru.
         const perSkuGmv = pdt.sumShopeeParentSkuGmv(parentSkuBerkas.aoa, 'Penjualan (Pesanan Siap Dikirim) (IDR)', parentSkuBerkas.barisHeader);
-        const deltaGmvPct = pdt.hitungDeltaPersen(perSkuGmv, basisSiapDikirim.gmv);
-        reconcileDeltaPct = deltaGmvPct; // Rule 14 — tersimpan baik lolos maupun ditolak (sinyal diagnostik, bukan hanya penanda kegagalan).
-        if (deltaGmvPct > pdt.AMBANG_REKONSILIASI_PERSEN) {
-          alasanDitolak = `[selisih rekonsiliasi GMV ${deltaGmvPct.toFixed(2)}% melebihi ambang ${pdt.AMBANG_REKONSILIASI_PERSEN}% (basis Pesanan Siap Dikirim, Rule 16)]`;
+        const perSkuPesanan = pdt.sumShopeeParentSkuGmv(parentSkuBerkas.aoa, 'Pesanan Siap Dikirim', parentSkuBerkas.barisHeader);
+        const hasilRekon = pdt.rekonsiliasiGmvPesanan({
+          perSkuGmv, shopLevelGmv: basisSiapDikirim.gmv,
+          perSkuPesanan, shopLevelPesanan: basisSiapDikirim.pesanan,
+          modulTerlibat: [
+            { kode: 'shopee_shop_stats', parseStatusOk: true },
+            { kode: 'shopee_parent_sku', parseStatusOk: true },
+          ],
+        });
+        // Rule 14 — tersimpan baik lolos maupun ditolak (sinyal diagnostik, bukan hanya penanda kegagalan).
+        reconcileDeltaPct = hasilRekon.status === 'verified' ? Math.max(hasilRekon.deltaGmvPct, hasilRekon.deltaPesananPct) : hasilRekon.deltaPct;
+        if (hasilRekon.status === 'ditolak') {
+          alasanDitolak = `${hasilRekon.pesan.slice(0, -1)} (basis Pesanan Siap Dikirim, Rule 16)]`;
         }
       }
       // basisSiapDikirim tidak ditemukan meski shopee_shop_stats parse_status='ok' — rekonsiliasi

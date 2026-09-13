@@ -210,10 +210,11 @@ describeDb('POST /pdt/batches/preview — real DB', () => {
     const header = [
       'Kode Produk', 'Kode Variasi', 'SKU Induk',
       'Total Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+      'Pesanan Dibuat', 'Pesanan Siap Dikirim',
       'Jumlah Produk Dilihat', 'Produk Diklik', 'Tingkat Konversi (Pesanan yang Dibuat)',
       'repeat order', 'Pengunjung Produk (Kunjungan)',
     ];
-    const aoa = [header, ['P1', 'V1', 'SKU1', '100000', '90000', '500', '50', '10%', '2', '400']];
+    const aoa = [header, ['P1', 'V1', 'SKU1', '100000', '90000', '5', '4', '500', '50', '10%', '2', '400']];
     stubStorageDownload(await zipkan([{ nama: 'parent_sku.xlsx', isi: xlsxDariAoa(aoa) }]));
 
     const res = await POST(req(owner, { client_platform_id: cpId, storage_path: STORAGE_PATH }));

@@ -67,8 +67,14 @@ export const UNVERIFIED_SIGNATURE: PdtSignature = {
  * membandingkan angka ini ke `pdt_upload_batch.parser_versi`/
  * `pdt_fact_*.parser_versi` tersimpan untuk memutuskan batch mana yang perlu
  * diparse ulang.
+ *
+ * **Naik ke 2 pada 2026-09-13** (G1-09 sesi 13): `shopee_parent_sku.kolomDipanen`
+ * bertambah (`Pesanan Dibuat`/`Pesanan Siap Dikirim`) dan `shopee_ams_afiliasi
+ * .tandaTanganKolom` berubah (`ID Affiliates` masuk `must`) — keduanya bisa
+ * mengubah angka hasil parse batch LAMA (rekonsiliasi Rule 13/14 penuh,
+ * deteksi modul iklan Shopee tidak lagi ambigu).
  */
-export const PDT_PARSER_VERSI = 1;
+export const PDT_PARSER_VERSI = 2;
 
 export const PDT_MODULES: readonly PdtModuleDef[] = [
   // ===========================================================================
@@ -227,9 +233,20 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     namaTampilan: 'Shopee — Parent SKU Detail',
     tandaTanganKolom: { must: ['Kode Produk', 'Kode Variasi', 'SKU Induk'] },
     barisHeaderHint: 1,
+    // `Pesanan Dibuat`/`Pesanan Siap Dikirim` (kolom 16/17 dari 40) DITAMBAHKAN
+    // sesi ini — G1-09-PARENTSKU-PESANAN (docs/DECISIONS.md 2026-09-13)
+    // ditutup lewat sample `parentskudetail.xlsx` ASLI (Fim Motor, diunggah
+    // pemilik): kolom jumlah-pesanan per-SKU TERNYATA ada, sejajar persis
+    // dengan dua kolom GMV yang sudah dipanen (`Total Penjualan (Pesanan
+    // Dibuat) (IDR)`/`Penjualan (Pesanan Siap Dikirim) (IDR)`) — bukan "tidak
+    // diekspor Shopee" seperti dugaan sebelumnya. Rule 13/14 (Σ GMV DAN Σ
+    // pesanan per-SKU vs shop-level) sekarang bisa ditegakkan penuh lewat
+    // `rekonsiliasiGmvPesanan` (`packages/core/src/pdt/rekonsiliasi.ts`),
+    // dipanggil dari `commitUploadBatch`.
     kolomDipanen: [
       'Kode Produk', 'Kode Variasi', 'SKU Induk',
       'Total Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+      'Pesanan Dibuat', 'Pesanan Siap Dikirim',
       'Jumlah Produk Dilihat', 'Produk Diklik', 'Tingkat Konversi (Pesanan yang Dibuat)',
       'repeat order', 'Pengunjung Produk (Kunjungan)',
     ],
@@ -389,8 +406,31 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     kode: 'shopee_ams_afiliasi',
     platform: 'shopee',
     namaTampilan: 'Shopee AMS — Performa Afiliasi (Kreator)',
-    // Sama persis `report/shopee/detect.ts` CONTENT_SIGNATURES.aff_creator.
-    tandaTanganKolom: { must: ['Omzet'], anyOf: [{ must: ['Username'] }, { must: ['Kreator'] }, { must: ['Creator'] }] },
+    // SENGAJA BERBEDA dari `report/shopee/detect.ts` CONTENT_SIGNATURES.aff_creator
+    // (`must:['Omzet'], anyOf:[Username|Kreator|Creator]`, tanpa 'ID Affiliates') —
+    // mesin lama menyandarkan disambiguasi ke NAMA BERKAS (`detect.ts` baris
+    // 20-24/226-231), yang Rule 6 PDT larang. Menyalin signature-nya verbatim
+    // terbukti BENTROK dengan `shopee_ads_cpc`/`shopee_ads_search` pada data
+    // REALISTIS (docs/DECISIONS.md G1-09-SIGNATURE-AMS-COLLISION, 2026-09-13):
+    // KETIGA modul iklan Shopee membawa preamble `Username: ...` (Rule 2) dan
+    // KEDUANYA (`_cpc`/`_search`) punya kolom yang mengandung substring
+    // 'omzet' ('omzet penjualan') — jadi `must:['Omzet']` + `anyOf` Username
+    // saja tidak pernah cukup membedakan. **`ID Affiliates` DITAMBAHKAN ke
+    // `must`** sesudah diverifikasi ke sample ASLI berdampingan (Fim Motor,
+    // `AMSAffiliatePerformance_*.csv` vs `Data+Keseluruhan+Iklan+Shopee-*.csv`/
+    // `Search-Ads-Overall-Data-*.csv`/`Data-Semua-Iklan-Live-*.csv`, diunggah
+    // pemilik): literal `'ID Affiliates'` HANYA muncul di berkas AMS afiliasi,
+    // nol kemunculan di ketiga modul ads Shopee lain atau `shopee_shop_stats`/
+    // `shopee_parent_sku`. Temuan sampingan: sample ASLI `shopee_ads_live`
+    // TERNYATA tidak membawa baris `Username` di preamble-nya (beda dari
+    // `_cpc`/`_search`, dan beda dari asumsi Rule 2 yang dipakai fixture
+    // lama) — tidak mengubah kesimpulan (gerbang `must:['ID Affiliates']`
+    // menutup collision terlepas dari itu), dicatat supaya tidak ditebak lagi
+    // di sesi lain.
+    tandaTanganKolom: {
+      must: ['Omzet', 'ID Affiliates'],
+      anyOf: [{ must: ['Username'] }, { must: ['Kreator'] }, { must: ['Creator'] }],
+    },
     barisHeaderHint: 1,
     kolomDipanen: ['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Komisi', 'ROI'],
     wajib: false,

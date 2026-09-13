@@ -226,6 +226,7 @@ Bucket 1:
 | `Kode Variasi` | -- konsumen: pdt_sku_master.platform_variation_id [PX] |
 | `SKU Induk` | -- konsumen: pdt_sku_master (grouping varian→induk) |
 | `Total Penjualan (Pesanan Dibuat) (IDR)` / `Penjualan (Pesanan Siap Dikirim) (IDR)` | -- konsumen: pdt_fact_sku_period.gmv per basis (Rule 15/16) |
+| `Pesanan Dibuat` / `Pesanan Siap Dikirim` | -- konsumen: pdt_fact_sku_period.pesanan per basis, gerbang rekonsiliasi Rule 13/14 (`rekonsiliasiGmvPesanan`) — DITAMBAHKAN 2026-09-13 (G1-09-PARENTSKU-PESANAN), diverifikasi ke sample ASLI (Fim Motor, 40 kolom) |
 | `Jumlah Produk Dilihat` | -- konsumen: pdt_fact_sku_period (turunan CTR) |
 | `Produk Diklik` | -- konsumen: pdt_fact_sku_period.klik |
 | `Tingkat Konversi (Pesanan yang Dibuat)` | -- konsumen: pdt_fact_sku_period.cr |
@@ -290,6 +291,12 @@ pesanan (`shopee_chat_broadcast`) ⇒ dimensi layanan / CRM. Tidak ada baris buc
 Bucket 1: `Kode Item`/`ID Affiliates`, omzet, **`komisi`**, ROI ⇒ sinyal PX sisi Shopee /
 `pdt_fact_creator_period` Shopee. `komisi` di sini adalah sumber **`commission_pct`** Shopee untuk
 PX Flow D (celah PX #1, §4) — sudah bucket 1, bukan tambahan baru. Tidak ada baris bucket 2.
+
+`ID Affiliates` juga MASUK `tandaTanganKolom` (deteksi) `shopee_ams_afiliasi` sejak 2026-09-13
+(G1-09-SIGNATURE-AMS-COLLISION, `modules.ts`) — sebelumnya sinyal deteksi modul ini
+(`must:['Omzet'], anyOf:[Username|Kreator|Creator]`) bentrok dengan `shopee_ads_cpc`/
+`shopee_ads_search` (keduanya membawa preamble `Username` + kolom ber-substring 'omzet' pada
+sample ASLI). `ID Affiliates` diverifikasi HANYA muncul di export AMS afiliasi.
 
 ### 2.11 `shopee_kesehatan` — **MODUL BARU, tidak ada di §7 sama sekali**
 Bucket 2 (derived-add — modul penuh, `report/shopee/metrik.ts:516-540` `parseKesehatan`,

@@ -197,6 +197,7 @@ afterEach(async () => {
 const PARENT_SKU_HEADER = [
   'Kode Produk', 'Kode Variasi', 'SKU Induk',
   'Total Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+  'Pesanan Dibuat', 'Pesanan Siap Dikirim',
   'Jumlah Produk Dilihat', 'Produk Diklik', 'Tingkat Konversi (Pesanan yang Dibuat)',
   'repeat order', 'Pengunjung Produk (Kunjungan)',
 ];
@@ -300,7 +301,7 @@ describeDb('POST /pdt/batches/commit — real DB', () => {
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
     const cpId = await insertClientPlatform(clientId, 'Shopee', null);
-    const parentSkuAoa = [PARENT_SKU_HEADER, ['P1', 'V1', 'IND-1', '100000', '90000', '500', '50', '10%', '2', '400']];
+    const parentSkuAoa = [PARENT_SKU_HEADER, ['P1', 'V1', 'IND-1', '100000', '90000', '5', '4', '500', '50', '10%', '2', '400']];
     stubStorage(await zipkan([
       { nama: 'ads.xlsx', isi: adsCpcXlsx('938284780') },
       { nama: 'ambigu.xlsx', isi: xlsxDariAoa(parentSkuAoa) },

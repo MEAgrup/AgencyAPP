@@ -100,11 +100,14 @@ export function parseShopeeShopStatsPerBasis(aoa: readonly (readonly unknown[])[
 }
 
 /**
- * Σ kolom GMV `shopee_parent_sku` untuk satu basis (Rule 13 — Σ GMV per-SKU).
- * `kolomGmv` adalah nama literal kolom (`'Total Penjualan (Pesanan Dibuat) (IDR)'`/
- * `'Penjualan (Pesanan Siap Dikirim) (IDR)'`, `PDT_KOLOM_DIPANEN.md` §2.2) —
- * dipanggil dengan literal, bukan ditebak di sini (lihat docblock berkas
- * untuk basis `dibayar`, belum terverifikasi).
+ * Σ SATU kolom numerik `shopee_parent_sku` per-SKU (nama historis — dipakai
+ * pertama untuk GMV, Rule 13). `kolomGmv` adalah nama literal kolom
+ * (`'Total Penjualan (Pesanan Dibuat) (IDR)'`/`'Penjualan (Pesanan Siap
+ * Dikirim) (IDR)'` untuk GMV, `'Pesanan Dibuat'`/`'Pesanan Siap Dikirim'`
+ * untuk sisi pesanan — `PDT_KOLOM_DIPANEN.md` §2.2, keduanya ditambahkan
+ * G1-09-PARENTSKU-PESANAN 2026-09-13) — dipanggil dengan literal, bukan
+ * ditebak di sini (lihat docblock berkas untuk basis `dibayar`, kolom
+ * pesanan/GMV per-SKU-nya belum terverifikasi, G1-07-PERSKU-DIBAYAR).
  */
 export function sumShopeeParentSkuGmv(aoa: readonly (readonly unknown[])[], kolomGmv: string, barisHeader = 1): number {
   const header = aoa[barisHeader - 1] ?? [];

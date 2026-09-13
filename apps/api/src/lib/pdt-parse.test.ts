@@ -152,9 +152,9 @@ const FIXTURES: { nama: string; kode: string; aoa: Aoa; csv?: boolean; bom?: boo
     kode: 'shopee_parent_sku',
     aoa: [
       ['Kode Produk', 'Kode Variasi', 'SKU Induk', 'Total Penjualan (Pesanan Dibuat) (IDR)',
-        'Penjualan (Pesanan Siap Dikirim) (IDR)', 'Jumlah Produk Dilihat', 'Produk Diklik',
+        'Penjualan (Pesanan Siap Dikirim) (IDR)', 'Pesanan Dibuat', 'Pesanan Siap Dikirim', 'Jumlah Produk Dilihat', 'Produk Diklik',
         'Tingkat Konversi (Pesanan yang Dibuat)', 'repeat order', 'Pengunjung Produk (Kunjungan)'],
-      ['SKU-A', 'VAR-A1', 'SKU-A', 'Rp90.000.000', 'Rp84.000.000', '5000', '900', '30,00%', '25,00%', '1000'],
+      ['SKU-A', 'VAR-A1', 'SKU-A', 'Rp90.000.000', 'Rp84.000.000', '18', '17', '5000', '900', '30,00%', '25,00%', '1000'],
     ],
   },
   {
@@ -238,8 +238,8 @@ const FIXTURES: { nama: string; kode: string; aoa: Aoa; csv?: boolean; bom?: boo
     kode: 'shopee_ams_afiliasi',
     csv: true,
     aoa: [
-      ['Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Click', 'Komisi', 'ROI', 'Total Pembeli', 'Pembeli Baru'],
-      ['@kreator1', '10000000', '20', '18', '500', '1000000', '3.5', '15', '4'],
+      ['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Click', 'Komisi', 'ROI', 'Total Pembeli', 'Pembeli Baru'],
+      ['11339711407', '@kreator1', '10000000', '20', '18', '500', '1000000', '3.5', '15', '4'],
     ],
   },
   {
@@ -305,6 +305,47 @@ describe('parsePdtZipEntries / decodePdtAoa (G1-05) — dekode + deteksi lewat p
     }
   });
 
+  // G1-09-SIGNATURE-AMS-COLLISION (docs/DECISIONS.md 2026-09-13, ditutup sesi
+  // 13) — sample ASLI (Fim Motor) membuktikan `shopee_ads_cpc` SAH membawa
+  // preamble `Username: ...` (Rule 2) + kolom `omzet penjualan`, yang sebelum
+  // `ID Affiliates` masuk `must` shopee_ams_afiliasi bikin KEDUANYA cocok
+  // (ambiguous) untuk SETIAP unggahan ads_cpc sah — bukan cuma di fixture AoA
+  // hand-crafted `detect.test.ts`, tapi lewat pipeline SERVER PENUH (`XLSX.write`
+  // → ZIP sungguhan → `bacaDanEkstrakPdtZip` → `decodePdtAoa`/`XLSX.read` →
+  // `detectPdtModule`) — persis yang G1-09 sesi 12 temukan menulis
+  // `commit/route.test.ts`. Tes ini membuktikan disambiguasinya SUNGGUHAN,
+  // bukan cuma di teori AoA.
+  it('G1-09-SIGNATURE-AMS-COLLISION: ads_cpc BERDAMPINGAN dengan ams_afiliasi dalam SATU batch, keduanya terdeteksi tepat (tidak ambigu) — pipeline XLSX sungguhan', async () => {
+    const adsCpc = xlsxDariAoa([
+      ['Username: fim_motor'], ['Nama Toko: Fim_Motor'], ['ID Toko: 938284780'], ['Periode: 01/07/2026 - 31/07/2026'], [], [], [],
+      ['Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya', 'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Biaya Iklan Terhadap Omzet (ACOS) (%)'],
+      ['SKU-A', '50000', '2000', '80', '5000000', 'Kampanye A', '40000000', '8,00', '12,50%'],
+    ]);
+    const amsAfiliasi = xlsxDariAoa([
+      ['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Click', 'Komisi', 'ROI', 'Total Pembeli', 'Pembeli Baru'],
+      ['11339711407', 'shpmedianetwork.id', '47514873', '670', '477', '1001', '899797.76', '52.8', '475', '412'],
+    ]);
+    const paket = await zipkan([
+      { nama: 'ads_cpc.xlsx', isi: adsCpc },
+      { nama: 'ams_afiliasi.xlsx', isi: amsAfiliasi },
+    ]);
+
+    const zipHasil = await bacaDanEkstrakPdtZip(paket);
+    if (zipHasil.direktoriSementara) direktoriUntukDibersihkan.push(zipHasil.direktoriSementara);
+    expect(zipHasil.pagar.ok).toBe(true);
+
+    const parseHasil = await parsePdtZipEntries(zipHasil.diekstrak, PDT_MODULES);
+    expect(parseHasil.gagal).toEqual([]);
+
+    const cpcHasil = parseHasil.berkas.find((b) => b.nama === 'ads_cpc.xlsx');
+    expect(cpcHasil?.ambiguous, JSON.stringify(cpcHasil?.matches)).toBe(false);
+    expect(cpcHasil?.modul).toBe('shopee_ads_cpc');
+
+    const amsHasil = parseHasil.berkas.find((b) => b.nama === 'ams_afiliasi.xlsx');
+    expect(amsHasil?.ambiguous, JSON.stringify(amsHasil?.matches)).toBe(false);
+    expect(amsHasil?.modul).toBe('shopee_ams_afiliasi');
+  });
+
   it('kegagalan dekode SATU entri (berkas rusak) tidak menjatuhkan batch — entri lain tetap diproses', async () => {
     const baik = xlsxDariAoa(FIXTURES[0].aoa);
     // Awalan `PK\x03\x04` memaksa XLSX.read MENGENALI ini sebagai upaya ZIP (bukan
@@ -334,7 +375,7 @@ describe('parsePdtZipEntries / decodePdtAoa (G1-05) — dekode + deteksi lewat p
     const skuFiles = Array.from({ length: 7 }, (_, i) => {
       const rows: Aoa = [header];
       for (let r = 0; r < 215; r++) {
-        rows.push([`SKU-${i}-${r}`, `VAR-${i}-${r}`, `SKU-${i}-${r}`, `Rp${(90000 + r * 137) * 1000}`, `Rp${(84000 + r * 91) * 1000}`, String(5000 + r), String(900 + r), '30,00%', '25,00%', String(1000 + r)]);
+        rows.push([`SKU-${i}-${r}`, `VAR-${i}-${r}`, `SKU-${i}-${r}`, `Rp${(90000 + r * 137) * 1000}`, `Rp${(84000 + r * 91) * 1000}`, String(20 + r), String(19 + r), String(5000 + r), String(900 + r), '30,00%', '25,00%', String(1000 + r)]);
       }
       return { nama: `sku_${i}.xlsx`, isi: xlsxDariAoa(rows) };
     }); // 7 * 215 ≈ 1.500 baris SKU

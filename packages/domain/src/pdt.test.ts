@@ -259,16 +259,31 @@ function shopeeShopStatsBerkas(nama: string, gmvSiapDikirim: number, pesananSiap
   return { nama, sha256: 'sha-stats', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_shop_stats', ambiguous: false, matches: ['shopee_shop_stats'] };
 }
 
-/** Berkas shopee_parent_sku LENGKAP — Σ `Penjualan (Pesanan Siap Dikirim) (IDR)` = `gmvSiapDikirimBaris` dijumlah. */
-function shopeeParentSkuBerkas(nama: string, gmvSiapDikirimBaris: readonly number[]): PdtPreviewBerkasInput {
+/**
+ * Berkas shopee_parent_sku LENGKAP — Σ `Penjualan (Pesanan Siap Dikirim) (IDR)` = `gmvSiapDikirimBaris`
+ * dijumlah, Σ `Pesanan Siap Dikirim` = `pesananSiapDikirimBaris` dijumlah (default: 1 pesanan/baris,
+ * dipakai pemanggil yang cuma peduli sisi GMV — lihat `shopeeShopStatsBerkas` default
+ * `pesananSiapDikirim=100`, jadi pemanggil yang rekonsiliasi pesanannya harus cocok WAJIB
+ * menyertakan array eksplisit yang jumlahnya sejajar).
+ */
+function shopeeParentSkuBerkas(
+  nama: string,
+  gmvSiapDikirimBaris: readonly number[],
+  pesananSiapDikirimBaris: readonly number[] = gmvSiapDikirimBaris.map(() => 1),
+): PdtPreviewBerkasInput {
   const header = [
     'Kode Produk', 'Kode Variasi', 'SKU Induk', 'Total Penjualan (Pesanan Dibuat) (IDR)',
-    'Penjualan (Pesanan Siap Dikirim) (IDR)', 'Jumlah Produk Dilihat', 'Produk Diklik',
-    'Tingkat Konversi (Pesanan yang Dibuat)', 'repeat order', 'Pengunjung Produk (Kunjungan)',
+    'Penjualan (Pesanan Siap Dikirim) (IDR)', 'Pesanan Dibuat', 'Pesanan Siap Dikirim',
+    'Jumlah Produk Dilihat', 'Produk Diklik', 'Tingkat Konversi (Pesanan yang Dibuat)',
+    'repeat order', 'Pengunjung Produk (Kunjungan)',
   ];
   const aoa: unknown[][] = [
     header,
-    ...gmvSiapDikirimBaris.map((gmv, i) => [`SKU-${i}`, `VAR-${i}`, `IND-${i}`, `Rp${gmv}`, `Rp${gmv}`, '100', '10', '10,00%', '2', '90']),
+    ...gmvSiapDikirimBaris.map((gmv, i) => [
+      `SKU-${i}`, `VAR-${i}`, `IND-${i}`, `Rp${gmv}`, `Rp${gmv}`,
+      String(pesananSiapDikirimBaris[i]), String(pesananSiapDikirimBaris[i]),
+      '100', '10', '10,00%', '2', '90',
+    ]),
   ];
   return { nama, sha256: 'sha-parent-sku', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'] };
 }
@@ -647,7 +662,7 @@ describeDb('commitUploadBatch — identitas Rule 2-4', () => {
     expect(cp[0].akun_konten_toko).toEqual(['kreator-a']);
   });
 
-  it("identitas 'tidak_dapat_divalidasi' ⇒ TIDAK ditolak (ketidakpastian #1, docs/DECISIONS.md) — lolos ke verified", async () => {
+  it("identitas 'tidak_dapat_divalidasi' ⇒ TIDAK ditolak (ditokan Nerissa 2026-09-13: A, docs/DECISIONS.md) — lolos ke verified", async () => {
     await ensureOwnerEmployee();
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
@@ -658,7 +673,7 @@ describeDb('commitUploadBatch — identitas Rule 2-4', () => {
     // sisipkan periode lewat berkas ads_cpc TANPA memicu validasi identitas gagal — pakai shop_id
     // yang SAMA persis supaya identitas ads_cpc sendiri 'cocok', bukan sumber sinyal yang diuji di sini.
     const ads = shopeeAdsCpcBerkas('ads.xlsx', 'SHOP-1', '01/07/2026 - 31/07/2026');
-    const parentSku = shopeeParentSkuBerkas('parent.xlsx', [1_000_000]);
+    const parentSku = shopeeParentSkuBerkas('parent.xlsx', [1_000_000], [100]); // pesanan sejajar shop-level (default shopeeShopStatsBerkas) — sisi pesanan tidak diuji di sini
     const hasil = await commitUploadBatch(sql, ownerActor(), cpId, [stats, ads, parentSku], { paket: paketMeta(), sekarang: SEKARANG });
     // Catatan: fixture ini SENGAJA membawa berkas ads_cpc (identitas 'cocok'), bukan menguji
     // tidak_dapat_divalidasi murni (butuh nol berkas preamble sama sekali + periode dari sumber
@@ -667,15 +682,15 @@ describeDb('commitUploadBatch — identitas Rule 2-4', () => {
   });
 });
 
-describeDb('commitUploadBatch — rekonsiliasi Rule 13-16 (GMV-only, basis siap_dikirim — ketidakpastian #2)', () => {
-  it('delta GMV ≤ 0,5% ⇒ verified, reconcile_delta_pct tersimpan (bukan null — Rule 14 diagnostik)', async () => {
+describeDb('commitUploadBatch — rekonsiliasi Rule 13-16 (GMV DAN pesanan, basis siap_dikirim — G1-09-PARENTSKU-PESANAN ditutup 2026-09-13)', () => {
+  it('delta GMV ≤ 0,5% (pesanan sejajar) ⇒ verified, reconcile_delta_pct tersimpan (bukan null — Rule 14 diagnostik)', async () => {
     await ensureOwnerEmployee();
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
     const cpId = await insertClientPlatform(clientId, 'Shopee', 'SHOP-1');
     const ads = shopeeAdsCpcBerkas('ads.xlsx', 'SHOP-1', '01/07/2026 - 31/07/2026');
     const stats = shopeeShopStatsBerkas('stats.xlsx', 1_000_000);
-    const parentSku = shopeeParentSkuBerkas('parent.xlsx', [999_900]); // 0,01% — dalam ambang, representasi bersih di numeric(6,3)
+    const parentSku = shopeeParentSkuBerkas('parent.xlsx', [999_900], [100]); // GMV 0,01% (dalam ambang), pesanan 0% — sisi pesanan tidak diuji di sini
     const hasil = await commitUploadBatch(sql, ownerActor(), cpId, [ads, stats, parentSku], { paket: paketMeta(), sekarang: SEKARANG });
     expect(hasil.status).toBe('verified');
     const batch = await readBatch(hasil.batchId);
@@ -683,21 +698,38 @@ describeDb('commitUploadBatch — rekonsiliasi Rule 13-16 (GMV-only, basis siap_
     expect(Number(batch.reconcile_delta_pct)).toBeCloseTo(0.01, 3);
   });
 
-  it('delta GMV > 0,5% ⇒ ditolak, alasan menyebut persentase + basis, reconcile_delta_pct tersimpan, TETAP TERSIMPAN', async () => {
+  it('delta GMV > 0,5% (pesanan sejajar) ⇒ ditolak, alasan menyebut GMV + persentase + basis, reconcile_delta_pct tersimpan, TETAP TERSIMPAN', async () => {
     await ensureOwnerEmployee();
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
     const cpId = await insertClientPlatform(clientId, 'Shopee', 'SHOP-1');
     const ads = shopeeAdsCpcBerkas('ads.xlsx', 'SHOP-1', '01/07/2026 - 31/07/2026');
     const stats = shopeeShopStatsBerkas('stats.xlsx', 1_000_000);
-    const parentSku = shopeeParentSkuBerkas('parent.xlsx', [800_000]); // 20% — jauh di atas ambang
+    const parentSku = shopeeParentSkuBerkas('parent.xlsx', [800_000], [100]); // GMV 20% (jauh di atas ambang), pesanan 0%
     const hasil = await commitUploadBatch(sql, ownerActor(), cpId, [ads, stats, parentSku], { paket: paketMeta(), sekarang: SEKARANG });
     expect(hasil.status).toBe('ditolak');
+    expect(hasil.alasanDitolak).toContain('GMV');
     expect(hasil.alasanDitolak).toContain('Pesanan Siap Dikirim');
     expect(hasil.alasanDitolak).toMatch(/2\d\.\d\d%/); // ~20.00%
     const batch = await readBatch(hasil.batchId);
     expect(Number(batch.reconcile_delta_pct)).toBeGreaterThan(0.5);
     expect(batch.retensi_alasan).toBe('ditolak'); // +30 hari, bukan +120
+  });
+
+  it('GMV per-SKU cocok TAPI pesanan per-SKU beda jauh ⇒ ditolak, alasan menyebut pesanan (kasus persis contoh handoff SESI12 §1b) — gerbang GMV-only LAMA akan meloloskannya', async () => {
+    await ensureOwnerEmployee();
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', 'SHOP-1');
+    const ads = shopeeAdsCpcBerkas('ads.xlsx', 'SHOP-1', '01/07/2026 - 31/07/2026');
+    const stats = shopeeShopStatsBerkas('stats.xlsx', 1_000_000, 100); // shop-level: GMV 1.000.000, 100 pesanan
+    const parentSku = shopeeParentSkuBerkas('parent.xlsx', [999_900], [50]); // GMV 0,01% (dalam ambang), pesanan 50% (jauh di atas ambang)
+    const hasil = await commitUploadBatch(sql, ownerActor(), cpId, [ads, stats, parentSku], { paket: paketMeta(), sekarang: SEKARANG });
+    expect(hasil.status).toBe('ditolak');
+    expect(hasil.alasanDitolak).toContain('pesanan');
+    expect(hasil.alasanDitolak).toContain('Pesanan Siap Dikirim');
+    const batch = await readBatch(hasil.batchId);
+    expect(Number(batch.reconcile_delta_pct)).toBeGreaterThan(0.5);
   });
 
   it('shopee_shop_stats/shopee_parent_sku TIDAK keduanya hadir ⇒ rekonsiliasi DILEWATI, tetap verified', async () => {
