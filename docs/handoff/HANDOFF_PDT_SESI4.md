@@ -3,10 +3,13 @@
 > **Dibuat 2026-09-13.** Baca berkas ini sebelum lanjut. Cabang kerja sesi ini:
 > `claude/handoff-sesi-3-continuation-n483la`.
 >
-> **Status: PR #356 (G1-01) di-merge ke `main`. G1-02 SELESAI** (seed
+> **Status: PR #356 (G1-01) DAN PR #357 (G1-02) sudah di-merge ke `main`
+> (squash, `9af02f3` lalu `ad2fb50`).** G1-02 SELESAI (seed
 > `pdt_parser_modul`/`pdt_kolom_alias`, registry TS + pencocok tanda tangan +
-> 29 tes, diterapkan ke live `CDPS SG`). Sesi 5 lanjut ke **G1-03** (normalisasi
-> angka terpusat → NaN) — lihat §4.
+> 29 tes, diterapkan ke live `CDPS SG`). PR #357 sempat memerah di
+> `db-and-migrations` — kegagalan pra-ada yang sama seperti §1 (bukan milik
+> PR #357), di-standing-down + satu re-run non-flaky, lalu di-merge. Sesi 5
+> lanjut ke **G1-03** (normalisasi angka terpusat → NaN) — lihat §4.
 
 ---
 
