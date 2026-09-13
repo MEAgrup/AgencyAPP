@@ -8,7 +8,9 @@
  * `identitas.ts` untuk Rule 2-5 (preamble Shopee, `ID Kreator` TikTok, resolusi
  * periode batch), `rekonsiliasi.ts` untuk Rule 13-16 (gerbang 0,5%, larangan
  * campur basis), `parsestatus.ts` untuk Rule 9-10 (kolom wajib + parse_status)
- * dan Rule 12 (skor netral dihapus, renormalisasi bobot dimensi).
+ * dan Rule 12 (skor netral dihapus, renormalisasi bobot dimensi), `header.ts`
+ * untuk Rule 7 (baris header dicari, bukan diasumsikan) + Rule 8 (kolom
+ * dipanen/kolom baru, G1-09).
  */
 export * from './types';
 export * from './modules';
@@ -18,3 +20,4 @@ export * from './zip-pagar';
 export * from './identitas';
 export * from './rekonsiliasi';
 export * from './parsestatus';
+export * from './header';

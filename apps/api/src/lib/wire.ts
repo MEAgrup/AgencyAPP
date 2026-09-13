@@ -9,8 +9,8 @@
 // tabel kalimat BI-nya, dan merakit kalimatnya di server adalah yang mencegah
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
-import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, productexchange, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
+import type { interview as ivcore, pdt as pdtCore, report as coreReport } from '@cdps/core';
+import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, pdt, performance, plan, plangate, portal, productexchange, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -8831,5 +8831,96 @@ export function externalServiceMapToWire(m: bridge.ExternalServiceMap): External
     external_service_type: m.externalServiceType,
     master_service_id: m.masterServiceId,
     aktif: m.aktif,
+  };
+}
+
+// ===========================================================================
+// PDT (Pusat Data Toko) — G1-09 pratinjau deteksi batch (Flow A langkah 2-5,
+// SEBELUM disimpan). `pdt.previewUploadBatch` nol tulis DB — belum ada baris
+// `pdt_upload_batch`/`pdt_file` untuk dipetakan; wire di bawah HANYA membawa
+// hasil pratinjau. Sub-langkah commit (menulis batch sungguhan) menyusul di
+// sesi berikutnya, dengan wire-nya sendiri.
+// ===========================================================================
+
+/** Satu baris tabel hasil deteksi (PRD Flow A langkah 3) — status TAMPILAN, bukan `pdt_file.parse_status` DB (dua status tambahan di sini belum berhak jadi baris DB). */
+export interface PdtPreviewBerkasWire {
+  nama: string;
+  modul_kode: string | null;
+  modul_nama: string | null;
+  ambiguous: boolean;
+  matches: string[];
+  baris_header: number | null;
+  kolom_dipanen: number;
+  kolom_baru: string[];
+  status: string; // 'ok' | 'perlu_pilih_modul' | 'gagal' | 'ditolak_pagar'
+  pesan: string | null;
+  sha256: string | null;
+  bytes: number | null;
+}
+
+/** `usulan` terisi hanya saat `status==='usulkan_ikat'`; `pesan` hanya saat `'tolak'`/`'tidak_dapat_divalidasi'` — kunci lain SELALU ada (null), bukan hilang (aturan rumah #4/O43). */
+export interface PdtPreviewIdentitasWire {
+  status: string; // 'cocok' | 'usulkan_ikat' | 'tolak' | 'tidak_dapat_divalidasi'
+  usulan: string | null;
+  pesan: string | null;
+}
+
+export interface PdtPreviewPeriodeWire {
+  status: string; // 'ok' | 'tolak'
+  mulai: string | null;
+  selesai: string | null;
+  pesan: string | null;
+}
+
+export interface PdtModuleOptionWire {
+  kode: string;
+  nama_tampilan: string;
+}
+
+export interface PdtPreviewBatchWire {
+  client_platform_id: number;
+  platform: string;
+  berkas: PdtPreviewBerkasWire[];
+  identitas: PdtPreviewIdentitasWire;
+  /** `null` HANYA bila nol berkas ber-status 'ok' sama sekali — beda dari `{status:'tolak'}` (ada berkas 'ok', tapi tak satu pun membawa periode terbaca). */
+  periode: PdtPreviewPeriodeWire | null;
+  module_options: PdtModuleOptionWire[];
+}
+
+function pdtPreviewIdentitasToWire(i: pdt.PdtPreviewIdentitas): PdtPreviewIdentitasWire {
+  return {
+    status: i.status,
+    usulan: i.status === 'usulkan_ikat' ? i.usulan : null,
+    pesan: i.status === 'tolak' || i.status === 'tidak_dapat_divalidasi' ? i.pesan : null,
+  };
+}
+
+function pdtPreviewPeriodeToWire(p: pdtCore.PdtPeriodeBatchHasil | null): PdtPreviewPeriodeWire | null {
+  if (!p) return null;
+  if (p.status === 'ok') return { status: 'ok', mulai: p.mulai, selesai: p.selesai, pesan: null };
+  return { status: 'tolak', mulai: null, selesai: null, pesan: p.pesan };
+}
+
+export function pdtPreviewBatchToWire(h: pdt.PdtPreviewBatchHasil): PdtPreviewBatchWire {
+  return {
+    client_platform_id: h.clientPlatformId,
+    platform: h.platform,
+    berkas: h.berkas.map((b) => ({
+      nama: b.nama,
+      modul_kode: b.modulKode,
+      modul_nama: b.modulNama,
+      ambiguous: b.ambiguous,
+      matches: [...b.matches],
+      baris_header: b.barisHeader,
+      kolom_dipanen: b.kolomDipanen,
+      kolom_baru: [...b.kolomBaru],
+      status: b.status,
+      pesan: b.pesan,
+      sha256: b.sha256,
+      bytes: b.bytes,
+    })),
+    identitas: pdtPreviewIdentitasToWire(h.identitas),
+    periode: pdtPreviewPeriodeToWire(h.periode),
+    module_options: h.moduleOptions.map((m) => ({ kode: m.kode, nama_tampilan: m.namaTampilan })),
   };
 }

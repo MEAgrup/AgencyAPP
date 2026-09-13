@@ -142,3 +142,31 @@ export function evaluatePdtZipPagar(paket: PdtZipPaket): PdtZipPagarHasil {
   const entri = paket.entries.map((meta) => ({ meta, keputusan: klasifikasiEntri(meta) }));
   return { ok: true, entri };
 }
+
+const PESAN_ALASAN_TOLAK_ENTRI: Record<Extract<PdtZipEntriKeputusan, { kode: 'ditolak' }>['alasan'], string> = {
+  zip_bersarang: 'adalah ZIP bersarang, tidak didukung',
+  terenkripsi: 'terenkripsi/berkata sandi, tidak dapat dibaca',
+  ekstensi_tidak_didukung: 'berekstensi tidak didukung (hanya .xlsx/.xls/.csv)',
+  zip_slip: 'memiliki path tidak valid, dilewati',
+};
+
+/**
+ * Rule 41 (G1-09): pesan BI `[...]` (aturan rumah #5) untuk satu entri
+ * ber-`keputusan.kode === 'ditolak'` — dipakai pemanggil (route pratinjau
+ * batch) untuk menampilkan berkas yang pagar tolak SEBELUM sempat diekstrak,
+ * beda dari kegagalan decode (Rule 10, `turunkanParseStatus`).
+ */
+export function formatAlasanTolakEntri(nama: string, alasan: Extract<PdtZipEntriKeputusan, { kode: 'ditolak' }>['alasan']): string {
+  return `[berkas '${nama}' ${PESAN_ALASAN_TOLAK_ENTRI[alasan]}]`;
+}
+
+const PESAN_ALASAN_TOLAK_PAKET: Record<PdtZipAlasanTolakPaket, string> = {
+  ukuran_melebihi_50mb: '[paket ZIP melebihi 50 MB]',
+  entri_melebihi_40: '[paket ZIP berisi lebih dari 40 entri]',
+  rasio_dekompresi_melebihi_100x: '[paket ZIP mencurigakan — rasio dekompresi melebihi 100:1]',
+};
+
+/** Rule 42: pesan BI `[...]` untuk paket yang ditolak SEBELUM satu entri pun diklasifikasi. */
+export function formatAlasanTolakPaket(alasan: PdtZipAlasanTolakPaket): string {
+  return PESAN_ALASAN_TOLAK_PAKET[alasan];
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluatePdtZipPagar, type PdtZipEntryMeta, type PdtZipPaket } from './zip-pagar';
+import { evaluatePdtZipPagar, formatAlasanTolakEntri, formatAlasanTolakPaket, type PdtZipEntryMeta, type PdtZipPaket } from './zip-pagar';
 
 const entri = (over: Partial<PdtZipEntryMeta> & { nama: string }): PdtZipEntryMeta => ({
   ukuranTerkompresi: 100,
@@ -146,5 +146,22 @@ describe('evaluatePdtZipPagar (G1-04)', () => {
     const diproses = hasil.entri.filter((e) => e.keputusan.kode === 'diproses');
     expect(dilewati).toHaveLength(2);
     expect(diproses).toHaveLength(13);
+  });
+});
+
+describe('formatAlasanTolakEntri (G1-09 — pesan BI Rule 41)', () => {
+  it('menyebut nama berkas dan alasannya, dalam kurung siku (aturan rumah #5)', () => {
+    expect(formatAlasanTolakEntri('rahasia.zip', 'zip_bersarang')).toBe("[berkas 'rahasia.zip' adalah ZIP bersarang, tidak didukung]");
+    expect(formatAlasanTolakEntri('rahasia.xlsx', 'terenkripsi')).toBe("[berkas 'rahasia.xlsx' terenkripsi/berkata sandi, tidak dapat dibaca]");
+    expect(formatAlasanTolakEntri('rahasia.pdf', 'ekstensi_tidak_didukung')).toBe("[berkas 'rahasia.pdf' berekstensi tidak didukung (hanya .xlsx/.xls/.csv)]");
+    expect(formatAlasanTolakEntri('../etc/passwd.xlsx', 'zip_slip')).toBe("[berkas '../etc/passwd.xlsx' memiliki path tidak valid, dilewati]");
+  });
+});
+
+describe('formatAlasanTolakPaket (G1-09 — pesan BI Rule 42)', () => {
+  it('satu pesan per alasan penolakan paket', () => {
+    expect(formatAlasanTolakPaket('ukuran_melebihi_50mb')).toBe('[paket ZIP melebihi 50 MB]');
+    expect(formatAlasanTolakPaket('entri_melebihi_40')).toBe('[paket ZIP berisi lebih dari 40 entri]');
+    expect(formatAlasanTolakPaket('rasio_dekompresi_melebihi_100x')).toBe('[paket ZIP mencurigakan — rasio dekompresi melebihi 100:1]');
   });
 });
