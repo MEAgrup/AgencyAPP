@@ -87,6 +87,22 @@ Ads atas sebuah ekspor, tanpa induk Brief dan tanpa lifecycle sendiri.
 
 *`SVC-` prefix: Service IDs are generated at closing per M0 §6; exact prefix string not spelled in the PRDs — confirm prefix label at ticketing (registry pattern implies `SVC-YYYYMM-NNNN`). Log in DECISIONS.md once fixed.
 
+**PDT (`pdt_*`) MEMINTA NOL PREFIX BARU — dan itu disengaja (2026-09-12).** Seluruh tabel
+Pusat Data Toko (`pdt_upload_batch`, `pdt_file`, `pdt_sku_master`, `pdt_fact_*`,
+`pdt_parser_modul`, `pdt_kolom_alias`, `pdt_benchmark`, `pdt_usulan*`, `pdt_laporan_kiriman`)
+memakai `bigint GENERATED ALWAYS AS IDENTITY` — preseden `client_reports`,
+`px_eligibility_policy`, dan `client_platforms`. Karena itu **`entity_prefix` tetap 44** dan
+gerbang CI prefix tidak dinaikkan untuk PDT. Tak satu pun dari tabel-tabel itu adalah entitas
+yang dirujuk manusia lewat ID; semuanya fakta, konfigurasi, atau provenance. Koreksi K-2 di
+kepala `docs/prd/CDPS_PDT_Pusat_Data_Toko.md` mencabut rujukan "(D-14)" yang PRD sumber pakai
+untuk membenarkan `bigint` — di repo ini `D-14` berarti "Disiplin Rekap Mingguan", hal yang
+sama sekali lain.
+
+Bila kelak PDT memang butuh entitas ber-ID manusia, itu **tiket tersendiri** dengan empat
+gerbang yang naik dalam **satu commit**: baris di tabel §1 ini + `INSERT entity_prefix` di
+migrasinya + entri `PREFIXES` di `packages/core/src/ident.ts` + dua gerbang hitung
+(`.github/workflows/ci.yml` **dan** `scripts/db-rebuild.sh`).
+
 **"Task" is NOT an entity.** It's a role played by AST / BKG / BRF-as-task (Ads). Module 12 adds computed fields (`turnaround_time`, `revision_turnaround`, `speed_score`, `revision_count`) onto those rows, derived from transition history — never stored as independently mutable values.
 
 ## 2. Relationship spine (mermaid)
