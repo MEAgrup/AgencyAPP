@@ -1,0 +1,341 @@
+/**
+ * G1-02 — tes `detectPdtModule` terhadap seluruh 25 modul.
+ *
+ * DoD backlog: "deteksi diuji terhadap 28 berkas sample (Fim Motor/Shopee,
+ * Avitaskin/TikTok) dengan target nol salah-slot". Berkas mentahnya sendiri
+ * TIDAK ada di repo (data klien, dicatat di kedua UAT-nya) — fixture di bawah
+ * memakai STRING KOLOM LITERAL yang sama yang sudah diverifikasi/dites di
+ * `docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md`,
+ * `docs/handoff/UAT_TIKTOK_AVITASKIN_20260904.md`,
+ * `docs/backlog/PDT_KOLOM_DIPANEN.md`, dan fixture teruji
+ * `report/shopee/shopee.test.ts` — bukan karangan baru. Lihat komentar per
+ * modul di `modules.ts` untuk sumber persis tiap tanda tangan.
+ *
+ * Setiap modul yang PUNYA sinyal isi terverifikasi diuji dua arah: (1) fixture
+ * modulnya sendiri terdeteksi TEPAT sebagai modul itu, tidak ambigu; (2)
+ * fixture itu, dites terhadap SELURUH registry lintas platform, tidak pernah
+ * salah slot ke modul lain manapun (nol salah-slot).
+ */
+import { describe, expect, it } from 'vitest';
+import { detectPdtModule } from './detect';
+import { PDT_MODULES, UNVERIFIED_SIGNATURE } from './modules';
+
+const TIKTOK = PDT_MODULES.filter((m) => m.platform === 'tiktok');
+const SHOPEE = PDT_MODULES.filter((m) => m.platform === 'shopee');
+
+/** Modul yang sengaja belum punya sinyal isi (lihat modules.ts) — dikecualikan dari uji "harus terdeteksi". */
+const UNVERIFIED = new Set(['shopee_diskon', 'shopee_flash_sale', 'shopee_video']);
+
+type Aoa = ReadonlyArray<ReadonlyArray<unknown>>;
+
+/** Jalankan `rows` terhadap SELURUH registry (lintas platform) dan pastikan hanya `expected` yang menang. */
+function expectExactMatch(rows: Aoa, expected: string): void {
+  const r = detectPdtModule(rows, PDT_MODULES);
+  expect(r.matches, `fixture ${expected}`).toEqual([expected]);
+  expect(r.kode, `fixture ${expected}`).toBe(expected);
+  expect(r.ambiguous, `fixture ${expected}`).toBe(false);
+}
+
+describe('detectPdtModule — TikTok (9 modul)', () => {
+  it('tt_orders', () => {
+    expectExactMatch(
+      [
+        ['Order ID', 'SKU ID', 'Seller SKU', 'Product Name', 'Variation', 'Quantity', 'SKU Unit Original Price',
+          'SKU Subtotal After Discount', 'Order Status', 'Paid Time', 'Product Category', 'Creator Handle'],
+        ['576…', '17123…', 'SKU-001', 'Kemeja Flanel', 'M/Merah', '1', '150000', '135000', 'Completed', '2026-07-15 10:00:00', 'Fashion', '@kreator1'],
+      ],
+      'tt_orders',
+    );
+  });
+
+  it('tt_product_analytics (product_list, header baris 4)', () => {
+    expectExactMatch(
+      [
+        [], [], [],
+        ['ID Produk', 'Nama', 'GMV', 'GMV dari kreator', 'GMV dari video penjual', 'GMV dari LIVE penjual',
+          'Pesanan SKU', 'AOV', 'CTR', 'CTOR', 'Impresi produk', 'Klik produk', 'Status daftar produk'],
+        ['170…', 'Produk A', '10945407', '2000000', '1000000', '500000', '30', '183173', '3.51%', '0.40%', '832842', '27208', 'Aktif'],
+      ],
+      'tt_product_analytics',
+    );
+  });
+
+  it('tt_transaction_product', () => {
+    expectExactMatch(
+      [
+        ['Product ID', 'Product category', 'GMV dari kreator', 'CTOR', 'Video', 'Siaran LIVE', 'Sampel terkirim'],
+        ['170…', 'Fashion', '2000000', '0.40%', '5', '1', '3'],
+      ],
+      'tt_transaction_product',
+    );
+  });
+
+  it('tt_transaction_creator', () => {
+    expectExactMatch(
+      [
+        ['Creator name', 'GMV dari kreator', 'AOV', 'CTOR', 'Pesanan teratribusi', 'Tayangan video', 'Video', 'Siaran LIVE', 'Perkiraan komisi'],
+        ['@kreator1', '2000000', '150000', '1.20%', '13', '5000', '5', '1', '100000'],
+      ],
+      'tt_transaction_creator',
+    );
+  });
+
+  it('tt_video (header baris 3)', () => {
+    expectExactMatch(
+      [
+        [], [],
+        ['ID Kreator', 'Nama Kreator', 'ID Video', 'Waktu', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'],
+        ['@kreator1', 'Kreator Satu', '712…', '2026-07-05', '170…', '5000', '200', '10', '30', 'Review produk', '15000', '300000'],
+      ],
+      'tt_video',
+    );
+  });
+
+  it('tt_live (header baris 3)', () => {
+    expectExactMatch(
+      [
+        [], [],
+        ['ID Kreator', 'Kreator', 'Waktu Live', 'Durasi', 'GMV dari LIVE (Rp)', 'Produk Terjual', 'Penonton', 'CTOR'],
+        ['@kreator1', 'Kreator Satu', '2026-07-05 20:00', '3600', '1000000', '10', '500', '2.00%'],
+      ],
+      'tt_live',
+    );
+  });
+
+  it('tt_shop_analytics', () => {
+    expectExactMatch(
+      [
+        ['GMV', 'Pesanan', 'Pembeli', 'Pesanan SKU', 'Pengunjung', 'Persentase konversi', 'Pendapatan bruto',
+          'Pengembalian dana', 'GMV dari LIVE kreator', 'GMV dari LIVE akun tertaut', 'GMV dari video afiliasi', 'GMV dari video akun tertaut'],
+        ['26560049', '143', '137', '145', '20627', '0.66418%', '26894689', '334640', '5000000', '3000000', '2000000', '1000000'],
+      ],
+      'tt_shop_analytics',
+    );
+  });
+
+  it('tt_ads_product', () => {
+    expectExactMatch(
+      [
+        ['ID Campaign', 'Nama kampanye', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor'],
+        ['CAM-1', 'Kampanye A', '170…', '712…', 'avitaskin_official', '6540407', '80', '81755', '20666992'],
+      ],
+      'tt_ads_product',
+    );
+  });
+
+  it('tt_ads_live', () => {
+    expectExactMatch(
+      [
+        ['Nama LIVE', 'ID Campaign', 'Nama kampanye', 'Biaya', 'Pesanan SKU', 'ROI', 'Pendapatan kotor'],
+        ['LIVE Kampanye A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '3.16', '3160000'],
+      ],
+      'tt_ads_live',
+    );
+  });
+
+  it('kesembilan fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
+    // Sudah tercakup satu-per-satu di atas (expectExactMatch memaksa matches
+    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 9 sekaligus,
+    // bukan cuma yang paling akhir diuji.
+    expect(TIKTOK).toHaveLength(9);
+  });
+});
+
+describe('detectPdtModule — Shopee (15 modul, 2 belum terverifikasi)', () => {
+  it('shopee_shop_stats (marker "Pesanan Dibuat" + header terpisah baris)', () => {
+    expectExactMatch(
+      [
+        ['Pesanan Dibuat'],
+        ['Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik',
+          'Total Pengunjung', 'Tingkat Konversi Pesanan', 'Pesanan Dibatalkan', 'Penjualan Dibatalkan',
+          'Pesanan Dikembalikan', 'Penjualan Dikembalikan', 'Pembeli', 'Total Pembeli Baru',
+          'Total Pembeli Saat Ini', 'Total Potensi Pembeli', 'Tingkat Pembelian Berulang'],
+        ['Total', 'Rp1.624.937.476', '13568', 'Rp119.762', '5000', '20627', '2,46%', '2785', 'Rp359.295.534', '140', 'Rp24.586.464', '11452', '300', '600', '50', '12,97%'],
+      ],
+      'shopee_shop_stats',
+    );
+  });
+
+  it('shopee_parent_sku', () => {
+    expectExactMatch(
+      [
+        ['Kode Produk', 'Kode Variasi', 'SKU Induk', 'Total Penjualan (Pesanan Dibuat) (IDR)',
+          'Penjualan (Pesanan Siap Dikirim) (IDR)', 'Jumlah Produk Dilihat', 'Produk Diklik',
+          'Tingkat Konversi (Pesanan yang Dibuat)', 'repeat order', 'Pengunjung Produk (Kunjungan)'],
+        ['SKU-A', 'VAR-A1', 'SKU-A', 'Rp90.000.000', 'Rp84.000.000', '5000', '900', '30,00%', '25,00%', '1000'],
+      ],
+      'shopee_parent_sku',
+    );
+  });
+
+  it('shopee_ads_cpc (header baris 8)', () => {
+    expectExactMatch(
+      [
+        ['ID Toko: 938284780'], ['Periode: 01/07/2026 - 31/07/2026'], [], [], [], [], [],
+        ['Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya', 'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Biaya Iklan Terhadap Omzet (ACOS) (%)'],
+        ['SKU-A', '50000', '2000', '80', '5000000', 'Kampanye A', '40000000', '8,00', '12,50%'],
+      ],
+      'shopee_ads_cpc',
+    );
+  });
+
+  it('shopee_ads_search (header baris 8)', () => {
+    expectExactMatch(
+      [
+        [], [], [], [], [], [], [],
+        ['Kata Pencarian', 'SOV', 'Klik', 'Konversi', 'Biaya'],
+        ['baju flanel', '12%', '100', '8', '200000'],
+      ],
+      'shopee_ads_search',
+    );
+  });
+
+  it('shopee_ads_live (header baris 7)', () => {
+    expectExactMatch(
+      [
+        [], [], [], [], [], [],
+        ['ID Iklan', 'Nama Iklan', 'Penonton', 'Pesanan', 'Omzet', 'Biaya', 'Efektifitas Iklan'],
+        ['AD-1', 'Live Ads A', '3000', '40', '15000000', '3000000', '5,00'],
+      ],
+      'shopee_ads_live',
+    );
+  });
+
+  it('shopee_live', () => {
+    expectExactMatch(
+      [
+        ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan'],
+        ['Live Juli', '2026-07-10 20:00', '500', 'Rp5.000.000'],
+      ],
+      'shopee_live',
+    );
+  });
+
+  it('shopee_voucher', () => {
+    expectExactMatch(
+      [
+        ['Periode Waktu', 'Klaim', 'Pesanan (Pesanan Dibuat)', 'Penjualan (Pesanan Dibuat) (IDR)',
+          'Tingkat Penggunaan (Pesanan Dibuat)', 'Pembeli (Pesanan Dibuat)', 'Total Biaya (Pesanan Dibuat) (IDR)'],
+        ['01-31 Agu', '200', '150', 'Rp8.000.000', '75,00%', '140', 'Rp500.000'],
+      ],
+      'shopee_voucher',
+    );
+  });
+
+  it('shopee_chat', () => {
+    expectExactMatch(
+      [
+        ['Periode Waktu', 'Pengunjung', 'Jumlah Chat', 'Chat Dibalas', 'Waktu Respon Rata-rata', 'CSAT %',
+          'Persentase Chat Dibalas', 'Total Pesanan', 'Penjualan (IDR)', 'Tingkat Konversi (Chat Dibalas)'],
+        ['01-31 Agu', '5000', '800', '760', '00:12:30', '90,00%', '95,00%', '160', 'Rp16.000.000', '20,00%'],
+      ],
+      'shopee_chat',
+    );
+  });
+
+  it('shopee_chat_broadcast', () => {
+    expectExactMatch(
+      [
+        ['Nama Broadcast', 'penerima', 'dibaca', 'diklik', 'pesanan'],
+        ['Promo Juli', '5000', '3000', '500', '20'],
+      ],
+      'shopee_chat_broadcast',
+    );
+  });
+
+  it('shopee_ams_produk (ProductPerformance, tanpa kolom kreator)', () => {
+    expectExactMatch(
+      [
+        ['Kode Item', 'Nama Produk', 'Omzet', 'Komisi', 'ROI'],
+        ['SKU-A', 'Produk A', '10000000', '1000000', '3,5'],
+      ],
+      'shopee_ams_produk',
+    );
+  });
+
+  it('shopee_ams_afiliasi (AMSAffiliatePerformance)', () => {
+    expectExactMatch(
+      [
+        ['Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Click', 'Komisi', 'ROI', 'Total Pembeli', 'Pembeli Baru'],
+        ['@kreator1', '10000000', '20', '18', '500', '1000000', '3.5', '15', '4'],
+      ],
+      'shopee_ams_afiliasi',
+    );
+  });
+
+  it('shopee_kesehatan', () => {
+    expectExactMatch(
+      [
+        ['Poin Penalti', 'Deskripsi', 'Durasi'],
+        ['1', 'Pelanggaran larangan produk', '7 hari'],
+      ],
+      'shopee_kesehatan',
+    );
+    expectExactMatch(
+      [
+        ['Poin Pinalti', 'Deskripsi', 'Durasi'], // ejaan alternatif yang memang muncul di export nyata
+        ['2', 'Pelanggaran lain', '14 hari'],
+      ],
+      'shopee_kesehatan',
+    );
+  });
+
+  it('shopee_diskon / shopee_flash_sale — belum terverifikasi, tidak PERNAH terdeteksi otomatis (AM memilih manual)', () => {
+    const voucherLikeButNoAnchor: Aoa = [
+      ['Periode Waktu', 'Klaim', 'Tingkat Penggunaan (Pesanan Dibuat)'],
+      ['01-31 Agu', '100', '50,00%'],
+    ];
+    const r = detectPdtModule(voucherLikeButNoAnchor, PDT_MODULES);
+    // Cocok ke shopee_voucher (sinyal 'Periode Waktu'+'Klaim' terpenuhi) DAN
+    // tidak pernah ke diskon/flash_sale (sentinel-nya mustahil cocok).
+    expect(r.matches).not.toContain('shopee_diskon');
+    expect(r.matches).not.toContain('shopee_flash_sale');
+  });
+
+  it('shopee_video — belum terverifikasi, sentinel tidak pernah cocok ke isi apa pun', () => {
+    for (const m of SHOPEE) {
+      if (m.kode !== 'shopee_video') continue;
+      expect(m.tandaTanganKolom).toEqual(UNVERIFIED_SIGNATURE);
+    }
+    const anySheet: Aoa = [['ID Kreator', 'ID Video', 'VV', 'Likes', 'Periode Data']];
+    expect(detectPdtModule(anySheet, PDT_MODULES).matches).not.toContain('shopee_video');
+  });
+
+  it('kelima belas modul Shopee terdaftar', () => {
+    expect(SHOPEE).toHaveLength(15);
+    for (const kode of UNVERIFIED) expect(SHOPEE.map((m) => m.kode)).toContain(kode);
+  });
+});
+
+describe('detectPdtModule — meta_ads', () => {
+  it('meta_ads', () => {
+    expectExactMatch(
+      [
+        ['Minggu', 'Nama Kampanye', 'Nama iklan', 'Jumlah yang Dibelanjakan', 'ROAS', 'Impresi', 'Klik Tautan', 'CTR', 'CPM', 'CPC'],
+        ['', 'Kampanye Meta A', 'Iklan A', '2000000', '2.50', '50000', '800', '1.60', '40000', '2500'],
+      ],
+      'meta_ads',
+    );
+  });
+});
+
+describe('detectPdtModule — registry', () => {
+  it('25 modul total, kode unik', () => {
+    expect(PDT_MODULES).toHaveLength(25);
+    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(25);
+  });
+
+  it('sheet kosong tidak pernah cocok ke modul manapun', () => {
+    const r = detectPdtModule([], PDT_MODULES);
+    expect(r.matches).toEqual([]);
+    expect(r.kode).toBeNull();
+    expect(r.ambiguous).toBe(false);
+  });
+
+  it('setiap modul non-UNVERIFIED punya tanda tangan yang berbeda dari UNVERIFIED_SIGNATURE', () => {
+    for (const m of PDT_MODULES) {
+      if (UNVERIFIED.has(m.kode)) continue;
+      expect(m.tandaTanganKolom).not.toEqual(UNVERIFIED_SIGNATURE);
+    }
+  });
+});

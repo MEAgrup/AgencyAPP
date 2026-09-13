@@ -87,3 +87,8 @@ export * as dailyops from './dailyops';
 // CR-12 — aset dokumen laporan yang ditempel (CSS, ikon, Chart.js, boot Print).
 // Diekspor supaya tes di luar `packages/core` bisa memeriksa isinya.
 export * as docassets from './docassets';
+// G1-02 — registry modul parser PDT (Pusat Data Toko): 25 tanda tangan kolom
+// (menyatukan baseline/report/report.shopee/adsscanner.tiktok detect.ts +
+// modul baru) + pencocok generik `detectPdtModule` (Rule 6/7). Cermin
+// `pdt_parser_modul`/`pdt_kolom_alias`, dijaga `packages/db/src/pdt.registry.test.ts`.
+export * as pdt from './pdt';
