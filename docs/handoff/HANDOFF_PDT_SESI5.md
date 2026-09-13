@@ -1,15 +1,18 @@
 # HANDOFF — PDT (Pusat Data Toko) SESI 5 → SESI 6
 
-> **Dibuat 2026-09-13, diperbarui sesi yang sama setelah G1-04 selesai.** Baca
-> berkas ini sebelum lanjut. Cabang kerja sesi ini:
-> `claude/inspiring-lovelace-d9x7tl`.
+> **Dibuat 2026-09-13, diperbarui sesi yang sama setelah G1-04 selesai DAN
+> setelah PR #359 di-merge.** Baca berkas ini sebelum lanjut.
 >
-> **Status: G1-03 SELESAI dan G1-04 SELESAI**, keduanya dalam SATU sesi (PR
-> #359 — awalnya dibuka untuk G1-03, diperluas dengan komit G1-04 di branch
-> yang sama, bukan dua PR terpisah; lihat §0). Sesi 6 lanjut ke **G1-05**
-> (parse **di server**, DI SINI-lah `bacaDanEkstrakPdtZip` dan
-> `parsePdtAngka` yang sesi ini bangun BENAR-BENAR dipakai membaca upload
-> nyata) — lihat §4.
+> **Status: G1-03 SELESAI dan G1-04 SELESAI, PR #359 SUDAH DI-MERGE ke `main`
+> (squash, `493ac3f`).** CI job `db-and-migrations` sempat memerah di PR
+> #359 — bug pra-ada yang sama seperti §1 (bukan milik PR #359), di-standing-
+> down + satu re-run non-flaky (gagal lagi dengan error identik, mengonfirmasi
+> bukan flake), lalu di-merge. Sesi 6 mulai dari `main` (branch baru,
+> `claude/inspiring-lovelace-d9x7tl` boleh dipakai ulang lewat
+> `git checkout -B` dari `origin/main` — riwayatnya sudah ter-squash ke
+> `main`, jangan menumpuk di atasnya) dan lanjut ke **G1-05** (parse **di
+> server**, DI SINI-lah `bacaDanEkstrakPdtZip` dan `parsePdtAngka` yang sesi
+> ini bangun BENAR-BENAR dipakai membaca upload nyata) — lihat §4.
 
 ---
 
@@ -17,15 +20,8 @@
 
 Instruksi sesi ini: "baca handoff sesi 4 dan lanjutkan" → G1-03 selesai (lihat
 §2) → user minta "lanjut g1-04" di percakapan yang sama → G1-04 juga selesai
-(§3), semuanya di satu sesi/branch berkelanjutan.
-
-**Cek sebelum sesi 6 mulai:** PR #359 statusnya saat berkas ini ditulis
-**open, belum di-merge** (title masih menyebut "G1-03" saja — perlu
-diperbarui menyebut G1-04 juga, atau dipecah kalau reviewer minta). Kalau
-sesi 6 mulai dan PR #359 SUDAH di-merge: lanjut normal dari `main`. Kalau
-BELUM: cek CI-nya dulu (kemungkinan flake `gelombang-c-showcase.e2e.test.ts`
-yang sama seperti PR #356/#357, root-cause `HANDOFF_PDT_SESI2.md` §4 — bukan
-punya G1-03/G1-04).
+(§3) → user minta "merge PR" → PR #359 di-merge (squash, `493ac3f`), semuanya
+di satu sesi/branch berkelanjutan.
 
 **G1-03** — `parsePdtAngka` (`packages/core/src/pdt/angka.ts`): normalisasi
 angka terpusat PDT, tiga keadaan (sel kosong ⇒ 0, tak-terbaca ⇒ NaN, kolom
@@ -42,10 +38,11 @@ jujur:** signed URL BELUM diuji terhadap Storage live (nol
 
 ## 1. Yang perlu ditindaklanjuti sesi ini (sebelum atau sambil mulai G1-05)
 
-1. Cek status PR #359 (lihat §0). Kalau CI merah dengan
+1. PR #359 **sudah di-merge** — tidak ada tindak lanjut di situ. Kalau
+   `db-and-migrations` merah lagi di PR sesi 6 dengan
    `gelombang-c-showcase.e2e.test.ts` / fixture `client_platforms` collision:
-   bug pra-ada yang sama, standing-down + satu re-run, JANGAN diperbaiki di
-   PR ini.
+   bug pra-ada yang SAMA (dikonfirmasi ulang non-flaky di PR #359 — re-run
+   gagal identik), standing-down + satu re-run, JANGAN diperbaiki di PR ini.
 2. **Jalankan tes `describeLive` di `apps/api/src/lib/pdt-storage.test.ts`**
    di lingkungan yang punya `SUPABASE_SERVICE_ROLE_KEY` +
    `NEXT_PUBLIC_SUPABASE_URL` sungguhan (project `CDPS SG`,
