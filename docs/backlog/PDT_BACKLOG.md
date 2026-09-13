@@ -313,6 +313,18 @@ membedakan "tidak diunggah" dari "gagal parse".
 **DoD:** `route-parity` hijau (`KNOWN_GAPS` kosong) · `shape-parity` hijau · tiap field wire
 punya `null` eksplisit.
 
+> **Status 2026-09-13 (sub-langkah 1/3 SELESAI, lihat `docs/DECISIONS.md` baris teratas)** —
+> `POST /account/pdt/batches/preview` (`packages/domain/src/pdt.ts` `previewUploadBatch` +
+> `apps/api/.../pdt/batches/preview/route.ts`) menutup bullet 1-2 (satu ZIP, tabel deteksi
+> SEBELUM disimpan) dan separuh bullet 4 dari sisi identitas/periode (Rule 2-5 DIPANGGIL
+> untuk pertama kalinya dari alur nyata) — **nol tulis DB, nol upload storage**. Kontrak wire
+> (`PdtPreviewBatchWire` + FE mirror `web-internal/src/lib/pdt.ts`) sudah ada; **halaman UI-nya
+> BELUM** (tidak ada tombol/form yang memanggil route ini hari ini). **Belum dibangun:** dropdown
+> override AM per berkas (bullet 3 — moduleOptions sudah dikirim, penegakan overridenya
+> butuh commit endpoint), UI status paket (bullet 4, batch belum ada untuk dibaca statusnya),
+> commit sungguhan (menulis `pdt_upload_batch`/`pdt_file`, upload ke `pdt-raw`, rekonsiliasi
+> Rule 13-16), dan error path bullet 5 (butuh baris batch untuk ditandai `ditolak`).
+
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
 hanya bisa menyentuh baris DB. Menghapus **objek storage** butuh panggilan API.

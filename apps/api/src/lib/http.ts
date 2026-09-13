@@ -100,6 +100,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   OutstandingTotalError: 400, // finance.OutstandingTotalError
   OverVerificationError: 400, // finance.OverVerificationError
   PageCursorError: 400, // core page.PageCursorError — a cursor this server did not mint
+  PdtValidationError: 400, // pdt.ValidationError (G1-09)
   PerformanceValidationError: 400, // performance.ValidationError
   ProductExchangeValidationError: 400, // productexchange.ValidationError (PX-M2a)
   ReqValidationError: 400, // req.ValidationError
@@ -139,6 +140,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   MarketingForbiddenError: 403, // marketing.ForbiddenError
   MilestoneForbiddenError: 403, // milestone.ForbiddenError
   MslForbiddenError: 403, // msl.ForbiddenError
+  PdtForbiddenError: 403, // pdt.ForbiddenError (G1-09)
   PerformanceForbiddenError: 403, // performance.ForbiddenError
   PortalForbiddenError: 403, // portal.ForbiddenError
   ProductExchangeForbiddenError: 403, // productexchange.ForbiddenError (PX-M2a)
@@ -170,6 +172,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   MarketingNotFoundError: 404, // marketing.NotFoundError
   MilestoneNotFoundError: 404, // milestone.NotFoundError
   NotFoundError: 404, // demo.NotFoundError (see auth.NotFoundError note above)
+  PdtNotFoundError: 404, // pdt.NotFoundError (G1-09)
   PerformanceNotFoundError: 404, // performance.NotFoundError
   ProductExchangeNotFoundError: 404, // productexchange.NotFoundError (PX-M2a)
   ReqNotFoundError: 404, // req.NotFoundError

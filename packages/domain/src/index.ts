@@ -193,3 +193,10 @@ export * as bridge from './bridge';
 // `adsscanner_benchmark`. Pembaca kelayakan SKU (Flow D PRD) lahir di PX-M2b
 // bersama M3 (`px_sku`). Lihat `docs/DECISIONS.md` 2026-09-12.
 export * as productexchange from './productexchange';
+// PDT (Pusat Data Toko), G1-01..09 — satu lapisan fakta yang menggantikan AM
+// Baseline/AM Co-Pilot/Report Engine TikTok/Report Engine Shopee (PDT-17
+// strangler). `pdt.ts` sampai G1-08 hanya predikat izin (nol pemanggil nyata);
+// G1-09 (`previewUploadBatch`) adalah pemanggil PERTAMA yang menyambungkan
+// `@cdps/core` `pdt` (deteksi/identitas/rekonsiliasi/parsestatus, murni) ke
+// baris `client_platforms`/`clients` sungguhan. Lihat `docs/prd/CDPS_PDT_Pusat_Data_Toko.md`.
+export * as pdt from './pdt';
