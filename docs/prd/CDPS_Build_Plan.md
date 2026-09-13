@@ -38,6 +38,8 @@
 | 17 | `CDPS_Module17_AI_Optimizer.md` | **New — added 2026-08-28** (divisi eksekusi AI Optimizer: optimasi SKU + AI video, dengan jalur balik bernomor ke STRG). |
 | 18 | `CDPS_Module18_Store_Ops.md` | **New — added 2026-09-08** (divisi Store Operation: baris SKU `SKU-` sebagai unit kerja, mesin #32, dinding dua penulis AM↔Store Ops). Ketokan pemilik K-4/K-5/K-6 (2026-09-07) + pembagian peran (2026-09-08), `docs/DECISIONS.md`. |
 | 19 | `CDPS_Module19_Creative_Daily_Ops.md` | **New — added 2026-09-09** (ketokan D1/D3/D4/D5/D8 2026-09-09; realisasi bagian "jadwal harian leader" dari K-1 2026-09-07). Lapisan RENCANA di bawah lapisan eksekusi M7: slot produksi harian per studio, ketidaktersediaan produksi PIC, penyelesaian hari-sama. Separuh `SMO & Content Strategist` DITAHAN — lihat `DECISIONS.md` §Open `M19-SCS-ENGINE`. |
+| PX | `CDPS_ProductExchange_M1_M2.md` | **New — added 2026-09-12** (Product Exchange; bukan modul bernomor. PX-M2a sudah mendarat; PX-M2b + M3 menyusul). |
+| PDT | `CDPS_PDT_Pusat_Data_Toko.md` | **New — added 2026-09-12** (Pusat Data Toko; bukan modul bernomor, pola sama PX). Satu lapisan fakta yang menggantikan **empat** tool: AM Baseline (Riset Awal + Video Factory), AM Co-Pilot, Report Engine TikTok, Report Engine Shopee. 10 keputusan terkunci `PDT-15`…`PDT-27` (`docs/DECISIONS.md` 2026-09-12) + backlog gelombang G1–G5 di `docs/backlog/PDT_BACKLOG.md`. **Status: dokumen saja, nol migrasi** — G5 diblokir (P-02/P-03), 6 dari 11 asumsi masih menunggu manusia. |
 | — | `CDPS_Build_Plan.md` (this file) | New |
 
 *"Use your existing copy" = the file from the original batch is already final; no content changed, so no regenerated version is issued (avoids accidental drift). This manifest supersedes README v2's file list.*
