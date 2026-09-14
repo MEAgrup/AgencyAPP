@@ -227,10 +227,24 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     platform: 'shopee',
     namaTampilan: 'Shopee Ads — Iklan Keseluruhan (CPC)',
     tandaTanganKolom: { must: ['Kode Produk', 'Dilihat', 'Biaya'] },
-    barisHeaderHint: 8, // PRD §7.2 + PDT_KOLOM_DIPANEN §2.3: "header baris 8"
+    barisHeaderHint: 8, // PRD §7.2 + PDT_KOLOM_DIPANEN §2.3: "header baris 8"; DIKONFIRMASI baris 8 persis lewat sample asli Fim Motor sesi 19.
+    // `ID Toko`/`Periode` DIHAPUS dari daftar ini sesi 19 (docs/DECISIONS.md
+    // 2026-09-14 modul KEENAM) — keduanya PREAMBLE (baris 1-6, divalidasi
+    // `ekstrakPreambleShopee`/Rule 2), BUKAN kolom baris header. Menaruhnya di
+    // sini membuat `validasiKolomWajib` (yang memeriksa SELURUH kolomDipanen
+    // terhadap SATU baris header saja) SELALU gagal untuk berkas ASLI apa pun
+    // — bug laten sejak G1-02, tidak pernah tertangkap karena fixture tes
+    // sebelum sesi ini menaruh 'ID Toko'/'Periode' sebagai SEL header buatan
+    // (tidak merefleksikan bentuk berkas asli). `shopee_ads_live`/
+    // `shopee_ads_search` tidak pernah membuat kesalahan yang sama — preseden
+    // yang benar, bukan modul ini. Kolom ACOS DIKOREKSI ke ejaan PERSIS sample
+    // asli (`Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)`) —
+    // ejaan lama (`Biaya Iklan Terhadap Omzet (ACOS) (%)`) adalah TEBAKAN
+    // (PDT_KOLOM_DIPANEN.md §2.3 sendiri menulis "mis." di depannya) yang
+    // TIDAK PERNAH cocok dengan berkas nyata mana pun.
     kolomDipanen: [
-      'ID Toko', 'Periode', 'Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya',
-      'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Biaya Iklan Terhadap Omzet (ACOS) (%)',
+      'Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya',
+      'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)',
     ],
     wajib: false,
   },
@@ -366,20 +380,38 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     kode: 'shopee_ams_produk',
     platform: 'shopee',
     namaTampilan: 'Shopee AMS — Performa Produk (Afiliasi)',
-    // Sama persis `report/shopee/detect.ts` CONTENT_SIGNATURES.aff_product.
-    tandaTanganKolom: { must: ['Omzet', 'Nama Produk'], mustNot: ['Username', 'Kreator', 'Creator'] },
+    // Dikoreksi sesi 20 (docs/DECISIONS.md 2026-09-14) terhadap sample EKSPOR ASLI
+    // (Fim Motor, `ProductPerformance_*.csv`) — ejaan lama ('Nama Produk'/'Omzet'/
+    // 'Komisi') TIDAK PERNAH cocok berkas nyata: header sungguhan ber-'Nama Item'
+    // (bukan 'Nama Produk' — deteksi lama gagal total, bukan cuma kolomDipanen).
+    // 'Kode Item' (satu-satunya identitas modul ini yang tidak dimiliki
+    // `shopee_ams_afiliasi`) dipakai sebagai penanda `must`, `mustNot 'ID
+    // Affiliates'` menjaga dua modul tetap terpisah (bukan cermin
+    // `report/shopee/detect.ts` lagi — signature lama itu sendiri tidak pernah
+    // diverifikasi ke sample asli).
+    tandaTanganKolom: { must: ['Kode Item', 'Omzet'], mustNot: ['ID Affiliates'] },
     barisHeaderHint: 1,
-    kolomDipanen: ['Kode Item', 'Omzet', 'Nama Produk', 'Komisi', 'ROI'],
+    kolomDipanen: ['Kode Item', 'Nama Item', 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi Komisi(Rp)', 'ROI'],
     wajib: false,
   },
   {
     kode: 'shopee_ams_afiliasi',
     platform: 'shopee',
     namaTampilan: 'Shopee AMS — Performa Afiliasi (Kreator)',
-    // Sama persis `report/shopee/detect.ts` CONTENT_SIGNATURES.aff_creator.
+    // Tanda tangan (substring, `detect.ts` `containsSomewhere`) TIDAK berubah —
+    // 'Omzet'/'Username' tetap cocok sebagai SUBSTRING dari 'Omzet Penjualan(Rp)'/
+    // 'Username Affiliate' sungguhan, jadi deteksi modul ini SUDAH benar sejak
+    // awal. `kolomDipanen` DIKOREKSI sesi 20 (docs/DECISIONS.md 2026-09-14) —
+    // `validasiKolomWajib` (exact PER SEL, beda dari deteksi) memakai ejaan lama
+    // ('Username'/'Omzet'/'Komisi') yang TIDAK PERNAH cocok berkas nyata
+    // (`AMSAffiliatePerformance_*.csv`: 'Username Affiliate'/'Omzet
+    // Penjualan(Rp)'/'Estimasi Komisi(Rp)') — bug laten sejak G1-02, modul ini
+    // SELALU `parse_status='gagal'` untuk berkas asli walau modul KELIMA (sesi
+    // 17) sudah menulis `pdt_fact_creator_period` dari sini; fixture tes lama
+    // memalsukan header persis kelas yang sama dengan `shopee_ads_cpc`.
     tandaTanganKolom: { must: ['Omzet'], anyOf: [{ must: ['Username'] }, { must: ['Kreator'] }, { must: ['Creator'] }] },
     barisHeaderHint: 1,
-    kolomDipanen: ['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Komisi', 'ROI'],
+    kolomDipanen: ['ID Affiliates', 'Username Affiliate', 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi Komisi(Rp)', 'ROI'],
     wajib: false,
   },
   {

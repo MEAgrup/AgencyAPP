@@ -238,25 +238,47 @@ Bucket 2 (derived-add — `report/shopee/metrik.ts:250` `pengunjung_produk`, sum
 | `Pengunjung Produk (Kunjungan)` (alias: `pengunjung produk`) | -- konsumen: dim product_performance(0.14), sumbu X 4-kuadran Shopee (`report/shopee/metrik.ts:747-749` `computeQuadrants`) | sumbu traffic kuadran kolaps → dimensi 0.14 tak bisa dihitung |
 
 ### 2.3 `shopee_ads_cpc` — `Data+Keseluruhan+Iklan+Shopee-*.csv` (header baris 8)
-Bucket 1:
+> **Dikoreksi sesi 19 (docs/DECISIONS.md 2026-09-14 modul KEENAM) terhadap sample EKSPOR ASLI
+> (Fim Motor)** — dua koreksi terhadap versi sebelumnya di sini, keduanya TEBAKAN yang TIDAK
+> PERNAH cocok berkas nyata: (1) `ID Toko`/`Periode` adalah PREAMBLE (baris 1-6, Rule 2),
+> **BUKAN** kolom baris header — dipindah dari bucket 1 di bawah (dulu ditulis seolah kolom
+> header, sempat membuat `kolomDipanen`/`pdt_parser_modul` SALAH selama G1-02 s.d. sesi 18: baris
+> header manapun tidak akan pernah punya sel bernama "ID Toko"/"Periode" secara harfiah). (2)
+> Kolom ACOS **bukan** "mis." lagi — ejaan PERSIS sample asli: `Persentase Biaya Iklan terhadap
+> Penjualan dari Iklan (ACOS)`. **Grain baris TERBUKTI per IKLAN** (bukan per produk) — baris
+> "Shop GMV Max" di sample asli TIDAK punya `Kode Produk` sama sekali (iklan toko, bukan iklan
+> produk) tapi tetap baris data sah; `kampanye_id` (`pdt_fact_ads`) karena itu memakai `nama
+> iklan`, bukan `Kode Produk` (lihat `packages/core/src/pdt/fakta.ts` docblock kepala berkas untuk
+> rincian). `Kode Produk` **TIDAK** dipakai sebagai `pdt_fact_ads.sku_id` (dikoreksi dari baris di
+> bawah) — ia level PRODUK INDUK, `pdt_sku_master` berkunci PER VARIAN, jadi lookup langsung akan
+> mengarang varian; `sku_id` modul ini tetap `null` (Open `G1-09-2BII-ADS-CPC-SKU`).
+
+Preamble (Rule 2, DIVALIDASI terpisah dari kolom baris header — lihat `ekstrakPreambleShopee`,
+bukan bagian `kolomDipanen`):
 
 | Kolom | Konsumen |
 |---|---|
-| preamble `ID Toko` / `Periode` | -- konsumen: identitas toko (Rule 2), periode batch (Rule 5) |
-| `Kode Produk` | -- konsumen: pdt_fact_ads.sku_id |
-| `Dilihat` | -- konsumen: pdt_fact_ads.impresi |
-| `Klik` (`Jumlah Klik`) | -- konsumen: pdt_fact_ads.klik |
+| `ID Toko` | -- konsumen: identitas toko (Rule 2) |
+| `Periode` | -- konsumen: periode batch (Rule 5) |
+
+Bucket 1 (kolom baris header sesungguhnya):
+
+| Kolom | Konsumen |
+|---|---|
+| `nama iklan` | -- konsumen: pdt_fact_ads.kampanye_id (KUNCI baris — bukan Kode Produk, lihat catatan di atas) |
+| `Kode Produk` | -- konsumen: identitas produk untuk konsumen LAIN (bukan `sku_id`, lihat catatan di atas — bisa `'-'` untuk iklan toko) |
+| `Dilihat` | -- konsumen: pdt_fact_ads.tayangan |
+| `Jumlah Klik` | -- konsumen: pdt_fact_ads.klik |
 | `Konversi` | -- konsumen: pdt_fact_ads.pesanan_sku |
 | `Biaya` | -- konsumen: pdt_fact_ads.biaya, dim roas_channel(0.22) |
+| `omzet penjualan` | -- konsumen: pdt_fact_ads.gmv, dim roas_channel(0.22) |
+| `Efektifitas Iklan` | -- konsumen: pdt_fact_ads.roas, dim roas_channel(0.22) (`metrik.ts:464`) |
 
 Bucket 2 (derived-add — `report/shopee/metrik.ts:460-477` `ads_toko`/`ads_produk`/`ads_banner`):
 
 | Kolom | Konsumen | Dampak bila hilang |
 |---|---|---|
-| `nama iklan` | -- konsumen: dim roas_channel(0.22) label kampanye | kampanye tak bisa dikelompokkan |
-| `omzet penjualan` | -- konsumen: pdt_fact_ads.gmv, dim roas_channel(0.22) | ROAS Shopee kehilangan sisi pendapatan |
-| `Efektifitas Iklan` (ROAS) | -- konsumen: dim roas_channel(0.22) (`metrik.ts:464`) | dimensi 0.22 kehilangan input utama |
-| kolom `(ACOS)` (mis. `Biaya Iklan Terhadap Omzet (ACOS) (%)`) | -- konsumen: `HealthAds.acos`, B-4.3 (`metrik.ts:465-466`) | ACOS toko tak terhitung |
+| `Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)` | -- konsumen: `HealthAds.acos`, B-4.3 (`metrik.ts:465-466`) — TIDAK ada kolom skema `pdt_fact_ads` untuknya, konsumennya domain LAIN | ACOS toko tak terhitung |
 
 ### 2.4 `shopee_ads_search` — `Search-Ads-Overall-Data-*.csv` (header baris 8)
 Bucket 1: `klik`, `konversi` ⇒ `pdt_fact_ads`.
@@ -287,9 +309,20 @@ Bucket 1: waktu respon, % dibalas, CSAT, konversi chat (`shopee_chat`); penerima
 pesanan (`shopee_chat_broadcast`) ⇒ dimensi layanan / CRM. Tidak ada baris bucket 2.
 
 ### 2.10 `shopee_ams_produk` / `shopee_ams_afiliasi`
-Bucket 1: `Kode Item`/`ID Affiliates`, omzet, **`komisi`**, ROI ⇒ sinyal PX sisi Shopee /
-`pdt_fact_creator_period` Shopee. `komisi` di sini adalah sumber **`commission_pct`** Shopee untuk
-PX Flow D (celah PX #1, §4) — sudah bucket 1, bukan tambahan baru. Tidak ada baris bucket 2.
+> **Ejaan kolom DIKOREKSI sesi 20 (docs/DECISIONS.md 2026-09-14) terhadap sample EKSPOR ASLI**
+> (Fim Motor, `ProductPerformance_*.csv` + `AMSAffiliatePerformance_*.csv`) — ejaan sebelumnya di
+> sini ('Nama Produk' untuk `shopee_ams_produk`; 'Username'/'Omzet'/'Komisi' polos untuk
+> keduanya) TIDAK PERNAH cocok berkas nyata: header sungguhan ber-`Nama Item` (bukan `Nama
+> Produk` — deteksi `shopee_ams_produk` GAGAL TOTAL, bukan cuma kolomDipanen), `Username
+> Affiliate` (bukan `Username` polos), `Omzet Penjualan(Rp)` (bukan `Omzet` polos), `Estimasi
+> Komisi(Rp)` (bukan `Komisi` polos). Tabel di bawah sudah ejaan yang BENAR.
+
+Bucket 1: `Kode Item` (`shopee_ams_produk`) / `ID Affiliates`+`Username Affiliate`
+(`shopee_ams_afiliasi`), `Omzet Penjualan(Rp)`, **`Estimasi Komisi(Rp)`**, `ROI` ⇒ sinyal PX sisi
+Shopee / `pdt_fact_creator_period` Shopee (afiliasi saja — `shopee_ams_produk` grain PER PRODUK,
+lihat catatan `fakta.ts` kenapa saudaranya TIDAK dipetakan ke tabel per-kreator ini). `Estimasi
+Komisi(Rp)` di sini adalah sumber **`commission_pct`** Shopee untuk PX Flow D (celah PX #1, §4) —
+sudah bucket 1, bukan tambahan baru. Tidak ada baris bucket 2.
 
 ### 2.11 `shopee_kesehatan` — **MODUL BARU, tidak ada di §7 sama sekali**
 Bucket 2 (derived-add — modul penuh, `report/shopee/metrik.ts:516-540` `parseKesehatan`,
