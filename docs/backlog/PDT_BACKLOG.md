@@ -411,6 +411,10 @@ punya `null` eksplisit.
 > kebetulan cocok, bukan keanggotaan array sungguhan), sekarang diperbaiki. **Sisa 23 modul/3
 > tabel fakta lain BELUM disentuh** — lihat `docs/handoff/HANDOFF_PDT_SESI15.md` untuk kandidat
 > berikutnya.
+>
+> **Status 2026-09-14 (PR #368 DI-MERGE ke `main`, `docs/handoff/HANDOFF_PDT_SESI16.md`)** —
+> seluruh isi sub-langkah 2a+2b-i+2b-ii (dua modul di atas) sekarang di `main`, bukan lagi di
+> branch PR terpisah. Sesi berikutnya mulai dari `main` langsung.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
