@@ -4,7 +4,7 @@
  * request shape (endpoint, apikey header).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { passwordGrant, signOut } from './gotrue';
+import { passwordGrant, refreshGrant, signOut } from './gotrue';
 import { UnauthorizedError } from './http';
 
 const prevUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -52,6 +52,35 @@ describe('passwordGrant', () => {
   it('throws a server error when Supabase is unconfigured', async () => {
     delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     await expect(passwordGrant('a@b.c', 'pw', vi.fn())).rejects.toThrow(/not configured/);
+  });
+});
+
+describe('refreshGrant', () => {
+  it('exchanges a refresh token for a new session at the refresh_token endpoint', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://proj.supabase.co/auth/v1/token?grant_type=refresh_token');
+      const headers = init?.headers as Record<string, string>;
+      expect(headers.apikey).toBe('anon-key');
+      expect(JSON.parse(init?.body as string)).toEqual({ refresh_token: 'old-r' });
+      return jsonResponse({ access_token: 'new.a.t', refresh_token: 'new-r', expires_in: 3600, token_type: 'bearer' });
+    });
+    const session = await refreshGrant('old-r', fetchImpl);
+    expect(session.access_token).toBe('new.a.t');
+    // The ROTATED refresh token must come back to the caller — storing only the
+    // access token would leave the browser holding a token GoTrue has retired.
+    expect(session.refresh_token).toBe('new-r');
+  });
+
+  it('maps a 4xx (expired / revoked / already rotated) to UnauthorizedError with the BI string', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ error: 'invalid_grant' }, 400));
+    await expect(refreshGrant('dead-r', fetchImpl)).rejects.toThrow(UnauthorizedError);
+    await expect(refreshGrant('dead-r', fetchImpl)).rejects.toThrow('[sesi tidak valid, silahkan login kembali]');
+  });
+
+  it('maps a 5xx to a generic error, NOT a session ending — GoTrue being down must not log anyone out', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ error: 'server' }, 503));
+    await expect(refreshGrant('r', fetchImpl)).rejects.toThrow(/GoTrue refresh grant failed: 503/);
+    await expect(refreshGrant('r', fetchImpl)).rejects.not.toThrow(UnauthorizedError);
   });
 });
 

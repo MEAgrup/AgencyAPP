@@ -37,7 +37,14 @@
  */
 import { account, auth, clientPortalAuth } from '@cdps/domain';
 import { permission } from '@cdps/core';
-import { actorFromToken, CLIENT_PORTAL_SESSION_COOKIE, sessionCookie } from '@/lib/auth';
+import {
+  actorFromToken,
+  CLIENT_PORTAL_SESSION_COOKIE,
+  refreshCookie,
+  refreshCookieNameFor,
+  sessionCookie,
+  SESSION_COOKIE,
+} from '@/lib/auth';
 import { passwordGrant } from '@/lib/gotrue';
 import { db, readAsActor } from '@/lib/db';
 import { BadRequestError, clientIp, handle, json, readJson, UnauthorizedError } from '@/lib/http';
@@ -83,9 +90,14 @@ export async function POST(request: Request): Promise<Response> {
       throw err;
     }
 
-    const cookieName = permission.isClientContactActor(actor) ? CLIENT_PORTAL_SESSION_COOKIE : undefined;
+    const cookieName = permission.isClientContactActor(actor) ? CLIENT_PORTAL_SESSION_COOKIE : SESSION_COOKIE;
     const res = json(profile);
     res.headers.append('Set-Cookie', sessionCookie(session.access_token, session.expires_in, cookieName));
+    // BOTH cookies, always. GoTrue has returned `refresh_token` here since day
+    // one and CDPS dropped it on the floor, which is why a session could only
+    // ever be ENDED, never renewed — see `refreshGrant`'s doc comment for the
+    // three field complaints that one omission produced.
+    res.headers.append('Set-Cookie', refreshCookie(session.refresh_token, refreshCookieNameFor(cookieName)));
     return res;
   });
 }
