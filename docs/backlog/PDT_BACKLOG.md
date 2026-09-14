@@ -415,6 +415,52 @@ punya `null` eksplisit.
 > **Status 2026-09-14 (PR #368 DI-MERGE ke `main`, `docs/handoff/HANDOFF_PDT_SESI16.md`)** —
 > seluruh isi sub-langkah 2a+2b-i+2b-ii (dua modul di atas) sekarang di `main`, bukan lagi di
 > branch PR terpisah. Sesi berikutnya mulai dari `main` langsung.
+>
+> **Status 2026-09-14 (sub-langkah 2b-ii — MODUL KETIGA, `docs/DECISIONS.md` baris teratas)** —
+> rekomendasi sesi lalu (`shopee_live`/`shopee_video`) diinvestigasi dulu, KEDUANYA ternyata
+> BLOCKED (`shopee_live`: kelas blocker sama `tt_live`, nol kolom identitas sesi live stabil —
+> `G1-09-2BII-SHOPEELIVE`, Open baru; `shopee_video`: masih `UNVERIFIED_SIGNATURE`, tidak
+> berubah). **`pdt_sku_master` dibangun sebagai gantinya** — `shopee_parent_sku` (Shopee,
+> sendirian, Rule 18) + `tt_orders` (TikTok, sendirian — DEVIASI SADAR dari Rule 18 harfiah yang
+> minta digabung `tt_transaction_product`, karena nol kunci gabung terverifikasi antara dua grain
+> berbeda, lihat `docs/DECISIONS.md`) → `pdt_sku_master`. **UPSERT sungguhan** (bukan
+> delete-then-insert/`ON CONFLICT DO UPDATE` polos seperti dua tabel fakta sebelumnya) — Rule 19
+> (SKU tidak pernah dihapus) ditegakkan lewat `COALESCE` field opsional + `status_listing`
+> selalu `'aktif'` saat terlihat + `first_seen_at` hanya diisi sekali. **Belum dibangun (sengaja):**
+> transisi `status_listing` ke `nonaktif`/`dihapus_platform` untuk SKU yang berhenti muncul
+> (`G1-09-2BII-SKU-STATUS-TRANSISI`, Open baru — PRD tidak merinci kriteria pemicu); `sku_id` di
+> `pdt_fact_content`/`pdt_fact_ads` TETAP NULL (resolusi FK adalah pekerjaan lanjutan terpisah,
+> lihat `docs/handoff/HANDOFF_PDT_SESI17.md` untuk kandidat modul berikutnya). Tiga
+> modul/tiga tabel fakta (dari enam) kini punya penulis: `pdt_fact_ads`, `pdt_fact_content`,
+> `pdt_sku_master`. Sisa 21 modul/3 tabel fakta lain (`pdt_fact_sku_period`,
+> `pdt_fact_creator_period`, sisa `pdt_fact_ads`/`pdt_fact_content`) belum disentuh.
+>
+> **Status 2026-09-14 (sub-langkah 2b-ii — MODUL KEEMPAT, `docs/DECISIONS.md` baris teratas)** —
+> `tt_transaction_creator` → `pdt_fact_creator_period` (`ekstrakBarisKreatorTtTransactionCreator`).
+> Dipilih SETELAH mengevaluasi `shopee_ads_cpc` lebih dulu (blocker lamanya — SKU master belum
+> ada — sudah tertutup) dan menemukan blocker BARU yang lebih dalam: legacy parser
+> (`report/shopee/metrik.ts` `parseAdsCsv`) mengunci baris lewat `nama iklan`, bukan `Kode Produk`
+> — menyiratkan grain SEBENARNYA modul itu mungkin satu baris PER IKLAN (bukan per produk), dan
+> salah tebak `kampanye_id` berisiko unique-violation di runtime, bukan cuma salah data. `G1-09-
+> 2BII-ADS-CPC` diperbarui (bukan ditutup) mencatat temuan ini — TETAP terbuka, butuh sample asli.
+> `tt_transaction_creator` dipilih sebagai gantinya: grain barisnya SUDAH per-kreator, cocok
+> persis kunci `pdt_fact_creator_period`, nol ambiguitas serupa. `ON CONFLICT DO UPDATE` (bukan
+> delete-then-insert) — kunci unik tabel ini tidak pernah punya komponen NULL. `Tayangan video`/
+> `Perkiraan komisi` (whitelist modul ini) SENGAJA tidak ditulis ke tabel ini (konsumen Co-Pilot/PX,
+> belum dibangun). **Empat modul/empat tabel fakta (dari enam) kini punya penulis**: `pdt_fact_ads`,
+> `pdt_fact_content`, `pdt_sku_master`, `pdt_fact_creator_period`. Sisa: `pdt_fact_sku_period`
+> (nol penulis) + 20 modul lain yang belum dipetakan ke tabel yang SUDAH punya penulis.
+>
+> **Status 2026-09-14 (sub-langkah 2b-ii — MODUL KELIMA, `docs/DECISIONS.md` baris teratas)** —
+> `shopee_ams_afiliasi` → `pdt_fact_creator_period` (`ekstrakBarisKreatorShopeeAmsAfiliasi`),
+> sisi Shopee untuk tabel yang modul keempat baru mengisi sisi TikTok-nya. `shopee_ams_produk`
+> (dikelompokkan bersama di `PDT_KOLOM_DIPANEN.md` §2.10) SENGAJA TIDAK ikut dipetakan — grainnya
+> PER PRODUK, bukan per-kreator, tidak cocok kunci tabel ini. `Username`→`creator_handle` (bukan
+> `ID Affiliates` — cermin legacy `parseAffCsv`), `Omzet`→`gmv`, `Pesanan`→`pesanan_teratribusi`.
+> `Komisi`/`ROI` SENGAJA tidak ditulis (konsumen PX Flow D `commission_pct`, domain lain, tabel
+> ini tidak punya kolom untuk keduanya). `pdt_fact_creator_period` sekarang punya penulis di
+> KEDUA platform (TikTok + Shopee) — lima modul/empat tabel fakta (dari enam) kini punya penulis.
+> Sisa: `pdt_fact_sku_period` (nol penulis) + 19 modul lain belum dipetakan.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
