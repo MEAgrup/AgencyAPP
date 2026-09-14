@@ -420,11 +420,12 @@ export async function siapkanUploadBatch(
 // adalah skor/kuadran/usulan/prefill DI ATAS baris fakta, konsumen hilir yang
 // belum dibangun, koreksi catatan sebelumnya di sini/HANDOFF_PDT_SESI13.md
 // §1 butir 1) yang menulis "baris fakta sesuai whitelist (Rule 8)" —
-// `shopee_ads_live` → `pdt_fact_ads` (sub-langkah 2b-ii, di bawah, SATU
-// modul pertama sebagai bukti pola) adalah baris fakta PERTAMA yang benar-
-// benar ditulis; 24 modul/6 tabel fakta lain BELUM (peta kolomDipanen→tabel
-// fakta untuk sisanya belum ada, pekerjaan besar tersendiri, lihat
-// `docs/handoff/HANDOFF_PDT_SESI12.md`/`HANDOFF_PDT_SESI13.md`/`HANDOFF_PDT_SESI14.md`).
+// `shopee_ads_live` → `pdt_fact_ads` (modul pertama) dan `tt_video` →
+// `pdt_fact_content` (modul kedua, sesi ini) adalah dua baris fakta PERTAMA
+// yang benar-benar ditulis (sub-langkah 2b-ii, di bawah); 23 modul/4 tabel
+// fakta lain BELUM (peta kolomDipanen→tabel fakta untuk sisanya belum ada,
+// pekerjaan besar tersendiri, lihat `docs/handoff/HANDOFF_PDT_SESI12.md`/
+// `HANDOFF_PDT_SESI13.md`/`HANDOFF_PDT_SESI14.md`/`HANDOFF_PDT_SESI15.md`).
 //
 // **Keputusan: PIPELINE DIJALANKAN ULANG dari `storage_path` yang sama**
 // (bukan menerima cache hasil `previewUploadBatch` dari klien) — pemanggil
@@ -644,6 +645,7 @@ export async function commitUploadBatch(
   const periodeAwalBulan = `${periode.mulai.slice(0, 7)}-01`;
 
   const berkasAdsLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ads_live');
+  const berkasTtVideo = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_video');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -707,6 +709,36 @@ export async function commitUploadBatch(
               values
                 (${clientPlatformId}, 'shopee_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
                  ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+          }
+        }
+      }
+
+      // G1-09 sub-langkah 2b-ii — modul KEDUA, `tt_video` → `pdt_fact_content` (lihat
+      // docblock `ekstrakBarisTtVideo`, `@cdps/core` `pdt/fakta.ts`). Beda dari
+      // `shopee_ads_live`/`pdt_fact_ads`: kunci unik `pdt_fact_content`
+      // (`client_platform_id, platform_content_id`) TIDAK punya komponen NULL (`ID Video`
+      // selalu ada untuk baris yang ditulis — baris kosong sudah dilewati di
+      // `ekstrakBarisTtVideo`), jadi `ON CONFLICT ... DO UPDATE` sungguhan AMAN dipakai di
+      // sini (beda dari alasan replace-on-recommit `pdt_fact_ads` di atas). `sku_id`/
+      // `waktu_posting` SELALU NULL (SKU master belum ada; nol parser terverifikasi untuk
+      // format kolom `Waktu` — lihat docblock `ekstrakBarisTtVideo`).
+      if (berkasTtVideo.length > 0) {
+        for (const b of berkasTtVideo) {
+          for (const baris of pdt.ekstrakBarisTtVideo(b.aoa, b.barisHeader, row.akun_konten_toko)) {
+            await tx`
+              insert into pdt_fact_content
+                (client_platform_id, platform_content_id, batch_id, parser_versi, jenis,
+                 creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
+                 vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
+              values
+                (${clientPlatformId}, ${baris.platformContentId}, ${id}, ${pdt.PDT_PARSER_VERSI}, 'video',
+                 ${baris.creatorPlatformId}, ${baris.creatorHandle}, ${baris.isAkunToko}, null, null,
+                 ${baris.vv}, ${baris.likes}, null, ${baris.dibagikan}, null, null, ${baris.klikProduk}, ${baris.gmv}, null)
+              on conflict (client_platform_id, platform_content_id) do update set
+                batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+                creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
+                is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, likes = excluded.likes,
+                dibagikan = excluded.dibagikan, klik_produk = excluded.klik_produk, gmv = excluded.gmv`;
           }
         }
       }

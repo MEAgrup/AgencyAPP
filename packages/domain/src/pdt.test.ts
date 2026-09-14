@@ -139,9 +139,16 @@ async function insertClientPlatform(
   shopId: string | null = null,
   akunKontenToko: readonly string[] | null = null,
 ): Promise<number> {
+  // sql.json(...) TANPA JSON.stringify/::jsonb manual — pola sama seperti `commitUploadBatch`
+  // (`docs/DECISIONS.md` 2026-09-14, sub-langkah 2b-i "Temuan sampingan": `${JSON.stringify(obj)}::jsonb`
+  // DOUBLE-ENCODE, tersimpan sebagai jsonb SCALAR STRING (`jsonb_typeof` = 'string'), bukan array —
+  // ditemukan lewat tes `ekstrakBarisTtVideo`/`is_akun_toko` sesi ini yang PERTAMA KALI menembus
+  // `validasiIdentitasTiktok` cabang `tolak` dengan `akunKontenToko` non-kosong (`.join()` melempar
+  // pada string, bukan array; cabang `cocok`/`usulkan_ikat` "kebetulan lolos" sebelumnya karena
+  // `.includes()` pada STRING adalah substring-match, bukan keanggotaan array sungguhan).
   const rows = await sql<{ id: number }[]>`
     insert into client_platforms (client_id, platform, active, shop_id, akun_konten_toko, created_by)
-    values (${clientId}, ${platform}, true, ${shopId}, ${akunKontenToko ? JSON.stringify(akunKontenToko) : null}::jsonb, 'ZZ-TEST')
+    values (${clientId}, ${platform}, true, ${shopId}, ${akunKontenToko ? sql.json(akunKontenToko as never) : null}, 'ZZ-TEST')
     returning id`;
   return rows[0].id;
 }
@@ -162,6 +169,8 @@ afterEach(async () => {
   // pdt_fact_ads (G1-09 sub-langkah 2b-ii) — FK ke client_platforms TANPA ON DELETE CASCADE
   // (migrasi G1-01), jadi harus dibersihkan SEBELUM client_platforms atau FK menolak DELETE.
   await sql`delete from pdt_fact_ads where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
+  // pdt_fact_content (G1-09 sub-langkah 2b-ii, modul kedua tt_video) — sama alasan.
+  await sql`delete from pdt_fact_content where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -259,6 +268,27 @@ function ttVideoBerkasDenganPeriode(nama: string, idKreator: string, rentang: st
     [], [],
     header,
     [idKreator, 'V1', '01/07/2026', rentang, 'Produk A', '100', '10', '2', '5', 'Kreator A', 'info', '1000', '50000'],
+  ];
+  return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
+}
+
+/**
+ * `tt_video` LENGKAP untuk uji `pdt_fact_content` (G1-09 sub-langkah 2b-ii,
+ * modul kedua) — parametrized per baris video, + 'Rentang Tanggal' (sama
+ * seperti `ttVideoBerkasDenganPeriode`, tt_video sendiri tidak membawa
+ * kolom periode) supaya `commitUploadBatch` (yang MEWAJIBKAN periode sah)
+ * bisa dipanggil dengan HANYA berkas ini.
+ */
+function ttVideoBerkasLengkap(
+  nama: string,
+  rentang: string,
+  baris: readonly [string, string, string, string, string, string, string][],
+): PdtPreviewBerkasInput {
+  const header = ['ID Kreator', 'ID Video', 'Waktu', 'Rentang Tanggal', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Nama Kreator', 'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'];
+  const aoa: unknown[][] = [
+    [], [],
+    header,
+    ...baris.map(([idKreator, idVideo, vv, likes, dibagikan, klikProduk, gmv]) => [idKreator, idVideo, '01/07/2026', rentang, 'Produk A', vv, likes, dibagikan, klikProduk, 'Kreator', 'info', '1000', gmv]),
   ];
   return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
 }
@@ -981,5 +1011,100 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii) — baris fakta shopee_a
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
     expect(persiapan.status).toBe('identitas_belum_terikat');
     expect(await loadFactAds(cpId)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEDUA) — baris fakta
+// tt_video → pdt_fact_content (lihat fakta.ts @cdps/core untuk kenapa modul
+// ini pakai ON CONFLICT DO UPDATE sungguhan, beda dari shopee_ads_live).
+// ---------------------------------------------------------------------------
+interface FactContentRow {
+  platform_content_id: string;
+  batch_id: number;
+  parser_versi: number;
+  jenis: string;
+  creator_platform_id: string | null;
+  creator_handle: string | null;
+  is_akun_toko: boolean;
+  waktu_posting: Date | null;
+  sku_id: number | null;
+  vv: number | null;
+  likes: number | null;
+  komentar: number | null;
+  dibagikan: number | null;
+  klik_produk: number | null;
+  gmv: string | null;
+}
+
+async function loadFactContent(clientPlatformId: number): Promise<FactContentRow[]> {
+  return sql<FactContentRow[]>`select * from pdt_fact_content where client_platform_id = ${clientPlatformId} order by platform_content_id`;
+}
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul kedua) — baris fakta tt_video → pdt_fact_content', () => {
+  async function fixture(akunKontenToko: readonly string[] | null): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'TikTok Shop', null, akunKontenToko);
+  }
+
+  it('satu baris per ID Video, jenis=video, sku_id/waktu_posting NULL (belum ada pdt_sku_master/parser Waktu)', async () => {
+    const cpId = await fixture(['KR-1']);
+    const berkas = ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', [
+      ['KR-1', 'V1', '1000', '50', '5', '10', '2000000'],
+      ['KR-1', 'V2', '500', '20', '2', '5', '400000'],
+    ]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    expect(persiapan.status).toBe('parsing'); // identitas cocok, TikTok belum punya rekonsiliasi (G1-07-TIKTOK-REKONSILIASI)
+    const rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      platform_content_id: 'V1', jenis: 'video', batch_id: persiapan.batchId, parser_versi: 1,
+      creator_platform_id: 'KR-1', creator_handle: 'Kreator', is_akun_toko: true,
+      waktu_posting: null, sku_id: null, vv: 1000, likes: 50, komentar: null, dibagikan: 5, klik_produk: 10,
+    });
+    expect(Number(rows[0].gmv)).toBe(2000000);
+    expect(rows[1].platform_content_id).toBe('V2');
+  });
+
+  it('is_akun_toko false bila ID Kreator video tidak ada di akun_konten_toko klien', async () => {
+    const cpId = await fixture(['KR-LAIN-YANG-TERIKAT', 'KR-1']); // 'KR-1' harus ada supaya identitas TIDAK tolak — video di sini dari kreator BERBEDA
+    const berkas = ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', [
+      ['KR-1', 'V1', '1000', '50', '5', '10', '2000000'],
+      ['KR-AFILIASI', 'V2', '500', '20', '2', '5', '400000'],
+    ]);
+    await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    const rows = await loadFactContent(cpId);
+    expect(rows.find((r) => r.platform_content_id === 'V1')!.is_akun_toko).toBe(true);
+    expect(rows.find((r) => r.platform_content_id === 'V2')!.is_akun_toko).toBe(false);
+  });
+
+  it('commit ULANG (ID Video sama) ⇒ ON CONFLICT DO UPDATE — baris diperbarui di tempat, bukan digandakan', async () => {
+    const cpId = await fixture(['KR-1']);
+    const pertama = ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', [
+      ['KR-1', 'V1', '1000', '50', '5', '10', '2000000'],
+    ]);
+    await commitUploadBatch(sql, ownerActor(), cpId, [pertama], []);
+    expect(await loadFactContent(cpId)).toHaveLength(1);
+
+    const kedua = ttVideoBerkasLengkap('video-revisi.xlsx', '01/07/2026 - 31/07/2026', [
+      ['KR-1', 'V1', '1500', '80', '9', '20', '2500000'],
+    ]);
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, [kedua], []);
+    const rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — ON CONFLICT DO UPDATE, bukan baris baru
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(rows[0].vv).toBe(1500);
+    expect(Number(rows[0].gmv)).toBe(2500000);
+  });
+
+  it("identitas 'tolak' (ID Kreator video tidak terdaftar di akun_konten_toko) ⇒ NOL baris fakta ditulis", async () => {
+    const cpId = await fixture(['KR-LAIN']);
+    const berkas = ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', [
+      ['KR-1', 'V1', '1000', '50', '5', '10', '2000000'],
+    ]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(await loadFactContent(cpId)).toHaveLength(0);
   });
 });

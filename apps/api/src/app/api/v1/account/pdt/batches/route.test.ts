@@ -168,6 +168,11 @@ afterAll(async () => {
 afterEach(async () => {
   if (!sql) return;
   await sql`delete from pdt_file where batch_id in (select id from pdt_upload_batch where client_id like 'CLI-PDTCM-%')`;
+  // pdt_fact_ads/pdt_fact_content (G1-09 sub-langkah 2b-ii) — FK ke pdt_upload_batch.batch_id,
+  // dibersihkan SEBELUM pdt_upload_batch atau FK menolak DELETE (fixture ZIP nyata di berkas ini
+  // bisa membawa shopee_ads_live/tt_video, yang sejak sub-langkah 2b-ii menulis baris fakta).
+  await sql`delete from pdt_fact_ads where batch_id in (select id from pdt_upload_batch where client_id like 'CLI-PDTCM-%')`;
+  await sql`delete from pdt_fact_content where batch_id in (select id from pdt_upload_batch where client_id like 'CLI-PDTCM-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-PDTCM-%'`;
   await sql`delete from client_platforms where client_id like 'CLI-PDTCM-%'`;
   await sql`delete from clients where id like 'CLI-PDTCM-%'`;

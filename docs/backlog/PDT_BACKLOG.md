@@ -396,6 +396,21 @@ punya `null` eksplisit.
 > conflict). **Sisa peta kolomDipanen→tabel fakta untuk 24 modul/5 tabel lain BELUM disentuh**
 > — pekerjaan besar tersendiri, lihat `docs/handoff/HANDOFF_PDT_SESI14.md` §1 untuk kandidat
 > modul berikutnya (`tt_video`→`pdt_fact_content` direkomendasikan, kolomnya paling verified).
+>
+> **Status 2026-09-14 (sub-langkah 2b-ii — MODUL KEDUA, `docs/DECISIONS.md` baris teratas)** —
+> `tt_video` → `pdt_fact_content` (`ekstrakBarisTtVideo`) ditulis sungguhan, dua tabel fakta
+> sekarang punya penulis (`pdt_fact_ads`, `pdt_fact_content`). Investigasi ulang (bukan percaya
+> framing "kolomnya paling verified" apa adanya) menemukan `Likes`/`Dibagikan`/`Klik Produk`
+> AMAN dipanen (verified di `baseline/metrik.ts`/`report/metrik.ts`, dua modul yang sebelumnya
+> tidak dicek) — `waktu_posting`/`sku_id` TETAP NULL (nol parser `Waktu` terverifikasi; SKU
+> master belum ada). `is_akun_toko` — fungsi PERTAMA turunan boolean per-baris `ID Kreator` vs
+> `akun_konten_toko`, baru ditulis sesi ini. Modul ini pakai `ON CONFLICT DO UPDATE` SUNGGUHAN
+> (kunci uniknya, beda dari `pdt_fact_ads`, tidak punya komponen NULL). **Efek samping**: bug
+> test-fixture double-encoding jsonb ditemukan+diperbaiki (`pdt.test.ts` `insertClientPlatform`)
+> — seluruh tes identitas TikTok lama diam-diam menguji perilaku yang salah (substring-match
+> kebetulan cocok, bukan keanggotaan array sungguhan), sekarang diperbaiki. **Sisa 23 modul/3
+> tabel fakta lain BELUM disentuh** — lihat `docs/handoff/HANDOFF_PDT_SESI15.md` untuk kandidat
+> berikutnya.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
