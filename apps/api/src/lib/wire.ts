@@ -8938,3 +8938,62 @@ export interface PdtUploadUrlWire {
 export function pdtUploadUrlToWire(h: pdt.PdtSiapkanUploadHasil, uploadUrl: string): PdtUploadUrlWire {
   return { client_platform_id: h.clientPlatformId, storage_path: h.stagingPath, upload_url: uploadUrl };
 }
+
+// ===========================================================================
+// G1-09 sub-langkah 2a+2b-i — commit (Flow A langkah 6 sisi batch/berkas +
+// langkah 7 rekonsiliasi Shopee + langkah 9 error path). `POST
+// /account/pdt/batches` (`pdt.commitUploadBatch`) — beda dari pratinjau:
+// baris `pdt_upload_batch`/`pdt_file` SUNGGUHAN sudah tertulis saat wire ini
+// dibentuk, dan `status` SEKARANG bisa `'verified'` (rekonsiliasi Shopee,
+// Rule 13-16, basis Siap Dikirim, GMV saja — lihat docs/DECISIONS.md
+// G1-07-PERSKU-PESANAN). Baris fakta tertipe (Flow A langkah 8) + TikTok
+// (G1-07-TIKTOK-REKONSILIASI, Open) menyusul sub-langkah 2b-ii.
+// ===========================================================================
+
+/** Satu baris `pdt_file` yang baru ditulis — sama seperti `PdtPreviewBerkasWire` + `deteksi_oleh` (kolom DB yang tidak ada gunanya sebelum baris ini benar-benar ditulis). */
+export interface PdtCommitBerkasWire extends PdtPreviewBerkasWire {
+  deteksi_oleh: string; // 'tanda_tangan' | 'override_am'
+}
+
+export interface PdtCommitBatchWire {
+  batch_id: number;
+  client_platform_id: number;
+  platform: string;
+  status: string; // 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak'
+  alasan_ditolak: string | null;
+  /** `null` bila rekonsiliasi (Rule 13-16) belum/tidak dijalankan — lihat `status`, bukan berarti 0%. */
+  reconcile_delta_pct: number | null;
+  periode_mulai: string;
+  periode_selesai: string;
+  berkas: PdtCommitBerkasWire[];
+  identitas: PdtPreviewIdentitasWire;
+}
+
+export function pdtCommitBatchToWire(h: pdt.PdtCommitPersiapan): PdtCommitBatchWire {
+  return {
+    batch_id: h.batchId,
+    client_platform_id: h.clientPlatformId,
+    platform: h.platform,
+    status: h.status,
+    alasan_ditolak: h.alasanDitolak,
+    reconcile_delta_pct: h.reconcileDeltaPct,
+    periode_mulai: h.periodeMulai,
+    periode_selesai: h.periodeSelesai,
+    berkas: h.berkas.map((b) => ({
+      nama: b.nama,
+      modul_kode: b.modulKode,
+      modul_nama: b.modulNama,
+      ambiguous: b.ambiguous,
+      matches: [...b.matches],
+      baris_header: b.barisHeader,
+      kolom_dipanen: b.kolomDipanen,
+      kolom_baru: [...b.kolomBaru],
+      status: b.status,
+      pesan: b.pesan,
+      sha256: b.sha256,
+      bytes: b.bytes,
+      deteksi_oleh: b.deteksiOleh,
+    })),
+    identitas: pdtPreviewIdentitasToWire(h.identitas),
+  };
+}

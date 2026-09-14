@@ -110,6 +110,42 @@ export async function buatPdtRawSignedUploadUrl(path: string, fetchImpl?: FetchL
 }
 
 /**
+ * Unggah (upsert) isi objek ke bucket `pdt-raw` LANGSUNG dengan service-role
+ * key (server-ke-server, pasangan `unduhPdtRawObjek`) — dipakai commit
+ * (G1-09 sub-langkah 2a) untuk menulis paket ZIP yang sudah diunduh+diparse
+ * dari path STAGING ke path FINAL Rule 44
+ * (`{client_id}/{client_platform_id}/{periode_selesai}/{batch_id}.zip`).
+ *
+ * SENGAJA unggah ulang byte yang sudah ada di memori (`buf` dari
+ * `unduhPdtRawObjek` di route commit), BUKAN "move" storage-ke-storage:
+ * Supabase Storage REST tidak seragam menyediakan move server-side yang
+ * murah untuk kasus ini, dan byte-nya toh sudah di tangan pemanggil (nol
+ * unduhan tambahan). Objek staging lama TIDAK dihapus di sini — ia jadi
+ * objek "yatim" yang Rule 49 sudah antisipasi (purge > 7 hari), sama seperti
+ * `siapkanUploadBatch` sudah mendokumentasikan untuk staging yang tidak
+ * pernah dipakai sama sekali.
+ */
+export async function unggahPdtRawObjek(path: string, isi: Buffer, fetchImpl?: FetchLike): Promise<void> {
+  const { url, serviceRoleKey } = config();
+  const doFetch = fetchImpl ?? fetch;
+
+  const res = await doFetch(`${url}/storage/v1/object/pdt-raw/${path.split('/').map(encodeURIComponent).join('/')}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'x-upsert': 'true',
+    },
+    body: isi as unknown as BodyInit, // Buffer implements Uint8Array/ArrayBufferView — lib.dom.d.ts's BodyInit union just doesn't say so nominally
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`gagal mengunggah pdt-raw/${path}: ${res.status} ${body}`.trim());
+  }
+}
+
+/**
  * Unduh isi objek dari bucket `pdt-raw` LANGSUNG dengan service-role key
  * (server-ke-server, nol token sementara — beda dari `buatPdtRawSignedUrl`
  * yang untuk browser). Dipakai route preview/commit untuk membaca ZIP yang

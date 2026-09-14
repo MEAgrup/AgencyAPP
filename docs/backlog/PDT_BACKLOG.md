@@ -20,6 +20,18 @@
 > aslinya tidak ditemukan di repo mana pun — lihat berkas itu §7. Ini **tidak** memblokir G1 (G1-02
 > sudah punya bucket 1 + bucket 2 lengkap, yang memang whitelist-nya); ia memblokir kelengkapan
 > penuh `pdt_parser_modul.kolom_dipanen` sebelum daftar itu jadi kanonik selamanya.
+>
+> ### Ringkasan jumlah tiket per gelombang (2026-09-14 — jauh sesudah "NOL KODE" di atas)
+> **17 tiket bernomor** di seluruh §1-§5 (`### G<gelombang>-<nomor>`): **G1** 12 (`G1-00`…`G1-11`),
+> **G2** 2 (`G2-01`/`G2-02`), **G3** 0 (§3 masih prosa, belum dipecah jadi tiket bernomor), **G4** 3
+> (`G4-01`…`G4-03`), **G5** 0 (⛔ diblokir, sengaja belum dijadwalkan — §5). Status ringkas: **G1-00
+> s.d. G1-08 SELESAI** (migrasi+engine+tes, lihat commit/`docs/DECISIONS.md` per tiket); **G1-09
+> SEDANG BERJALAN** — bukan satu langkah, sudah 5 dari ~6 sub-langkah (pratinjau, G1-09-BODY-BESAR,
+> commit 2a, rekonsiliasi 2b-i, baris fakta 2b-ii DIMULAI SATU modul dari 25 — halaman UI
+> sub-langkah 3 masih menyusul, lihat catatan status di bawah DoD G1-09 §1); **G1-10**/**G1-11**
+> belum dimulai; **G2**/**G4**
+> belum dimulai (nol seed/nol UI di luar struktur tabel G1-01). Angka ini TIDAK termasuk tiket
+> non-coding §7 atau Open Assumptions §6 (bukan "tiket G", pertanyaan/keputusan pemilik).
 
 ---
 
@@ -337,6 +349,72 @@ punya `null` eksplisit.
 > sudah ada berjalan TIDAK BERUBAH. Ini menutup risiko 413 produksi untuk pratinjau, BUKAN cuma
 > untuk commit seperti dugaan Open row semula. Sub-langkah 2 (commit) sekarang tinggal
 > memindahkan objek staging ke path final Rule 44 (bukan mengunggah ulang dari nol).
+>
+> **Status 2026-09-14 (sub-langkah 2a SELESAI, lihat `docs/DECISIONS.md` baris teratas)** —
+> `POST /account/pdt/batches` (`pdt.commitUploadBatch` + `pdt.markRawStored` +
+> `apps/api/.../pdt/batches/route.ts`) menutup bullet 1 (satu ZIP → batch sungguhan) dan
+> separuh bullet 3-5: dropdown override AM DITEGAKKAN (`overrides`, `deteksi_oleh` DB
+> mencatat `tanda_tangan` vs `override_am`), status batch ditulis dari identitas (Rule 2-4:
+> `tolak`→`ditolak`, `usulkan_ikat`→`identitas_belum_terikat`, `cocok`/`tidak_dapat_divalidasi`→
+> `parsing`), error path bullet 5 (gagal identitas/periode TETAP tersimpan sebagai batch
+> `ditolak`, kecuali periode sendiri yang gagal — lihat catatan skema di `docs/DECISIONS.md`).
+> **Bukan** "pindah objek staging" seperti dugaan status sebelumnya — byte yang sudah di
+> tangan (dari unduh ulang untuk parse) diunggah LANGSUNG ke path final via
+> `unggahPdtRawObjek` (POST + upsert), objek staging lama dibiarkan jadi yatim (Rule 49).
+> **Belum dibangun (sengaja, sub-langkah 2b):** rekonsiliasi (Rule 13-16, PDT-16 — `status`
+> tidak pernah `verified` hari ini), penulisan baris fakta tertipe (`pdt_fact_*`, peta
+> kolomDipanen→tabel BELUM ada), UI status paket bullet 4 (batch sudah ada untuk dibaca
+> statusnya, tapi halaman `web-internal` masih sub-langkah 3), dan endpoint konfirmasi AM
+> untuk `usulkan_ikat` (menulis `client_platforms.shop_id`/`akun_konten_toko` — Rule 2/4
+> eksplisit minta AM "mengonfirmasi sekali", BUKAN otomatis saat commit).
+>
+> **Status 2026-09-14 (sub-langkah 2b-i SELESAI, lihat `docs/DECISIONS.md` baris teratas)** —
+> `commitUploadBatch` sekarang menjalankan rekonsiliasi Shopee (Rule 13-16,
+> `pdt.rekonsiliasiGmvPesanan` G1-07, AKHIRNYA dipanggil dari alur nyata) begitu identitas
+> `cocok`/`tidak_dapat_divalidasi` DAN batch membawa `shopee_shop_stats` + `shopee_parent_sku`
+> ber-status `ok` berdua — basis **Siap Dikirim** (Rule 16, default laporan klien). `status`
+> **BISA `'verified'` sekarang** (bukan lagi selalu berhenti di `'parsing'`), atau `'ditolak'`
+> dengan `reconcile_delta_pct` + alasan menyebut modul penyebab. **Perbandingan pesanan (separuh
+> Rule 13) DILEWATI** — nol kolom jumlah-pesanan per-SKU terverifikasi di `shopee_parent_sku`
+> (`G1-07-PERSKU-PESANAN`, Open BARU) — verdict murni dari GMV sampai kolomnya ditemukan.
+> **TikTok TIDAK direkonsiliasi** (`G1-07-TIKTOK-REKONSILIASI`, Open BARU) — G1-07 belum punya
+> mesin shop-level-vs-per-SKU setara Shopee untuk TikTok; batch TikTok tetap berhenti di
+> `'parsing'`. `uq_pdt_upload_batch_verified` (Rule 36, batch verified kedua untuk toko+periode
+> yang sama) diterjemahkan jadi `ValidationError` BI, bukan 500 mentah. **Masih belum dibangun:**
+> baris fakta tertipe (sub-langkah 2b-ii), UI (sub-langkah 3), endpoint konfirmasi identitas AM.
+>
+> **Status 2026-09-14 (sub-langkah 2b-ii DIMULAI — SATU modul, `docs/DECISIONS.md` baris
+> teratas)** — baris fakta tertipe PERTAMA ditulis sungguhan: `shopee_ads_live` →
+> `pdt_fact_ads` (`packages/core/src/pdt/fakta.ts` `ekstrakBarisShopeeAdsLive`, dipanggil
+> `commitUploadBatch`). Dipilih dari ketiga modul iklan Shopee karena satu-satunya yang kunci
+> uniknya (`ID Iklan`) tidak butuh `pdt_sku_master` (belum ada) — `shopee_ads_cpc`/
+> `shopee_ads_search` **BELUM dipetakan**, masing-masing punya blocker BERBEDA yang ditemukan
+> saat membangun (bukan sekadar "belum sempat"): lihat Open baru `G1-09-2BII-ADS-CPC` (butuh
+> `pdt_sku_master`) dan `G1-09-2BII-ADS-SEARCH` (kolomDipanen tidak cukup — nol biaya/identitas).
+> Commit-ulang periode yang sama = replace (DELETE+INSERT dalam transaksi yang sama), bukan
+> `ON CONFLICT` (`sku_id`/`content_id` NULL membuat unique index tidak bisa jadi target
+> conflict). **Sisa peta kolomDipanen→tabel fakta untuk 24 modul/5 tabel lain BELUM disentuh**
+> — pekerjaan besar tersendiri, lihat `docs/handoff/HANDOFF_PDT_SESI14.md` §1 untuk kandidat
+> modul berikutnya (`tt_video`→`pdt_fact_content` direkomendasikan, kolomnya paling verified).
+>
+> **Status 2026-09-14 (sub-langkah 2b-ii — MODUL KEDUA, `docs/DECISIONS.md` baris teratas)** —
+> `tt_video` → `pdt_fact_content` (`ekstrakBarisTtVideo`) ditulis sungguhan, dua tabel fakta
+> sekarang punya penulis (`pdt_fact_ads`, `pdt_fact_content`). Investigasi ulang (bukan percaya
+> framing "kolomnya paling verified" apa adanya) menemukan `Likes`/`Dibagikan`/`Klik Produk`
+> AMAN dipanen (verified di `baseline/metrik.ts`/`report/metrik.ts`, dua modul yang sebelumnya
+> tidak dicek) — `waktu_posting`/`sku_id` TETAP NULL (nol parser `Waktu` terverifikasi; SKU
+> master belum ada). `is_akun_toko` — fungsi PERTAMA turunan boolean per-baris `ID Kreator` vs
+> `akun_konten_toko`, baru ditulis sesi ini. Modul ini pakai `ON CONFLICT DO UPDATE` SUNGGUHAN
+> (kunci uniknya, beda dari `pdt_fact_ads`, tidak punya komponen NULL). **Efek samping**: bug
+> test-fixture double-encoding jsonb ditemukan+diperbaiki (`pdt.test.ts` `insertClientPlatform`)
+> — seluruh tes identitas TikTok lama diam-diam menguji perilaku yang salah (substring-match
+> kebetulan cocok, bukan keanggotaan array sungguhan), sekarang diperbaiki. **Sisa 23 modul/3
+> tabel fakta lain BELUM disentuh** — lihat `docs/handoff/HANDOFF_PDT_SESI15.md` untuk kandidat
+> berikutnya.
+>
+> **Status 2026-09-14 (PR #368 DI-MERGE ke `main`, `docs/handoff/HANDOFF_PDT_SESI16.md`)** —
+> seluruh isi sub-langkah 2a+2b-i+2b-ii (dua modul di atas) sekarang di `main`, bukan lagi di
+> branch PR terpisah. Sesi berikutnya mulai dari `main` langsung.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
