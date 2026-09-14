@@ -555,16 +555,19 @@ jobs:
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/rls_checks.sql
       - name: Invariant — Supabase Auth custom claims (ResolveActor parity)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/auth_claims_checks.sql
+      # Ketiga langkah tes di bawah menulis hasilnya sebagai JSON selain ke layar.
+      # Itu bukan tambahan lari — reporter kedua pada lari yang SAMA — dan
+      # dipakai satu gerbang di bawahnya. Lihat komentar gerbang itu.
       - name: '@cdps/db — test (incl. integration) + typecheck'
         run: |
           npm run typecheck -w @cdps/db
-          npm test -w @cdps/db
+          npm test -w @cdps/db -- --reporter=default --reporter=json --outputFile=/tmp/vitest-db.json
       - name: '@cdps/domain — test (incl. integration) + typecheck'
         # Exercises the employee importer, demo-task service, M5 finance, M1 lead
         # read models, etc. end-to-end against the migrated Postgres above.
         run: |
           npm run typecheck -w @cdps/domain
-          npm test -w @cdps/domain
+          npm test -w @cdps/domain -- --reporter=default --reporter=json --outputFile=/tmp/vitest-domain.json
       - name: '@cdps/api — test (jalur rute yang butuh DB)'
         # The `api` job above runs the SAME suite without a DATABASE_URL, so every
         # DB-backed route test there is silently skipped — including the Gelombang B
@@ -572,4 +575,22 @@ jobs:
         # Riset Awal → Section B → Section E → Plan → Brief through the real route
         # handlers. Running it here, against the Postgres this job already migrated,
         # is what makes those skips actually execute somewhere.
-        run: npm test -w @cdps/api
+        run: npm test -w @cdps/api -- --reporter=default --reporter=json --outputFile=/tmp/vitest-api.json
+      # Gerbang: sebuah berkas tes tidak boleh lolos tanpa menjalankan satu tes pun.
+      #
+      # `if: always()` DISENGAJA. Justru saat langkah tes di atas MERAH-lah
+      # gerbang ini paling berguna: ia menyebut berkas mana yang runtuh sebelum
+      # tesnya sempat jalan, alih-alih membiarkannya terbaca sebagai "skipped"
+      # di ringkasan. Itu persis yang membuat `db-and-migrations` merah selama
+      # dua hari (2026-09-12 → 14) tanpa ada yang tahu dua belas tes pagar
+      # Showcase menghilang. Lihat kepala skripnya untuk kejadian lengkapnya.
+      #
+      # Ia juga menangkap bentuk yang TIDAK PERNAH memerahkan apa pun: kalau
+      # `DATABASE_URL` job ini lepas, seluruh suite ber-`skipIf` jadi kosong dan
+      # CI tetap hijau. Komentar langkah `@cdps/api` di atas sudah menyebut
+      # bahwa itu memang terjadi di job `api` — di job INI ia tidak boleh.
+      - name: 'Gerbang — tidak ada suite yang lolos tanpa menjalankan tes'
+        if: always()
+        run: |
+          node scripts/ci-gerbang-suite-senyap.mjs \
+            /tmp/vitest-db.json /tmp/vitest-domain.json /tmp/vitest-api.json

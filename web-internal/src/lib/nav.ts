@@ -425,17 +425,20 @@ const TIM: NavNode[] = [
 // ADMIN
 // ---------------------------------------------------------------------------
 /**
- * Divisi CDPS yang Lead-nya dipercaya mengelola roster karyawan (mutasi +
- * resign). Cermin `admin.HR_DIVISION` / `admin.canManageEmployeeAssignment` di
- * `packages/domain/src/admin.ts` — bukan aturan baru, dan bukan nilai kedua:
- * kalau konstanta di sana berubah, baris ini ikut.
+ * Divisi CDPS yang memikul pekerjaan roster karyawan (mutasi, tambah karyawan,
+ * resign, reset password sementara). Cermin `permission.HR_DIVISION` /
+ * `permission.canManageHr` — bukan aturan baru, dan bukan nilai kedua: kalau
+ * konstanta di sana berubah, baris ini ikut.
+ *
+ * Sejak 2026-09-14 cakupannya SELURUH orang divisi HR, bukan Lead-nya saja.
  */
 const HR = 'HR';
 
 const ADMIN: NavNode[] = [
-  // Director/OD membaca; Lead divisi HR juga, karena ia yang MENULIS mutasi &
-  // resign (`admin.canManageEmployeeAssignment`, DECISIONS 2026-08-10 +
-  // ketokan resign 2026-09-10). Sebelumnya gerbang ini `director || od` saja,
+  // Director/OD membaca; orang divisi HR juga, karena merekalah yang MENULIS
+  // mutasi & resign (`admin.canManageEmployeeAssignment`, DECISIONS 2026-08-10 +
+  // ketokan resign 2026-09-10 + pelebaran ke staff HR 2026-09-14).
+  // Sebelumnya gerbang ini `director || od` saja,
   // sementara halamannya sudah menghitung `canMutate` dengan lengan HR —
   // artinya seorang Lead HR lolos gerbang server tapi tidak pernah melihat
   // menunya. Itu persis "hiding something reachable = a silent functional
@@ -443,7 +446,7 @@ const ADMIN: NavNode[] = [
   {
     href: '/admin/employees',
     label: 'Karyawan',
-    access: (role) => Boolean(role.director || role.od) || isLead(role, HR),
+    access: (role) => Boolean(role.director || role.od) || role.division === HR,
   },
   {
     href: '/admin/role-mappings',

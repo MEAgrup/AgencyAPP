@@ -73,6 +73,9 @@ const salesStaff = (): Actor => ({
 const hrLead = (): Actor => ({
   employeeId: 'ZZ-HRLEAD', role: permission.makeRole({ division: HR_DIVISION, level: 'lead' }),
 });
+const hrStaff = (): Actor => ({
+  employeeId: 'ZZ-HRSTAFF', role: permission.makeRole({ division: HR_DIVISION, level: 'staff' }),
+});
 
 // ---------------------------------------------------------------------------
 // Unit: permission matrix (Phase 0 §4 — OD is read-only EVERYWHERE).
@@ -107,21 +110,33 @@ describe('admin permission matrix', () => {
     expect(canWriteAdmin(salesStaff())).toBe(false);
   });
 
-  it('gates employee mutation to Director + HR-division Lead ONLY', () => {
-    // Director always; the HR Lead is the one non-Director allowed (owner
-    // decision 2026-08-10). Crucially a Lead of ANOTHER division must NOT be able
-    // to re-grade employees — that would be self-promotion via jabatan.
+  it('gates employee mutation to Director + SIAPA PUN di divisi HR', () => {
+    // Director selalu. Selain itu divisi HR — staff MAUPUN lead sejak ketokan
+    // pemilik 2026-09-14: tim OD berisi satu lead dan dua staff yang memikul
+    // pekerjaan HR yang sama, dan sebelum ini kedua staff hanya bisa bekerja
+    // lewat akun `director` pinjaman yang aksesnya jauh lebih luas.
     expect(canManageEmployeeAssignment(director())).toBe(true);
     expect(canManageEmployeeAssignment(hrLead())).toBe(true);
+    expect(canManageEmployeeAssignment(hrStaff())).toBe(true);
+    // Yang TIDAK boleh, dan inilah inti kesempitannya: Lead divisi lain. Kalau
+    // ia boleh menulis divisi/jabatan, ia bisa memindahkan DIRINYA ke jabatan
+    // yang dipetakan lebih tinggi.
     expect(canManageEmployeeAssignment(salesLead())).toBe(false);
     expect(canManageEmployeeAssignment(salesStaff())).toBe(false);
+    // OD MURNI (layered `od` tanpa divisi HR) tetap read-only — melebar ke HR
+    // adalah soal DIVISI, bukan soal layered role.
     expect(canManageEmployeeAssignment(od())).toBe(false);
-    // An HR *staff* (not lead) is not enough either.
-    expect(
-      canManageEmployeeAssignment({
-        employeeId: 'ZZ-HRSTAFF', role: permission.makeRole({ division: HR_DIVISION, level: 'staff' }),
-      }),
-    ).toBe(false);
+  });
+
+  it('menulis role mapping & layered role TETAP Director-only — inilah yang menahan eskalasi', () => {
+    // Gerbang ini SENGAJA tidak ikut melebar. Selama `canWriteAdmin`
+    // Director-only, orang HR tidak bisa mengarang pemetaan baru yang lebih
+    // tinggi lalu memindahkan dirinya ke sana lewat mutasi — yang bisa ia
+    // lakukan hanyalah memindahkan orang ke pemetaan yang SUDAH ada.
+    for (const a of [hrLead(), hrStaff(), salesLead(), od()]) {
+      expect(canWriteAdmin(a)).toBe(false);
+    }
+    expect(canWriteAdmin(director())).toBe(true);
   });
 });
 

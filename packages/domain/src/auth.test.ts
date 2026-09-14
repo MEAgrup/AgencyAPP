@@ -173,6 +173,8 @@ const od = (): permission.Actor => actor('ZZ-OD', { division: 'OD', level: 'lead
 const salesLead = (): permission.Actor => actor('ZZ-SLEAD', { division: 'Sales', level: 'lead' });
 const salesStaff = (): permission.Actor => actor('ZZ-SSTAFF', { division: 'Sales', level: 'staff' });
 const creativeLead = (): permission.Actor => actor('ZZ-CLEAD', { division: 'Creative', level: 'lead' });
+const hrStaff = (): permission.Actor => actor('ZZ-HRSTAFF', { division: 'HR', level: 'staff' });
+const hrLead = (): permission.Actor => actor('ZZ-HRLEAD', { division: 'HR', level: 'lead' });
 
 describe('validatePassword', () => {
   it('rejects shorter than the minimum, counted in CHARACTERS', () => {
@@ -210,6 +212,14 @@ describe('canManagePasswords', () => {
     // Mirrors Go: the coarse check is director||lead. OD being read-only is
     // enforced by adminMayManage/domain gates, not by this predicate.
     expect(canManagePasswords(od())).toBe(true);
+  });
+
+  it('allows HR staff — lengan yang diketok pemilik 2026-09-14', () => {
+    // Tanpa lengan ini, staff HR gagal di gerbang KASAR dan tidak pernah sampai
+    // ke `adminMayManage`, jadi pemulihan akses hanya bisa lewat akun Director
+    // pinjaman.
+    expect(canManagePasswords(hrStaff())).toBe(true);
+    expect(canManagePasswords(hrLead())).toBe(true);
   });
 });
 
@@ -250,6 +260,72 @@ describeDb('adminMayManage', () => {
       await sql`delete from employee_credentials where employee_id = 'ZZ-TGT'`;
       await sql`delete from employees where employee_id = 'ZZ-TGT'`;
       await sql`delete from role_mappings where divisi = 'ZZ-DIV'`;
+    }
+  });
+
+  it('HR menjangkau LINTAS divisi — tapi TIDAK PERNAH target ber-layered OD/Director', async () => {
+    // Inti keputusan 2026-09-14: pemulihan akses tidak bisa dibatasi pada satu
+    // divisi, karena yang minta tolong datang dari mana saja. Yang menahan
+    // eskalasinya bukan batas divisi, melainkan pagar layered di bawah.
+    await sql`
+      insert into role_mappings (divisi, jabatan, division, level, created_by)
+      values ('ZZ-HRDIV', 'ZZ-HRJAB', 'Sales', 'staff', 'ZZ-DIR')
+      on conflict (divisi, jabatan) do update set division = excluded.division`;
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values ('ZZ-HRTGT', 'Target', 'zz-hrtgt@zz.local', 'ZZ-HRDIV', 'ZZ-HRJAB', true, 'ZZ-DIR')
+      on conflict (employee_id) do nothing`;
+    try {
+      // Target divisi Sales, aktor divisi HR: Lead Creative ditolak (beda
+      // divisi), HR justru boleh — itulah bedanya lengan HR dari lengan Lead.
+      expect(await adminMayManage(sql, creativeLead(), 'ZZ-HRTGT')).toBe(false);
+      expect(await adminMayManage(sql, hrStaff(), 'ZZ-HRTGT')).toBe(true);
+      expect(await adminMayManage(sql, hrLead(), 'ZZ-HRTGT')).toBe(true);
+
+      // PAGARNYA. Begitu target memegang layered `director`, HR kehilangan
+      // aksesnya — tanpa baris ini, membuka jalur password ke HR sama dengan
+      // memberi HR kunci akun Direksi.
+      await sql`
+        insert into employee_layered_roles (employee_id, role, enabled, created_by)
+        values ('ZZ-HRTGT', 'director', true, 'ZZ-DIR')
+        on conflict (employee_id, role) do update set enabled = true`;
+      expect(await adminMayManage(sql, hrStaff(), 'ZZ-HRTGT')).toBe(false);
+      expect(await adminMayManage(sql, hrLead(), 'ZZ-HRTGT')).toBe(false);
+      // Director tetap bisa — hanya dia.
+      expect(await adminMayManage(sql, director(), 'ZZ-HRTGT')).toBe(true);
+
+      // Layered `od` menutup pintu yang sama.
+      await sql`update employee_layered_roles set enabled = false
+                 where employee_id = 'ZZ-HRTGT' and role = 'director'`;
+      await sql`
+        insert into employee_layered_roles (employee_id, role, enabled, created_by)
+        values ('ZZ-HRTGT', 'od', true, 'ZZ-DIR')
+        on conflict (employee_id, role) do update set enabled = true`;
+      expect(await adminMayManage(sql, hrStaff(), 'ZZ-HRTGT')).toBe(false);
+    } finally {
+      await sql`delete from employee_layered_roles where employee_id = 'ZZ-HRTGT'`;
+      await sql`delete from employee_credentials where employee_id = 'ZZ-HRTGT'`;
+      await sql`delete from employees where employee_id = 'ZZ-HRTGT'`;
+      await sql`delete from role_mappings where divisi = 'ZZ-HRDIV'`;
+    }
+  });
+
+  it('HR pun tidak bisa menyentuh target TANPA mapping — itu tetap Director-only', async () => {
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values ('ZZ-HRNOMAP', 'Nomap', 'zz-hrnomap@zz.local', 'ZZ-NOMAP2', 'ZZ-NOMAP2', true, 'ZZ-DIR')
+      on conflict (employee_id) do nothing`;
+    try {
+      // Target tanpa mapping tidak punya divisi CDPS untuk dibandingkan. Lengan
+      // HR TIDAK membandingkan divisi, jadi ia lolos — dan itu memang niatnya:
+      // karyawan yang jabatannya belum dipetakan justru yang paling sering
+      // butuh pemulihan akses.
+      expect(await adminMayManage(sql, hrStaff(), 'ZZ-HRNOMAP')).toBe(true);
+      expect(await adminMayManage(sql, salesLead(), 'ZZ-HRNOMAP')).toBe(false);
+      expect(await adminMayManage(sql, director(), 'ZZ-HRNOMAP')).toBe(true);
+    } finally {
+      await sql`delete from employee_credentials where employee_id = 'ZZ-HRNOMAP'`;
+      await sql`delete from employees where employee_id = 'ZZ-HRNOMAP'`;
     }
   });
 
