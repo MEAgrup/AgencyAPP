@@ -58,11 +58,13 @@ export interface PdtUploadUrl {
   upload_url: string;
 }
 
-// G1-09 sub-langkah 2a — commit (POST /account/pdt/batches). Beda dari
+// G1-09 sub-langkah 2a+2b-i — commit (POST /account/pdt/batches). Beda dari
 // pratinjau: baris pdt_upload_batch/pdt_file sungguhan sudah tertulis saat
-// respons ini dibentuk. Rekonsiliasi/baris fakta menyusul sub-langkah 2b —
-// `status` di sini tidak pernah 'verified'. Belum ada halaman yang
-// memanggilnya — sama seperti PdtPreviewBatch, kontrak datanya lebih dulu.
+// respons ini dibentuk, dan rekonsiliasi Shopee (Rule 13-16) sudah bisa
+// menghasilkan `status: 'verified'`/'ditolak' (basis Siap Dikirim, GMV saja
+// — lihat docs/DECISIONS.md G1-07-PERSKU-PESANAN). TikTok + baris fakta
+// tertipe masih sub-langkah 2b-ii. Belum ada halaman yang memanggilnya —
+// sama seperti PdtPreviewBatch, kontrak datanya lebih dulu.
 export interface PdtCommitBerkas extends PdtPreviewBerkas {
   deteksi_oleh: string; // 'tanda_tangan' | 'override_am'
 }
@@ -71,8 +73,9 @@ export interface PdtCommitBatch {
   batch_id: number;
   client_platform_id: number;
   platform: string;
-  status: string; // 'parsing' | 'identitas_belum_terikat' | 'ditolak'
+  status: string; // 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak'
   alasan_ditolak: string | null;
+  reconcile_delta_pct: number | null;
   periode_mulai: string;
   periode_selesai: string;
   berkas: PdtCommitBerkas[];

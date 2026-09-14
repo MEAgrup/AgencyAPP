@@ -1,6 +1,7 @@
 /**
- * POST /api/v1/account/pdt/batches — PDT G1-09 sub-langkah 2a: commit (Flow A
- * langkah 6 sisi batch/berkas + langkah 9 error path). Beda dari `/preview`
+ * POST /api/v1/account/pdt/batches — PDT G1-09 sub-langkah 2a+2b-i: commit
+ * (Flow A langkah 6 sisi batch/berkas + langkah 7 rekonsiliasi Shopee +
+ * langkah 9 error path). Beda dari `/preview`
  * (`docs/backlog/PDT_BACKLOG.md` G1-09, `docs/prd/CDPS_PDT_Pusat_Data_Toko.md`):
  * ini benar-benar MENULIS `pdt_upload_batch`/`pdt_file` dan mengunggah paket
  * ZIP ke path FINAL Rule 44 — bukan sekadar pratinjau.
@@ -15,13 +16,19 @@
  * TIDAK menerima cache hasil `/preview` dari klien (`docs/DECISIONS.md`
  * 2026-09-14, alasan lengkap di kepala `pdt.commitUploadBatch`). Urutan:
  * unduh ZIP staging (server-ke-server) → G1-04 → G1-05 → G1-09
- * `pdt.commitUploadBatch` (menulis batch+file dalam SATU transaksi) →
- * unggah byte yang SAMA ke path final Rule 44 (`unggahPdtRawObjek`) →
- * `pdt.markRawStored` (mengisi `raw_path`/`raw_sha256`/`raw_bytes`/dst.).
+ * `pdt.commitUploadBatch` (menulis batch+file+rekonsiliasi dalam SATU
+ * transaksi) → unggah byte yang SAMA ke path final Rule 44
+ * (`unggahPdtRawObjek`) → `pdt.markRawStored` (mengisi
+ * `raw_path`/`raw_sha256`/`raw_bytes`/dst.).
  *
- * Rekonsiliasi (Rule 13-16) dan penulisan baris fakta (Flow A langkah 7-8)
- * BELUM ada di sini — sub-langkah 2b, lihat handoff sesi ini. `status` hasil
- * commit ini TIDAK PERNAH `'verified'`.
+ * **Rekonsiliasi (Rule 13-16, sub-langkah 2b-i) — Shopee saja, basis Siap
+ * Dikirim, GMV saja** (nol kolom jumlah-pesanan per-SKU terverifikasi,
+ * `G1-07-PERSKU-PESANAN`, `docs/DECISIONS.md`) — `commitUploadBatch` yang
+ * menjalankannya, route ini tidak menyentuh logikanya sama sekali. `status`
+ * hasil commit BISA `'verified'` sekarang (bukan lagi selalu berhenti di
+ * `'parsing'`) untuk batch Shopee yang lolos ambang. Penulisan baris fakta
+ * tertipe (Flow A langkah 8) + rekonsiliasi TikTok
+ * (`G1-07-TIKTOK-REKONSILIASI`, Open) BELUM ada — sub-langkah 2b-ii.
  */
 import { pdt } from '@cdps/core';
 import { pdt as pdtDomain } from '@cdps/domain';

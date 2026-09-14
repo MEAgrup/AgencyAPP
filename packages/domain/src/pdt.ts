@@ -414,9 +414,11 @@ export async function siapkanUploadBatch(
 }
 
 // ===========================================================================
-// G1-09 sub-langkah 2a — commit (Flow A langkah 6 sisi batch/berkas + langkah
-// 9 error path; langkah 7-8 — rekonsiliasi PDT-16 + baris fakta + skor/usulan
-// — SENGAJA BUKAN di sini, lihat handoff sesi ini untuk pembagian 2a/2b).
+// G1-09 sub-langkah 2a+2b-i — commit (Flow A langkah 6 sisi batch/berkas +
+// langkah 7 rekonsiliasi shop-level Shopee + langkah 9 error path). Baris
+// fakta tertipe (`pdt_fact_*`, langkah 8) — sub-langkah 2b-ii, SENGAJA BUKAN
+// di sini (peta kolomDipanen→tabel fakta belum ada, pekerjaan besar
+// tersendiri, lihat `docs/handoff/HANDOFF_PDT_SESI12.md`/`HANDOFF_PDT_SESI13.md`).
 //
 // **Keputusan: PIPELINE DIJALANKAN ULANG dari `storage_path` yang sama**
 // (bukan menerima cache hasil `previewUploadBatch` dari klien) — pemanggil
@@ -453,13 +455,18 @@ export interface PdtCommitRawMeta {
 }
 
 /**
- * Status `pdt_upload_batch` yang BOLEH ditulis sub-langkah ini. `'verified'`
- * SENGAJA tidak ada di sini — itu hanya lahir dari rekonsiliasi (Rule 13-14,
- * sub-langkah 2b), yang belum berjalan; batch yang identitasnya cocok/tidak
- * bisa divalidasi (advisory, bukan pagar blokir — sama seperti pratinjau)
- * berhenti di `'parsing'` menunggu 2b, BUKAN otomatis `'verified'`.
+ * Status `pdt_upload_batch` yang boleh ditulis commit ini. `'verified'`
+ * (BARU sub-langkah 2b-i) lahir HANYA dari rekonsiliasi Shopee
+ * shop-level-vs-per-SKU (Rule 13-14) yang lolos ambang — lihat catatan
+ * rekonsiliasi di kepala `commitUploadBatch`. Batch yang identitasnya
+ * cocok/tidak bisa divalidasi TAPI rekonsiliasinya tidak bisa/belum
+ * dijalankan (TikTok — belum ada mesin shop-level-vs-per-SKU-nya; Shopee
+ * tanpa `shopee_shop_stats`+`shopee_parent_sku` ber-status `ok` berdua)
+ * berhenti di `'parsing'`, BUKAN otomatis `'verified'` — menunggu batch
+ * berikutnya yang membawa berkas lengkap, atau sub-langkah 2b-ii (baris
+ * fakta) menambah jalur lain.
  */
-export type PdtCommitStatus = 'parsing' | 'identitas_belum_terikat' | 'ditolak';
+export type PdtCommitStatus = 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak';
 
 export interface PdtCommitBerkasHasil extends PdtPreviewBerkasHasil {
   /** `pdt_file.deteksi_oleh` — METODE yang dipakai (signature vs override AM), terisi apa pun hasilnya (termasuk yang berakhir `modulKode: null`). */
@@ -472,6 +479,8 @@ export interface PdtCommitPersiapan {
   platform: pdt.PdtPlatform;
   status: PdtCommitStatus;
   alasanDitolak: string | null;
+  /** `pdt_upload_batch.reconcile_delta_pct` — `null` bila rekonsiliasi tidak/belum dijalankan (lihat `PdtCommitStatus`), bukan berarti 0%. */
+  reconcileDeltaPct: number | null;
   periodeMulai: string;
   periodeSelesai: string;
   berkas: readonly PdtCommitBerkasHasil[];
@@ -507,6 +516,29 @@ export interface PdtCommitPersiapan {
  * menghasilkan baris batch (`status='ditolak'`, Flow A langkah 9: "tetap
  * tersimpan agar dapat didiagnosis TANPA UPLOAD ULANG"), karena periode
  * sudah diketahui sah di titik itu.
+ *
+ * **Rekonsiliasi (Rule 13-16, sub-langkah 2b-i) — Shopee SAJA, basis Siap
+ * Dikirim.** Berjalan HANYA ketika identitas `cocok`/`tidak_dapat_divalidasi`
+ * (identitas `tolak`/`usulkan_ikat` tidak masuk akal direkonsiliasi — batch
+ * belum tentu punya toko yang benar) DAN batch membawa `shopee_shop_stats`
+ * + `shopee_parent_sku` yang KEDUANYA `status='ok'`. Basis dipilih Rule 16
+ * (default laporan klien = **Pesanan Siap Dikirim** — basis Dibayar/PDT-19
+ * adalah gerbang Product Exchange TERPISAH, di luar cakupan gerbang Flow A
+ * ini). **Perbandingan pesanan (separuh Rule 13) DILEWATI** —
+ * `shopee_parent_sku.kolomDipanen` (`PDT_KOLOM_DIPANEN.md` §2.2, bucket 1+2
+ * SUDAH lengkap dicek) nol kolom jumlah-pesanan per-SKU terverifikasi;
+ * `rekonsiliasiGmvPesanan` menerima ini (parameter opsional, G1-07 direvisi
+ * sub-langkah ini) dan menilai HANYA dari GMV sampai kolomnya ditemukan —
+ * dicatat `G1-07-PERSKU-PESANAN` (Open, `docs/DECISIONS.md`). TikTok TIDAK
+ * direkonsiliasi sama sekali di sini — G1-07 tidak (belum) punya fungsi
+ * pembaca shop-level-vs-per-SKU untuk TikTok setara punya Shopee
+ * (`parseShopeeShopStatsPerBasis`/`sumShopeeParentSkuGmv`); batch TikTok
+ * berhenti di `'parsing'`, dicatat `G1-07-TIKTOK-REKONSILIASI` (Open).
+ * Lolos ambang ⇒ `status='verified'` — **`uq_pdt_upload_batch_verified`**
+ * (partial unique index, Rule 36) menolak batch verified KEDUA untuk
+ * `(client_platform_id, periode_mulai, periode_selesai)` yang sama; commit
+ * ini menerjemahkan pelanggaran itu jadi `ValidationError` BI, bukan 500
+ * mentah (lihat `catch` di bawah).
  */
 export async function commitUploadBatch(
   sql: Sql,
@@ -558,65 +590,113 @@ export async function commitUploadBatch(
 
   let status: PdtCommitStatus = 'parsing';
   let alasanDitolak: string | null = null;
+  let reconcileDeltaPct: number | null = null;
   if (identitas.status === 'tolak') {
     status = 'ditolak';
     alasanDitolak = identitas.pesan;
   } else if (identitas.status === 'usulkan_ikat') {
     status = 'identitas_belum_terikat';
+  } else {
+    // identitas.status 'cocok'/'tidak_dapat_divalidasi' — satu-satunya jalur yang boleh
+    // mencoba rekonsiliasi (Rule 13-16, sub-langkah 2b-i). Lihat docblock fungsi ini untuk
+    // cakupan (Shopee saja, basis Siap Dikirim, pesanan dilewati — G1-07-PERSKU-PESANAN).
+    if (platform === 'shopee') {
+      const shopStatsBerkas = terparse.find((b) => b.modul.kode === 'shopee_shop_stats');
+      const parentSkuBerkas = terparse.find((b) => b.modul.kode === 'shopee_parent_sku');
+      if (shopStatsBerkas && parentSkuBerkas) {
+        const shopLevel = pdt.parseShopeeShopStatsPerBasis(shopStatsBerkas.aoa).siap_dikirim;
+        if (shopLevel) {
+          const perSkuGmv = pdt.sumShopeeParentSkuGmv(
+            parentSkuBerkas.aoa, 'Penjualan (Pesanan Siap Dikirim) (IDR)', parentSkuBerkas.barisHeader,
+          );
+          const modulTerlibat = hasilBerkas
+            .filter((b) => b.modulKode != null)
+            .map((b) => ({ kode: b.modulKode as string, parseStatusOk: b.status === 'ok' }));
+          const hasilRekon = pdt.rekonsiliasiGmvPesanan({ perSkuGmv, shopLevelGmv: shopLevel.gmv, modulTerlibat });
+          if (hasilRekon.status === 'verified') {
+            status = 'verified';
+            reconcileDeltaPct = hasilRekon.deltaGmvPct;
+          } else {
+            status = 'ditolak';
+            alasanDitolak = hasilRekon.pesan;
+            reconcileDeltaPct = hasilRekon.deltaPct;
+          }
+        }
+        // shopLevel absen (section 'Pesanan Siap Dikirim' tidak ada di berkas ini) — berhenti
+        // di 'parsing', sama seperti pasangan berkas yang tidak lengkap (di bawah).
+      }
+      // Salah satu/keduanya absen atau bukan 'ok' — nol dasar untuk rekonsiliasi, berhenti di
+      // 'parsing' menunggu batch berikutnya yang membawa keduanya lengkap.
+    }
+    // platform === 'tiktok' — G1-07-TIKTOK-REKONSILIASI (Open): belum ada mesin shop-level-
+    // vs-per-SKU untuk TikTok, berhenti di 'parsing'.
   }
-  // identitas.status 'cocok'/'tidak_dapat_divalidasi' — status tetap 'parsing' (advisory,
-  // konsisten previewUploadBatch: 'tidak_dapat_divalidasi' bukan pagar blokir).
 
-  const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b), tidak pernah diperpendek
+  const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
   const retensiAlasan = status === 'ditolak' ? 'ditolak' : 'default';
 
-  const batchId = await withTransaction(sql, async (tx) => {
-    const rows = await tx<{ id: number }[]>`
-      insert into pdt_upload_batch
-        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
-         alasan_ditolak, parser_versi, identitas_sumber, retensi_sampai, retensi_alasan, dibuat_oleh)
-      values
-        (${row.client_id}, ${clientPlatformId}, ${platform}, ${periode.mulai}::date, ${periode.selesai}::date,
-         ${status}, ${alasanDitolak}, ${pdt.PDT_PARSER_VERSI}, ${tx.json(identitasSumber as never)}, ${retensiSampai}::date,
-         ${retensiAlasan}, ${actor.employeeId})
-      returning id`;
-    const id = rows[0].id;
-
-    for (const b of hasilBerkas) {
-      // ditolakPagar/gagalEkstrak — nol bytes sungguhan dibaca (sha256/bytes null di sumbernya),
-      // TIDAK dipersist sebagai pdt_file (sha256/bytes NOT NULL di skema, dan genuinely tidak
-      // diketahui) — tetap terlihat di respons commit ini untuk request yang sama, didiagnosis
-      // dari pesan sha256=null/bytes=null di sana; docs/DECISIONS.md 2026-09-14.
-      if (b.sha256 == null || b.bytes == null) continue;
-      // 'sebagian' TIDAK PERNAH diproduksi hari ini — turunkanParseStatus (G1-08) hanya
-      // mengembalikan 'ok'/'gagal' (pemicu 'sebagian' belum didefinisikan, G1-08-SEBAGIAN,
-      // docs/DECISIONS.md, masih terbuka). Peta di sini APA ADANYA sampai itu terjawab.
-      const parseStatusDb = b.status === 'ok' ? 'ok' : 'gagal';
-      await tx`
-        insert into pdt_file
-          (batch_id, modul_kode, nama_entri, sha256, bytes, baris_header, deteksi_oleh,
-           kolom_dipanen, kolom_baru, parse_status, parse_error)
+  let batchId: number;
+  try {
+    batchId = await withTransaction(sql, async (tx) => {
+      const rows = await tx<{ id: number }[]>`
+        insert into pdt_upload_batch
+          (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
+           alasan_ditolak, reconcile_delta_pct, parser_versi, identitas_sumber, retensi_sampai,
+           retensi_alasan, dibuat_oleh)
         values
-          (${id}, ${b.modulKode}, ${b.nama}, ${b.sha256}, ${b.bytes}, ${b.barisHeader ?? 0}, ${b.deteksiOleh},
-           ${b.kolomDipanen}, ${[...b.kolomBaru]}, ${parseStatusDb}, ${parseStatusDb === 'ok' ? null : b.pesan})`;
-    }
+          (${row.client_id}, ${clientPlatformId}, ${platform}, ${periode.mulai}::date, ${periode.selesai}::date,
+           ${status}, ${alasanDitolak}, ${reconcileDeltaPct}, ${pdt.PDT_PARSER_VERSI}, ${tx.json(identitasSumber as never)},
+           ${retensiSampai}::date, ${retensiAlasan}, ${actor.employeeId})
+        returning id`;
+      const id = rows[0].id;
 
-    await executors(tx).audit.insertAudit({
-      entityType: 'pdt_upload_batch',
-      entityId: String(id),
-      actorEmployeeId: actor.employeeId,
-      action: 'pdt_batch_committed',
-      beforeJson: null,
-      afterJson: {
-        status, platform, periode_mulai: periode.mulai, periode_selesai: periode.selesai,
-        jumlah_berkas: hasilBerkas.length, identitas_status: identitas.status,
-      },
-      createdBy: actor.employeeId,
+      for (const b of hasilBerkas) {
+        // ditolakPagar/gagalEkstrak — nol bytes sungguhan dibaca (sha256/bytes null di sumbernya),
+        // TIDAK dipersist sebagai pdt_file (sha256/bytes NOT NULL di skema, dan genuinely tidak
+        // diketahui) — tetap terlihat di respons commit ini untuk request yang sama, didiagnosis
+        // dari pesan sha256=null/bytes=null di sana; docs/DECISIONS.md 2026-09-14.
+        if (b.sha256 == null || b.bytes == null) continue;
+        // 'sebagian' TIDAK PERNAH diproduksi hari ini — turunkanParseStatus (G1-08) hanya
+        // mengembalikan 'ok'/'gagal' (pemicu 'sebagian' belum didefinisikan, G1-08-SEBAGIAN,
+        // docs/DECISIONS.md, masih terbuka). Peta di sini APA ADANYA sampai itu terjawab.
+        const parseStatusDb = b.status === 'ok' ? 'ok' : 'gagal';
+        await tx`
+          insert into pdt_file
+            (batch_id, modul_kode, nama_entri, sha256, bytes, baris_header, deteksi_oleh,
+             kolom_dipanen, kolom_baru, parse_status, parse_error)
+          values
+            (${id}, ${b.modulKode}, ${b.nama}, ${b.sha256}, ${b.bytes}, ${b.barisHeader ?? 0}, ${b.deteksiOleh},
+             ${b.kolomDipanen}, ${[...b.kolomBaru]}, ${parseStatusDb}, ${parseStatusDb === 'ok' ? null : b.pesan})`;
+      }
+
+      await executors(tx).audit.insertAudit({
+        entityType: 'pdt_upload_batch',
+        entityId: String(id),
+        actorEmployeeId: actor.employeeId,
+        action: 'pdt_batch_committed',
+        beforeJson: null,
+        afterJson: {
+          status, platform, periode_mulai: periode.mulai, periode_selesai: periode.selesai,
+          jumlah_berkas: hasilBerkas.length, identitas_status: identitas.status, reconcile_delta_pct: reconcileDeltaPct,
+        },
+        createdBy: actor.employeeId,
+      });
+
+      return id;
     });
-
-    return id;
-  });
+  } catch (e) {
+    // uq_pdt_upload_batch_verified (Rule 36) — SATU batch verified per (toko, periode); batch
+    // ditolak/digantikan tidak menghalangi penggantinya, jadi hanya rekonsiliasi 'verified' KEDUA
+    // untuk periode yang sama yang bisa memicu ini. BI, bukan 500 mentah — AM diberi tahu kenapa,
+    // bukan "internal server error".
+    if (isUniqueViolation(e)) {
+      throw new ValidationError(
+        `[batch verified untuk toko dan periode ${periode.mulai} s.d. ${periode.selesai} ini sudah ada — reparse batch lama (Flow D) alih-alih mengunggah batch verified baru untuk periode yang sama]`,
+      );
+    }
+    throw e;
+  }
 
   return {
     batchId,
@@ -624,12 +704,18 @@ export async function commitUploadBatch(
     platform,
     status,
     alasanDitolak,
+    reconcileDeltaPct,
     periodeMulai: periode.mulai,
     periodeSelesai: periode.selesai,
     berkas: hasilBerkas,
     identitas,
     rawPath: `${row.client_id}/${clientPlatformId}/${periode.selesai}/${batchId}.zip`,
   };
+}
+
+/** True untuk Postgres unique-violation (SQLSTATE 23505) — pola sama `report.ts`/`vendor.ts`/`client-portal-auth.ts`. */
+function isUniqueViolation(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: string }).code === '23505';
 }
 
 /**

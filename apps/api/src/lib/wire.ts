@@ -8940,11 +8940,14 @@ export function pdtUploadUrlToWire(h: pdt.PdtSiapkanUploadHasil, uploadUrl: stri
 }
 
 // ===========================================================================
-// G1-09 sub-langkah 2a — commit (Flow A langkah 6 sisi batch/berkas + langkah
-// 9 error path). `POST /account/pdt/batches` (`pdt.commitUploadBatch`) —
-// beda dari pratinjau: baris `pdt_upload_batch`/`pdt_file` SUNGGUHAN sudah
-// tertulis saat wire ini dibentuk. Rekonsiliasi/baris fakta (Flow A langkah
-// 7-8) menyusul sub-langkah 2b — `status` di sini TIDAK PERNAH 'verified'.
+// G1-09 sub-langkah 2a+2b-i — commit (Flow A langkah 6 sisi batch/berkas +
+// langkah 7 rekonsiliasi Shopee + langkah 9 error path). `POST
+// /account/pdt/batches` (`pdt.commitUploadBatch`) — beda dari pratinjau:
+// baris `pdt_upload_batch`/`pdt_file` SUNGGUHAN sudah tertulis saat wire ini
+// dibentuk, dan `status` SEKARANG bisa `'verified'` (rekonsiliasi Shopee,
+// Rule 13-16, basis Siap Dikirim, GMV saja — lihat docs/DECISIONS.md
+// G1-07-PERSKU-PESANAN). Baris fakta tertipe (Flow A langkah 8) + TikTok
+// (G1-07-TIKTOK-REKONSILIASI, Open) menyusul sub-langkah 2b-ii.
 // ===========================================================================
 
 /** Satu baris `pdt_file` yang baru ditulis — sama seperti `PdtPreviewBerkasWire` + `deteksi_oleh` (kolom DB yang tidak ada gunanya sebelum baris ini benar-benar ditulis). */
@@ -8956,8 +8959,10 @@ export interface PdtCommitBatchWire {
   batch_id: number;
   client_platform_id: number;
   platform: string;
-  status: string; // 'parsing' | 'identitas_belum_terikat' | 'ditolak'
+  status: string; // 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak'
   alasan_ditolak: string | null;
+  /** `null` bila rekonsiliasi (Rule 13-16) belum/tidak dijalankan — lihat `status`, bukan berarti 0%. */
+  reconcile_delta_pct: number | null;
   periode_mulai: string;
   periode_selesai: string;
   berkas: PdtCommitBerkasWire[];
@@ -8971,6 +8976,7 @@ export function pdtCommitBatchToWire(h: pdt.PdtCommitPersiapan): PdtCommitBatchW
     platform: h.platform,
     status: h.status,
     alasan_ditolak: h.alasanDitolak,
+    reconcile_delta_pct: h.reconcileDeltaPct,
     periode_mulai: h.periodeMulai,
     periode_selesai: h.periodeSelesai,
     berkas: h.berkas.map((b) => ({

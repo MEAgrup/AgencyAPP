@@ -20,6 +20,17 @@
 > aslinya tidak ditemukan di repo mana pun — lihat berkas itu §7. Ini **tidak** memblokir G1 (G1-02
 > sudah punya bucket 1 + bucket 2 lengkap, yang memang whitelist-nya); ia memblokir kelengkapan
 > penuh `pdt_parser_modul.kolom_dipanen` sebelum daftar itu jadi kanonik selamanya.
+>
+> ### Ringkasan jumlah tiket per gelombang (2026-09-14 — jauh sesudah "NOL KODE" di atas)
+> **17 tiket bernomor** di seluruh §1-§5 (`### G<gelombang>-<nomor>`): **G1** 12 (`G1-00`…`G1-11`),
+> **G2** 2 (`G2-01`/`G2-02`), **G3** 0 (§3 masih prosa, belum dipecah jadi tiket bernomor), **G4** 3
+> (`G4-01`…`G4-03`), **G5** 0 (⛔ diblokir, sengaja belum dijadwalkan — §5). Status ringkas: **G1-00
+> s.d. G1-08 SELESAI** (migrasi+engine+tes, lihat commit/`docs/DECISIONS.md` per tiket); **G1-09
+> SEDANG BERJALAN** — bukan satu langkah, sudah 4 dari ~6 sub-langkah (pratinjau, G1-09-BODY-BESAR,
+> commit 2a, rekonsiliasi 2b-i — baris fakta 2b-ii dan halaman UI sub-langkah 3 masih menyusul,
+> lihat catatan status di bawah DoD G1-09 §1); **G1-10**/**G1-11** belum dimulai; **G2**/**G4**
+> belum dimulai (nol seed/nol UI di luar struktur tabel G1-01). Angka ini TIDAK termasuk tiket
+> non-coding §7 atau Open Assumptions §6 (bukan "tiket G", pertanyaan/keputusan pemilik).
 
 ---
 
@@ -355,6 +366,21 @@ punya `null` eksplisit.
 > statusnya, tapi halaman `web-internal` masih sub-langkah 3), dan endpoint konfirmasi AM
 > untuk `usulkan_ikat` (menulis `client_platforms.shop_id`/`akun_konten_toko` — Rule 2/4
 > eksplisit minta AM "mengonfirmasi sekali", BUKAN otomatis saat commit).
+>
+> **Status 2026-09-14 (sub-langkah 2b-i SELESAI, lihat `docs/DECISIONS.md` baris teratas)** —
+> `commitUploadBatch` sekarang menjalankan rekonsiliasi Shopee (Rule 13-16,
+> `pdt.rekonsiliasiGmvPesanan` G1-07, AKHIRNYA dipanggil dari alur nyata) begitu identitas
+> `cocok`/`tidak_dapat_divalidasi` DAN batch membawa `shopee_shop_stats` + `shopee_parent_sku`
+> ber-status `ok` berdua — basis **Siap Dikirim** (Rule 16, default laporan klien). `status`
+> **BISA `'verified'` sekarang** (bukan lagi selalu berhenti di `'parsing'`), atau `'ditolak'`
+> dengan `reconcile_delta_pct` + alasan menyebut modul penyebab. **Perbandingan pesanan (separuh
+> Rule 13) DILEWATI** — nol kolom jumlah-pesanan per-SKU terverifikasi di `shopee_parent_sku`
+> (`G1-07-PERSKU-PESANAN`, Open BARU) — verdict murni dari GMV sampai kolomnya ditemukan.
+> **TikTok TIDAK direkonsiliasi** (`G1-07-TIKTOK-REKONSILIASI`, Open BARU) — G1-07 belum punya
+> mesin shop-level-vs-per-SKU setara Shopee untuk TikTok; batch TikTok tetap berhenti di
+> `'parsing'`. `uq_pdt_upload_batch_verified` (Rule 36, batch verified kedua untuk toko+periode
+> yang sama) diterjemahkan jadi `ValidationError` BI, bukan 500 mentah. **Masih belum dibangun:**
+> baris fakta tertipe (sub-langkah 2b-ii), UI (sub-langkah 3), endpoint konfirmasi identitas AM.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

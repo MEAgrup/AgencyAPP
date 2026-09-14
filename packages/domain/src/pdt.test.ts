@@ -236,6 +236,58 @@ function ttVideoBerkasDenganPeriode(nama: string, idKreator: string, rentang: st
   return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
 }
 
+// ---------------------------------------------------------------------------
+// Fixture rekonsiliasi Shopee (G1-09 sub-langkah 2b-i) — shopee_shop_stats
+// BUKAN satu header, tapi DUA struktur berbeda dalam satu sheet: (a) baris
+// 15-metrik DATAR (HEADER_SHOP_STATS_15) yang divalidasi validasiKolomWajib
+// (Rule 9, `kolomDipanen`); (b) mini-tabel PER BASIS (marker 'Pesanan Siap
+// Dikirim' → header 'Periode Waktu'/'Total Penjualan (IDR)'/'Total Pesanan'
+// → baris Total) yang dibaca `parseShopeeShopStatsPerBasis` (G1-07) —
+// terpisah dari (a), lihat rekonsiliasi.test.ts FIM_MOTOR_SHOP_STATS untuk
+// bentuk aslinya. Detection (`detectPdtModule`) TIDAK disentuh di sini
+// (fixture domain-level menyuntik `modulTerdeteksi` langsung), jadi hanya
+// (a)+(b) yang perlu benar, bukan `tandaTanganKolom`.
+// ---------------------------------------------------------------------------
+const HEADER_SHOP_STATS_15 = [
+  'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik', 'Total Pengunjung',
+  'Tingkat Konversi Pesanan', 'Pesanan Dibatalkan', 'Penjualan Dibatalkan', 'Pesanan Dikembalikan',
+  'Penjualan Dikembalikan', 'Pembeli', 'Total Pembeli Baru', 'Total Pembeli Saat Ini',
+  'Total Potensi Pembeli', 'Tingkat Pembelian Berulang',
+];
+
+function shopeeShopStatsBerkas(nama: string, gmvSiapKirim: number, pesananSiapKirim: number): PdtPreviewBerkasInput {
+  const dataRow15 = [String(gmvSiapKirim), String(pesananSiapKirim), '0', '0', '500', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'];
+  const aoa: unknown[][] = [
+    HEADER_SHOP_STATS_15,
+    dataRow15,
+    [],
+    ['Pesanan Siap Dikirim'],
+    ['Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan'],
+    ['Total', String(gmvSiapKirim), String(pesananSiapKirim)],
+  ];
+  return {
+    nama, sha256: 'sha-shopstats', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, modulTerdeteksi: 'shopee_shop_stats', ambiguous: false, matches: ['shopee_shop_stats'],
+  };
+}
+
+const HEADER_PARENT_SKU = [
+  'Kode Produk', 'Kode Variasi', 'SKU Induk', 'Total Penjualan (Pesanan Dibuat) (IDR)',
+  'Penjualan (Pesanan Siap Dikirim) (IDR)', 'Jumlah Produk Dilihat', 'Produk Diklik',
+  'Tingkat Konversi (Pesanan yang Dibuat)', 'repeat order', 'Pengunjung Produk (Kunjungan)',
+];
+
+function shopeeParentSkuBerkas(nama: string, gmvSiapKirimTotal: number): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_PARENT_SKU,
+    ['P1', 'V1', 'SKU1', String(gmvSiapKirimTotal), String(gmvSiapKirimTotal), '100', '10', '5%', '10%', '50'],
+  ];
+  return {
+    nama, sha256: 'sha-parentsku', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, modulTerdeteksi: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'],
+  };
+}
+
 describeDb('previewUploadBatch (G1-09) — gerbang izin + platform', () => {
   it('404 pada client_platform_id yang tidak ada', async () => {
     await expect(previewUploadBatch(sql, ownerActor(), 999999999, [])).rejects.toBeInstanceOf(NotFoundError);
@@ -467,6 +519,7 @@ interface BatchRow {
   id: number;
   status: string;
   alasan_ditolak: string | null;
+  reconcile_delta_pct: string | null; // numeric — datang sebagai string dari driver
   periode_mulai: string | Date;
   periode_selesai: string | Date;
   parser_versi: number;
@@ -581,12 +634,13 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — status batch dari ident
     expect(cp[0].shop_id).toBeNull();
   });
 
-  it("identitas 'cocok' ⇒ status parsing (menunggu 2b — TIDAK otomatis verified)", async () => {
+  it("identitas 'cocok' TikTok ⇒ status parsing (rekonsiliasi TikTok belum ada, G1-07-TIKTOK-REKONSILIASI — beda dari Shopee, lihat describeDb rekonsiliasi di bawah)", async () => {
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
     const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, ['kreator-a']);
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [ttVideoBerkasDenganPeriode('v.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026')], []);
     expect(persiapan.status).toBe('parsing');
+    expect(persiapan.reconcileDeltaPct).toBeNull();
     const row = await loadBatch(persiapan.batchId);
     expect(row.status).toBe('parsing');
     expect(row.retensi_alasan).toBe('default');
@@ -616,6 +670,88 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — status batch dari ident
     expect(persiapan.status).toBe('parsing');
     expect(persiapan.periodeMulai).toBe('2026-07-01');
     expect(persiapan.periodeSelesai).toBe('2026-07-31');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2b-i) — rekonsiliasi Shopee (Rule
+// 13-16), basis Siap Dikirim, GMV saja (G1-07-PERSKU-PESANAN — nol kolom
+// jumlah-pesanan per-SKU terverifikasi di shopee_parent_sku).
+// ---------------------------------------------------------------------------
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-i) — rekonsiliasi Shopee', () => {
+  async function fixtureCocok(): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', '938284780'); // shop_id SUDAH terikat ⇒ identitas 'cocok', gerbang reconciliation terbuka
+  }
+
+  it('GMV per-SKU Σ = GMV shop-level (basis Siap Dikirim) ⇒ verified, reconcile_delta_pct = 0', async () => {
+    const cpId = await fixtureCocok();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeShopStatsBerkas('shop-stats.xlsx', 1_000_000, 100),
+      shopeeParentSkuBerkas('parent-sku.xlsx', 1_000_000),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('verified');
+    expect(persiapan.reconcileDeltaPct).toBe(0);
+    const row = await loadBatch(persiapan.batchId);
+    expect(row.status).toBe('verified');
+    expect(Number(row.reconcile_delta_pct)).toBe(0);
+    expect(row.retensi_alasan).toBe('default'); // 'verified' ikut baris DEFAULT Rule 45, bukan 'ditolak'
+  });
+
+  it('GMV per-SKU Σ menyimpang > 0,5% dari shop-level ⇒ ditolak, alasan menyebut selisih GMV', async () => {
+    const cpId = await fixtureCocok();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeShopStatsBerkas('shop-stats.xlsx', 1_000_000, 100),
+      shopeeParentSkuBerkas('parent-sku.xlsx', 500_000), // separuh — jauh > 0,5%
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(persiapan.alasanDitolak).toContain('selisih rekonsiliasi GMV');
+    expect(persiapan.reconcileDeltaPct).toBeCloseTo(50, 0);
+    const row = await loadBatch(persiapan.batchId);
+    expect(row.status).toBe('ditolak');
+    expect(row.retensi_alasan).toBe('ditolak'); // rekonsiliasi-ditolak ikut baris +30 hari yang SAMA seperti identitas-ditolak
+  });
+
+  it('hanya shopee_shop_stats TANPA shopee_parent_sku (pasangan tidak lengkap) ⇒ tetap parsing, reconcile_delta_pct null', async () => {
+    const cpId = await fixtureCocok();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeShopStatsBerkas('shop-stats.xlsx', 1_000_000, 100),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('parsing');
+    expect(persiapan.reconcileDeltaPct).toBeNull();
+  });
+
+  it("identitas 'usulkan_ikat' (shop_id belum terikat) ⇒ rekonsiliasi TIDAK dicoba meski berkas lengkap (identitas gate lebih dulu)", async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', null); // shop_id belum terikat
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeShopStatsBerkas('shop-stats.xlsx', 1_000_000, 100),
+      shopeeParentSkuBerkas('parent-sku.xlsx', 1_000_000),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('identitas_belum_terikat');
+    expect(persiapan.reconcileDeltaPct).toBeNull();
+  });
+
+  it('batch verified KEDUA untuk (toko, periode) yang sama ⇒ ValidationError BI (uq_pdt_upload_batch_verified, Rule 36), bukan 500 mentah', async () => {
+    const cpId = await fixtureCocok();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeShopStatsBerkas('shop-stats.xlsx', 1_000_000, 100),
+      shopeeParentSkuBerkas('parent-sku.xlsx', 1_000_000),
+    ];
+    const pertama = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(pertama.status).toBe('verified');
+    await expect(commitUploadBatch(sql, ownerActor(), cpId, berkas, [])).rejects.toBeInstanceOf(ValidationError);
   });
 });
 
