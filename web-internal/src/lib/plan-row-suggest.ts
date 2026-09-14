@@ -32,7 +32,7 @@ export const PILAR_TO_DIVISI: Record<string, string> = {
   iklan: 'Ads',
   affiliate: 'KOL',
   live: 'Live Stream',
-  operasional: 'Ops',
+  operasional: 'Store Operation',
 };
 
 /** Cermin `planpillar.PILAR_PILIH_DIVISI` — divisinya dipilih AM, bukan ditebak. */

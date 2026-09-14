@@ -101,9 +101,28 @@ async function seedKlien(id: string): Promise<void> {
 }
 
 async function seedLaporan(clientId: string, skor: number, bulan: number, gmv: number): Promise<void> {
+  // SATU baris platform per klien, dipakai ulang oleh setiap periode laporan.
+  //
+  // Sebelumnya fungsi ini menyisipkan baris `client_platforms` BARU pada setiap
+  // panggilan — dan ia dipanggil tiga kali per klien (tiga bulan laporan).
+  // Itu lolos sampai `20261009010000_px_m2a_client_platforms_unique_active`
+  // memasang `uq_client_platforms_active_platform`
+  // (`UNIQUE (client_id, platform) WHERE active`), yang sejak 2026-09-12
+  // menggagalkan panggilan KEDUA — di `beforeAll`, jadi seluruh berkas ini
+  // gagal saat setup dan KEDUA BELAS tesnya tidak pernah dijalankan sama
+  // sekali. Vitest melaporkannya sebagai `skipped`, bukan merah, jadi
+  // `db-and-migrations` merah di `main` selama dua hari tanpa ada yang tahu tes
+  // apa yang hilang.
+  //
+  // `on conflict … where active` memakai predikat index parsial itu sebagai
+  // conflict target, jadi baris kedua tidak lagi dibuat dan invariannya
+  // (satu platform aktif per klien) ikut terbaca dari kode tes.
   const [cp] = await sql<{ id: number }[]>`
     insert into client_platforms (client_id, platform, active, created_by)
-    values (${clientId}, 'TikTok Shop', true, ${AM}) returning id`;
+    values (${clientId}, 'TikTok Shop', true, ${AM})
+    on conflict (client_id, platform) where active
+      do update set created_by = excluded.created_by
+    returning id`;
   const mm = String(bulan).padStart(2, '0');
   await sql`
     insert into client_reports (client_id, client_platform_id, platform, periode_tipe,

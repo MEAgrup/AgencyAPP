@@ -81,7 +81,7 @@ describe('PIC_GROUPS', () => {
 
   it('grup operasional = DISPATCH_DIVISIONS, urut registry', () => {
     expect(PIC_GROUPS[0].divisi).toEqual([...DISPATCH_DIVISIONS]);
-    expect(PIC_GROUPS[1].divisi).toEqual(['Account', 'Ops']);
+    expect(PIC_GROUPS[1].divisi).toEqual(['Account']);
   });
 
   it('AI Optimizer & Store Operation ADA di picker (bug yang dilaporkan pemilik)', () => {

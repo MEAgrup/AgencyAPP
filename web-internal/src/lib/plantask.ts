@@ -95,5 +95,5 @@ export const PIC_GROUPS: { label: string; divisi: string[] }[] = [
     label: 'Divisi Operasional',
     divisi: ['Creative', 'Ads', 'KOL', 'Live Stream', 'AI Optimizer', 'Store Operation'],
   },
-  { label: 'Internal', divisi: ['Account', 'Ops'] },
+  { label: 'Internal', divisi: ['Account'] },
 ];
