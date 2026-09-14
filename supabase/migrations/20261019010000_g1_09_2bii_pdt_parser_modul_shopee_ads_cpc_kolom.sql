@@ -16,11 +16,14 @@
 --     Terhadap Omzet (ACOS) (%)`) adalah tebakan yang tidak pernah cocok
 --     dengan berkas nyata mana pun.
 -- ============================================================================
+-- `versi` SENGAJA TIDAK dinaikkan (`pdt.registry.test.ts` menegakkan
+-- `versi === 1` untuk SELURUH modul hari ini — kolomnya belum punya makna
+-- "versi ke berapa" yang ditegakkan di luar 1, beda dari `pdt_benchmark.versi`
+-- yang memang berversi berlapis).
 UPDATE pdt_parser_modul
    SET kolom_dipanen = ARRAY[
          'Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya',
          'nama iklan', 'omzet penjualan', 'Efektifitas Iklan',
          'Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)'
-       ],
-       versi = versi + 1
+       ]
  WHERE kode = 'shopee_ads_cpc';
