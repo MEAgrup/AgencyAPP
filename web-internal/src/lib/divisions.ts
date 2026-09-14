@@ -40,7 +40,6 @@ export const DIVISI_KERJA = [
   'KOL',
   'Live Stream',
   'Account',
-  'Ops',
   'AI Optimizer',
   'Store Operation',
 ] as const;

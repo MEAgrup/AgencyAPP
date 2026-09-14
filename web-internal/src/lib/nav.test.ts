@@ -112,22 +112,26 @@ describe('visibleNav — Sales', () => {
     expect(seen).not.toContain('/admin/employees');
   });
 
-  it('shows Karyawan to the HR lead — the role that actually writes mutasi & resign', () => {
-    // Gerbang server-nya `admin.canManageEmployeeAssignment` (Director ATAU Lead
-    // divisi HR) sudah mengizinkan sejak 2026-08-10, tapi menunya dulu
-    // `director || od` saja — jadi satu-satunya non-Director yang boleh menulis
-    // tidak pernah melihat halamannya. Itu "hiding something reachable", persis
-    // yang kepala `nav.ts` sebut regresi fungsional diam-diam.
+  it('shows Karyawan to divisi HR — staff MAUPUN lead, yang memang menulis mutasi & resign', () => {
+    // Gerbang server-nya `admin.canManageEmployeeAssignment` sudah mengizinkan
+    // sejak 2026-08-10, tapi menunya dulu `director || od` saja — jadi
+    // satu-satunya non-Director yang boleh menulis tidak pernah melihat
+    // halamannya. Itu "hiding something reachable", persis yang kepala `nav.ts`
+    // sebut regresi fungsional diam-diam.
+    //
+    // Sejak ketokan pemilik 2026-09-14 gerbangnya DIVISI, bukan level: tim OD
+    // berisi satu lead dan dua staff yang memikul pekerjaan HR yang sama.
     const seen = hrefs(role('HR', 'lead'));
     expect(seen).toContain('/admin/employees');
+    expect(hrefs(role('HR', 'staff'))).toContain('/admin/employees');
     // TIDAK melebar jadi "lead mana pun": Lead divisi lain tetap tidak melihatnya.
     expect(hrefs(role('Sales', 'lead'))).not.toContain('/admin/employees');
     expect(hrefs(role('Finance', 'lead'))).not.toContain('/admin/employees');
-    // Dan HR *staff* juga tidak — gerbangnya lead, bukan divisi.
-    expect(hrefs(role('HR', 'staff'))).not.toContain('/admin/employees');
-    // Role Mapping tetap Director/OD: HR menempatkan orang pada posisi yang
-    // sudah ada, ia tidak mengarang posisi baru.
+    // Role Mapping tetap Director/OD — dan inilah yang menahan eskalasi: HR
+    // menempatkan orang pada posisi yang SUDAH ada, ia tidak mengarang posisi
+    // baru yang lebih tinggi lalu pindah ke sana.
     expect(seen).not.toContain('/admin/role-mappings');
+    expect(hrefs(role('HR', 'staff'))).not.toContain('/admin/role-mappings');
   });
 
   it('adds Portal Tim for a Sales lead (division lead), still no cross-division menus', () => {

@@ -36,8 +36,17 @@ import {
   type PlanGateContext,
   type TargetKind,
 } from '@/lib/account';
+import { DIVISI_KERJA } from '@/lib/divisions';
 
-const DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream', 'Account', 'Ops'];
+// Salinan hardcode ke-delapan yang M16 justru dibuat untuk menghabisinya —
+// dan yang paling ketahuan hari ini: ia masih memuat `Ops` (kini nonaktif) dan
+// TIDAK PERNAH memuat `AI Optimizer`/`Store Operation`, padahal pilar
+// `sku`/`harga` justru mendahulukan keduanya sebagai PIC. Dipakai untuk DUA
+// hal — centang "Divisi Terlibat" (GA-3) dan picker `divisi_pic` — jadi divisi
+// yang hilang di sini adalah divisi yang tak bisa dipilih AM sama sekali.
+// Diganti cermin tunggal `DIVISI_KERJA`, jadi divisi berikutnya cukup
+// ditambahkan di satu tempat.
+const DIVISIONS: readonly string[] = DIVISI_KERJA;
 const TARGET_KINDS: { value: TargetKind; label: string }[] = [
   { value: 'gmv', label: 'GMV' },
   { value: 'roas', label: 'ROAS' },

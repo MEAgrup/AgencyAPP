@@ -159,6 +159,43 @@ describe('rekonsiliasiGmvPesanan (Rule 13-14)', () => {
     });
     expect(hasil.status).toBe('verified');
   });
+
+  describe('pesanan opsional (G1-09 sub-langkah 2b — G1-07-PERSKU-PESANAN, nol kolom jumlah-pesanan per-SKU terverifikasi)', () => {
+    it('kedua sisi pesanan diberikan tapi bukan sebagai `undefined` eksplisit ⇒ perilaku identik pola lama (tetap dibandingkan)', () => {
+      const hasil = rekonsiliasiGmvPesanan({
+        perSkuGmv: 500_000_000, shopLevelGmv: 1_000_000_000, // GMV jelas jauh > ambang
+        perSkuPesanan: 999, shopLevelPesanan: 1000, // pesanan dekat, TIDAK melebihi ambang sendirian
+        modulTerlibat: modulOk,
+      });
+      expect(hasil.status).toBe('ditolak');
+      if (hasil.status === 'ditolak') expect(hasil.pesan).toContain('GMV');
+    });
+
+    it('perSkuPesanan/shopLevelPesanan tidak diberikan ⇒ verdict HANYA dari GMV, deltaPesananPct null (bukan 0)', () => {
+      const hasil = rekonsiliasiGmvPesanan({
+        perSkuGmv: 999_500_000, shopLevelGmv: 1_000_000_000, // GMV dalam ambang
+        modulTerlibat: modulOk,
+      });
+      expect(hasil).toEqual({ status: 'verified', deltaGmvPct: expect.any(Number), deltaPesananPct: null });
+    });
+
+    it('GMV di luar ambang, pesanan tidak diberikan ⇒ tetap ditolak murni dari GMV (pesanan tidak menyembunyikan kegagalan GMV)', () => {
+      const hasil = rekonsiliasiGmvPesanan({
+        perSkuGmv: 500_000_000, shopLevelGmv: 1_000_000_000,
+        modulTerlibat: modulOk,
+      });
+      expect(hasil.status).toBe('ditolak');
+      if (hasil.status === 'ditolak') expect(hasil.pesan).toContain('GMV');
+    });
+
+    it('hanya SATU sisi pesanan diberikan (sisi lain undefined) ⇒ tetap diperlakukan sebagai "tidak diketahui" (bukan dibandingkan dengan 0)', () => {
+      const hasil = rekonsiliasiGmvPesanan({
+        perSkuGmv: 999_500_000, shopLevelGmv: 1_000_000_000, perSkuPesanan: 1000,
+        modulTerlibat: modulOk,
+      });
+      expect(hasil).toEqual({ status: 'verified', deltaGmvPct: expect.any(Number), deltaPesananPct: null });
+    });
+  });
 });
 
 describe('AMBANG_REKONSILIASI_PERSEN', () => {
