@@ -511,12 +511,14 @@ jobs:
       # Feedback lapangan 2026-09-14 (20261020010000_feedback_lapangan_20260914.sql):
       # nol tabel baru ⇒ TETAP 175 — F-2/F-4 mengubah tabel yang sudah ada
       # (ALTER + kolom baru), F-5 (koreksi) nol tabel sama sekali.
-      - name: Verify table count (expect 175)
+      # F-6 Daily Activity (20261021010000_f6_daily_activities.sql): 176 = 175
+      # + 1 tabel `daily_activities` (log append-only, pola prospect_activities).
+      - name: Verify table count (expect 176)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 175
+          test "$n" -eq 176
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
@@ -547,15 +549,18 @@ jobs:
       #      20261007010000_bridge_msdps_fase1.sql: inbox order eksternal).
       # Feedback lapangan 2026-09-14: TETAP 44 — `alasan_nego`/`harga_standar`
       # (F-4) adalah kolom pada entitas NEG- yang sudah ada, bukan prefix baru.
-      - name: Verify entity_prefix registry (expect 44)
+      # F-6 Daily Activity: 45 = 44 + DACT (bukan reuse ACT — sudah dipakai
+      # Prospect activity).
+      - name: Verify entity_prefix registry (expect 45)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
           # 44 sejak Bridge MSDPS→CDPS Fase 1
-          # (`20261007010000_bridge_msdps_fase1.sql`) menambah prefix ORD.
+          # (`20261007010000_bridge_msdps_fase1.sql`) menambah prefix ORD; 45
+          # sejak F-6 Daily Activity (DACT) di atas.
           # Naikkan KEDUA gate (di sini dan di scripts/db-rebuild.sh) dalam
           # satu commit — persis pelajaran PR #170/#335.
-          test "$n" -eq 44
+          test "$n" -eq 45
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)

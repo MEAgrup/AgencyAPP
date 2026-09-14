@@ -143,6 +143,11 @@ const BERANDA: NavNode[] = [
   // Lain" untuk atasan (keputusan pemilik 2026-09-04 — IA v3 §4 mengira
   // keduanya duplikat; kodenya membuktikan tidak).
   { href: '/board/my-tasks', label: 'Tugas Saya' },
+  // F-6 (feedback lapangan 2026-09-14) — riwayat aktivitas harian (meeting
+  // klien/internal, training, webinar, input data) yang nyambung ke M14 Team
+  // Performance. Universal: setiap orang mencatat aktivitasnya sendiri; lead/
+  // SPV melihat divisinya lewat RLS, bukan lewat menu terpisah.
+  { href: '/aktivitas', label: 'Aktivitas Harian' },
   // "Perlu Persetujuan Saya" — setiap antrean persetujuan digabung: Sales
   // negotiation, Renewal/Cross-Sell, Finance TCR, Lead Delete, Hold Service,
   // M12 Block, KOL escalation, Strategi review (keputusan pemilik 2026-08-31).

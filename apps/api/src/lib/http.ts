@@ -84,6 +84,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ClientIncompleteError: 400, // client.IncompleteError
   ClientPortalValidationError: 400, // clientPortal.PortalValidationError
   CreativeValidationError: 400, // creative.ValidationError
+  DailyActivityIncompleteError: 400, // dailyactivity.IncompleteError (F-6)
   DailyOpsValidationError: 400, // dailyops.ValidationError (M19)
   CustomTermRequiresNegotiationError: 400, // sales.CustomTermRequiresNegotiationError
   FinanceIncompleteError: 400, // finance.IncompleteError

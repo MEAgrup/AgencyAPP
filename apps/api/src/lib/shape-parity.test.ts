@@ -192,7 +192,7 @@ const FE_FILES = [
   // itu hidup empat kali (account/tasks/creative/kol) dengan hanya SATU yang
   // di-anchor di sini; lihat `ONE_BRIEF` di bawah, yang menjaga agar tidak
   // lahir yang kelima.
-  'account.ts', 'adopsi.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'bridge.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyops.ts', 'scs.ts',
+  'account.ts', 'adopsi.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'bridge.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyactivity.ts', 'dailyops.ts', 'scs.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
   'pdt.ts', 'performance.ts', 'portal.ts', 'px.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
@@ -641,6 +641,8 @@ const WIRE_TO_FE: Record<string, string> = {
   AdsScanRunSummaryWire: 'adsscanner.ts::AdsScanRunSummary',
   AdsScanRunDetailWire: 'adsscanner.ts::AdsScanRunDetail',
   AdsScanPortfolioRowWire: 'adsscanner.ts::AdsScanPortfolioRow',
+  // F-6 (feedback lapangan 2026-09-14) — Daily Activity (DACT-).
+  DailyActivityWire: 'dailyactivity.ts::DailyActivity',
   ReportInsightBundleWire: 'report.ts::ReportInsightBundle',
   // A REQUEST body (same reasoning as ProposalLineBody above): the insight the
   // editor PUTs. Paired with the FE's `ReportInsight` — the same six fields the

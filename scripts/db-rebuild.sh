@@ -175,8 +175,8 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "175"
-check "entity_prefix"    "select count(*) from entity_prefix"    "44"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "176"
+check "entity_prefix"    "select count(*) from entity_prefix"    "45"
 check "sm_machines"      "select count(*) from sm_machines"      "35"
 check "notif_events"     "select count(*) from notif_events"     "75"
 # --- Feedback lapangan 2026-09-14 — F-2 + F-4
@@ -188,6 +188,12 @@ check "notif_events"     "select count(*) from notif_events"     "75"
 #       sudah ada (kolom `email` + dua fungsi baru), F-4 menambah dua KOLOM
 #       (`negotiation_proposals.alasan_nego`, `negotiation_proposal_lines.
 #       harga_standar`) pada entitas NEG- yang sudah ada, bukan entitas baru.
+# --- F-6 Daily Activity (20261021010000_f6_daily_activities.sql) -----------
+# 176 = 175 + 1 tabel `daily_activities` (log, bukan lifecycle — pola
+#       prospect_activities). entity_prefix 44→45: +DACT (bukan reuse ACT,
+#       sudah dipakai Prospect activity). sm_machines TETAP 35 (nol status);
+#       notif_events TETAP 75 (nol event — mencatat aktivitas sendiri tidak
+#       memberi tahu siapa pun).
 # --- PX-M2a — Shop ID Gate & Eligibility Policy
 #     (20261008010000_px_m2a_shop_id_eligibility_policy.sql) -----------------
 # 161 = 160 + 1 tabel: `px_eligibility_policy` — kalibrasi kelayakan SKU
