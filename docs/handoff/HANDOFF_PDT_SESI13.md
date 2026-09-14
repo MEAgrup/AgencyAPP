@@ -10,9 +10,15 @@
 >
 > **Status: G1-09 sub-langkah 2b-i (rekonsiliasi Shopee) SELESAI.** PR #368
 > (branch `claude/handoff-sesi10-build-gei0gn`, sesi 12 sub-langkah 2a) masih
-> OPEN/draft saat sesi ini mulai — commit sesi ini menumpuk di branch/PR yang
-> SAMA (bukan PR baru), lihat status PR di GitHub untuk keadaan terbaru.
-> Sub-langkah 2b-ii (baris fakta tertipe) **BELUM dimulai** — lihat §1.
+> OPEN — commit sesi ini menumpuk di branch/PR yang SAMA (bukan PR baru).
+> **Update 2026-09-14 (akhir sesi 13):** PR #368 ditandai **ready for
+> review** (bukan lagi draft) — semua kerja 2a+2b-i sudah commit+push, satu
+> kegagalan CI pra-ada (`gelombang-c-showcase.e2e.test.ts`, tidak terkait,
+> sudah dikomentari di PR) belum berubah, belum ada review manusia. **Claude
+> TIDAK meng-approve/merge PR ini sendiri** — itu keputusan manusia; sesi
+> berikutnya (chat baru) mulai dari sini dengan mengecek status PR terbaru
+> dulu sebelum lanjut kode. Sub-langkah 2b-ii (baris fakta tertipe) **BELUM
+> dimulai** — lihat §1.
 
 ---
 
