@@ -461,6 +461,24 @@ punya `null` eksplisit.
 > ini tidak punya kolom untuk keduanya). `pdt_fact_creator_period` sekarang punya penulis di
 > KEDUA platform (TikTok + Shopee) — lima modul/empat tabel fakta (dari enam) kini punya penulis.
 > Sisa: `pdt_fact_sku_period` (nol penulis) + 19 modul lain belum dipetakan.
+>
+> **Status 2026-09-14 (sesi 19, sub-langkah 2b-ii — MODUL KEENAM, `docs/DECISIONS.md` baris
+> teratas)** — `shopee_ads_cpc` → `pdt_fact_ads` (`ekstrakBarisShopeeAdsCpc`), blocker grain
+> `G1-09-2BII-ADS-CPC` TERTUTUP: pemilik mengunggah sample EKSPOR ASLI (Fim Motor), grain TERBUKTI
+> per IKLAN (`nama iklan` sebagai `kampanye_id`, BUKAN `Kode Produk` — baris "Shop GMV Max" di
+> sample asli tidak punya `Kode Produk` sama sekali tapi tetap baris sah). `Dilihat`→`tayangan`,
+> `Jumlah Klik`→`klik` (beda dari `shopee_ads_live` yang tidak punya kolom klik), `Konversi`→
+> `pesanan_sku`, `omzet penjualan`→`gmv`, `Biaya`→`biaya`, `Efektifitas Iklan`→`roas`. `sku_id`
+> SENGAJA tetap `null` — `Kode Produk` level produk induk, `pdt_sku_master` berkunci per varian,
+> lookup langsung akan mengarang varian (Open baru `G1-09-2BII-ADS-CPC-SKU`, kelas ambiguitas sama
+> dengan modul KEENAM/KETUJUH `pdt_fact_sku_period` di bawah, belum punya preseden). **Bug LATEN
+> ditemukan & diperbaiki**: `kolomDipanen` modul ini (`modules.ts`/`pdt_parser_modul`) salah sejak
+> G1-02 — `ID Toko`/`Periode` (preamble) salah dimasukkan sebagai kolom header (`validasiKolomWajib`
+> akan SELALU gagal untuk berkas asli), dan ejaan kolom ACOS adalah tebakan yang tidak pernah cocok
+> sample nyata; keduanya dikoreksi (`modules.ts` + migrasi `UPDATE pdt_parser_modul`), plus migrasi
+> melebarkan `pdt_fact_ads.kampanye_id` ke `varchar(255)` (nama iklan bisa sepanjang judul produk).
+> **Enam modul/lima tabel fakta (dari enam) kini punya penulis.** Sisa: `pdt_fact_sku_period` (nol
+> penulis, tabel fakta TERAKHIR tanpa penulis) + 19 modul lain belum dipetakan.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

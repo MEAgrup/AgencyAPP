@@ -40,25 +40,10 @@
  * periode)` (`uq_pdt_fact_ads`, migrasi G1-01) adalah kunci yang SAH tanpa
  * perlu resolusi SKU apa pun.
  *
- * `shopee_ads_cpc`/`shopee_ads_search` SENGAJA BELUM dipetakan di sini —
- * dicatat `docs/DECISIONS.md` (G1-09-2BII-ADS-CPC/G1-09-2BII-ADS-SEARCH):
- *  - `shopee_ads_cpc`: baris PER PRODUK (`Kode Produk`, PDT_KOLOM_DIPANEN.md
- *    §2.3: "konsumen: pdt_fact_ads.sku_id") — `sku_id` SEKARANG BISA diisi
- *    (`pdt_sku_master` ada sejak modul KETIGA), tapi investigasi sesi
- *    berikutnya (setelah `pdt_sku_master` lahir) menemukan blocker BARU yang
- *    lebih dalam: `report/shopee/detect.ts` (`ads_toko`, nama lama untuk
- *    berkas fisik yang SAMA — `Data+Keseluruhan+Iklan+Shopee-*.csv`) parser
- *    legacy-nya (`parseAdsCsv`, `report/shopee/metrik.ts`) mengunci baris
- *    lewat `nama iklan`, BUKAN `Kode Produk` — menyiratkan grain SEBENARNYA
- *    modul ini adalah **satu baris per IKLAN** (satu produk bisa punya
- *    BANYAK iklan berjalan sekaligus), bukan satu baris per produk seperti
- *    framing lama di baris ini menduga. Memakai `Kode Produk` sebagai
- *    `kampanye_id` (row-key `pdt_fact_ads`) TANPA verifikasi ke sample asli
- *    berisiko PECAH di runtime (unique-violation `uq_pdt_fact_ads` kalau
- *    memang ada >1 iklan per produk per periode) — bukan cuma salah data
- *    diam-diam seperti risiko lama. Dicatat `G1-09-2BII-ADS-CPC` (diperbarui,
- *    `docs/DECISIONS.md`), TETAP terbuka sampai sample asli membuktikan
- *    grain barisnya.
+ * `shopee_ads_search` SENGAJA BELUM dipetakan di sini — dicatat
+ * `docs/DECISIONS.md` (G1-09-2BII-ADS-SEARCH). `shopee_ads_cpc` LIHAT Modul
+ * KEENAM di bawah — blocker grainnya AKHIRNYA terbuka sesi ini (sample asli
+ * Fim Motor, bukan lagi ditebak):
  *  - `shopee_ads_search`: `kolomDipanen` (`modules.ts`) hanya `['klik',
  *    'konversi']` (bucket 3 `Kata Pencarian`/`SOV` DITAHAN, Q-6) — nol
  *    `biaya` (NOT NULL di skema) dan nol identitas kampanye/produk. Tidak
@@ -107,6 +92,37 @@
  * koma ribuan), BUKAN konvensi Seller Center (`angka.ts` docblock) — cermin
  * `report/shopee/metrik.ts` `parseAdsLive`/`pn(r[ci], true)`, satu-satunya
  * pembaca TERVERIFIKASI untuk bentuk berkas ini sebelum PDT ada.
+ *
+ * **Modul KEENAM (sesi 19): `shopee_ads_cpc` → `pdt_fact_ads`** (lihat
+ * `ekstrakBarisShopeeAdsCpc` di bawah) — blocker grain yang TETAP terbuka
+ * sejak sesi 13 (`G1-09-2BII-ADS-CPC`) akhirnya terjawab: sesi ini menerima
+ * sample EKSPOR ASLI klien (Fim Motor, berkas fisik `Data+Keseluruhan+Iklan+
+ * Shopee-01_07_2026-31_07_2026.csv`, 13 baris data), bukan lagi menebak dari
+ * kode legacy saja. Sample membuktikan dugaan sesi 17 **benar**: baris
+ * PERTAMA (`Nama Iklan` = "Shop GMV Max", `Jenis Iklan` kosong, `Kode Produk`
+ * = `"-"`) adalah iklan TOKO (bukan iklan produk) — TIDAK punya `Kode Produk`
+ * sama sekali, tapi tetap satu baris data yang sah (parser legacy
+ * `parseAdsCsv` menerimanya, kunci lewat `nama iklan` bukan `Kode Produk`).
+ * Grain barisnya **per IKLAN**, bukan per produk — 12 baris sisanya
+ * (`Jenis Iklan` = "Iklan Produk") kebetulan satu produk = satu iklan di
+ * sample ini, tapi itu properti SAMPLE ini, bukan jaminan skema (produk yang
+ * sama BISA punya >1 iklan berjalan). `kampanye_id` (kunci `uq_pdt_fact_ads`)
+ * karena itu memakai `nama iklan` — SATU-SATUNYA identitas baris yang selalu
+ * ada di whitelist modul ini (tidak ada `ID Iklan` numerik seperti
+ * `shopee_ads_live`), cermin PERSIS `parseAdsCsv` legacy (`cNama`, baris
+ * ber-nama kosong dilewati). **`sku_id` SENGAJA TETAP `null`** — beda dari
+ * dugaan awal PDT_KOLOM_DIPANEN.md §2.3 ("`Kode Produk` konsumen:
+ * pdt_fact_ads.sku_id"), sample yang sama menunjukkan `Kode Produk` adalah
+ * level PRODUK INDUK (tanpa info varian), sedangkan `pdt_sku_master` (modul
+ * KETIGA) berkunci `(platform_product_id, platform_variation_id)` PER VARIAN
+ * — satu `Kode Produk` bisa cocok dengan BANYAK baris `pdt_sku_master` (satu
+ * per varian), jadi lookup langsung akan mengarang varian mana yang dipilih.
+ * Ini KELAS AMBIGUITAS YANG SAMA dengan lookup lintas-tabel yang belum punya
+ * preseden (`tt_transaction_product`/`shopee_ams_produk` → `pdt_fact_sku_period`,
+ * `docs/handoff/HANDOFF_PDT_SESI18.md` §1 butir 1) — BUKAN diselesaikan diam-
+ * diam di sini. Dicatat `G1-09-2BII-ADS-CPC-SKU` (Open baru, `docs/DECISIONS.md`).
+ * Angka: `parsePdtAngka(v, true)` — konvensi Ads Manager, sama seperti
+ * `shopee_ads_live` (berkas dari dashboard Ads Manager yang sama).
  */
 import { parsePdtAngka } from './angka';
 
@@ -458,6 +474,62 @@ export function ekstrakBarisKreatorShopeeAmsAfiliasi(
       creatorHandle,
       gmv: iOmzet === -1 ? null : parsePdtAngka(row?.[iOmzet], true),
       pesananTeratribusi: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
+    });
+  }
+  return hasil;
+}
+
+/** Satu baris `pdt_fact_ads` mentah dari `shopee_ads_cpc`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi, pola sama fungsi lain di paket ini). `sku_id`/`content_id` SELALU `null` di pemanggil — lihat docblock kepala berkas untuk kenapa (`Kode Produk` level induk, `pdt_sku_master` berkunci per varian). */
+export interface PdtBarisAdsShopeeCpc {
+  kampanyeId: string;
+  tayangan: number | null;
+  klik: number | null;
+  pesananSku: number | null;
+  gmv: number | null;
+  biaya: number;
+  roas: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `shopee_ads_cpc` (Rule 8 whitelist `modules.ts`:
+ * `['ID Toko', 'Periode', 'Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi',
+ * 'Biaya', 'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Biaya Iklan
+ * Terhadap Omzet (ACOS) (%)']` — `ID Toko`/`Periode` adalah preamble batch,
+ * bukan kolom baris, dan ACOS tidak punya kolom skema `pdt_fact_ads` (dicatat,
+ * bukan hilang diam-diam — konsumennya `HealthAds.acos`, domain LAIN).
+ * `kampanye_id` memakai `nama iklan` (BUKAN `Kode Produk` — lihat docblock
+ * kepala berkas untuk bukti grain PER IKLAN dari sample Fim Motor), cermin
+ * PERSIS `parseAdsCsv` legacy (`report/shopee/metrik.ts`, `cNama`). Baris
+ * ber-`nama iklan` kosong dilewati (bukan baris data sungguhan — sama alasan
+ * legacy: `if (!nama) continue`). Angka: `parsePdtAngka(v, true)` — konvensi
+ * Ads Manager, sama seperti `shopee_ads_live`.
+ */
+export function ekstrakBarisShopeeAdsCpc(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisAdsShopeeCpc[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iKampanye = idx('nama iklan');
+  const iTayangan = idx('Dilihat');
+  const iKlik = idx('Jumlah Klik');
+  const iPesanan = idx('Konversi');
+  const iGmv = idx('omzet penjualan');
+  const iBiaya = idx('Biaya');
+  const iRoas = idx('Efektifitas Iklan');
+
+  const hasil: PdtBarisAdsShopeeCpc[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const kampanyeId = iKampanye === -1 ? '' : String(row?.[iKampanye] ?? '').trim();
+    if (kampanyeId === '') continue;
+    hasil.push({
+      kampanyeId,
+      tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
+      klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik], true),
+      pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
+      gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
+      biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
+      roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
     });
   }
   return hasil;

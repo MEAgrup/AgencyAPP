@@ -227,10 +227,24 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     platform: 'shopee',
     namaTampilan: 'Shopee Ads — Iklan Keseluruhan (CPC)',
     tandaTanganKolom: { must: ['Kode Produk', 'Dilihat', 'Biaya'] },
-    barisHeaderHint: 8, // PRD §7.2 + PDT_KOLOM_DIPANEN §2.3: "header baris 8"
+    barisHeaderHint: 8, // PRD §7.2 + PDT_KOLOM_DIPANEN §2.3: "header baris 8"; DIKONFIRMASI baris 8 persis lewat sample asli Fim Motor sesi 19.
+    // `ID Toko`/`Periode` DIHAPUS dari daftar ini sesi 19 (docs/DECISIONS.md
+    // 2026-09-14 modul KEENAM) — keduanya PREAMBLE (baris 1-6, divalidasi
+    // `ekstrakPreambleShopee`/Rule 2), BUKAN kolom baris header. Menaruhnya di
+    // sini membuat `validasiKolomWajib` (yang memeriksa SELURUH kolomDipanen
+    // terhadap SATU baris header saja) SELALU gagal untuk berkas ASLI apa pun
+    // — bug laten sejak G1-02, tidak pernah tertangkap karena fixture tes
+    // sebelum sesi ini menaruh 'ID Toko'/'Periode' sebagai SEL header buatan
+    // (tidak merefleksikan bentuk berkas asli). `shopee_ads_live`/
+    // `shopee_ads_search` tidak pernah membuat kesalahan yang sama — preseden
+    // yang benar, bukan modul ini. Kolom ACOS DIKOREKSI ke ejaan PERSIS sample
+    // asli (`Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)`) —
+    // ejaan lama (`Biaya Iklan Terhadap Omzet (ACOS) (%)`) adalah TEBAKAN
+    // (PDT_KOLOM_DIPANEN.md §2.3 sendiri menulis "mis." di depannya) yang
+    // TIDAK PERNAH cocok dengan berkas nyata mana pun.
     kolomDipanen: [
-      'ID Toko', 'Periode', 'Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya',
-      'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Biaya Iklan Terhadap Omzet (ACOS) (%)',
+      'Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya',
+      'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)',
     ],
     wajib: false,
   },
