@@ -344,6 +344,16 @@ export const DIVISIONS = [
   'Ads',
   'KOL',
   'Live Stream',
+  // M17 / M18. Keduanya SUDAH ada di `division_registry` (core `division.ts`,
+  // urutan 7 dan 8) dan sudah di-skor M14 (`lib/performance.ts` DIVISIONS),
+  // tapi tidak pernah masuk daftar ini — akibatnya nol orang bisa dipetakan ke
+  // sana lewat /admin/role-mappings, dan kedua divisi itu berdiri dengan
+  // `brief_assignable = true` tanpa satu pun PIC yang bisa menerima Brief-nya.
+  // Bukan divisi baru: ini menutup lubang antara registry divisi dan form yang
+  // mengisinya (keputusan pemilik 2026-09-14 — Account Service dipecah menjadi
+  // AM / CRO / KOL / AI Optimizer / Store Operation).
+  'AI Optimizer',
+  'Store Operation',
   'HR',
 ] as const;
 

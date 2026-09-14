@@ -164,10 +164,14 @@ export class ConflictError extends Error {
  * it scopes a Lead to their own mapped division, so an HR Lead saw HR staff
  * only. A write authority that cannot read its own subjects is not a feature.
  *
- * Deliberately NOT extended to passwords: `auth.canManagePasswords` /
- * `adminMayManage` stay as they are, because letting HR reset anyone's password
- * would be privilege escalation by password takeover — the exact thing
- * `adminMayManage` already refuses for every other Lead.
+ * SEJAK 2026-09-14 jalur password IKUT dibuka untuk HR — kalimat di tempat ini
+ * sebelumnya menyatakan sebaliknya, dan itu sudah tidak berlaku. Ketokan
+ * pemilik: OD/HR memikul pemulihan akses, jadi menahannya di sini hanya memaksa
+ * mereka memakai akun `director` pinjaman yang aksesnya jauh lebih luas.
+ * Kekhawatiran aslinya — "pengambilalihan password sebagai jalur eskalasi" —
+ * TIDAK dijawab dengan menutup gerbangnya, melainkan dengan pagar di
+ * `auth.adminMayManage`: target ber-layered `od`/`director` tidak bisa disetel
+ * passwordnya oleh siapa pun selain Director.
  */
 export function canReadAdmin(actor: Actor): boolean {
   return permission.canManageAdmin(actor) || actor.role.od || canManageEmployeeAssignment(actor);
@@ -189,23 +193,31 @@ export function canWriteAdmin(actor: Actor): boolean {
  * Director maps some HR jabatan → (division `HR`, level `lead`); the gate is
  * written now so the arm exists the moment that mapping is created.
  */
-export const HR_DIVISION = 'HR';
+export const HR_DIVISION = permission.HR_DIVISION;
 
 /**
- * canManageEmployeeAssignment gates the divisi/jabatan mutation. Director always;
- * otherwise ONLY a Lead of the HR division.
+ * canManageEmployeeAssignment gates the divisi/jabatan mutation (dan, lewat
+ * gerbang yang sama, `addEmployeeManually`). Director always; otherwise siapa
+ * pun di divisi HR — lihat `permission.canManageHr` untuk alasannya.
  *
- * This is deliberately NARROW (not "any division Lead") because divisi+jabatan is
- * the LEFT side of a role mapping: editing it re-derives an employee's CDPS role
- * via `employee_claims()` (and `trg_sync_claims_employee` re-issues their JWT
- * claims). Letting an arbitrary Lead rewrite it would be privilege escalation —
- * they could re-grade themselves onto a Director-mapped jabatan.
+ * Tetap NARROW dalam arti yang penting: bukan "Lead divisi mana pun". divisi +
+ * jabatan adalah sisi KIRI sebuah role mapping, jadi mengubahnya menurunkan
+ * ulang role CDPS orang itu lewat `employee_claims()` (dan
+ * `trg_sync_claims_employee` menerbitkan ulang klaim JWT-nya). Kalau Lead divisi
+ * sembarang boleh menulisnya, ia bisa memindahkan DIRINYA ke jabatan yang
+ * dipetakan lebih tinggi.
+ *
+ * KENAPA MELEBAR KE HR TIDAK MEMBUKA ESKALASI ITU, dan ini bergantung pada dua
+ * fakta yang dijaga tes, bukan pada niat baik:
+ *   1. `role_mappings` tidak pernah memberi `director`. Director HANYA lahir
+ *      dari `employee_layered_roles`, yang gerbangnya `canWriteAdmin` —
+ *      Director-only, TIDAK ikut melebar di sini.
+ *   2. Karena itu, yang paling jauh bisa dilakukan orang HR lewat mutasi adalah
+ *      memindahkan seseorang ke divisi/jabatan yang SUDAH dipetakan. Ia tidak
+ *      bisa mengarang target yang lebih tinggi dari yang ada.
  */
 export function canManageEmployeeAssignment(actor: Actor): boolean {
-  if (actor.role.director) {
-    return true;
-  }
-  return actor.role.level === permission.LevelLead && actor.role.division === HR_DIVISION;
+  return permission.canManageHr(actor);
 }
 
 // ---------------------------------------------------------------------------

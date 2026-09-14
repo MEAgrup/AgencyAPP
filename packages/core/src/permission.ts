@@ -121,6 +121,37 @@ export function canManageAdmin(a: Actor): boolean {
   return a.role.director;
 }
 
+/**
+ * Divisi CDPS yang memikul pekerjaan HR. Nilai ini ada di SINI, bukan di
+ * `domain/admin.ts`, karena sejak 2026-09-14 ia dipakai DUA modul domain yang
+ * tidak saling impor (`admin` untuk mutasi/tambah karyawan, `auth` untuk reset
+ * password sementara). Satu salinan di core menghindari keduanya menyimpan
+ * jawaban sendiri atas pertanyaan yang sama.
+ */
+export const HR_DIVISION = 'HR';
+
+/**
+ * canManageHr — boleh menjalankan pekerjaan roster HR: mutasi divisi/jabatan,
+ * menambah karyawan, dan menyetel password SEMENTARA.
+ *
+ * Director selalu; selain itu SIAPA PUN di divisi `HR`, staff maupun lead.
+ *
+ * KENAPA STAFF IKUT, dan ini ketokan pemilik 2026-09-14. Sebelumnya gerbangnya
+ * `lead` divisi HR saja. Tim OD MEA berisi tiga orang — satu lead dan DUA
+ * staff — dan ketiganya memikul pekerjaan HR yang sama. Selama gerbangnya
+ * lead-only, kedua staff itu hanya bisa bekerja lewat akun `director` yang
+ * dipinjamkan ke mereka, yang justru memberi akses JAUH lebih luas daripada
+ * yang mereka butuhkan (ubah data klien, kontrak, nominal). Melebarkan gerbang
+ * sempit ini adalah cara MEMPERSEMPIT akses mereka secara keseluruhan.
+ *
+ * Yang TIDAK ikut melebar, dan sengaja: `canManageAdmin` (role mapping +
+ * layered role) tetap Director-only. Itu yang menahan eskalasi — lihat
+ * `admin.canManageEmployeeAssignment` dan `auth.adminMayManage`.
+ */
+export function canManageHr(a: Actor): boolean {
+  return a.role.director || a.role.division === HR_DIVISION;
+}
+
 /** canReadDivision reports read access to a division's data. */
 export function canReadDivision(a: Actor, division: string): boolean {
   if (a.role.director || a.role.od) {
