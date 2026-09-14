@@ -233,22 +233,44 @@ export function validatePassword(password: string): void {
 }
 
 /**
- * canManagePasswords is the coarse gate: only a Director or a division Lead may
- * ever touch someone else's password. Mirrors Go's first check in SetPassword /
- * ListCredentials. The per-target check is `adminMayManage`.
+ * canManagePasswords is the coarse gate: Director, a division Lead, atau orang
+ * divisi HR may ever touch someone else's password. Mirrors Go's first check in
+ * SetPassword / ListCredentials. The per-target check is `adminMayManage`.
+ *
+ * Lengan HR ditambahkan 2026-09-14 atas ketokan pemilik: OD/HR memikul
+ * pemulihan akses tanpa email (password SEMENTARA + wajib ganti saat login
+ * berikutnya), dan sebelumnya hanya bisa melakukannya lewat akun `director`
+ * pinjaman. Gerbang ini KASAR dengan sengaja — batas sesungguhnya ada di
+ * `adminMayManage`, dan di situlah pagar anti-eskalasinya berdiri.
  */
 export function canManagePasswords(actor: Actor): boolean {
-  return actor.role.director || actor.role.level === permission.LevelLead;
+  return (
+    actor.role.director ||
+    actor.role.level === permission.LevelLead ||
+    permission.canManageHr(actor)
+  );
 }
 
 /**
  * adminMayManage decides whether `actor` may set `targetId`'s password.
  *
- * Director → anyone. A division Lead → only employees whose MAPPED CDPS division
- * equals theirs, and never a layered OD/Director target (a Lead must not be able
- * to reset the password of someone above them — that would be privilege
- * escalation by password takeover). An unmapped target is Director-only, since
- * without a mapping there is no division to compare.
+ * Director → siapa pun.
+ *
+ * Orang divisi HR → siapa pun LINTAS divisi, karena itulah isi pekerjaannya
+ * (ketokan pemilik 2026-09-14): pemulihan akses tidak bisa dibatasi pada satu
+ * divisi kalau yang minta tolong bisa datang dari mana saja.
+ *
+ * Lead divisi lain → hanya karyawan yang divisi CDPS TERPETAKANNYA sama dengan
+ * divisinya. Target tanpa mapping tetap Director-only: tanpa mapping tidak ada
+ * divisi untuk dibandingkan.
+ *
+ * PAGAR YANG BERLAKU UNTUK SEMUANYA KECUALI DIRECTOR — dan sejak 2026-09-14 ia
+ * dipindah ke ATAS supaya lengan HR ikut terkena, bukan hanya Lead: target yang
+ * memegang layered `od` atau `director` TIDAK PERNAH bisa disetel passwordnya
+ * oleh siapa pun selain Director. Tanpa pagar ini, melebarkan jalur password ke
+ * HR sama saja memberi HR kunci akun Director — eskalasi lewat pengambilalihan
+ * password, persis yang ditolak model ini sejak awal. Dengan pagar ini, akun
+ * Yohan dan Nerissa tetap di luar jangkauan HR.
  *
  * Mirrors Go's adminMayManage. Takes the privileged client: it reads
  * `role_mappings` + `employee_layered_roles`, which are default-deny under RLS.
@@ -262,19 +284,23 @@ export async function adminMayManage(sql: Queryable, actor: Actor, targetId: str
   if (actor.role.director) {
     return true;
   }
+  // Pagar anti-eskalasi lebih dulu: berlaku untuk HR maupun Lead.
+  const layered = await sql<{ n: number }[]>`
+    select count(*)::int as n from employee_layered_roles
+     where employee_id = ${targetId} and enabled = true and role in ('od', 'director')`;
+  if (layered[0].n > 0) {
+    return false;
+  }
+  if (permission.canManageHr(actor)) {
+    return true;
+  }
   if (actor.role.level !== permission.LevelLead || actor.role.division === '') {
     return false;
   }
   const mapped = await sql<{ division: string }[]>`
     select division from role_mappings
      where divisi = ${rows[0].divisi} and jabatan = ${rows[0].jabatan}`;
-  if (mapped.length === 0 || mapped[0].division !== actor.role.division) {
-    return false;
-  }
-  const layered = await sql<{ n: number }[]>`
-    select count(*)::int as n from employee_layered_roles
-     where employee_id = ${targetId} and enabled = true and role in ('od', 'director')`;
-  return layered[0].n === 0;
+  return mapped.length > 0 && mapped[0].division === actor.role.division;
 }
 
 /**
