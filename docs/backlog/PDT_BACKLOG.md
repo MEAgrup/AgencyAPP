@@ -493,6 +493,20 @@ punya `null` eksplisit.
 > BELUM dibangun** — `sku_id` NOT NULL DAN bagian kunci unik tabel itu, jadi TIDAK ADA baris yang
 > bisa ditulis sampai lookup `Kode Item` (produk induk) → `pdt_sku_master.id` (per varian)
 > diputuskan (Open `G1-09-2BII-ADS-CPC-SKU`, sekarang menunggu DUA modul nyata).
+>
+> **Status 2026-09-14 (sesi lanjutan pasca-sesi 20) — EMPAT bug `kolomDipanen` lagi dikoreksi**
+> (`shopee_ads_search`, `shopee_live`, `shopee_chat`, `shopee_chat_broadcast`), ZIP Fim Motor
+> LENGKAP (15 berkas) diekstrak ulang untuk memeriksa berkas yang belum pernah dibaca sesi
+> mana pun. Pola sama seluruhnya: ejaan `kolomDipanen` tidak pernah diverifikasi, tidak pernah
+> cocok berkas nyata. `shopee_ads_search`: sample JUGA membuktikan `Nama Iklan`/`Biaya` ada
+> (premis `G1-09-2BII-ADS-SEARCH` usang) — writer BELUM dibangun (keputusan whitelist baru,
+> lihat Open diperbarui). `shopee_live`: ejaan diperbaiki, blocker identitas
+> `G1-09-2BII-SHOPEELIVE` TETAP terbuka. `shopee_chat`/`shopee_chat_broadcast`: keduanya belum
+> punya writer, jadi koreksi ini murni mencegah `parse_status='gagal'` sejak modul ini kelak
+> dibangun. **Investigasi TANPA kode** untuk `shopee_diskon`/`shopee_flash_sale`
+> (`UNVERIFIED_SIGNATURE` sejak G1-02): header asli dibaca pertama kali, deskripsi lama
+> "sama struktur `shopee_voucher`" TERBUKTI SALAH — dicatat Open baru
+> `G1-09-2BII-DISKON-FLASHSALE-STRUKTUR`, menunggu keputusan kolom mana yang dipanen.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

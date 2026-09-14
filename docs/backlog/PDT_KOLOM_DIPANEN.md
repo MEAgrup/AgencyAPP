@@ -281,7 +281,16 @@ Bucket 2 (derived-add — `report/shopee/metrik.ts:460-477` `ads_toko`/`ads_prod
 | `Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)` | -- konsumen: `HealthAds.acos`, B-4.3 (`metrik.ts:465-466`) — TIDAK ada kolom skema `pdt_fact_ads` untuknya, konsumennya domain LAIN | ACOS toko tak terhitung |
 
 ### 2.4 `shopee_ads_search` — `Search-Ads-Overall-Data-*.csv` (header baris 8)
-Bucket 1: `klik`, `konversi` ⇒ `pdt_fact_ads`.
+Bucket 1: `Jumlah Klik`, `Konversi` ⇒ `pdt_fact_ads`. **Ejaan DIKOREKSI sesi lanjutan pasca-sesi
+20 (docs/DECISIONS.md 2026-09-14)** terhadap sample EKSPOR ASLI Fim Motor — ejaan huruf kecil
+sebelumnya (`klik`/`konversi`) tidak pernah diverifikasi dan tidak pernah cocok berkas nyata.
+
+**Temuan baru sesi ini (belum diimplementasikan, belum jadi keputusan whitelist):** sample asli
+JUGA membuktikan kolom `Nama Iklan` (identitas kampanye) dan `Biaya` (`pdt_fact_ads.biaya` NOT
+NULL) SUNGGUH ADA di berkas ini — premis `G1-09-2BII-ADS-SEARCH` ("nol kolom biaya/identitas")
+sudah usang. Menambah keduanya ke `kolomDipanen` (memungkinkan modul ini akhirnya menulis
+`pdt_fact_ads`, pola sama `shopee_ads_cpc`) BELUM dilakukan — itu keputusan desain whitelist baru
+(sama kelas Q-6), bukan koreksi ejaan, sengaja tidak ditebak sesi ini.
 
 Bucket 3 (human call — **ditahan**, bukan dibuang, ketokan Q-6): `Kata Pencarian`, `SOV`. Riset
 keyword belum punya konsumen yang dibangun; menunggu Anty menjawab apakah dibangun atau memang
@@ -291,9 +300,12 @@ dibuang secara permanen (§6 handoff, baris ketiga).
 Bucket 1: `ID Iklan`, `Penonton`, `Pesanan`, `Omzet`, `Biaya`, `Efektifitas Iklan` ⇒ `pdt_fact_ads`.
 Tidak ada baris bucket 2.
 
-### 2.6 `shopee_live` — `live_streaming_*.xlsx` (3 sheet)
-Bucket 1: `Informasi Streaming`, `Waktu Mulai`, `Pengunjung`, `Penjualan` ⇒ `pdt_fact_content` jenis
-`live`. Tidak ada baris bucket 2.
+### 2.6 `shopee_live` — `live_streaming_*.xlsx` (3 sheet, sheet "Daftar Streaming")
+Bucket 1: `Informasi Streaming`, `Waktu Mulai`, `Pengunjung`, `Penjualan (Pesanan Siap Dikirim)(Rp)`
+⇒ `pdt_fact_content` jenis `live`. **Ejaan kolom terakhir DIKOREKSI sesi lanjutan pasca-sesi 20**
+terhadap sample asli Fim Motor (`'Penjualan'` polos tidak pernah cocok). Tidak ada baris bucket 2.
+Blocker identitas `G1-09-2BII-SHOPEELIVE` (tidak ada kolom ID sesi live yang stabil di sample yang
+sama) TETAP terbuka — koreksi ini tidak menyentuhnya.
 
 ### 2.7 `shopee_video` — `video-overview-v3*.csv` (header 2 lapis, 54 kolom)
 Bucket 1: transaksi, kunjungan, sumber penonton, konversi (11 dari 54 kolom) ⇒ `pdt_fact_content`.
@@ -301,12 +313,49 @@ Tidak ada baris bucket 2 — §7 menandai modul ini sudah lengkap terhadap konsu
 diverifikasi; 43 kolom sisanya sengaja tidak dipanen (Example §5).
 
 ### 2.8 `shopee_voucher` / `shopee_diskon` / `shopee_flash_sale`
-Bucket 1: penjualan 2 basis, klaim, tingkat penggunaan, biaya promo ⇒ dimensi promo + biaya promo.
-Tidak ada baris bucket 2.
+`shopee_voucher` bucket 1: penjualan 2 basis, klaim, tingkat penggunaan, biaya promo ⇒ dimensi
+promo + biaya promo (`modules.ts` — SUDAH cocok persis sample asli `voucher_*.xlsx`). Tidak ada
+baris bucket 2.
+
+> **`shopee_diskon`/`shopee_flash_sale` MASIH `UNVERIFIED_SIGNATURE` (kode tidak diubah sesi ini)
+> — TAPI struktur header asli sudah terbaca sesi lanjutan pasca-sesi 20** (Fim Motor
+> `discount_20260701-20260731.xlsx` sheet "Kriteria Utama"/"Rincian Performa" dan
+> `In_Shop_Flash_Sale_Metrics_*.xlsx` sheet "Kriteria Utama"). Deskripsi prosa di atas ("penjualan
+> 2 basis, klaim, tingkat penggunaan, biaya promo" — disamakan dengan `shopee_voucher`) TERNYATA
+> **TIDAK COCOK** untuk `shopee_diskon`: sample asli TIDAK PUNYA kolom `Klaim`/`Tingkat
+> Penggunaan`/`Total Biaya` sama sekali — strukturnya justru jauh lebih kaya (26 kolom: `Tanggal`,
+> `Tipe Promosi` [nilai: "Semua"/"Diskon"/"Paket Diskon"/"Kombo Hemat"], penjualan 2 basis, produk
+> terjual 2 basis, pembeli 2 basis, PLUS rincian "Paket Diskon"/"Kombo Hemat" — produk utama vs
+> produk tambahan). Anchor pembeda YANG TERVERIFIKASI: `Tanggal`+`Tipe Promosi` (tidak dimiliki
+> `shopee_voucher`, yang ber-`Periode Waktu`+`Klaim`).
+>
+> `shopee_flash_sale` (`In_Shop_Flash_Sale_Metrics_*.xlsx`) LEBIH dekat ke struktur `shopee_voucher`
+> (sama-sama `Periode Waktu`) TAPI juga TIDAK punya `Klaim`/`Total Biaya` — kolom uniknya `Jumlah
+> Produk Dilihat`/`Produk Diklik`/`Persentase Klik` (funnel tampilan, bukan promo cost). Anchor
+> pembeda yang terverifikasi: `Periode Waktu`+`Jumlah Produk Dilihat` (tidak dimiliki
+> `shopee_voucher`/`shopee_diskon`).
+>
+> **Kenapa TIDAK langsung dikodekan sesi ini**: sinyal deteksi (`tandaTanganKolom`) BISA ditulis
+> dari temuan di atas, tapi `kolomDipanen` (kolom mana yang genuinely mau dipanen dari struktur
+> yang TERNYATA beda dari asumsi PRD) adalah keputusan desain baru — kelas sama Q-6 — bukan
+> koreksi ejaan. Menyalakan deteksi TANPA `kolomDipanen` yang diputuskan berarti modul akan
+> `parse_status='ok'` vakum (nol kolom divalidasi, nol data dipanen) tanpa AM pernah tahu —
+> lebih berbahaya daripada tetap `UNVERIFIED_SIGNATURE`. Dicatat sebagai Open baru
+> `docs/DECISIONS.md` untuk Anty/Hans: kolom mana dari struktur asli di atas yang mau dipanen.
 
 ### 2.9 `shopee_chat` / `shopee_chat_broadcast`
-Bucket 1: waktu respon, % dibalas, CSAT, konversi chat (`shopee_chat`); penerima, dibaca, diklik,
-pesanan (`shopee_chat_broadcast`) ⇒ dimensi layanan / CRM. Tidak ada baris bucket 2.
+> **`kolomDipanen` DIKOREKSI sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** terhadap
+> sample EKSPOR ASLI (Fim Motor, `chat_*.xlsx` + `Chat_Broadcast_overview_*.xlsx`). `shopee_chat`:
+> `'Persentase Chat Dibalas'` DIHAPUS — sample tidak punya kolom itu sama sekali (bukan salah eja).
+> `shopee_chat_broadcast`: SELURUH whitelist huruf kecil (`penerima`/`dibaca`/`diklik`/`pesanan`,
+> "TEBAKAN KONVENSI" per catatan lama) dikoreksi ke ejaan Title Case PERSIS sample asli — modul ini
+> SELALU `parse_status='gagal'` sejak G1-02 (belum punya writer, jadi belum pernah terlihat di
+> produksi, beda dari `shopee_ams_afiliasi` yang sudah SEMPAT rusak diam-diam di produksi).
+
+Bucket 1: `Periode Waktu`, `Pengunjung`, `Jumlah Chat`, `Chat Dibalas`, `Waktu Respon Rata-rata`,
+`CSAT %`, `Total Pesanan`, `Penjualan (IDR)`, `Tingkat Konversi (Chat Dibalas)` (`shopee_chat`);
+`Total Penerima`, `Penerima yang Membaca`, `Penerima yang Mengklik`, `Pesanan`
+(`shopee_chat_broadcast`) ⇒ dimensi layanan / CRM. Tidak ada baris bucket 2.
 
 ### 2.10 `shopee_ams_produk` / `shopee_ams_afiliasi`
 > **Ejaan kolom DIKOREKSI sesi 20 (docs/DECISIONS.md 2026-09-14) terhadap sample EKSPOR ASLI**
