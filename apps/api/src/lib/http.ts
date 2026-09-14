@@ -105,6 +105,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   PerformanceValidationError: 400, // performance.ValidationError
   ProductExchangeValidationError: 400, // productexchange.ValidationError (PX-M2a)
   ReqValidationError: 400, // req.ValidationError
+  SalesClosingScheduleTotalError: 400, // sales.ClosingScheduleTotalError (F-3, 2026-09-14)
   SalesIncompleteError: 400, // sales.IncompleteError
   SalesPerfValidationError: 400, // salesperf.ValidationError
   SalesTooManyServicesError: 400, // sales.TooManyServicesError

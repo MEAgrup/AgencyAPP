@@ -11,7 +11,7 @@
 | Butir | Status | Migrasi |
 |---|---|---|
 | F-2 (rate-limit login per email+IP) | ✅ selesai | `20261020010000_feedback_lapangan_20260914.sql` |
-| F-3 (pesan validasi sales.ts) | ⚠️ **3 dari 4 baris prioritas** — lihat §2 | nol migrasi |
+| F-3 (pesan validasi sales.ts) | ✅ **3/4 prioritas (sesi 2) + 3 lagi dari audit menyeluruh 47 lokasi (sesi 3)** — lihat §2 | nol migrasi |
 | F-4 (catatan nego wajib + harga standar) | ✅ selesai | `20261020010000_feedback_lapangan_20260914.sql` |
 | F-5 (nominal Finance beda dari rencana) | 🔴 **DIKOREKSI** — nol tabel baru, lihat DECISIONS.md | `20261020010000_feedback_lapangan_20260914.sql` (1 event saja) |
 | Gelombang 3 (4 butir "sudah ada") | ✅ dokumen `docs/FITUR_SUDAH_ADA_TAPI_TIDAK_TERLIHAT.md` | — |
@@ -36,21 +36,43 @@ deadlock atau salah hitung count kalau jalan bersamaan pada mesin satu-core.
 Selalu tambahkan `--pool=forks --poolOptions.forks.singleFork` di sini; CI
 sungguhan (runner GitHub, lebih banyak core) tidak menunjukkan ini.
 
-## 2. F-3 — 47 lokasi lagi, belum ditelusuri
+## 2. F-3 — 47 lokasi ditelusuri SESI INI (SESI 3), 3 lagi diperbaiki
 
-Handoff sesi 1 menandai **4 baris prioritas**. Sesi ini menyelesaikan **3**:
-platform di luar checklist, jasa+platform duplikat, salesperson duplikat di
-alokasi (`sales.ValidationError` + 3 konstanta BI baru). **Baris ke-4 yang
-dilaporkan ternyata SUDAH BENAR** (`TooManyServicesError` vs `IncompleteError`
-sudah dibedakan lewat ternary sebelum sesi ini) — dicatat sebagai koreksi di
-DECISIONS.md, bukan dikerjakan ulang.
+Handoff sesi 1 menandai **4 baris prioritas**; sesi 2 menyelesaikan **3** dari
+situ (platform di luar checklist, jasa+platform duplikat, salesperson
+duplikat di alokasi — `sales.ValidationError` + 3 konstanta BI). Baris ke-4
+ternyata sudah benar (dicatat sebagai koreksi, bukan dikerjakan ulang).
 
-Sisa **~47 lokasi** `throw new IncompleteError()` di `packages/domain/src/sales.ts`
-belum ditelusuri satu per satu untuk membedakan "field kosong" (biarkan) dari
-"isi salah" (butuh pesan baru gaya `sales.ValidationError`). Ini SENGAJA
-tidak dikerjakan sekali jalan (handoff sesi 1: *"Sisanya boleh menyusul"*) —
-tapi kalau ada keluhan lapangan baru yang berbunyi mirip *"padahal sudah
-diisi"*, curigai dulu lokasi-lokasi ini sebelum menganggapnya bug baru.
+**Sesi 3 menelusuri SEMUA ~47 sisanya satu per satu** (bukan sampel) — hasilnya
+di `docs/DECISIONS.md` (baris F-3 lanjutan, 2026-09-14). Tiga lagi diperbaiki:
+
+- `submitQualifiedForm` — 2 titik (platform di luar checklist, jasa+platform
+  duplikat) — logika sama persis dengan `writeProposal`, reuse konstanta yang
+  sudah ada.
+- `validateScheduleTotal` (dipakai `close()` **dan** `renewal.executeRenewal`,
+  R-03 berbagi fungsi) — jadwal cicilan ≠ nilai transaksi. Kelas baru
+  `sales.ClosingScheduleTotalError`, pesan verbatim PRD M5 §4
+  `[total termin tidak sama dengan nilai transaksi]`. **Nama sengaja bukan
+  `ScheduleTotalError` polos** — `finance.ts` sudah punya kelas itu untuk
+  pesan sama di gerbang M5-OA-7 (aturan berbeda); menyatukannya butuh
+  `sales.ts` mengimpor `finance.ts`, padahal arahnya sudah kebalikannya
+  (`finance.ts` → `sales.ts`), jadi akan jadi siklus impor.
+
+**Sisa ~44 lokasi TETAP `IncompleteError` — diperiksa dan disengaja, bukan
+terlewat**: mayoritas invarian internal kalkulator harga MSL v2 (`computeSubtotal`
+mode/qty/minQty tidak valid — jalur ini tidak dipicu isian form biasa), tenor
+FS-6b di luar katalog (`resolveTenor` — tidak ada kutipan PRD untuk pesan
+spesifik, mengarang satu akan melanggar house rule #5), dan validasi
+shape/enum lain yang genuinely kosong. Kalau ada keluhan lapangan baru yang
+berbunyi mirip *"padahal sudah diisi"*, cek `docs/DECISIONS.md` baris F-3
+lanjutan dulu untuk daftar kelasnya sebelum menganggapnya bug baru.
+
+Test yang diperbarui: `sales.test.ts` (5 assertion pesan diganti dari
+`toBeInstanceOf(IncompleteError)` ke `toThrow(MSG_...)`/`toThrow(ClosingScheduleTotalError)`)
+dan `renewal.test.ts` (1 assertion, `validateScheduleTotal` dipakai R-03 juga).
+`http.ts` mendapat entri baru `SalesClosingScheduleTotalError: 400`. **Nol
+migrasi** — perubahan ini murni pesan validasi + kelas error TS, tidak
+menyentuh skema.
 
 ## 3. F-6 — selesai: keluaran kerja, bukan absensi
 

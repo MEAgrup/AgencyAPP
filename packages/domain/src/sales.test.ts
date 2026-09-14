@@ -17,6 +17,7 @@ import {
   BadCommissionRuleError,
   buildQuote,
   close,
+  ClosingScheduleTotalError,
   computeCommission,
   computePPN,
   computeSubtotal,
@@ -556,7 +557,7 @@ describeDb('D-4 — tombol Include PPN mengalir sampai tagihan', () => {
     await expect(close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
       parties, paymentScheme: PAYMENT_SCHEME_TERMIN, includePPN: true,
       installments: [{ amount: '5000000', dueDate: '2026-08-01' }, { amount: '5000000', dueDate: '2026-09-01' }],
-    })).rejects.toBeInstanceOf(IncompleteError);
+    })).rejects.toThrow(ClosingScheduleTotalError);
 
     const res = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
       parties, paymentScheme: PAYMENT_SCHEME_TERMIN, includePPN: true,
@@ -783,7 +784,7 @@ describeDb('submitQualifiedForm', () => {
         kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '1', targetGmv: '1',
         services: [{ masterServiceId: svc, quantity: 1 }, { masterServiceId: svc, quantity: 1 }],
       }),
-    ).rejects.toBeInstanceOf(IncompleteError);
+    ).rejects.toThrow(MSG_JASA_DUPLIKAT_PLATFORM);
     const attempt = await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`;
     expect(attempt[0].status).toBe('Contacted');
     const lines = await sql<{ n: number }[]>`
@@ -822,7 +823,7 @@ describeDb('submitQualifiedForm', () => {
           { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop' },
         ],
       }),
-    ).rejects.toBeInstanceOf(IncompleteError);
+    ).rejects.toThrow(MSG_JASA_DUPLIKAT_PLATFORM);
   });
 
   it('PR-5: rejects a line naming a platform outside the form\'s own checklist', async () => {
@@ -834,7 +835,7 @@ describeDb('submitQualifiedForm', () => {
         kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '1', targetGmv: '1',
         services: [{ masterServiceId: svc, quantity: 1, platform: 'Lazada' }],
       }),
-    ).rejects.toBeInstanceOf(IncompleteError);
+    ).rejects.toThrow(MSG_PLATFORM_DI_LUAR_CHECKLIST);
   });
 
   it('rejects an incomplete client draft with the exact BI message', async () => {
@@ -1190,7 +1191,7 @@ describeDb('closing', () => {
       parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
       paymentScheme: PAYMENT_SCHEME_TERMIN,
       installments: [{ amount: '4000000', dueDate: '2026-08-01' }, { amount: '4000000', dueDate: '2026-09-01' }],
-    })).rejects.toBeInstanceOf(IncompleteError);
+    })).rejects.toThrow(ClosingScheduleTotalError);
 
     const attemptId = await autoApprovedAttempt(budi(), svc);
     const res = await close(sql, budi(), attemptId, {

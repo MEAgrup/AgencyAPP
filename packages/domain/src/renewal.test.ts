@@ -40,6 +40,7 @@ import {
   close,
   CustomTermRequiresNegotiationError,
   ForbiddenError,
+  ClosingScheduleTotalError,
   IncompleteError,
   markContacted,
   NotClosableError,
@@ -477,7 +478,7 @@ describeDb('executeRenewal', () => {
       parties: { primarySalespersonId: budi().employeeId, allocations: [{ salespersonId: budi().employeeId, basisPoints: 10000 }] },
       paymentScheme: PAYMENT_SCHEME_TERMIN,
       installments: [{ amount: '1000000', dueDate: '2026-09-01' }],
-    })).rejects.toBeInstanceOf(IncompleteError);
+    })).rejects.toBeInstanceOf(ClosingScheduleTotalError);
 
     const res = await executeRenewal(sql, budi(), rn.id, {
       durasiBulan: 12, ...nextYearWindow(),

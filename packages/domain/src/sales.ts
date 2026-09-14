@@ -206,6 +206,28 @@ export class NotClosableError extends Error {
   }
 }
 
+/**
+ * F-3: the installment schedule at CLOSING sums to something other than the
+ * transaction total (M5 §4 — "must sum to agreed total ... system validates
+ * with `[total termin tidak sama dengan nilai transaksi]`"). Amount and due
+ * date were filled in on every row; the schedule as a whole is simply wrong,
+ * which `bi.INCOMPLETE_DATA` cannot say. Verbatim PRD string, like
+ * `AllocationTotalError` above for the sibling Σ=100% rule.
+ *
+ * Named `Closing…` (not the bare `ScheduleTotalError`) because `finance.ts`
+ * already has one for the SAME message at the M5-OA-7 re-file/approval door —
+ * a different rule (schedule vs. Amount Outstanding, not vs. the original
+ * total) reusing the identical BI string. Sharing one class would require
+ * `sales.ts` to import from `finance.ts`, which already imports from
+ * `sales.ts` (`computeCommission`/`parseCommissionRule`) — a cycle.
+ */
+export class ClosingScheduleTotalError extends Error {
+  constructor() {
+    super('[total termin tidak sama dengan nilai transaksi]');
+    this.name = 'SalesClosingScheduleTotalError';
+  }
+}
+
 // ===========================================================================
 // MSL v2 "Kalkulator Service Jasa" — line-subtotal engine (pricing.go).
 //
@@ -820,11 +842,13 @@ export async function submitQualifiedForm(
     }
     const plat = (sel.platform ?? '').trim() || fallbackPlatform;
     if (checklist.length > 0 && !checklist.includes(plat)) {
-      throw new IncompleteError();
+      // F-3: same wrong-field case `writeProposal` guards against (below) — the
+      // platform IS filled in, just not one of this form's own checked ones.
+      throw new ValidationError(MSG_PLATFORM_DI_LUAR_CHECKLIST);
     }
     const key = `${sid} ${plat}`;
     if (picked.has(key)) {
-      throw new IncompleteError();
+      throw new ValidationError(MSG_JASA_DUPLIKAT_PLATFORM);
     }
     picked.add(key);
     platforms.push(plat);
@@ -2134,7 +2158,7 @@ export function validateScheduleTotal(input: ClosingInput, total: money.Money): 
     sum += money.parse(inst.amount);
   }
   if (sum !== total) {
-    throw new IncompleteError();
+    throw new ClosingScheduleTotalError();
   }
 }
 
