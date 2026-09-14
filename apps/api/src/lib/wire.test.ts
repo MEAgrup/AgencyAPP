@@ -1271,6 +1271,7 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
       proposedBy: '2409230432',
       proposedByNama: 'BUDI SANTOSO',
       decisionNote: 'harga terlalu rendah',
+      alasanNego: 'klien minta diskon volume',
       createdAt: new Date('2026-07-21T04:00:00Z'),
       lines: [{
         masterServiceId: 'MSL-202607-0001',
@@ -1280,6 +1281,7 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
         paymentTerms: null,
         durasiBulan: null,
         platform: 'Shopee',
+        hargaStandar: '9000000',
       }],
     }],
     nqReasons: [],
@@ -1343,6 +1345,7 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
       proposed_by: '2409230432',
       proposed_by_nama: 'BUDI SANTOSO',
       decision_note: 'harga terlalu rendah',
+      alasan_nego: 'klien minta diskon volume',
       created_at: '2026-07-21T04:00:00.000Z',
       lines: [{
         master_service_id: 'MSL-202607-0001',
@@ -1352,6 +1355,7 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
         payment_terms: null,
         durasi_bulan: null,
         platform: 'Shopee',
+        harga_standar: '9000000',
       }],
     });
   });

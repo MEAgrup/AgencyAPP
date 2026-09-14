@@ -176,6 +176,13 @@ export const PREFIXES = {
   // di atas ("di luar 18 PRD"). Machine #35 `external_order`, registered by
   // 20261007010000_bridge_msdps_fase1.sql.
   ORD: { entity: 'External work order (bridge MSDPS→CDPS)', module: 'Bridge' },
+  // F-6 (feedback lapangan 2026-09-14, keputusan pemilik: ini keluaran kerja,
+  // bukan absensi — CDPS bukan HRIS, docs/DECISIONS.md). Satu baris = satu
+  // kegiatan (meeting klien/internal/training/webinar/input data) yang
+  // karyawan catat sendiri; nyambung ke M14 Team Performance. `ACT` sudah
+  // dipakai (Prospect activity) — `DACT` (Daily Activity) dipilih supaya tidak
+  // bentrok, bukan reuse yang menyamarkan dua entitas berbeda.
+  DACT: { entity: 'Daily activity (keluaran kerja harian)', module: 'M14' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

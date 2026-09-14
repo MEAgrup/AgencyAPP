@@ -25,7 +25,7 @@
  *
  * ## No rate limiter here, on purpose
  *
- * `enforceLoginRateLimit` guards `/auth/login` because a password is guessable.
+ * `auth.assertLoginNotRateLimited` guards `/auth/login` because a password is guessable.
  * A refresh token is not — it is a 200-bit secret the server itself issued, and
  * GoTrue retires it the moment it is used. Putting the login bucket in front of
  * this route would do the opposite of what this change is for: the whole point

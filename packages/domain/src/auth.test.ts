@@ -11,7 +11,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { createClient, withClaims, type Sql, type TransactionSql } from '@cdps/db';
 import { permission } from '@cdps/core';
-import { enforceLoginRateLimit, getMe, getVendorMe, NotFoundError, RateLimitedError } from './auth';
+import { assertLoginNotRateLimited, getMe, getVendorMe, NotFoundError, RateLimitedError, recordFailedLoginAttempt } from './auth';
 
 const URL = process.env.DATABASE_URL;
 const describeDb = describe.skipIf(!URL);
@@ -534,38 +534,57 @@ describe('password BI messages are the exact ported strings', () => {
   });
 });
 
-describeDb('enforceLoginRateLimit (M15-C2 §5.2 OQ-5, DECISIONS O64)', () => {
+describeDb('assertLoginNotRateLimited / recordFailedLoginAttempt (F-2, 2026-09-14)', () => {
   it('allows attempts under the ceiling and blocks the one that crosses it', async () => {
     await inRollback(async (tx) => {
       const ip = '203.0.113.10'; // TEST-NET-3 (RFC 5737) — never a real caller
+      const email = 'ratelimit-a@example.com';
 
       for (let i = 0; i < 10; i++) {
-        await expect(enforceLoginRateLimit(tx, ip)).resolves.toBeUndefined();
+        await expect(assertLoginNotRateLimited(tx, ip, email)).resolves.toBeUndefined();
+        await recordFailedLoginAttempt(tx, ip, email);
       }
-      await expect(enforceLoginRateLimit(tx, ip)).rejects.toBeInstanceOf(RateLimitedError);
+      await expect(assertLoginNotRateLimited(tx, ip, email)).rejects.toBeInstanceOf(RateLimitedError);
     });
   });
 
   it('carries the exact BI rate-limit message', async () => {
     await inRollback(async (tx) => {
       const ip = '203.0.113.11';
+      const email = 'ratelimit-b@example.com';
       for (let i = 0; i < 10; i++) {
-        await enforceLoginRateLimit(tx, ip);
+        await recordFailedLoginAttempt(tx, ip, email);
       }
-      await expect(enforceLoginRateLimit(tx, ip)).rejects.toThrow(MSG_LOGIN_RATE_LIMITED);
+      await expect(assertLoginNotRateLimited(tx, ip, email)).rejects.toThrow(MSG_LOGIN_RATE_LIMITED);
     });
   });
 
-  it('tracks each IP independently', async () => {
+  it('tracks each email+IP bucket independently', async () => {
     await inRollback(async (tx) => {
       const blocked = '203.0.113.12';
       const other = '203.0.113.13';
+      const email = 'ratelimit-c@example.com';
       for (let i = 0; i < 10; i++) {
-        await enforceLoginRateLimit(tx, blocked);
+        await recordFailedLoginAttempt(tx, blocked, email);
       }
-      await expect(enforceLoginRateLimit(tx, blocked)).rejects.toBeInstanceOf(RateLimitedError);
-      // A different IP still has its own full budget.
-      await expect(enforceLoginRateLimit(tx, other)).resolves.toBeUndefined();
+      await expect(assertLoginNotRateLimited(tx, blocked, email)).rejects.toBeInstanceOf(RateLimitedError);
+      // A different IP still has its own full budget, even for the same email —
+      // this is the office-NAT fix: one leaky IP no longer throttles everyone
+      // sharing it, and (below) the same IP with a DIFFERENT email is also fine.
+      await expect(assertLoginNotRateLimited(tx, other, email)).resolves.toBeUndefined();
+      await expect(assertLoginNotRateLimited(tx, blocked, 'someone-else@example.com')).resolves.toBeUndefined();
+    });
+  });
+
+  it('a successful login (no recordFailedLoginAttempt call) never consumes budget', async () => {
+    await inRollback(async (tx) => {
+      const ip = '203.0.113.14';
+      const email = 'ratelimit-d@example.com';
+      // Simulate 20 successful logins: only the read-only check runs, exactly
+      // as login/route.ts does when passwordGrant does not throw.
+      for (let i = 0; i < 20; i++) {
+        await expect(assertLoginNotRateLimited(tx, ip, email)).resolves.toBeUndefined();
+      }
     });
   });
 });

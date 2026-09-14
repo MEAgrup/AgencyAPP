@@ -200,3 +200,7 @@ export * as productexchange from './productexchange';
 // `@cdps/core` `pdt` (deteksi/identitas/rekonsiliasi/parsestatus, murni) ke
 // baris `client_platforms`/`clients` sungguhan. Lihat `docs/prd/CDPS_PDT_Pusat_Data_Toko.md`.
 export * as pdt from './pdt';
+// F-6 (feedback lapangan 2026-09-14) — Daily Activity (DACT-): log aktivitas
+// harian karyawan (keluaran kerja, bukan absensi), nyambung M14 Team
+// Performance. Lihat docs/DECISIONS.md 2026-09-14 (F-6).
+export * as dailyactivity from './dailyactivity';

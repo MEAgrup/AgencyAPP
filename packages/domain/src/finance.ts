@@ -475,6 +475,26 @@ export async function verifyPayment(
             proof_of_payment = coalesce(${nullString(input.proofOfPayment)}, proof_of_payment),
             jatuh_tempo = false
         where id = ${inst.id}`;
+
+      // F-5 (2026-09-14, DECISIONS.md) — the termin just settled for a total
+      // (instVerified + amount) that differs from its planned `amount`.
+      // payment_verifications already lets Finance type any received nominal
+      // per event (the "Jumlah Diterima" field is free-typed, never locked to
+      // the plan); nothing told Sales/Finance the two numbers had drifted
+      // until the monthly recap. Emitted here, not on every partial payment,
+      // because a partial (instVerified + amount < inst.amount) is the normal
+      // "Sebagian" case, not a mismatch.
+      const settledTotal = instVerified + amount;
+      if (settledTotal !== inst.amount) {
+        const [client] = await tx<{ sales_pic_id: string }[]>`
+          select sales_pic_id from clients where id = ${trx.clientId}`;
+        await notification.emit(ex.notify, {
+          event: notification.EVENTS.InstallmentAmountMismatch,
+          entityType: 'installment', entityId: inst.id, actor: actor.employeeId,
+          division: FINANCE_DIVISION, explicitRecipients: client ? [client.sales_pic_id] : [],
+          notifyActor: false, deepLink: `/transactions/${trx.id}`,
+        });
+      }
     } else if (inst) {
       await tx`
         update installments

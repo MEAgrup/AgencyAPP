@@ -32,9 +32,12 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       no_nego?: boolean;
       no_negotiation?: boolean;
       lines?: ProposalLineBody[];
+      alasan_nego?: string;
     }>(request);
     const noNego = body.no_nego === true || body.no_negotiation === true;
-    const result = await sales.submitNegotiation(db(), actor, id, toProposalLines(body.lines), noNego);
+    const result = await sales.submitNegotiation(
+      db(), actor, id, toProposalLines(body.lines), noNego, body.alasan_nego ?? null,
+    );
     return transitionResponse(result);
   });
 }

@@ -84,6 +84,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ClientIncompleteError: 400, // client.IncompleteError
   ClientPortalValidationError: 400, // clientPortal.PortalValidationError
   CreativeValidationError: 400, // creative.ValidationError
+  DailyActivityIncompleteError: 400, // dailyactivity.IncompleteError (F-6)
   DailyOpsValidationError: 400, // dailyops.ValidationError (M19)
   CustomTermRequiresNegotiationError: 400, // sales.CustomTermRequiresNegotiationError
   FinanceIncompleteError: 400, // finance.IncompleteError
@@ -104,9 +105,11 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   PerformanceValidationError: 400, // performance.ValidationError
   ProductExchangeValidationError: 400, // productexchange.ValidationError (PX-M2a)
   ReqValidationError: 400, // req.ValidationError
+  SalesClosingScheduleTotalError: 400, // sales.ClosingScheduleTotalError (F-3, 2026-09-14)
   SalesIncompleteError: 400, // sales.IncompleteError
   SalesPerfValidationError: 400, // salesperf.ValidationError
   SalesTooManyServicesError: 400, // sales.TooManyServicesError
+  SalesValidationError: 400, // sales.ValidationError (F-3, 2026-09-14 — field present but wrong)
   ScheduleTotalError: 400, // finance.ScheduleTotalError
   ScsValidationError: 400, // scs.ValidationError (M19 separuh SCS)
   StageValidationError: 400, // stage.ValidationError

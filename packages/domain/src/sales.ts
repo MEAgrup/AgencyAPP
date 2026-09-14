@@ -84,6 +84,43 @@ export class IncompleteError extends Error {
   }
 }
 
+/**
+ * F-3 (feedback lapangan 2026-09-14, DECISIONS.md O73 precedent): a field is
+ * present but WRONG — a platform outside the Qualified Form checklist, the
+ * same jasa+platform picked twice, a salesperson repeated in the allocation.
+ * `bi.INCOMPLETE_DATA` ("data tidak lengkap, silahkan lengkapi semua
+ * pertanyaan wajib!") told the salesperson to fill in something they had
+ * already filled in — this class exists so each of those cases can carry a
+ * message that names the actual problem instead, same style as
+ * `internaltask.ts` `ValidationError` / `MSG_ASSIGNEE_INVALID` etc.
+ */
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SalesValidationError';
+  }
+}
+
+/** F-3: platform on a negotiation service line is not one of the Qualified
+ *  Form's checked platforms — the line is wrong, not empty. */
+export const MSG_PLATFORM_DI_LUAR_CHECKLIST =
+  '[platform jasa harus salah satu dari platform yang dicentang di Qualified Form]';
+/** F-3: the same jasa (master service) picked twice for the same platform. */
+export const MSG_JASA_DUPLIKAT_PLATFORM =
+  '[jasa yang sama tidak boleh dipilih dua kali untuk platform yang sama]';
+/** F-3: a salesperson listed more than once in the allocation. */
+export const MSG_SALESPERSON_DUPLIKAT =
+  '[satu salesperson tidak boleh muncul dua kali dalam alokasi]';
+
+/**
+ * F-4 (feedback lapangan 2026-09-14, DECISIONS.md — deviasi PRD M0 §5): a
+ * version carrying custom terms (a negotiated price) must say WHY — harga
+ * awal, harga setelah nego, dan alasannya sendiri, supaya Head bisa
+ * melihatnya tanpa harus bertanya balik ke sales.
+ */
+export const MSG_ALASAN_NEGO_WAJIB =
+  '[alasan negosiasi wajib diisi untuk penawaran dengan harga custom]';
+
 /** More than MAX_SERVICES services selected (carries the verbatim BI message). */
 export class TooManyServicesError extends Error {
   constructor() {
@@ -166,6 +203,28 @@ export class NotClosableError extends Error {
   constructor() {
     super(bi.TRANSITION_NOT_ALLOWED);
     this.name = 'NotClosableError';
+  }
+}
+
+/**
+ * F-3: the installment schedule at CLOSING sums to something other than the
+ * transaction total (M5 §4 — "must sum to agreed total ... system validates
+ * with `[total termin tidak sama dengan nilai transaksi]`"). Amount and due
+ * date were filled in on every row; the schedule as a whole is simply wrong,
+ * which `bi.INCOMPLETE_DATA` cannot say. Verbatim PRD string, like
+ * `AllocationTotalError` above for the sibling Σ=100% rule.
+ *
+ * Named `Closing…` (not the bare `ScheduleTotalError`) because `finance.ts`
+ * already has one for the SAME message at the M5-OA-7 re-file/approval door —
+ * a different rule (schedule vs. Amount Outstanding, not vs. the original
+ * total) reusing the identical BI string. Sharing one class would require
+ * `sales.ts` to import from `finance.ts`, which already imports from
+ * `sales.ts` (`computeCommission`/`parseCommissionRule`) — a cycle.
+ */
+export class ClosingScheduleTotalError extends Error {
+  constructor() {
+    super('[total termin tidak sama dengan nilai transaksi]');
+    this.name = 'SalesClosingScheduleTotalError';
   }
 }
 
@@ -783,11 +842,13 @@ export async function submitQualifiedForm(
     }
     const plat = (sel.platform ?? '').trim() || fallbackPlatform;
     if (checklist.length > 0 && !checklist.includes(plat)) {
-      throw new IncompleteError();
+      // F-3: same wrong-field case `writeProposal` guards against (below) — the
+      // platform IS filled in, just not one of this form's own checked ones.
+      throw new ValidationError(MSG_PLATFORM_DI_LUAR_CHECKLIST);
     }
     const key = `${sid} ${plat}`;
     if (picked.has(key)) {
-      throw new IncompleteError();
+      throw new ValidationError(MSG_JASA_DUPLIKAT_PLATFORM);
     }
     picked.add(key);
     platforms.push(plat);
@@ -1027,6 +1088,9 @@ export async function submitNegotiation(
   attemptId: string,
   lines: ProposalLine[],
   noNego: boolean,
+  // F-4: the negotiation note (harga awal/nego/alasan) — required the moment
+  // this submission carries a custom line; `writeProposal` enforces that.
+  alasanNego: string | null = null,
   now: Date = new Date(),
 ): Promise<statemachine.TransitionResult> {
   if (noNego && hasCustomLine(lines)) {
@@ -1049,7 +1113,7 @@ export async function submitNegotiation(
       return result;
     }
     const proposalLines = noNego && lines.length === 0 ? await standardLines(tx, attemptId) : lines;
-    await writeProposal(tx, ex, actor, attemptId, proposalLines, now, !noNego);
+    await writeProposal(tx, ex, actor, attemptId, proposalLines, now, !noNego, alasanNego);
     if (!noNego) {
       await emitPendingApproval(ex.notify, actor, attemptId);
     }
@@ -1086,6 +1150,8 @@ export async function reviseServices(
   actor: Actor,
   attemptId: string,
   lines: ProposalLine[],
+  // F-4: required (enforced in writeProposal) the moment any line is custom.
+  alasanNego: string | null = null,
   now: Date = new Date(),
 ): Promise<statemachine.TransitionResult> {
   if (lines.length === 0) {
@@ -1107,7 +1173,7 @@ export async function reviseServices(
     if (!custom) {
       // Standard-only: no status move at all, so no sm_transition — the audit row
       // written by writeProposal is the history of the change.
-      await writeProposal(tx, ex, actor, attemptId, lines, now, false);
+      await writeProposal(tx, ex, actor, attemptId, lines, now, false, alasanNego);
       const unmoved: statemachine.TransitionOk = { ok: true, from: a.status, to: a.status };
       return unmoved;
     }
@@ -1115,7 +1181,7 @@ export async function reviseServices(
     if (!result.ok) {
       return result;
     }
-    await writeProposal(tx, ex, actor, attemptId, lines, now, true);
+    await writeProposal(tx, ex, actor, attemptId, lines, now, true, alasanNego);
     await emitPendingApproval(ex.notify, actor, attemptId);
     return result;
   });
@@ -1131,6 +1197,8 @@ export async function resubmitNegotiation(
   actor: Actor,
   attemptId: string,
   lines: ProposalLine[],
+  // F-4: required (enforced in writeProposal) the moment any line is custom.
+  alasanNego: string | null = null,
   now: Date = new Date(),
 ): Promise<statemachine.TransitionResult> {
   if (lines.length === 0) {
@@ -1146,7 +1214,7 @@ export async function resubmitNegotiation(
     if (!result.ok) {
       return result;
     }
-    await writeProposal(tx, ex, actor, attemptId, lines, now, hasCustomLine(lines));
+    await writeProposal(tx, ex, actor, attemptId, lines, now, hasCustomLine(lines), alasanNego);
     await emitPendingApproval(ex.notify, actor, attemptId);
     return result;
   });
@@ -1373,6 +1441,10 @@ async function writeProposal(
   // snapshot (which carries pinned prices and would read as custom here) — the
   // audit row must say what the salesperson actually did.
   customTerms: boolean,
+  // F-4: required (verbatim BI, not the generic incomplete message) the moment
+  // `customTerms` is true — a negotiated version must say WHY. Ignored (may be
+  // null/blank) on a standard-terms version, since nothing was negotiated.
+  alasanNego: string | null = null,
 ): Promise<void> {
   if (lines.length === 0 || lines.length > MAX_SERVICES) {
     throw lines.length > MAX_SERVICES ? new TooManyServicesError() : new IncompleteError();
@@ -1395,11 +1467,11 @@ async function writeProposal(
     }
     const plat = (l.platform ?? '').trim() || fallbackPlatform;
     if (checklist.length > 0 && !checklist.includes(plat)) {
-      throw new IncompleteError();
+      throw new ValidationError(MSG_PLATFORM_DI_LUAR_CHECKLIST);
     }
     const key = `${id} ${plat}`;
     if (seen.has(key)) {
-      throw new IncompleteError();
+      throw new ValidationError(MSG_JASA_DUPLIKAT_PLATFORM);
     }
     seen.add(key);
     platforms.push(plat);
@@ -1407,12 +1479,44 @@ async function writeProposal(
   // Resolve every line BEFORE the first insert: a bad line must not leave a
   // half-written proposal version behind (the whole call is one transaction, but
   // resolving first also means no NEG- id is burned on an invalid set).
-  const resolved: { line: ProposalLine; price: string; rule: string; durasiBulan: number | null; platform: string }[]
-    = [];
+  const resolved: {
+    line: ProposalLine; price: string; rule: string; durasiBulan: number | null; platform: string;
+    hargaStandar: string | null;
+  }[] = [];
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     const { price, rule, durasiBulan } = await resolveProposalLine(tx, l, now);
-    resolved.push({ line: l, price, rule, durasiBulan, platform: platforms[i] });
+    // F-4: `harga_standar` — what the MSL would charge today for this exact
+    // line (qty/nominal/tenor), independent of whatever price actually got
+    // negotiated. For a non-custom line `price` already IS that number,
+    // computed the same way. For a version that never negotiated at all
+    // (`customTerms` false — includes `standardLines()`'s pinned Qualified
+    // Form snapshot, which reads as "custom" by shape but negotiated nothing),
+    // the pinned price itself is the standard one; recomputing against
+    // TODAY's MSL would compare it against the wrong version. Only a line
+    // that is BOTH inside a real negotiation AND itself custom-priced needs
+    // the separate lookup — wrapped in try/catch because a custom line is
+    // deliberately allowed to name a service the catalog can no longer price
+    // (archived, or a one-off), and a display-only column must never block
+    // the negotiation that is its whole point.
+    let hargaStandar: string | null = price;
+    if (customTerms && isCustomLine(l)) {
+      try {
+        hargaStandar = (await resolveProposalLine(tx, { ...l, proposedPrice: undefined, commissionRule: undefined }, now)).price;
+      } catch {
+        hargaStandar = null;
+      }
+    }
+    resolved.push({ line: l, price, rule, durasiBulan, platform: platforms[i], hargaStandar });
+  }
+
+  // F-4: checked LAST, after every line has proven otherwise valid — a
+  // salesperson who forgot the reason should see that message, not have it
+  // mask a real problem with the lines themselves (archived service,
+  // duplicate, bad platform), which existed before this field did.
+  const alasan = (alasanNego ?? '').trim();
+  if (customTerms && alasan === '') {
+    throw new ValidationError(MSG_ALASAN_NEGO_WAJIB);
   }
 
   const verRows = await tx<{ max: number | null }[]>`
@@ -1421,16 +1525,16 @@ async function writeProposal(
 
   const proposalId = await ex.ident.identNext('NEG', now);
   await tx`
-    insert into negotiation_proposals (id, attempt_id, version_no, proposed_by, created_by)
-    values (${proposalId}, ${attemptId}, ${version}, ${actor.employeeId}, ${actor.employeeId})`;
+    insert into negotiation_proposals (id, attempt_id, version_no, proposed_by, alasan_nego, created_by)
+    values (${proposalId}, ${attemptId}, ${version}, ${actor.employeeId}, ${alasan === '' ? null : alasan}, ${actor.employeeId})`;
 
-  for (const { line: l, price, rule, durasiBulan, platform } of resolved) {
+  for (const { line: l, price, rule, durasiBulan, platform, hargaStandar } of resolved) {
     await tx`
       insert into negotiation_proposal_lines
         (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms,
-         durasi_bulan, platform, created_by)
+         durasi_bulan, platform, harga_standar, created_by)
       values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule},
-              ${nullString(l.paymentTerms)}, ${durasiBulan}, ${platform}, ${actor.employeeId})`;
+              ${nullString(l.paymentTerms)}, ${durasiBulan}, ${platform}, ${hargaStandar}, ${actor.employeeId})`;
   }
   await ex.audit.insertAudit({
     entityType: 'prospect_attempt', entityId: attemptId, actorEmployeeId: actor.employeeId,
@@ -1576,7 +1680,7 @@ export function validateParties(c: ClosingParties): void {
       throw new IncompleteError();
     }
     if (seen.has(id)) {
-      throw new IncompleteError(); // a salesperson may appear at most once
+      throw new ValidationError(MSG_SALESPERSON_DUPLIKAT); // a salesperson may appear at most once
     }
     seen.add(id);
     if (id === primary) {
@@ -2054,7 +2158,7 @@ export function validateScheduleTotal(input: ClosingInput, total: money.Money): 
     sum += money.parse(inst.amount);
   }
   if (sum !== total) {
-    throw new IncompleteError();
+    throw new ClosingScheduleTotalError();
   }
 }
 
@@ -2367,6 +2471,13 @@ export interface AttemptProposalLine {
   durasiBulan: number | null;
   /** PR-5 — platform baris ini (selalu terisi; lihat ProposalLine.platform). */
   platform: string;
+  /**
+   * F-4 — harga MSL hari itu untuk baris ini, independen dari negosiasi.
+   * `null` untuk baris yang ditulis sebelum F-4 (tidak di-backfill mundur
+   * tanpa `master_version_no` yang tercatat) atau baris custom yang katalognya
+   * sudah tidak bisa menghitung ulang (jasa diarsipkan) — lihat writeProposal.
+   */
+  hargaStandar: string | null;
 }
 
 /** One versioned negotiation proposal with its lines — Go's ProposalView. */
@@ -2376,6 +2487,8 @@ export interface AttemptProposal {
   proposedBy: string;
   proposedByNama: string;
   decisionNote: string | null;
+  /** F-4 — alasan sales mengajukan harga custom (wajib saat versi ini custom). */
+  alasanNego: string | null;
   createdAt: Date;
   lines: AttemptProposalLine[];
 }
@@ -2480,11 +2593,11 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
 
     sql<{
       id: string; version_no: number; proposed_by: string; proposed_by_nama: string;
-      decision_note: string | null; created_at: Date;
+      decision_note: string | null; alasan_nego: string | null; created_at: Date;
     }[]>`
       select np.id, np.version_no, np.proposed_by,
              private.employee_display_name(np.proposed_by) as proposed_by_nama,
-             np.decision_note, np.created_at
+             np.decision_note, np.alasan_nego, np.created_at
       from negotiation_proposals np
       where np.attempt_id = ${id}
       order by np.version_no asc`,
@@ -2537,12 +2650,12 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
       : await sql<{
           proposal_id: string; master_service_id: string; name: string; proposed_price: string;
           commission_rule: string; payment_terms: string | null; durasi_bulan: number | null;
-          platform: string;
+          platform: string; harga_standar: string | null;
         }[]>`
           select npl.proposal_id, npl.master_service_id,
                  coalesce(qfs.name, latest.name, '') as name,
                  npl.proposed_price, npl.commission_rule, npl.payment_terms, npl.durasi_bulan,
-                 npl.platform
+                 npl.platform, npl.harga_standar
           from negotiation_proposal_lines npl
           -- PR-5: platform in the key too, for the same reason as loadApprovedLines
           -- — otherwise a two-platform deal would render each line's name TWICE.
@@ -2568,14 +2681,15 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
       masterServiceId: ln.master_service_id, name: ln.name, proposedPrice: ln.proposed_price,
       commissionRule: ln.commission_rule, paymentTerms: ln.payment_terms,
       durasiBulan: ln.durasi_bulan === null ? null : Number(ln.durasi_bulan),
-      platform: ln.platform,
+      platform: ln.platform, hargaStandar: ln.harga_standar,
     });
     linesByProposal.set(ln.proposal_id, list);
   }
 
   const proposals: AttemptProposal[] = propRows.map((p) => ({
     id: p.id, versionNo: p.version_no, proposedBy: p.proposed_by,
-    proposedByNama: p.proposed_by_nama, decisionNote: p.decision_note, createdAt: p.created_at,
+    proposedByNama: p.proposed_by_nama, decisionNote: p.decision_note, alasanNego: p.alasan_nego,
+    createdAt: p.created_at,
     lines: linesByProposal.get(p.id) ?? [],
   }));
 

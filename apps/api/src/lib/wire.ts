@@ -10,7 +10,7 @@
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, pdt as pdtCore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, pdt, performance, plan, plangate, portal, productexchange, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
+import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyactivity, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, pdt, performance, plan, plangate, portal, productexchange, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -2451,6 +2451,8 @@ export interface ProposalLineWire {
   durasi_bulan: number | null;
   /** PR-5 — platform baris ini (selalu terisi). */
   platform: string;
+  /** F-4 — harga MSL hari itu untuk baris ini, independen dari negosiasi. */
+  harga_standar: string | null;
 }
 
 /** One negotiation proposal + its lines — web-internal's `NegotiationProposalRow`. */
@@ -2460,6 +2462,8 @@ export interface ProposalWire {
   proposed_by: string;
   proposed_by_nama: string;
   decision_note: string | null;
+  /** F-4 — alasan sales mengajukan harga custom (wajib saat versi ini custom). */
+  alasan_nego: string | null;
   created_at: string;
   lines: ProposalLineWire[];
 }
@@ -2577,6 +2581,7 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
       proposed_by: p.proposedBy,
       proposed_by_nama: p.proposedByNama,
       decision_note: p.decisionNote,
+      alasan_nego: p.alasanNego,
       created_at: p.createdAt.toISOString(),
       lines: p.lines.map((l) => ({
         master_service_id: l.masterServiceId,
@@ -2586,6 +2591,7 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
         payment_terms: l.paymentTerms,
         durasi_bulan: l.durasiBulan,
         platform: l.platform,
+        harga_standar: l.hargaStandar,
       })),
     })),
     nq_reasons: d.nqReasons,
@@ -3621,6 +3627,38 @@ export function activityToWire(a: activity.Activity): ActivityWire {
     summary: a.summary,
     created_by: a.createdBy,
     created_by_nama: a.createdByNama,
+    created_at: a.createdAt.toISOString(),
+  };
+}
+
+/** One logged daily activity (DACT-, F-6) — web-internal's `DailyActivityRow`. */
+export interface DailyActivityWire {
+  id: string;
+  employee_id: string;
+  employee_nama: string;
+  divisi: string;
+  activity_type: string;
+  activity_date: string;
+  jam_mulai: string;
+  jam_selesai: string | null;
+  keterangan: string;
+  bukti_pelaksanaan: string | null;
+  created_at: string;
+}
+
+/** Maps one daily activity log entry (DACT-). */
+export function dailyActivityToWire(a: dailyactivity.DailyActivity): DailyActivityWire {
+  return {
+    id: a.id,
+    employee_id: a.employeeId,
+    employee_nama: a.employeeNama,
+    divisi: a.divisi,
+    activity_type: a.activityType,
+    activity_date: a.activityDate,
+    jam_mulai: a.jamMulai,
+    jam_selesai: a.jamSelesai,
+    keterangan: a.keterangan,
+    bukti_pelaksanaan: a.buktiPelaksanaan,
     created_at: a.createdAt.toISOString(),
   };
 }

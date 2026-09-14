@@ -254,12 +254,14 @@ function NegotiationCard({
         masterServiceId: l.master_service_id,
         name: l.name || snap?.name || '',
         proposedPrice: l.proposed_price,
-        // Pembandingnya SUBTOTAL snapshot Qualified (harga standar × qty), bukan
-        // harga satuan: `proposed_price` juga total per baris, jadi menaruh harga
-        // satuan di sebelahnya akan melaporkan diskon palsu untuk qty > 1. Baris
-        // yang baru ditambah saat negosiasi tidak ada di snapshot — jatuh ke MSL
-        // hidup lewat `buildComparison`.
-        standardPrice: snap?.subtotal ?? snap?.standard_price ?? undefined,
+        // F-4 (2026-09-14): `harga_standar` adalah harga MSL yang DIBEKUKAN saat
+        // versi ini ditulis (writeProposal) — dipakai duluan karena ia benar
+        // untuk SEMUA baris, termasuk yang ditambah saat negosiasi (tidak ada di
+        // snapshot Qualified). Snapshot Qualified (subtotal/standard_price) hanya
+        // fallback untuk versi lama sebelum F-4 (harga_standar null di situ);
+        // MSL hidup lewat `buildComparison` adalah fallback TERAKHIR, dan sudah
+        // bisa keliru begitu katalog berubah sejak versi ini diajukan.
+        standardPrice: l.harga_standar ?? snap?.subtotal ?? snap?.standard_price ?? undefined,
         commissionRule: l.commission_rule,
         paymentTerms: l.payment_terms,
         quantity: snap?.quantity ?? null,
@@ -288,6 +290,10 @@ function NegotiationCard({
           ]}
         />
       )}
+      {/* F-4 (2026-09-14): alasan sales mengajukan harga custom — wajib diisi di
+          server untuk versi ber-custom-terms (writeProposal), jadi Head tidak lagi
+          harus menyimpulkan sendiri dari deretan angka. */}
+      {latest?.alasan_nego && <ReasonBlock label="Alasan negosiasi" text={latest.alasan_nego} />}
       {comparison && <PriceComparison comparison={comparison} />}
       {detail && detail.proposals.length > 1 && (
         <div>

@@ -416,6 +416,10 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   const [propLines, setPropLines] = useState<LineRow[]>([]);
   const [negoSubmitting, setNegoSubmitting] = useState(false);
   const [negoError, setNegoError] = useState<string | null>(null);
+  // F-4 (2026-09-14) — harga awal, harga setelah nego, alasan: server menolak
+  // versi ber-custom-terms tanpa ini (writeProposal), jadi Head bisa melihat
+  // alasannya di /persetujuan tanpa bertanya balik ke sales.
+  const [alasanNego, setAlasanNego] = useState('');
 
   // --- Edit Service sebelum closing (M0 §5.1) ---
   // `reviseCustom` memilih apakah revisi memakai harga standar MSL (status tetap
@@ -871,7 +875,8 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     setNegoError(null);
     setNegoSubmitting(true);
     try {
-      await submitNegotiation(id, propPayload(propLines, false), false);
+      await submitNegotiation(id, propPayload(propLines, false), false, alasanNego);
+      setAlasanNego('');
       await load();
       await loadAudit();
     } catch (err) {
@@ -889,13 +894,14 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     setReviseSubmitting(true);
     try {
       const lines = propPayload(propLines, !reviseCustom);
-      await reviseServices(id, lines);
+      await reviseServices(id, lines, reviseCustom ? alasanNego : undefined);
       setReviseMessage(
         reviseCustom
           ? 'Revisi jasa terkirim — proposal kembali menunggu persetujuan Superior.'
           : 'Set jasa diperbarui. Attempt tetap siap closing.',
       );
       setShowReviseEditor(false);
+      setAlasanNego('');
       // Alokasi closing dipasang ulang: nilai transaksinya berubah, jadi form
       // closing harus membaca versi proposal yang baru.
       closingInitRef.current = false;
@@ -913,7 +919,8 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     setNegoError(null);
     setNegoSubmitting(true);
     try {
-      await resubmitNegotiation(id, propPayload(propLines, false));
+      await resubmitNegotiation(id, propPayload(propLines, false), alasanNego);
+      setAlasanNego('');
       await load();
       await loadAudit();
     } catch (err) {
@@ -1714,8 +1721,17 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                 disabled={negoSubmitting}
                 platformOptions={platformOptions}
               />
+              <div className="field">
+                <label htmlFor="alasan-nego">Alasan negosiasi (wajib — harga awal, harga nego, kenapa)</label>
+                <textarea
+                  id="alasan-nego"
+                  value={alasanNego}
+                  disabled={negoSubmitting}
+                  onChange={(e) => setAlasanNego(e.target.value)}
+                />
+              </div>
               <div>
-                <button type="submit" className="btn btnPrimary" disabled={negoSubmitting}>
+                <button type="submit" className="btn btnPrimary" disabled={negoSubmitting || !alasanNego.trim()}>
                   {negoSubmitting ? 'Memproses...' : 'Ajukan Negosiasi'}
                 </button>
               </div>
@@ -1795,6 +1811,15 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
               disabled={negoSubmitting}
               platformOptions={platformOptions}
             />
+            <div className="field">
+              <label htmlFor="alasan-nego-resubmit">Alasan negosiasi (wajib bila ada baris custom)</label>
+              <textarea
+                id="alasan-nego-resubmit"
+                value={alasanNego}
+                disabled={negoSubmitting}
+                onChange={(e) => setAlasanNego(e.target.value)}
+              />
+            </div>
             <div>
               <button type="submit" className="btn btnSecondary" disabled={negoSubmitting}>
                 {negoSubmitting ? 'Memproses...' : 'Resubmit Proposal'}
@@ -1825,6 +1850,15 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
               disabled={negoSubmitting}
               platformOptions={platformOptions}
             />
+            <div className="field">
+              <label htmlFor="alasan-nego-resubmit">Alasan negosiasi (wajib bila ada baris custom)</label>
+              <textarea
+                id="alasan-nego-resubmit"
+                value={alasanNego}
+                disabled={negoSubmitting}
+                onChange={(e) => setAlasanNego(e.target.value)}
+              />
+            </div>
             <div>
               <button type="submit" className="btn btnSecondary" disabled={negoSubmitting}>
                 {negoSubmitting ? 'Memproses...' : 'Resubmit Proposal'}
@@ -1882,8 +1916,23 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                 disabled={reviseSubmitting}
                 platformOptions={platformOptions}
               />
+              {reviseCustom && (
+                <div className="field">
+                  <label htmlFor="alasan-nego-revise">Alasan negosiasi (wajib — harga awal, harga nego, kenapa)</label>
+                  <textarea
+                    id="alasan-nego-revise"
+                    value={alasanNego}
+                    disabled={reviseSubmitting}
+                    onChange={(e) => setAlasanNego(e.target.value)}
+                  />
+                </div>
+              )}
               <div>
-                <button type="submit" className="btn btnPrimary" disabled={reviseSubmitting}>
+                <button
+                  type="submit"
+                  className="btn btnPrimary"
+                  disabled={reviseSubmitting || (reviseCustom && !alasanNego.trim())}
+                >
                   {reviseSubmitting ? 'Memproses...' : 'Simpan Revisi Jasa'}
                 </button>
               </div>
@@ -2171,6 +2220,9 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                 <div className="muted" style={{ fontSize: 12 }}>
                   Diajukan oleh: {p.proposed_by_nama || p.proposed_by}
                 </div>
+                {p.alasan_nego && (
+                  <div style={{ marginTop: 6 }}>Alasan negosiasi: {p.alasan_nego}</div>
+                )}
                 {p.decision_note && (
                   <div style={{ marginTop: 6 }}>Catatan keputusan: {p.decision_note}</div>
                 )}
@@ -2182,6 +2234,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                           <th>Jasa</th>
                           {platformOptions.length > 1 && <th>Platform</th>}
                           <th>Durasi</th>
+                          <th>Harga Standar</th>
                           <th>Proposed Price</th>
                           <th>Commission Rule</th>
                           <th>Payment Terms</th>
@@ -2193,6 +2246,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                             <td>{l.name || l.master_service_id}</td>
                             {platformOptions.length > 1 && <td>{l.platform}</td>}
                             <td>{l.durasi_bulan === null ? '—' : `${l.durasi_bulan} bulan`}</td>
+                            <td>{l.harga_standar === null ? '—' : money(l.harga_standar)}</td>
                             <td>{money(l.proposed_price)}</td>
                             <td>{l.commission_rule || '—'}</td>
                             <td>{l.payment_terms || '—'}</td>
