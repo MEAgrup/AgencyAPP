@@ -31,7 +31,7 @@
 -- kalau keduanya menyimpang.
 --
 -- SISA DATA BER-`Ops` DI LIVE, dan semuanya dibereskan: Brief `BRF-202609-0003`
--- sudah pindah ke `Store Operation` di migrasi 20261014010000, dan satu
+-- sudah pindah ke `Store Operation` di migrasi 20261016010000, dan satu
 -- `plan_row` (pilar `sku`, PIC pilihan AM — bukan hasil semai pilar) dipindah
 -- di bawah ini. Sesudah migrasi ini nol baris kerja live yang menunjuk `Ops`.
 -- ===========================================================================
