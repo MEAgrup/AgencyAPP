@@ -524,6 +524,22 @@ punya `null` eksplisit.
 > `G1-09-2BII-SHOPEEVIDEO-GRAIN`, menunggu konfirmasi apakah ada laporan Shopee per-video lain
 > yang belum diunggah. `shopee_video` TETAP `UNVERIFIED_SIGNATURE`. **Ini menutup investigasi ZIP
 > Fim Motor — seluruh 15 berkas sudah diperiksa minimal sekali.**
+>
+> **Status 2026-09-14 (sesi 22) — MODUL KETUJUH: `shopee_ads_search` → `pdt_fact_ads`,
+> `G1-09-2BII-ADS-SEARCH` DITUTUP.** `HANDOFF_PDT_SESI21.md` §3.B menandai ini murni
+> implementasi (pola sudah ada) — dikerjakan tanpa menunggu pemilik. `kolomDipanen` dilebarkan
+> `'Nama Iklan'`/`'Biaya'`; `ekstrakBarisShopeeAdsSearch` + writer `pdt_fact_ads` dibangun.
+> `kampanye_id` **KOMPOSIT** (`nama iklan :: kata pencarian`, BUKAN `nama iklan` polos seperti
+> `shopee_ads_cpc`) — aman kalau satu iklan search ternyata punya banyak baris per keyword
+> (belum terbukti dari sample 1 baris, tapi mahal untuk salah tebak). `Kata Pencarian` dibaca
+> untuk identitas baris TAPI TIDAK ditambahkan ke `kolomDipanen` — Q-6 (isinya sebagai dimensi
+> laporan) TETAP terbuka menunggu Anty. **Tiga tabel fakta sekarang punya total TUJUH modul
+> penulis** (`pdt_fact_ads`: `shopee_ads_live`/`shopee_ads_cpc`/`shopee_ads_search`;
+> `pdt_fact_content`: `tt_video`; `pdt_sku_master`: `shopee_parent_sku`/`tt_orders`;
+> `pdt_fact_creator_period`: `tt_transaction_creator`/`shopee_ams_afiliasi`). Migrasi baru:
+> `20261023010000_..._pdt_parser_modul_ads_search_kolom.sql`. Diverifikasi (DB lokal rebuild
+> bersih): `@cdps/core` 1191/1191, `@cdps/domain` 2590/2590 (1 skip), `@cdps/db` 107/107,
+> `@cdps/api` 576/576 (2 skip); typecheck + lint bersih.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

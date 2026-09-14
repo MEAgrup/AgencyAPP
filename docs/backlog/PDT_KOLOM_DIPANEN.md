@@ -281,19 +281,24 @@ Bucket 2 (derived-add — `report/shopee/metrik.ts:460-477` `ads_toko`/`ads_prod
 | `Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)` | -- konsumen: `HealthAds.acos`, B-4.3 (`metrik.ts:465-466`) — TIDAK ada kolom skema `pdt_fact_ads` untuknya, konsumennya domain LAIN | ACOS toko tak terhitung |
 
 ### 2.4 `shopee_ads_search` — `Search-Ads-Overall-Data-*.csv` (header baris 8)
-Bucket 1: `Jumlah Klik`, `Konversi` ⇒ `pdt_fact_ads`. **Ejaan DIKOREKSI sesi lanjutan pasca-sesi
-20 (docs/DECISIONS.md 2026-09-14)** terhadap sample EKSPOR ASLI Fim Motor — ejaan huruf kecil
-sebelumnya (`klik`/`konversi`) tidak pernah diverifikasi dan tidak pernah cocok berkas nyata.
+Bucket 1: `Jumlah Klik`, `Konversi`, `Nama Iklan`, `Biaya` ⇒ `pdt_fact_ads`. **Ejaan DIKOREKSI
+sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** terhadap sample EKSPOR ASLI Fim
+Motor — ejaan huruf kecil sebelumnya (`klik`/`konversi`) tidak pernah diverifikasi dan tidak
+pernah cocok berkas nyata.
 
-**Temuan baru sesi ini (belum diimplementasikan, belum jadi keputusan whitelist):** sample asli
-JUGA membuktikan kolom `Nama Iklan` (identitas kampanye) dan `Biaya` (`pdt_fact_ads.biaya` NOT
-NULL) SUNGGUH ADA di berkas ini — premis `G1-09-2BII-ADS-SEARCH` ("nol kolom biaya/identitas")
-sudah usang. Menambah keduanya ke `kolomDipanen` (memungkinkan modul ini akhirnya menulis
-`pdt_fact_ads`, pola sama `shopee_ads_cpc`) BELUM dilakukan — itu keputusan desain whitelist baru
-(sama kelas Q-6), bukan koreksi ejaan, sengaja tidak ditebak sesi ini.
+**`G1-09-2BII-ADS-SEARCH` DITUTUP sesi 22 (docs/DECISIONS.md 2026-09-14, modul KETUJUH):**
+`Nama Iklan` (identitas kampanye) dan `Biaya` (`pdt_fact_ads.biaya` NOT NULL) DITAMBAHKAN ke
+`kolomDipanen` — sample asli membuktikan keduanya sungguh ada, premis blocker lama ("nol kolom
+biaya/identitas") sudah usang. `ekstrakBarisShopeeAdsSearch` (`packages/core/src/pdt/fakta.ts`)
++ writer `pdt_fact_ads` di `commitUploadBatch` sudah dibangun. `kampanye_id` **KOMPOSIT**
+(`` `${namaIklan} :: ${kataPencarian}` ``, BUKAN `nama iklan` polos seperti `shopee_ads_cpc`) —
+sample yang tersedia hanya satu baris, tidak membuktikan apakah satu iklan search bisa muncul
+berkali-kali dengan `Kata Pencarian` berbeda dalam satu periode; komposit aman di kedua kasus.
 
-Bucket 3 (human call — **ditahan**, bukan dibuang, ketokan Q-6): `Kata Pencarian`, `SOV`. Riset
-keyword belum punya konsumen yang dibangun; menunggu Anty menjawab apakah dibangun atau memang
+Bucket 3 (human call — **ditahan**, bukan dibuang, ketokan Q-6): `Kata Pencarian`, `SOV`. `Kata
+Pencarian` DIBACA oleh `ekstrakBarisShopeeAdsSearch` untuk membentuk `kampanye_id` (identitas
+baris) — TIDAK ditambahkan ke `kolomDipanen` (isinya masih bukan dimensi laporan). Riset keyword
+sendiri belum punya konsumen yang dibangun; menunggu Anty menjawab apakah dibangun atau memang
 dibuang secara permanen (§6 handoff, baris ketiga).
 
 ### 2.5 `shopee_ads_live` — `Data-Semua-Iklan-Live-*.csv` (header baris 7)

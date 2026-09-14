@@ -662,6 +662,10 @@ export async function commitUploadBatch(
   // kenapa blocker grain `G1-09-2BII-ADS-CPC` — terbuka sejak sesi 13 — akhirnya
   // terjawab sesi ini: sample asli Fim Motor).
   const berkasAdsCpc = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ads_cpc');
+  // G1-09 sub-langkah 2b-ii — modul KETUJUH (sesi 22), `shopee_ads_search` → `pdt_fact_ads`
+  // (lihat docblock `ekstrakBarisShopeeAdsSearch`, `@cdps/core` `pdt/fakta.ts`, untuk kenapa
+  // blocker `G1-09-2BII-ADS-SEARCH` — "nol kolom biaya/identitas" — ditutup sesi ini).
+  const berkasAdsSearch = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ads_search');
   const berkasTtVideo = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_video');
   // G1-09 sub-langkah 2b-ii — modul KETIGA, `shopee_parent_sku`/`tt_orders` → `pdt_sku_master`
   // (lihat docblock `ekstrakBarisSkuMasterShopeeParentSku`/`ekstrakBarisSkuMasterTtOrders`,
@@ -763,6 +767,30 @@ export async function commitUploadBatch(
                  parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
               values
                 (${clientPlatformId}, 'shopee_ads_cpc', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+                 ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+          }
+        }
+      }
+
+      // G1-09 sub-langkah 2b-ii — modul KETUJUH (sesi 22), `shopee_ads_search` → `pdt_fact_ads`
+      // (lihat docblock `ekstrakBarisShopeeAdsSearch`, `@cdps/core` `pdt/fakta.ts`). Sama pola
+      // replace-on-recommit `shopee_ads_cpc`/`shopee_ads_live` di atas — `sku_id`/`content_id`
+      // SELALU NULL di sini juga (modul ini tidak punya identitas produk sama sekali di
+      // whitelist). `kampanye_id` KOMPOSIT (`nama iklan :: kata pencarian`, bukan nama iklan
+      // polos) — lihat docblock kepala berkas `fakta.ts` untuk alasan (satu iklan search bisa
+      // punya banyak baris keyword per periode, belum terbukti aman disamakan ke `shopee_ads_cpc`).
+      if (berkasAdsSearch.length > 0) {
+        await tx`
+          delete from pdt_fact_ads
+           where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_search' and periode = ${periodeAwalBulan}::date`;
+        for (const b of berkasAdsSearch) {
+          for (const baris of pdt.ekstrakBarisShopeeAdsSearch(b.aoa, b.barisHeader)) {
+            await tx`
+              insert into pdt_fact_ads
+                (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+                 parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+              values
+                (${clientPlatformId}, 'shopee_ads_search', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
                  ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
           }
         }

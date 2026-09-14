@@ -257,19 +257,23 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // Q-6 menunggu Anty), kolomnya sendiri boleh dipakai untuk DETEKSI.
     tandaTanganKolom: { must: ['Kata Pencarian'] },
     barisHeaderHint: 8, // PRD §7.2: "header baris 8"; DIKONFIRMASI baris 8 persis lewat sample asli Fim Motor (Search-Ads-Overall-Data-*.csv).
-    // Ejaan DIKOREKSI terhadap sample asli Fim Motor sesi ini — casing lama
+    // Ejaan DIKOREKSI terhadap sample asli Fim Motor sesi lalu — casing lama
     // huruf kecil ('klik'/'konversi') TIDAK PERNAH cocok header nyata
     // (`validasiKolomWajib` exact per-sel setelah normalisasi kosakata, sel
     // sungguhan ber-'Jumlah Klik'/'Konversi', bukan sel literal 'klik'/
-    // 'konversi' — bug laten kelas sama `shopee_ads_cpc` sesi 19). Sample
-    // yang sama JUGA membuktikan kolom 'Nama Iklan' (identitas kampanye) dan
-    // 'Biaya' (NOT NULL di `pdt_fact_ads`) SUNGGUH ADA di berkas ini —
-    // premis `G1-09-2BII-ADS-SEARCH` ("nol kolom biaya/identitas") sudah
-    // usang, TAPI belum ditambahkan ke kolomDipanen di sini: menambah
-    // keduanya berarti keputusan desain whitelist baru (sama kelas Q-6),
-    // bukan sekadar koreksi ejaan — dicatat sebagai temuan baru di
-    // `docs/DECISIONS.md`, bukan diam-diam diperluas sesi ini.
-    kolomDipanen: ['Jumlah Klik', 'Konversi'],
+    // 'konversi' — bug laten kelas sama `shopee_ads_cpc` sesi 19).
+    // **`G1-09-2BII-ADS-SEARCH` DITUTUP sesi ini (docs/DECISIONS.md
+    // 2026-09-14, modul KETUJUH)** — 'Nama Iklan'/'Biaya' DITAMBAHKAN:
+    // sample yang sama membuktikan keduanya SUNGGUH ADA (identitas kampanye
+    // + NOT NULL `pdt_fact_ads.biaya`), murni pekerjaan implementasi
+    // mengikuti pola `shopee_ads_cpc` (handoff SESI21 §3.B, "boleh langsung
+    // dikerjakan TANPA menunggu pemilik"). 'Kata Pencarian' SENGAJA TETAP
+    // TIDAK ada di sini — Q-6 (bucket 3, isinya) masih DITAHAN menunggu
+    // Anty, TAPI kolomnya tetap dibaca oleh `ekstrakBarisShopeeAdsSearch`
+    // (`@cdps/core` `pdt/fakta.ts`) untuk membentuk `kampanye_id` KOMPOSIT —
+    // itu memakai IDENTITAS baris, bukan menjadikan isinya dimensi laporan,
+    // jadi tidak melanggar penahanan Q-6.
+    kolomDipanen: ['Jumlah Klik', 'Konversi', 'Nama Iklan', 'Biaya'],
     wajib: false,
   },
   {

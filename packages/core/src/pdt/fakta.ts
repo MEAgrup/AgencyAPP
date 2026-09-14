@@ -40,15 +40,11 @@
  * periode)` (`uq_pdt_fact_ads`, migrasi G1-01) adalah kunci yang SAH tanpa
  * perlu resolusi SKU apa pun.
  *
- * `shopee_ads_search` SENGAJA BELUM dipetakan di sini — dicatat
- * `docs/DECISIONS.md` (G1-09-2BII-ADS-SEARCH). `shopee_ads_cpc` LIHAT Modul
- * KEENAM di bawah — blocker grainnya AKHIRNYA terbuka sesi ini (sample asli
- * Fim Motor, bukan lagi ditebak):
- *  - `shopee_ads_search`: `kolomDipanen` (`modules.ts`) hanya `['klik',
- *    'konversi']` (bucket 3 `Kata Pencarian`/`SOV` DITAHAN, Q-6) — nol
- *    `biaya` (NOT NULL di skema) dan nol identitas kampanye/produk. Tidak
- *    ada baris `pdt_fact_ads` yang SAH bisa ditulis dari whitelist ini hari
- *    ini sama sekali.
+ * `shopee_ads_cpc` LIHAT Modul KEENAM di bawah — blocker grainnya AKHIRNYA
+ * terbuka sesi lalu (sample asli Fim Motor, bukan lagi ditebak). `shopee_ads_search`
+ * LIHAT Modul KETUJUH di bawah — blocker `G1-09-2BII-ADS-SEARCH` ("nol kolom
+ * biaya/identitas") ditutup sesi ini, sample yang sama membuktikan premis itu
+ * sudah usang.
  *
  * **Modul KEEMPAT (sesi ini): `tt_transaction_creator` → `pdt_fact_creator_period`**
  * (lihat `ekstrakBarisKreatorTtTransactionCreator` di bawah) — tabel fakta
@@ -130,6 +126,31 @@
  * diam di sini. Dicatat `G1-09-2BII-ADS-CPC-SKU` (Open baru, `docs/DECISIONS.md`).
  * Angka: `parsePdtAngka(v, true)` — konvensi Ads Manager, sama seperti
  * `shopee_ads_live` (berkas dari dashboard Ads Manager yang sama).
+ *
+ * **Modul KETUJUH (sesi 22): `shopee_ads_search` → `pdt_fact_ads`** (lihat
+ * `ekstrakBarisShopeeAdsSearch` di bawah) — `G1-09-2BII-ADS-SEARCH` DITUTUP.
+ * `HANDOFF_PDT_SESI21.md` §3.B: sample asli Fim Motor (`Search-Ads-Overall-
+ * Data-*.csv`) TERNYATA punya `Nama Iklan`/`Biaya`, premis blocker lama ("nol
+ * kolom biaya/identitas") sudah usang — murni pekerjaan implementasi mengikuti
+ * pola `shopee_ads_cpc` di atas, ditandai boleh dikerjakan TANPA menunggu
+ * pemilik. **`kampanye_id` KOMPOSIT** — `` `${namaIklan} :: ${kataPencarian}` ``,
+ * BUKAN `nama iklan` polos seperti `shopee_ads_cpc` — sample yang tersedia
+ * hanya SATU baris data, tidak membuktikan apakah satu iklan search bisa
+ * muncul berkali-kali dengan `Kata Pencarian` berbeda dalam satu periode
+ * (satu iklan menargetkan banyak keyword, satu baris per keyword). Kalau itu
+ * terjadi dan `kampanye_id` cuma `nama iklan`, replace-on-recommit
+ * (DELETE+INSERT, sama pola `shopee_ads_cpc`/`shopee_ads_live`) akan diam-diam
+ * menimpa baris keyword lain sebagai baris terakhir yang di-loop — bukan
+ * error yang kelihatan. Komposit ini aman di kedua kasus: kalau `Kata
+ * Pencarian` SELALU `"Semua"` (tidak spesifik keyword, seperti satu-satunya
+ * baris sample), komposit berkurang jadi setara `nama iklan` saja (nol
+ * downside). `Kata Pencarian` DIBACA di sini tapi SENGAJA TIDAK ditambahkan
+ * ke `kolomDipanen` (`modules.ts`) — isinya (bucket 3, Q-6) masih DITAHAN
+ * sebagai dimensi laporan, tapi memakainya untuk MEMBENTUK identitas baris
+ * bukan pelanggaran penahanan itu (beda tujuan: kunci unik, bukan metrik).
+ * `sku_id` tetap `null` — modul ini tidak punya identitas produk sama sekali
+ * di whitelist. Angka: `parsePdtAngka(v, true)` — konvensi Ads Manager, sama
+ * seperti `shopee_ads_cpc`/`shopee_ads_live`.
  */
 import { parsePdtAngka } from './angka';
 
@@ -535,6 +556,65 @@ export function ekstrakBarisShopeeAdsCpc(
     if (kampanyeId === '') continue;
     hasil.push({
       kampanyeId,
+      tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
+      klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik], true),
+      pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
+      gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
+      biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
+      roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+    });
+  }
+  return hasil;
+}
+
+/** Satu baris `pdt_fact_ads` mentah dari `shopee_ads_search`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi). */
+export interface PdtBarisAdsShopeeSearch {
+  kampanyeId: string;
+  tayangan: number | null;
+  klik: number | null;
+  pesananSku: number | null;
+  gmv: number | null;
+  biaya: number;
+  roas: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `shopee_ads_search` (Modul KETUJUH — lihat
+ * docblock kepala berkas untuk kenapa blocker `G1-09-2BII-ADS-SEARCH`
+ * akhirnya ditutup sesi ini). Rule 8 whitelist `modules.ts`: `['Jumlah
+ * Klik', 'Konversi', 'Nama Iklan', 'Biaya']` — `Kata Pencarian` DIBACA di
+ * sini untuk membentuk `kampanye_id` KOMPOSIT tapi SENGAJA TIDAK ditambah
+ * ke `kolomDipanen` (Q-6 masih DITAHAN, isinya belum boleh jadi dimensi
+ * laporan). `kampanye_id` memakai `` `${namaIklan} :: ${kataPencarian}` ``
+ * (bukan `nama iklan` polos seperti `shopee_ads_cpc`) — lihat docblock
+ * kepala berkas untuk alasan lengkap. Baris ber-`Nama Iklan` kosong
+ * dilewati (bukan baris data sungguhan — sama pola `shopee_ads_cpc`/
+ * `shopee_ads_live`). Angka: `parsePdtAngka(v, true)` — konvensi Ads
+ * Manager, sama seperti `shopee_ads_cpc`/`shopee_ads_live` (berkas dari
+ * dashboard yang sama).
+ */
+export function ekstrakBarisShopeeAdsSearch(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisAdsShopeeSearch[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iKampanye = idx('Nama Iklan');
+  const iKataPencarian = idx('Kata Pencarian');
+  const iTayangan = idx('Dilihat');
+  const iKlik = idx('Jumlah Klik');
+  const iPesanan = idx('Konversi');
+  const iGmv = idx('Omzet Penjualan');
+  const iBiaya = idx('Biaya');
+  const iRoas = idx('Efektifitas Iklan');
+
+  const hasil: PdtBarisAdsShopeeSearch[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const namaIklan = iKampanye === -1 ? '' : String(row?.[iKampanye] ?? '').trim();
+    if (namaIklan === '') continue;
+    const kataPencarian = iKataPencarian === -1 ? '' : String(row?.[iKataPencarian] ?? '').trim();
+    hasil.push({
+      kampanyeId: `${namaIklan} :: ${kataPencarian}`,
       tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
       klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik], true),
       pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),

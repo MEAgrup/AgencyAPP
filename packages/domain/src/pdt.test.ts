@@ -279,6 +279,34 @@ function shopeeAdsCpcBerkasLengkap(
   return { nama, sha256: 'sha-adscpc-lengkap', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_ads_cpc', ambiguous: false, matches: ['shopee_ads_cpc'] };
 }
 
+/**
+ * `shopee_ads_search` LENGKAP untuk uji `pdt_fact_ads` (G1-09 sub-langkah
+ * 2b-ii, modul KETUJUH, sesi 22) — parametrized per baris [namaIklan,
+ * kataPencarian, dilihat, klik, konversi, omzet, biaya], pola sama
+ * `shopeeAdsCpcBerkasLengkap`.
+ */
+function shopeeAdsSearchBerkasLengkap(
+  nama: string,
+  idToko: string,
+  periode: string,
+  baris: readonly [string, string, string, string, string, string, string][],
+): PdtPreviewBerkasInput {
+  const header = [
+    'Nama Iklan', 'Kata Pencarian', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Omzet Penjualan', 'Biaya', 'Efektifitas Iklan',
+  ];
+  const aoa: unknown[][] = [
+    [`ID Toko: ${idToko}`],
+    ['Username: tokoku'],
+    ['Nama Toko: Toko Saya'],
+    [`Periode: ${periode}`],
+    [],
+    [],
+    header,
+    ...baris.map(([namaIklan, kataPencarian, dilihat, klik, konversi, omzet, biaya]) => [namaIklan, kataPencarian, dilihat, klik, konversi, omzet, biaya, '5.24']),
+  ];
+  return { nama, sha256: 'sha-adssearch-lengkap', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_ads_search', ambiguous: false, matches: ['shopee_ads_search'] };
+}
+
 /** Berkas tt_video LENGKAP — cukup untuk status 'ok' dan sinyal identitas TikTok ('ID Kreator' terbanyak). */
 function ttVideoBerkas(nama: string, idKreator: string): PdtPreviewBerkasInput {
   const header = ['ID Kreator', 'ID Video', 'Waktu', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Nama Kreator', 'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'];
@@ -1120,6 +1148,66 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEENAM) — baris 
 
     const kedua = shopeeAdsCpcBerkasLengkap('ads-cpc-revisi.csv', '938284780', '01/07/2026 - 31/07/2026', [
       ['Iklan A (revisi)', 'PRD-1', '1500', '150', '25', '2500000', '175000'],
+    ]);
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, [kedua], []);
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(Number(rows[0].biaya)).toBe(175000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KETUJUH, sesi 22) — baris
+// fakta shopee_ads_search → pdt_fact_ads (blocker G1-09-2BII-ADS-SEARCH
+// ditutup sesi ini — lihat fakta.ts @cdps/core untuk detail kampanye_id
+// KOMPOSIT).
+// ---------------------------------------------------------------------------
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KETUJUH) — baris fakta shopee_ads_search → pdt_fact_ads', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', shopId);
+  }
+
+  it('satu baris per keyword, kampanye_id KOMPOSIT (nama iklan :: kata pencarian), sku_id/content_id NULL', async () => {
+    const cpId = await fixture();
+    const berkas = shopeeAdsSearchBerkasLengkap('ads-search.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan toko by MEA', 'Semua', '3', '20677', '330', '32480316', '6200000'],
+    ]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      sumber: 'shopee_ads_search', kampanye_id: 'Iklan toko by MEA :: Semua', sku_id: null, content_id: null,
+      batch_id: persiapan.batchId, parser_versi: 1, tayangan: 3, klik: 20677, pesanan_sku: 330,
+    });
+    expect(Number(rows[0].biaya)).toBe(6200000);
+    expect(Number(rows[0].gmv)).toBe(32480316);
+  });
+
+  it('dua keyword untuk IKLAN yang SAMA ⇒ dua baris terpisah (kampanye_id komposit membedakan, bukan nama iklan saja)', async () => {
+    const cpId = await fixture();
+    const berkas = shopeeAdsSearchBerkasLengkap('ads-search.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan Search A', 'sepatu wanita', '1000', '100', '20', '2000000', '150000'],
+      ['Iklan Search A', 'sepatu pria', '500', '50', '5', '400000', '50000'],
+    ]);
+    await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    const rows = await loadFactAds(cpId);
+    // loadFactAds ORDER BY kampanye_id (alfabetis) — bukan urutan baris di berkas ('pria' < 'wanita').
+    expect(rows.map((r) => r.kampanye_id)).toEqual(['Iklan Search A :: sepatu pria', 'Iklan Search A :: sepatu wanita']);
+  });
+
+  it('commit ULANG periode yang sama ⇒ baris LAMA diganti (replace-on-recommit), sama pola shopee_ads_cpc', async () => {
+    const cpId = await fixture();
+    const pertama = shopeeAdsSearchBerkasLengkap('ads-search.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan A', 'Semua', '1000', '100', '20', '2000000', '150000'],
+    ]);
+    await commitUploadBatch(sql, ownerActor(), cpId, [pertama], []);
+    expect(await loadFactAds(cpId)).toHaveLength(1);
+
+    const kedua = shopeeAdsSearchBerkasLengkap('ads-search-revisi.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan A (revisi)', 'Semua', '1500', '150', '25', '2500000', '175000'],
     ]);
     const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, [kedua], []);
     const rows = await loadFactAds(cpId);
