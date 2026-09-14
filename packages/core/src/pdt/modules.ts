@@ -463,11 +463,21 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     platform: 'meta',
     namaTampilan: 'Meta Ads — Laporan Kampanye',
     // Sama persis `report/shopee/detect.ts` CONTENT_SIGNATURES.meta.
+    // `tandaTanganKolom` TIDAK berubah — substring 'dibelanjakan' tetap cocok
+    // sel asli 'Jumlah yang dibelanjakan (IDR)' (deteksi sudah benar).
     tandaTanganKolom: { must: ['Minggu', 'Dibelanjakan'] },
-    barisHeaderHint: 1,
+    barisHeaderHint: 1, // DIKONFIRMASI: sheet "Raw Data Report", sample asli Fim Motor `Laporan-tanpa-judul-*.xlsx`.
+    // `kolomDipanen` DIKOREKSI sesi lanjutan pasca-sesi 20 terhadap sample
+    // asli — 6 dari 11 entri lama TIDAK PERNAH cocok (exact-match) sel
+    // sungguhan, yang punya sufiks panjang khas Meta Ads Manager ("(IDR)",
+    // "Khusus untuk Item Bersama", dsb.) yang tidak dituliskan sebelumnya —
+    // bug laten kelas sama `shopee_ads_cpc`/AMS. Set kolom yang dipanen
+    // TIDAK berubah secara konsep, cuma ejaannya dikoreksi.
     kolomDipanen: [
-      'Nama kampanye', 'Nama iklan', 'Jumlah yang dibelanjakan', 'Nilai Konversi Pembelian', 'ROAS',
-      'Impresi', 'Klik tautan', 'CTR', 'CPM', 'CPC', 'Minggu',
+      'Nama kampanye', 'Nama iklan', 'Jumlah yang dibelanjakan (IDR)',
+      'Nilai Konversi Pembelian Khusus untuk Item Bersama', 'ROAS pembelian khusus untuk item bersama',
+      'Impresi', 'Klik tautan', 'CTR Unik (rasio klik tayang tautan)', 'CPM (Biaya Per 1.000 Tayangan)',
+      'CPC (biaya per klik tautan)', 'Minggu',
     ],
     wajib: false, // opsional (PDT-22) — tidak masuk rekonsiliasi GMV toko
   },

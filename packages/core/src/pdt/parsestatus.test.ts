@@ -95,6 +95,20 @@ describe('validasiKolomWajib × PDT_MODULES.kolomDipanen — header PERSIS sampl
     ];
     expect(validasiKolomWajib(header, kolomDipanenModul('shopee_chat_broadcast'))).toEqual([]);
   });
+
+  it('meta_ads — sheet "Raw Data Report", Laporan-tanpa-judul-*.xlsx', () => {
+    const header = [
+      'Minggu', 'Nama kampanye', 'Nama iklan', 'Jumlah yang dibelanjakan (IDR)',
+      'Nilai Konversi Pembelian Khusus untuk Item Bersama', 'ROAS pembelian khusus untuk item bersama',
+      'Pembelian dengan item bersama', 'Frekuensi', 'Impresi', 'Klik tautan',
+      'CTR Unik (rasio klik tayang tautan)', 'Tampilan konten dengan item bersama',
+      'CPM (Biaya Per 1.000 Tayangan)', 'CPC (biaya per klik tautan)',
+      'Penambahan ke Keranjang Belanja dengan Item Bersama',
+      'Nilai Konversi Penambahan ke Keranjang Belanja Khusus untuk Item Bersama',
+      'Awal pelaporan', 'Akhir pelaporan',
+    ];
+    expect(validasiKolomWajib(header, kolomDipanenModul('meta_ads'))).toEqual([]);
+  });
 });
 
 describe('turunkanParseStatus (Rule 10)', () => {
