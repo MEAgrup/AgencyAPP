@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ekstrakBarisShopeeAdsLive, ekstrakBarisTtVideo } from './fakta';
+import {
+  ekstrakBarisShopeeAdsLive,
+  ekstrakBarisSkuMasterShopeeParentSku,
+  ekstrakBarisSkuMasterTtOrders,
+  ekstrakBarisTtVideo,
+} from './fakta';
 
 const HEADER = ['Nama Iklan', 'ID Iklan', 'Status', 'Penonton', 'Tingkat Konversi', 'Pesanan', 'Omzet', 'Biaya', 'Efektifitas Iklan'];
 
@@ -99,6 +104,100 @@ describe('ekstrakBarisTtVideo', () => {
     const aoa = [headerMinimal, ['V1']];
     expect(ekstrakBarisTtVideo(aoa, 1, null)).toEqual([
       { platformContentId: 'V1', creatorPlatformId: null, creatorHandle: null, isAkunToko: false, vv: null, likes: null, dibagikan: null, klikProduk: null, gmv: null },
+    ]);
+  });
+});
+
+const HEADER_PARENT_SKU = [
+  'Kode Produk', 'Kode Variasi', 'SKU Induk', 'Total Penjualan (Pesanan Dibuat) (IDR)',
+  'Penjualan (Pesanan Siap Dikirim) (IDR)', 'Jumlah Produk Dilihat', 'Produk Diklik',
+  'Tingkat Konversi (Pesanan yang Dibuat)', 'repeat order', 'Pengunjung Produk (Kunjungan)',
+];
+
+describe('ekstrakBarisSkuMasterShopeeParentSku', () => {
+  it('memetakan Kode Produk/Kode Variasi/SKU Induk — nama_produk/kategori/harga SELALU null (tidak ada di whitelist modul ini)', () => {
+    const aoa = [HEADER_PARENT_SKU, ['P1', 'V1', 'SKU1', '100000', '100000', '10', '5', '5%', '10%', '20']];
+    expect(ekstrakBarisSkuMasterShopeeParentSku(aoa, 1)).toEqual([
+      {
+        platformProductId: 'P1', platformVariationId: 'V1', sellerSku: 'SKU1',
+        namaProduk: null, namaVariasi: null, kategoriPlatform: null, hargaSatuanTerakhir: null,
+      },
+    ]);
+  });
+
+  it('Kode Variasi kosong ⇒ platformVariationId string kosong (bukan null — DEFAULT skema)', () => {
+    const aoa = [HEADER_PARENT_SKU, ['P1', '', 'SKU1', '0', '0', '0', '0', '0%', '0%', '0']];
+    expect(ekstrakBarisSkuMasterShopeeParentSku(aoa, 1)[0].platformVariationId).toBe('');
+  });
+
+  it('baris ber-Kode Produk kosong dilewati', () => {
+    const aoa = [HEADER_PARENT_SKU, ['', 'V1', 'SKU1', '0', '0', '0', '0', '0%', '0%', '0']];
+    expect(ekstrakBarisSkuMasterShopeeParentSku(aoa, 1)).toHaveLength(0);
+  });
+
+  it('SKU sama muncul dua kali (dua baris) ⇒ dedup jadi SATU baris, nilai TERAKHIR menang', () => {
+    const aoa = [
+      HEADER_PARENT_SKU,
+      ['P1', 'V1', 'SKU-LAMA', '100', '100', '1', '1', '1%', '1%', '1'],
+      ['P1', 'V1', 'SKU-BARU', '200', '200', '2', '2', '2%', '2%', '2'],
+    ];
+    const hasil = ekstrakBarisSkuMasterShopeeParentSku(aoa, 1);
+    expect(hasil).toHaveLength(1);
+    expect(hasil[0].sellerSku).toBe('SKU-BARU');
+  });
+});
+
+const HEADER_TT_ORDERS = [
+  'Order ID', 'SKU ID', 'Seller SKU', 'Product Name', 'Variation', 'Quantity',
+  'SKU Unit Original Price', 'SKU Subtotal After Discount', 'Order Status', 'Paid Time',
+  'Product Category', 'Creator Handle',
+];
+
+describe('ekstrakBarisSkuMasterTtOrders', () => {
+  it('memetakan SKU ID/Seller SKU/Product Name/Variation/Product Category/harga — platformVariationId SELALU string kosong (nol id level-produk-induk terverifikasi)', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      ['O1', 'SKU-1', 'SLR-1', 'Kaos Polos', 'Merah / L', '2', '50.000', '95.000', 'Completed', '01/07/2026', 'Fashion Pria', 'KR-1'],
+    ];
+    expect(ekstrakBarisSkuMasterTtOrders(aoa, 1)).toEqual([
+      {
+        platformProductId: 'SKU-1', platformVariationId: '', sellerSku: 'SLR-1',
+        namaProduk: 'Kaos Polos', namaVariasi: 'Merah / L', kategoriPlatform: 'Fashion Pria',
+        hargaSatuanTerakhir: 50000,
+      },
+    ]);
+  });
+
+  it('konvensi Seller Center (titik ribuan, koma desimal) untuk harga', () => {
+    const aoa = [HEADER_TT_ORDERS, ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '1.234.567,89', '0', 'Completed', '01/07/2026', 'Kat', 'KR-1']];
+    expect(ekstrakBarisSkuMasterTtOrders(aoa, 1)[0].hargaSatuanTerakhir).toBe(1234567.89);
+  });
+
+  it('baris ber-SKU ID kosong dilewati', () => {
+    const aoa = [HEADER_TT_ORDERS, ['O1', '', 'SLR-1', 'X', 'Y', '1', '0', '0', 'Completed', '01/07/2026', 'Kat', 'KR-1']];
+    expect(ekstrakBarisSkuMasterTtOrders(aoa, 1)).toHaveLength(0);
+  });
+
+  it('SKU yang sama di banyak baris pesanan ⇒ dedup jadi SATU baris master, nilai TERAKHIR menang', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      ['O1', 'SKU-1', 'SLR-1', 'Nama Lama', 'Y', '1', '40.000', '0', 'Completed', '01/07/2026', 'Kat', 'KR-1'],
+      ['O2', 'SKU-1', 'SLR-1', 'Nama Baru', 'Y', '1', '45.000', '0', 'Completed', '02/07/2026', 'Kat', 'KR-1'],
+    ];
+    const hasil = ekstrakBarisSkuMasterTtOrders(aoa, 1);
+    expect(hasil).toHaveLength(1);
+    expect(hasil[0].namaProduk).toBe('Nama Baru');
+    expect(hasil[0].hargaSatuanTerakhir).toBe(45000);
+  });
+
+  it('kolom opsional hilang ⇒ null untuk field itu', () => {
+    const headerMinimal = ['SKU ID'];
+    const aoa = [headerMinimal, ['SKU-1']];
+    expect(ekstrakBarisSkuMasterTtOrders(aoa, 1)).toEqual([
+      {
+        platformProductId: 'SKU-1', platformVariationId: '', sellerSku: null,
+        namaProduk: null, namaVariasi: null, kategoriPlatform: null, hargaSatuanTerakhir: null,
+      },
     ]);
   });
 });

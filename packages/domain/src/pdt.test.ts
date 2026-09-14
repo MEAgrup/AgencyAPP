@@ -171,6 +171,9 @@ afterEach(async () => {
   await sql`delete from pdt_fact_ads where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
   // pdt_fact_content (G1-09 sub-langkah 2b-ii, modul kedua tt_video) — sama alasan.
   await sql`delete from pdt_fact_content where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
+  // pdt_sku_master (G1-09 sub-langkah 2b-ii, modul KETIGA) — sama alasan (FK ke client_platforms
+  // TANPA ON DELETE CASCADE).
+  await sql`delete from pdt_sku_master where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -1106,5 +1109,176 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul kedua) — baris f
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
     expect(persiapan.status).toBe('ditolak');
     expect(await loadFactContent(cpId)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KETIGA) — `shopee_parent_sku`/
+// `tt_orders` → `pdt_sku_master` (lihat fakta.ts @cdps/core untuk kenapa modul
+// ini, bukan `shopee_live`/`shopee_video` seperti rekomendasi sesi lalu — dan
+// kenapa `tt_orders` SENDIRIAN, bukan digabung `tt_transaction_product`).
+// Beda dari dua modul di atas: tabel MASTER (Rule 19), UPSERT sungguhan.
+// ---------------------------------------------------------------------------
+interface SkuMasterRow {
+  platform_product_id: string;
+  platform_variation_id: string;
+  seller_sku: string | null;
+  nama_produk: string | null;
+  nama_variasi: string | null;
+  kategori_platform: string | null;
+  harga_satuan_terakhir: string | null;
+  status_listing: string;
+  first_seen_at: Date;
+  last_seen_at: Date;
+}
+
+async function loadSkuMaster(clientPlatformId: number): Promise<SkuMasterRow[]> {
+  return sql<SkuMasterRow[]>`select * from pdt_sku_master where client_platform_id = ${clientPlatformId} order by platform_product_id, platform_variation_id`;
+}
+
+/** `shopee_parent_sku` TANPA preamble/periode sendiri (sama seperti bentuk asli — lihat `shopeeParentSkuBerkas` di atas), beberapa baris SKU sekaligus untuk uji upsert `pdt_sku_master`. */
+function shopeeParentSkuBerkasMulti(nama: string, baris: readonly [string, string, string][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_PARENT_SKU,
+    ...baris.map(([kodeProduk, kodeVariasi, skuInduk]) => [kodeProduk, kodeVariasi, skuInduk, '0', '0', '0', '0', '0%', '0%', '0']),
+  ];
+  return {
+    nama, sha256: 'sha-parentsku-multi', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, modulTerdeteksi: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'],
+  };
+}
+
+const HEADER_TT_ORDERS = [
+  'Order ID', 'SKU ID', 'Seller SKU', 'Product Name', 'Variation', 'Quantity',
+  'SKU Unit Original Price', 'SKU Subtotal After Discount', 'Order Status', 'Paid Time',
+  'Product Category', 'Creator Handle',
+];
+
+/** `tt_orders` (Semua Pesanan) — tidak membawa 'ID Kreator'/periode sendiri (Rule 5 ayat 2: mewarisi dari berkas lain di batch yang sama, sama pola `ttOrdersBerkas` dipasangkan dengan `ttVideoBerkasLengkap` di tes di bawah). */
+function ttOrdersBerkas(nama: string, baris: readonly [string, string, string, string, string, string][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TT_ORDERS,
+    ...baris.map(([skuId, sellerSku, productName, variation, harga, kategori]) => [
+      'ORD-1', skuId, sellerSku, productName, variation, '1', harga, harga, 'Completed', '01/07/2026', kategori, 'KR-1',
+    ]),
+  ];
+  return {
+    nama, sha256: 'sha-ttorders', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, modulTerdeteksi: 'tt_orders', ambiguous: false, matches: ['tt_orders'],
+  };
+}
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KETIGA) — shopee_parent_sku → pdt_sku_master', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', shopId);
+  }
+
+  it('satu baris per (Kode Produk, Kode Variasi), status_listing aktif, nama_produk/kategori/harga NULL (tidak ada di whitelist modul ini)', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'), // identitas+periode
+      shopeeParentSkuBerkasMulti('parent-sku.xlsx', [
+        ['P1', 'V1', 'SKU1'],
+        ['P1', 'V2', 'SKU2'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadSkuMaster(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      platform_product_id: 'P1', platform_variation_id: 'V1', seller_sku: 'SKU1',
+      nama_produk: null, nama_variasi: null, kategori_platform: null, harga_satuan_terakhir: null,
+      status_listing: 'aktif',
+    });
+    expect(rows[1].platform_variation_id).toBe('V2');
+  });
+
+  it('commit ULANG (SKU sama) ⇒ UPSERT di tempat (last_seen_at maju), bukan baris baru', async () => {
+    const cpId = await fixture();
+    const t1 = new Date('2026-07-01T00:00:00Z');
+    const t2 = new Date('2026-07-15T00:00:00Z');
+    const pertama = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeParentSkuBerkasMulti('parent-sku.xlsx', [['P1', 'V1', 'SKU-LAMA']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, [], t1);
+    const setelahPertama = await loadSkuMaster(cpId);
+    expect(setelahPertama).toHaveLength(1);
+    const firstSeenAsli = setelahPertama[0].first_seen_at;
+
+    const kedua = [
+      shopeeAdsCpcBerkas('ads-2.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeParentSkuBerkasMulti('parent-sku-2.xlsx', [['P1', 'V1', 'SKU-BARU']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, kedua, [], t2);
+    const rows = await loadSkuMaster(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — UPSERT, bukan baris baru
+    expect(rows[0].seller_sku).toBe('SKU-BARU'); // nilai TERBARU menang
+    expect(new Date(rows[0].first_seen_at).getTime()).toBe(new Date(firstSeenAsli).getTime()); // first_seen_at TIDAK berubah
+    expect(new Date(rows[0].last_seen_at).getTime()).toBe(t2.getTime()); // last_seen_at maju
+  });
+
+  it("identitas 'tolak' (ID Toko berkas ≠ shop_id tersimpan) ⇒ NOL baris pdt_sku_master ditulis", async () => {
+    const cpId = await fixture('SHOP-LAIN');
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeParentSkuBerkasMulti('parent-sku.xlsx', [['P1', 'V1', 'SKU1']]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(await loadSkuMaster(cpId)).toHaveLength(0);
+  });
+});
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KETIGA) — tt_orders → pdt_sku_master', () => {
+  async function fixture(akunKontenToko: readonly string[] | null): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'TikTok Shop', null, akunKontenToko);
+  }
+
+  it('satu baris per SKU ID, mengisi seller_sku/nama_produk/nama_variasi/kategori_platform/harga sekaligus dari SATU berkas (platform_variation_id selalu string kosong)', async () => {
+    const cpId = await fixture(['KR-1']);
+    const berkas = [
+      ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', [['KR-1', 'V1', '100', '10', '1', '5', '200000']]), // identitas+periode
+      ttOrdersBerkas('orders.xlsx', [
+        ['SKU-1', 'SLR-1', 'Kaos Polos', 'Merah / L', '50.000', 'Fashion Pria'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadSkuMaster(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      platform_product_id: 'SKU-1', platform_variation_id: '', seller_sku: 'SLR-1',
+      nama_produk: 'Kaos Polos', nama_variasi: 'Merah / L', kategori_platform: 'Fashion Pria',
+      status_listing: 'aktif',
+    });
+    expect(Number(rows[0].harga_satuan_terakhir)).toBe(50000);
+  });
+
+  it('dua baris pesanan, SKU sama ⇒ dedup jadi SATU baris master (bukan satu per baris pesanan)', async () => {
+    const cpId = await fixture(['KR-1']);
+    const berkas = [
+      ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', [['KR-1', 'V1', '100', '10', '1', '5', '200000']]),
+      ttOrdersBerkas('orders.xlsx', [
+        ['SKU-1', 'SLR-1', 'Kaos Polos', 'Merah / L', '50.000', 'Fashion Pria'],
+        ['SKU-1', 'SLR-1', 'Kaos Polos', 'Merah / L', '50.000', 'Fashion Pria'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(await loadSkuMaster(cpId)).toHaveLength(1);
+  });
+
+  it("identitas 'tolak' (ID Kreator tidak terdaftar) ⇒ NOL baris pdt_sku_master ditulis", async () => {
+    const cpId = await fixture(['KR-LAIN']);
+    const berkas = [
+      ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', [['KR-1', 'V1', '100', '10', '1', '5', '200000']]),
+      ttOrdersBerkas('orders.xlsx', [['SKU-1', 'SLR-1', 'Kaos Polos', 'Merah / L', '50.000', 'Fashion Pria']]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(await loadSkuMaster(cpId)).toHaveLength(0);
   });
 });

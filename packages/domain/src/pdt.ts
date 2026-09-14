@@ -420,12 +420,17 @@ export async function siapkanUploadBatch(
 // adalah skor/kuadran/usulan/prefill DI ATAS baris fakta, konsumen hilir yang
 // belum dibangun, koreksi catatan sebelumnya di sini/HANDOFF_PDT_SESI13.md
 // §1 butir 1) yang menulis "baris fakta sesuai whitelist (Rule 8)" —
-// `shopee_ads_live` → `pdt_fact_ads` (modul pertama) dan `tt_video` →
-// `pdt_fact_content` (modul kedua, sesi ini) adalah dua baris fakta PERTAMA
-// yang benar-benar ditulis (sub-langkah 2b-ii, di bawah); 23 modul/4 tabel
-// fakta lain BELUM (peta kolomDipanen→tabel fakta untuk sisanya belum ada,
-// pekerjaan besar tersendiri, lihat `docs/handoff/HANDOFF_PDT_SESI12.md`/
-// `HANDOFF_PDT_SESI13.md`/`HANDOFF_PDT_SESI14.md`/`HANDOFF_PDT_SESI15.md`).
+// `shopee_ads_live` → `pdt_fact_ads` (modul pertama), `tt_video` →
+// `pdt_fact_content` (modul kedua), dan `shopee_parent_sku`/`tt_orders` →
+// `pdt_sku_master` (modul KETIGA, sesi ini — lihat docblock `fakta.ts` untuk
+// kenapa `pdt_sku_master`, bukan `shopee_live`/`shopee_video` seperti
+// rekomendasi sesi lalu, yang keduanya ternyata BLOCKED begitu
+// diinvestigasi) adalah baris/tabel fakta PERTAMA yang benar-benar ditulis
+// (sub-langkah 2b-ii, di bawah); 22 modul/3 tabel fakta lain BELUM (peta
+// kolomDipanen→tabel fakta untuk sisanya belum ada, pekerjaan besar
+// tersendiri, lihat `docs/handoff/HANDOFF_PDT_SESI12.md`/
+// `HANDOFF_PDT_SESI13.md`/`HANDOFF_PDT_SESI14.md`/`HANDOFF_PDT_SESI15.md`/
+// `HANDOFF_PDT_SESI16.md`).
 //
 // **Keputusan: PIPELINE DIJALANKAN ULANG dari `storage_path` yang sama**
 // (bukan menerima cache hasil `previewUploadBatch` dari klien) — pemanggil
@@ -646,6 +651,13 @@ export async function commitUploadBatch(
 
   const berkasAdsLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ads_live');
   const berkasTtVideo = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_video');
+  // G1-09 sub-langkah 2b-ii — modul KETIGA, `shopee_parent_sku`/`tt_orders` → `pdt_sku_master`
+  // (lihat docblock `ekstrakBarisSkuMasterShopeeParentSku`/`ekstrakBarisSkuMasterTtOrders`,
+  // `@cdps/core` `pdt/fakta.ts`, untuk kenapa modul ini — bukan `shopee_live`/`shopee_video`
+  // seperti rekomendasi sesi lalu — dan kenapa `tt_orders` SENDIRIAN, bukan digabung
+  // `tt_transaction_product` seperti Rule 18 harfiah).
+  const berkasParentSkuUntukMaster = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_parent_sku');
+  const berkasTtOrders = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_orders');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -740,6 +752,44 @@ export async function commitUploadBatch(
                 is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, likes = excluded.likes,
                 dibagikan = excluded.dibagikan, klik_produk = excluded.klik_produk, gmv = excluded.gmv`;
           }
+        }
+      }
+
+      // G1-09 sub-langkah 2b-ii — modul KETIGA, `pdt_sku_master` (lihat docblock
+      // `ekstrakBarisSkuMasterShopeeParentSku`/`ekstrakBarisSkuMasterTtOrders`,
+      // `@cdps/core` `pdt/fakta.ts`). BEDA dari `pdt_fact_ads`/`pdt_fact_content` di atas:
+      // ini tabel MASTER, bukan fakta per-periode — Rule 19 (`docs/PRD` §3.4) SKU tidak
+      // pernah dihapus, hanya `status_listing`/`last_seen_at` yang berubah. UPSERT sungguhan
+      // (`ON CONFLICT (client_platform_id, platform_product_id, platform_variation_id) DO
+      // UPDATE`, kunci = `uq_pdt_sku_master`), field opsional (`seller_sku`/`nama_produk`/
+      // `nama_variasi`/`kategori_platform`/`harga_satuan_terakhir`) di-COALESCE dengan nilai
+      // lama supaya sumber yang tidak membawa field itu (mis. `shopee_parent_sku` untuk
+      // nama/kategori/harga) tidak menimpanya jadi NULL. `status_listing` selalu diset
+      // 'aktif' di sini — SKU yang muncul di batch berarti masih terlihat; transisi ke
+      // 'nonaktif'/'dihapus_platform' (SKU yang BERHENTI muncul) butuh perbandingan lintas
+      // batch yang belum ada mesinnya (`G1-09-2BII-SKU-STATUS-TRANSISI`, Open baru).
+      for (const b of [...berkasParentSkuUntukMaster, ...berkasTtOrders]) {
+        const ekstrak = b.modul.kode === 'shopee_parent_sku'
+          ? pdt.ekstrakBarisSkuMasterShopeeParentSku(b.aoa, b.barisHeader)
+          : pdt.ekstrakBarisSkuMasterTtOrders(b.aoa, b.barisHeader);
+        for (const baris of ekstrak) {
+          await tx`
+            insert into pdt_sku_master
+              (client_platform_id, platform_product_id, platform_variation_id, seller_sku,
+               nama_produk, nama_variasi, kategori_platform, harga_satuan_terakhir,
+               status_listing, first_seen_at, last_seen_at)
+            values
+              (${clientPlatformId}, ${baris.platformProductId}, ${baris.platformVariationId}, ${baris.sellerSku},
+               ${baris.namaProduk}, ${baris.namaVariasi}, ${baris.kategoriPlatform}, ${baris.hargaSatuanTerakhir},
+               'aktif', ${now.toISOString()}, ${now.toISOString()})
+            on conflict (client_platform_id, platform_product_id, platform_variation_id) do update set
+              seller_sku = coalesce(excluded.seller_sku, pdt_sku_master.seller_sku),
+              nama_produk = coalesce(excluded.nama_produk, pdt_sku_master.nama_produk),
+              nama_variasi = coalesce(excluded.nama_variasi, pdt_sku_master.nama_variasi),
+              kategori_platform = coalesce(excluded.kategori_platform, pdt_sku_master.kategori_platform),
+              harga_satuan_terakhir = coalesce(excluded.harga_satuan_terakhir, pdt_sku_master.harga_satuan_terakhir),
+              status_listing = 'aktif',
+              last_seen_at = excluded.last_seen_at`;
         }
       }
 

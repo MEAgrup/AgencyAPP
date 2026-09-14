@@ -5,13 +5,30 @@
  * Fungsi murni saja — nol I/O, nol DB. Pemanggil (`commitUploadBatch`,
  * `packages/domain/src/pdt.ts`) yang menulis `pdt_fact_ads`/`pdt_fact_content`.
  *
- * **Modul KEDUA (sesi ini): `tt_video` → `pdt_fact_content`** (lihat
- * `ekstrakBarisTtVideo` di bawah). Beda dari `pdt_fact_ads` — kunci unik
- * `pdt_fact_content` (`client_platform_id, platform_content_id`) TIDAK
- * pernah punya komponen NULL (`ID Video` selalu ada untuk baris yang
- * ditulis), jadi pemanggil bisa memakai `ON CONFLICT ... DO UPDATE`
- * sungguhan di sini — beda dari `pdt_fact_ads` yang harus delete-then-
- * insert karena `sku_id`/`content_id` selalu NULL.
+ * **Modul KEDUA: `tt_video` → `pdt_fact_content`** (lihat `ekstrakBarisTtVideo`
+ * di bawah). Beda dari `pdt_fact_ads` — kunci unik `pdt_fact_content`
+ * (`client_platform_id, platform_content_id`) TIDAK pernah punya komponen
+ * NULL (`ID Video` selalu ada untuk baris yang ditulis), jadi pemanggil bisa
+ * memakai `ON CONFLICT ... DO UPDATE` sungguhan di sini — beda dari
+ * `pdt_fact_ads` yang harus delete-then-insert karena `sku_id`/`content_id`
+ * selalu NULL.
+ *
+ * **Modul KETIGA (sesi ini): `shopee_parent_sku` + `tt_orders` →
+ * `pdt_sku_master`** (lihat `ekstrakBarisSkuMasterShopeeParentSku`/
+ * `ekstrakBarisSkuMasterTtOrders` di bawah). Kandidat sebelumnya
+ * (`shopee_live`/`shopee_video`, direkomendasikan `HANDOFF_PDT_SESI16.md`)
+ * TERNYATA BLOCKED begitu diinvestigasi — `shopee_live` punya kelas blocker
+ * SAMA seperti `tt_live` (nol kolom identitas sesi live terverifikasi;
+ * `Informasi Streaming` adalah judul bebas, bukan ID stabil — lihat
+ * `docs/DECISIONS.md` G1-09-2BII-SHOPEELIVE), dan `shopee_video` masih
+ * `UNVERIFIED_SIGNATURE` (`modules.ts`). `pdt_sku_master` dipilih sebagai
+ * gantinya — PALING BERHARGA (prasyarat `shopee_ads_cpc`/`pdt_fact_sku_period`/
+ * `sku_id` di modul manapun) meski PALING RUMIT (dua platform, upsert bukan
+ * insert/replace seperti dua modul di atas). **Bukan** fungsi murni
+ * "ekstrak baris" saja seperti dua modul di atas — pemanggil (`commitUploadBatch`)
+ * melakukan UPSERT (Rule 19: SKU tidak pernah dihapus, hanya
+ * `status_listing`/`last_seen_at` berubah), bukan delete-then-insert atau
+ * ON CONFLICT DO UPDATE polos.
  *
  * **`shopee_ads_live` adalah modul PERTAMA yang dipetakan ke tabel fakta**
  * (bukti pola sebelum digeneralisasi ke 24 modul lain — `docs/handoff/
@@ -179,4 +196,119 @@ export function ekstrakBarisTtVideo(
     });
   }
   return hasil;
+}
+
+/**
+ * Satu baris (SATU SKU/varian, sesudah dedup) `pdt_sku_master`, SEBELUM
+ * `client_platform_id`/`batch_id`/`parser_versi` (pemanggil yang melengkapi,
+ * pola sama fungsi lain di paket ini). `platformVariationId` `''` bila
+ * platform/modul sumber tidak membawa id varian terpisah (kolom DB
+ * `DEFAULT ''`, bukan `NULL` — cermin skema `pdt_sku_master`,
+ * `uq_pdt_sku_master (client_platform_id, platform_product_id,
+ * platform_variation_id)`).
+ */
+export interface PdtBarisSkuMaster {
+  platformProductId: string;
+  platformVariationId: string;
+  sellerSku: string | null;
+  namaProduk: string | null;
+  namaVariasi: string | null;
+  kategoriPlatform: string | null;
+  hargaSatuanTerakhir: number | null;
+}
+
+/** Dedup berdasar `(platformProductId, platformVariationId)` — baris belakangan menang (menimpa baris sebelumnya di array yang sama), cermin semantik `ON CONFLICT DO UPDATE` yang dipakai pemanggil. Satu berkas bisa membawa SKU yang sama berkali-kali (mis. satu baris per pesanan) — tabel master butuh SATU baris per SKU, bukan satu per kemunculan. */
+function dedupSkuMaster(baris: readonly PdtBarisSkuMaster[]): PdtBarisSkuMaster[] {
+  const byKey = new Map<string, PdtBarisSkuMaster>();
+  for (const b of baris) byKey.set(`${b.platformProductId} ${b.platformVariationId}`, b);
+  return [...byKey.values()];
+}
+
+/**
+ * Ekstrak master SKU dari `shopee_parent_sku` (Rule 18: sumber kanonik Shopee
+ * — `parentskudetail.xlsx`, `Kode Produk`/`Kode Variasi`/`SKU Induk`, ketiga
+ * satu-satunya kolom identitas modul ini di `kolomDipanen`,
+ * `PDT_KOLOM_DIPANEN.md` §2.2). **`nama_produk`/`kategori_platform`/
+ * `harga_satuan_terakhir` SENGAJA selalu `null` di sini** — modul ini tidak
+ * membawa satu pun dari ketiganya di whitelist (bukan lupa dipetakan; ketiga
+ * nama kolom itu genuinely tidak ada di `kolomDipanen` modul ini). Baris
+ * ber-`Kode Produk` kosong dilewati.
+ */
+export function ekstrakBarisSkuMasterShopeeParentSku(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisSkuMaster[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iKodeProduk = idx('Kode Produk');
+  const iKodeVariasi = idx('Kode Variasi');
+  const iSkuInduk = idx('SKU Induk');
+
+  const hasil: PdtBarisSkuMaster[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const platformProductId = iKodeProduk === -1 ? '' : String(row?.[iKodeProduk] ?? '').trim();
+    if (platformProductId === '') continue;
+    hasil.push({
+      platformProductId,
+      platformVariationId: iKodeVariasi === -1 ? '' : String(row?.[iKodeVariasi] ?? '').trim(),
+      sellerSku: iSkuInduk === -1 ? null : (String(row?.[iSkuInduk] ?? '').trim() || null),
+      namaProduk: null,
+      namaVariasi: null,
+      kategoriPlatform: null,
+      hargaSatuanTerakhir: null,
+    });
+  }
+  return dedupSkuMaster(hasil);
+}
+
+/**
+ * Ekstrak master SKU dari `tt_orders` (`Semua Pesanan`, Rule 18 separuh
+ * TikTok). **Deviasi sadar dari Rule 18 harfiah** (dicatat
+ * `docs/DECISIONS.md`): PRD minta `tt_orders` DIGABUNG
+ * `tt_transaction_product` (`Transaction_Analysis_Product_List`, `Product
+ * ID`/`Product category`) — tapi TIDAK ADA kolom kunci gabung yang
+ * terverifikasi antara keduanya (`tt_orders` punya `SKU ID`, level VARIAN;
+ * `tt_transaction_product` punya `Product ID`, diduga level PRODUK INDUK —
+ * dua grain berbeda, nol kolom penghubung di `kolomDipanen` manapun).
+ * Mengarang join tanpa kunci sungguhan berisiko salah-gabung SKU yang
+ * berbeda. **`tt_orders` kolomDipanen sendiri sudah membawa `Product
+ * Category`** (`modules.ts`) — jadi `kategori_platform` TETAP terisi tanpa
+ * berkas kedua, dan seluruh field skema lain (`seller_sku`/`nama_produk`/
+ * `nama_variasi`/`harga_satuan_terakhir`) juga tercakup oleh SATU berkas ini
+ * saja. `platform_variation_id` diisi `''` (bukan `SKU ID` dipakai dua kali)
+ * — `SKU ID` sendiri sudah level-varian (satu-satunya id yang tersedia),
+ * jadi ia jadi `platformProductId`; TikTok tidak mengekspos id level-produk-
+ * induk terpisah di whitelist modul ini. Baris ber-`SKU ID` kosong dilewati.
+ * Angka (`SKU Unit Original Price`): `parsePdtAngka(v)` TANPA `raw` —
+ * konvensi Seller Center, sama seperti `tt_orders` adalah ekspor Seller
+ * Center (bukan Ads Manager).
+ */
+export function ekstrakBarisSkuMasterTtOrders(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisSkuMaster[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iSkuId = idx('SKU ID');
+  const iSellerSku = idx('Seller SKU');
+  const iProductName = idx('Product Name');
+  const iVariation = idx('Variation');
+  const iProductCategory = idx('Product Category');
+  const iHarga = idx('SKU Unit Original Price');
+
+  const hasil: PdtBarisSkuMaster[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const platformProductId = iSkuId === -1 ? '' : String(row?.[iSkuId] ?? '').trim();
+    if (platformProductId === '') continue;
+    hasil.push({
+      platformProductId,
+      platformVariationId: '',
+      sellerSku: iSellerSku === -1 ? null : (String(row?.[iSellerSku] ?? '').trim() || null),
+      namaProduk: iProductName === -1 ? null : (String(row?.[iProductName] ?? '').trim() || null),
+      namaVariasi: iVariation === -1 ? null : (String(row?.[iVariation] ?? '').trim() || null),
+      kategoriPlatform: iProductCategory === -1 ? null : (String(row?.[iProductCategory] ?? '').trim() || null),
+      hargaSatuanTerakhir: iHarga === -1 ? null : parsePdtAngka(row?.[iHarga]),
+    });
+  }
+  return dedupSkuMaster(hasil);
 }
