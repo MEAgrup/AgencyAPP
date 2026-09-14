@@ -57,3 +57,24 @@ export interface PdtUploadUrl {
   storage_path: string;
   upload_url: string;
 }
+
+// G1-09 sub-langkah 2a — commit (POST /account/pdt/batches). Beda dari
+// pratinjau: baris pdt_upload_batch/pdt_file sungguhan sudah tertulis saat
+// respons ini dibentuk. Rekonsiliasi/baris fakta menyusul sub-langkah 2b —
+// `status` di sini tidak pernah 'verified'. Belum ada halaman yang
+// memanggilnya — sama seperti PdtPreviewBatch, kontrak datanya lebih dulu.
+export interface PdtCommitBerkas extends PdtPreviewBerkas {
+  deteksi_oleh: string; // 'tanda_tangan' | 'override_am'
+}
+
+export interface PdtCommitBatch {
+  batch_id: number;
+  client_platform_id: number;
+  platform: string;
+  status: string; // 'parsing' | 'identitas_belum_terikat' | 'ditolak'
+  alasan_ditolak: string | null;
+  periode_mulai: string;
+  periode_selesai: string;
+  berkas: PdtCommitBerkas[];
+  identitas: PdtPreviewIdentitas;
+}

@@ -337,6 +337,24 @@ punya `null` eksplisit.
 > sudah ada berjalan TIDAK BERUBAH. Ini menutup risiko 413 produksi untuk pratinjau, BUKAN cuma
 > untuk commit seperti dugaan Open row semula. Sub-langkah 2 (commit) sekarang tinggal
 > memindahkan objek staging ke path final Rule 44 (bukan mengunggah ulang dari nol).
+>
+> **Status 2026-09-14 (sub-langkah 2a SELESAI, lihat `docs/DECISIONS.md` baris teratas)** —
+> `POST /account/pdt/batches` (`pdt.commitUploadBatch` + `pdt.markRawStored` +
+> `apps/api/.../pdt/batches/route.ts`) menutup bullet 1 (satu ZIP → batch sungguhan) dan
+> separuh bullet 3-5: dropdown override AM DITEGAKKAN (`overrides`, `deteksi_oleh` DB
+> mencatat `tanda_tangan` vs `override_am`), status batch ditulis dari identitas (Rule 2-4:
+> `tolak`→`ditolak`, `usulkan_ikat`→`identitas_belum_terikat`, `cocok`/`tidak_dapat_divalidasi`→
+> `parsing`), error path bullet 5 (gagal identitas/periode TETAP tersimpan sebagai batch
+> `ditolak`, kecuali periode sendiri yang gagal — lihat catatan skema di `docs/DECISIONS.md`).
+> **Bukan** "pindah objek staging" seperti dugaan status sebelumnya — byte yang sudah di
+> tangan (dari unduh ulang untuk parse) diunggah LANGSUNG ke path final via
+> `unggahPdtRawObjek` (POST + upsert), objek staging lama dibiarkan jadi yatim (Rule 49).
+> **Belum dibangun (sengaja, sub-langkah 2b):** rekonsiliasi (Rule 13-16, PDT-16 — `status`
+> tidak pernah `verified` hari ini), penulisan baris fakta tertipe (`pdt_fact_*`, peta
+> kolomDipanen→tabel BELUM ada), UI status paket bullet 4 (batch sudah ada untuk dibaca
+> statusnya, tapi halaman `web-internal` masih sub-langkah 3), dan endpoint konfirmasi AM
+> untuk `usulkan_ikat` (menulis `client_platforms.shop_id`/`akun_konten_toko` — Rule 2/4
+> eksplisit minta AM "mengonfirmasi sekali", BUKAN otomatis saat commit).
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

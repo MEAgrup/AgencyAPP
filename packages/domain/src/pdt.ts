@@ -12,8 +12,8 @@
  * lain — konsisten dengan ketokan PX-M2a (`docs/DECISIONS.md` 2026-09-12).
  */
 import { randomUUID } from 'node:crypto';
-import { pdt, permission } from '@cdps/core';
-import type { Sql } from '@cdps/db';
+import { pdt, permission, tz } from '@cdps/core';
+import { executors, withTransaction, type Sql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
 
 /**
@@ -241,20 +241,27 @@ function bangunSatuPreviewBerkas(input: PdtPreviewBerkasInput): { hasil: PdtPrev
   };
 }
 
-/** Rule 2/4 — identitas dari berkas 'ok' pertama yang membawa sinyalnya (bukan diketik AM). */
-function resolveIdentitasPreview(
+/**
+ * Rule 2/4 — identitas dari berkas 'ok' pertama yang membawa sinyalnya (bukan
+ * diketik AM). `sumber` (bentuk `pdt_upload_batch.identitas_sumber`, dipakai
+ * HANYA oleh `commitUploadBatch`) terisi untuk verdict `cocok`/`usulkan_ikat`
+ * — bukti apa yang divalidasi/diusulkan; `null` untuk `tolak`/
+ * `tidak_dapat_divalidasi` (nol identitas yang tervalidasi untuk disimpan).
+ */
+function resolveIdentitasDanSumber(
   platform: pdt.PdtPlatform,
   terparse: readonly BerkasTerparse[],
   shopId: string | null,
   akunKontenToko: readonly string[] | null,
-): PdtPreviewIdentitas {
+): { verdict: PdtPreviewIdentitas; sumber: Record<string, unknown> | null } {
   if (platform === 'shopee') {
     const berkas = terparse.find((b) => MODUL_PREAMBLE_SHOPEE.includes(b.modul.kode));
     if (!berkas) {
-      return { status: 'tidak_dapat_divalidasi', pesan: '[tidak ada berkas Shopee Ads (CPC/Search/Live) yang terparse untuk validasi identitas toko]' };
+      return { verdict: { status: 'tidak_dapat_divalidasi', pesan: '[tidak ada berkas Shopee Ads (CPC/Search/Live) yang terparse untuk validasi identitas toko]' }, sumber: null };
     }
     const preamble = pdt.ekstrakPreambleShopee(berkas.aoa, berkas.barisHeader);
-    return pdt.validasiIdentitasShopee(preamble, shopId);
+    const verdict = pdt.validasiIdentitasShopee(preamble, shopId);
+    return { verdict, sumber: verdict.status === 'tolak' ? null : pdt.bangunIdentitasSumberShopee(preamble) };
   }
   // tiktok — cari berkas 'ok' PERTAMA yang modulnya benar-benar membawa kolom 'ID Kreator' (Rule 3),
   // bukan dua kode modul hardcode — supaya penambahan modul TikTok baru yang juga membawa kolom ini
@@ -262,9 +269,22 @@ function resolveIdentitasPreview(
   for (const berkas of terparse) {
     if (!berkas.modul.kolomDipanen.some((k) => k.toLowerCase() === KOLOM_ID_KREATOR.toLowerCase())) continue;
     const terbanyak = pdt.kolomTerbanyak(berkas.aoa, berkas.barisHeader, KOLOM_ID_KREATOR);
-    if (terbanyak) return pdt.validasiIdentitasTiktok(terbanyak.nilai, akunKontenToko);
+    if (terbanyak) {
+      const verdict = pdt.validasiIdentitasTiktok(terbanyak.nilai, akunKontenToko);
+      return { verdict, sumber: verdict.status === 'tolak' ? null : { id_kreator: terbanyak.nilai } };
+    }
   }
-  return { status: 'tidak_dapat_divalidasi', pesan: "[tidak ada berkas TikTok yang membawa kolom 'ID Kreator' terparse untuk validasi identitas toko]" };
+  return { verdict: { status: 'tidak_dapat_divalidasi', pesan: "[tidak ada berkas TikTok yang membawa kolom 'ID Kreator' terparse untuk validasi identitas toko]" }, sumber: null };
+}
+
+/** Wrapper preview — hanya verdict, `pdt_upload_batch` belum ada untuk ditulisi `identitas_sumber` di sub-langkah ini. */
+function resolveIdentitasPreview(
+  platform: pdt.PdtPlatform,
+  terparse: readonly BerkasTerparse[],
+  shopId: string | null,
+  akunKontenToko: readonly string[] | null,
+): PdtPreviewIdentitas {
+  return resolveIdentitasDanSumber(platform, terparse, shopId, akunKontenToko).verdict;
 }
 
 /** Rule 5 — periode batch dari SELURUH berkas 'ok' (berkas yang modulnya tidak membawa tanggal terbaca ikut disertakan dengan `periode: null`, supaya efek "mewarisi" ayat 2 berlaku). */
@@ -391,4 +411,245 @@ export async function siapkanUploadBatch(
 
   const stagingPath = `_staging/${row.client_id}/${clientPlatformId}/${randomUUID()}.zip`;
   return { clientPlatformId, stagingPath };
+}
+
+// ===========================================================================
+// G1-09 sub-langkah 2a — commit (Flow A langkah 6 sisi batch/berkas + langkah
+// 9 error path; langkah 7-8 — rekonsiliasi PDT-16 + baris fakta + skor/usulan
+// — SENGAJA BUKAN di sini, lihat handoff sesi ini untuk pembagian 2a/2b).
+//
+// **Keputusan: PIPELINE DIJALANKAN ULANG dari `storage_path` yang sama**
+// (bukan menerima cache hasil `previewUploadBatch` dari klien) — pemanggil
+// (route) mengunduh+mengekstrak+memparse ulang ZIP staging yang sama persis
+// yang dipakai `/preview`, lalu memanggil fungsi di bawah dengan hasilnya.
+// Alasan: (1) konsisten dengan seluruh pipeline G1-02..08 yang selalu
+// menghitung ulang dari sumber, tidak pernah mempercayai angka yang
+// dikirim balik klien (aturan rumah #4); (2) preview bisa dilakukan berkali-
+// kali/beda sesi sebelum AM menekan submit final — cache di server/klien
+// untuk itu adalah state tambahan yang tidak ada hari ini; (3) biaya parse
+// ulang nol-berarti pada ukuran paket Rule 42 (≤50 MB, ≤40 entri, XLSX/CSV
+// kecil). Didokumentasikan `docs/DECISIONS.md` 2026-09-14.
+// ===========================================================================
+
+/** AM menimpa deteksi satu berkas dari dropdown (PRD Flow A langkah 4, `moduleOptions` pratinjau). */
+export interface PdtCommitOverride {
+  nama: string;
+  modulKode: string;
+}
+
+/**
+ * Metadata paket ZIP yang SUDAH diketahui pemanggil (route) sebelum memanggil
+ * fungsi ini — `packages/domain` tidak boleh membuka zip/Storage sendiri
+ * (arah dependensi, lihat catatan G1-09 di kepala berkas). `entri` = entri
+ * 'diproses' + 'ditolak' pagar (Rule 41) — seluruh entri NYATA dalam paket,
+ * DI LUAR junk macOS (`entriDilewati`, dilewati tanpa peringatan) yang punya
+ * kolomnya sendiri di `pdt_upload_batch.raw_entri_dilewati`.
+ */
+export interface PdtCommitRawMeta {
+  sha256: string;
+  bytes: number;
+  entri: number;
+  entriDilewati: number;
+}
+
+/**
+ * Status `pdt_upload_batch` yang BOLEH ditulis sub-langkah ini. `'verified'`
+ * SENGAJA tidak ada di sini — itu hanya lahir dari rekonsiliasi (Rule 13-14,
+ * sub-langkah 2b), yang belum berjalan; batch yang identitasnya cocok/tidak
+ * bisa divalidasi (advisory, bukan pagar blokir — sama seperti pratinjau)
+ * berhenti di `'parsing'` menunggu 2b, BUKAN otomatis `'verified'`.
+ */
+export type PdtCommitStatus = 'parsing' | 'identitas_belum_terikat' | 'ditolak';
+
+export interface PdtCommitBerkasHasil extends PdtPreviewBerkasHasil {
+  /** `pdt_file.deteksi_oleh` — METODE yang dipakai (signature vs override AM), terisi apa pun hasilnya (termasuk yang berakhir `modulKode: null`). */
+  deteksiOleh: 'tanda_tangan' | 'override_am';
+}
+
+export interface PdtCommitPersiapan {
+  batchId: number;
+  clientPlatformId: number;
+  platform: pdt.PdtPlatform;
+  status: PdtCommitStatus;
+  alasanDitolak: string | null;
+  periodeMulai: string;
+  periodeSelesai: string;
+  berkas: readonly PdtCommitBerkasHasil[];
+  identitas: PdtPreviewIdentitas;
+  /**
+   * Path final Rule 44 (`{client_id}/{client_platform_id}/{periode_selesai}/{batch_id}.zip`).
+   * Domain TIDAK mengunggah byte ke sini (tidak boleh menyentuh Storage) —
+   * pemanggil (route) yang mengunggahnya (`unggahPdtRawObjek`, byte yang
+   * sama sudah ada di memori dari mengunduh path staging), lalu memanggil
+   * `markRawStored` dengan path yang SAMA ini.
+   */
+  rawPath: string;
+}
+
+/**
+ * commitUploadBatch — Flow A langkah 6 (sisi batch/berkas) + langkah 9 (error
+ * path identitas/periode). Menulis `pdt_upload_batch` + `pdt_file` dalam SATU
+ * transaksi + satu baris `audit_log` (aturan rumah #3) — `pdt_upload_batch`
+ * TIDAK memakai `sm_transition` (dicatat migrasi G1-01: "status ditulis
+ * LANGSUNG oleh domain, preseden M19 dailyops"), jadi audit ditulis manual
+ * di sini, bukan oleh mesin transisi.
+ *
+ * **Batas periode (Rule 5):** bila nol berkas berhasil diproses ATAU
+ * berkas-berkas yang ada berasal dari bulan kalender berbeda, TIDAK ADA
+ * baris `pdt_upload_batch` yang bisa ditulis sama sekali —
+ * `periode_mulai`/`periode_selesai` NOT NULL di skema dan kedua kasus ini
+ * tidak punya nilai yang sah untuk keduanya. Pemanggil menerima
+ * `ValidationError` (400); paket ZIP yang sudah di-staging tetap ada di
+ * bucket sebagai objek yatim yang dipurge otomatis Rule 49 (>7 hari) — AM
+ * mengunggah ulang paket yang benar, bukan me-retry commit yang sama.
+ *
+ * **Identitas (Rule 2-4) TIDAK memblokir seperti periode** — `tolak` masih
+ * menghasilkan baris batch (`status='ditolak'`, Flow A langkah 9: "tetap
+ * tersimpan agar dapat didiagnosis TANPA UPLOAD ULANG"), karena periode
+ * sudah diketahui sah di titik itu.
+ */
+export async function commitUploadBatch(
+  sql: Sql,
+  actor: Actor,
+  clientPlatformId: number,
+  berkasInput: readonly PdtPreviewBerkasInput[],
+  overrides: readonly PdtCommitOverride[],
+  now: Date = new Date(),
+): Promise<PdtCommitPersiapan> {
+  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
+  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+
+  const platform = platformKeVokabPdt(row.platform);
+  if (!platform) {
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+  }
+
+  const modulValidUntukPlatform = new Set(pdt.PDT_MODULES.filter((m) => m.platform === platform).map((m) => m.kode));
+  const overrideByNama = new Map<string, string>();
+  for (const o of overrides) {
+    if (!modulValidUntukPlatform.has(o.modulKode)) {
+      throw new ValidationError(`[modul '${o.modulKode}' bukan modul platform toko ini, pilih dari daftar modul yang tersedia]`);
+    }
+    overrideByNama.set(o.nama, o.modulKode);
+  }
+
+  const hasilBerkas: PdtCommitBerkasHasil[] = [];
+  const terparse: BerkasTerparse[] = [];
+  for (const b of berkasInput) {
+    const overrideKode = overrideByNama.get(b.nama);
+    // Override hanya berlaku untuk berkas yang benar-benar terekstrak (b.aoa != null) — berkas
+    // ditolakPagar/decodeGagal tidak punya sheet untuk diparse ulang dengan modul apa pun.
+    const berlakuOverride = overrideKode != null && b.aoa != null;
+    const efektif: PdtPreviewBerkasInput = berlakuOverride ? { ...b, modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] } : b;
+    const { hasil, terparse: t } = bangunSatuPreviewBerkas(efektif);
+    hasilBerkas.push({ ...hasil, deteksiOleh: berlakuOverride ? 'override_am' : 'tanda_tangan' });
+    if (t) terparse.push(t);
+  }
+
+  const { verdict: identitas, sumber: identitasSumber } = resolveIdentitasDanSumber(platform, terparse, row.shop_id, row.akun_konten_toko);
+  const periode = resolvePeriodePreview(platform, terparse);
+
+  if (periode == null) {
+    throw new ValidationError('[tidak ada satu pun berkas dalam paket yang berhasil diproses — periksa kembali paket ZIP sebelum mengunggah ulang]');
+  }
+  if (periode.status === 'tolak') {
+    throw new ValidationError(periode.pesan);
+  }
+
+  let status: PdtCommitStatus = 'parsing';
+  let alasanDitolak: string | null = null;
+  if (identitas.status === 'tolak') {
+    status = 'ditolak';
+    alasanDitolak = identitas.pesan;
+  } else if (identitas.status === 'usulkan_ikat') {
+    status = 'identitas_belum_terikat';
+  }
+  // identitas.status 'cocok'/'tidak_dapat_divalidasi' — status tetap 'parsing' (advisory,
+  // konsisten previewUploadBatch: 'tidak_dapat_divalidasi' bukan pagar blokir).
+
+  const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b), tidak pernah diperpendek
+  const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
+  const retensiAlasan = status === 'ditolak' ? 'ditolak' : 'default';
+
+  const batchId = await withTransaction(sql, async (tx) => {
+    const rows = await tx<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
+         alasan_ditolak, parser_versi, identitas_sumber, retensi_sampai, retensi_alasan, dibuat_oleh)
+      values
+        (${row.client_id}, ${clientPlatformId}, ${platform}, ${periode.mulai}::date, ${periode.selesai}::date,
+         ${status}, ${alasanDitolak}, ${pdt.PDT_PARSER_VERSI}, ${tx.json(identitasSumber as never)}, ${retensiSampai}::date,
+         ${retensiAlasan}, ${actor.employeeId})
+      returning id`;
+    const id = rows[0].id;
+
+    for (const b of hasilBerkas) {
+      // ditolakPagar/gagalEkstrak — nol bytes sungguhan dibaca (sha256/bytes null di sumbernya),
+      // TIDAK dipersist sebagai pdt_file (sha256/bytes NOT NULL di skema, dan genuinely tidak
+      // diketahui) — tetap terlihat di respons commit ini untuk request yang sama, didiagnosis
+      // dari pesan sha256=null/bytes=null di sana; docs/DECISIONS.md 2026-09-14.
+      if (b.sha256 == null || b.bytes == null) continue;
+      // 'sebagian' TIDAK PERNAH diproduksi hari ini — turunkanParseStatus (G1-08) hanya
+      // mengembalikan 'ok'/'gagal' (pemicu 'sebagian' belum didefinisikan, G1-08-SEBAGIAN,
+      // docs/DECISIONS.md, masih terbuka). Peta di sini APA ADANYA sampai itu terjawab.
+      const parseStatusDb = b.status === 'ok' ? 'ok' : 'gagal';
+      await tx`
+        insert into pdt_file
+          (batch_id, modul_kode, nama_entri, sha256, bytes, baris_header, deteksi_oleh,
+           kolom_dipanen, kolom_baru, parse_status, parse_error)
+        values
+          (${id}, ${b.modulKode}, ${b.nama}, ${b.sha256}, ${b.bytes}, ${b.barisHeader ?? 0}, ${b.deteksiOleh},
+           ${b.kolomDipanen}, ${[...b.kolomBaru]}, ${parseStatusDb}, ${parseStatusDb === 'ok' ? null : b.pesan})`;
+    }
+
+    await executors(tx).audit.insertAudit({
+      entityType: 'pdt_upload_batch',
+      entityId: String(id),
+      actorEmployeeId: actor.employeeId,
+      action: 'pdt_batch_committed',
+      beforeJson: null,
+      afterJson: {
+        status, platform, periode_mulai: periode.mulai, periode_selesai: periode.selesai,
+        jumlah_berkas: hasilBerkas.length, identitas_status: identitas.status,
+      },
+      createdBy: actor.employeeId,
+    });
+
+    return id;
+  });
+
+  return {
+    batchId,
+    clientPlatformId,
+    platform,
+    status,
+    alasanDitolak,
+    periodeMulai: periode.mulai,
+    periodeSelesai: periode.selesai,
+    berkas: hasilBerkas,
+    identitas,
+    rawPath: `${row.client_id}/${clientPlatformId}/${periode.selesai}/${batchId}.zip`,
+  };
+}
+
+/**
+ * markRawStored — dipanggil route commit SEGERA setelah `commitUploadBatch`
+ * berhasil DAN byte paket ZIP sudah diunggah ke `rawPath` (`unggahPdtRawObjek`,
+ * `apps/api/src/lib/pdt-storage.ts`). Tidak mengulang gerbang izin — batch
+ * `batchId` baru saja lahir dari `commitUploadBatch` yang SUDAH menegakkannya
+ * dalam request yang sama; ini bukan endpoint publik terpisah.
+ *
+ * `raw_path` NULL sampai fungsi ini berhasil (komentar migrasi G1-01: "NULL
+ * hanya sebelum upload selesai") — bila panggilan Storage gagal SETELAH
+ * `commitUploadBatch` sukses, baris batch tetap ada (didiagnosis lewat
+ * `pdt_file` yang sudah tertulis) tapi `raw_path` tertunda; belum ada jalur
+ * retry otomatis untuk kasus ini (dicatat sebagai keterbatasan, bukan
+ * kegagalan senyap — pemanggil menerima error dari langkah unggah Storage).
+ */
+export async function markRawStored(sql: Sql, batchId: number, rawPath: string, raw: PdtCommitRawMeta): Promise<void> {
+  await sql`
+    update pdt_upload_batch
+       set raw_path = ${rawPath}, raw_sha256 = ${raw.sha256}, raw_bytes = ${raw.bytes},
+           raw_entri = ${raw.entri}, raw_entri_dilewati = ${raw.entriDilewati}
+     where id = ${batchId}`;
 }

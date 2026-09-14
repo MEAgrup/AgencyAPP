@@ -9,9 +9,14 @@
  * menyambungkan `@cdps/core` `pdt` ke baris `client_platforms`/`clients`
  * sungguhan. Baris di-namespace `ZPDT-`.
  */
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { permission } from '@cdps/core';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
+
+/** `date` datang dari driver sebagai string ATAU Date tergantung konfigurasi — pola sama `dailyops.ts` `ymd()`. */
+function ymd(v: string | Date): string {
+  return typeof v === 'string' ? v.slice(0, 10) : tz.dateString(v);
+}
 import {
   ForbiddenError,
   NotFoundError,
@@ -19,9 +24,12 @@ import {
   canKelolaBenchmark,
   canKirimLaporan,
   canUploadBatch,
+  commitUploadBatch,
+  markRawStored,
   platformKeVokabPdt,
   previewUploadBatch,
   siapkanUploadBatch,
+  type PdtCommitOverride,
   type PdtPreviewBerkasInput,
 } from './pdt';
 
@@ -139,11 +147,19 @@ async function insertClientPlatform(
 }
 
 afterAll(async () => {
-  if (sql) await sql.end();
+  if (!sql) return;
+  await sql`delete from employees where employee_id = ${OWNER_AM}`;
+  await sql.end();
 });
 
 afterEach(async () => {
   if (!sql) return;
+  // pdt_upload_batch/pdt_file (commitUploadBatch, FK ke clients/client_platforms) dulu —
+  // urutan penghapusan mengikuti arah FK, sama seperti test lain di repo ini. audit_log
+  // SENGAJA tidak dibersihkan — append-only (trigger menolak DELETE juga, bukan cuma UPDATE),
+  // baris uji menumpuk seperti test suite lain yang menembus sm_transition/insertAudit.
+  await sql`delete from pdt_file where batch_id in (select id from pdt_upload_batch where client_id like 'CLI-ZPDT-%')`;
+  await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
 });
@@ -152,6 +168,17 @@ const OWNER_AM = 'ZPDT-AM-DB';
 const ownerActor = () => ({ employeeId: OWNER_AM, role: permission.makeRole({ division: 'Account', level: 'staff' }) });
 const otherAm = () => ({ employeeId: 'ZPDT-AM-LAIN', role: permission.makeRole({ division: 'Account', level: 'staff' }) });
 const leadActor = () => ({ employeeId: 'ZPDT-SPV-DB', role: permission.makeRole({ division: 'Account', level: 'lead' }) });
+
+// commitUploadBatch menulis pdt_upload_batch.dibuat_oleh (FK employees) — OWNER_AM harus jadi
+// baris employees sungguhan (pola sama auth.test.ts insertEmployee), beda dari clients/
+// client_platforms.created_by yang tidak ber-FK ke employees.
+beforeAll(async () => {
+  if (!sql) return;
+  await sql`
+    insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+    values (${OWNER_AM}, 'AM Uji PDT', 'zpdt-am-db@mea.co.id', 'Account', 'Account Manager', true, 'SYSTEM')
+    on conflict (employee_id) do nothing`;
+});
 
 const decodeGagalBerkas = (nama: string, pesan: string): PdtPreviewBerkasInput => ({
   nama, sha256: null, bytes: null, ditolakPagar: null, decodeGagal: pesan, aoa: null, modulTerdeteksi: null, ambiguous: false, matches: [],
@@ -189,6 +216,22 @@ function ttVideoBerkas(nama: string, idKreator: string): PdtPreviewBerkasInput {
     header,
     [idKreator, 'V1', '01/07/2026', 'Produk A', '100', '10', '2', '5', 'Kreator A', 'info', '1000', '50000'],
     [idKreator, 'V2', '02/07/2026', 'Produk B', '200', '20', '4', '10', 'Kreator A', 'info', '2000', '80000'],
+  ];
+  return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
+}
+
+/**
+ * Sama seperti `ttVideoBerkas`, + kolom 'Rentang Tanggal' (Rule 5,
+ * `KANDIDAT_KOLOM_PERIODE_TIKTOK`) — `tt_video` sendiri tidak membawa
+ * kolom periode (`ttVideoBerkas` polos cukup untuk tes identitas/status
+ * berkas yang tidak menyentuh commit, yang MEWAJIBKAN periode batch sah).
+ */
+function ttVideoBerkasDenganPeriode(nama: string, idKreator: string, rentang: string): PdtPreviewBerkasInput {
+  const header = ['ID Kreator', 'ID Video', 'Waktu', 'Rentang Tanggal', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Nama Kreator', 'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'];
+  const aoa: unknown[][] = [
+    [], [],
+    header,
+    [idKreator, 'V1', '01/07/2026', rentang, 'Produk A', '100', '10', '2', '5', 'Kreator A', 'info', '1000', '50000'],
   ];
   return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
 }
@@ -411,5 +454,278 @@ describeDb('previewUploadBatch (G1-09) — identitas (Rule 2-4) + periode (Rule 
     const cpId = await insertClientPlatform(clientId, 'Shopee');
     const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [decodeGagalBerkas('x.xlsx', 'rusak')]);
     expect(hasil.periode).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2a) — Flow A langkah 6 (batch/berkas)
+// + langkah 9 (error path). Beda dari previewUploadBatch: baris
+// pdt_upload_batch/pdt_file SUNGGUHAN ditulis di sini — setiap test yang
+// menegaskan isi baris query langsung ke DB, bukan cuma nilai balik fungsi.
+// ---------------------------------------------------------------------------
+interface BatchRow {
+  id: number;
+  status: string;
+  alasan_ditolak: string | null;
+  periode_mulai: string | Date;
+  periode_selesai: string | Date;
+  parser_versi: number;
+  identitas_sumber: unknown;
+  retensi_sampai: string | Date;
+  retensi_alasan: string | null;
+  raw_path: string | null;
+  raw_sha256: string | null;
+  raw_bytes: string | null;
+  raw_entri: number | null;
+  raw_entri_dilewati: number | null;
+}
+
+async function loadBatch(id: number): Promise<BatchRow> {
+  const rows = await sql<BatchRow[]>`select * from pdt_upload_batch where id = ${id}`;
+  return rows[0];
+}
+
+interface FileRow {
+  modul_kode: string | null;
+  nama_entri: string;
+  sha256: string;
+  bytes: string; // bigint — datang sebagai string dari driver
+  baris_header: number;
+  deteksi_oleh: string;
+  kolom_dipanen: number;
+  kolom_baru: string[];
+  parse_status: string;
+  parse_error: string | null;
+}
+
+async function loadFiles(batchId: number): Promise<FileRow[]> {
+  return sql<FileRow[]>`select * from pdt_file where batch_id = ${batchId} order by nama_entri`;
+}
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — gerbang izin + platform', () => {
+  it('404 pada client_platform_id yang tidak ada', async () => {
+    await expect(commitUploadBatch(sql, ownerActor(), 999999999, [], [])).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('403 untuk AM yang bukan pemilik klien (dan bukan lead/Director)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    await expect(commitUploadBatch(sql, otherAm(), cpId, [], [])).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('platform Tokopedia/Lazada/Blibli ⇒ ValidationError (PDT-22, manual saja)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Tokopedia');
+    await expect(commitUploadBatch(sql, ownerActor(), cpId, [], [])).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('override modul di luar platform toko ini ⇒ ValidationError', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const overrides: PdtCommitOverride[] = [{ nama: 'a.xlsx', modulKode: 'tt_video' }];
+    await expect(commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '111', '01/07/2026 - 31/07/2026')], overrides))
+      .rejects.toBeInstanceOf(ValidationError);
+  });
+});
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — batas periode (Rule 5): nol baris bila periode tidak sah', () => {
+  it('nol berkas ber-status ok ⇒ ValidationError, NOL baris pdt_upload_batch ditulis', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    await expect(commitUploadBatch(sql, ownerActor(), cpId, [decodeGagalBerkas('x.xlsx', 'rusak')], []))
+      .rejects.toBeInstanceOf(ValidationError);
+    const rows = await sql`select id from pdt_upload_batch where client_id = ${clientId}`;
+    expect(rows.length).toBe(0);
+  });
+
+  it('berkas dari bulan kalender berbeda ⇒ ValidationError, NOL baris pdt_upload_batch ditulis', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const juli = shopeeAdsCpcBerkas('juli.xlsx', '111', '01/07/2026 - 31/07/2026');
+    const agustus = shopeeAdsCpcBerkas('agustus.xlsx', '111', '01/08/2026 - 31/08/2026');
+    await expect(commitUploadBatch(sql, ownerActor(), cpId, [juli, agustus], [])).rejects.toBeInstanceOf(ValidationError);
+    const rows = await sql`select id from pdt_upload_batch where client_id = ${clientId}`;
+    expect(rows.length).toBe(0);
+  });
+});
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — status batch dari identitas (Rule 2-4)', () => {
+  it("identitas 'tolak' (ID Toko ≠ shop_id tersimpan) ⇒ status ditolak, alasan_ditolak terisi, TETAP tersimpan (Flow A langkah 9)", async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', 'SHOP-LAMA');
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(persiapan.alasanDitolak).toContain('938284780');
+    const row = await loadBatch(persiapan.batchId);
+    expect(row.status).toBe('ditolak');
+    expect(row.alasan_ditolak).toBe(persiapan.alasanDitolak);
+    expect(row.retensi_alasan).toBe('ditolak');
+  });
+
+  it("identitas 'usulkan_ikat' (shop_id belum terikat) ⇒ status identitas_belum_terikat, identitas_sumber terisi, client_platforms.shop_id TIDAK berubah (AM belum konfirmasi)", async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', null);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], []);
+    expect(persiapan.status).toBe('identitas_belum_terikat');
+    const row = await loadBatch(persiapan.batchId);
+    expect(row.status).toBe('identitas_belum_terikat');
+    expect(row.identitas_sumber).toEqual({ shop_id: '938284780', username: 'tokoku', nama_toko: 'Toko Saya' });
+    const cp = await sql`select shop_id from client_platforms where id = ${cpId}`;
+    expect(cp[0].shop_id).toBeNull();
+  });
+
+  it("identitas 'cocok' ⇒ status parsing (menunggu 2b — TIDAK otomatis verified)", async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, ['kreator-a']);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [ttVideoBerkasDenganPeriode('v.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026')], []);
+    expect(persiapan.status).toBe('parsing');
+    const row = await loadBatch(persiapan.batchId);
+    expect(row.status).toBe('parsing');
+    expect(row.retensi_alasan).toBe('default');
+  });
+
+  it("identitas 'tidak_dapat_divalidasi' (nol sinyal identitas di batch, TAPI periode tetap terbaca dari kolom lain) ⇒ status parsing juga (advisory, bukan pagar blokir)", async () => {
+    // shopee_shop_stats/shopee_parent_sku dkk TIDAK PERNAH membawa periode sendiri (Rule 5 ayat
+    // 2 — mewarisi dari berkas lain), jadi Shopee tanpa satu pun berkas Ads 'ok' TIDAK BISA
+    // punya periode valid (lihat ekstrakPreambleShopee/MODUL_PREAMBLE_SHOPEE) — kombinasi
+    // "tidak_dapat_divalidasi + periode valid" hanya mungkin di TikTok, yang membaca periode
+    // dari SETIAP berkas 'ok' (ekstrakPeriodeKolomTiktok), independen dari 'ID Kreator'.
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const header = [
+      'GMV', 'Pesanan', 'Pembeli', 'Pesanan SKU', 'Pengunjung', 'Persentase konversi', 'Pendapatan bruto',
+      'Pengembalian dana', 'GMV dari LIVE kreator', 'GMV dari LIVE akun tertaut', 'GMV dari video afiliasi',
+      'GMV dari video akun tertaut', 'Tanggal analisis',
+    ];
+    const dataRow = ['1000000', '10', '8', '12', '500', '2', '1000000', '0', '200000', '100000', '50000', '50000', '01/07/2026 - 31/07/2026'];
+    const berkas: PdtPreviewBerkasInput = {
+      nama: 'shop-analytics.xlsx', sha256: 's-sa', bytes: 20, ditolakPagar: null, decodeGagal: null,
+      aoa: [header, dataRow], modulTerdeteksi: 'tt_shop_analytics', ambiguous: false, matches: ['tt_shop_analytics'],
+    };
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    expect(persiapan.identitas.status).toBe('tidak_dapat_divalidasi');
+    expect(persiapan.status).toBe('parsing');
+    expect(persiapan.periodeMulai).toBe('2026-07-01');
+    expect(persiapan.periodeSelesai).toBe('2026-07-31');
+  });
+});
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — retensi (Rule 45)', () => {
+  it('status ditolak ⇒ retensi_sampai = +30 hari; status lain ⇒ +120 hari (dari `now` yang disuntik)', async () => {
+    const now = new Date('2026-07-15T03:00:00Z');
+
+    // Dua client TERPISAH — uq_client_platforms_active_platform mengizinkan hanya SATU
+    // client_platform Shopee aktif per client, jadi dua batch tidak bisa berbagi satu client.
+    const clientDitolak = nextClientId();
+    await insertClient(clientDitolak, OWNER_AM);
+    const cpDitolak = await insertClientPlatform(clientDitolak, 'Shopee', 'SHOP-LAMA');
+    const ditolak = await commitUploadBatch(sql, ownerActor(), cpDitolak, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], [], now);
+    expect(ymd((await loadBatch(ditolak.batchId)).retensi_sampai)).toBe('2026-08-14');
+
+    const clientOk = nextClientId();
+    await insertClient(clientOk, OWNER_AM);
+    const cpOk = await insertClientPlatform(clientOk, 'Shopee', '938284780');
+    const cocok = await commitUploadBatch(sql, ownerActor(), cpOk, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], [], now);
+    expect(ymd((await loadBatch(cocok.batchId)).retensi_sampai)).toBe('2026-11-12');
+  });
+});
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — baris pdt_file per status berkas', () => {
+  async function fixture(): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', '938284780');
+  }
+
+  it("berkas 'ok' ⇒ satu baris pdt_file lengkap, deteksi_oleh='tanda_tangan'", async () => {
+    const cpId = await fixture();
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], []);
+    const files = await loadFiles(persiapan.batchId);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      modul_kode: 'shopee_ads_cpc', nama_entri: 'a.xlsx', sha256: 'sha-cpc', bytes: '100',
+      baris_header: 8, deteksi_oleh: 'tanda_tangan', kolom_dipanen: 11, kolom_baru: [], parse_status: 'ok', parse_error: null,
+    });
+  });
+
+  it("ditolakPagar/gagalEkstrak (sha256/bytes null di sumber) ⇒ NOL baris pdt_file — sha256/bytes NOT NULL di skema dan genuinely tidak diketahui", async () => {
+    const cpId = await fixture();
+    const persiapan = await commitUploadBatch(
+      sql, ownerActor(), cpId,
+      [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026'), ditolakPagarBerkas('b.zip', '[zip bersarang]'), decodeGagalBerkas('c.xlsx', 'gagal ekstrak')],
+      [],
+    );
+    const files = await loadFiles(persiapan.batchId);
+    expect(files).toHaveLength(1); // hanya a.xlsx — b.zip/c.xlsx (gagalEkstrak) tidak punya sha256/bytes
+    expect(files[0].nama_entri).toBe('a.xlsx');
+    expect(persiapan.berkas).toHaveLength(3); // tetap TERLIHAT di respons untuk request yang sama
+  });
+
+  it("perlu_pilih_modul TANPA override ⇒ baris ditulis dengan modul_kode NULL, baris_header sentinel 0, parse_status gagal", async () => {
+    const cpId = await fixture();
+    const ambigu: PdtPreviewBerkasInput = {
+      nama: 'ambigu.xlsx', sha256: 's-amb', bytes: 5, ditolakPagar: null, decodeGagal: null,
+      aoa: [['x']], modulTerdeteksi: null, ambiguous: true, matches: ['shopee_diskon', 'shopee_flash_sale'],
+    };
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026'), ambigu], []);
+    const files = await loadFiles(persiapan.batchId);
+    const baris = files.find((f) => f.nama_entri === 'ambigu.xlsx')!;
+    expect(baris).toMatchObject({ modul_kode: null, baris_header: 0, deteksi_oleh: 'tanda_tangan', kolom_dipanen: 0, kolom_baru: [], parse_status: 'gagal' });
+    expect(baris.parse_error).toContain('shopee_diskon');
+  });
+
+  it("perlu_pilih_modul DENGAN override AM ⇒ diparse ulang dengan modul yang ditimpa, deteksi_oleh='override_am'", async () => {
+    const cpId = await fixture();
+    const ambigu: PdtPreviewBerkasInput = {
+      nama: 'ambigu.xlsx', sha256: 's-amb', bytes: 5, ditolakPagar: null, decodeGagal: null,
+      aoa: [['x']], modulTerdeteksi: null, ambiguous: true, matches: ['shopee_diskon', 'shopee_flash_sale'],
+    };
+    const overrides: PdtCommitOverride[] = [{ nama: 'ambigu.xlsx', modulKode: 'shopee_diskon' }];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026'), ambigu], overrides);
+    const files = await loadFiles(persiapan.batchId);
+    const baris = files.find((f) => f.nama_entri === 'ambigu.xlsx')!;
+    expect(baris.modul_kode).toBe('shopee_diskon');
+    expect(baris.deteksi_oleh).toBe('override_am');
+  });
+});
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — audit log (aturan rumah #3)', () => {
+  it('menulis satu baris audit_log per commit, actor tercatat', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', '938284780');
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], []);
+    const rows = await sql`select action, actor_employee_id from audit_log where entity_type = 'pdt_upload_batch' and entity_id = ${String(persiapan.batchId)}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].action).toBe('pdt_batch_committed');
+    expect(rows[0].actor_employee_id).toBe(OWNER_AM);
+  });
+});
+
+describeDb('markRawStored (G1-09 sub-langkah 2a) — mengisi raw_* setelah unggah Storage berhasil', () => {
+  it('mengisi raw_path/raw_sha256/raw_bytes/raw_entri/raw_entri_dilewati', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', '938284780');
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], []);
+    expect((await loadBatch(persiapan.batchId)).raw_path).toBeNull();
+
+    await markRawStored(sql, persiapan.batchId, persiapan.rawPath, { sha256: 'paket-sha', bytes: 12345, entri: 1, entriDilewati: 2 });
+    const row = await loadBatch(persiapan.batchId);
+    expect(row.raw_path).toBe(persiapan.rawPath);
+    expect(row.raw_path).toBe(`${clientId}/${cpId}/2026-07-31/${persiapan.batchId}.zip`);
+    expect(row.raw_sha256).toBe('paket-sha');
+    expect(Number(row.raw_bytes)).toBe(12345);
+    expect(row.raw_entri).toBe(1);
+    expect(row.raw_entri_dilewati).toBe(2);
   });
 });

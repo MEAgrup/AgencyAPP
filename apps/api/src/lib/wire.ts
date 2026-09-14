@@ -8938,3 +8938,56 @@ export interface PdtUploadUrlWire {
 export function pdtUploadUrlToWire(h: pdt.PdtSiapkanUploadHasil, uploadUrl: string): PdtUploadUrlWire {
   return { client_platform_id: h.clientPlatformId, storage_path: h.stagingPath, upload_url: uploadUrl };
 }
+
+// ===========================================================================
+// G1-09 sub-langkah 2a — commit (Flow A langkah 6 sisi batch/berkas + langkah
+// 9 error path). `POST /account/pdt/batches` (`pdt.commitUploadBatch`) —
+// beda dari pratinjau: baris `pdt_upload_batch`/`pdt_file` SUNGGUHAN sudah
+// tertulis saat wire ini dibentuk. Rekonsiliasi/baris fakta (Flow A langkah
+// 7-8) menyusul sub-langkah 2b — `status` di sini TIDAK PERNAH 'verified'.
+// ===========================================================================
+
+/** Satu baris `pdt_file` yang baru ditulis — sama seperti `PdtPreviewBerkasWire` + `deteksi_oleh` (kolom DB yang tidak ada gunanya sebelum baris ini benar-benar ditulis). */
+export interface PdtCommitBerkasWire extends PdtPreviewBerkasWire {
+  deteksi_oleh: string; // 'tanda_tangan' | 'override_am'
+}
+
+export interface PdtCommitBatchWire {
+  batch_id: number;
+  client_platform_id: number;
+  platform: string;
+  status: string; // 'parsing' | 'identitas_belum_terikat' | 'ditolak'
+  alasan_ditolak: string | null;
+  periode_mulai: string;
+  periode_selesai: string;
+  berkas: PdtCommitBerkasWire[];
+  identitas: PdtPreviewIdentitasWire;
+}
+
+export function pdtCommitBatchToWire(h: pdt.PdtCommitPersiapan): PdtCommitBatchWire {
+  return {
+    batch_id: h.batchId,
+    client_platform_id: h.clientPlatformId,
+    platform: h.platform,
+    status: h.status,
+    alasan_ditolak: h.alasanDitolak,
+    periode_mulai: h.periodeMulai,
+    periode_selesai: h.periodeSelesai,
+    berkas: h.berkas.map((b) => ({
+      nama: b.nama,
+      modul_kode: b.modulKode,
+      modul_nama: b.modulNama,
+      ambiguous: b.ambiguous,
+      matches: [...b.matches],
+      baris_header: b.barisHeader,
+      kolom_dipanen: b.kolomDipanen,
+      kolom_baru: [...b.kolomBaru],
+      status: b.status,
+      pesan: b.pesan,
+      sha256: b.sha256,
+      bytes: b.bytes,
+      deteksi_oleh: b.deteksiOleh,
+    })),
+    identitas: pdtPreviewIdentitasToWire(h.identitas),
+  };
+}

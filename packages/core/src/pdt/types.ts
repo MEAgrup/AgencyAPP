@@ -10,6 +10,16 @@
 export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
 
 /**
+ * Versi mesin pipeline parse PDT (Rule 11) — dicatat ke
+ * `pdt_upload_batch.parser_versi` dan (menyusul sub-langkah 2b) ke setiap
+ * baris fakta. SATU angka global untuk seluruh pipeline G1-04..09 (bukan
+ * per-modul — `pdt_parser_modul.versi` sudah memegang versi PER MODUL).
+ * Naik hanya saat pipeline (deteksi/parse/identitas/periode) berubah dengan
+ * cara yang mengubah hasil baris fakta — bukan setiap commit kode.
+ */
+export const PDT_PARSER_VERSI = 1;
+
+/**
  * Satu grup AND/NOT: seluruh `must` harus muncul (cocok substring, tanpa
  * membedakan huruf besar/kecil) DI SUATU BARIS pada sheet, dan tak satu pun
  * `mustNot` boleh muncul. Ini mengizinkan kolom penanda seksi (mis. baris
