@@ -1387,3 +1387,82 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEEMPAT) — tt_tr
     expect(await loadFactCreatorPeriod(cpId)).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KELIMA) — shopee_ams_afiliasi
+// → pdt_fact_creator_period (sisi Shopee, lihat fakta.ts @cdps/core untuk kenapa
+// shopee_ams_produk saudaranya TIDAK dipetakan — grain per PRODUK, bukan per-kreator).
+// ---------------------------------------------------------------------------
+const HEADER_SHOPEE_AMS_AFILIASI = ['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Komisi', 'ROI'];
+
+/** `shopee_ams_afiliasi` — tidak membawa preamble/periode sendiri (sama pola `shopeeParentSkuBerkasMulti`, dipasangkan dengan `shopeeAdsCpcBerkas` di tes di bawah). */
+function shopeeAmsAfiliasiBerkas(nama: string, baris: readonly [string, string, string][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_SHOPEE_AMS_AFILIASI,
+    ...baris.map(([username, omzet, pesanan]) => ['AFF-X', username, omzet, '0', pesanan, '0', '0']),
+  ];
+  return {
+    nama, sha256: 'sha-amsafiliasi', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, modulTerdeteksi: 'shopee_ams_afiliasi', ambiguous: false, matches: ['shopee_ams_afiliasi'],
+  };
+}
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KELIMA) — shopee_ams_afiliasi → pdt_fact_creator_period', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', shopId);
+  }
+
+  it('satu baris per Username, gmv/pesanan_teratribusi terisi, sisanya NULL (modul ini tidak membawanya)', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'), // identitas+periode
+      shopeeAmsAfiliasiBerkas('ams-afiliasi.xlsx', [
+        ['kreator_a', '2000000', '10'],
+        ['kreator_b', '500000', '5'],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactCreatorPeriod(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      creator_handle: 'kreator_a', batch_id: persiapan.batchId,
+      pesanan_teratribusi: 10, gmv_live: null, gmv_video: null, aov: null, ctor: null, jumlah_live: null, jumlah_video: null, sampel_terkirim: null,
+    });
+    expect(Number(rows[0].gmv)).toBe(2000000);
+    expect(rows[1].creator_handle).toBe('kreator_b');
+  });
+
+  it('commit ULANG (Username sama) ⇒ ON CONFLICT DO UPDATE — baris diperbarui di tempat, bukan digandakan', async () => {
+    const cpId = await fixture();
+    const pertama = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeAmsAfiliasiBerkas('ams-afiliasi.xlsx', [['kreator_a', '1000000', '5']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect(await loadFactCreatorPeriod(cpId)).toHaveLength(1);
+
+    const kedua = [
+      shopeeAdsCpcBerkas('ads-2.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeAmsAfiliasiBerkas('ams-afiliasi-revisi.xlsx', [['kreator_a', '1500000', '8']]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = await loadFactCreatorPeriod(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — ON CONFLICT DO UPDATE
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(Number(rows[0].gmv)).toBe(1500000);
+    expect(rows[0].pesanan_teratribusi).toBe(8);
+  });
+
+  it("identitas 'tolak' (ID Toko berkas ≠ shop_id tersimpan) ⇒ NOL baris fakta ditulis", async () => {
+    const cpId = await fixture('SHOP-LAIN');
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeAmsAfiliasiBerkas('ams-afiliasi.xlsx', [['kreator_a', '1000000', '5']]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(await loadFactCreatorPeriod(cpId)).toHaveLength(0);
+  });
+});

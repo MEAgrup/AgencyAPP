@@ -450,6 +450,17 @@ punya `null` eksplisit.
 > belum dibangun). **Empat modul/empat tabel fakta (dari enam) kini punya penulis**: `pdt_fact_ads`,
 > `pdt_fact_content`, `pdt_sku_master`, `pdt_fact_creator_period`. Sisa: `pdt_fact_sku_period`
 > (nol penulis) + 20 modul lain yang belum dipetakan ke tabel yang SUDAH punya penulis.
+>
+> **Status 2026-09-14 (sub-langkah 2b-ii — MODUL KELIMA, `docs/DECISIONS.md` baris teratas)** —
+> `shopee_ams_afiliasi` → `pdt_fact_creator_period` (`ekstrakBarisKreatorShopeeAmsAfiliasi`),
+> sisi Shopee untuk tabel yang modul keempat baru mengisi sisi TikTok-nya. `shopee_ams_produk`
+> (dikelompokkan bersama di `PDT_KOLOM_DIPANEN.md` §2.10) SENGAJA TIDAK ikut dipetakan — grainnya
+> PER PRODUK, bukan per-kreator, tidak cocok kunci tabel ini. `Username`→`creator_handle` (bukan
+> `ID Affiliates` — cermin legacy `parseAffCsv`), `Omzet`→`gmv`, `Pesanan`→`pesanan_teratribusi`.
+> `Komisi`/`ROI` SENGAJA tidak ditulis (konsumen PX Flow D `commission_pct`, domain lain, tabel
+> ini tidak punya kolom untuk keduanya). `pdt_fact_creator_period` sekarang punya penulis di
+> KEDUA platform (TikTok + Shopee) — lima modul/empat tabel fakta (dari enam) kini punya penulis.
+> Sisa: `pdt_fact_sku_period` (nol penulis) + 19 modul lain belum dipetakan.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

@@ -85,6 +85,24 @@
  * TIDAK bisa kolaps karenanya, cuma menambah satu baris ekstra untuk toko
  * sendiri kalau memang muncul di berkas — mudah direvisi lewat reparse).
  *
+ * **Modul KELIMA (sesi ini): `shopee_ams_afiliasi` → `pdt_fact_creator_period`**
+ * (lihat `ekstrakBarisKreatorShopeeAmsAfiliasi` di bawah) — sisi SHOPEE untuk
+ * tabel yang modul KEEMPAT baru mengisi sisi TikTok-nya. Grain barisnya SUDAH
+ * per-kreator (`Username`), sama alasan modul KEEMPAT dipilih — kandidat
+ * SAUDARANYA di modul yang sama (`shopee_ams_produk`) SENGAJA TIDAK dipetakan
+ * di sini: grainnya PER PRODUK (`Kode Item`/`Nama Produk`), bukan per-kreator,
+ * jadi tidak cocok tabel ini sama sekali — `PDT_KOLOM_DIPANEN.md` §2.10
+ * menyebut keduanya bersama sebagai "sinyal PX sisi Shopee / pdt_fact_
+ * creator_period Shopee", tapi baris §2.10 itu HARUS dibaca per-grain, bukan
+ * "kedua modul menulis ke tabel yang sama". `Komisi`/`ROI` (whitelist modul
+ * ini) SENGAJA tidak ditulis ke tabel ini — §2.10 eksplisit `komisi` adalah
+ * sumber **`commission_pct`** untuk PX Flow D (konsumen domain LAIN, belum
+ * dibangun), bukan kolom `pdt_fact_creator_period` (yang memang tidak punya
+ * kolom komisi/ROI sama sekali). `ID Affiliates`/`Produk Terjual` juga tidak
+ * dipetakan — tabel ini tidak punya kolom `creator_platform_id` terpisah
+ * (beda dari `pdt_fact_content`), dan `Produk Terjual` (hitungan unit) bukan
+ * `pesanan_teratribusi` (hitungan pesanan).
+ *
  * Angka: `parsePdtAngka(v, true)` — konvensi **Ads Manager** (titik desimal,
  * koma ribuan), BUKAN konvensi Seller Center (`angka.ts` docblock) — cermin
  * `report/shopee/metrik.ts` `parseAdsLive`/`pn(r[ci], true)`, satu-satunya
@@ -391,6 +409,55 @@ export function ekstrakBarisKreatorTtTransactionCreator(
       ctor: iCtor === -1 ? null : parsePdtAngka(row?.[iCtor]),
       jumlahLive: iLive === -1 ? null : parsePdtAngka(row?.[iLive]),
       jumlahVideo: iVideo === -1 ? null : parsePdtAngka(row?.[iVideo]),
+    });
+  }
+  return hasil;
+}
+
+/** Satu baris `pdt_fact_creator_period` mentah dari `shopee_ams_afiliasi`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi). */
+export interface PdtBarisKreatorShopeeAmsAfiliasi {
+  creatorHandle: string;
+  gmv: number | null;
+  pesananTeratribusi: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `shopee_ams_afiliasi` (Rule 8 whitelist
+ * `modules.ts`: `['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual',
+ * 'Pesanan', 'Komisi', 'ROI']`). `Username` (bukan `ID Affiliates`) dipakai
+ * sebagai `creatorHandle` — cermin `report/shopee/metrik.ts` `parseAffCsv`
+ * (dipanggil dari `aff_creator`, `nameKws: ['username', 'kreator', 'creator',
+ * 'nama']`, kolom NAMA yang dipakai sebagai kunci baris `nm`, bukan ID).
+ * `ID Affiliates`/`Produk Terjual` TIDAK dipetakan ke field manapun di sini —
+ * `pdt_fact_creator_period` tidak punya kolom untuk keduanya (nol
+ * `creator_platform_id` terpisah di tabel ini, beda dari `pdt_fact_content`;
+ * `Produk Terjual` = hitungan unit, bukan `pesanan_teratribusi`). `Komisi`/
+ * `ROI` JUGA tidak dipetakan — keduanya sinyal **PX Flow D**
+ * (`PDT_KOLOM_DIPANEN.md` §2.10: `komisi` sumber `commission_pct` Shopee),
+ * konsumen di domain LAIN (`productexchange`), bukan `pdt_fact_creator_period`
+ * — menuliskannya di sini akan mengarang kolom yang tidak diminta whitelist
+ * ini. Baris ber-`Username` kosong dilewati (kunci NOT NULL
+ * `pdt_fact_creator_period`). Angka: `parsePdtAngka(v, true)` — konvensi
+ * **Ads Manager**, cermin `parseAffCsv`/`pn(r[ci], true)`.
+ */
+export function ekstrakBarisKreatorShopeeAmsAfiliasi(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisKreatorShopeeAmsAfiliasi[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iUsername = idx('Username');
+  const iOmzet = idx('Omzet');
+  const iPesanan = idx('Pesanan');
+
+  const hasil: PdtBarisKreatorShopeeAmsAfiliasi[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const creatorHandle = iUsername === -1 ? '' : String(row?.[iUsername] ?? '').trim();
+    if (creatorHandle === '') continue;
+    hasil.push({
+      creatorHandle,
+      gmv: iOmzet === -1 ? null : parsePdtAngka(row?.[iOmzet], true),
+      pesananTeratribusi: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
     });
   }
   return hasil;

@@ -1,8 +1,8 @@
 # HANDOFF — PDT (Pusat Data Toko) SESI 17 → SESI 18
 
-> **Dibuat 2026-09-14, diperbarui sesi yang sama (modul KEEMPAT ditambahkan).**
-> Baca berkas ini sebelum lanjut (rantai: … → sesi 16 → berkas ini;
-> `docs/handoff/HANDOFF_PDT_SESI16.md` untuk ringkasan merge PR #368,
+> **Dibuat 2026-09-14, diperbarui sesi yang sama (modul KEEMPAT lalu KELIMA
+> ditambahkan).** Baca berkas ini sebelum lanjut (rantai: … → sesi 16 →
+> berkas ini; `docs/handoff/HANDOFF_PDT_SESI16.md` untuk ringkasan merge PR #368,
 > `HANDOFF_PDT_SESI14.md`/`HANDOFF_PDT_SESI15.md` untuk detail teknis modul
 > pertama/kedua — TIDAK diulang di sini).
 
@@ -77,19 +77,39 @@ ambiguitas kelas ads_cpc:
 - `ON CONFLICT ... DO UPDATE` sungguhan (bukan delete-then-insert) — kunci
   unik tabel ini tidak pernah punya komponen NULL.
 
-**Kode & tes (kedua modul, sesi yang sama):**
+**Modul KELIMA (sama sesi, sesudah modul KEEMPAT) — sisi Shopee tabel yang
+sama: `shopee_ams_afiliasi` → `pdt_fact_creator_period`.** Grain barisnya
+SUDAH per-kreator (`Username`), sama alasan modul KEEMPAT dipilih:
+
+- `Username`→`creator_handle` (kunci — BUKAN `ID Affiliates`, cermin legacy
+  `report/shopee/metrik.ts` `parseAffCsv`/`aff_creator` yang memakai kolom
+  NAMA sebagai kunci baris, konsisten dengan TikTok yang juga pakai nama
+  tampilan bukan ID numerik), `Omzet`→`gmv`, `Pesanan`→`pesanan_teratribusi`.
+- **`Komisi`/`ROI` SENGAJA TIDAK ditulis ke tabel ini** — `PDT_KOLOM_DIPANEN.md`
+  §2.10 eksplisit: `komisi` adalah sumber `commission_pct` untuk **PX Flow D**
+  (domain `productexchange`, konsumen LAIN sama sekali, belum dibangun) —
+  tabel `pdt_fact_creator_period` sendiri tidak punya kolom komisi/ROI.
+- **`shopee_ams_produk` (saudaranya di §2.10 yang sama) SENGAJA TIDAK
+  dipetakan** — grainnya PER PRODUK (`Kode Item`), bukan per-kreator, jadi
+  tidak cocok kunci tabel ini sama sekali walau §2.10 mengelompokkan
+  keduanya dalam satu kalimat konsumen.
+- Angka: `parsePdtAngka(v, true)` — konvensi Ads Manager (cermin
+  `parseAffCsv`/`pn(r[ci], true)`).
+- `ON CONFLICT ... DO UPDATE` sama pola modul KEEMPAT.
+
+**Kode & tes (ketiga modul, sesi yang sama):**
 - `packages/core/src/pdt/fakta.ts` — `ekstrakBarisSkuMasterShopeeParentSku`,
-  `ekstrakBarisSkuMasterTtOrders`, `ekstrakBarisKreatorTtTransactionCreator`
-  (fungsi murni).
+  `ekstrakBarisSkuMasterTtOrders`, `ekstrakBarisKreatorTtTransactionCreator`,
+  `ekstrakBarisKreatorShopeeAmsAfiliasi` (fungsi murni).
 - `packages/domain/src/pdt.ts` `commitUploadBatch` — blok UPSERT `pdt_sku_master`
-  + blok `ON CONFLICT DO UPDATE` `pdt_fact_creator_period`, keduanya sebelum
-  `insertAudit`.
-- `packages/core/src/pdt/fakta.test.ts` — 34 tes total (19 lama + 10 sku_master
-  + 5 creator_period, murni tanpa DB).
-- `packages/domain/src/pdt.test.ts` — 76 tes total (67 lama + 6 sku_master + 3
-  creator_period, `describeDb`, perlu `DATABASE_URL`). `afterEach` ditambah
-  pembersihan `pdt_sku_master` DAN `pdt_fact_creator_period` (FK ke
-  `client_platforms` tanpa `ON DELETE CASCADE`).
+  + dua blok `ON CONFLICT DO UPDATE` `pdt_fact_creator_period` (TikTok, Shopee),
+  semua sebelum `insertAudit`.
+- `packages/core/src/pdt/fakta.test.ts` — 29 tes total (19 lama + 10 sku_master
+  + 5 creator_period TikTok + 5 creator_period Shopee, murni tanpa DB).
+- `packages/domain/src/pdt.test.ts` — 79 tes total (67 lama + 6 sku_master + 3
+  creator_period TikTok + 3 creator_period Shopee, `describeDb`, perlu
+  `DATABASE_URL`). `afterEach` ditambah pembersihan `pdt_sku_master` DAN
+  `pdt_fact_creator_period` (FK ke `client_platforms` tanpa `ON DELETE CASCADE`).
 
 **Verifikasi (lingkungan sesi ini kosong `node_modules`/DB — keduanya
 disiapkan dari nol):**
@@ -102,21 +122,22 @@ disiapkan dari nol):**
   `scripts/db-rebuild.sh --yes` (password perlu di-set ulang tiap restart
   cluster, tidak persisten).
 - `npm run typecheck --workspaces` — bersih (4 paket).
-- `npm run test -w @cdps/core` — **1169 tes lolos**.
-- `npm run test -w @cdps/domain` — **2567 tes lolos, 1 skip** (pre-existing).
+- `npm run test -w @cdps/core` — **1174 tes lolos**.
+- `npm run test -w @cdps/domain` — **2570 tes lolos, 1 skip** (pre-existing).
   ⚠️ **Jangan jalankan suite penuh berkali-kali berturut-turut tanpa
   `db-rebuild.sh` di antaranya** — dua tes lama (`admin.test.ts` hari libur,
   `client.test.ts` Hold Service) menghitung baris `audit_log` PERSIS `1` untuk
   ID yang sama, dan `audit_log` append-only nol dibersihkan `afterEach` —
   run kedua di DB yang sama akan menaikkan hitungan itu dan gagal PALSU
-  (ditemukan sesi ini, bukan regresi kode).
+  (ditemukan sesi ini, bukan regresi kode; DB di-rebuild ulang sebelum angka
+  final di atas diambil).
 - `npm run test -w @cdps/api -- pdt` — 58 lolos, 2 skip.
 - `npm run lint --workspaces` — bersih.
 
-**Nol perubahan migrasi/skema** — kedua tabel dipakai APA ADANYA dari G1-01.
-**Nol push ke GitHub sesi ini setelah modul KEEMPAT** — commit modul KETIGA
-sudah di-push sebelumnya (lihat §2); modul KEEMPAT + revisi berkas ini masih
-perlu dikomit terpisah.
+**Nol perubahan migrasi/skema** — ketiga tabel dipakai APA ADANYA dari G1-01.
+**Status push ke GitHub**: modul KETIGA dan KEEMPAT sudah di-push (dua commit
+terpisah). Modul KELIMA + revisi berkas ini — cek `git status`/`git log` sesi
+berikutnya untuk memastikan sudah/belum dikomit sebelum lanjut.
 
 ---
 
@@ -126,18 +147,20 @@ perlu dikomit terpisah.
    sekarang butuh verifikasi grain baris (per-produk vs per-iklan) sebelum
    `kampanye_id` bisa diputuskan aman — salah pilih berisiko crash, bukan
    cuma data longgar (lihat §0 di atas + `docs/DECISIONS.md`).
-2. **Kandidat modul KELIMA** (grain jelas, kolom lengkap, rendah risiko —
-   pola yang sama dipakai memilih modul KEEMPAT):
+2. **Kandidat modul KEENAM** (grain jelas, kolom lengkap, rendah risiko —
+   pola yang sama dipakai memilih modul KEEMPAT/KELIMA):
    - `tt_transaction_product` → `pdt_fact_sku_period`? Grain PER PRODUK
      (`Product ID`), tapi `pdt_fact_sku_period` kuncinya `sku_id` (FK
      `pdt_sku_master`) bukan `platform_product_id` langsung — butuh lookup
      SKU master dulu (mirip `shopee_ads_cpc`, TAPI `tt_transaction_product`
      grainnya sudah eksplisit per-produk di `PDT_KOLOM_DIPANEN.md` §1.3, tidak
      ada ambiguitas legacy-parser seperti ads_cpc — VERIFIKASI ini dulu
-     sebelum bangun, jangan asumsikan aman hanya karena "mirip").
-   - `shopee_ams_afiliasi` → `pdt_fact_creator_period` (Shopee, sekarang ada
-     penulis TikTok-nya) — kolomDipanen: `ID Affiliates`, omzet, komisi, ROI.
-   - `shopee_ams_produk` → sinyal PX / kandidat `pdt_fact_sku_period` Shopee.
+     sebelum bangun, jangan asumsikan aman hanya karena "mirip"; INI JADI
+     KANDIDAT PERTAMA sekarang yang butuh `pdt_sku_master.id` — resolusi
+     lookup lintas-tabel PERTAMA di PDT, pola belum ada preseden).
+   - `shopee_ams_produk` → grain PER PRODUK (`Kode Item`), sama kelas
+     kebutuhan lookup SKU master seperti `tt_transaction_product` di atas —
+     bukan `pdt_fact_creator_period` (sudah tertutup modul KELIMA).
 3. **Resolusi `sku_id` untuk `tt_video`/`shopee_ads_live` yang SUDAH ditulis**
    — keduanya masih menulis `sku_id=NULL` selamanya. `tt_video` sumber SKU-nya
    kolom `Produk` yang BELUM diverifikasi formatnya cocok dengan
@@ -158,13 +181,15 @@ perlu dikomit terpisah.
 ## 2. Konteks penting untuk sesi berikutnya
 
 - **Kerja sesi ini ADA DI BRANCH SESI** (`claude/ecstatic-cannon-78wwsn`,
-  fast-forward dari `origin/main` saat sesi dimulai). Modul KETIGA sudah
-  di-push; modul KEEMPAT + revisi handoff ini masih perlu dikomit. BELUM
-  di-PR/merge — cek dulu status branch sebelum menumpuk komit lebih lanjut.
-- **Empat modul/empat tabel fakta (dari enam) kini punya penulis**:
+  fast-forward dari `origin/main` saat sesi dimulai). Modul KETIGA dan KEEMPAT
+  sudah di-push (dua commit terpisah); modul KELIMA + revisi handoff ini masih
+  perlu dikomit. BELUM di-PR/merge — cek dulu status branch sebelum menumpuk
+  komit lebih lanjut.
+- **Lima modul/empat tabel fakta (dari enam) kini punya penulis**:
   `pdt_fact_ads` (`shopee_ads_live`), `pdt_fact_content` (`tt_video`),
   `pdt_sku_master` (`shopee_parent_sku`+`tt_orders`), `pdt_fact_creator_period`
-  (`tt_transaction_creator`). Sisa: `pdt_fact_sku_period` (nol penulis) + 20
+  (`tt_transaction_creator` + `shopee_ams_afiliasi`, KEDUA platform). Sisa:
+  `pdt_fact_sku_period` (nol penulis, tabel fakta TERAKHIR tanpa penulis) + 19
   modul lain yang belum dipetakan ke tabel yang SUDAH punya penulis.
 - **Progress ringkas G1-09**: lihat `docs/backlog/PDT_BACKLOG.md` §G1-09
   status teratas untuk rincian lengkap sesi ini.
@@ -176,9 +201,9 @@ perlu dikomit terpisah.
 - `docs/handoff/HANDOFF_PDT_SESI16.md` — ringkasan merge PR #368.
 - `docs/handoff/HANDOFF_PDT_SESI14.md`/`HANDOFF_PDT_SESI15.md` — modul
   pertama/kedua, detail teknis lengkap.
-- `docs/DECISIONS.md` — baris Decided 2026-09-14 (modul KEEMPAT lalu KETIGA,
-  paling atas) + Open baru/diperbarui `G1-09-2BII-SHOPEELIVE`,
+- `docs/DECISIONS.md` — baris Decided 2026-09-14 (modul KELIMA, KEEMPAT, lalu
+  KETIGA, paling atas) + Open baru/diperbarui `G1-09-2BII-SHOPEELIVE`,
   `G1-09-2BII-SKU-STATUS-TRANSISI`, `G1-09-2BII-ADS-CPC` (diperbarui).
 - `docs/backlog/PDT_BACKLOG.md` §G1-09 — status ringkas seluruh sub-langkah.
 - `packages/core/src/pdt/fakta.ts` — docblock kepala berkas menjelaskan urutan
-  keempat modul dan kenapa masing-masing dipilih.
+  kelima modul dan kenapa masing-masing dipilih.

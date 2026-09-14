@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ekstrakBarisKreatorShopeeAmsAfiliasi,
   ekstrakBarisKreatorTtTransactionCreator,
   ekstrakBarisShopeeAdsLive,
   ekstrakBarisSkuMasterShopeeParentSku,
@@ -243,6 +244,47 @@ describe('ekstrakBarisKreatorTtTransactionCreator', () => {
     const aoa = [headerMinimal, ['Kreator A']];
     expect(ekstrakBarisKreatorTtTransactionCreator(aoa, 1)).toEqual([
       { creatorHandle: 'Kreator A', gmv: null, pesananTeratribusi: null, aov: null, ctor: null, jumlahLive: null, jumlahVideo: null },
+    ]);
+  });
+});
+
+const HEADER_SHOPEE_AMS_AFILIASI = ['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Komisi', 'ROI'];
+
+describe('ekstrakBarisKreatorShopeeAmsAfiliasi', () => {
+  it('memetakan Username/Omzet/Pesanan — ID Affiliates/Produk Terjual/Komisi/ROI TIDAK dipetakan (nol kolom/konsumen lain di pdt_fact_creator_period)', () => {
+    const aoa = [
+      HEADER_SHOPEE_AMS_AFILIASI,
+      ['AFF-1', 'kreator_a', '2000000', '15', '10', '100000', '5'],
+    ];
+    expect(ekstrakBarisKreatorShopeeAmsAfiliasi(aoa, 1)).toEqual([
+      { creatorHandle: 'kreator_a', gmv: 2000000, pesananTeratribusi: 10 },
+    ]);
+  });
+
+  it('konvensi Ads Manager (titik desimal, koma ribuan) — bukan Seller Center', () => {
+    const aoa = [HEADER_SHOPEE_AMS_AFILIASI, ['AFF-1', 'kreator_a', '2,000,000.5', '0', '10', '0', '0']];
+    expect(ekstrakBarisKreatorShopeeAmsAfiliasi(aoa, 1)[0].gmv).toBe(2000000.5);
+  });
+
+  it('baris ber-Username kosong dilewati (kunci NOT NULL pdt_fact_creator_period)', () => {
+    const aoa = [HEADER_SHOPEE_AMS_AFILIASI, ['AFF-1', '', '0', '0', '0', '0', '0']];
+    expect(ekstrakBarisKreatorShopeeAmsAfiliasi(aoa, 1)).toHaveLength(0);
+  });
+
+  it('dua kreator terpisah tetap terpetakan masing-masing', () => {
+    const aoa = [
+      HEADER_SHOPEE_AMS_AFILIASI,
+      ['AFF-1', 'kreator_a', '1000000', '0', '0', '0', '0'],
+      ['AFF-2', 'kreator_b', '500000', '0', '0', '0', '0'],
+    ];
+    expect(ekstrakBarisKreatorShopeeAmsAfiliasi(aoa, 1).map((b) => b.creatorHandle)).toEqual(['kreator_a', 'kreator_b']);
+  });
+
+  it('kolom opsional hilang ⇒ null untuk field itu', () => {
+    const headerMinimal = ['Username'];
+    const aoa = [headerMinimal, ['kreator_a']];
+    expect(ekstrakBarisKreatorShopeeAmsAfiliasi(aoa, 1)).toEqual([
+      { creatorHandle: 'kreator_a', gmv: null, pesananTeratribusi: null },
     ]);
   });
 });
