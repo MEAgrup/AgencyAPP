@@ -657,6 +657,11 @@ export async function commitUploadBatch(
   const periodeAwalBulan = `${periode.mulai.slice(0, 7)}-01`;
 
   const berkasAdsLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ads_live');
+  // G1-09 sub-langkah 2b-ii — modul KEENAM, `shopee_ads_cpc` → `pdt_fact_ads`
+  // (lihat docblock `ekstrakBarisShopeeAdsCpc`, `@cdps/core` `pdt/fakta.ts`, untuk
+  // kenapa blocker grain `G1-09-2BII-ADS-CPC` — terbuka sejak sesi 13 — akhirnya
+  // terjawab sesi ini: sample asli Fim Motor).
+  const berkasAdsCpc = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ads_cpc');
   const berkasTtVideo = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_video');
   // G1-09 sub-langkah 2b-ii — modul KETIGA, `shopee_parent_sku`/`tt_orders` → `pdt_sku_master`
   // (lihat docblock `ekstrakBarisSkuMasterShopeeParentSku`/`ekstrakBarisSkuMasterTtOrders`,
@@ -735,6 +740,30 @@ export async function commitUploadBatch(
               values
                 (${clientPlatformId}, 'shopee_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
                  ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+          }
+        }
+      }
+
+      // G1-09 sub-langkah 2b-ii — modul KEENAM, `shopee_ads_cpc` → `pdt_fact_ads`
+      // (lihat docblock `ekstrakBarisShopeeAdsCpc`, `@cdps/core` `pdt/fakta.ts`).
+      // Sama pola replace-on-recommit `shopee_ads_live` di atas — `sku_id`/
+      // `content_id` SELALU NULL di sini juga (lihat docblock kepala berkas
+      // `fakta.ts` untuk kenapa `sku_id` TIDAK diisi walau `pdt_sku_master`
+      // sudah ada: `Kode Produk` level induk, `pdt_sku_master` berkunci per
+      // varian — lookup langsung akan mengarang varian mana yang dipilih).
+      if (berkasAdsCpc.length > 0) {
+        await tx`
+          delete from pdt_fact_ads
+           where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_cpc' and periode = ${periodeAwalBulan}::date`;
+        for (const b of berkasAdsCpc) {
+          for (const baris of pdt.ekstrakBarisShopeeAdsCpc(b.aoa, b.barisHeader)) {
+            await tx`
+              insert into pdt_fact_ads
+                (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+                 parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+              values
+                (${clientPlatformId}, 'shopee_ads_cpc', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+                 ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
           }
         }
       }

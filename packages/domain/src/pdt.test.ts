@@ -209,7 +209,7 @@ const ditolakPagarBerkas = (nama: string, pesan: string): PdtPreviewBerkasInput 
 function shopeeAdsCpcBerkas(nama: string, idToko: string, periode: string): PdtPreviewBerkasInput {
   const header = [
     'ID Toko', 'Periode', 'Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya',
-    'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Biaya Iklan Terhadap Omzet (ACOS) (%)',
+    'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)',
   ];
   const aoa: unknown[][] = [
     [`ID Toko: ${idToko}`],
@@ -247,6 +247,36 @@ function shopeeAdsLiveBerkas(nama: string, idToko: string, periode: string, bari
     ...baris.map(([namaIklan, idIklan, penonton, pesanan, omzet, biaya]) => [namaIklan, idIklan, penonton, pesanan, omzet, biaya, '10']),
   ];
   return { nama, sha256: 'sha-adslive', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_ads_live', ambiguous: false, matches: ['shopee_ads_live'] };
+}
+
+/**
+ * `shopee_ads_cpc` LENGKAP untuk uji `pdt_fact_ads` (G1-09 sub-langkah 2b-ii,
+ * modul KEENAM) — parametrized per baris iklan, pola sama `shopeeAdsLiveBerkas`.
+ * `Kode Produk` diikutkan di header/baris (boleh `'-'`, sama seperti baris
+ * "Shop GMV Max" sample Fim Motor asli) untuk membuktikan kolom itu TIDAK
+ * dipakai sebagai `kampanye_id` (lihat `fakta.ts` docblock).
+ */
+function shopeeAdsCpcBerkasLengkap(
+  nama: string,
+  idToko: string,
+  periode: string,
+  baris: readonly [string, string, string, string, string, string, string][],
+): PdtPreviewBerkasInput {
+  const header = [
+    'nama iklan', 'Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'omzet penjualan', 'Biaya', 'Efektifitas Iklan',
+    'Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)',
+  ];
+  const aoa: unknown[][] = [
+    [`ID Toko: ${idToko}`],
+    ['Username: tokoku'],
+    ['Nama Toko: Toko Saya'],
+    [`Periode: ${periode}`],
+    [],
+    [],
+    header,
+    ...baris.map(([namaIklan, kodeProduk, dilihat, klik, konversi, omzet, biaya]) => [namaIklan, kodeProduk, dilihat, klik, konversi, omzet, biaya, '10%']),
+  ];
+  return { nama, sha256: 'sha-adscpc-lengkap', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_ads_cpc', ambiguous: false, matches: ['shopee_ads_cpc'] };
 }
 
 /** Berkas tt_video LENGKAP — cukup untuk status 'ok' dan sinyal identitas TikTok ('ID Kreator' terbanyak). */
@@ -488,19 +518,25 @@ describeDb('previewUploadBatch (G1-09) — status per berkas', () => {
   it('modul terdeteksi, kolom wajib LENGKAP ⇒ status ok, baris header DICARI bukan hint mentah', async () => {
     const cpId = await fixture();
     const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('e.xlsx', '111', '01/07/2026 - 31/07/2026')]);
-    expect(hasil.berkas[0]).toMatchObject({ status: 'ok', modulKode: 'shopee_ads_cpc', barisHeader: 8, kolomDipanen: 11, kolomBaru: [], pesan: null });
+    // `ID Toko`/`Periode` (preamble, sengaja masih ada di header fixture ini untuk
+    // uji identitas/periode di describeDb lain) BUKAN lagi bagian kolomDipanen
+    // sejak sesi 19 (docs/DECISIONS.md modul KEENAM) — keduanya ikut kolomBaru.
+    expect(hasil.berkas[0]).toMatchObject({
+      status: 'ok', modulKode: 'shopee_ads_cpc', barisHeader: 8, kolomDipanen: 9,
+      kolomBaru: ['ID Toko', 'Periode'], pesan: null,
+    });
   });
 
   it('modul terdeteksi, kolom wajib HILANG ⇒ status gagal, pesan menyebut nama kolom (Rule 9)', async () => {
     const cpId = await fixture();
     const input: PdtPreviewBerkasInput = {
       nama: 'f.xlsx', sha256: 's', bytes: 1, ditolakPagar: null, decodeGagal: null,
-      aoa: [['Kode Produk', 'Dilihat', 'Biaya']], // shopee_ads_cpc, tapi 8 dari 11 kolomDipanen hilang
+      aoa: [['Kode Produk', 'Dilihat', 'Biaya']], // shopee_ads_cpc, tapi 6 dari 9 kolomDipanen hilang
       modulTerdeteksi: 'shopee_ads_cpc', ambiguous: false, matches: ['shopee_ads_cpc'],
     };
     const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [input]);
     expect(hasil.berkas[0].status).toBe('gagal');
-    expect(hasil.berkas[0].pesan).toContain("'Periode'");
+    expect(hasil.berkas[0].pesan).toContain("'Konversi'");
   });
 
   it('kolom di luar whitelist/alias tercatat sebagai kolomBaru (Rule 8, NAMA saja)', async () => {
@@ -509,7 +545,8 @@ describeDb('previewUploadBatch (G1-09) — status per berkas', () => {
     (berkas.aoa as unknown[][])[7] = [...(berkas.aoa as unknown[][])[7], 'Kolom Rahasia Baru'];
     (berkas.aoa as unknown[][])[8] = [...(berkas.aoa as unknown[][])[8], 'nilai-rahasia'];
     const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [berkas]);
-    expect(hasil.berkas[0].kolomBaru).toEqual(['Kolom Rahasia Baru']);
+    // `ID Toko`/`Periode` JUGA kolomBaru sekarang (preamble, bukan kolomDipanen sejak sesi 19).
+    expect(hasil.berkas[0].kolomBaru).toEqual(['ID Toko', 'Periode', 'Kolom Rahasia Baru']);
   });
 });
 
@@ -850,8 +887,10 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — baris pdt_file per stat
     const files = await loadFiles(persiapan.batchId);
     expect(files).toHaveLength(1);
     expect(files[0]).toMatchObject({
+      // `ID Toko`/`Periode` (preamble) ikut kolom_baru sejak sesi 19 — lihat catatan
+      // fixture `shopeeAdsCpcBerkas`/docs/DECISIONS.md modul KEENAM.
       modul_kode: 'shopee_ads_cpc', nama_entri: 'a.xlsx', sha256: 'sha-cpc', bytes: '100',
-      baris_header: 8, deteksi_oleh: 'tanda_tangan', kolom_dipanen: 11, kolom_baru: [], parse_status: 'ok', parse_error: null,
+      baris_header: 8, deteksi_oleh: 'tanda_tangan', kolom_dipanen: 9, kolom_baru: ['ID Toko', 'Periode'], parse_status: 'ok', parse_error: null,
     });
   });
 
@@ -1016,6 +1055,77 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii) — baris fakta shopee_a
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
     expect(persiapan.status).toBe('identitas_belum_terikat');
     expect(await loadFactAds(cpId)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEENAM) — baris fakta
+// shopee_ads_cpc → pdt_fact_ads (blocker grain G1-09-2BII-ADS-CPC, terbuka
+// sejak sesi 13, akhirnya terjawab sesi ini lewat sample asli Fim Motor —
+// lihat fakta.ts @cdps/core untuk detail).
+// ---------------------------------------------------------------------------
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEENAM) — baris fakta shopee_ads_cpc → pdt_fact_ads', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', shopId);
+  }
+
+  it('satu baris per iklan, klik TERISI (beda dari shopee_ads_live yang tidak punya kolom klik), sku_id/content_id NULL', async () => {
+    const cpId = await fixture();
+    const berkas = shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan Produk A', 'PRD-1', '447740', '21428', '616', '105473414', '10628677'],
+      ['Iklan Produk B', 'PRD-2', '1040984', '56287', '2185', '211897708', '23252704'],
+    ]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      sumber: 'shopee_ads_cpc', kampanye_id: 'Iklan Produk A', sku_id: null, content_id: null,
+      batch_id: persiapan.batchId, parser_versi: 1, tayangan: 447740, klik: 21428, pesanan_sku: 616,
+    });
+    expect(Number(rows[0].biaya)).toBe(10628677);
+    expect(Number(rows[0].gmv)).toBe(105473414);
+  });
+
+  it('baris iklan TOKO tanpa Kode Produk (mis. "Shop GMV Max", sample Fim Motor asli) tetap ditulis — kampanye_id dari nama iklan, sku_id tetap NULL', async () => {
+    const cpId = await fixture();
+    const berkas = shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Shop GMV Max', '-', '608677', '29556', '1377', '146650117', '10500000'],
+    ]);
+    await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ sumber: 'shopee_ads_cpc', kampanye_id: 'Shop GMV Max', sku_id: null });
+  });
+
+  it('dua iklan untuk Kode Produk yang SAMA ⇒ dua baris terpisah (kampanye_id = nama iklan membedakan, bukan Kode Produk)', async () => {
+    const cpId = await fixture();
+    const berkas = shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan Manual', 'PRD-1', '1000', '100', '20', '2000000', '150000'],
+      ['Iklan Otomatis', 'PRD-1', '500', '50', '5', '400000', '50000'],
+    ]);
+    await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    const rows = await loadFactAds(cpId);
+    expect(rows.map((r) => r.kampanye_id)).toEqual(['Iklan Manual', 'Iklan Otomatis']);
+  });
+
+  it('commit ULANG periode yang sama ⇒ baris LAMA diganti (replace-on-recommit), sama pola shopee_ads_live', async () => {
+    const cpId = await fixture();
+    const pertama = shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan A', 'PRD-1', '1000', '100', '20', '2000000', '150000'],
+    ]);
+    await commitUploadBatch(sql, ownerActor(), cpId, [pertama], []);
+    expect(await loadFactAds(cpId)).toHaveLength(1);
+
+    const kedua = shopeeAdsCpcBerkasLengkap('ads-cpc-revisi.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan A (revisi)', 'PRD-1', '1500', '150', '25', '2500000', '175000'],
+    ]);
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, [kedua], []);
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(Number(rows[0].biaya)).toBe(175000);
   });
 });
 
@@ -1393,7 +1503,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEEMPAT) — tt_tr
 // → pdt_fact_creator_period (sisi Shopee, lihat fakta.ts @cdps/core untuk kenapa
 // shopee_ams_produk saudaranya TIDAK dipetakan — grain per PRODUK, bukan per-kreator).
 // ---------------------------------------------------------------------------
-const HEADER_SHOPEE_AMS_AFILIASI = ['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Komisi', 'ROI'];
+const HEADER_SHOPEE_AMS_AFILIASI = ['ID Affiliates', 'Username Affiliate', 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi Komisi(Rp)', 'ROI'];
 
 /** `shopee_ams_afiliasi` — tidak membawa preamble/periode sendiri (sama pola `shopeeParentSkuBerkasMulti`, dipasangkan dengan `shopeeAdsCpcBerkas` di tes di bawah). */
 function shopeeAmsAfiliasiBerkas(nama: string, baris: readonly [string, string, string][]): PdtPreviewBerkasInput {

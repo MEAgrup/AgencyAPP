@@ -238,28 +238,59 @@ Bucket 2 (derived-add — `report/shopee/metrik.ts:250` `pengunjung_produk`, sum
 | `Pengunjung Produk (Kunjungan)` (alias: `pengunjung produk`) | -- konsumen: dim product_performance(0.14), sumbu X 4-kuadran Shopee (`report/shopee/metrik.ts:747-749` `computeQuadrants`) | sumbu traffic kuadran kolaps → dimensi 0.14 tak bisa dihitung |
 
 ### 2.3 `shopee_ads_cpc` — `Data+Keseluruhan+Iklan+Shopee-*.csv` (header baris 8)
-Bucket 1:
+> **Dikoreksi sesi 19 (docs/DECISIONS.md 2026-09-14 modul KEENAM) terhadap sample EKSPOR ASLI
+> (Fim Motor)** — dua koreksi terhadap versi sebelumnya di sini, keduanya TEBAKAN yang TIDAK
+> PERNAH cocok berkas nyata: (1) `ID Toko`/`Periode` adalah PREAMBLE (baris 1-6, Rule 2),
+> **BUKAN** kolom baris header — dipindah dari bucket 1 di bawah (dulu ditulis seolah kolom
+> header, sempat membuat `kolomDipanen`/`pdt_parser_modul` SALAH selama G1-02 s.d. sesi 18: baris
+> header manapun tidak akan pernah punya sel bernama "ID Toko"/"Periode" secara harfiah). (2)
+> Kolom ACOS **bukan** "mis." lagi — ejaan PERSIS sample asli: `Persentase Biaya Iklan terhadap
+> Penjualan dari Iklan (ACOS)`. **Grain baris TERBUKTI per IKLAN** (bukan per produk) — baris
+> "Shop GMV Max" di sample asli TIDAK punya `Kode Produk` sama sekali (iklan toko, bukan iklan
+> produk) tapi tetap baris data sah; `kampanye_id` (`pdt_fact_ads`) karena itu memakai `nama
+> iklan`, bukan `Kode Produk` (lihat `packages/core/src/pdt/fakta.ts` docblock kepala berkas untuk
+> rincian). `Kode Produk` **TIDAK** dipakai sebagai `pdt_fact_ads.sku_id` (dikoreksi dari baris di
+> bawah) — ia level PRODUK INDUK, `pdt_sku_master` berkunci PER VARIAN, jadi lookup langsung akan
+> mengarang varian; `sku_id` modul ini tetap `null` (Open `G1-09-2BII-ADS-CPC-SKU`).
+
+Preamble (Rule 2, DIVALIDASI terpisah dari kolom baris header — lihat `ekstrakPreambleShopee`,
+bukan bagian `kolomDipanen`):
 
 | Kolom | Konsumen |
 |---|---|
-| preamble `ID Toko` / `Periode` | -- konsumen: identitas toko (Rule 2), periode batch (Rule 5) |
-| `Kode Produk` | -- konsumen: pdt_fact_ads.sku_id |
-| `Dilihat` | -- konsumen: pdt_fact_ads.impresi |
-| `Klik` (`Jumlah Klik`) | -- konsumen: pdt_fact_ads.klik |
+| `ID Toko` | -- konsumen: identitas toko (Rule 2) |
+| `Periode` | -- konsumen: periode batch (Rule 5) |
+
+Bucket 1 (kolom baris header sesungguhnya):
+
+| Kolom | Konsumen |
+|---|---|
+| `nama iklan` | -- konsumen: pdt_fact_ads.kampanye_id (KUNCI baris — bukan Kode Produk, lihat catatan di atas) |
+| `Kode Produk` | -- konsumen: identitas produk untuk konsumen LAIN (bukan `sku_id`, lihat catatan di atas — bisa `'-'` untuk iklan toko) |
+| `Dilihat` | -- konsumen: pdt_fact_ads.tayangan |
+| `Jumlah Klik` | -- konsumen: pdt_fact_ads.klik |
 | `Konversi` | -- konsumen: pdt_fact_ads.pesanan_sku |
 | `Biaya` | -- konsumen: pdt_fact_ads.biaya, dim roas_channel(0.22) |
+| `omzet penjualan` | -- konsumen: pdt_fact_ads.gmv, dim roas_channel(0.22) |
+| `Efektifitas Iklan` | -- konsumen: pdt_fact_ads.roas, dim roas_channel(0.22) (`metrik.ts:464`) |
 
 Bucket 2 (derived-add — `report/shopee/metrik.ts:460-477` `ads_toko`/`ads_produk`/`ads_banner`):
 
 | Kolom | Konsumen | Dampak bila hilang |
 |---|---|---|
-| `nama iklan` | -- konsumen: dim roas_channel(0.22) label kampanye | kampanye tak bisa dikelompokkan |
-| `omzet penjualan` | -- konsumen: pdt_fact_ads.gmv, dim roas_channel(0.22) | ROAS Shopee kehilangan sisi pendapatan |
-| `Efektifitas Iklan` (ROAS) | -- konsumen: dim roas_channel(0.22) (`metrik.ts:464`) | dimensi 0.22 kehilangan input utama |
-| kolom `(ACOS)` (mis. `Biaya Iklan Terhadap Omzet (ACOS) (%)`) | -- konsumen: `HealthAds.acos`, B-4.3 (`metrik.ts:465-466`) | ACOS toko tak terhitung |
+| `Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)` | -- konsumen: `HealthAds.acos`, B-4.3 (`metrik.ts:465-466`) — TIDAK ada kolom skema `pdt_fact_ads` untuknya, konsumennya domain LAIN | ACOS toko tak terhitung |
 
 ### 2.4 `shopee_ads_search` — `Search-Ads-Overall-Data-*.csv` (header baris 8)
-Bucket 1: `klik`, `konversi` ⇒ `pdt_fact_ads`.
+Bucket 1: `Jumlah Klik`, `Konversi` ⇒ `pdt_fact_ads`. **Ejaan DIKOREKSI sesi lanjutan pasca-sesi
+20 (docs/DECISIONS.md 2026-09-14)** terhadap sample EKSPOR ASLI Fim Motor — ejaan huruf kecil
+sebelumnya (`klik`/`konversi`) tidak pernah diverifikasi dan tidak pernah cocok berkas nyata.
+
+**Temuan baru sesi ini (belum diimplementasikan, belum jadi keputusan whitelist):** sample asli
+JUGA membuktikan kolom `Nama Iklan` (identitas kampanye) dan `Biaya` (`pdt_fact_ads.biaya` NOT
+NULL) SUNGGUH ADA di berkas ini — premis `G1-09-2BII-ADS-SEARCH` ("nol kolom biaya/identitas")
+sudah usang. Menambah keduanya ke `kolomDipanen` (memungkinkan modul ini akhirnya menulis
+`pdt_fact_ads`, pola sama `shopee_ads_cpc`) BELUM dilakukan — itu keputusan desain whitelist baru
+(sama kelas Q-6), bukan koreksi ejaan, sengaja tidak ditebak sesi ini.
 
 Bucket 3 (human call — **ditahan**, bukan dibuang, ketokan Q-6): `Kata Pencarian`, `SOV`. Riset
 keyword belum punya konsumen yang dibangun; menunggu Anty menjawab apakah dibangun atau memang
@@ -269,27 +300,100 @@ dibuang secara permanen (§6 handoff, baris ketiga).
 Bucket 1: `ID Iklan`, `Penonton`, `Pesanan`, `Omzet`, `Biaya`, `Efektifitas Iklan` ⇒ `pdt_fact_ads`.
 Tidak ada baris bucket 2.
 
-### 2.6 `shopee_live` — `live_streaming_*.xlsx` (3 sheet)
-Bucket 1: `Informasi Streaming`, `Waktu Mulai`, `Pengunjung`, `Penjualan` ⇒ `pdt_fact_content` jenis
-`live`. Tidak ada baris bucket 2.
+### 2.6 `shopee_live` — `live_streaming_*.xlsx` (3 sheet, sheet "Daftar Streaming")
+Bucket 1: `Informasi Streaming`, `Waktu Mulai`, `Pengunjung`, `Penjualan (Pesanan Siap Dikirim)(Rp)`
+⇒ `pdt_fact_content` jenis `live`. **Ejaan kolom terakhir DIKOREKSI sesi lanjutan pasca-sesi 20**
+terhadap sample asli Fim Motor (`'Penjualan'` polos tidak pernah cocok). Tidak ada baris bucket 2.
+Blocker identitas `G1-09-2BII-SHOPEELIVE` (tidak ada kolom ID sesi live yang stabil di sample yang
+sama) TETAP terbuka — koreksi ini tidak menyentuhnya.
 
 ### 2.7 `shopee_video` — `video-overview-v3*.csv` (header 2 lapis, 54 kolom)
-Bucket 1: transaksi, kunjungan, sumber penonton, konversi (11 dari 54 kolom) ⇒ `pdt_fact_content`.
-Tidak ada baris bucket 2 — §7 menandai modul ini sudah lengkap terhadap konsumen yang
-diverifikasi; 43 kolom sisanya sengaja tidak dipanen (Example §5).
+> **TEMUAN DEFINITIF sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** — sample asli
+> Fim Motor (`video-overview-v3_1m_2026-07-31_h4hr6t1_1786349868376.csv`) akhirnya dibaca isinya
+> secara PENUH (32 baris, bukan cuma dua baris header). Hasilnya BUKAN "kolom belum
+> diverifikasi" seperti dicatat sejak G1-02 — berkas ini **TIDAK PUNYA BARIS PER VIDEO SAMA
+> SEKALI**. Baris data satu-satunya (baris 3) adalah AGREGAT SATU AKUN untuk seluruh periode
+> (`Periode Data` = rentang tanggal penuh, `User Id` = satu akun toko) — bukan satu baris per
+> video. Baris 6-32 adalah blok ringkasan TAMBAHAN per sumber kunjungan ("Kunjungan - Sumber
+> Penonton - Toko Saya"/"Pencarian"/"Rekomendasi"/dst.), juga agregat, bukan per video. **NOL
+> dari 54 kolom adalah identitas video** (tidak ada "ID Video"/"Video ID"/nama file/URL apa pun)
+> — konsisten dengan tidak adanya baris per video untuk dijadikan identitas.
+>
+> **Kesimpulan: berkas ini secara struktural TIDAK BISA menulis `pdt_fact_content` (grain per
+> video, `platform_content_id` NOT NULL) — bukan soal kolom mana yang dipilih dari 54, tapi
+> karena tidak ada baris video sama sekali di export "Video Overview" Shopee.** Ini BEDA dari
+> `shopee_ads_cpc`/`shopee_ads_search` (data cukup, cuma ejaan salah) DAN dari
+> `shopee_diskon`/`shopee_flash_sale` (data cukup, whitelist belum diputuskan) — di sini datanya
+> sendiri secara struktural salah bentuk untuk tujuan modul ini. `tandaTanganKolom` TETAP
+> `UNVERIFIED_SIGNATURE` (kode TIDAK diubah) — menyalakan deteksi untuk berkas yang tidak bisa
+> menulis apa pun tetap tidak berguna. Kemungkinan sumber per-video yang benar (`Content
+> Performance`/daftar video individual Shopee Seller Center) BELUM pernah diunggah — dicatat
+> Open baru `docs/DECISIONS.md` `G1-09-2BII-SHOPEEVIDEO-GRAIN`.
+
+Bucket 1 LAMA (sebelum temuan di atas — TIDAK BERLAKU lagi, dipertahankan di sini sebagai
+riwayat): transaksi, kunjungan, sumber penonton, konversi (11 dari 54 kolom) ⇒ `pdt_fact_content`.
+Bucket ini TIDAK PERNAH bisa diisi dari sample yang ada — lihat catatan di atas.
 
 ### 2.8 `shopee_voucher` / `shopee_diskon` / `shopee_flash_sale`
-Bucket 1: penjualan 2 basis, klaim, tingkat penggunaan, biaya promo ⇒ dimensi promo + biaya promo.
-Tidak ada baris bucket 2.
+`shopee_voucher` bucket 1: penjualan 2 basis, klaim, tingkat penggunaan, biaya promo ⇒ dimensi
+promo + biaya promo (`modules.ts` — SUDAH cocok persis sample asli `voucher_*.xlsx`). Tidak ada
+baris bucket 2.
+
+> **`shopee_diskon`/`shopee_flash_sale` MASIH `UNVERIFIED_SIGNATURE` (kode tidak diubah sesi ini)
+> — TAPI struktur header asli sudah terbaca sesi lanjutan pasca-sesi 20** (Fim Motor
+> `discount_20260701-20260731.xlsx` sheet "Kriteria Utama"/"Rincian Performa" dan
+> `In_Shop_Flash_Sale_Metrics_*.xlsx` sheet "Kriteria Utama"). Deskripsi prosa di atas ("penjualan
+> 2 basis, klaim, tingkat penggunaan, biaya promo" — disamakan dengan `shopee_voucher`) TERNYATA
+> **TIDAK COCOK** untuk `shopee_diskon`: sample asli TIDAK PUNYA kolom `Klaim`/`Tingkat
+> Penggunaan`/`Total Biaya` sama sekali — strukturnya justru jauh lebih kaya (26 kolom: `Tanggal`,
+> `Tipe Promosi` [nilai: "Semua"/"Diskon"/"Paket Diskon"/"Kombo Hemat"], penjualan 2 basis, produk
+> terjual 2 basis, pembeli 2 basis, PLUS rincian "Paket Diskon"/"Kombo Hemat" — produk utama vs
+> produk tambahan). Anchor pembeda YANG TERVERIFIKASI: `Tanggal`+`Tipe Promosi` (tidak dimiliki
+> `shopee_voucher`, yang ber-`Periode Waktu`+`Klaim`).
+>
+> `shopee_flash_sale` (`In_Shop_Flash_Sale_Metrics_*.xlsx`) LEBIH dekat ke struktur `shopee_voucher`
+> (sama-sama `Periode Waktu`) TAPI juga TIDAK punya `Klaim`/`Total Biaya` — kolom uniknya `Jumlah
+> Produk Dilihat`/`Produk Diklik`/`Persentase Klik` (funnel tampilan, bukan promo cost). Anchor
+> pembeda yang terverifikasi: `Periode Waktu`+`Jumlah Produk Dilihat` (tidak dimiliki
+> `shopee_voucher`/`shopee_diskon`).
+>
+> **Kenapa TIDAK langsung dikodekan sesi ini**: sinyal deteksi (`tandaTanganKolom`) BISA ditulis
+> dari temuan di atas, tapi `kolomDipanen` (kolom mana yang genuinely mau dipanen dari struktur
+> yang TERNYATA beda dari asumsi PRD) adalah keputusan desain baru — kelas sama Q-6 — bukan
+> koreksi ejaan. Menyalakan deteksi TANPA `kolomDipanen` yang diputuskan berarti modul akan
+> `parse_status='ok'` vakum (nol kolom divalidasi, nol data dipanen) tanpa AM pernah tahu —
+> lebih berbahaya daripada tetap `UNVERIFIED_SIGNATURE`. Dicatat sebagai Open baru
+> `docs/DECISIONS.md` untuk Anty/Hans: kolom mana dari struktur asli di atas yang mau dipanen.
 
 ### 2.9 `shopee_chat` / `shopee_chat_broadcast`
-Bucket 1: waktu respon, % dibalas, CSAT, konversi chat (`shopee_chat`); penerima, dibaca, diklik,
-pesanan (`shopee_chat_broadcast`) ⇒ dimensi layanan / CRM. Tidak ada baris bucket 2.
+> **`kolomDipanen` DIKOREKSI sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** terhadap
+> sample EKSPOR ASLI (Fim Motor, `chat_*.xlsx` + `Chat_Broadcast_overview_*.xlsx`). `shopee_chat`:
+> `'Persentase Chat Dibalas'` DIHAPUS — sample tidak punya kolom itu sama sekali (bukan salah eja).
+> `shopee_chat_broadcast`: SELURUH whitelist huruf kecil (`penerima`/`dibaca`/`diklik`/`pesanan`,
+> "TEBAKAN KONVENSI" per catatan lama) dikoreksi ke ejaan Title Case PERSIS sample asli — modul ini
+> SELALU `parse_status='gagal'` sejak G1-02 (belum punya writer, jadi belum pernah terlihat di
+> produksi, beda dari `shopee_ams_afiliasi` yang sudah SEMPAT rusak diam-diam di produksi).
+
+Bucket 1: `Periode Waktu`, `Pengunjung`, `Jumlah Chat`, `Chat Dibalas`, `Waktu Respon Rata-rata`,
+`CSAT %`, `Total Pesanan`, `Penjualan (IDR)`, `Tingkat Konversi (Chat Dibalas)` (`shopee_chat`);
+`Total Penerima`, `Penerima yang Membaca`, `Penerima yang Mengklik`, `Pesanan`
+(`shopee_chat_broadcast`) ⇒ dimensi layanan / CRM. Tidak ada baris bucket 2.
 
 ### 2.10 `shopee_ams_produk` / `shopee_ams_afiliasi`
-Bucket 1: `Kode Item`/`ID Affiliates`, omzet, **`komisi`**, ROI ⇒ sinyal PX sisi Shopee /
-`pdt_fact_creator_period` Shopee. `komisi` di sini adalah sumber **`commission_pct`** Shopee untuk
-PX Flow D (celah PX #1, §4) — sudah bucket 1, bukan tambahan baru. Tidak ada baris bucket 2.
+> **Ejaan kolom DIKOREKSI sesi 20 (docs/DECISIONS.md 2026-09-14) terhadap sample EKSPOR ASLI**
+> (Fim Motor, `ProductPerformance_*.csv` + `AMSAffiliatePerformance_*.csv`) — ejaan sebelumnya di
+> sini ('Nama Produk' untuk `shopee_ams_produk`; 'Username'/'Omzet'/'Komisi' polos untuk
+> keduanya) TIDAK PERNAH cocok berkas nyata: header sungguhan ber-`Nama Item` (bukan `Nama
+> Produk` — deteksi `shopee_ams_produk` GAGAL TOTAL, bukan cuma kolomDipanen), `Username
+> Affiliate` (bukan `Username` polos), `Omzet Penjualan(Rp)` (bukan `Omzet` polos), `Estimasi
+> Komisi(Rp)` (bukan `Komisi` polos). Tabel di bawah sudah ejaan yang BENAR.
+
+Bucket 1: `Kode Item` (`shopee_ams_produk`) / `ID Affiliates`+`Username Affiliate`
+(`shopee_ams_afiliasi`), `Omzet Penjualan(Rp)`, **`Estimasi Komisi(Rp)`**, `ROI` ⇒ sinyal PX sisi
+Shopee / `pdt_fact_creator_period` Shopee (afiliasi saja — `shopee_ams_produk` grain PER PRODUK,
+lihat catatan `fakta.ts` kenapa saudaranya TIDAK dipetakan ke tabel per-kreator ini). `Estimasi
+Komisi(Rp)` di sini adalah sumber **`commission_pct`** Shopee untuk PX Flow D (celah PX #1, §4) —
+sudah bucket 1, bukan tambahan baru. Tidak ada baris bucket 2.
 
 ### 2.11 `shopee_kesehatan` — **MODUL BARU, tidak ada di §7 sama sekali**
 Bucket 2 (derived-add — modul penuh, `report/shopee/metrik.ts:516-540` `parseKesehatan`,
@@ -308,10 +412,17 @@ kasus "27 kolom dari sekian ratus", modulnya sendiri yang absen dari §7.
 
 ## 3. Lintas platform
 
-### 3.1 `meta_ads` — `Laporan-tanpa-judul-Jul-*.xlsx`
-Bucket 1: `Nama kampanye`, `Nama iklan`, `Jumlah yang dibelanjakan`, `Nilai Konversi Pembelian`,
-`ROAS`, `Impresi`, `Klik tautan`, `CTR`, `CPM`, `CPC` ⇒ modul opsional (PDT-22), tidak masuk
-rekonsiliasi.
+### 3.1 `meta_ads` — `Laporan-tanpa-judul-Jul-*.xlsx` (sheet "Raw Data Report")
+> **Ejaan kolom DIKOREKSI sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** terhadap
+> sample EKSPOR ASLI Fim Motor — 6 dari 11 kolom lama hilang sufiks panjang khas Meta Ads Manager
+> yang sel asli sungguh punya (mis. `'Jumlah yang dibelanjakan'` → `'Jumlah yang dibelanjakan
+> (IDR)'`, `'ROAS'` → `'ROAS pembelian khusus untuk item bersama'`). Set kolom TIDAK berubah
+> secara konsep, cuma ejaannya dikoreksi.
+
+Bucket 1: `Nama kampanye`, `Nama iklan`, `Jumlah yang dibelanjakan (IDR)`, `Nilai Konversi
+Pembelian Khusus untuk Item Bersama`, `ROAS pembelian khusus untuk item bersama`, `Impresi`, `Klik
+tautan`, `CTR Unik (rasio klik tayang tautan)`, `CPM (Biaya Per 1.000 Tayangan)`, `CPC (biaya per
+klik tautan)` ⇒ modul opsional (PDT-22), tidak masuk rekonsiliasi.
 
 Bucket 2 (derived-add):
 
