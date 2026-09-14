@@ -256,13 +256,20 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // (bucket 3) DITAHAN dari kolomDipanen (PDT_KOLOM_DIPANEN §2.4, ketokan
     // Q-6 menunggu Anty), kolomnya sendiri boleh dipakai untuk DETEKSI.
     tandaTanganKolom: { must: ['Kata Pencarian'] },
-    barisHeaderHint: 8, // PRD §7.2: "header baris 8"
-    // PDT_KOLOM_DIPANEN §2.4 menulis "klik, konversi" huruf kecil (gaya
-    // parafrase, bukan kutipan literal) — casing pastinya BELUM terverifikasi
-    // ke sample asli. Disimpan apa adanya (huruf kecil) supaya ketidakpastian
-    // ini tidak tersembunyi di balik Title Case yang menyesatkan; G1-05 wajib
-    // verifikasi ulang sebelum panen sungguhan.
-    kolomDipanen: ['klik', 'konversi'],
+    barisHeaderHint: 8, // PRD §7.2: "header baris 8"; DIKONFIRMASI baris 8 persis lewat sample asli Fim Motor (Search-Ads-Overall-Data-*.csv).
+    // Ejaan DIKOREKSI terhadap sample asli Fim Motor sesi ini — casing lama
+    // huruf kecil ('klik'/'konversi') TIDAK PERNAH cocok header nyata
+    // (`validasiKolomWajib` exact per-sel setelah normalisasi kosakata, sel
+    // sungguhan ber-'Jumlah Klik'/'Konversi', bukan sel literal 'klik'/
+    // 'konversi' — bug laten kelas sama `shopee_ads_cpc` sesi 19). Sample
+    // yang sama JUGA membuktikan kolom 'Nama Iklan' (identitas kampanye) dan
+    // 'Biaya' (NOT NULL di `pdt_fact_ads`) SUNGGUH ADA di berkas ini —
+    // premis `G1-09-2BII-ADS-SEARCH` ("nol kolom biaya/identitas") sudah
+    // usang, TAPI belum ditambahkan ke kolomDipanen di sini: menambah
+    // keduanya berarti keputusan desain whitelist baru (sama kelas Q-6),
+    // bukan sekadar koreksi ejaan — dicatat sebagai temuan baru di
+    // `docs/DECISIONS.md`, bukan diam-diam diperluas sesi ini.
+    kolomDipanen: ['Jumlah Klik', 'Konversi'],
     wajib: false,
   },
   {
@@ -280,8 +287,16 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     platform: 'shopee',
     namaTampilan: 'Shopee — Live Streaming',
     tandaTanganKolom: { must: ['Informasi Streaming', 'Waktu Mulai'] },
-    barisHeaderHint: 1,
-    kolomDipanen: ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan'],
+    barisHeaderHint: 1, // DIKONFIRMASI: sheet "Daftar Streaming" (dari 3 sheet workbook), sample asli Fim Motor `live_streaming_*.xlsx`.
+    // 'Penjualan' DIKOREKSI ke ejaan PERSIS sample asli — ejaan lama adalah
+    // TEBAKAN yang tidak pernah cocok berkas nyata (kolom sungguhan
+    // 'Penjualan (Pesanan Siap Dikirim)(Rp)'), bug laten kelas sama
+    // `shopee_ads_cpc` sesi 19. TIDAK menutup `G1-09-2BII-SHOPEELIVE` —
+    // blocker itu soal `Informasi Streaming` (judul bebas AM, bukan ID
+    // platform stabil) sebagai identitas `pdt_fact_content`, sample yang
+    // sama TIDAK membawa kolom ID sesi live mana pun; koreksi ini murni
+    // ejaan whitelist, bukan resolusi identitas.
+    kolomDipanen: ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan (Pesanan Siap Dikirim)(Rp)'],
     wajib: true, // menutup dimensi Live Shopee yang hari ini struktural maks 5/10 (PRD §7.2)
   },
   {
@@ -353,10 +368,17 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
         { must: ['Periode Waktu', 'Jumlah Chat'] },
       ],
     },
-    barisHeaderHint: 1,
+    barisHeaderHint: 1, // DIKONFIRMASI: sheet "Kriteria Utama", sample asli Fim Motor `chat_*.xlsx`.
+    // 'Persentase Chat Dibalas' DIHAPUS sesi ini — sample asli TIDAK punya
+    // kolom itu sama sekali (Rule 9 exact-match tidak pernah menemukannya,
+    // bug laten kelas sama `shopee_ads_cpc`/AMS). Sample punya
+    // 'Tingkat Konversi (Chat Dibalas)' — SEMANTIK BERBEDA (tingkat konversi,
+    // bukan persentase dibalas), bukan pengganti 1:1, jadi tidak disubstitusi
+    // begitu saja (CLAUDE.md: jangan mengarang). Sembilan kolom lain di
+    // bawah SUDAH cocok persis (exact match) ke sample asli.
     kolomDipanen: [
       'Periode Waktu', 'Pengunjung', 'Jumlah Chat', 'Chat Dibalas', 'Waktu Respon Rata-rata', 'CSAT %',
-      'Persentase Chat Dibalas', 'Total Pesanan', 'Penjualan (IDR)', 'Tingkat Konversi (Chat Dibalas)',
+      'Total Pesanan', 'Penjualan (IDR)', 'Tingkat Konversi (Chat Dibalas)',
     ],
     wajib: false,
   },
@@ -366,14 +388,21 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     namaTampilan: 'Shopee — Chat Broadcast',
     // PRD §7.3 (baris shopee_chat_broadcast §7.2 sebenarnya) menulis
     // "penerima, dibaca, diklik, pesanan" huruf kecil — parafrase, bukan
-    // kutipan literal (pola sama dengan shopee_ads_search di atas). Casing
-    // Title Case di bawah adalah TEBAKAN KONVENSI (nama Shopee lain memakai
-    // Title Case), BUKAN dikutip dari sample — ditandai di `kolomDipanen`
-    // dengan casing yang sama seperti prosa PRD untuk kejujuran, dan sinyal
-    // deteksi memakai gabungan yang paling mustahil bentrok dengan modul lain.
+    // kutipan literal. `tandaTanganKolom` TIDAK diubah (substring
+    // case-insensitive lintas-sel-dalam-satu-baris tetap cocok ke header
+    // asli — 'penerima' ada di sel 'Total Penerima', 'dibaca' di sel
+    // 'Persentase Chat Dibaca', 'diklik' di sel 'Persentase Chat Diklik' —
+    // deteksi SUDAH benar sejak awal, sama pola `shopee_ams_afiliasi`).
     tandaTanganKolom: { must: ['penerima', 'dibaca', 'diklik'] },
-    barisHeaderHint: 1,
-    kolomDipanen: ['penerima', 'dibaca', 'diklik', 'pesanan'],
+    barisHeaderHint: 1, // DIKONFIRMASI: sample asli Fim Motor `Chat_Broadcast_overview_*.xlsx` (sheet pertama).
+    // `kolomDipanen` DIKOREKSI ke ejaan PERSIS sample asli — `validasiKolomWajib`
+    // (EXACT per-sel, beda dari deteksi substring di atas) TIDAK PERNAH
+    // menemukan sel literal 'penerima'/'dibaca'/'diklik' (hanya 'pesanan'
+    // yang kebetulan cocok exact ke sel 'Pesanan') — modul ini SELALU
+    // `parse_status='gagal'` untuk berkas asli sejak G1-02, bug laten kelas
+    // sama `shopee_ads_cpc`/AMS (belum pernah tertangkap, modul ini belum
+    // pernah punya writer `pdt_fact_*`).
+    kolomDipanen: ['Total Penerima', 'Penerima yang Membaca', 'Penerima yang Mengklik', 'Pesanan'],
     wajib: false,
   },
   {

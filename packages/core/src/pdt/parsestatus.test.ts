@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PDT_MODULES } from './modules';
 import {
   LABEL_DIMENSI_TIDAK_TERSEDIA,
   cariKolomWajib,
@@ -8,6 +9,8 @@ import {
   validasiKolomWajib,
   type PdtDimensiSkor,
 } from './parsestatus';
+
+const kolomDipanenModul = (kode: string): readonly string[] => PDT_MODULES.find((m) => m.kode === kode)!.kolomDipanen;
 
 describe('cariKolomWajib (Rule 9)', () => {
   const header = ['Kode Produk', 'GMV dari kreator', 'CTOR'];
@@ -43,6 +46,54 @@ describe('validasiKolomWajib (Rule 9)', () => {
   it('alias menyelamatkan kolom dari dianggap hilang', () => {
     const gagal = validasiKolomWajib(header, ['GMV Kreator'], { 'GMV Kreator': ['GMV dari kreator'] });
     expect(gagal).toEqual([]);
+  });
+});
+
+describe('validasiKolomWajib × PDT_MODULES.kolomDipanen — header PERSIS sample asli Fim Motor (bug laten sesi lanjutan pasca-sesi 20)', () => {
+  // Header baris tunggal diambil langsung dari berkas ekspor Shopee asli
+  // (Fim Motor, diunggah pemilik) — bukan fixture yang ditulis untuk cocok
+  // dengan tebakan kolomDipanen (kelas kesalahan yang menyembunyikan bug
+  // `shopee_ads_cpc`/AMS sampai sesi 19/20).
+
+  it('shopee_ads_search — header baris 8, Search-Ads-Overall-Data-*.csv', () => {
+    const header = [
+      'Urutan', 'Nama Iklan', 'Status', 'Tampilan Iklan', 'Mode Bidding', 'Kata Pencarian', 'Tanggal Mulai',
+      'Tanggal Selesai', 'SOV', 'Dilihat', 'Jumlah Klik', 'Persentase Klik', 'Konversi', 'Konversi Langsung',
+      'Tingkat konversi', 'Tingkat Konversi Langsung', 'Biaya per Konversi', 'Biaya per Konversi Langsung',
+      'Produk Terjual', 'Terjual Langsung', 'Omzet Penjualan', 'Penjualan Langsung (GMV Langsung)', 'Biaya',
+      'Efektifitas Iklan', 'Efektivitas Langsung',
+      'Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)',
+      'Persentase Biaya Iklan terhadap Penjualan dari Iklan Langsung (ACOS Langsung)',
+      'Jumlah Produk Dilihat', 'Jumlah Klik Produk', 'Persentase Klik Produk',
+    ];
+    expect(validasiKolomWajib(header, kolomDipanenModul('shopee_ads_search'))).toEqual([]);
+  });
+
+  it('shopee_live — sheet "Daftar Streaming", live_streaming_*.xlsx', () => {
+    const header = [
+      'Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penonton Terbanyak', 'Rata-rata Durasi Menonton',
+      'Pesanan (COD Dibuat + non-COD Dibayar)', 'Penjualan (Pesanan Siap Dikirim)(Rp)',
+    ];
+    expect(validasiKolomWajib(header, kolomDipanenModul('shopee_live'))).toEqual([]);
+  });
+
+  it('shopee_chat — sheet "Kriteria Utama", chat_*.xlsx', () => {
+    const header = [
+      'Periode Waktu', 'Pengunjung', 'Jumlah Chat', 'Pengunjung Bertanya', 'Pertanyaan Diajukan', 'Chat Dibalas',
+      'Chat Belum Dibalas', 'Waktu Respon Rata-rata', 'CSAT %', 'Waktu Respon Chat Pertama Kali',
+      'Tingkat Konversi (Jumlah Chat yang Direspon)', 'Total Pembeli', 'Total Pesanan', 'Produk', 'Penjualan (IDR)',
+      'Tingkat Konversi (Chat Dibalas)',
+    ];
+    expect(validasiKolomWajib(header, kolomDipanenModul('shopee_chat'))).toEqual([]);
+  });
+
+  it('shopee_chat_broadcast — Chat_Broadcast_overview_*.xlsx (sheet pertama)', () => {
+    const header = [
+      'Periode Data', 'Total Penerima', 'Penerima yang Membaca', 'Penerima yang Mengklik',
+      'Penerima yang Memblokir', 'Pesanan', 'Penjualan (IDR)', 'Total Pembeli', 'Persentase Chat Dibaca',
+      'Persentase Chat Diklik', 'Tingkat Konversi (Chat Dibalas)',
+    ];
+    expect(validasiKolomWajib(header, kolomDipanenModul('shopee_chat_broadcast'))).toEqual([]);
   });
 });
 
