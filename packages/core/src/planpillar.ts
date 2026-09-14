@@ -43,7 +43,17 @@ export const PILAR_TO_DIVISI: Readonly<Record<string, string>> = {
   iklan: 'Ads',
   affiliate: 'KOL',
   live: 'Live Stream',
-  operasional: 'Ops',
+  // Sejak 2026-09-14 `Store Operation`, bukan `Ops`. Pemilik mengetok
+  // pemindahan ini sebagai SYARAT menonaktifkan `Ops` — divisi yang nol
+  // karyawan sejak lahir, sementara pekerjaan toko yang ia maksudkan justru
+  // dikerjakan `Store Operation` (M18) yang terisi tiga orang.
+  //
+  // Konsekuensi yang disengaja, bukan efek samping: `Store Operation`
+  // ber-`punyaKuotaSatuan: true` sedangkan `Ops` `false`, jadi baris yang
+  // disemai pilar `operasional` kini mendarat di divisi YANG PUNYA
+  // `TASK_CATALOG` — `taskDefaultsFor` memberinya jenis task sungguhan alih-alih
+  // jatuh ke `Lainnya`. Itu justru yang hilang selama pilar ini menunjuk `Ops`.
+  operasional: 'Store Operation',
 };
 
 /**

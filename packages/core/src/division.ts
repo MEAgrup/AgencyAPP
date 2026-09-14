@@ -72,7 +72,15 @@ export const DIVISIONS: readonly Division[] = [
   // divisi (keputusan pemilik 2026-08-27) — jadi bukan dispatch target Strategi
   // dan tidak punya kuota satuan.
   { code: 'ACCOUNT',   nama: 'Account',        aktif: true, briefAssignable: true, dispatchTarget: false, punyaKuotaSatuan: false, vendorManaged: false, urutan: 5 },
-  { code: 'OPS',       nama: 'Ops',            aktif: true, briefAssignable: true, dispatchTarget: false, punyaKuotaSatuan: false, vendorManaged: false, urutan: 6 },
+  // NONAKTIF sejak 2026-09-14 (keputusan pemilik; migrasi 20261015010000).
+  // Nol baris `role_mappings` dan nol karyawan sejak lahir — satu-satunya
+  // pekerjaan yang pernah mendarat di sini (Brief `BRF-202609-0003`, satu
+  // `plan_row`) macet justru karena tak ada orang yang bisa jadi PIC-nya.
+  // Prasyaratnya sudah dipenuhi lebih dulu: pilar `operasional` dipindahkan ke
+  // `Store Operation` (`planpillar.PILAR_TO_DIVISI`), jadi `seedRowFromPillar`
+  // tidak lagi menyemai baris ke divisi ini. Flag lain SENGAJA dibiarkan apa
+  // adanya supaya menghidupkannya kembali mengembalikan perilaku yang sama.
+  { code: 'OPS',       nama: 'Ops',            aktif: false, briefAssignable: true, dispatchTarget: false, punyaKuotaSatuan: false, vendorManaged: false, urutan: 6 },
   // M17 — optimasi SKU klien + pembuatan AI video. `punyaKuotaSatuan: true`
   // hanya sah karena `TASK_CATALOG` mendapat barisnya di migrasi yang sama.
   { code: 'AI_OPT',    nama: 'AI Optimizer',   aktif: true, briefAssignable: true, dispatchTarget: true,  punyaKuotaSatuan: true,  vendorManaged: false, urutan: 7 },

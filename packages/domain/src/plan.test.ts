@@ -783,7 +783,9 @@ describeDb('createPlanRow (RAB-14, Section P-C)', () => {
     await expect(createPlanRow(sql, am(), id, { ...ok, divisiPic: 'Finance' })).rejects.toThrow(
       MSG_PLAN_ROW_DIVISI_PIC_INVALID,
     );
-    for (const divisiPic of ['Creative', 'Ads', 'KOL', 'Live Stream', 'Account', 'Ops']) {
+    // `Ops` dicabut dari daftar sah 2026-09-14 (divisi nonaktif). `Store
+    // Operation` menggantikannya sebagai pemilik pilar `operasional`.
+    for (const divisiPic of ['Creative', 'Ads', 'KOL', 'Live Stream', 'Account', 'Store Operation']) {
       await expect(createPlanRow(sql, am(), id, { ...ok, divisiPic })).resolves.toMatchObject({ divisiPic });
     }
   });
@@ -1196,7 +1198,7 @@ describeDb('generatePlanPeriods — semai baris dari Section E', () => {
       ['iklan', 'Ads'],
       ['affiliate', 'KOL'],
       ['live', 'Live Stream'],
-      ['operasional', 'Ops'],
+      ['operasional', 'Store Operation'],
     ]);
     expect(rows.map((r) => r.kuota)).toEqual([2, 3, 4, 5, 6]);
   });

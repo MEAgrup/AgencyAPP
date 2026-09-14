@@ -96,7 +96,9 @@ describe('picGroups — dua grup picker PC-8', () => {
     expect(g[0].divisi).toEqual([
       'Creative', 'Ads', 'KOL', 'Live Stream', 'AI Optimizer', 'Store Operation',
     ]);
-    expect(g[1].divisi).toEqual(['Account', 'Ops']);
+    // `Ops` keluar dari grup Internal 2026-09-14: divisinya nonaktif, dan
+    // pilar `operasional` kini milik `Store Operation` (grup Operasional).
+    expect(g[1].divisi).toEqual(['Account']);
   });
 
   it('gabungan kedua grup = tepat BRIEF_ASSIGNABLE (tak ada divisi yang hilang dari picker)', () => {

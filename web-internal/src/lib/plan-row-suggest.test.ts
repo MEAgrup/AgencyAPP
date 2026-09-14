@@ -51,7 +51,7 @@ describe('suggestRowFromPillar', () => {
     expect(suggestRowFromPillar(pillar({ jenis: 'iklan' })).divisiPic).toBe('Ads');
     expect(suggestRowFromPillar(pillar({ jenis: 'affiliate' })).divisiPic).toBe('KOL');
     expect(suggestRowFromPillar(pillar({ jenis: 'live' })).divisiPic).toBe('Live Stream');
-    expect(suggestRowFromPillar(pillar({ jenis: 'operasional' })).divisiPic).toBe('Ops');
+    expect(suggestRowFromPillar(pillar({ jenis: 'operasional' })).divisiPic).toBe('Store Operation');
   });
 
   it('leaves divisi PIC unset for sku/harga/retensi — no single owning division', () => {
