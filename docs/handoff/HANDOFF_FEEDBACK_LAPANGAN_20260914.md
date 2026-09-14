@@ -6,7 +6,9 @@
 > Google Doc sumbernya.
 >
 > **Status: PR #375 (F-1) TERBUKA, draft.** Kode sesi ini seluruhnya ada di
-> branch `claude/tender-bardeen-pxneyu`. Tugas berikutnya **F-2 → F-3 →
+> branch `claude/tender-bardeen-pxneyu`, yang sudah **di-merge dengan `main`**
+> (32 commit, 2026-09-14) — jadi ia membawa perbaikan `seedLaporan` dan
+> gerbang suite-senyap yang baru. Tugas berikutnya **F-2 → F-3 →
 > Gelombang 3** (lihat §2), tidak perlu menunggu #375 merge kecuali disebut
 > sebaliknya.
 
@@ -305,9 +307,16 @@ kenaikan gerbang CI, supaya bentrok dengan PDT terjadi sekali dan mudah
 diselesaikan.
 
 **Nama berkas:** `supabase/migrations/20261020010000_feedback_lapangan_20260914.sql`
-Nomor itu sengaja menyisakan ruang untuk PDT G1-05..G1-11 di antaranya.
-Migrasi terakhir di repo saat handoff ini ditulis:
-`20261013010000_g1_04_pdt_raw_bucket.sql`.
+
+⚠️ **Periksa ulang nomor ini sebelum memakainya.** Migrasi terakhir bergerak
+cepat: `20261013010000_g1_04_pdt_raw_bucket.sql` saat handoff ini mulai
+ditulis, sudah `20261017010000_ops_nonaktif_pilar_operasional_ke_store_operation.sql`
+beberapa jam kemudian. `20261020010000` masih di atas keduanya, tapi ruang
+kosongnya tinggal dua slot — `ls supabase/migrations/ | tail -3` dulu, dan
+naikkan nomornya kalau PDT sudah memakan ruang itu.
+
+**Angka gerbang di bawah sudah diverifikasi ulang sesudah merge `main`
+2026-09-14 (32 commit masuk): 175/44/35/74 TIDAK berubah.**
 
 **Gerbang CI harus naik di DUA tempat pada commit yang SAMA** —
 `scripts/db-rebuild.sh:178` **dan** `.github/workflows/ci.yml:259-264`:
@@ -423,5 +432,27 @@ cd apps/api && npx vitest run     # apps/api saja (config-nya sendiri; `@/` TIDA
 cd web-internal && npx tsc --noEmit && npx eslint src/...
 ```
 
-Yang bikin tersandung sesi ini: `npx vitest run <path>` dari **root** gagal
-me-resolve alias `@/lib/...` milik `apps/api`. Jalankan dari `apps/api`.
+Yang bikin tersandung sesi ini, supaya Anda tidak mengulanginya:
+
+1. **`npx vitest run <path>` dari root gagal** me-resolve alias `@/lib/...`
+   milik `apps/api`. Jalankan dari `apps/api`.
+2. **Tarik `main` DULU sebelum membuka PR.** Branch sesi ini bercabang dari
+   `37a8a73` dan langsung mewarisi `db-and-migrations` merah yang **bukan
+   miliknya**: `seedLaporan` di `gelombang-c-showcase.e2e.test.ts`
+   menyisipkan baris `client_platforms` baru tiap panggilan, dan sejak
+   `20261009010000` memasang `uq_client_platforms_active_platform`,
+   panggilan kedua gagal di `beforeAll`. PR #369 sudah memperbaikinya di
+   `main` pagi itu juga. Satu `git merge origin/main` menghapus kegagalan
+   itu.
+3. **Kegagalan itu hanya muncul di job `db-and-migrations`.** Tes e2e
+   ber-`skipIf(!DATABASE_URL)`, jadi lokal dan job `api` tetap hijau
+   sementara CI merah. Kalau `api` hijau tapi `db-and-migrations` merah,
+   curigai e2e lebih dulu, bukan kode Anda.
+4. **Gerbang CI baru** `scripts/ci-gerbang-suite-senyap.mjs` (dari `main`,
+   PR #371) menolak berkas tes yang lolos **tanpa menjalankan satu tes
+   pun** — lahir persis dari cacat di butir 2, yang selama dua hari terbaca
+   sebagai "skipped" alih-alih merah. Berkas tes baru Anda harus
+   benar-benar menjalankan tesnya di job `db-and-migrations` juga.
+5. **`docs/DECISIONS.md` pasti bentrok** kalau PDT juga sedang jalan —
+   kedua sisi menambah baris di puncak tabel yang sama. Selesaikan dengan
+   **mempertahankan keduanya**; jangan pernah membuang baris sisi lain.
