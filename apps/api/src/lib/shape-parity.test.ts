@@ -782,6 +782,9 @@ const WIRE_TO_FE: Record<string, string> = {
   PdtModuleOptionWire: 'pdt.ts::PdtModuleOption',
   // PDT G1-09-BODY-BESAR — siapkan unggah (signed upload URL), mendahului langkah 2.
   PdtUploadUrlWire: 'pdt.ts::PdtUploadUrl',
+  // PDT G1-09 sub-langkah 2a — commit (menulis pdt_upload_batch/pdt_file sungguhan).
+  PdtCommitBatchWire: 'pdt.ts::PdtCommitBatch',
+  PdtCommitBerkasWire: 'pdt.ts::PdtCommitBerkas',
 };
 
 /**

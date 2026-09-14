@@ -8,7 +8,7 @@
  * di sini — lihat handoff untuk siapa yang perlu menjalankannya.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buatPdtRawSignedUploadUrl, buatPdtRawSignedUrl, PDT_RAW_SIGNED_URL_MAX_DETIK, unduhPdtRawObjek } from './pdt-storage';
+import { buatPdtRawSignedUploadUrl, buatPdtRawSignedUrl, PDT_RAW_SIGNED_URL_MAX_DETIK, unduhPdtRawObjek, unggahPdtRawObjek } from './pdt-storage';
 
 const prevUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const prevKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -130,6 +130,34 @@ describe('unduhPdtRawObjek (G1-09-BODY-BESAR) — bentuk request (fetch disuntik
   it('melempar error server saat Supabase belum dikonfigurasi', async () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     await expect(unduhPdtRawObjek('a.zip', vi.fn())).rejects.toThrow(/tidak dikonfigurasi/);
+  });
+});
+
+describe('unggahPdtRawObjek (G1-09 sub-langkah 2a) — bentuk request (fetch disuntik)', () => {
+  it('POST langsung ke objek bucket pdt-raw dengan service-role key + x-upsert (server-ke-server, path final Rule 44)', async () => {
+    const isi = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://proj.supabase.co/storage/v1/object/pdt-raw/CLI-1/1/2026-07-31/42.zip');
+      expect(init?.method).toBe('POST');
+      const headers = init?.headers as Record<string, string>;
+      expect(headers.apikey).toBe('service-role-key');
+      expect(headers.Authorization).toBe('Bearer service-role-key');
+      expect(headers['x-upsert']).toBe('true');
+      expect(init?.body).toBe(isi);
+      return new Response(null, { status: 200 });
+    });
+    await unggahPdtRawObjek('CLI-1/1/2026-07-31/42.zip', isi, fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('melempar error yang menyebut status saat Storage API menolak', async () => {
+    const fetchImpl = vi.fn(async () => new Response('rusak', { status: 500 }));
+    await expect(unggahPdtRawObjek('a.zip', Buffer.from([1]), fetchImpl)).rejects.toThrow(/500/);
+  });
+
+  it('melempar error server saat Supabase belum dikonfigurasi', async () => {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    await expect(unggahPdtRawObjek('a.zip', Buffer.from([1]), vi.fn())).rejects.toThrow(/tidak dikonfigurasi/);
   });
 });
 

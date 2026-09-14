@@ -138,7 +138,7 @@ export interface PdtModulTerlibat {
 }
 
 export type PdtRekonsiliasiHasil =
-  | { status: 'verified'; deltaGmvPct: number; deltaPesananPct: number }
+  | { status: 'verified'; deltaGmvPct: number; deltaPesananPct: number | null }
   | { status: 'ditolak'; deltaPct: number; pesan: string; modulPenyebab: readonly string[] };
 
 /**
@@ -147,28 +147,46 @@ export type PdtRekonsiliasiHasil =
  * kesamaan basis — lihat `hitungDeltaPersen` docblock kenapa fungsi ini
  * TIDAK menerima parameter basis: basis hidup di kunci yang pemanggil pilih
  * SEBELUM memanggil fungsi ini, bukan dicampur di sini). Ditolak bila SALAH
- * SATU (GMV atau pesanan) melebihi `AMBANG_REKONSILIASI_PERSEN`;
- * `deltaPct` yang tersimpan (`pdt_upload_batch.reconcile_delta_pct`) adalah
- * yang LEBIH BESAR dari keduanya. `modulPenyebab` (Rule 14: "menunjuk modul
- * penyebab") mengurutkan modul ber-`parseStatusOk=false` LEBIH DULU.
+ * SATU (GMV atau pesanan, KETIKA pesanan diketahui) melebihi
+ * `AMBANG_REKONSILIASI_PERSEN`; `deltaPct` yang tersimpan
+ * (`pdt_upload_batch.reconcile_delta_pct`) adalah yang LEBIH BESAR dari
+ * keduanya. `modulPenyebab` (Rule 14: "menunjuk modul penyebab") mengurutkan
+ * modul ber-`parseStatusOk=false` LEBIH DULU.
+ *
+ * `perSkuPesanan`/`shopLevelPesanan` OPSIONAL (G1-09 sub-langkah 2b,
+ * `docs/DECISIONS.md` 2026-09-14, `G1-07-PERSKU-PESANAN` Open) — **nol
+ * kolom jumlah-pesanan per-SKU terverifikasi** di `shopee_parent_sku`
+ * (`PDT_KOLOM_DIPANEN.md` §2.2, bucket 1+2 keduanya sudah dicek): whitelist
+ * hanya membawa GMV/views/klik/CR/repeat-order per SKU, nol hitungan
+ * pesanan mentah. Memaksa Rule 13 penuh hari ini berarti MENGARANG dua
+ * angka yang selalu sama (delta 0% palsu) — persis kelas bug yang Rule
+ * 13-16 dibangun untuk mencegah. Saat SALAH SATU sisi pesanan tidak
+ * diberikan (`undefined`), perbandingan pesanan DILEWATI (`deltaPesananPct:
+ * null`, BUKAN 0) — verdict hanya bergantung pada GMV sampai kolomnya
+ * ditemukan; test lama (kedua sisi selalu diisi) berperilaku identik.
  */
 export function rekonsiliasiGmvPesanan(input: {
   perSkuGmv: number;
   shopLevelGmv: number;
-  perSkuPesanan: number;
-  shopLevelPesanan: number;
+  perSkuPesanan?: number;
+  shopLevelPesanan?: number;
   modulTerlibat: readonly PdtModulTerlibat[];
 }): PdtRekonsiliasiHasil {
   const deltaGmvPct = hitungDeltaPersen(input.perSkuGmv, input.shopLevelGmv);
-  const deltaPesananPct = hitungDeltaPersen(input.perSkuPesanan, input.shopLevelPesanan);
-  if (deltaGmvPct <= AMBANG_REKONSILIASI_PERSEN && deltaPesananPct <= AMBANG_REKONSILIASI_PERSEN) {
+  const pesananDiketahui = input.perSkuPesanan != null && input.shopLevelPesanan != null;
+  const deltaPesananPct = pesananDiketahui ? hitungDeltaPersen(input.perSkuPesanan!, input.shopLevelPesanan!) : null;
+
+  const gmvGagal = deltaGmvPct > AMBANG_REKONSILIASI_PERSEN;
+  const pesananGagal = deltaPesananPct != null && deltaPesananPct > AMBANG_REKONSILIASI_PERSEN;
+
+  if (!gmvGagal && !pesananGagal) {
     return { status: 'verified', deltaGmvPct, deltaPesananPct };
   }
-  const deltaPct = Math.max(deltaGmvPct, deltaPesananPct);
+  const deltaPct = Math.max(deltaGmvPct, deltaPesananPct ?? 0);
   const modulPenyebab = [...input.modulTerlibat]
     .sort((a, b) => Number(a.parseStatusOk) - Number(b.parseStatusOk))
     .map((m) => m.kode);
-  const sebab = deltaGmvPct > AMBANG_REKONSILIASI_PERSEN ? 'GMV' : 'pesanan';
+  const sebab = gmvGagal ? 'GMV' : 'pesanan';
   return {
     status: 'ditolak',
     deltaPct,
