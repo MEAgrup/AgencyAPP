@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { api } from '@/lib/api';
+import { api, refreshSession } from '@/lib/api';
 import type { Employee, MeResponse, Role } from '@/lib/types';
 
 interface AuthState {
@@ -36,6 +36,14 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
  * Dipakai sessionStorage (bukan localStorage) supaya mati saat tab ditutup.
  */
 const SESSION_KEY = 'cdps.session.v1';
+
+/**
+ * How often a live session renews itself. Chosen to sit comfortably below any
+ * realistic access-token TTL rather than to match one: `jwt_expiry` is set in
+ * the Supabase Dashboard and is not readable from this repo, so a value derived
+ * from an assumed TTL would break silently the day someone changed it.
+ */
+const PROACTIVE_REFRESH_MS = 10 * 60 * 1000;
 
 function readCachedSession(): MeResponse | null {
   if (typeof window === 'undefined') {
@@ -109,6 +117,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // whether the session is still valid.
     refresh();
   }, [refresh]);
+
+  /**
+   * Proactive session renewal — the half of the fix the user actually feels.
+   *
+   * The 401-retry in `lib/api.ts` is a safety net: it repairs a request that
+   * has ALREADY failed. On its own it would still leave the person who came
+   * back from a two-hour meeting watching their first click fail and silently
+   * retry. The owner made "no automatic logout" a hard acceptance condition for
+   * this work (2026-09-14), so the session is renewed BEFORE it lapses.
+   *
+   * Two triggers, because neither covers the other:
+   *
+   *  - **A timer**, well under any plausible GoTrue `jwt_expiry` (the project's
+   *    TTL lives in the Supabase Dashboard, not in this repo, so this must not
+   *    assume a number — ten minutes is safely below even a short setting).
+   *  - **Tab becoming visible**, because browsers throttle timers hard in
+   *    background tabs; a laptop closed over lunch may fire no interval at all.
+   *    Renewing on the way back is what makes the FIRST click after a meeting
+   *    succeed. Same shape as the notification badge's polling
+   *    (`use-unread-count.ts`), for the same reason.
+   *
+   * `refreshSession` never throws and de-duplicates concurrent calls, so a
+   * failure here is a no-op: the session simply lapses as it did before, and
+   * the 401 path takes over. Nothing about authorization is decided here —
+   * this only keeps a cookie the server already trusts from going stale.
+   */
+  useEffect(() => {
+    if (employee === null) return;
+
+    let interval: ReturnType<typeof setInterval> | undefined;
+
+    const stop = () => {
+      if (interval !== undefined) {
+        clearInterval(interval);
+        interval = undefined;
+      }
+    };
+    const start = () => {
+      if (interval === undefined) {
+        interval = setInterval(() => void refreshSession(), PROACTIVE_REFRESH_MS);
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        stop();
+        return;
+      }
+      void refreshSession();
+      start();
+    };
+
+    if (document.visibilityState !== 'hidden') {
+      start();
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [employee]);
 
   const setSession = useCallback((session: MeResponse) => {
     setEmployee(session.employee);

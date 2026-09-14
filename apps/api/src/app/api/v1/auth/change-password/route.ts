@@ -46,7 +46,15 @@
  */
 import { auth, clientPortalAuth } from '@cdps/domain';
 import { permission } from '@cdps/core';
-import { CLIENT_PORTAL_SESSION_COOKIE, requireActor, requireClientContactActor, sessionCookie } from '@/lib/auth';
+import {
+  CLIENT_PORTAL_SESSION_COOKIE,
+  refreshCookie,
+  refreshCookieNameFor,
+  requireActor,
+  requireClientContactActor,
+  SESSION_COOKIE,
+  sessionCookie,
+} from '@/lib/auth';
 import { db, readAsActor } from '@/lib/db';
 import { passwordGrant, updatePassword } from '@/lib/gotrue';
 import { BadRequestError, handle, json, readJson, UnauthorizedError } from '@/lib/http';
@@ -102,9 +110,13 @@ export async function POST(request: Request): Promise<Response> {
       throw new UnauthorizedError('[password berhasil diubah, silahkan login kembali]');
     }
 
-    const cookieName = isContact ? CLIENT_PORTAL_SESSION_COOKIE : undefined;
+    const cookieName = isContact ? CLIENT_PORTAL_SESSION_COOKIE : SESSION_COOKIE;
     const res = json({ status: 'ok' });
     res.headers.append('Set-Cookie', sessionCookie(fresh.access_token, fresh.expires_in, cookieName));
+    // Re-grant means a NEW refresh token as well; the old one belongs to the
+    // pre-change session. Writing back only the access cookie would leave the
+    // user renewable for a few minutes and then stranded.
+    res.headers.append('Set-Cookie', refreshCookie(fresh.refresh_token, refreshCookieNameFor(cookieName)));
     return res;
   });
 }

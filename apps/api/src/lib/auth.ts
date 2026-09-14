@@ -71,7 +71,13 @@ function decodePayload(payloadB64: string, now: number): JwtPayload {
   }
   const nowSec = Math.floor(now / 1000);
   if (typeof payload.exp === 'number' && nowSec >= payload.exp) {
-    throw new UnauthorizedError('token expired');
+    // BI, bracketed (CLAUDE.md #5) — unlike the other failures in this file,
+    // this one is REACHED BY ORDINARY USERS on an ordinary day, so a bare
+    // English `token expired` was the string the team actually saw. The
+    // wording matches the missing-token case below so the browser cannot tell
+    // "no cookie" from "stale cookie" by message text; `/auth/refresh` is what
+    // distinguishes them, and it runs before this ever reaches a screen.
+    throw new UnauthorizedError('[sesi tidak valid, silahkan login kembali]');
   }
   if (typeof payload.nbf === 'number' && nowSec < payload.nbf) {
     throw new UnauthorizedError('token not yet valid');
@@ -248,6 +254,43 @@ export const SESSION_COOKIE = 'cdps_access_token';
  */
 export const CLIENT_PORTAL_SESSION_COOKIE = 'cdps_client_access_token';
 
+/**
+ * Names of the httpOnly cookies holding the GoTrue REFRESH token, one per
+ * realm, alongside the access cookies above.
+ *
+ * Why a second cookie rather than one holding both: the access token is sent
+ * to (and read by) every route on every request, while the refresh token is
+ * read by exactly one route, `POST /auth/refresh`. Keeping them apart means
+ * the long-lived credential is not re-parsed on hot paths, and `Max-Age` can
+ * differ — which is the whole point. The access cookie still expires on the
+ * GoTrue TTL; the refresh cookie outlives a full working day, so nobody is
+ * sent back to the login screen because a meeting ran long (field feedback
+ * 2026-09-14; owner made "no automatic logout" a hard acceptance condition).
+ */
+export const REFRESH_COOKIE = 'cdps_refresh_token';
+export const CLIENT_PORTAL_REFRESH_COOKIE = 'cdps_client_refresh_token';
+
+/**
+ * Lifetime of the refresh cookie: 30 days.
+ *
+ * It has to clear one bar to do its job — outlast a working day, so the gap
+ * between "AM closes the laptop at 18:00" and "AM opens it at 09:00" does not
+ * become a login. Thirty days also covers a holiday without making the session
+ * effectively permanent, and GoTrue remains the real authority regardless: it
+ * rotates the token on every use and refuses one that was revoked at logout or
+ * whose user was disabled, so a cookie outliving its session buys nothing.
+ */
+export const REFRESH_MAX_AGE_SEC = 30 * 24 * 60 * 60;
+
+/** Maps an access-cookie name to the refresh-cookie name of the SAME realm, so
+ *  callers that already branch on realm for `sessionCookie` do not have to
+ *  learn a second, parallel branch (and cannot get the two out of step). */
+export function refreshCookieNameFor(sessionCookieName: string): string {
+  return sessionCookieName === CLIENT_PORTAL_SESSION_COOKIE
+    ? CLIENT_PORTAL_REFRESH_COOKIE
+    : REFRESH_COOKIE;
+}
+
 /** Reads a named cookie from the request's Cookie header, or null. */
 export function cookieValue(req: Request, name: string): string | null {
   const header = req.headers.get('cookie');
@@ -322,6 +365,32 @@ export function requireClientContactActor(req: Request): Actor {
 export function sessionCookie(token: string, maxAgeSec: number, cookieName: string = SESSION_COOKIE): string {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
   return `${cookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
+}
+
+/**
+ * Serializes the Set-Cookie header that stores the REFRESH token.
+ *
+ * `Path=/api/v1/auth` on purpose, not `/`: only the auth routes ever need this
+ * cookie, so scoping it there keeps the long-lived credential off every other
+ * request in the app rather than attaching it to hundreds of calls that have no
+ * use for it. Same httpOnly / SameSite=Lax / Secure-in-production flags as
+ * `sessionCookie` — this one is strictly more sensitive, never less.
+ */
+export function refreshCookie(
+  token: string,
+  cookieName: string = REFRESH_COOKIE,
+  maxAgeSec: number = REFRESH_MAX_AGE_SEC,
+): string {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${cookieName}=${encodeURIComponent(token)}; Path=/api/v1/auth; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
+}
+
+/** Clears the refresh cookie. The `Path` MUST match `refreshCookie`'s exactly —
+ *  a clear written at a different path leaves the original cookie in place and
+ *  logout would silently fail to end the session. */
+export function clearedRefreshCookie(cookieName: string = REFRESH_COOKIE): string {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${cookieName}=; Path=/api/v1/auth; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
 /** Serializes the Set-Cookie header that clears the session token (logout).

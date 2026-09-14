@@ -71,6 +71,63 @@ export async function passwordGrant(
 }
 
 /**
+ * refreshGrant exchanges a refresh token for a NEW session via GoTrue's
+ * `token?grant_type=refresh_token` endpoint — the mirror image of
+ * `passwordGrant` above, deliberately kept in the same shape so the two read
+ * as one pair.
+ *
+ * ## Why this exists at all
+ *
+ * CDPS has received `refresh_token` from GoTrue since the auth BFF shipped and
+ * THREW IT AWAY: nothing in the repo ever read the field. A session therefore
+ * lived exactly as long as the access token GoTrue minted at login, counted
+ * from the moment of login rather than from the last thing the user did. An AM
+ * typing into the Strategi form and an AM in a two-hour meeting were logged out
+ * at the same instant, and the only way to carry on was the 522ms `/auth/login`
+ * route — the slowest endpoint in the system. Field feedback 2026-09-14 named
+ * this three separate times ("sesi tidak valid saat klik simpan", "ter-logout
+ * otomatis", "Section A–J data hilang"); all three are this one hole.
+ *
+ * ## What this returns
+ *
+ * GoTrue rotates the refresh token on every use, so the response carries a NEW
+ * `refresh_token` as well as a new `access_token`. The caller MUST store both —
+ * writing back only the access token would leave the browser holding a refresh
+ * token GoTrue has already retired, and the session would die at the next
+ * refresh instead of the next expiry. That is worse than no refresh at all,
+ * because it fails later and less predictably.
+ *
+ * A 4xx (expired, already-rotated, revoked by logout) surfaces as
+ * UnauthorizedError carrying the CDPS BI string — that is the ONE case where
+ * the browser genuinely has to show the login screen again. Other failures
+ * throw a generic error → 500, and the caller treats them as "try again",
+ * never as "log the user out".
+ */
+export async function refreshGrant(
+  refreshToken: string,
+  fetchImpl?: FetchLike,
+): Promise<GoTrueSession> {
+  const { url, anonKey, fetchImpl: fi } = config(fetchImpl);
+  const doFetch = fi ?? fetch;
+  const res = await doFetch(`${url}/auth/v1/token?grant_type=refresh_token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: anonKey,
+      Authorization: `Bearer ${anonKey}`,
+    },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  if (res.status >= 400 && res.status < 500) {
+    throw new UnauthorizedError('[sesi tidak valid, silahkan login kembali]');
+  }
+  if (!res.ok) {
+    throw new Error(`GoTrue refresh grant failed: ${res.status}`);
+  }
+  return (await res.json()) as GoTrueSession;
+}
+
+/**
  * signOut revokes a GoTrue session server-side (best-effort). A failure here
  * never blocks logout — the cookie is cleared regardless by the caller.
  */
