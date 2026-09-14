@@ -390,10 +390,17 @@ kasus "27 kolom dari sekian ratus", modulnya sendiri yang absen dari §7.
 
 ## 3. Lintas platform
 
-### 3.1 `meta_ads` — `Laporan-tanpa-judul-Jul-*.xlsx`
-Bucket 1: `Nama kampanye`, `Nama iklan`, `Jumlah yang dibelanjakan`, `Nilai Konversi Pembelian`,
-`ROAS`, `Impresi`, `Klik tautan`, `CTR`, `CPM`, `CPC` ⇒ modul opsional (PDT-22), tidak masuk
-rekonsiliasi.
+### 3.1 `meta_ads` — `Laporan-tanpa-judul-Jul-*.xlsx` (sheet "Raw Data Report")
+> **Ejaan kolom DIKOREKSI sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** terhadap
+> sample EKSPOR ASLI Fim Motor — 6 dari 11 kolom lama hilang sufiks panjang khas Meta Ads Manager
+> yang sel asli sungguh punya (mis. `'Jumlah yang dibelanjakan'` → `'Jumlah yang dibelanjakan
+> (IDR)'`, `'ROAS'` → `'ROAS pembelian khusus untuk item bersama'`). Set kolom TIDAK berubah
+> secara konsep, cuma ejaannya dikoreksi.
+
+Bucket 1: `Nama kampanye`, `Nama iklan`, `Jumlah yang dibelanjakan (IDR)`, `Nilai Konversi
+Pembelian Khusus untuk Item Bersama`, `ROAS pembelian khusus untuk item bersama`, `Impresi`, `Klik
+tautan`, `CTR Unik (rasio klik tayang tautan)`, `CPM (Biaya Per 1.000 Tayangan)`, `CPC (biaya per
+klik tautan)` ⇒ modul opsional (PDT-22), tidak masuk rekonsiliasi.
 
 Bucket 2 (derived-add):
 
