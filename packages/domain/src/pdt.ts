@@ -421,16 +421,19 @@ export async function siapkanUploadBatch(
 // belum dibangun, koreksi catatan sebelumnya di sini/HANDOFF_PDT_SESI13.md
 // §1 butir 1) yang menulis "baris fakta sesuai whitelist (Rule 8)" —
 // `shopee_ads_live` → `pdt_fact_ads` (modul pertama), `tt_video` →
-// `pdt_fact_content` (modul kedua), dan `shopee_parent_sku`/`tt_orders` →
-// `pdt_sku_master` (modul KETIGA, sesi ini — lihat docblock `fakta.ts` untuk
-// kenapa `pdt_sku_master`, bukan `shopee_live`/`shopee_video` seperti
-// rekomendasi sesi lalu, yang keduanya ternyata BLOCKED begitu
-// diinvestigasi) adalah baris/tabel fakta PERTAMA yang benar-benar ditulis
-// (sub-langkah 2b-ii, di bawah); 22 modul/3 tabel fakta lain BELUM (peta
-// kolomDipanen→tabel fakta untuk sisanya belum ada, pekerjaan besar
+// `pdt_fact_content` (modul kedua), `shopee_parent_sku`/`tt_orders` →
+// `pdt_sku_master` (modul ketiga — lihat docblock `fakta.ts` untuk kenapa
+// `pdt_sku_master`, bukan `shopee_live`/`shopee_video` seperti rekomendasi
+// sesi lalu, yang keduanya ternyata BLOCKED begitu diinvestigasi), dan
+// `tt_transaction_creator` → `pdt_fact_creator_period` (modul KEEMPAT, sesi
+// ini — dipilih karena grain barisnya SUDAH per-kreator, nol ambiguitas kelas
+// `shopee_ads_cpc`, yang investigasi sesi ini JUSTRU menemukan blocker BARU,
+// lihat docblock `fakta.ts`) adalah baris/tabel fakta yang benar-benar
+// ditulis (sub-langkah 2b-ii, di bawah); 21 modul/2 tabel fakta lain BELUM
+// (peta kolomDipanen→tabel fakta untuk sisanya belum ada, pekerjaan besar
 // tersendiri, lihat `docs/handoff/HANDOFF_PDT_SESI12.md`/
 // `HANDOFF_PDT_SESI13.md`/`HANDOFF_PDT_SESI14.md`/`HANDOFF_PDT_SESI15.md`/
-// `HANDOFF_PDT_SESI16.md`).
+// `HANDOFF_PDT_SESI16.md`/`HANDOFF_PDT_SESI17.md`).
 //
 // **Keputusan: PIPELINE DIJALANKAN ULANG dari `storage_path` yang sama**
 // (bukan menerima cache hasil `previewUploadBatch` dari klien) — pemanggil
@@ -658,6 +661,9 @@ export async function commitUploadBatch(
   // `tt_transaction_product` seperti Rule 18 harfiah).
   const berkasParentSkuUntukMaster = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_parent_sku');
   const berkasTtOrders = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_orders');
+  // G1-09 sub-langkah 2b-ii — modul KEEMPAT, `tt_transaction_creator` → `pdt_fact_creator_period`
+  // (lihat docblock `ekstrakBarisKreatorTtTransactionCreator`, `@cdps/core` `pdt/fakta.ts`).
+  const berkasTtTransactionCreator = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_transaction_creator');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -790,6 +796,30 @@ export async function commitUploadBatch(
               harga_satuan_terakhir = coalesce(excluded.harga_satuan_terakhir, pdt_sku_master.harga_satuan_terakhir),
               status_listing = 'aktif',
               last_seen_at = excluded.last_seen_at`;
+        }
+      }
+
+      // G1-09 sub-langkah 2b-ii — modul KEEMPAT, `tt_transaction_creator` → `pdt_fact_creator_period`
+      // (lihat docblock `ekstrakBarisKreatorTtTransactionCreator`, `@cdps/core` `pdt/fakta.ts`).
+      // Kunci unik `pdt_fact_creator_period` (`client_platform_id, creator_handle, periode`)
+      // TIDAK pernah punya komponen NULL (baris ber-`Creator name` kosong sudah dilewati di
+      // ekstraksi) — `ON CONFLICT ... DO UPDATE` sungguhan AMAN, sama pola `pdt_fact_content`
+      // (bukan delete-then-insert seperti `pdt_fact_ads`).
+      if (berkasTtTransactionCreator.length > 0) {
+        for (const b of berkasTtTransactionCreator) {
+          for (const baris of pdt.ekstrakBarisKreatorTtTransactionCreator(b.aoa, b.barisHeader)) {
+            await tx`
+              insert into pdt_fact_creator_period
+                (client_platform_id, creator_handle, periode, batch_id, parser_versi,
+                 gmv, gmv_live, gmv_video, pesanan_teratribusi, aov, ctor, jumlah_live, jumlah_video, sampel_terkirim)
+              values
+                (${clientPlatformId}, ${baris.creatorHandle}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
+                 ${baris.gmv}, null, null, ${baris.pesananTeratribusi}, ${baris.aov}, ${baris.ctor}, ${baris.jumlahLive}, ${baris.jumlahVideo}, null)
+              on conflict (client_platform_id, creator_handle, periode) do update set
+                batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+                gmv = excluded.gmv, pesanan_teratribusi = excluded.pesanan_teratribusi,
+                aov = excluded.aov, ctor = excluded.ctor, jumlah_live = excluded.jumlah_live, jumlah_video = excluded.jumlah_video`;
+          }
         }
       }
 

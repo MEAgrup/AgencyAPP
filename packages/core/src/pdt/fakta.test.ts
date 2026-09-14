@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ekstrakBarisKreatorTtTransactionCreator,
   ekstrakBarisShopeeAdsLive,
   ekstrakBarisSkuMasterShopeeParentSku,
   ekstrakBarisSkuMasterTtOrders,
@@ -198,6 +199,50 @@ describe('ekstrakBarisSkuMasterTtOrders', () => {
         platformProductId: 'SKU-1', platformVariationId: '', sellerSku: null,
         namaProduk: null, namaVariasi: null, kategoriPlatform: null, hargaSatuanTerakhir: null,
       },
+    ]);
+  });
+});
+
+const HEADER_TT_TRANSACTION_CREATOR = ['Creator name', 'GMV dari kreator', 'AOV', 'CTOR', 'Pesanan teratribusi', 'Tayangan video', 'Video', 'Siaran LIVE', 'Perkiraan komisi'];
+
+describe('ekstrakBarisKreatorTtTransactionCreator', () => {
+  it('memetakan Creator name/GMV/AOV/CTOR/Pesanan teratribusi/Video/Siaran LIVE — Tayangan video/Perkiraan komisi TIDAK dipetakan (konsumen lain, bukan kolom di sini)', () => {
+    const aoa = [
+      HEADER_TT_TRANSACTION_CREATOR,
+      ['Kreator A', '2.000.000', '150.000', '5%', '10', '5000', '3', '2', '100.000'],
+    ];
+    expect(ekstrakBarisKreatorTtTransactionCreator(aoa, 1)).toEqual([
+      {
+        creatorHandle: 'Kreator A', gmv: 2000000, pesananTeratribusi: 10, aov: 150000,
+        ctor: 0.05, jumlahLive: 2, jumlahVideo: 3,
+      },
+    ]);
+  });
+
+  it('konvensi Seller Center (titik ribuan, koma desimal)', () => {
+    const aoa = [HEADER_TT_TRANSACTION_CREATOR, ['Kreator A', '1.234.567,89', '0', '0', '0', '0', '0', '0', '0']];
+    expect(ekstrakBarisKreatorTtTransactionCreator(aoa, 1)[0].gmv).toBe(1234567.89);
+  });
+
+  it('baris ber-Creator name kosong dilewati (kunci NOT NULL pdt_fact_creator_period)', () => {
+    const aoa = [HEADER_TT_TRANSACTION_CREATOR, ['', '0', '0', '0', '0', '0', '0', '0', '0']];
+    expect(ekstrakBarisKreatorTtTransactionCreator(aoa, 1)).toHaveLength(0);
+  });
+
+  it('dua kreator terpisah tetap terpetakan masing-masing', () => {
+    const aoa = [
+      HEADER_TT_TRANSACTION_CREATOR,
+      ['Kreator A', '1000000', '0', '0', '0', '0', '0', '0', '0'],
+      ['Kreator B', '500000', '0', '0', '0', '0', '0', '0', '0'],
+    ];
+    expect(ekstrakBarisKreatorTtTransactionCreator(aoa, 1).map((b) => b.creatorHandle)).toEqual(['Kreator A', 'Kreator B']);
+  });
+
+  it('kolom opsional hilang ⇒ null untuk field itu', () => {
+    const headerMinimal = ['Creator name'];
+    const aoa = [headerMinimal, ['Kreator A']];
+    expect(ekstrakBarisKreatorTtTransactionCreator(aoa, 1)).toEqual([
+      { creatorHandle: 'Kreator A', gmv: null, pesananTeratribusi: null, aov: null, ctor: null, jumlahLive: null, jumlahVideo: null },
     ]);
   });
 });

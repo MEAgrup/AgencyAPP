@@ -434,6 +434,22 @@ punya `null` eksplisit.
 > modul/tiga tabel fakta (dari enam) kini punya penulis: `pdt_fact_ads`, `pdt_fact_content`,
 > `pdt_sku_master`. Sisa 21 modul/3 tabel fakta lain (`pdt_fact_sku_period`,
 > `pdt_fact_creator_period`, sisa `pdt_fact_ads`/`pdt_fact_content`) belum disentuh.
+>
+> **Status 2026-09-14 (sub-langkah 2b-ii — MODUL KEEMPAT, `docs/DECISIONS.md` baris teratas)** —
+> `tt_transaction_creator` → `pdt_fact_creator_period` (`ekstrakBarisKreatorTtTransactionCreator`).
+> Dipilih SETELAH mengevaluasi `shopee_ads_cpc` lebih dulu (blocker lamanya — SKU master belum
+> ada — sudah tertutup) dan menemukan blocker BARU yang lebih dalam: legacy parser
+> (`report/shopee/metrik.ts` `parseAdsCsv`) mengunci baris lewat `nama iklan`, bukan `Kode Produk`
+> — menyiratkan grain SEBENARNYA modul itu mungkin satu baris PER IKLAN (bukan per produk), dan
+> salah tebak `kampanye_id` berisiko unique-violation di runtime, bukan cuma salah data. `G1-09-
+> 2BII-ADS-CPC` diperbarui (bukan ditutup) mencatat temuan ini — TETAP terbuka, butuh sample asli.
+> `tt_transaction_creator` dipilih sebagai gantinya: grain barisnya SUDAH per-kreator, cocok
+> persis kunci `pdt_fact_creator_period`, nol ambiguitas serupa. `ON CONFLICT DO UPDATE` (bukan
+> delete-then-insert) — kunci unik tabel ini tidak pernah punya komponen NULL. `Tayangan video`/
+> `Perkiraan komisi` (whitelist modul ini) SENGAJA tidak ditulis ke tabel ini (konsumen Co-Pilot/PX,
+> belum dibangun). **Empat modul/empat tabel fakta (dari enam) kini punya penulis**: `pdt_fact_ads`,
+> `pdt_fact_content`, `pdt_sku_master`, `pdt_fact_creator_period`. Sisa: `pdt_fact_sku_period`
+> (nol penulis) + 20 modul lain yang belum dipetakan ke tabel yang SUDAH punya penulis.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

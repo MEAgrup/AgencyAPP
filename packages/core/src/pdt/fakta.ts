@@ -43,17 +43,47 @@
  * `shopee_ads_cpc`/`shopee_ads_search` SENGAJA BELUM dipetakan di sini —
  * dicatat `docs/DECISIONS.md` (G1-09-2BII-ADS-CPC/G1-09-2BII-ADS-SEARCH):
  *  - `shopee_ads_cpc`: baris PER PRODUK (`Kode Produk`, PDT_KOLOM_DIPANEN.md
- *    §2.3: "konsumen: pdt_fact_ads.sku_id") — tapi `sku_id` (FK ke
- *    `pdt_sku_master`) tidak bisa diisi sampai SKU master ada. Memakai
- *    `nama iklan` sebagai `kampanye_id` sementara `sku_id` tetap NULL akan
- *    membuat produk BERBEDA di bawah kampanye/periode yang sama saling
- *    menimpa (kunci unik kolaps) — persis kelas bug Rule 13-16 dibangun
- *    untuk mencegah, bukan cuma di rekonsiliasi.
+ *    §2.3: "konsumen: pdt_fact_ads.sku_id") — `sku_id` SEKARANG BISA diisi
+ *    (`pdt_sku_master` ada sejak modul KETIGA), tapi investigasi sesi
+ *    berikutnya (setelah `pdt_sku_master` lahir) menemukan blocker BARU yang
+ *    lebih dalam: `report/shopee/detect.ts` (`ads_toko`, nama lama untuk
+ *    berkas fisik yang SAMA — `Data+Keseluruhan+Iklan+Shopee-*.csv`) parser
+ *    legacy-nya (`parseAdsCsv`, `report/shopee/metrik.ts`) mengunci baris
+ *    lewat `nama iklan`, BUKAN `Kode Produk` — menyiratkan grain SEBENARNYA
+ *    modul ini adalah **satu baris per IKLAN** (satu produk bisa punya
+ *    BANYAK iklan berjalan sekaligus), bukan satu baris per produk seperti
+ *    framing lama di baris ini menduga. Memakai `Kode Produk` sebagai
+ *    `kampanye_id` (row-key `pdt_fact_ads`) TANPA verifikasi ke sample asli
+ *    berisiko PECAH di runtime (unique-violation `uq_pdt_fact_ads` kalau
+ *    memang ada >1 iklan per produk per periode) — bukan cuma salah data
+ *    diam-diam seperti risiko lama. Dicatat `G1-09-2BII-ADS-CPC` (diperbarui,
+ *    `docs/DECISIONS.md`), TETAP terbuka sampai sample asli membuktikan
+ *    grain barisnya.
  *  - `shopee_ads_search`: `kolomDipanen` (`modules.ts`) hanya `['klik',
  *    'konversi']` (bucket 3 `Kata Pencarian`/`SOV` DITAHAN, Q-6) — nol
  *    `biaya` (NOT NULL di skema) dan nol identitas kampanye/produk. Tidak
  *    ada baris `pdt_fact_ads` yang SAH bisa ditulis dari whitelist ini hari
  *    ini sama sekali.
+ *
+ * **Modul KEEMPAT (sesi ini): `tt_transaction_creator` → `pdt_fact_creator_period`**
+ * (lihat `ekstrakBarisKreatorTtTransactionCreator` di bawah) — tabel fakta
+ * KEEMPAT yang lahir. Dipilih karena grain barisnya SUDAH per-kreator
+ * (`Creator name`, kunci `pdt_fact_creator_period`), jadi NOL ambiguitas
+ * kelas `shopee_ads_cpc` di atas — setiap kolom `kolomDipanen` modul ini
+ * ber-konsumen EKSPLISIT di `PDT_KOLOM_DIPANEN.md` §1.4 (baik yang menuju
+ * kolom skema di sini, maupun yang menuju konsumen LAIN seperti Co-Pilot/PX
+ * yang belum dibangun — `Tayangan video`/`Perkiraan komisi` TETAP tidak
+ * ditulis ke tabel ini, bukan lupa). `gmv_live`/`gmv_video`/`sampel_terkirim`
+ * SENGAJA `null` — modul ini cuma membawa GMV TOTAL kreator (bukan split
+ * live/video), dan `Sampel terkirim` MEMANG bukan bagian `kolomDipanen`
+ * modul ini (milik `tt_transaction_product`, modul LAIN, grain PER PRODUK
+ * — tidak otomatis bisa disatukan ke grain per-kreator tabel ini). **Nol
+ * filter akun toko sendiri** — legacy `report/metrik.ts` `affiliateReport`
+ * mengecualikan `akunKontenToko` dari daftar kreator (`own.has(...)`), PDT
+ * TIDAK mereplikasi filter itu di sini (dicatat, bukan lupa) — beda dari
+ * `shopee_ads_cpc` di atas, ini keputusan RENDAH RISIKO (kunci unik tabel
+ * TIDAK bisa kolaps karenanya, cuma menambah satu baris ekstra untuk toko
+ * sendiri kalau memang muncul di berkas — mudah direvisi lewat reparse).
  *
  * Angka: `parsePdtAngka(v, true)` — konvensi **Ads Manager** (titik desimal,
  * koma ribuan), BUKAN konvensi Seller Center (`angka.ts` docblock) — cermin
@@ -311,4 +341,57 @@ export function ekstrakBarisSkuMasterTtOrders(
     });
   }
   return dedupSkuMaster(hasil);
+}
+
+/** Satu baris `pdt_fact_creator_period` mentah dari `tt_transaction_creator`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi, pola sama fungsi lain di paket ini). */
+export interface PdtBarisKreatorTtTransactionCreator {
+  creatorHandle: string;
+  gmv: number | null;
+  pesananTeratribusi: number | null;
+  aov: number | null;
+  ctor: number | null;
+  jumlahLive: number | null;
+  jumlahVideo: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `tt_transaction_creator` (Rule 8 whitelist
+ * `modules.ts`: `['Creator name', 'GMV dari kreator', 'AOV', 'CTOR',
+ * 'Pesanan teratribusi', 'Tayangan video', 'Video', 'Siaran LIVE', 'Perkiraan
+ * komisi']`). `Tayangan video`/`Perkiraan komisi` SENGAJA tidak dipetakan ke
+ * field manapun di sini — konsumennya Co-Pilot/PX (`PDT_KOLOM_DIPANEN.md`
+ * §1.4), belum dibangun, BUKAN kolom `pdt_fact_creator_period`. Baris
+ * ber-`Creator name` kosong dilewati (kunci NOT NULL `pdt_fact_creator_period`).
+ * Angka: `parsePdtAngka(v)` TANPA `raw` — konvensi Seller Center, cermin
+ * `report/metrik.ts` `affiliateReport`/`reader()` (dipanggil tanpa flag `raw`).
+ */
+export function ekstrakBarisKreatorTtTransactionCreator(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisKreatorTtTransactionCreator[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iCreatorName = idx('Creator name');
+  const iGmv = idx('GMV dari kreator');
+  const iPesanan = idx('Pesanan teratribusi');
+  const iAov = idx('AOV');
+  const iCtor = idx('CTOR');
+  const iVideo = idx('Video');
+  const iLive = idx('Siaran LIVE');
+
+  const hasil: PdtBarisKreatorTtTransactionCreator[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const creatorHandle = iCreatorName === -1 ? '' : String(row?.[iCreatorName] ?? '').trim();
+    if (creatorHandle === '') continue;
+    hasil.push({
+      creatorHandle,
+      gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv]),
+      pesananTeratribusi: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan]),
+      aov: iAov === -1 ? null : parsePdtAngka(row?.[iAov]),
+      ctor: iCtor === -1 ? null : parsePdtAngka(row?.[iCtor]),
+      jumlahLive: iLive === -1 ? null : parsePdtAngka(row?.[iLive]),
+      jumlahVideo: iVideo === -1 ? null : parsePdtAngka(row?.[iVideo]),
+    });
+  }
+  return hasil;
 }

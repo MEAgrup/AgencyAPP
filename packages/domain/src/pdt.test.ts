@@ -174,6 +174,8 @@ afterEach(async () => {
   // pdt_sku_master (G1-09 sub-langkah 2b-ii, modul KETIGA) — sama alasan (FK ke client_platforms
   // TANPA ON DELETE CASCADE).
   await sql`delete from pdt_sku_master where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
+  // pdt_fact_creator_period (G1-09 sub-langkah 2b-ii, modul KEEMPAT tt_transaction_creator) — sama alasan.
+  await sql`delete from pdt_fact_creator_period where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -1280,5 +1282,108 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KETIGA) — tt_ord
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(persiapan.status).toBe('ditolak');
     expect(await loadSkuMaster(cpId)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEEMPAT) — tt_transaction_creator
+// → pdt_fact_creator_period (lihat fakta.ts @cdps/core untuk kenapa modul ini —
+// grain barisnya SUDAH per-kreator, nol ambiguitas kelas shopee_ads_cpc).
+// ---------------------------------------------------------------------------
+interface FactCreatorPeriodRow {
+  creator_handle: string;
+  periode: string | Date;
+  batch_id: number;
+  parser_versi: number;
+  gmv: string | null;
+  gmv_live: string | null;
+  gmv_video: string | null;
+  pesanan_teratribusi: number | null;
+  aov: string | null;
+  ctor: string | null;
+  jumlah_live: number | null;
+  jumlah_video: number | null;
+  sampel_terkirim: number | null;
+}
+
+async function loadFactCreatorPeriod(clientPlatformId: number): Promise<FactCreatorPeriodRow[]> {
+  return sql<FactCreatorPeriodRow[]>`select * from pdt_fact_creator_period where client_platform_id = ${clientPlatformId} order by creator_handle`;
+}
+
+const HEADER_TT_TRANSACTION_CREATOR = ['Creator name', 'GMV dari kreator', 'AOV', 'CTOR', 'Pesanan teratribusi', 'Tayangan video', 'Video', 'Siaran LIVE', 'Perkiraan komisi'];
+
+/** `tt_transaction_creator` — tidak membawa 'ID Kreator'/periode sendiri (Rule 5 ayat 2: mewarisi dari berkas lain di batch yang sama, sama pola `ttOrdersBerkas`). */
+function ttTransactionCreatorBerkas(nama: string, baris: readonly [string, string, string, string, string, string, string][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TT_TRANSACTION_CREATOR,
+    ...baris.map(([namaKreator, gmv, aov, ctor, pesanan, video, live]) => [namaKreator, gmv, aov, ctor, pesanan, '0', video, live, '0']),
+  ];
+  return {
+    nama, sha256: 'sha-ttcreator', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, modulTerdeteksi: 'tt_transaction_creator', ambiguous: false, matches: ['tt_transaction_creator'],
+  };
+}
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEEMPAT) — tt_transaction_creator → pdt_fact_creator_period', () => {
+  async function fixture(akunKontenToko: readonly string[] | null): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'TikTok Shop', null, akunKontenToko);
+  }
+
+  it('satu baris per Creator name, periode = AWAL BULAN (Q-3), gmv_live/gmv_video/sampel_terkirim NULL (modul ini tidak membawanya)', async () => {
+    const cpId = await fixture(['KR-1']);
+    const berkas = [
+      ttVideoBerkasLengkap('video.xlsx', '05/07/2026 - 31/07/2026', [['KR-1', 'V1', '100', '10', '1', '5', '200000']]), // identitas+periode
+      ttTransactionCreatorBerkas('creator.xlsx', [
+        ['Kreator A', '2000000', '150000', '5%', '10', '3', '2'],
+        ['Kreator B', '500000', '50000', '2%', '5', '1', '1'],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactCreatorPeriod(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      creator_handle: 'Kreator A', batch_id: persiapan.batchId, parser_versi: 1,
+      pesanan_teratribusi: 10, jumlah_live: 2, jumlah_video: 3,
+      gmv_live: null, gmv_video: null, sampel_terkirim: null,
+    });
+    expect(ymd(rows[0].periode)).toBe('2026-07-01'); // hari pertama BULAN, bukan 05/07 apa adanya
+    expect(Number(rows[0].gmv)).toBe(2000000);
+    expect(Number(rows[0].aov)).toBe(150000);
+    expect(Number(rows[0].ctor)).toBeCloseTo(0.05, 5);
+    expect(rows[1].creator_handle).toBe('Kreator B');
+  });
+
+  it('commit ULANG (Creator name sama) ⇒ ON CONFLICT DO UPDATE — baris diperbarui di tempat, bukan digandakan', async () => {
+    const cpId = await fixture(['KR-1']);
+    const pertama = [
+      ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', [['KR-1', 'V1', '100', '10', '1', '5', '200000']]),
+      ttTransactionCreatorBerkas('creator.xlsx', [['Kreator A', '1000000', '0', '0', '5', '0', '1']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect(await loadFactCreatorPeriod(cpId)).toHaveLength(1);
+
+    const kedua = [
+      ttVideoBerkasLengkap('video-2.xlsx', '01/07/2026 - 31/07/2026', [['KR-1', 'V2', '100', '10', '1', '5', '200000']]),
+      ttTransactionCreatorBerkas('creator-revisi.xlsx', [['Kreator A', '1500000', '0', '0', '8', '0', '2']]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = await loadFactCreatorPeriod(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — ON CONFLICT DO UPDATE
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(Number(rows[0].gmv)).toBe(1500000);
+    expect(rows[0].pesanan_teratribusi).toBe(8);
+  });
+
+  it("identitas 'tolak' (ID Kreator video tidak terdaftar di akun_konten_toko) ⇒ NOL baris fakta ditulis", async () => {
+    const cpId = await fixture(['KR-LAIN']);
+    const berkas = [
+      ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', [['KR-1', 'V1', '100', '10', '1', '5', '200000']]),
+      ttTransactionCreatorBerkas('creator.xlsx', [['Kreator A', '1000000', '0', '0', '5', '0', '1']]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(await loadFactCreatorPeriod(cpId)).toHaveLength(0);
   });
 });
