@@ -119,9 +119,11 @@ seluruh workspace; `npm run lint -w @cdps/api -- --max-warnings 0` bersih.
      `pdt_sku_master` (cpc) atau jawaban Q-6/sample asli (search) — lihat
      `G1-09-2BII-ADS-CPC`/`G1-09-2BII-ADS-SEARCH`, `docs/DECISIONS.md`
      (tidak berubah sesi ini).
-2. **PR #368** — statusnya BELUM dicek ulang sesi ini (masih di branch
-   sesi, belum jadi bagian PR mana pun sejak sesi 14). Cek status terbaru
-   sebelum memutuskan menumpuk atau membuka PR baru.
+2. ~~**PR #368** — statusnya BELUM dicek ulang sesi ini.~~ **SELESAI —
+   PR #368 di-MERGE ke `main` di penutup sesi ini** (lihat
+   `docs/handoff/HANDOFF_PDT_SESI16.md`). Sub-langkah 2a+2b-i+2b-ii (dua
+   modul) semuanya sudah di `main`. Sesi berikutnya mulai dari `main`
+   langsung, bukan dari branch PR manapun.
 3. Item lama masih terbuka, tidak tersentuh sesi ini: `G1-07-PERSKU-
    PESANAN`, `G1-07-TIKTOK-REKONSILIASI`, `G1-09-DETEKSI-PREAMBLE-AMBIGU`,
    `G1-08-SEBAGIAN`, `G1-06-PERIODE-TIKTOK`, `G1-07-PERSKU-DIBAYAR`.
