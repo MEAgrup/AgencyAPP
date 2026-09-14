@@ -28,7 +28,58 @@ function errorBody(body: unknown): string | null {
   return null;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * Path of the refresh route, and the one path `request` must NEVER try to
+ * refresh for — a 401 from the refresh route itself is the end of the session,
+ * not something to retry (it would recurse).
+ */
+const REFRESH_PATH = '/auth/refresh';
+
+/**
+ * One shared in-flight refresh promise.
+ *
+ * A page routinely has several requests in the air at once (the Leads screen
+ * fires per tab; the Strategi form autosaves while the gap count reloads). When
+ * the access cookie expires they all 401 within milliseconds of each other. If
+ * each one called `/auth/refresh` on its own, GoTrue would rotate the refresh
+ * token N times concurrently and all but one of those rotations would be
+ * racing a token the server had just retired — the session would die from the
+ * very mechanism meant to keep it alive. So the FIRST 401 starts the refresh
+ * and everyone else awaits the same promise.
+ */
+let inFlightRefresh: Promise<boolean> | null = null;
+
+/**
+ * Asks the server for a fresh access cookie. Resolves true when the session
+ * carried on, false when it is genuinely over (the server has already cleared
+ * both cookies in that case).
+ *
+ * Never throws: a network failure here resolves false, and the caller then
+ * surfaces the ORIGINAL error rather than a confusing one about refreshing.
+ */
+export async function refreshSession(): Promise<boolean> {
+  if (inFlightRefresh) return inFlightRefresh;
+  inFlightRefresh = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}${REFRESH_PATH}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      // Cleared in `finally` so a failed refresh does not pin a permanently
+      // rejected promise that every later 401 would reuse.
+      inFlightRefresh = null;
+    }
+  })();
+  return inFlightRefresh;
+}
+
+async function request<T>(path: string, init: RequestInit = {}, retrying = false): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
@@ -41,6 +92,22 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     });
   } catch {
     throw new ApiError(FALLBACK_MESSAGE, 0);
+  }
+
+  // An expired access cookie must not reach the user. Refresh once, then replay
+  // the ORIGINAL request — including its body, which is why the retry happens
+  // here rather than at each call site: this is the only fetch wrapper in the
+  // app, so one branch covers every screen.
+  //
+  // Before this, a 401 mid-form was terminal: nothing redirected, nothing
+  // retried, and the AM was left with a filled-in form that could never submit
+  // ("harus ngulang lagi dari awal", field feedback 2026-09-14). `retrying`
+  // bounds it to a single attempt so a server that 401s for some OTHER reason
+  // cannot produce a loop.
+  if (res.status === 401 && !retrying && path !== REFRESH_PATH) {
+    if (await refreshSession()) {
+      return request<T>(path, init, true);
+    }
   }
 
   if (res.status === 204) {

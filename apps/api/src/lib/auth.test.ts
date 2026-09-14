@@ -70,7 +70,10 @@ describe('verifyJwtHS256', () => {
 
   it('rejects an expired token', () => {
     const expired = { ...staffClaims, exp: Math.floor(Date.now() / 1000) - 10 };
-    expect(() => verifyJwtHS256(sign(expired), SECRET)).toThrow(/expired/);
+    // BI, bracketed (CLAUDE.md #5) — an expired token is the ONE failure in this
+    // file an ordinary user meets on an ordinary day, so it must not surface as
+    // raw English. Field feedback 2026-09-14.
+    expect(() => verifyJwtHS256(sign(expired), SECRET)).toThrow('[sesi tidak valid, silahkan login kembali]');
   });
 
   it('rejects a not-yet-valid token (nbf in the future)', () => {
@@ -80,7 +83,7 @@ describe('verifyJwtHS256', () => {
 
   it('honors an injected clock', () => {
     const payload = { ...staffClaims, exp: 2_000 }; // expires at t=2000s
-    expect(() => verifyJwtHS256(sign(payload), SECRET, 3_000_000)).toThrow(/expired/);
+    expect(() => verifyJwtHS256(sign(payload), SECRET, 3_000_000)).toThrow('[sesi tidak valid, silahkan login kembali]');
     expect(verifyJwtHS256(sign(payload), SECRET, 1_000_000)).toBeTruthy(); // t=1000s, still valid
   });
 
@@ -145,7 +148,7 @@ describe('verifyJwtES256 / verifyJwt (asymmetric ES256)', () => {
 
   it('rejects an expired ES256 token', () => {
     const expired = { ...staffClaims, exp: Math.floor(Date.now() / 1000) - 10 };
-    expect(() => verifyJwtES256(signES256(expired))).toThrow(/expired/);
+    expect(() => verifyJwtES256(signES256(expired))).toThrow('[sesi tidak valid, silahkan login kembali]');
   });
 
   it('throws when no ES256 public key is configured', () => {

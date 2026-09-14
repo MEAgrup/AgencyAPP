@@ -16,7 +16,14 @@
  * which realm it is, so it passes the hint rather than the backend guessing
  * from ambient cookie state.
  */
-import { clearedSessionCookie, CLIENT_PORTAL_SESSION_COOKIE, cookieValue, SESSION_COOKIE } from '@/lib/auth';
+import {
+  clearedRefreshCookie,
+  clearedSessionCookie,
+  CLIENT_PORTAL_SESSION_COOKIE,
+  cookieValue,
+  refreshCookieNameFor,
+  SESSION_COOKIE,
+} from '@/lib/auth';
 import { signOut } from '@/lib/gotrue';
 import { handle, json, readJson } from '@/lib/http';
 
@@ -35,6 +42,11 @@ export async function POST(request: Request): Promise<Response> {
     }
     const res = json({ ok: true });
     res.headers.append('Set-Cookie', clearedSessionCookie(cookieName));
+    // The refresh cookie MUST go too. Clearing only the access cookie would
+    // leave logout meaning nothing: the very next request would 401, the
+    // browser would refresh with the cookie still sitting there, and the user
+    // would be silently logged back in.
+    res.headers.append('Set-Cookie', clearedRefreshCookie(refreshCookieNameFor(cookieName)));
     return res;
   });
 }
