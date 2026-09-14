@@ -309,9 +309,20 @@ Bucket 1: waktu respon, % dibalas, CSAT, konversi chat (`shopee_chat`); penerima
 pesanan (`shopee_chat_broadcast`) ⇒ dimensi layanan / CRM. Tidak ada baris bucket 2.
 
 ### 2.10 `shopee_ams_produk` / `shopee_ams_afiliasi`
-Bucket 1: `Kode Item`/`ID Affiliates`, omzet, **`komisi`**, ROI ⇒ sinyal PX sisi Shopee /
-`pdt_fact_creator_period` Shopee. `komisi` di sini adalah sumber **`commission_pct`** Shopee untuk
-PX Flow D (celah PX #1, §4) — sudah bucket 1, bukan tambahan baru. Tidak ada baris bucket 2.
+> **Ejaan kolom DIKOREKSI sesi 20 (docs/DECISIONS.md 2026-09-14) terhadap sample EKSPOR ASLI**
+> (Fim Motor, `ProductPerformance_*.csv` + `AMSAffiliatePerformance_*.csv`) — ejaan sebelumnya di
+> sini ('Nama Produk' untuk `shopee_ams_produk`; 'Username'/'Omzet'/'Komisi' polos untuk
+> keduanya) TIDAK PERNAH cocok berkas nyata: header sungguhan ber-`Nama Item` (bukan `Nama
+> Produk` — deteksi `shopee_ams_produk` GAGAL TOTAL, bukan cuma kolomDipanen), `Username
+> Affiliate` (bukan `Username` polos), `Omzet Penjualan(Rp)` (bukan `Omzet` polos), `Estimasi
+> Komisi(Rp)` (bukan `Komisi` polos). Tabel di bawah sudah ejaan yang BENAR.
+
+Bucket 1: `Kode Item` (`shopee_ams_produk`) / `ID Affiliates`+`Username Affiliate`
+(`shopee_ams_afiliasi`), `Omzet Penjualan(Rp)`, **`Estimasi Komisi(Rp)`**, `ROI` ⇒ sinyal PX sisi
+Shopee / `pdt_fact_creator_period` Shopee (afiliasi saja — `shopee_ams_produk` grain PER PRODUK,
+lihat catatan `fakta.ts` kenapa saudaranya TIDAK dipetakan ke tabel per-kreator ini). `Estimasi
+Komisi(Rp)` di sini adalah sumber **`commission_pct`** Shopee untuk PX Flow D (celah PX #1, §4) —
+sudah bucket 1, bukan tambahan baru. Tidak ada baris bucket 2.
 
 ### 2.11 `shopee_kesehatan` — **MODUL BARU, tidak ada di §7 sama sekali**
 Bucket 2 (derived-add — modul penuh, `report/shopee/metrik.ts:516-540` `parseKesehatan`,

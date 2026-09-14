@@ -479,6 +479,20 @@ punya `null` eksplisit.
 > melebarkan `pdt_fact_ads.kampanye_id` ke `varchar(255)` (nama iklan bisa sepanjang judul produk).
 > **Enam modul/lima tabel fakta (dari enam) kini punya penulis.** Sisa: `pdt_fact_sku_period` (nol
 > penulis, tabel fakta TERAKHIR tanpa penulis) + 19 modul lain belum dipetakan.
+>
+> **Status 2026-09-14 (sesi 20) — dua bug LATEN dikoreksi (bukan modul baru), ditemukan saat
+> menginvestigasi kandidat modul KETUJUH.** `shopee_ams_produk` (`ProductPerformance_*.csv`)
+> TIDAK PERNAH terdeteksi sejak G1-02 — `tandaTanganKolom` lama mensyaratkan substring `'nama
+> produk'`, header asli ber-`'Nama Item'`; dikoreksi ke `must: ['Kode Item', 'Omzet'], mustNot:
+> ['ID Affiliates']`. `shopee_ams_afiliasi` (modul KELIMA, sesi 17, SUDAH menulis
+> `pdt_fact_creator_period`) terdeteksi BENAR tapi `kolomDipanen`-nya (`'Username'`/`'Omzet'`/
+> `'Komisi'` polos) tidak pernah cocok header asli (`'Username Affiliate'`/`'Omzet
+> Penjualan(Rp)'`/`'Estimasi Komisi(Rp)'`) — modul ini SELALU `parse_status='gagal'` di produksi
+> sejak lahir. Keduanya dikoreksi (`modules.ts`, `fakta.ts` `ekstrakBarisKreatorShopeeAmsAfiliasi`,
+> migrasi `UPDATE pdt_parser_modul`). **Modul KETUJUH (`shopee_ams_produk` → `pdt_fact_sku_period`)
+> BELUM dibangun** — `sku_id` NOT NULL DAN bagian kunci unik tabel itu, jadi TIDAK ADA baris yang
+> bisa ditulis sampai lookup `Kode Item` (produk induk) → `pdt_sku_master.id` (per varian)
+> diputuskan (Open `G1-09-2BII-ADS-CPC-SKU`, sekarang menunggu DUA modul nyata).
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

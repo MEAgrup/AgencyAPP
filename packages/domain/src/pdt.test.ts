@@ -1503,7 +1503,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEEMPAT) — tt_tr
 // → pdt_fact_creator_period (sisi Shopee, lihat fakta.ts @cdps/core untuk kenapa
 // shopee_ams_produk saudaranya TIDAK dipetakan — grain per PRODUK, bukan per-kreator).
 // ---------------------------------------------------------------------------
-const HEADER_SHOPEE_AMS_AFILIASI = ['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Komisi', 'ROI'];
+const HEADER_SHOPEE_AMS_AFILIASI = ['ID Affiliates', 'Username Affiliate', 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi Komisi(Rp)', 'ROI'];
 
 /** `shopee_ams_afiliasi` — tidak membawa preamble/periode sendiri (sama pola `shopeeParentSkuBerkasMulti`, dipasangkan dengan `shopeeAdsCpcBerkas` di tes di bawah). */
 function shopeeAmsAfiliasiBerkas(nama: string, baris: readonly [string, string, string][]): PdtPreviewBerkasInput {

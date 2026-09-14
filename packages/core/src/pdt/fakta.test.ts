@@ -249,7 +249,7 @@ describe('ekstrakBarisKreatorTtTransactionCreator', () => {
   });
 });
 
-const HEADER_SHOPEE_AMS_AFILIASI = ['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Komisi', 'ROI'];
+const HEADER_SHOPEE_AMS_AFILIASI = ['ID Affiliates', 'Username Affiliate', 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi Komisi(Rp)', 'ROI'];
 
 describe('ekstrakBarisKreatorShopeeAmsAfiliasi', () => {
   it('memetakan Username/Omzet/Pesanan — ID Affiliates/Produk Terjual/Komisi/ROI TIDAK dipetakan (nol kolom/konsumen lain di pdt_fact_creator_period)', () => {
@@ -282,7 +282,7 @@ describe('ekstrakBarisKreatorShopeeAmsAfiliasi', () => {
   });
 
   it('kolom opsional hilang ⇒ null untuk field itu', () => {
-    const headerMinimal = ['Username'];
+    const headerMinimal = ['Username Affiliate'];
     const aoa = [headerMinimal, ['kreator_a']];
     expect(ekstrakBarisKreatorShopeeAmsAfiliasi(aoa, 1)).toEqual([
       { creatorHandle: 'kreator_a', gmv: null, pesananTeratribusi: null },

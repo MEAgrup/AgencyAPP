@@ -70,12 +70,19 @@
  * TIDAK bisa kolaps karenanya, cuma menambah satu baris ekstra untuk toko
  * sendiri kalau memang muncul di berkas — mudah direvisi lewat reparse).
  *
- * **Modul KELIMA (sesi ini): `shopee_ams_afiliasi` → `pdt_fact_creator_period`**
+ * **Modul KELIMA: `shopee_ams_afiliasi` → `pdt_fact_creator_period`**
  * (lihat `ekstrakBarisKreatorShopeeAmsAfiliasi` di bawah) — sisi SHOPEE untuk
- * tabel yang modul KEEMPAT baru mengisi sisi TikTok-nya. Grain barisnya SUDAH
- * per-kreator (`Username`), sama alasan modul KEEMPAT dipilih — kandidat
+ * tabel yang modul KEEMPAT baru mengisi sisi TikTok-nya. ⚠️ **Ejaan kolom
+ * DIKOREKSI sesi 20** (`docs/DECISIONS.md` 2026-09-14) — sample asli Fim
+ * Motor membuktikan `Username`/`Omzet`/`Komisi` (ejaan sesi ini menulisnya
+ * semula) TIDAK PERNAH cocok berkas nyata (`Username Affiliate`/`Omzet
+ * Penjualan(Rp)`/`Estimasi Komisi(Rp)`) — bug laten yang membuat modul ini
+ * SELALU `parse_status='gagal'` untuk berkas asli sejak lahir, tersembunyi
+ * di balik fixture tes yang memalsukan header. Sisa paragraf ini memakai
+ * ejaan yang SUDAH dikoreksi. Grain barisnya SUDAH per-kreator (`Username
+ * Affiliate`), sama alasan modul KEEMPAT dipilih — kandidat
  * SAUDARANYA di modul yang sama (`shopee_ams_produk`) SENGAJA TIDAK dipetakan
- * di sini: grainnya PER PRODUK (`Kode Item`/`Nama Produk`), bukan per-kreator,
+ * di sini: grainnya PER PRODUK (`Kode Item`/`Nama Item`), bukan per-kreator,
  * jadi tidak cocok tabel ini sama sekali — `PDT_KOLOM_DIPANEN.md` §2.10
  * menyebut keduanya bersama sebagai "sinyal PX sisi Shopee / pdt_fact_
  * creator_period Shopee", tapi baris §2.10 itu HARUS dibaca per-grain, bukan
@@ -439,20 +446,24 @@ export interface PdtBarisKreatorShopeeAmsAfiliasi {
 
 /**
  * Ekstrak seluruh baris data `shopee_ams_afiliasi` (Rule 8 whitelist
- * `modules.ts`: `['ID Affiliates', 'Username', 'Omzet', 'Produk Terjual',
- * 'Pesanan', 'Komisi', 'ROI']`). `Username` (bukan `ID Affiliates`) dipakai
- * sebagai `creatorHandle` — cermin `report/shopee/metrik.ts` `parseAffCsv`
- * (dipanggil dari `aff_creator`, `nameKws: ['username', 'kreator', 'creator',
- * 'nama']`, kolom NAMA yang dipakai sebagai kunci baris `nm`, bukan ID).
- * `ID Affiliates`/`Produk Terjual` TIDAK dipetakan ke field manapun di sini —
- * `pdt_fact_creator_period` tidak punya kolom untuk keduanya (nol
- * `creator_platform_id` terpisah di tabel ini, beda dari `pdt_fact_content`;
- * `Produk Terjual` = hitungan unit, bukan `pesanan_teratribusi`). `Komisi`/
- * `ROI` JUGA tidak dipetakan — keduanya sinyal **PX Flow D**
- * (`PDT_KOLOM_DIPANEN.md` §2.10: `komisi` sumber `commission_pct` Shopee),
- * konsumen di domain LAIN (`productexchange`), bukan `pdt_fact_creator_period`
- * — menuliskannya di sini akan mengarang kolom yang tidak diminta whitelist
- * ini. Baris ber-`Username` kosong dilewati (kunci NOT NULL
+ * `modules.ts`: `['ID Affiliates', 'Username Affiliate', 'Omzet
+ * Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi Komisi(Rp)', 'ROI']`
+ * — ejaan PERSIS sample asli Fim Motor, dikoreksi sesi 20 dari ejaan lama
+ * ('Username'/'Omzet'/'Komisi') yang TIDAK PERNAH cocok berkas nyata, lihat
+ * docblock kepala berkas). `Username Affiliate` (bukan `ID Affiliates`)
+ * dipakai sebagai `creatorHandle` — cermin `report/shopee/metrik.ts`
+ * `parseAffCsv` (dipanggil dari `aff_creator`, `nameKws: ['username',
+ * 'kreator', 'creator', 'nama']`, kolom NAMA yang dipakai sebagai kunci baris
+ * `nm`, bukan ID). `ID Affiliates`/`Produk Terjual` TIDAK dipetakan ke field
+ * manapun di sini — `pdt_fact_creator_period` tidak punya kolom untuk
+ * keduanya (nol `creator_platform_id` terpisah di tabel ini, beda dari
+ * `pdt_fact_content`; `Produk Terjual` = hitungan unit, bukan
+ * `pesanan_teratribusi`). `Estimasi Komisi(Rp)`/`ROI` JUGA tidak dipetakan —
+ * keduanya sinyal **PX Flow D** (`PDT_KOLOM_DIPANEN.md` §2.10: `komisi`
+ * sumber `commission_pct` Shopee), konsumen di domain LAIN
+ * (`productexchange`), bukan `pdt_fact_creator_period` — menuliskannya di
+ * sini akan mengarang kolom yang tidak diminta whitelist ini. Baris
+ * ber-`Username Affiliate` kosong dilewati (kunci NOT NULL
  * `pdt_fact_creator_period`). Angka: `parsePdtAngka(v, true)` — konvensi
  * **Ads Manager**, cermin `parseAffCsv`/`pn(r[ci], true)`.
  */
@@ -462,8 +473,8 @@ export function ekstrakBarisKreatorShopeeAmsAfiliasi(
 ): PdtBarisKreatorShopeeAmsAfiliasi[] {
   const header = aoa[barisHeader - 1] ?? [];
   const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
-  const iUsername = idx('Username');
-  const iOmzet = idx('Omzet');
+  const iUsername = idx('Username Affiliate');
+  const iOmzet = idx('Omzet Penjualan(Rp)');
   const iPesanan = idx('Pesanan');
 
   const hasil: PdtBarisKreatorShopeeAmsAfiliasi[] = [];

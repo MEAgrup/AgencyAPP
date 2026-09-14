@@ -106,25 +106,80 @@ dari berkas yang SAMA, belum dibangun sesi ini).
 
 ---
 
+## 0b. Tambahan SESI 20 (sama hari, lanjutan langsung) — dua bug laten dikoreksi
+
+Investigasi kandidat modul KETUJUH (§1 butir 1 di bawah, ditulis sesi 19)
+dijalankan — **`ProductPerformance_202608101517.csv` dikonfirmasi
+`shopee_ams_produk`** (bukan sekadar dugaan nama berkas) — tapi sebelum baris
+fakta apa pun ditulis, verifikasi header terhadap `modules.ts` menemukan DUA
+bug laten yang lebih penting untuk diperbaiki lebih dulu:
+
+1. **`shopee_ams_produk` TIDAK PERNAH terdeteksi sejak G1-02.** `tandaTanganKolom`
+   lama (`must: ['Omzet', 'Nama Produk']`) mensyaratkan substring `'nama
+   produk'` di baris header (`detect.ts` — substring lintas-sel, BUKAN
+   per-sel exact) — header asli ber-`'Nama Item'`, bukan `'Nama Produk'`,
+   substring itu TIDAK PERNAH muncul. Kelas bug LEBIH DALAM dari
+   `shopee_ads_cpc` kemarin (di sana deteksinya sudah benar, cuma
+   `kolomDipanen`-nya yang salah) — di sini modul ini tidak pernah bahkan
+   SAMPAI ke tahap validasi kolom. Dikoreksi ke `must: ['Kode Item', 'Omzet'],
+   mustNot: ['ID Affiliates']`.
+2. **`shopee_ams_afiliasi` (modul KELIMA, sesi 17, SUDAH menulis
+   `pdt_fact_creator_period` di produksi) SELALU `parse_status='gagal'`
+   untuk berkas asli manapun.** Deteksinya BENAR (substring `'omzet'`/
+   `'username'` tetap cocok `'Omzet Penjualan(Rp)'`/`'Username Affiliate'`
+   sungguhan) — tapi `kolomDipanen` (`validasiKolomWajib`, EXACT per-sel,
+   mekanisme BEDA dari deteksi) memakai ejaan lama (`'Username'`/`'Omzet'`/
+   `'Komisi'` polos) yang TIDAK PERNAH cocok header asli. Modul ini sudah
+   MERGED ke `main` (PR #373) dan berjalan di produksi sejak sesi 17 — bug
+   ini tersembunyi selama itu karena fixture tes memalsukan bentuk header
+   (kelas persis sama dengan `shopee_ads_cpc`).
+
+**Pelajaran baru (dicatat `docs/DECISIONS.md`, bukan cuma diperbaiki diam-diam):**
+deteksi (`detect.ts`, substring lintas-sel) dan validasi kolom wajib
+(`parsestatus.ts`, exact per-sel) adalah DUA mekanisme dengan toleransi
+BERBEDA — modul bisa lolos satu tapi gagal yang lain. Keduanya harus dicek
+terpisah terhadap sample asli; "sudah terdeteksi benar" tidak berarti
+`kolomDipanen`-nya juga benar (persis kasus `shopee_ams_afiliasi`).
+
+**Kode & tes diperbaiki (BUKAN modul baru):**
+- `packages/core/src/pdt/modules.ts` — `shopee_ams_produk` (tandaTanganKolom
+  + kolomDipanen), `shopee_ams_afiliasi` (kolomDipanen saja).
+- `packages/core/src/pdt/fakta.ts` — `ekstrakBarisKreatorShopeeAmsAfiliasi`:
+  `idx('Username')`→`idx('Username Affiliate')`,
+  `idx('Omzet')`→`idx('Omzet Penjualan(Rp)')`.
+- `supabase/migrations/20261020010000_..._pdt_parser_modul_shopee_ams_kolom.sql`
+  — koreksi seed kedua baris (`versi` TIDAK dinaikkan, pola sama migrasi
+  sebelumnya — `pdt.registry.test.ts` menegakkan `versi === 1`).
+- `docs/backlog/PDT_KOLOM_DIPANEN.md` §2.10, fixture di
+  `fakta.test.ts`/`detect.test.ts`/`pdt.test.ts` (domain)/`pdt-parse.test.ts`
+  (api) — disamakan ke ejaan real Fim Motor.
+
+**Modul KETUJUH (`shopee_ams_produk` → `pdt_fact_sku_period`) TETAP BELUM
+dibangun** — `pdt_fact_sku_period.sku_id` `NOT NULL` DAN bagian
+`uq_pdt_fact_sku_period (sku_id, periode, basis)`, jadi TIDAK ADA baris yang
+bisa ditulis sama sekali tanpa lookup `Kode Item` (produk induk) →
+`pdt_sku_master.id` (per varian) diputuskan lebih dulu — sama persis
+`G1-09-2BII-ADS-CPC-SKU` (sesi 19), sekarang menunggu DUA modul nyata
+(`shopee_ads_cpc.sku_id` + `shopee_ams_produk` → `pdt_fact_sku_period`
+seluruhnya), memperkuat alasan merancang pola lookup-nya SEKALI dengan
+benar, bukan menebak per modul.
+
+**Verifikasi (DB lokal rebuild bersih, 237 migrasi):** `@cdps/core` 1180
+tes (1 fixture lama diperbaiki), `@cdps/domain` 2578 tes/1 skip, `@cdps/db`
+107 tes (`pdt.registry.test.ts` — TS≡DB tetap identik), `@cdps/api` 567
+tes/2 skip, `web-internal` 763 tes + typecheck bersih, typecheck+lint bersih
+seluruh workspace.
+
+---
+
 ## 1. Yang perlu ditindaklanjuti sesi berikutnya
 
-1. **Kandidat modul KETUJUH — data SUDAH ADA di ZIP Fim Motor yang sama,
-   belum dipetakan sesi ini:**
-   - `ProductPerformance_202608101517.csv` — SANGAT MUNGKIN `shopee_ams_produk`
-     (grain PER PRODUK, `Kode Item`, `PDT_KOLOM_DIPANEN.md` §2.10) — nama
-     berkas & timestamp (`202608101517`) satu menit persis dari
-     `AMSAffiliatePerformance_202608101516.csv` (`shopee_ams_afiliasi`, sudah
-     dipetakan modul KELIMA sesi 17) — sinyal kuat kedua berkas diunduh dari
-     dashboard AMS yang sama, TAPI verifikasi dulu isi headernya (Rule 6 —
-     nama berkas bukan tanda tangan) sebelum diasumsikan. Grain PER PRODUK
-     berarti tabel tujuannya `pdt_fact_sku_period` (BUKAN
-     `pdt_fact_creator_period` seperti modul KELIMA) — **inilah kandidat
-     lookup lintas-tabel PERTAMA di PDT** (butuh `pdt_sku_master.id`, belum
-     ada preseden) — sama ambiguitas dengan `G1-09-2BII-ADS-CPC-SKU` di atas
-     (`Kode Item` vs `Kode Produk`/`Kode Variasi` `pdt_sku_master` perlu
-     diverifikasi apakah level yang SAMA sebelum dipakai kunci lookup).
-   - Berkas lain di ZIP yang sama BELUM diperiksa headernya sama sekali sesi
-     ini: `chat_20260701_20260731.xlsx` (`shopee_chat`?),
+1. **Kandidat modul KETUJUH — `shopee_ams_produk` → `pdt_fact_sku_period`,
+   dikonfirmasi header-nya sesi 20 (§0b di atas), TAPI BLOCKED sampai lookup
+   `Kode Item` → `pdt_sku_master.id` diputuskan** (Open `G1-09-2BII-ADS-CPC-SKU`
+   — kelas ambiguitas sama `shopee_ads_cpc.sku_id`, produk induk vs varian).
+   Data ZIP Fim Motor yang sama, belum dipetakan:
+   - Berkas lain BELUM diperiksa headernya sama sekali: `chat_20260701_20260731.xlsx` (`shopee_chat`?),
      `Chat_Broadcast_overview_20260701-20260731.xlsx` (`shopee_chat_broadcast`?),
      `discount_20260701-20260731.xlsx`/`voucher_20260701-20260731.xlsx`/
      `In_Shop_Flash_Sale_Metrics_01072026-31072026.xlsx` (`shopee_voucher`/
@@ -196,11 +251,13 @@ dari berkas yang SAMA, belum dibangun sesi ini).
 
 - `docs/handoff/HANDOFF_PDT_SESI17.md`/`SESI18.md` — detail teknis modul 3/4/5,
   status merge PR #373.
-- `docs/DECISIONS.md` — baris Decided teratas (modul KEENAM, sesi 19) +
-  `G1-09-2BII-ADS-CPC` (DITUTUP, strikethrough) + Open baru
-  `G1-09-2BII-ADS-CPC-SKU`.
-- `docs/backlog/PDT_KOLOM_DIPANEN.md` §2.3 — dikoreksi sesi ini (preamble
-  vs header, ejaan ACOS, catatan grain per-iklan).
+- `docs/DECISIONS.md` — dua baris Decided teratas (sesi 20 bugfix
+  `shopee_ams_produk`/`shopee_ams_afiliasi`, lalu modul KEENAM sesi 19) +
+  `G1-09-2BII-ADS-CPC` (DITUTUP, strikethrough) + Open
+  `G1-09-2BII-ADS-CPC-SKU` (sekarang menunggu dua modul).
+- `docs/backlog/PDT_KOLOM_DIPANEN.md` §2.3 (dikoreksi sesi 19 — preamble vs
+  header, ejaan ACOS, catatan grain per-iklan) + §2.10 (dikoreksi sesi 20 —
+  ejaan `shopee_ams_produk`/`shopee_ams_afiliasi`).
 - `docs/backlog/PDT_BACKLOG.md` §G1-09 — status ringkas seluruh sub-langkah.
 - `packages/core/src/pdt/fakta.ts` — docblock kepala berkas menjelaskan
   keenam modul dan kenapa masing-masing dipilih.

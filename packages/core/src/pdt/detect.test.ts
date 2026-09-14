@@ -243,21 +243,21 @@ describe('detectPdtModule — Shopee (15 modul, 2 belum terverifikasi)', () => {
     );
   });
 
-  it('shopee_ams_produk (ProductPerformance, tanpa kolom kreator)', () => {
+  it('shopee_ams_produk (ProductPerformance, tanpa kolom kreator) — ejaan PERSIS sample asli Fim Motor', () => {
     expectExactMatch(
       [
-        ['Kode Item', 'Nama Produk', 'Omzet', 'Komisi', 'ROI'],
+        ['Kode Item', 'Nama Item', 'Omzet Penjualan(Rp)', 'Estimasi Komisi(Rp)', 'ROI'],
         ['SKU-A', 'Produk A', '10000000', '1000000', '3,5'],
       ],
       'shopee_ams_produk',
     );
   });
 
-  it('shopee_ams_afiliasi (AMSAffiliatePerformance)', () => {
+  it('shopee_ams_afiliasi (AMSAffiliatePerformance) — ejaan PERSIS sample asli Fim Motor', () => {
     expectExactMatch(
       [
-        ['Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Click', 'Komisi', 'ROI', 'Total Pembeli', 'Pembeli Baru'],
-        ['@kreator1', '10000000', '20', '18', '500', '1000000', '3.5', '15', '4'],
+        ['ID Affiliates', 'Username Affiliate', 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi Komisi(Rp)', 'ROI', 'Total Pembeli', 'Pembeli Baru'],
+        ['11339711407', '@kreator1', '10000000', '20', '18', '1000000', '3.5', '15', '4'],
       ],
       'shopee_ams_afiliasi',
     );

@@ -229,7 +229,7 @@ const FIXTURES: { nama: string; kode: string; aoa: Aoa; csv?: boolean; bom?: boo
     kode: 'shopee_ams_produk',
     csv: true,
     aoa: [
-      ['Kode Item', 'Nama Produk', 'Omzet', 'Komisi', 'ROI'],
+      ['Kode Item', 'Nama Item', 'Omzet Penjualan(Rp)', 'Estimasi Komisi(Rp)', 'ROI'],
       ['SKU-A', 'Produk A', '10000000', '1000000', '3,5'],
     ],
   },
@@ -238,8 +238,8 @@ const FIXTURES: { nama: string; kode: string; aoa: Aoa; csv?: boolean; bom?: boo
     kode: 'shopee_ams_afiliasi',
     csv: true,
     aoa: [
-      ['Username', 'Omzet', 'Produk Terjual', 'Pesanan', 'Click', 'Komisi', 'ROI', 'Total Pembeli', 'Pembeli Baru'],
-      ['@kreator1', '10000000', '20', '18', '500', '1000000', '3.5', '15', '4'],
+      ['ID Affiliates', 'Username Affiliate', 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi Komisi(Rp)', 'ROI', 'Total Pembeli', 'Pembeli Baru'],
+      ['11339711407', '@kreator1', '10000000', '20', '18', '1000000', '3.5', '15', '4'],
     ],
   },
   {
