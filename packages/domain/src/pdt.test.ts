@@ -1784,3 +1784,105 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEDELAPAN) — sho
     expect(await loadFactSkuPeriod(cpId)).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KESEMBILAN, sesi 24) —
+// shopee_live → pdt_fact_content. `G1-09-2BII-SHOPEELIVE` DITUTUP sesi ini —
+// lihat fakta.ts @cdps/core `ekstrakBarisShopeeLive` untuk kenapa identitas
+// dari `Waktu Mulai` (digit mentah), bukan `Informasi Streaming`.
+// ---------------------------------------------------------------------------
+const HEADER_SHOPEE_LIVE = ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan (Pesanan Siap Dikirim)(Rp)'];
+
+/** `shopee_live` — tidak membawa preamble/periode sendiri (sama pola `shopeeAmsAfiliasiBerkas`, dipasangkan dengan `shopeeAdsCpcBerkas` di tes di bawah). */
+function shopeeLiveBerkas(nama: string, baris: readonly [string, string, string, string][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [HEADER_SHOPEE_LIVE, ...baris];
+  return {
+    nama, sha256: 'sha-live', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, modulTerdeteksi: 'shopee_live', ambiguous: false, matches: ['shopee_live'],
+  };
+}
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KESEMBILAN) — shopee_live → pdt_fact_content', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', shopId);
+  }
+
+  it('satu baris per sesi live, platform_content_id dari digit Waktu Mulai, jenis=live, is_akun_toko TRUE, sku_id/creator NULL', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'), // identitas+periode
+      shopeeLiveBerkas('live.xlsx', [
+        ['jual berbagai body motor', '03-07-2026 15:21', '1.234', '5.000.000'],
+        ['sesi sore', '03-07-2026 20:00', '500', '2.000.000'],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      platform_content_id: '202607031521', jenis: 'live', batch_id: persiapan.batchId, parser_versi: 1,
+      creator_platform_id: null, creator_handle: null, is_akun_toko: true, sku_id: null, vv: 1234,
+    });
+    expect(rows[0].waktu_posting).not.toBeNull();
+    expect(Number(rows[0].gmv)).toBe(5000000);
+    expect(rows[1].platform_content_id).toBe('202607032000');
+  });
+
+  it('judul BERULANG (Informasi Streaming sama, Waktu Mulai beda) tetap dua baris terpisah', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeLiveBerkas('live.xlsx', [
+        ['jual berbagai body motor', '03-07-2026 15:21', '100', '0'],
+        ['jual berbagai body motor', '04-07-2026 11:11', '200', '0'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactContent(cpId);
+    expect(rows.map((r) => r.platform_content_id)).toEqual(['202607031521', '202607041111']);
+  });
+
+  it('commit ULANG (Waktu Mulai sama) ⇒ ON CONFLICT DO UPDATE — baris diperbarui di tempat, bukan digandakan', async () => {
+    const cpId = await fixture();
+    const pertama = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeLiveBerkas('live.xlsx', [['Judul Lama', '03-07-2026 15:21', '100', '1.000.000']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect(await loadFactContent(cpId)).toHaveLength(1);
+
+    const kedua = [
+      shopeeAdsCpcBerkas('ads-2.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeLiveBerkas('live-revisi.xlsx', [['Judul Baru', '03-07-2026 15:21', '150', '1.500.000']]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — ON CONFLICT DO UPDATE
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(rows[0].vv).toBe(150);
+    expect(Number(rows[0].gmv)).toBe(1500000);
+  });
+
+  it('baris "Waktu Mulai" tidak valid dilewati — nol baris fakta untuk baris itu', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeLiveBerkas('live.xlsx', [['Judul', 'bukan tanggal', '0', '0']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(await loadFactContent(cpId)).toHaveLength(0);
+  });
+
+  it("identitas 'tolak' (ID Toko berkas ≠ shop_id tersimpan) ⇒ NOL baris fakta ditulis (shopee_live)", async () => {
+    const cpId = await fixture('SHOP-LAIN');
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeLiveBerkas('live.xlsx', [['Judul', '03-07-2026 15:21', '100', '0']]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(await loadFactContent(cpId)).toHaveLength(0);
+  });
+});

@@ -151,7 +151,26 @@
  * `sku_id` tetap `null` — modul ini tidak punya identitas produk sama sekali
  * di whitelist. Angka: `parsePdtAngka(v, true)` — konvensi Ads Manager, sama
  * seperti `shopee_ads_cpc`/`shopee_ads_live`.
+ *
+ * **Modul KESEMBILAN (sesi 24): `shopee_live` → `pdt_fact_content`** (lihat
+ * `ekstrakBarisShopeeLive` di bawah) — `G1-09-2BII-SHOPEELIVE` DITUTUP.
+ * `Informasi Streaming` (judul sesi live, ditulis bebas AM) TIDAK stabil
+ * sebagai identitas (bisa berulang — sample asli PUNYA judul yang sama untuk
+ * DUA sesi berbeda). `Waktu Mulai` (menit presisi, `DD-MM-YYYY HH:mm`)
+ * TIDAK PERNAH berulang di sample — satu akun Shopee cuma bisa menjalankan
+ * SATU sesi live pada satu waktu, jadi menit presisi SANGAT mungkin unik
+ * per akun selama-lamanya (bukan cuma kebetulan sample). `platform_content_id`
+ * dibentuk dari DIGIT MENTAH string (`YYYYMMDDHHmm`, concat langsung — BUKAN
+ * lewat objek `Date`/konversi zona waktu) supaya identitasnya tidak
+ * tersandung ambiguitas WIB↔UTC; `waktuPosting` (kolom informasi, bukan
+ * identitas) TETAP dihitung sebagai instant UTC sungguhan (WIB − 7 jam,
+ * `WIB_OFFSET_HOURS` — Shopee Seller Center Indonesia SELALU WIB, tidak ada
+ * DST). `Informasi Streaming` TIDAK dipetakan ke kolom manapun (deskriptif,
+ * `pdt_fact_content` tidak punya slot judul). Angka: `parsePdtAngka(v)`
+ * TANPA `raw` — konvensi Seller Center, sama seperti `tt_video` (berkas dari
+ * dashboard Seller Center, bukan Ads Manager).
  */
+import { WIB_OFFSET_HOURS } from '../tz';
 import { parsePdtAngka } from './angka';
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
@@ -284,6 +303,67 @@ export function ekstrakBarisTtVideo(
       likes: iLikes === -1 ? null : parsePdtAngka(row?.[iLikes]),
       dibagikan: iDibagikan === -1 ? null : parsePdtAngka(row?.[iDibagikan]),
       klikProduk: iKlikProduk === -1 ? null : parsePdtAngka(row?.[iKlikProduk]),
+      gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv]),
+    });
+  }
+  return hasil;
+}
+
+/** `DD-MM-YYYY HH:mm` (Shopee `Waktu Mulai`) → `{ digitMentah, instantUtc }`, atau `null` bila tidak cocok pola. `digitMentah` adalah string angka MENTAH (`YYYYMMDDHHmm`, concat langsung dari komponen tertulis) — untuk identitas, tidak lewat objek Date. `instantUtc` adalah instant UTC sungguhan (WIB − `WIB_OFFSET_HOURS`) — untuk kolom informasi `waktu_posting`, BUKAN untuk identitas. */
+function parseWaktuMulaiShopeeLive(w: string): { digitMentah: string; instantUtc: Date } | null {
+  const m = w.trim().match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const [, dd, mm, yyyy, hh, min] = m;
+  const hhPad = hh.padStart(2, '0');
+  const digitMentah = `${yyyy}${mm}${dd}${hhPad}${min}`;
+  const instantUtc = new Date(Date.UTC(+yyyy, +mm - 1, +dd, +hh - WIB_OFFSET_HOURS, +min));
+  if (isNaN(instantUtc.getTime())) return null;
+  return { digitMentah, instantUtc };
+}
+
+/** Satu baris `pdt_fact_content` mentah dari `shopee_live`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi). `sku_id`/`creatorPlatformId`/`creatorHandle` SELALU `null` — modul ini tidak punya identitas produk maupun kreator terpisah di whitelist (sesi live Shopee adalah akun toko sendiri, bukan afiliasi). `isAkunToko` SELALU `true` — beda dari `tt_video` (yang membandingkan `creatorPlatformId` ke `akunKontenToko`), laporan ini secara struktural HANYA berisi sesi live akun toko (tidak ada laporan afiliasi dalam bentuk ini). */
+export interface PdtBarisContentShopeeLive {
+  platformContentId: string;
+  waktuPosting: Date;
+  vv: number | null;
+  gmv: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `shopee_live` (Modul KESEMBILAN — lihat
+ * docblock kepala berkas untuk kenapa blocker `G1-09-2BII-SHOPEELIVE`
+ * akhirnya ditutup sesi ini). Rule 8 whitelist `modules.ts`: `['Informasi
+ * Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan (Pesanan Siap
+ * Dikirim)(Rp)']`. `platform_content_id` dibentuk dari `Waktu Mulai`
+ * (`parseWaktuMulaiShopeeLive`, digit mentah `YYYYMMDDHHmm`) — BUKAN dari
+ * `Informasi Streaming` (judul bebas, bisa berulang, lihat docblock kepala
+ * berkas). Baris ber-`Waktu Mulai` kosong ATAU tidak cocok pola `DD-MM-YYYY
+ * HH:mm` dilewati (bukan baris data sungguhan — tidak ada identitas yang
+ * bisa dibentuk). `Pengunjung` → `vv` (kolom itu comment-nya eksplisit
+ * "konsumen: report.dimensi_video/live", dipakai bersama oleh `tt_video`/
+ * modul ini). Angka: `parsePdtAngka(v)` TANPA `raw` — konvensi Seller
+ * Center, sama seperti `tt_video`.
+ */
+export function ekstrakBarisShopeeLive(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisContentShopeeLive[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iWaktuMulai = idx('Waktu Mulai');
+  const iPengunjung = idx('Pengunjung');
+  const iGmv = idx('Penjualan (Pesanan Siap Dikirim)(Rp)');
+
+  const hasil: PdtBarisContentShopeeLive[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const waktuMulaiRaw = iWaktuMulai === -1 ? '' : String(row?.[iWaktuMulai] ?? '').trim();
+    if (waktuMulaiRaw === '') continue;
+    const parsed = parseWaktuMulaiShopeeLive(waktuMulaiRaw);
+    if (parsed == null) continue;
+    hasil.push({
+      platformContentId: parsed.digitMentah,
+      waktuPosting: parsed.instantUtc,
+      vv: iPengunjung === -1 ? null : parsePdtAngka(row?.[iPengunjung]),
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv]),
     });
   }

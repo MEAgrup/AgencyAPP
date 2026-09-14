@@ -295,11 +295,17 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // 'Penjualan' DIKOREKSI ke ejaan PERSIS sample asli — ejaan lama adalah
     // TEBAKAN yang tidak pernah cocok berkas nyata (kolom sungguhan
     // 'Penjualan (Pesanan Siap Dikirim)(Rp)'), bug laten kelas sama
-    // `shopee_ads_cpc` sesi 19. TIDAK menutup `G1-09-2BII-SHOPEELIVE` —
-    // blocker itu soal `Informasi Streaming` (judul bebas AM, bukan ID
-    // platform stabil) sebagai identitas `pdt_fact_content`, sample yang
-    // sama TIDAK membawa kolom ID sesi live mana pun; koreksi ini murni
-    // ejaan whitelist, bukan resolusi identitas.
+    // `shopee_ads_cpc` sesi 19.
+    // **`G1-09-2BII-SHOPEELIVE` DITUTUP sesi 24 (docs/DECISIONS.md
+    // 2026-09-14)** — blocker itu soal `Informasi Streaming` (judul bebas
+    // AM, bukan ID platform stabil) sebagai identitas `pdt_fact_content`.
+    // Sample asli membuktikan `Waktu Mulai` (menit presisi, format `DD-MM-
+    // YYYY HH:mm`) TIDAK PERNAH berulang untuk satu akun (satu toko cuma
+    // bisa live SATU sesi pada satu waktu) — dipakai sebagai identitas
+    // sebagai gantinya (`platform_content_id`, lihat docblock
+    // `ekstrakBarisShopeeLive`, `@cdps/core` `pdt/fakta.ts`). `Informasi
+    // Streaming` TETAP di `kolomDipanen` (deskriptif) tapi TIDAK dipetakan
+    // ke kolom manapun di `pdt_fact_content` (tabel tidak punya slot judul).
     kolomDipanen: ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan (Pesanan Siap Dikirim)(Rp)'],
     wajib: true, // menutup dimensi Live Shopee yang hari ini struktural maks 5/10 (PRD §7.2)
   },

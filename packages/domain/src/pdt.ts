@@ -438,7 +438,11 @@ export async function siapkanUploadBatch(
 // `ekstrakBarisShopeeAmsProduk`, `fakta.ts` — `sku_id` NULL, `platform_product_id`
 // diisi langsung dari `Kode Item`; blocker lama `sku_id NOT NULL` dibuka
 // bersamaan dengan `G1-09-2BII-ADS-CPC-SKU`, migrasi
-// `20261025010000_g1_09_2bii_ads_cpc_sku_platform_product_id.sql`)
+// `20261025010000_g1_09_2bii_ads_cpc_sku_platform_product_id.sql`), dan
+// `shopee_live`/modul KESEMBILAN (sesi 24) → `pdt_fact_content` (lihat
+// docblock `ekstrakBarisShopeeLive`, `fakta.ts` — identitas dari digit
+// mentah `Waktu Mulai`, BUKAN `Informasi Streaming`, `G1-09-2BII-SHOPEELIVE`
+// DITUTUP)
 // adalah baris/tabel fakta yang benar-benar ditulis (sub-langkah 2b-ii, di
 // bawah); modul-modul lain BELUM (peta kolomDipanen→tabel fakta untuk
 // sisanya belum ada, pekerjaan besar tersendiri, lihat
@@ -693,6 +697,10 @@ export async function commitUploadBatch(
   // ADS-CPC-SKU` DITUTUP sesi ini membuka blocker `sku_id NOT NULL` yang menahan modul ini sejak
   // lahir (HANDOFF_PDT_SESI21.md §1: "BLOCKED TOTAL").
   const berkasShopeeAmsProduk = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ams_produk');
+  // G1-09 sub-langkah 2b-ii — modul KESEMBILAN (sesi 24), `shopee_live` → `pdt_fact_content`
+  // (lihat docblock `ekstrakBarisShopeeLive`, `@cdps/core` `pdt/fakta.ts`) — `G1-09-2BII-
+  // SHOPEELIVE` DITUTUP sesi ini (`Waktu Mulai` sebagai identitas, bukan `Informasi Streaming`).
+  const berkasShopeeLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_live');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -837,6 +845,33 @@ export async function commitUploadBatch(
                 creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
                 is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, likes = excluded.likes,
                 dibagikan = excluded.dibagikan, klik_produk = excluded.klik_produk, gmv = excluded.gmv`;
+          }
+        }
+      }
+
+      // G1-09 sub-langkah 2b-ii — modul KESEMBILAN (sesi 24), `shopee_live` → `pdt_fact_content`
+      // (lihat docblock `ekstrakBarisShopeeLive`, `@cdps/core` `pdt/fakta.ts`). Sama pola
+      // `ON CONFLICT ... DO UPDATE` seperti `tt_video` di atas — `platform_content_id` (digit
+      // mentah `Waktu Mulai`) SELALU ada untuk baris yang ditulis (baris tanpa `Waktu Mulai`
+      // yang valid sudah dilewati di `ekstrakBarisShopeeLive`), jadi unique index tidak punya
+      // komponen NULL. `sku_id`/`creator_platform_id`/`creator_handle` SELALU NULL (modul ini
+      // tidak punya identitas produk maupun kreator terpisah); `is_akun_toko` SELALU `true`
+      // (sesi live Shopee secara struktural HANYA akun toko sendiri, bukan afiliasi).
+      if (berkasShopeeLive.length > 0) {
+        for (const b of berkasShopeeLive) {
+          for (const baris of pdt.ekstrakBarisShopeeLive(b.aoa, b.barisHeader)) {
+            await tx`
+              insert into pdt_fact_content
+                (client_platform_id, platform_content_id, batch_id, parser_versi, jenis,
+                 creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
+                 vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
+              values
+                (${clientPlatformId}, ${baris.platformContentId}, ${id}, ${pdt.PDT_PARSER_VERSI}, 'live',
+                 null, null, true, ${baris.waktuPosting}, null,
+                 ${baris.vv}, null, null, null, null, null, null, ${baris.gmv}, null)
+              on conflict (client_platform_id, platform_content_id) do update set
+                batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+                waktu_posting = excluded.waktu_posting, vv = excluded.vv, gmv = excluded.gmv`;
           }
         }
       }

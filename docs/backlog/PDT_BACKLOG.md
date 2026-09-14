@@ -567,6 +567,21 @@ punya `null` eksplisit.
 > `20261025010000_..._ads_cpc_sku_platform_product_id.sql`. Diverifikasi (DB lokal rebuild bersih,
 > `rls_checks` invariant lolos): `@cdps/core` 1199/1199, `@cdps/domain` 2594/2594 (1 skip),
 > `@cdps/db` 107/107, `@cdps/api` 576/576 (2 skip); typecheck + lint bersih.
+>
+> **Status 2026-09-14 (sesi 24) — MODUL KESEMBILAN: `shopee_live` → `pdt_fact_content`,
+> `G1-09-2BII-SHOPEELIVE` DITUTUP.** `HANDOFF_PDT_SESI23.md` §4 menandai item E ini "risiko
+> rendah, boleh dikerjakan tanpa menunggu pemilik" — dikerjakan langsung. `platform_content_id`
+> dibentuk dari digit mentah `Waktu Mulai` (`YYYYMMDDHHmm`), BUKAN `Informasi Streaming` (judul
+> bebas AM, bisa berulang — sample membuktikan `Waktu Mulai` menit-presisi TIDAK PERNAH berulang
+> untuk satu akun, termasuk saat judul sesi sama persis). Identitas dari DIGIT MENTAH string
+> (bukan lewat `Date`/konversi TZ) supaya tidak tersandung ambiguitas WIB↔UTC; kolom informasi
+> `waktu_posting` tetap dihitung sebagai instant UTC sungguhan (WIB − 7 jam). `is_akun_toko`
+> SELALU `true` (laporan ini struktural hanya sesi live akun toko sendiri). **Nol migrasi baru**
+> — `jenis IN ('video','live')` sudah mengizinkan 'live' sejak G1-01, `kolomDipanen`/
+> `tandaTanganKolom` tidak berubah. **Lima tabel fakta sekarang punya total SEMBILAN modul
+> penulis** (`pdt_fact_content` kini `tt_video`+`shopee_live`, kedua-duanya). Diverifikasi (DB
+> lokal rebuild bersih): `@cdps/core` 1206/1206, `@cdps/domain` 2599/2599 (1 skip), `@cdps/db`
+> 107/107, `@cdps/api` 576/576 (2 skip); typecheck + lint bersih.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

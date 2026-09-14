@@ -316,8 +316,15 @@ Tidak ada baris bucket 2.
 Bucket 1: `Informasi Streaming`, `Waktu Mulai`, `Pengunjung`, `Penjualan (Pesanan Siap Dikirim)(Rp)`
 ⇒ `pdt_fact_content` jenis `live`. **Ejaan kolom terakhir DIKOREKSI sesi lanjutan pasca-sesi 20**
 terhadap sample asli Fim Motor (`'Penjualan'` polos tidak pernah cocok). Tidak ada baris bucket 2.
-Blocker identitas `G1-09-2BII-SHOPEELIVE` (tidak ada kolom ID sesi live yang stabil di sample yang
-sama) TETAP terbuka — koreksi ini tidak menyentuhnya.
+
+> **`G1-09-2BII-SHOPEELIVE` DITUTUP sesi 24 (docs/DECISIONS.md 2026-09-14, modul KESEMBILAN)** —
+> `Waktu Mulai` (menit presisi, format `DD-MM-YYYY HH:mm`) dipakai sebagai `platform_content_id`
+> (digit mentah `YYYYMMDDHHmm`, BUKAN lewat `Informasi Streaming` yang bisa berulang). Sample asli
+> membuktikan `Waktu Mulai` TIDAK PERNAH berulang untuk satu akun, bahkan saat judul sesi sama
+> persis — satu akun cuma bisa live satu sesi pada satu waktu. `Informasi Streaming` TETAP
+> divalidasi (`kolomDipanen`) tapi TIDAK dipetakan ke kolom `pdt_fact_content` manapun (tidak ada
+> slot judul di tabel ini). `is_akun_toko` SELALU `true` (laporan ini struktural hanya sesi live
+> akun toko sendiri).
 
 ### 2.7 `shopee_video` — `video-overview-v3*.csv` (header 2 lapis, 54 kolom)
 > **TEMUAN DEFINITIF sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** — sample asli

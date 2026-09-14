@@ -6,6 +6,7 @@ import {
   ekstrakBarisShopeeAdsLive,
   ekstrakBarisShopeeAdsSearch,
   ekstrakBarisShopeeAmsProduk,
+  ekstrakBarisShopeeLive,
   ekstrakBarisSkuMasterShopeeParentSku,
   ekstrakBarisSkuMasterTtOrders,
   ekstrakBarisTtVideo,
@@ -110,6 +111,64 @@ describe('ekstrakBarisTtVideo', () => {
     expect(ekstrakBarisTtVideo(aoa, 1, null)).toEqual([
       { platformContentId: 'V1', creatorPlatformId: null, creatorHandle: null, isAkunToko: false, vv: null, likes: null, dibagikan: null, klikProduk: null, gmv: null },
     ]);
+  });
+});
+
+// Header persis kolomDipanen shopee_live (sheet "Daftar Streaming", live_streaming_*.xlsx).
+const HEADER_SHOPEE_LIVE = ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan (Pesanan Siap Dikirim)(Rp)'];
+
+describe('ekstrakBarisShopeeLive (modul KESEMBILAN, sesi 24)', () => {
+  it('memetakan platformContentId dari digit mentah Waktu Mulai (bukan Informasi Streaming), vv/gmv terisi', () => {
+    const aoa = [
+      HEADER_SHOPEE_LIVE,
+      ['jual berbagai body motor', '03-07-2026 15:21', '1.234', '5.000.000'],
+    ];
+    expect(ekstrakBarisShopeeLive(aoa, 1)).toEqual([
+      { platformContentId: '202607031521', waktuPosting: new Date(Date.UTC(2026, 6, 3, 8, 21)), vv: 1234, gmv: 5000000 },
+    ]);
+  });
+
+  it('judul BERULANG (dua sesi live, Informasi Streaming sama) tetap dua baris terpisah — Waktu Mulai membedakan', () => {
+    const aoa = [
+      HEADER_SHOPEE_LIVE,
+      ['jual berbagai body motor', '03-07-2026 15:21', '100', '0'],
+      ['jual berbagai body motor', '04-07-2026 11:11', '200', '0'],
+    ];
+    const hasil = ekstrakBarisShopeeLive(aoa, 1);
+    expect(hasil.map((b) => b.platformContentId)).toEqual(['202607031521', '202607041111']);
+  });
+
+  it('konversi WIB→UTC benar untuk waktuPosting (WIB − 7 jam)', () => {
+    const aoa = [HEADER_SHOPEE_LIVE, ['Judul', '01-01-2026 00:30', '0', '0']];
+    const [baris] = ekstrakBarisShopeeLive(aoa, 1);
+    // 01-01-2026 00:30 WIB = 31-12-2025 17:30 UTC (hari sebelumnya, WIB lebih dulu)
+    expect(baris.waktuPosting.toISOString()).toBe('2025-12-31T17:30:00.000Z');
+  });
+
+  it('konvensi Seller Center (titik ribuan, koma desimal) — bukan Ads Manager', () => {
+    const aoa = [HEADER_SHOPEE_LIVE, ['Judul', '03-07-2026 15:21', '1.234', '1.234.567,89']];
+    const [baris] = ekstrakBarisShopeeLive(aoa, 1);
+    expect(baris.vv).toBe(1234);
+    expect(baris.gmv).toBe(1234567.89);
+  });
+
+  it('baris ber-"Waktu Mulai" kosong dilewati (bukan baris data sungguhan)', () => {
+    const aoa = [HEADER_SHOPEE_LIVE, ['Judul', '', '0', '0']];
+    expect(ekstrakBarisShopeeLive(aoa, 1)).toHaveLength(0);
+  });
+
+  it('"Waktu Mulai" tidak cocok pola DD-MM-YYYY HH:mm dilewati (bukan crash)', () => {
+    const aoa = [HEADER_SHOPEE_LIVE, ['Judul', 'bukan tanggal', '0', '0']];
+    expect(ekstrakBarisShopeeLive(aoa, 1)).toHaveLength(0);
+  });
+
+  it('kolom "Pengunjung"/"Penjualan (...)(Rp)" hilang ⇒ null untuk field itu (bukan 0)', () => {
+    const headerMinimal = ['Waktu Mulai'];
+    const aoa = [headerMinimal, ['03-07-2026 15:21']];
+    const [baris] = ekstrakBarisShopeeLive(aoa, 1);
+    expect(baris.vv).toBeNull();
+    expect(baris.gmv).toBeNull();
+    expect(baris.platformContentId).toBe('202607031521');
   });
 });
 
