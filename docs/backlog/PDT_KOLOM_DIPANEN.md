@@ -308,9 +308,31 @@ Blocker identitas `G1-09-2BII-SHOPEELIVE` (tidak ada kolom ID sesi live yang sta
 sama) TETAP terbuka — koreksi ini tidak menyentuhnya.
 
 ### 2.7 `shopee_video` — `video-overview-v3*.csv` (header 2 lapis, 54 kolom)
-Bucket 1: transaksi, kunjungan, sumber penonton, konversi (11 dari 54 kolom) ⇒ `pdt_fact_content`.
-Tidak ada baris bucket 2 — §7 menandai modul ini sudah lengkap terhadap konsumen yang
-diverifikasi; 43 kolom sisanya sengaja tidak dipanen (Example §5).
+> **TEMUAN DEFINITIF sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** — sample asli
+> Fim Motor (`video-overview-v3_1m_2026-07-31_h4hr6t1_1786349868376.csv`) akhirnya dibaca isinya
+> secara PENUH (32 baris, bukan cuma dua baris header). Hasilnya BUKAN "kolom belum
+> diverifikasi" seperti dicatat sejak G1-02 — berkas ini **TIDAK PUNYA BARIS PER VIDEO SAMA
+> SEKALI**. Baris data satu-satunya (baris 3) adalah AGREGAT SATU AKUN untuk seluruh periode
+> (`Periode Data` = rentang tanggal penuh, `User Id` = satu akun toko) — bukan satu baris per
+> video. Baris 6-32 adalah blok ringkasan TAMBAHAN per sumber kunjungan ("Kunjungan - Sumber
+> Penonton - Toko Saya"/"Pencarian"/"Rekomendasi"/dst.), juga agregat, bukan per video. **NOL
+> dari 54 kolom adalah identitas video** (tidak ada "ID Video"/"Video ID"/nama file/URL apa pun)
+> — konsisten dengan tidak adanya baris per video untuk dijadikan identitas.
+>
+> **Kesimpulan: berkas ini secara struktural TIDAK BISA menulis `pdt_fact_content` (grain per
+> video, `platform_content_id` NOT NULL) — bukan soal kolom mana yang dipilih dari 54, tapi
+> karena tidak ada baris video sama sekali di export "Video Overview" Shopee.** Ini BEDA dari
+> `shopee_ads_cpc`/`shopee_ads_search` (data cukup, cuma ejaan salah) DAN dari
+> `shopee_diskon`/`shopee_flash_sale` (data cukup, whitelist belum diputuskan) — di sini datanya
+> sendiri secara struktural salah bentuk untuk tujuan modul ini. `tandaTanganKolom` TETAP
+> `UNVERIFIED_SIGNATURE` (kode TIDAK diubah) — menyalakan deteksi untuk berkas yang tidak bisa
+> menulis apa pun tetap tidak berguna. Kemungkinan sumber per-video yang benar (`Content
+> Performance`/daftar video individual Shopee Seller Center) BELUM pernah diunggah — dicatat
+> Open baru `docs/DECISIONS.md` `G1-09-2BII-SHOPEEVIDEO-GRAIN`.
+
+Bucket 1 LAMA (sebelum temuan di atas — TIDAK BERLAKU lagi, dipertahankan di sini sebagai
+riwayat): transaksi, kunjungan, sumber penonton, konversi (11 dari 54 kolom) ⇒ `pdt_fact_content`.
+Bucket ini TIDAK PERNAH bisa diisi dari sample yang ada — lihat catatan di atas.
 
 ### 2.8 `shopee_voucher` / `shopee_diskon` / `shopee_flash_sale`
 `shopee_voucher` bucket 1: penjualan 2 basis, klaim, tingkat penggunaan, biaya promo ⇒ dimensi

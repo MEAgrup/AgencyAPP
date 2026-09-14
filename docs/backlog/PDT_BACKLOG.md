@@ -513,6 +513,17 @@ punya `null` eksplisit.
 > sama: 6 dari 11 kolom lama hilang sufiks Meta Ads Manager (`'(IDR)'`, `'Khusus untuk Item
 > Bersama'`, dsb.). Dikoreksi (modul opsional PDT-22, belum ada writer — koreksi ini tidak
 > membuka konsumen baru).
+>
+> **Status 2026-09-14 (sesi lanjutan, PR #379 sudah merge) — `shopee_video` TEMUAN DEFINITIF, nol
+> perubahan kode.** Satu-satunya berkas ZIP Fim Motor yang belum dibaca ISINYA secara penuh
+> (`video-overview-v3*.csv`, 32 baris) akhirnya dibaca lengkap — bukan "kolom belum
+> diverifikasi" seperti dicatat sejak G1-02, tapi berkas ini TIDAK PUNYA BARIS PER VIDEO SAMA
+> SEKALI (satu baris agregat per akun per periode + blok ringkasan per sumber kunjungan, nol
+> identitas video di 54 kolom). Modul ini secara STRUKTURAL tidak bisa menulis
+> `pdt_fact_content` dari sumber laporan "Video Overview" — dicatat Open baru
+> `G1-09-2BII-SHOPEEVIDEO-GRAIN`, menunggu konfirmasi apakah ada laporan Shopee per-video lain
+> yang belum diunggah. `shopee_video` TETAP `UNVERIFIED_SIGNATURE`. **Ini menutup investigasi ZIP
+> Fim Motor — seluruh 15 berkas sudah diperiksa minimal sekali.**
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
