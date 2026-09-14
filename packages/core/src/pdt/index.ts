@@ -10,7 +10,8 @@
  * campur basis), `parsestatus.ts` untuk Rule 9-10 (kolom wajib + parse_status)
  * dan Rule 12 (skor netral dihapus, renormalisasi bobot dimensi), `header.ts`
  * untuk Rule 7 (baris header dicari, bukan diasumsikan) + Rule 8 (kolom
- * dipanen/kolom baru, G1-09).
+ * dipanen/kolom baru, G1-09), `fakta.ts` untuk baris fakta tertipe
+ * (`pdt_fact_ads` dari `shopee_ads_live`, G1-09 sub-langkah 2b-ii).
  */
 export * from './types';
 export * from './modules';
@@ -21,3 +22,4 @@ export * from './identitas';
 export * from './rekonsiliasi';
 export * from './parsestatus';
 export * from './header';
+export * from './fakta';

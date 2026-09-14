@@ -159,6 +159,9 @@ afterEach(async () => {
   // SENGAJA tidak dibersihkan — append-only (trigger menolak DELETE juga, bukan cuma UPDATE),
   // baris uji menumpuk seperti test suite lain yang menembus sm_transition/insertAudit.
   await sql`delete from pdt_file where batch_id in (select id from pdt_upload_batch where client_id like 'CLI-ZPDT-%')`;
+  // pdt_fact_ads (G1-09 sub-langkah 2b-ii) — FK ke client_platforms TANPA ON DELETE CASCADE
+  // (migrasi G1-01), jadi harus dibersihkan SEBELUM client_platforms atau FK menolak DELETE.
+  await sql`delete from pdt_fact_ads where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -206,6 +209,30 @@ function shopeeAdsCpcBerkas(nama: string, idToko: string, periode: string): PdtP
     ['P1', '01/07/2026', 'PRD-1', '100', '10', '2', '5000', 'Iklan A', '200000', '4x', '2,5'],
   ];
   return { nama, sha256: 'sha-cpc', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_ads_cpc', ambiguous: false, matches: ['shopee_ads_cpc'] };
+}
+
+/**
+ * Berkas `shopee_ads_live` LENGKAP (seluruh `kolomDipanen`) — modul PERTAMA
+ * yang dipetakan ke `pdt_fact_ads` (G1-09 sub-langkah 2b-ii, `fakta.ts`
+ * `@cdps/core`). Tidak membawa preamble toko (`MODUL_PREAMBLE_SHOPEE` hanya
+ * ketiga modul iklan CPC/Search/Live BUKAN — lihat `pdt.ts`, tapi khusus
+ * modul ini pratinjau/komentar `MODUL_PREAMBLE_SHOPEE` menyebut ketiganya;
+ * fixture ini tetap menambahkan preamble sama seperti `shopeeAdsCpcBerkas`
+ * supaya identitas/periode batch bisa diselesaikan tanpa berkas lain).
+ */
+function shopeeAdsLiveBerkas(nama: string, idToko: string, periode: string, baris: readonly [string, string, string, string, string, string][]): PdtPreviewBerkasInput {
+  const header = ['Nama Iklan', 'ID Iklan', 'Penonton', 'Pesanan', 'Omzet', 'Biaya', 'Efektifitas Iklan'];
+  const aoa: unknown[][] = [
+    [`ID Toko: ${idToko}`],
+    ['Username: tokoku'],
+    ['Nama Toko: Toko Saya'],
+    [`Periode: ${periode}`],
+    [],
+    [],
+    header,
+    ...baris.map(([namaIklan, idIklan, penonton, pesanan, omzet, biaya]) => [namaIklan, idIklan, penonton, pesanan, omzet, biaya, '10']),
+  ];
+  return { nama, sha256: 'sha-adslive', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_ads_live', ambiguous: false, matches: ['shopee_ads_live'] };
 }
 
 /** Berkas tt_video LENGKAP — cukup untuk status 'ok' dan sinyal identitas TikTok ('ID Kreator' terbanyak). */
@@ -863,5 +890,96 @@ describeDb('markRawStored (G1-09 sub-langkah 2a) — mengisi raw_* setelah ungga
     expect(Number(row.raw_bytes)).toBe(12345);
     expect(row.raw_entri).toBe(1);
     expect(row.raw_entri_dilewati).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2b-ii) — baris fakta `shopee_ads_live`
+// → `pdt_fact_ads` (modul PERTAMA dipetakan, lihat `fakta.ts` `@cdps/core`
+// untuk kenapa modul ini, bukan `shopee_ads_cpc`/`shopee_ads_search`).
+// ---------------------------------------------------------------------------
+interface FactAdsRow {
+  sumber: string;
+  kampanye_id: string;
+  sku_id: number | null;
+  content_id: number | null;
+  periode: string | Date;
+  batch_id: number;
+  parser_versi: number;
+  biaya: string;
+  tayangan: number | null;
+  klik: number | null;
+  pesanan_sku: number | null;
+  gmv: string | null;
+  roas: string | null;
+}
+
+async function loadFactAds(clientPlatformId: number): Promise<FactAdsRow[]> {
+  return sql<FactAdsRow[]>`select * from pdt_fact_ads where client_platform_id = ${clientPlatformId} order by kampanye_id`;
+}
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii) — baris fakta shopee_ads_live → pdt_fact_ads', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', shopId);
+  }
+
+  it('satu baris per kampanye, periode = AWAL BULAN (Q-3), sku_id/content_id NULL (belum ada pdt_sku_master)', async () => {
+    const cpId = await fixture();
+    const berkas = shopeeAdsLiveBerkas('ads-live.xlsx', '938284780', '05/07/2026 - 31/07/2026', [
+      ['Live Pagi', 'AD-1', '1000', '20', '2000000', '150000'],
+      ['Live Sore', 'AD-2', '500', '5', '400000', '50000'],
+    ]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      sumber: 'shopee_ads_live', kampanye_id: 'AD-1', sku_id: null, content_id: null,
+      batch_id: persiapan.batchId, parser_versi: 1, tayangan: 1000, klik: null, pesanan_sku: 20,
+    });
+    expect(ymd(rows[0].periode)).toBe('2026-07-01'); // hari pertama BULAN (05/07 dibulatkan ke awal bulan), bukan tanggal preamble apa adanya
+    expect(Number(rows[0].biaya)).toBe(150000);
+    expect(Number(rows[0].gmv)).toBe(2000000);
+    expect(Number(rows[0].roas)).toBe(10);
+    expect(rows[1].kampanye_id).toBe('AD-2');
+  });
+
+  it('commit ULANG periode yang sama ⇒ baris LAMA diganti (replace-on-recommit), bukan menumpuk duplikat', async () => {
+    const cpId = await fixture();
+    const pertama = shopeeAdsLiveBerkas('ads-live.xlsx', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Live Pagi', 'AD-1', '1000', '20', '2000000', '150000'],
+    ]);
+    await commitUploadBatch(sql, ownerActor(), cpId, [pertama], []);
+    expect(await loadFactAds(cpId)).toHaveLength(1);
+
+    const kedua = shopeeAdsLiveBerkas('ads-live-revisi.xlsx', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Live Pagi (revisi)', 'AD-1', '1500', '25', '2500000', '175000'],
+    ]);
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, [kedua], []);
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — baris lama dihapus, bukan ditambah
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(Number(rows[0].biaya)).toBe(175000);
+  });
+
+  it("identitas 'tolak' (ID Toko berkas ≠ shop_id tersimpan) ⇒ NOL baris fakta ditulis — data toko yang salah tidak boleh mengotori toko ini", async () => {
+    const cpId = await fixture('SHOP-LAIN');
+    const berkas = shopeeAdsLiveBerkas('ads-live.xlsx', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Live Pagi', 'AD-1', '1000', '20', '2000000', '150000'],
+    ]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(await loadFactAds(cpId)).toHaveLength(0);
+  });
+
+  it("identitas 'usulkan_ikat' (shop_id belum terikat) ⇒ baris fakta TETAP ditulis (bukan MISMATCH, hanya belum dikonfirmasi)", async () => {
+    const cpId = await fixture(null);
+    const berkas = shopeeAdsLiveBerkas('ads-live.xlsx', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Live Pagi', 'AD-1', '1000', '20', '2000000', '150000'],
+    ]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
+    expect(persiapan.status).toBe('identitas_belum_terikat');
+    expect(await loadFactAds(cpId)).toHaveLength(1);
   });
 });

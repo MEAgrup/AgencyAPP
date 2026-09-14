@@ -26,9 +26,10 @@
 > **G2** 2 (`G2-01`/`G2-02`), **G3** 0 (§3 masih prosa, belum dipecah jadi tiket bernomor), **G4** 3
 > (`G4-01`…`G4-03`), **G5** 0 (⛔ diblokir, sengaja belum dijadwalkan — §5). Status ringkas: **G1-00
 > s.d. G1-08 SELESAI** (migrasi+engine+tes, lihat commit/`docs/DECISIONS.md` per tiket); **G1-09
-> SEDANG BERJALAN** — bukan satu langkah, sudah 4 dari ~6 sub-langkah (pratinjau, G1-09-BODY-BESAR,
-> commit 2a, rekonsiliasi 2b-i — baris fakta 2b-ii dan halaman UI sub-langkah 3 masih menyusul,
-> lihat catatan status di bawah DoD G1-09 §1); **G1-10**/**G1-11** belum dimulai; **G2**/**G4**
+> SEDANG BERJALAN** — bukan satu langkah, sudah 5 dari ~6 sub-langkah (pratinjau, G1-09-BODY-BESAR,
+> commit 2a, rekonsiliasi 2b-i, baris fakta 2b-ii DIMULAI SATU modul dari 25 — halaman UI
+> sub-langkah 3 masih menyusul, lihat catatan status di bawah DoD G1-09 §1); **G1-10**/**G1-11**
+> belum dimulai; **G2**/**G4**
 > belum dimulai (nol seed/nol UI di luar struktur tabel G1-01). Angka ini TIDAK termasuk tiket
 > non-coding §7 atau Open Assumptions §6 (bukan "tiket G", pertanyaan/keputusan pemilik).
 
@@ -381,6 +382,20 @@ punya `null` eksplisit.
 > `'parsing'`. `uq_pdt_upload_batch_verified` (Rule 36, batch verified kedua untuk toko+periode
 > yang sama) diterjemahkan jadi `ValidationError` BI, bukan 500 mentah. **Masih belum dibangun:**
 > baris fakta tertipe (sub-langkah 2b-ii), UI (sub-langkah 3), endpoint konfirmasi identitas AM.
+>
+> **Status 2026-09-14 (sub-langkah 2b-ii DIMULAI — SATU modul, `docs/DECISIONS.md` baris
+> teratas)** — baris fakta tertipe PERTAMA ditulis sungguhan: `shopee_ads_live` →
+> `pdt_fact_ads` (`packages/core/src/pdt/fakta.ts` `ekstrakBarisShopeeAdsLive`, dipanggil
+> `commitUploadBatch`). Dipilih dari ketiga modul iklan Shopee karena satu-satunya yang kunci
+> uniknya (`ID Iklan`) tidak butuh `pdt_sku_master` (belum ada) — `shopee_ads_cpc`/
+> `shopee_ads_search` **BELUM dipetakan**, masing-masing punya blocker BERBEDA yang ditemukan
+> saat membangun (bukan sekadar "belum sempat"): lihat Open baru `G1-09-2BII-ADS-CPC` (butuh
+> `pdt_sku_master`) dan `G1-09-2BII-ADS-SEARCH` (kolomDipanen tidak cukup — nol biaya/identitas).
+> Commit-ulang periode yang sama = replace (DELETE+INSERT dalam transaksi yang sama), bukan
+> `ON CONFLICT` (`sku_id`/`content_id` NULL membuat unique index tidak bisa jadi target
+> conflict). **Sisa peta kolomDipanen→tabel fakta untuk 24 modul/5 tabel lain BELUM disentuh**
+> — pekerjaan besar tersendiri, lihat `docs/handoff/HANDOFF_PDT_SESI14.md` §1 untuk kandidat
+> modul berikutnya (`tt_video`→`pdt_fact_content` direkomendasikan, kolomnya paling verified).
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

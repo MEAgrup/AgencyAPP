@@ -414,11 +414,17 @@ export async function siapkanUploadBatch(
 }
 
 // ===========================================================================
-// G1-09 sub-langkah 2a+2b-i — commit (Flow A langkah 6 sisi batch/berkas +
-// langkah 7 rekonsiliasi shop-level Shopee + langkah 9 error path). Baris
-// fakta tertipe (`pdt_fact_*`, langkah 8) — sub-langkah 2b-ii, SENGAJA BUKAN
-// di sini (peta kolomDipanen→tabel fakta belum ada, pekerjaan besar
-// tersendiri, lihat `docs/handoff/HANDOFF_PDT_SESI12.md`/`HANDOFF_PDT_SESI13.md`).
+// G1-09 sub-langkah 2a+2b-i+2b-ii(sebagian) — commit (Flow A langkah 6 sisi
+// batch/berkas + baris fakta + langkah 7 rekonsiliasi shop-level Shopee +
+// langkah 9 error path). PRD Flow A langkah 6 (BUKAN langkah 8 — langkah 8
+// adalah skor/kuadran/usulan/prefill DI ATAS baris fakta, konsumen hilir yang
+// belum dibangun, koreksi catatan sebelumnya di sini/HANDOFF_PDT_SESI13.md
+// §1 butir 1) yang menulis "baris fakta sesuai whitelist (Rule 8)" —
+// `shopee_ads_live` → `pdt_fact_ads` (sub-langkah 2b-ii, di bawah, SATU
+// modul pertama sebagai bukti pola) adalah baris fakta PERTAMA yang benar-
+// benar ditulis; 24 modul/6 tabel fakta lain BELUM (peta kolomDipanen→tabel
+// fakta untuk sisanya belum ada, pekerjaan besar tersendiri, lihat
+// `docs/handoff/HANDOFF_PDT_SESI12.md`/`HANDOFF_PDT_SESI13.md`/`HANDOFF_PDT_SESI14.md`).
 //
 // **Keputusan: PIPELINE DIJALANKAN ULANG dari `storage_path` yang sama**
 // (bukan menerima cache hasil `previewUploadBatch` dari klien) — pemanggil
@@ -632,6 +638,13 @@ export async function commitUploadBatch(
     // vs-per-SKU untuk TikTok, berhenti di 'parsing'.
   }
 
+  // Q-3 (docs/DECISIONS.md 2026-09-13): pdt_fact_ads.periode adalah AWAL BULAN, bukan
+  // periode.mulai apa adanya (yang bisa jatuh di tengah bulan bila berkas tidak membawa
+  // preamble tanggal presisi) — supaya partisi bulanan nanti (bila diperlukan) = DDL murni.
+  const periodeAwalBulan = `${periode.mulai.slice(0, 7)}-01`;
+
+  const berkasAdsLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ads_live');
+
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
   const retensiAlasan = status === 'ditolak' ? 'ditolak' : 'default';
@@ -668,6 +681,34 @@ export async function commitUploadBatch(
           values
             (${id}, ${b.modulKode}, ${b.nama}, ${b.sha256}, ${b.bytes}, ${b.barisHeader ?? 0}, ${b.deteksiOleh},
              ${b.kolomDipanen}, ${[...b.kolomBaru]}, ${parseStatusDb}, ${parseStatusDb === 'ok' ? null : b.pesan})`;
+      }
+
+      // G1-09 sub-langkah 2b-ii — baris fakta tertipe, `shopee_ads_live` → `pdt_fact_ads`
+      // (modul PERTAMA dipetakan, lihat docblock `ekstrakBarisShopeeAdsLive`, `@cdps/core`
+      // `pdt/fakta.ts`, untuk kenapa modul ini dan bukan `shopee_ads_cpc`/`shopee_ads_search`).
+      // `uq_pdt_fact_ads` TIDAK AMAN dipakai lewat `ON CONFLICT` di sini — `sku_id`/`content_id`
+      // SELALU NULL untuk modul ini (dua kolom itu bagian kunci unik), dan Postgres tidak
+      // pernah menganggap NULL=NULL saat memeriksa keunikan, jadi commit ULANG periode yang
+      // sama tidak akan pernah "conflict" — ia akan menambah baris duplikat, bukan menimpa.
+      // Jalan aman: HAPUS baris toko+periode+sumber ini lebih dulu, lalu tulis ulang dari
+      // batch yang sedang di-commit (replace-on-recommit) — sah karena baris fakta adalah
+      // data TURUNAN yang selalu bisa dihitung ulang (aturan rumah #4), bukan riwayat
+      // immutable (itu tanggung jawab `audit_log`, di bawah).
+      if (berkasAdsLive.length > 0) {
+        await tx`
+          delete from pdt_fact_ads
+           where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_live' and periode = ${periodeAwalBulan}::date`;
+        for (const b of berkasAdsLive) {
+          for (const baris of pdt.ekstrakBarisShopeeAdsLive(b.aoa, b.barisHeader)) {
+            await tx`
+              insert into pdt_fact_ads
+                (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+                 parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+              values
+                (${clientPlatformId}, 'shopee_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+                 ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+          }
+        }
       }
 
       await executors(tx).audit.insertAudit({
