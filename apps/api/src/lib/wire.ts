@@ -2451,6 +2451,8 @@ export interface ProposalLineWire {
   durasi_bulan: number | null;
   /** PR-5 — platform baris ini (selalu terisi). */
   platform: string;
+  /** F-4 — harga MSL hari itu untuk baris ini, independen dari negosiasi. */
+  harga_standar: string | null;
 }
 
 /** One negotiation proposal + its lines — web-internal's `NegotiationProposalRow`. */
@@ -2460,6 +2462,8 @@ export interface ProposalWire {
   proposed_by: string;
   proposed_by_nama: string;
   decision_note: string | null;
+  /** F-4 — alasan sales mengajukan harga custom (wajib saat versi ini custom). */
+  alasan_nego: string | null;
   created_at: string;
   lines: ProposalLineWire[];
 }
@@ -2577,6 +2581,7 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
       proposed_by: p.proposedBy,
       proposed_by_nama: p.proposedByNama,
       decision_note: p.decisionNote,
+      alasan_nego: p.alasanNego,
       created_at: p.createdAt.toISOString(),
       lines: p.lines.map((l) => ({
         master_service_id: l.masterServiceId,
@@ -2586,6 +2591,7 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
         payment_terms: l.paymentTerms,
         durasi_bulan: l.durasiBulan,
         platform: l.platform,
+        harga_standar: l.hargaStandar,
       })),
     })),
     nq_reasons: d.nqReasons,

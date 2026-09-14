@@ -37,7 +37,10 @@ import {
   markLost,
   MAX_SERVICES,
   NotFoundError,
+  MSG_JASA_DUPLIKAT_PLATFORM,
   MSG_MAX_SERVICES,
+  MSG_PLATFORM_DI_LUAR_CHECKLIST,
+  MSG_SALESPERSON_DUPLIKAT,
   NotClosableError,
   isCommissionRule,
   parseCommissionRule,
@@ -331,6 +334,20 @@ describe('negotiation gates (no DB)', () => {
   });
 });
 
+// F-3 (feedback lapangan 2026-09-14, DECISIONS.md O73 precedent): "a field is
+// present but wrong" must never fall back to the generic incomplete BI — each
+// class below carries its own message, and this pins them apart so the
+// default never quietly creeps back in.
+describe('F-3: wrong-field messages are specific, never the generic incomplete BI', () => {
+  it('each new message differs from bi.INCOMPLETE_DATA and from each other', () => {
+    const messages = [MSG_PLATFORM_DI_LUAR_CHECKLIST, MSG_JASA_DUPLIKAT_PLATFORM, MSG_SALESPERSON_DUPLIKAT];
+    for (const m of messages) {
+      expect(m).not.toBe(bi.INCOMPLETE_DATA);
+    }
+    expect(new Set(messages).size).toBe(messages.length);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Unit: closing allocation rules (pure).
 // ---------------------------------------------------------------------------
@@ -366,6 +383,19 @@ describe('validateParties (allocation Σ=100%)', () => {
       primarySalespersonId: 'A',
       allocations: [{ salespersonId: 'A', basisPoints: 5000 }, { salespersonId: 'B', basisPoints: 5000 }],
     })).toThrow(IncompleteError); // PIC missing
+  });
+
+  // F-3 (feedback lapangan 2026-09-14): a salesperson listed twice is a WRONG
+  // allocation, not an empty one — names the actual problem instead of the
+  // generic incomplete BI.
+  it('rejects a salesperson listed twice with a specific message, not the generic incomplete BI', () => {
+    expect(() => validateParties({
+      primarySalespersonId: 'A',
+      allocations: [
+        { salespersonId: 'A', basisPoints: 5000 },
+        { salespersonId: 'A', basisPoints: 5000 },
+      ],
+    })).toThrow(MSG_SALESPERSON_DUPLIKAT);
   });
 });
 
@@ -865,7 +895,7 @@ describeDb('negotiation', () => {
     const svc = await seedService('SVC-ZZ-NEGO');
     const attemptId = await qualifiedAttempt(budi(), svc);
     const lines: ProposalLine[] = [{ masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price', paymentTerms: 'Termin 3x' }];
-    const submitted = await submitNegotiation(sql, budi(), attemptId, lines, false);
+    const submitted = await submitNegotiation(sql, budi(), attemptId, lines, false, 'ZZ alasan nego test');
     expect(submitted.ok).toBe(true);
     expect(await status(attemptId)).toBe('Negotiation - Pending Approval');
 
@@ -886,7 +916,7 @@ describeDb('negotiation', () => {
     const attemptId = await qualifiedAttempt(budi(), svc);
     await submitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
-    ], false);
+    ], false, 'ZZ alasan nego test');
     const denied = await decideNegotiation(sql, budi(), attemptId, DECISION_APPROVE);
     expect(denied.ok).toBe(false);
     if (!denied.ok) expect(denied.code).toBe('role_denied');
@@ -898,14 +928,14 @@ describeDb('negotiation', () => {
     const attemptId = await qualifiedAttempt(budi(), svc);
     await submitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
-    ], false);
+    ], false, 'ZZ alasan nego test');
     const revised = await decideNegotiation(sql, salesLead(), attemptId, DECISION_REVISE, 'harga terlalu rendah');
     expect(revised.ok).toBe(true);
     expect(await status(attemptId)).toBe('Negotiation - Revision Required');
 
     const resub = await resubmitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: svc, proposedPrice: '8500000', commissionRule: '10% of standard price' },
-    ]);
+    ], 'ZZ alasan nego resubmit');
     expect(resub.ok).toBe(true);
     expect(await status(attemptId)).toBe('Negotiation - Pending Approval');
     const versions = await sql<{ n: number }[]>`
@@ -918,7 +948,7 @@ describeDb('negotiation', () => {
     const attemptId = await qualifiedAttempt(budi(), svc);
     await submitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
-    ], false);
+    ], false, 'ZZ alasan nego test');
     await decideNegotiation(sql, salesLead(), attemptId, DECISION_REVISE, 'counter: 8.5jt');
     const accepted = await acceptCounter(sql, budi(), attemptId);
     expect(accepted.ok).toBe(true);
@@ -1040,13 +1070,13 @@ describeDb('reviseServices — Edit Service sebelum closing', () => {
     const attemptId = await qualifiedAttempt(budi(), svc);
     await submitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
-    ], false);
+    ], false, 'ZZ alasan nego test');
     await decideNegotiation(sql, salesLead(), attemptId, DECISION_APPROVE);
     expect(await status(attemptId)).toBe('Negotiation - Approved');
 
     const res = await reviseServices(sql, budi(), attemptId, [
       { masterServiceId: svc, proposedPrice: '7000000', commissionRule: '10% of standard price' },
-    ]);
+    ], 'ZZ alasan revisi custom');
     expect(res.ok).toBe(true);
     expect(await status(attemptId)).toBe('Negotiation - Pending Approval');
 
@@ -1061,9 +1091,11 @@ describeDb('reviseServices — Edit Service sebelum closing', () => {
     const svc = await seedService('SVC-ZZ-REV-GATE');
     const attemptId = await autoApprovedAttempt(budi(), svc);
     await expect(reviseServices(sql, budi(), attemptId, [])).rejects.toBeInstanceOf(IncompleteError);
+    // F-3: same jasa+platform twice is a WRONG line, not an empty one —
+    // ValidationError (MSG_JASA_DUPLIKAT_PLATFORM), not the generic incomplete BI.
     await expect(reviseServices(sql, budi(), attemptId, [
       { masterServiceId: svc, quantity: 1 }, { masterServiceId: svc, quantity: 2 },
-    ])).rejects.toBeInstanceOf(IncompleteError);
+    ])).rejects.toThrow(MSG_JASA_DUPLIKAT_PLATFORM);
     const many = Array.from({ length: MAX_SERVICES + 1 }, (_, i) => ({ masterServiceId: `SVC-ZZ-REV-N-${i}` }));
     await expect(reviseServices(sql, budi(), attemptId, many)).rejects.toThrow(MSG_MAX_SERVICES);
     // Nothing was written by any of the three refusals.
@@ -1085,7 +1117,7 @@ describeDb('reviseServices — Edit Service sebelum closing', () => {
     await expect(reviseServices(sql, budi(), attemptId, [
       { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop' },
       { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop' },
-    ])).rejects.toBeInstanceOf(IncompleteError);
+    ])).rejects.toThrow(MSG_JASA_DUPLIKAT_PLATFORM);
 
     await reviseServices(sql, budi(), attemptId, [
       { masterServiceId: svc, quantity: 1, platform: 'TikTok Shop' },
@@ -1382,7 +1414,7 @@ describeDb('read models', () => {
     // Submit a negotiation proposal (a counter-price) → a v1 proposal to surface.
     await submitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
-    ], false);
+    ], false, 'ZZ diskon volume');
 
     const detail = await getAttempt(sql, attemptId);
     expect(detail.attempt.id).toBe(attemptId);
@@ -1398,8 +1430,12 @@ describeDb('read models', () => {
     expect(detail.proposals).toHaveLength(1);
     expect(detail.proposals[0].versionNo).toBe(1);
     expect(detail.proposals[0].proposedByNama).not.toBe('');
+    // F-4: the mandatory reason, and the standard price frozen alongside the
+    // negotiated one (recomputed from the MSL — the line is custom-priced).
+    expect(detail.proposals[0].alasanNego).toBe('ZZ diskon volume');
     expect(detail.proposals[0].lines).toHaveLength(1);
     expect(money.parse(detail.proposals[0].lines[0].proposedPrice)).toBe(money.parse('8000000'));
+    expect(detail.proposals[0].lines[0].hargaStandar).not.toBeNull();
     expect(detail.nqReasons).toEqual([]);
     // Without this the client renders zero action buttons — a dead page.
     expect(detail.allowedTransitions.length).toBeGreaterThan(0);
@@ -1410,11 +1446,11 @@ describeDb('read models', () => {
     const attemptId = await qualifiedAttempt(budi(), svc);
     await submitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
-    ], false);
+    ], false, 'ZZ alasan v1');
     await decideNegotiation(sql, salesLead(), attemptId, DECISION_REVISE, 'harga terlalu rendah');
     await resubmitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: svc, proposedPrice: '8500000', commissionRule: '10% of standard price' },
-    ]);
+    ], 'ZZ alasan v2');
 
     const detail = await getAttempt(sql, attemptId);
     // A single "current quote" cannot show that a price was revised — the panel
@@ -1990,7 +2026,7 @@ describeDb('FS-6b — tenor pilihan klien sampai ke deal', () => {
     // Baris STANDAR ber-tenor 6: harganya diambil dari opsi, bukan dari versi.
     await submitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: svc, quantity: 1, durasiBulan: 6 },
-    ], false);
+    ], false, 'ZZ tenor 6 bulan');
     const std = await sql<{ proposed_price: string; durasi_bulan: number | null }[]>`
       select l.proposed_price, l.durasi_bulan from negotiation_proposal_lines l
         join negotiation_proposals p on p.id = l.proposal_id
@@ -2003,7 +2039,7 @@ describeDb('FS-6b — tenor pilihan klien sampai ke deal', () => {
     await decideNegotiation(sql, salesLead(), attemptId, DECISION_REVISE, 'coba tawarkan paket setahun');
     await resubmitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: svc, proposedPrice: '30000000', commissionRule: '10% of standard price', durasiBulan: 12 },
-    ]);
+    ], 'ZZ paket setahun');
     const nego = await sql<{ proposed_price: string; durasi_bulan: number | null }[]>`
       select l.proposed_price, l.durasi_bulan from negotiation_proposal_lines l
         join negotiation_proposals p on p.id = l.proposal_id
@@ -2049,7 +2085,7 @@ describeDb('FS-6b — kontrak dan layanan tidak boleh berbeda tenor', () => {
     // tahu soal kolomnya.
     await submitNegotiation(sql, budi(), attemptId, [
       { masterServiceId: id, proposedPrice: '30000000', commissionRule: '10% of standard price' },
-    ], false);
+    ], false, 'ZZ alasan jahit');
     await decideNegotiation(sql, salesLead(), attemptId, DECISION_APPROVE);
 
     const res = await close(sql, budi(), attemptId, {

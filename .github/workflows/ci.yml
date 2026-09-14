@@ -256,12 +256,16 @@ jobs:
       # +1 mesin `external_order` (#35, 34→35) + 1 event katalog v16
       # `bridge.order.masuk` (73→74). Lihat komentar migrasi untuk rincian
       # gate lengkap (tabel/prefix juga naik — dicek di step lain di bawah).
-      - name: Verify migration seed counts (35 machines, 74 events, catalog registry consistent)
+      # Feedback lapangan 2026-09-14 (20261020010000_feedback_lapangan_20260914.sql):
+      # +1 event katalog v17 `m5.installment.amount_mismatch` (74→75) — F-5
+      # koreksi, NOL tabel baru (payment_verifications sudah ada sejak wave 1).
+      # F-2 + F-4 mengubah tabel/kolom yang sudah ada, jadi sm_machines TETAP 35.
+      - name: Verify migration seed counts (35 machines, 75 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 35 then raise exception 'expected 35 machines'; end if;
-               if (select count(*) from notif_events) <> 74 then raise exception 'expected 74 events'; end if;
+               if (select count(*) from notif_events) <> 75 then raise exception 'expected 75 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;
@@ -504,6 +508,9 @@ jobs:
       #       (status pdt_upload_batch ditulis domain langsung, preseden M19
       #       dailyops) ⇒ sm_machines TETAP 35. Nol event katalog baru ⇒
       #       notif_events TETAP 74.
+      # Feedback lapangan 2026-09-14 (20261020010000_feedback_lapangan_20260914.sql):
+      # nol tabel baru ⇒ TETAP 175 — F-2/F-4 mengubah tabel yang sudah ada
+      # (ALTER + kolom baru), F-5 (koreksi) nol tabel sama sekali.
       - name: Verify table count (expect 175)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
@@ -538,6 +545,8 @@ jobs:
       #      diketok menjanjikan sesuatu yang belum ada.
       # 44 = 43 + ORD (Bridge MSDPS→CDPS Fase 1,
       #      20261007010000_bridge_msdps_fase1.sql: inbox order eksternal).
+      # Feedback lapangan 2026-09-14: TETAP 44 — `alasan_nego`/`harga_standar`
+      # (F-4) adalah kolom pada entitas NEG- yang sudah ada, bukan prefix baru.
       - name: Verify entity_prefix registry (expect 44)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")

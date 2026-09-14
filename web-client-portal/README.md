@@ -28,16 +28,18 @@ app's layer only — the underlying GoTrue token TTL is unchanged (would also
 shorten the employee/vendor realms' all-day sessions).
 
 **Login rate limiting (spec §5.2, OQ-5) built** (2026-08-31 follow-up,
-`docs/DECISIONS.md` O64): 10 attempts/IP/15min, enforced in `apps/api`
-(`packages/domain/src/auth.ts` `enforceLoginRateLimit`, called from
-`POST /auth/login` before GoTrue is even reached). Applied **uniformly**
-across all three CDPS auth realms, not Portal-only — `/auth/login` is one
-shared endpoint that only knows which realm resolved AFTER GoTrue
-authenticates, so a Portal-only gate would have needed a weaker,
-spoofable header check; the owner picked the uniform, more robust option.
-Nothing to build here in `web-client-portal` itself — a 429 from this
-endpoint surfaces through the existing `ApiError`/`errorMessage()` path
-like any other login failure.
+`docs/DECISIONS.md` O64; reworked by F-2, 2026-09-14): 10 FAILED
+attempts/email+IP/15min, enforced in `apps/api`
+(`packages/domain/src/auth.ts` `assertLoginNotRateLimited`, a read-only
+pre-check called before `passwordGrant`, plus `recordFailedLoginAttempt`
+called only when it throws — a successful login never consumes budget).
+Applied **uniformly** across all three CDPS auth realms, not Portal-only —
+`/auth/login` is one shared endpoint that only knows which realm resolved
+AFTER GoTrue authenticates, so a Portal-only gate would have needed a
+weaker, spoofable header check; the owner picked the uniform, more robust
+option. Nothing to build here in `web-client-portal` itself — a 429 from
+this endpoint surfaces through the existing `ApiError`/`errorMessage()`
+path like any other login failure.
 
 **Still not built**: the complaint-form rate limit (5/contact/hr +
 20/IP/hr, spec §5.2) — waits on the complaint-form cluster itself (no

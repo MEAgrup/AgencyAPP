@@ -178,7 +178,16 @@ check() { # nama · sql · harapan
 check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "175"
 check "entity_prefix"    "select count(*) from entity_prefix"    "44"
 check "sm_machines"      "select count(*) from sm_machines"      "35"
-check "notif_events"     "select count(*) from notif_events"     "74"
+check "notif_events"     "select count(*) from notif_events"     "75"
+# --- Feedback lapangan 2026-09-14 — F-2 + F-4
+#     (20261020010000_feedback_lapangan_20260914.sql) -----------------------
+# notif_events 74→75: `m5.installment.amount_mismatch` (F-5 koreksi — NOL tabel
+#       baru, murni event dari `payment_verifications` yang sudah ada sejak
+#       wave 1; lihat komentar migrasi). tabel public TETAP 175, entity_prefix
+#       TETAP 44, sm_machines TETAP 35 — F-2 mengubah tabel rate-limit yang
+#       sudah ada (kolom `email` + dua fungsi baru), F-4 menambah dua KOLOM
+#       (`negotiation_proposals.alasan_nego`, `negotiation_proposal_lines.
+#       harga_standar`) pada entitas NEG- yang sudah ada, bukan entitas baru.
 # --- PX-M2a — Shop ID Gate & Eligibility Policy
 #     (20261008010000_px_m2a_shop_id_eligibility_policy.sql) -----------------
 # 161 = 160 + 1 tabel: `px_eligibility_policy` — kalibrasi kelayakan SKU

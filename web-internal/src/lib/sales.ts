@@ -144,6 +144,8 @@ export interface ProposalLineRow {
   durasi_bulan: number | null;
   /** PR-5 — platform baris ini (selalu terisi). */
   platform: string;
+  /** F-4 — harga MSL hari itu untuk baris ini, independen dari negosiasi. */
+  harga_standar: string | null;
 }
 
 // One versioned negotiation_proposals row + its lines (version_no ASC).
@@ -153,6 +155,8 @@ export interface NegotiationProposalRow {
   proposed_by: string;
   proposed_by_nama: string;
   decision_note: string | null;
+  /** F-4 — alasan sales mengajukan harga custom (wajib saat versi ini custom). */
+  alasan_nego: string | null;
   created_at: string;
   lines: ProposalLineRow[];
 }
@@ -383,8 +387,12 @@ export function submitNegotiation(
   id: string,
   lines: ProposalLineInput[],
   noNego: boolean,
+  // F-4 (2026-09-14) — wajib di server untuk versi ber-custom-terms.
+  alasanNego?: string,
 ): Promise<{ ok: boolean }> {
-  return api.post<{ ok: boolean }>(`/attempts/${id}/negotiation`, { lines, no_nego: noNego });
+  return api.post<{ ok: boolean }>(`/attempts/${id}/negotiation`, {
+    lines, no_nego: noNego, alasan_nego: alasanNego ?? '',
+  });
 }
 
 export function decideNegotiation(
@@ -399,16 +407,26 @@ export function acceptCounter(id: string): Promise<{ status: string }> {
   return api.post<{ status: string }>(`/attempts/${id}/negotiation/accept`);
 }
 
-export function resubmitNegotiation(id: string, lines: ProposalLineInput[]): Promise<{ ok: boolean }> {
-  return api.post<{ ok: boolean }>(`/attempts/${id}/negotiation/resubmit`, { lines });
+export function resubmitNegotiation(
+  id: string,
+  lines: ProposalLineInput[],
+  // F-4 (2026-09-14) — wajib di server untuk versi ber-custom-terms.
+  alasanNego?: string,
+): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/attempts/${id}/negotiation/resubmit`, { lines, alasan_nego: alasanNego ?? '' });
 }
 
 // POST /attempts/{id}/services — Edit Service sebelum closing (M0 §5.1, keputusan
 // pemilik 2026-08-07). Menulis versi proposal BARU dengan set jasa final. Baris
 // standar saja ⇒ status tetap Approved/Auto Approved; ada harga custom ⇒ kembali
 // ke Negotiation - Pending Approval (server yang memutuskan).
-export function reviseServices(id: string, lines: ProposalLineInput[]): Promise<{ ok: boolean }> {
-  return api.post<{ ok: boolean }>(`/attempts/${id}/services`, { lines });
+export function reviseServices(
+  id: string,
+  lines: ProposalLineInput[],
+  // F-4 (2026-09-14) — wajib di server bila set ini mengandung baris custom.
+  alasanNego?: string,
+): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/attempts/${id}/services`, { lines, alasan_nego: alasanNego ?? '' });
 }
 
 export function closeAttempt(id: string, input: ClosingInput): Promise<ClosingResult> {

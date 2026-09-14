@@ -22,8 +22,8 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const body = await readJson<{ lines?: ProposalLineBody[] }>(request);
-    const result = await sales.reviseServices(db(), actor, id, toProposalLines(body.lines));
+    const body = await readJson<{ lines?: ProposalLineBody[]; alasan_nego?: string }>(request);
+    const result = await sales.reviseServices(db(), actor, id, toProposalLines(body.lines), body.alasan_nego ?? null);
     return transitionResponse(result);
   });
 }

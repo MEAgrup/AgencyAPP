@@ -107,6 +107,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   SalesIncompleteError: 400, // sales.IncompleteError
   SalesPerfValidationError: 400, // salesperf.ValidationError
   SalesTooManyServicesError: 400, // sales.TooManyServicesError
+  SalesValidationError: 400, // sales.ValidationError (F-3, 2026-09-14 — field present but wrong)
   ScheduleTotalError: 400, // finance.ScheduleTotalError
   ScsValidationError: 400, // scs.ValidationError (M19 separuh SCS)
   StageValidationError: 400, // stage.ValidationError

@@ -201,6 +201,12 @@ export const EVENTS = {
   // adalah aksi actor sendiri. Emitter: packages/domain/src/bridge.ts intake().
   BridgeOrderMasuk: 'bridge.order.masuk',               // -> lead Account
 
+  // F-2 feedback lapangan 2026-09-14 (F-5) — installment settles (§4 Rule 3)
+  // with a total ≠ its planned `amount` (payment_verifications already lets
+  // Finance type any received nominal per event; nothing told anyone the two
+  // numbers had drifted). Emitter: packages/domain/src/finance.ts verifyPayment().
+  InstallmentAmountMismatch: 'm5.installment.amount_mismatch', // -> Sales PIC + Finance lead
+
 } as const;
 
 /** A cataloged event type. */
@@ -331,6 +337,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'Bridge MSDPS→CDPS Fase 1 — 1 event: bridge.order.masuk (order [Masuk] baru dari MSDPS) → lead Account. Satu event, bukan tiga: [Ditolak] nol audiens CDPS di Fase 1 (nol callback), [Diterima] adalah aksi actor sendiri.',
     eventCount: 1,
     decisionRef: 'docs/DECISIONS.md 2026-09-10 (Bridge MSDPS→CDPS Fase 1)',
+  },
+  {
+    version: 17,
+    description:
+      'Feedback lapangan 2026-09-14 (F-5) — 1 event: m5.installment.amount_mismatch (termin settle dengan total diterima ≠ rencana, dari payment_verifications yang sudah ada sejak wave 1) → Sales PIC + lead Finance, sebelum rekap bulanan.',
+    eventCount: 1,
+    decisionRef: 'docs/DECISIONS.md 2026-09-14 (F-5, koreksi diagnosis handoff)',
   },
 ] as const;
 
@@ -497,6 +510,15 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   // --- v16 (Bridge MSDPS→CDPS Fase 1). Description/resolver WAJIB sama
   // persis dengan seed migrasi 20261007010000_bridge_msdps_fase1.sql. ---
   [EVENTS.BridgeOrderMasuk]: { description: 'Order baru [Masuk] dari MSDPS — ke lead Account', resolver: 'leadsOfDivision', version: 16 },
+
+  // --- v17 (Feedback lapangan 2026-09-14, F-5). Description/resolver WAJIB
+  // sama persis dengan seed migrasi
+  // 20261020010000_feedback_lapangan_20260914.sql. ---
+  [EVENTS.InstallmentAmountMismatch]: {
+    description: 'Termin settle dengan total diterima ≠ rencana — ke Sales PIC + lead Finance',
+    resolver: 'explicitOrLeads',
+    version: 17,
+  },
 };
 
 /** All registered event types (introspection / tests). */

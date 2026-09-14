@@ -22,10 +22,12 @@
  * `vendors` do not have either — checked before `auth.getMe`/`auth.getVendorMe`
  * so a client contact never hits either query.
  *
- * M15-C2 follow-up also adds a per-IP rate limit (spec §5.2 OQ-5,
- * DECISIONS.md O64) — 10 attempts/IP/15min, applied UNIFORMLY across all
+ * M15-C2 follow-up also adds a login rate limit (spec §5.2 OQ-5, DECISIONS.md
+ * O64) — 10 FAILED attempts/email+IP/15min, applied UNIFORMLY across all
  * three realms since this endpoint is shared and can't tell them apart until
- * after GoTrue has already run. See auth.enforceLoginRateLimit's doc comment.
+ * after GoTrue has already run. F-2 (2026-09-14) reworked the bucket: see
+ * auth.assertLoginNotRateLimited's doc comment for why it's now two calls
+ * (a read-only pre-check, then a failure-only record) instead of one.
  *
  * Client Portal is now served under `app.meagency.co.id/klien/*` — the SAME
  * host as `web-internal` (owner decision 2026-09-01, DECISIONS.md) — so a
@@ -58,9 +60,16 @@ export async function POST(request: Request): Promise<Response> {
       throw new BadRequestError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
     }
 
-    await auth.enforceLoginRateLimit(db(), clientIp(request));
+    const ip = clientIp(request);
+    await auth.assertLoginNotRateLimited(db(), ip, email);
 
-    const session = await passwordGrant(email, password);
+    let session: Awaited<ReturnType<typeof passwordGrant>>;
+    try {
+      session = await passwordGrant(email, password);
+    } catch (err) {
+      await auth.recordFailedLoginAttempt(db(), ip, email);
+      throw err;
+    }
     const secret = process.env.SUPABASE_JWT_SECRET ?? '';
     const actor = actorFromToken(session.access_token, secret);
 

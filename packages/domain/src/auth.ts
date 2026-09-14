@@ -141,9 +141,12 @@ export const MSG_SET_PASSWORD_DENIED = '[anda tidak memiliki akses untuk mengatu
 export const MSG_EMPLOYEE_NOT_FOUND = '[karyawan tidak ditemukan]';
 
 /** NEW string — no Go precedent (Go never had per-IP login throttling). M15-C2
- *  follow-up, spec §5.2 OQ-5, DECISIONS.md O64 (2026-08-31). */
+ *  follow-up, spec §5.2 OQ-5, DECISIONS.md O64 (2026-08-31). Reworded F-2
+ *  (2026-09-14, DECISIONS.md): names the way out, since the bucket is now
+ *  shared per email+IP rather than IP alone — a blocked office NAT egress
+ *  needs to know "wait" is the fix, not "something is wrong with the network". */
 export const MSG_LOGIN_RATE_LIMITED =
-  '[terlalu banyak percobaan login dari alamat ini, silahkan coba lagi dalam 15 menit]';
+  '[terlalu banyak percobaan login gagal untuk akun ini, silahkan tunggu 15 menit lalu coba lagi]';
 
 /** Password fails the length policy (carries the verbatim BI message). */
 export class PasswordPolicyError extends Error {
@@ -192,30 +195,61 @@ const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 10;
 const LOGIN_RATE_LIMIT_WINDOW_MINUTES = 15;
 
 /**
- * enforceLoginRateLimit — spec M15-C2 §5.2 (OQ-5: 10/IP/15min), applied
- * UNIFORMLY to every `POST /auth/login` attempt regardless of which realm
- * ultimately resolves (employee / LT-61 vendor / M15-C2 client-contact).
+ * Normalizes an email into the rate-limit bucket key the same way on every
+ * call site (lowercased, trimmed) — otherwise "Sales@x" and "sales@x" would
+ * silently get separate budgets.
+ */
+function rateLimitEmailKey(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/**
+ * assertLoginNotRateLimited — spec M15-C2 §5.2 (OQ-5: 10 attempts/15min),
+ * applied UNIFORMLY to every `POST /auth/login` attempt regardless of which
+ * realm ultimately resolves (employee / LT-61 vendor / M15-C2 client-contact).
  *
- * The spec's number was written for the Client Portal specifically, but
- * `/auth/login` is ONE shared endpoint across all three realms, branching by
- * resolved Actor only AFTER GoTrue authenticates — too late to gate repeated
- * bad-password attempts per-realm. See DECISIONS.md 2026-08-31 (O64 closed)
- * for the full reasoning: a uniform ceiling only ADDS protection for
- * employee/vendor logins (GoTrue's own baseline still applies underneath); it
- * never restricts a legitimate human logging in ten times in fifteen minutes.
+ * F-2 (2026-09-14, DECISIONS.md), field complaint from Account: *"Saat
+ * terjadi kendala jaringan ketika login, sistem menampilkan 'percobaan masuk
+ * terlalu banyak'."* Root cause was the BUCKET, not the message: the original
+ * single `check_login_rate_limit` (a) keyed on IP alone, so one office NAT
+ * egress shared one 10-attempt budget across every employee behind it, and
+ * (b) recorded EVERY checked attempt including successful logins, since it
+ * ran before `passwordGrant` even knew the outcome.
  *
- * DB-backed (`check_login_rate_limit`, 20260906010000_login_rate_limit.sql),
+ * Fixed by splitting into two functions and moving the call sites:
+ *   1. This one — a PURE READ (`login_rate_limit_check`), called BEFORE
+ *      `passwordGrant` so a brute-forcer is still stopped before bcrypt's
+ *      cost runs, but it never itself consumes budget.
+ *   2. `recordFailedLoginAttempt` below — called AFTER `passwordGrant`
+ *      throws, so a successful login records nothing at all.
+ * Keyed on email+IP (`rateLimitEmailKey`), not IP alone, so a shared office
+ * egress no longer throttles every employee behind it for one person's typos.
+ *
+ * DB-backed (20260906010000 + 20261020010000_feedback_lapangan_20260914.sql),
  * not in-memory: `apps/api` runs as Vercel serverless functions, where an
  * in-process counter would not reliably survive between invocations.
  */
-export async function enforceLoginRateLimit(sql: Queryable, ipAddress: string): Promise<void> {
+export async function assertLoginNotRateLimited(sql: Queryable, ipAddress: string, email: string): Promise<void> {
   const rows = await sql<{ allowed: boolean }[]>`
-    select public.check_login_rate_limit(
-      ${ipAddress}, ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS}, ${LOGIN_RATE_LIMIT_WINDOW_MINUTES}
+    select public.login_rate_limit_check(
+      ${ipAddress}, ${rateLimitEmailKey(email)}, ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS}, ${LOGIN_RATE_LIMIT_WINDOW_MINUTES}
     ) as allowed`;
   if (rows[0]?.allowed !== true) {
     throw new RateLimitedError();
   }
+}
+
+/**
+ * recordFailedLoginAttempt — the write half of the F-2 split (see
+ * `assertLoginNotRateLimited`'s doc comment). Call this ONLY when
+ * `passwordGrant` (or the realm resolution after it) has actually failed —
+ * never on a successful login, and never before the outcome is known.
+ */
+export async function recordFailedLoginAttempt(sql: Queryable, ipAddress: string, email: string): Promise<void> {
+  await sql`
+    select public.login_rate_limit_record_failure(
+      ${ipAddress}, ${rateLimitEmailKey(email)}, ${LOGIN_RATE_LIMIT_WINDOW_MINUTES}
+    )`;
 }
 
 /**
