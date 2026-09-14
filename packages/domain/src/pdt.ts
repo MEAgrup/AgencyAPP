@@ -429,12 +429,19 @@ export async function siapkanUploadBatch(
 // dipilih karena grain barisnya SUDAH per-kreator, nol ambiguitas kelas
 // `shopee_ads_cpc`, yang investigasi sesi ini JUSTRU menemukan blocker BARU,
 // lihat docblock `fakta.ts`), dan `shopee_ams_afiliasi` → `pdt_fact_creator_period`
-// (modul KELIMA, sesi ini — sisi Shopee untuk tabel yang modul keempat baru
-// mengisi sisi TikTok-nya; `shopee_ams_produk`, saudaranya di modul yang sama,
-// SENGAJA tidak dipetakan karena grainnya PER PRODUK, bukan per-kreator)
+// (modul KELIMA — sisi Shopee untuk tabel yang modul keempat baru mengisi
+// sisi TikTok-nya; `shopee_ams_produk`, saudaranya di modul yang sama, TIDAK
+// dipetakan KE SINI karena grainnya PER PRODUK, bukan per-kreator — TIDAK
+// berarti tidak dipetakan sama sekali, lihat modul KEDELAPAN di bawah), dan
+// `shopee_ads_search`/modul KETUJUH → `pdt_fact_ads`, dan `shopee_ams_produk`/
+// modul KEDELAPAN (sesi 23) → `pdt_fact_sku_period` (lihat docblock
+// `ekstrakBarisShopeeAmsProduk`, `fakta.ts` — `sku_id` NULL, `platform_product_id`
+// diisi langsung dari `Kode Item`; blocker lama `sku_id NOT NULL` dibuka
+// bersamaan dengan `G1-09-2BII-ADS-CPC-SKU`, migrasi
+// `20261025010000_g1_09_2bii_ads_cpc_sku_platform_product_id.sql`)
 // adalah baris/tabel fakta yang benar-benar ditulis (sub-langkah 2b-ii, di
-// bawah); 20 modul/2 tabel fakta lain BELUM (peta kolomDipanen→tabel fakta
-// untuk sisanya belum ada, pekerjaan besar tersendiri, lihat
+// bawah); modul-modul lain BELUM (peta kolomDipanen→tabel fakta untuk
+// sisanya belum ada, pekerjaan besar tersendiri, lihat
 // `docs/handoff/HANDOFF_PDT_SESI12.md`/`HANDOFF_PDT_SESI13.md`/
 // `HANDOFF_PDT_SESI14.md`/`HANDOFF_PDT_SESI15.md`/`HANDOFF_PDT_SESI16.md`/
 // `HANDOFF_PDT_SESI17.md`).
@@ -681,6 +688,11 @@ export async function commitUploadBatch(
   // (lihat docblock `ekstrakBarisKreatorShopeeAmsAfiliasi`, `@cdps/core` `pdt/fakta.ts`) — sisi
   // Shopee untuk tabel yang modul KEEMPAT (TikTok) baru mengisi.
   const berkasShopeeAmsAfiliasi = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ams_afiliasi');
+  // G1-09 sub-langkah 2b-ii — modul KEDELAPAN (sesi 23), `shopee_ams_produk` → `pdt_fact_sku_period`
+  // (lihat docblock `ekstrakBarisShopeeAmsProduk`, `@cdps/core` `pdt/fakta.ts`) — `G1-09-2BII-
+  // ADS-CPC-SKU` DITUTUP sesi ini membuka blocker `sku_id NOT NULL` yang menahan modul ini sejak
+  // lahir (HANDOFF_PDT_SESI21.md §1: "BLOCKED TOTAL").
+  const berkasShopeeAmsProduk = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ams_produk');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -755,6 +767,9 @@ export async function commitUploadBatch(
       // `fakta.ts` untuk kenapa `sku_id` TIDAK diisi walau `pdt_sku_master`
       // sudah ada: `Kode Produk` level induk, `pdt_sku_master` berkunci per
       // varian — lookup langsung akan mengarang varian mana yang dipilih).
+      // `platform_product_id` DIISI sesi 23 (`G1-09-2BII-ADS-CPC-SKU` DITUTUP
+      // — pemilik: "kebutuhan hanya GMV per produk bukan sampai varian") —
+      // salinan identitas `Kode Produk`, bukan lookup.
       if (berkasAdsCpc.length > 0) {
         await tx`
           delete from pdt_fact_ads
@@ -763,10 +778,10 @@ export async function commitUploadBatch(
           for (const baris of pdt.ekstrakBarisShopeeAdsCpc(b.aoa, b.barisHeader)) {
             await tx`
               insert into pdt_fact_ads
-                (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+                (client_platform_id, sumber, kampanye_id, platform_product_id, sku_id, content_id, periode, batch_id,
                  parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
               values
-                (${clientPlatformId}, 'shopee_ads_cpc', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+                (${clientPlatformId}, 'shopee_ads_cpc', ${baris.kampanyeId}, ${baris.platformProductId}, null, null, ${periodeAwalBulan}::date, ${id},
                  ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
           }
         }
@@ -908,6 +923,33 @@ export async function commitUploadBatch(
               on conflict (client_platform_id, creator_handle, periode) do update set
                 batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
                 gmv = excluded.gmv, pesanan_teratribusi = excluded.pesanan_teratribusi`;
+          }
+        }
+      }
+
+      // G1-09 sub-langkah 2b-ii — modul KEDELAPAN (sesi 23), `shopee_ams_produk` →
+      // `pdt_fact_sku_period` (lihat docblock `ekstrakBarisShopeeAmsProduk`, `@cdps/core`
+      // `pdt/fakta.ts`). `sku_id` SELALU NULL (level produk-induk, `G1-09-2BII-ADS-CPC-SKU`
+      // DITUTUP sesi ini) — replace-on-recommit (DELETE scope lalu INSERT), sama alasan
+      // `pdt_fact_ads` di atas: baris LAMA yang `platform_product_id`-nya sudah tidak muncul di
+      // batch baru (produk delisting dari laporan AMS) harus ikut hilang, bukan cuma di-upsert
+      // per baris — `ON CONFLICT` pada unique index PARSIAL `uq_pdt_fact_sku_period_produk`
+      // tidak menutupi kasus itu. `basis = 'dibayar'` LITERAL (bukan dari kolom manapun di
+      // berkas — keputusan pemilik, lihat docblock `ekstrakBarisShopeeAmsProduk`).
+      if (berkasShopeeAmsProduk.length > 0) {
+        await tx`
+          delete from pdt_fact_sku_period
+           where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'dibayar'
+             and periode = ${periodeAwalBulan}::date`;
+        for (const b of berkasShopeeAmsProduk) {
+          for (const baris of pdt.ekstrakBarisShopeeAmsProduk(b.aoa, b.barisHeader)) {
+            await tx`
+              insert into pdt_fact_sku_period
+                (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id,
+                 parser_versi, gmv, produk_terjual, pesanan)
+              values
+                (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'dibayar', ${id},
+                 ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.produkTerjual}, ${baris.pesanan})`;
           }
         }
       }

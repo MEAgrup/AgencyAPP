@@ -251,7 +251,14 @@ Bucket 2 (derived-add — `report/shopee/metrik.ts:250` `pengunjung_produk`, sum
 > iklan`, bukan `Kode Produk` (lihat `packages/core/src/pdt/fakta.ts` docblock kepala berkas untuk
 > rincian). `Kode Produk` **TIDAK** dipakai sebagai `pdt_fact_ads.sku_id` (dikoreksi dari baris di
 > bawah) — ia level PRODUK INDUK, `pdt_sku_master` berkunci PER VARIAN, jadi lookup langsung akan
-> mengarang varian; `sku_id` modul ini tetap `null` (Open `G1-09-2BII-ADS-CPC-SKU`).
+> mengarang varian; `sku_id` modul ini tetap `null`.
+>
+> **`G1-09-2BII-ADS-CPC-SKU` DITUTUP sesi 23 (docs/DECISIONS.md 2026-09-14)** — pemilik: "kebutuhan
+> hanya GMV per produk bukan sampai varian". `Kode Produk` sekarang DISALIN LANGSUNG ke
+> `pdt_fact_ads.platform_product_id varchar(128) NULL` (BUKAN lookup `pdt_sku_master`, `sku_id`
+> tetap `null`) — `'-'`/kosong dipetakan `null`, bukan string `'-'`. Konsumen "GMV per produk" query
+> `platform_product_id` langsung; JOIN opsional ke `pdt_sku_master WHERE platform_product_id = ...`
+> (1-ke-banyak varian) kalau perlu daftar varian di baliknya.
 
 Preamble (Rule 2, DIVALIDASI terpisah dari kolom baris header — lihat `ekstrakPreambleShopee`,
 bukan bagian `kolomDipanen`):
@@ -332,8 +339,13 @@ sama) TETAP terbuka — koreksi ini tidak menyentuhnya.
 > sendiri secara struktural salah bentuk untuk tujuan modul ini. `tandaTanganKolom` TETAP
 > `UNVERIFIED_SIGNATURE` (kode TIDAK diubah) — menyalakan deteksi untuk berkas yang tidak bisa
 > menulis apa pun tetap tidak berguna. Kemungkinan sumber per-video yang benar (`Content
-> Performance`/daftar video individual Shopee Seller Center) BELUM pernah diunggah — dicatat
-> Open baru `docs/DECISIONS.md` `G1-09-2BII-SHOPEEVIDEO-GRAIN`.
+> Performance`/daftar video individual Shopee Seller Center) BELUM pernah diunggah.
+>
+> **`G1-09-2BII-SHOPEEVIDEO-GRAIN` DITUTUP sesi 23 (docs/DECISIONS.md 2026-09-14)** — pemilik
+> mengonfirmasi Shopee Seller Center TIDAK punya laporan per-video lain ("Tidak ada"). `wajib`
+> modul ini diturunkan `true` → `false` (deviasi PRD §7.2, disetujui pemilik langsung) — dimensi
+> Video PDT sekarang HANYA terisi dari TikTok (`tt_video`, sudah jalan) sampai Shopee mengekspos
+> laporan per-video di masa depan. `tandaTanganKolom`/`kolomDipanen` TETAP tidak berubah.
 
 Bucket 1 LAMA (sebelum temuan di atas — TIDAK BERLAKU lagi, dipertahankan di sini sebagai
 riwayat): transaksi, kunjungan, sumber penonton, konversi (11 dari 54 kolom) ⇒ `pdt_fact_content`.
@@ -362,13 +374,19 @@ baris bucket 2.
 > pembeda yang terverifikasi: `Periode Waktu`+`Jumlah Produk Dilihat` (tidak dimiliki
 > `shopee_voucher`/`shopee_diskon`).
 >
-> **Kenapa TIDAK langsung dikodekan sesi ini**: sinyal deteksi (`tandaTanganKolom`) BISA ditulis
-> dari temuan di atas, tapi `kolomDipanen` (kolom mana yang genuinely mau dipanen dari struktur
-> yang TERNYATA beda dari asumsi PRD) adalah keputusan desain baru — kelas sama Q-6 — bukan
-> koreksi ejaan. Menyalakan deteksi TANPA `kolomDipanen` yang diputuskan berarti modul akan
-> `parse_status='ok'` vakum (nol kolom divalidasi, nol data dipanen) tanpa AM pernah tahu —
-> lebih berbahaya daripada tetap `UNVERIFIED_SIGNATURE`. Dicatat sebagai Open baru
-> `docs/DECISIONS.md` untuk Anty/Hans: kolom mana dari struktur asli di atas yang mau dipanen.
+> **`G1-09-2BII-DISKON-FLASHSALE-STRUKTUR` DITUTUP sesi 23 (docs/DECISIONS.md 2026-09-14)** —
+> pemilik: "Jalan rekomendasi" (MVP, opsi 1). Kedua modul dinyalakan dari `UNVERIFIED_SIGNATURE`:
+> `shopee_diskon` `tandaTanganKolom: { must: ['Tanggal', 'Tipe Promosi'] }`,
+> `kolomDipanen: ['Tanggal', 'Tipe Promosi', 'Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan
+> (Pesanan Siap Dikirim) (IDR)', 'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)']` —
+> agregat harian sheet "Kriteria Utama" SAJA, BUKAN sheet "Rincian Performa" (per-promosi
+> individual, ditunda sampai ada yang minta — opsi 2). `shopee_flash_sale`
+> `tandaTanganKolom: { must: ['Periode Waktu', 'Jumlah Produk Dilihat'] }`,
+> `kolomDipanen: ['Periode Waktu', 'Penjualan (Pesanan Dibuat)(Rp)', 'Penjualan (Pesanan Siap
+> Dikirim)(Rp)', 'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)', 'Jumlah Produk
+> Dilihat', 'Produk Diklik']`. **Nol writer fact-table** untuk keduanya — sama seperti
+> `shopee_voucher`/`shopee_chat`/`shopee_chat_broadcast`/`meta_ads`, cukup `parse_status='ok'` +
+> audit `pdt_file.kolom_dipanen`; konsumen fact-table menyusul kalau ada yang butuh.
 
 ### 2.9 `shopee_chat` / `shopee_chat_broadcast`
 > **`kolomDipanen` DIKOREKSI sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** terhadap
@@ -399,6 +417,18 @@ Shopee / `pdt_fact_creator_period` Shopee (afiliasi saja — `shopee_ams_produk`
 lihat catatan `fakta.ts` kenapa saudaranya TIDAK dipetakan ke tabel per-kreator ini). `Estimasi
 Komisi(Rp)` di sini adalah sumber **`commission_pct`** Shopee untuk PX Flow D (celah PX #1, §4) —
 sudah bucket 1, bukan tambahan baru. Tidak ada baris bucket 2.
+
+> **`shopee_ams_produk` DIPETAKAN sesi 23 (docs/DECISIONS.md 2026-09-14, modul KEDELAPAN) ke
+> `pdt_fact_sku_period`** — `G1-09-2BII-ADS-CPC-SKU` DITUTUP membuka blocker `sku_id NOT NULL`
+> yang menahannya sejak lahir. `Kode Item`→`platform_product_id` (salinan langsung, `sku_id`
+> tetap NULL — level PRODUK INDUK, sama alasan `shopee_ads_cpc` §2.3), `Omzet Penjualan(Rp)`→
+> `gmv`, `Produk Terjual`→`produk_terjual`, `Pesanan`→`pesanan`. `Estimasi Komisi(Rp)`/`ROI` TETAP
+> tidak ditulis ke tabel manapun (`pdt_fact_sku_period` tidak punya kolom komisi/ROI sama
+> sekali — sumbernya `commission_pct` PX Flow D di atas, konsumen domain LAIN yang belum
+> dibangun). **`basis = 'dibayar'` LITERAL** — AMS tidak menyebutkan basis GMV-nya di kolom
+> manapun (beda dari `shopee_parent_sku`/G1-07 yang eksplisit menulisnya di nama kolom);
+> ditanyakan ke pemilik (`AskUserQuestion`), dijawab "Pesanan Dibayar/Selesai" (lazim untuk
+> program afiliasi — komisi dihitung dari pesanan yang benar-benar selesai).
 
 ### 2.11 `shopee_kesehatan` — **MODUL BARU, tidak ada di §7 sama sekali**
 Bucket 2 (derived-add — modul penuh, `report/shopee/metrik.ts:516-540` `parseKesehatan`,

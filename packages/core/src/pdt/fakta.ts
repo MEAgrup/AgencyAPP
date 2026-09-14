@@ -511,9 +511,76 @@ export function ekstrakBarisKreatorShopeeAmsAfiliasi(
   return hasil;
 }
 
-/** Satu baris `pdt_fact_ads` mentah dari `shopee_ads_cpc`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi, pola sama fungsi lain di paket ini). `sku_id`/`content_id` SELALU `null` di pemanggil — lihat docblock kepala berkas untuk kenapa (`Kode Produk` level induk, `pdt_sku_master` berkunci per varian). */
+/**
+ * Satu baris `pdt_fact_sku_period` mentah dari `shopee_ams_produk`, SEBELUM
+ * `client_platform_id`/`batch_id`/`periode`/`parser_versi`/`basis`
+ * (pemanggil yang melengkapi — `basis` bukan hasil fungsi ini karena bukan
+ * diturunkan dari kolom apa pun di sini, lihat docblock `ekstrakBarisShopeeAmsProduk`).
+ * `sku_id` SELALU `null` di pemanggil (level produk-induk, lihat docblock
+ * kepala berkas — `G1-09-2BII-ADS-CPC-SKU`).
+ */
+export interface PdtBarisSkuPeriodShopeeAmsProduk {
+  platformProductId: string;
+  gmv: number | null;
+  produkTerjual: number | null;
+  pesanan: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `shopee_ams_produk` (Modul KEDELAPAN, sesi 23
+ * — `G1-09-2BII-ADS-CPC-SKU` DITUTUP juga membuka blocker modul ini:
+ * `pdt_fact_sku_period.sku_id` sekarang NULLABLE, lihat docblock kepala
+ * berkas). Rule 8 whitelist `modules.ts`: `['Kode Item', 'Nama Item',
+ * 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi
+ * Komisi(Rp)', 'ROI']` — `Nama Item` TIDAK dipetakan (tampilan UI saja,
+ * Rule 20 melarangnya jadi kunci). `Estimasi Komisi(Rp)`/`ROI` SENGAJA
+ * TIDAK ditulis ke tabel ini — `PDT_KOLOM_DIPANEN.md` §2.10: `Estimasi
+ * Komisi(Rp)` adalah sumber `commission_pct` untuk PX Flow D (konsumen
+ * domain LAIN, belum dibangun), dan `pdt_fact_sku_period` memang tidak
+ * punya kolom komisi/ROI sama sekali — sama pola `shopee_ams_afiliasi`/
+ * modul KELIMA di atas. `sku_id` SELALU `null` di pemanggil — `Kode Item`
+ * level PRODUK INDUK, `pdt_sku_master` berkunci per varian (lihat docblock
+ * kepala berkas, `G1-09-2BII-ADS-CPC-SKU`: pemilik menjawab "kebutuhan
+ * hanya GMV per produk bukan sampai varian"). Baris ber-`Kode Item` kosong
+ * dilewati (bukan baris data sungguhan, sama pola modul lain di paket ini).
+ * **`basis = 'dibayar'`** — DITETAPKAN pemanggil (bukan diturunkan di sini),
+ * keputusan pemilik (`AskUserQuestion` sesi 23): AMS tidak menyebutkan
+ * basis GMV-nya secara eksplisit (beda dari `shopee_parent_sku`/G1-07 yang
+ * memang menulisnya di nama kolom), diperlakukan sebagai "Pesanan
+ * Dibayar/Selesai" (lazim untuk program afiliasi — komisi biasanya baru
+ * dihitung dari pesanan yang benar-benar selesai, mencegah kecurangan lewat
+ * order yang dibatalkan). Angka: `parsePdtAngka(v, true)` — konvensi Ads
+ * Manager, sama seperti `shopee_ams_afiliasi` (dashboard AMS yang sama).
+ */
+export function ekstrakBarisShopeeAmsProduk(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisSkuPeriodShopeeAmsProduk[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iKodeItem = idx('Kode Item');
+  const iOmzet = idx('Omzet Penjualan(Rp)');
+  const iProdukTerjual = idx('Produk Terjual');
+  const iPesanan = idx('Pesanan');
+
+  const hasil: PdtBarisSkuPeriodShopeeAmsProduk[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const platformProductId = iKodeItem === -1 ? '' : String(row?.[iKodeItem] ?? '').trim();
+    if (platformProductId === '') continue;
+    hasil.push({
+      platformProductId,
+      gmv: iOmzet === -1 ? null : parsePdtAngka(row?.[iOmzet], true),
+      produkTerjual: iProdukTerjual === -1 ? null : parsePdtAngka(row?.[iProdukTerjual], true),
+      pesanan: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
+    });
+  }
+  return hasil;
+}
+
+/** Satu baris `pdt_fact_ads` mentah dari `shopee_ads_cpc`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi, pola sama fungsi lain di paket ini). `sku_id`/`content_id` SELALU `null` di pemanggil — lihat docblock kepala berkas untuk kenapa (`Kode Produk` level induk, `pdt_sku_master` berkunci per varian). `platformProductId` DIISI (sesi 23, `G1-09-2BII-ADS-CPC-SKU`) — salinan identitas `Kode Produk`, BUKAN lookup ke `pdt_sku_master`. */
 export interface PdtBarisAdsShopeeCpc {
   kampanyeId: string;
+  platformProductId: string | null;
   tayangan: number | null;
   klik: number | null;
   pesananSku: number | null;
@@ -535,6 +602,13 @@ export interface PdtBarisAdsShopeeCpc {
  * ber-`nama iklan` kosong dilewati (bukan baris data sungguhan — sama alasan
  * legacy: `if (!nama) continue`). Angka: `parsePdtAngka(v, true)` — konvensi
  * Ads Manager, sama seperti `shopee_ads_live`.
+ *
+ * `platformProductId` (sesi 23, `G1-09-2BII-ADS-CPC-SKU` DITUTUP — pemilik:
+ * "kebutuhan hanya GMV per produk bukan sampai varian") — `Kode Produk`
+ * disalin LANGSUNG (bukan lookup `pdt_sku_master`, yang berkunci per
+ * varian). Nilai `'-'` (sample "Shop GMV Max" Fim Motor asli, iklan TOKO
+ * tanpa produk) dan sel kosong SAMA-SAMA dipetakan `null`, BUKAN string
+ * literal `'-'` — `'-'` bukan identitas produk sungguhan.
  */
 export function ekstrakBarisShopeeAdsCpc(
   aoa: readonly (readonly unknown[])[],
@@ -543,6 +617,7 @@ export function ekstrakBarisShopeeAdsCpc(
   const header = aoa[barisHeader - 1] ?? [];
   const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
   const iKampanye = idx('nama iklan');
+  const iKodeProduk = idx('Kode Produk');
   const iTayangan = idx('Dilihat');
   const iKlik = idx('Jumlah Klik');
   const iPesanan = idx('Konversi');
@@ -554,8 +629,10 @@ export function ekstrakBarisShopeeAdsCpc(
   for (const row of aoa.slice(barisHeader)) {
     const kampanyeId = iKampanye === -1 ? '' : String(row?.[iKampanye] ?? '').trim();
     if (kampanyeId === '') continue;
+    const kodeProduk = iKodeProduk === -1 ? '' : String(row?.[iKodeProduk] ?? '').trim();
     hasil.push({
       kampanyeId,
+      platformProductId: kodeProduk === '' || kodeProduk === '-' ? null : kodeProduk,
       tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
       klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik], true),
       pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),

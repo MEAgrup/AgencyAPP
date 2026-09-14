@@ -540,6 +540,33 @@ punya `null` eksplisit.
 > `20261023010000_..._pdt_parser_modul_ads_search_kolom.sql`. Diverifikasi (DB lokal rebuild
 > bersih): `@cdps/core` 1191/1191, `@cdps/domain` 2590/2590 (1 skip), `@cdps/db` 107/107,
 > `@cdps/api` 576/576 (2 skip); typecheck + lint bersih.
+>
+> **Status 2026-09-14 (sesi 23) — pemilik menjawab TIGA keputusan `HANDOFF_PDT_SESI22.md` §2
+> sekaligus (A/C/D); MODUL KEDELAPAN: `shopee_ams_produk` → `pdt_fact_sku_period`.**
+> **A** ("kebutuhan hanya GMV per produk bukan sampai varian", `G1-09-2BII-ADS-CPC-SKU` DITUTUP):
+> `platform_product_id varchar(128) NULL` (salinan identitas, bukan lookup) ditambah ke
+> `pdt_fact_ads`/`pdt_fact_sku_period`; `pdt_fact_sku_period.sku_id` DILONGGARKAN nullable + CHECK
+> identitas + dua unique index PARSIAL + RLS pindah ke `jwt_owns_client_platform_am` langsung
+> (migrasi `20261025010000`) — membuka blocker `sku_id NOT NULL` yang menahan `shopee_ams_produk`
+> sejak lahir ("BLOCKED TOTAL", SESI21 §1). `shopee_ads_cpc` sekarang mengisi `platform_product_id`
+> dari `Kode Produk`. `shopee_ams_produk` (modul KEDELAPAN) akhirnya dibangun: `Kode Item`→
+> `platform_product_id`, `Omzet Penjualan(Rp)`→`gmv`, `Produk Terjual`/`Pesanan` terisi,
+> `Estimasi Komisi(Rp)`/`ROI` TETAP tidak ditulis (sumber PX Flow D, domain lain). `basis =
+> 'dibayar'` — ditanyakan lewat `AskUserQuestion` (AMS tidak menyebut basisnya), pemilik memilih
+> "Pesanan Dibayar/Selesai". **B (C di §2)** ("Jalan rekomendasi", `G1-09-2BII-DISKON-FLASHSALE-
+> STRUKTUR` DITUTUP): `shopee_diskon`/`shopee_flash_sale` dinyalakan dari `UNVERIFIED_SIGNATURE`
+> ke whitelist MVP (agregat harian sheet "Kriteria Utama" saja) — nol writer fact-table, sama
+> pola `shopee_voucher`/`shopee_chat`. **C (D di §2)** ("Tidak ada" laporan per-video lain di
+> Shopee Seller Center, `G1-09-2BII-SHOPEEVIDEO-GRAIN` DITUTUP): `shopee_video.wajib` diturunkan
+> `true`→`false` (deviasi PRD §7.2, disetujui pemilik langsung) — dimensi Video PDT sekarang
+> hanya dari TikTok. **Empat tabel fakta sekarang punya total DELAPAN modul penulis** (`pdt_fact_
+> ads`: `shopee_ads_live`/`shopee_ads_cpc`/`shopee_ads_search`; `pdt_fact_content`: `tt_video`;
+> `pdt_sku_master`: `shopee_parent_sku`/`tt_orders`; `pdt_fact_creator_period`:
+> `tt_transaction_creator`/`shopee_ams_afiliasi`; `pdt_fact_sku_period`: `shopee_ams_produk`
+> — PENULIS PERTAMA tabel ini). Migrasi baru: `20261024010000_..._diskon_flashsale_video.sql`,
+> `20261025010000_..._ads_cpc_sku_platform_product_id.sql`. Diverifikasi (DB lokal rebuild bersih,
+> `rls_checks` invariant lolos): `@cdps/core` 1199/1199, `@cdps/domain` 2594/2594 (1 skip),
+> `@cdps/db` 107/107, `@cdps/api` 576/576 (2 skip); typecheck + lint bersih.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
