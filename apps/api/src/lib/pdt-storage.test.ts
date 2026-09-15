@@ -8,7 +8,14 @@
  * di sini — lihat handoff untuk siapa yang perlu menjalankannya.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buatPdtRawSignedUploadUrl, buatPdtRawSignedUrl, PDT_RAW_SIGNED_URL_MAX_DETIK, unduhPdtRawObjek, unggahPdtRawObjek } from './pdt-storage';
+import {
+  buatPdtRawSignedUploadUrl,
+  buatPdtRawSignedUrl,
+  hapusPdtRawObjek,
+  PDT_RAW_SIGNED_URL_MAX_DETIK,
+  unduhPdtRawObjek,
+  unggahPdtRawObjek,
+} from './pdt-storage';
 
 const prevUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const prevKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -158,6 +165,32 @@ describe('unggahPdtRawObjek (G1-09 sub-langkah 2a) — bentuk request (fetch dis
   it('melempar error server saat Supabase belum dikonfigurasi', async () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     await expect(unggahPdtRawObjek('a.zip', Buffer.from([1]), vi.fn())).rejects.toThrow(/tidak dikonfigurasi/);
+  });
+});
+
+describe('hapusPdtRawObjek (G1-10 — purge harian) — bentuk request (fetch disuntik)', () => {
+  it('DELETE bulk ke bucket pdt-raw dengan SATU path di prefixes (bukan path di URL)', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://proj.supabase.co/storage/v1/object/pdt-raw');
+      expect(init?.method).toBe('DELETE');
+      const headers = init?.headers as Record<string, string>;
+      expect(headers.apikey).toBe('service-role-key');
+      expect(headers.Authorization).toBe('Bearer service-role-key');
+      expect(JSON.parse(init?.body as string)).toEqual({ prefixes: ['CLI-1/1/2026-07-31/42.zip'] });
+      return new Response(JSON.stringify([{ name: 'CLI-1/1/2026-07-31/42.zip' }]), { status: 200 });
+    });
+    await hapusPdtRawObjek('CLI-1/1/2026-07-31/42.zip', fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('melempar error yang menyebut status saat Storage API menolak', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ message: 'rusak' }), { status: 500 }));
+    await expect(hapusPdtRawObjek('a.zip', fetchImpl)).rejects.toThrow(/500/);
+  });
+
+  it('melempar error server saat Supabase belum dikonfigurasi', async () => {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    await expect(hapusPdtRawObjek('a.zip', vi.fn())).rejects.toThrow(/tidak dikonfigurasi/);
   });
 });
 

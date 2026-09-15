@@ -12,7 +12,7 @@
  * lain — konsisten dengan ketokan PX-M2a (`docs/DECISIONS.md` 2026-09-12).
  */
 import { randomUUID } from 'node:crypto';
-import { pdt, permission, tz } from '@cdps/core';
+import { notification, pdt, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Sql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
 
@@ -1057,4 +1057,188 @@ export async function markRawStored(sql: Sql, batchId: number, rawPath: string, 
        set raw_path = ${rawPath}, raw_sha256 = ${raw.sha256}, raw_bytes = ${raw.bytes},
            raw_entri = ${raw.entri}, raw_entri_dilewati = ${raw.entriDilewati}
      where id = ${batchId}`;
+}
+
+// ===========================================================================
+// G1-10 — Job purge harian (Flow E, Rule 45-49; `docs/backlog/PDT_BACKLOG.md`
+// G1-10, `docs/prd/CDPS_PDT_Pusat_Data_Toko.md` §3/§4).
+//
+// Domain hanya memutuskan APA yang dihapus (baca+tulis DB) — penghapusan
+// OBJEK STORAGE sungguhan ada di lapisan route (`apps/api/src/lib/pdt-storage.ts`
+// `hapusPdtRawObjek`), pola sama `commitUploadBatch`/`unggahPdtRawObjek`: domain
+// tidak pernah memanggil Storage REST langsung. Urutan dua fungsi di bawah
+// cermin Flow E: `planPdtPurgeTick` (langkah 1-3, baca + pagar) dijalankan
+// route LEBIH DULU; untuk tiap kandidat route memanggil `hapusPdtRawObjek`
+// sendiri-sendiri (Rule 46 error path — satu objek gagal tidak menghentikan
+// sisanya); hasilnya dikumpulkan lalu diserahkan ke `finalizePdtPurgeTick`
+// (langkah 4/6, tulis).
+//
+// Cakupan SENGAJA dipersempit dari Rule 45/49 penuh sesi ini (dicatat
+// `docs/DECISIONS.md` — Open baru):
+//   (a) recompute perpanjangan retensi (Rule 45 langkah 2) HARI INI hanya
+//       membaca `retensi_sampai`/`legal_hold` yang sudah tersimpan (default
+//       120 hari verified / 30 hari ditolak, migrasi G1-01) — DUA dari EMPAT
+//       pemicu perpanjangan ("menopang laporan yang sudah dikirim" →
+//       `pdt_laporan_kiriman`, "SKU di katalog PX" → `px_sku_volume`)
+//       menunjuk tabel yang BELUM ADA (G2-01/G5 belum dibangun). Purge hari
+//       ini tidak bisa salah memperpanjang retensi yang seharusnya
+//       diperpanjang oleh dua pemicu itu — karena tidak ada baris yang bisa
+//       dibaca untuk memutuskannya — tapi juga tidak bisa BENAR
+//       melakukannya. Menutup gap ini adalah pekerjaan lanjutan G2-01/G5.
+//   (b) pass kedua Flow E (Rule 49 — objek yatim > 7 hari) BELUM dibangun:
+//       butuh listing bucket rekursif yang `pdt-storage.ts` belum punya
+//       pembungkusnya (baru get/put/delete per-path yang sudah tahu path-nya).
+// ===========================================================================
+
+/** Rule 48 — pagar harian: tidak boleh menghapus > 5% objek aktif per hari tanpa ACC Director. */
+export const PDT_PURGE_GUARD_PCT = 5;
+
+/** Actor sistem untuk audit/notifikasi tick — pola sama `plan.ts` `PLAN_JOB_ACTOR_ID`. */
+const PDT_PURGE_ACTOR = 'SISTEM';
+
+const MSG_PDT_PURGE_TANGGAL_INVALID = '[tanggal tick tidak valid]';
+
+/** Satu batch yang lolos gerbang Rule 45/48 dan siap dihapus objek storage-nya. */
+export interface PdtPurgeCandidate {
+  batchId: number;
+  rawPath: string;
+  rawBytes: number | null;
+}
+
+/** Rencana tick hari ini — hasil `planPdtPurgeTick` (Flow E langkah 1-3). */
+export interface PdtPurgeTickPlan {
+  today: string;
+  totalObjekAktif: number;
+  ambangObjek: number;
+  kandidat: readonly PdtPurgeCandidate[];
+  pagarTerlampaui: boolean;
+}
+
+/** Hasil mencoba menghapus SATU kandidat — dilaporkan balik route setelah memanggil Storage. */
+export interface PdtPurgeOutcome {
+  batchId: number;
+  bytes: number | null;
+  berhasil: boolean;
+}
+
+/** Rekap akhir tick — hasil `finalizePdtPurgeTick` (Flow E langkah 4/6). */
+export interface PdtPurgeTickResult {
+  today: string;
+  dihapus: number;
+  bytesDihapus: number;
+  gagal: number;
+  pagarTerlampaui: boolean;
+}
+
+/** Directors' employee ids (peran berlapis) — pola sama `finance.ts` `directorIds` (tidak diekspor di sana). */
+async function pdtDirectorIds(sql: Sql): Promise<string[]> {
+  const rows = await sql<{ employee_id: string }[]>`
+    select e.employee_id
+      from employee_layered_roles r
+      join employees e on e.employee_id = r.employee_id
+     where r.role = 'director' and r.enabled = true and e.status_aktif = true
+     order by e.employee_id`;
+  return rows.map((r) => r.employee_id);
+}
+
+/**
+ * planPdtPurgeTick — Flow E langkah 1-3. Memilih batch `retensi_sampai < today`,
+ * `legal_hold = false`, `raw_dihapus_pada IS NULL`, `raw_path IS NOT NULL`
+ * (langkah 1; langkah 2 recompute — lihat catatan cakupan di atas). Langkah 3:
+ * kandidat melebihi `PDT_PURGE_GUARD_PCT`% dari objek aktif ⇒ PAGAR (Rule 48)
+ * — kandidat dikosongkan, notifikasi ke Directors dikirim, NOL baris disentuh.
+ * Murni baca, ditambah (hanya bila pagar tersentuh) SATU tulis notifikasi —
+ * TIDAK menghapus objek storage maupun mengisi `raw_dihapus_pada` (itu
+ * `finalizePdtPurgeTick`, dipanggil route SETELAH penghapusan storage
+ * sungguhan). Idempoten dalam satu hari: batch yang sudah `raw_dihapus_pada`
+ * tidak pernah lagi jadi kandidat.
+ */
+export async function planPdtPurgeTick(sql: Sql, today: string): Promise<PdtPurgeTickPlan> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    throw new ValidationError(MSG_PDT_PURGE_TANGGAL_INVALID);
+  }
+
+  const [{ n: totalObjekAktif }] = await sql<{ n: number }[]>`
+    select count(*)::int as n
+      from pdt_upload_batch
+     where raw_path is not null and raw_dihapus_pada is null`;
+
+  const kandidatRows = await sql<{ id: number; raw_path: string; raw_bytes: number | null }[]>`
+    select id, raw_path, raw_bytes
+      from pdt_upload_batch
+     where raw_path is not null and raw_dihapus_pada is null
+       and legal_hold = false and retensi_sampai < ${today}::date
+     order by id`;
+  const semuaKandidat: PdtPurgeCandidate[] = kandidatRows.map((r) => ({
+    batchId: r.id,
+    rawPath: r.raw_path,
+    rawBytes: r.raw_bytes,
+  }));
+
+  const ambangObjek = Math.floor((totalObjekAktif * PDT_PURGE_GUARD_PCT) / 100);
+  const pagarTerlampaui = semuaKandidat.length > ambangObjek;
+
+  if (pagarTerlampaui) {
+    const directors = await pdtDirectorIds(sql);
+    if (directors.length > 0) {
+      await notification.emit(executors(sql).notify, {
+        event: notification.EVENTS.PdtPurgeGuardExceeded,
+        entityType: 'pdt_upload_batch',
+        entityId: today,
+        actor: PDT_PURGE_ACTOR,
+        explicitRecipients: directors,
+        notifyActor: false,
+        deepLink: '/pdt/batches',
+      });
+    }
+    return { today, totalObjekAktif, ambangObjek, kandidat: [], pagarTerlampaui: true };
+  }
+
+  return { today, totalObjekAktif, ambangObjek, kandidat: semuaKandidat, pagarTerlampaui: false };
+}
+
+/**
+ * finalizePdtPurgeTick — Flow E langkah 4/6. Dipanggil route SETELAH mencoba
+ * menghapus objek storage tiap kandidat (`hapusPdtRawObjek`, framework-free,
+ * lapisan `apps/api`) — `hasil` membawa sukses/gagal per batch. Hanya batch
+ * `berhasil` yang `raw_dihapus_pada` diisi (Rule 46: "hanya diisi setelah
+ * penghapusan objek benar-benar berhasil"); yang gagal dibiarkan NULL untuk
+ * dicoba lagi tick besok (Rule 46 error path) — TIDAK menghentikan batch lain
+ * dalam tick yang sama (pemanggil sudah mengiterasi semuanya sebelum sampai
+ * di sini). Rule 47: SATU entri `audit_log` per tick (bukan per objek)
+ * merekap jumlah objek + total byte — nol entri ditulis bila nol objek
+ * berhasil dihapus (mis. seluruh kandidat gagal, atau kandidat memang kosong).
+ */
+export async function finalizePdtPurgeTick(
+  sql: Sql,
+  today: string,
+  hasil: readonly PdtPurgeOutcome[],
+): Promise<PdtPurgeTickResult> {
+  const berhasil = hasil.filter((h) => h.berhasil);
+  const gagal = hasil.length - berhasil.length;
+  const bytesDihapus = berhasil.reduce((n, h) => n + (h.bytes ?? 0), 0);
+
+  for (const h of berhasil) {
+    await sql`
+      update pdt_upload_batch set raw_dihapus_pada = now()
+       where id = ${h.batchId} and raw_dihapus_pada is null`;
+  }
+
+  if (berhasil.length > 0) {
+    await executors(sql).audit.insertAudit({
+      entityType: 'pdt_purge_tick',
+      entityId: today,
+      actorEmployeeId: PDT_PURGE_ACTOR,
+      action: 'pdt_raw_purged',
+      beforeJson: null,
+      afterJson: {
+        jumlah_objek: berhasil.length,
+        total_bytes: bytesDihapus,
+        batch_ids: berhasil.map((h) => h.batchId),
+      },
+      createdBy: PDT_PURGE_ACTOR,
+    });
+  }
+
+  return { today, dihapus: berhasil.length, bytesDihapus, gagal, pagarTerlampaui: false };
 }

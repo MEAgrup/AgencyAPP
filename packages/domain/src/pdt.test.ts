@@ -25,7 +25,9 @@ import {
   canKirimLaporan,
   canUploadBatch,
   commitUploadBatch,
+  finalizePdtPurgeTick,
   markRawStored,
+  planPdtPurgeTick,
   platformKeVokabPdt,
   previewUploadBatch,
   siapkanUploadBatch,
@@ -1884,5 +1886,171 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KESEMBILAN) — sh
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(persiapan.status).toBe('ditolak');
     expect(await loadFactContent(cpId)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1-10 — job purge harian (`planPdtPurgeTick`/`finalizePdtPurgeTick`, Flow E
+// Rule 45-49). DB nyata (di-skip tanpa DATABASE_URL) — menulis
+// `pdt_upload_batch` LANGSUNG (bukan lewat `commitUploadBatch`): tick hanya
+// peduli kolom retensi/legal_hold/raw_*, bukan pipeline parse. Bergantung
+// pada `fileParallelism: false` (vitest.config.ts) + `afterEach` global di
+// atas: tabel `pdt_upload_batch` kosong di awal SETIAP `it()` di sini (baris
+// test sebelumnya, dalam file ini maupun file lain, sudah dibersihkan),
+// jadi `totalObjekAktif` yang dibaca pagar 5% deterministik — murni dari
+// baris yang di-insert test itu sendiri.
+// ---------------------------------------------------------------------------
+describeDb('planPdtPurgeTick / finalizePdtPurgeTick (G1-10 — Flow E, Rule 45-49)', () => {
+  const PURGE_DIRECTOR = 'ZPDT-PURGE-DIR';
+  let periodeSeq = 0;
+
+  beforeAll(async () => {
+    if (!sql) return;
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values (${PURGE_DIRECTOR}, 'Direktur Uji Purge PDT', 'zpdt-purge-dir@mea.co.id', 'Account', 'Direktur', true, 'SYSTEM')
+      on conflict (employee_id) do nothing`;
+    await sql`
+      insert into employee_layered_roles (employee_id, role, enabled, created_by)
+      values (${PURGE_DIRECTOR}, 'director', true, 'SYSTEM')
+      on conflict (employee_id, role) do update set enabled = true`;
+  });
+
+  afterAll(async () => {
+    if (!sql) return;
+    // `notifications` SENGAJA tidak dibersihkan — append-only (trigger menolak DELETE
+    // juga, bukan cuma UPDATE, sama pola `audit_log` di afterEach global atas berkas ini).
+    await sql`delete from employee_layered_roles where employee_id = ${PURGE_DIRECTOR}`;
+    await sql`delete from employees where employee_id = ${PURGE_DIRECTOR}`;
+  });
+
+  /** Klien + toko baru — prefix `CLI-ZPDT-`/`ZZ-TEST`, dibersihkan `afterEach` global di atas. */
+  async function purgeFixture(): Promise<{ clientId: string; cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    return { clientId, cpId };
+  }
+
+  /**
+   * Insert `pdt_upload_batch` LANGSUNG, periode di-increment per panggilan
+   * (`periodeSeq`) supaya banyak baris untuk `cpId` yang SAMA tidak pernah
+   * bentrok `uq_pdt_upload_batch_verified` — status di sini sengaja `'parsing'`
+   * (eligibilitas purge Flow E langkah 1 tidak melihat status sama sekali).
+   */
+  async function insertBatch(
+    cpId: number,
+    clientId: string,
+    opts: { retensiSampai: string; legalHold?: boolean; rawDihapusPada?: Date | null; rawBytes?: number },
+  ): Promise<number> {
+    const bulan = 1 + (periodeSeq++ % 12);
+    const periodeMulai = `2020-${String(bulan).padStart(2, '0')}-01`;
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
+         parser_versi, retensi_sampai, retensi_alasan, raw_path, raw_bytes, legal_hold,
+         raw_dihapus_pada, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', ${periodeMulai}::date, (${periodeMulai}::date + interval '1 month' - interval '1 day')::date,
+         'parsing', 1, ${opts.retensiSampai}::date, 'default', ${`ZPDT-PURGE/${cpId}/${periodeSeq}.zip`},
+         ${opts.rawBytes ?? 1000}, ${opts.legalHold ?? false}, ${opts.rawDihapusPada ?? null}, ${OWNER_AM})
+      returning id`;
+    return rows[0].id;
+  }
+
+  it('memilih batch retensi_sampai lewat + legal_hold=false + belum dihapus — melewati sisanya', async () => {
+    const { clientId, cpId } = await purgeFixture();
+    // 19 objek "aman" (retensi belum lewat) supaya totalObjekAktif cukup besar (20) — pada
+    // total kecil, ambang 5% pembulatan-ke-bawah bisa jadi 0 dan memicu pagar (Rule 48) untuk
+    // SATU kandidat pun; bukan itu yang diuji baris ini (pagarnya sendiri diuji terpisah).
+    for (let i = 0; i < 19; i++) {
+      await insertBatch(cpId, clientId, { retensiSampai: '2999-01-01' });
+    }
+    const lewat = await insertBatch(cpId, clientId, { retensiSampai: '2020-01-01' });
+    await insertBatch(cpId, clientId, { retensiSampai: '2020-01-01', legalHold: true }); // legal hold
+    await insertBatch(cpId, clientId, { retensiSampai: '2020-01-01', rawDihapusPada: new Date() }); // sudah dihapus
+
+    const rencana = await planPdtPurgeTick(sql, '2026-06-01');
+    expect(rencana.pagarTerlampaui).toBe(false);
+    expect(rencana.kandidat.map((k) => k.batchId)).toEqual([lewat]);
+  });
+
+  it('pagar 5%/hari (Rule 48): kandidat > ambang ⇒ dikosongkan + notifikasi Director, nol batch tersentuh', async () => {
+    const { clientId, cpId } = await purgeFixture();
+    // 20 objek aktif total, ambang = floor(20*5/100) = 1 — DUA kandidat melebihi ambang.
+    for (let i = 0; i < 18; i++) {
+      await insertBatch(cpId, clientId, { retensiSampai: '2999-01-01' });
+    }
+    const kandidat1 = await insertBatch(cpId, clientId, { retensiSampai: '2020-01-01' });
+    const kandidat2 = await insertBatch(cpId, clientId, { retensiSampai: '2020-01-01' });
+
+    const rencana = await planPdtPurgeTick(sql, '2026-06-01');
+    expect(rencana.totalObjekAktif).toBe(20);
+    expect(rencana.ambangObjek).toBe(1);
+    expect(rencana.pagarTerlampaui).toBe(true);
+    expect(rencana.kandidat).toEqual([]);
+
+    const notif = await sql<{ recipient_employee_id: string }[]>`
+      select recipient_employee_id from notifications
+       where event_type = 'pdt.purge.guard_exceeded' and entity_id = '2026-06-01'`;
+    expect(notif.map((n) => n.recipient_employee_id)).toContain(PURGE_DIRECTOR);
+
+    // Route memanggil finalize dengan hasil KOSONG karena kandidat kosong — nol batch tersentuh.
+    const rekap = await finalizePdtPurgeTick(sql, '2026-06-01', []);
+    expect(rekap).toMatchObject({ dihapus: 0, gagal: 0, bytesDihapus: 0 });
+    const masihAda = await sql<{ id: number }[]>`
+      select id from pdt_upload_batch where id in (${kandidat1}, ${kandidat2}) and raw_dihapus_pada is null`;
+    expect(masihAda).toHaveLength(2);
+  });
+
+  it('TIDAK memicu pagar tepat DI ambang (kandidat == ambang, bukan >)', async () => {
+    const { clientId, cpId } = await purgeFixture();
+    // 20 objek, ambang 1: SATU kandidat pas di ambang ⇒ tidak memicu pagar (Rule 48 "lebih dari 5%").
+    for (let i = 0; i < 19; i++) {
+      await insertBatch(cpId, clientId, { retensiSampai: '2999-01-01' });
+    }
+    const satuSatunya = await insertBatch(cpId, clientId, { retensiSampai: '2020-01-01' });
+
+    const rencana = await planPdtPurgeTick(sql, '2026-06-01');
+    expect(rencana.pagarTerlampaui).toBe(false);
+    expect(rencana.kandidat.map((k) => k.batchId)).toEqual([satuSatunya]);
+  });
+
+  it('finalizePdtPurgeTick: hanya batch berhasil yang raw_dihapus_pada terisi — gagal tetap NULL untuk dicoba lagi (Rule 46)', async () => {
+    const { clientId, cpId } = await purgeFixture();
+    const berhasil = await insertBatch(cpId, clientId, { retensiSampai: '2020-01-01', rawBytes: 1000 });
+    const gagal = await insertBatch(cpId, clientId, { retensiSampai: '2020-01-01', rawBytes: 2000 });
+
+    const rekap = await finalizePdtPurgeTick(sql, '2026-06-02', [
+      { batchId: berhasil, bytes: 1000, berhasil: true },
+      { batchId: gagal, bytes: 2000, berhasil: false },
+    ]);
+    expect(rekap).toMatchObject({ dihapus: 1, gagal: 1, bytesDihapus: 1000 });
+
+    const rows = await sql<{ id: number; raw_dihapus_pada: Date | null }[]>`
+      select id, raw_dihapus_pada from pdt_upload_batch where id in (${berhasil}, ${gagal}) order by id`;
+    expect(rows.find((r) => r.id === berhasil)?.raw_dihapus_pada).not.toBeNull();
+    expect(rows.find((r) => r.id === gagal)?.raw_dihapus_pada).toBeNull();
+
+    // Rule 47 — SATU entri audit_log per tick (bukan per objek), merekap jumlah + total byte.
+    const audit = await sql<{ after_json: { jumlah_objek: number; total_bytes: number; batch_ids: number[] } }[]>`
+      select after_json from audit_log
+       where entity_type = 'pdt_purge_tick' and entity_id = '2026-06-02' and action = 'pdt_raw_purged'
+       order by id desc limit 1`;
+    expect(audit[0]?.after_json).toMatchObject({ jumlah_objek: 1, total_bytes: 1000, batch_ids: [berhasil] });
+  });
+
+  it('finalizePdtPurgeTick dengan hasil kosong menulis NOL entri audit_log', async () => {
+    const before = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log where entity_type = 'pdt_purge_tick' and entity_id = '2026-06-03'`;
+    const rekap = await finalizePdtPurgeTick(sql, '2026-06-03', []);
+    expect(rekap).toMatchObject({ dihapus: 0, gagal: 0, bytesDihapus: 0 });
+    const after = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log where entity_type = 'pdt_purge_tick' and entity_id = '2026-06-03'`;
+    expect(after[0].n).toBe(before[0].n);
+  });
+
+  it('planPdtPurgeTick menolak format tanggal tidak valid', async () => {
+    await expect(planPdtPurgeTick(sql, '01-06-2026')).rejects.toThrow('[tanggal tick tidak valid]');
   });
 });

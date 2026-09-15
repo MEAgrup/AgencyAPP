@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 17, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(17);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+  it('is at version 18, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(18);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
