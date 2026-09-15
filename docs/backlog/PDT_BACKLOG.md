@@ -633,6 +633,18 @@ punya `null` eksplisit.
 > (DB lokal rebuild bersih, 247 migrasi — nol migrasi baru): `@cdps/core` 1213/1213, `@cdps/domain`
 > 2619/2619 (1 skip), `@cdps/db` 107/107, `@cdps/api` 595/595 (2 skip); typecheck 5 paket + lint
 > bersih. **G1 sekarang benar-benar nol item murni-teknis DAN nol item severity-tinggi tersisa.**
+>
+> **Status 2026-09-15 (sesi 32) — `G1-09-2BII-SKU-STATUS-TRANSISI` DITUTUP, keputusan (c).**
+> Pemilik memilih lewat `AskUserQuestion`: **ditinggalkan manual untuk saat ini** — TIDAK
+> membangun mesin transisi `status_listing` ke `'nonaktif'`. Alasan (rekomendasi yang diketok):
+> G2 (laporan)/G4 (katalog usulan) — satu-satunya konsumen kolom `status_listing` — belum
+> dibangun sama sekali (0%, `docs/backlog/PDT_BACKLOG.md` §2/§4), jadi membangun mesin transisi
+> sekarang berarti mengarang kriteria pemicu yang PRD Rule 19 belum tentukan, untuk kolom yang
+> belum ada satu pun pemakai nyata. **Nol kode berubah** — keputusan didokumentasikan sebagai
+> Decided sadar (`docs/DECISIONS.md`), bukan dibiarkan diam-diam. `pdt_sku_master.status_listing`
+> tetap SELALU `'aktif'` sekali SKU pernah terlihat; SKU yang delisted/dihapus platform tidak
+> pernah pindah status sampai G2/G4 dibangun DAN sesi yang membangunnya memutuskan ulang (opsi
+> (a)/(b) tetap tercatat sebagai jalan yang tersedia bila keputusan berubah).
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
