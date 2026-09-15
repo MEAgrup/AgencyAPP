@@ -842,13 +842,26 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > SKU, `quad_klik`/`quad_cvr` di benchmark) adalah pekerjaan TERSENDIRI sebelum dimensi ini bisa
 > hidup dari data sungguhan — dicatat `G2-01-KUADRAN-SKU` (Open), di luar cakupan sesi 34.
 >
-> **Belum dikerjakan (sengaja, urutan berikutnya):** query agregasi SQL yang membaca
-> `pdt_fact_*`/`pdt_fact_sku_period.kuadran` per periode dan merakit `PdtSkorInputTiktok` (domain
-> layer, `packages/domain/src/pdt.ts`), keputusan mekanisme "pencabutan"/revoke untuk
+> **Status 2026-09-15 (sesi 34, lanjutan) — query agregasi SQL DITUTUP.**
+> `rakitInputSkorTiktok` (`packages/domain/src/pdt.ts`) membaca `pdt_fact_ads`/`pdt_fact_content`/
+> `pdt_fact_shop_daily`/`pdt_fact_creator_period` per `client_platform_id`+periode dan merakit
+> `PdtSkorInputTiktok` — MURNI-BACA, nol tulis, nol pemanggilan `computeSkorTiktok` (benchmark
+> aktif belum bisa dibaca — bentuk JSON `pdt_benchmark.nilai` milik G2-02, belum diputuskan).
+> Lima dimensi diverifikasi dari mesin LAMA yang SEDANG PRODUKSI (`report/metrik.ts`/`skor.ts`,
+> `docs/DECISIONS.md`), bukan ditebak — termasuk satu detail yang MUDAH salah tanpa verifikasi:
+> dimensi **LIVE Streaming** mesin lama membaca `slots.live_toko` yang TERPISAH dari
+> `slots.live_aff` (LIVE afiliasi masuk dimensi Affiliate, BUKAN LIVE) — jadi agregasi di sini
+> memfilter `is_akun_toko = true` untuk LIVE, TAPI menggabung toko+afiliasi untuk **Video** (mesin
+> lama menerima `vid_toko` DAN `vid_aff` sekaligus ke satu `videoReport`). Portfolio Produk TETAP
+> `null` (lihat Open `G2-01-KUADRAN-SKU` di atas — tidak berubah).
+>
+> **Belum dikerjakan (sengaja, urutan berikutnya):** keputusan mekanisme "pencabutan"/revoke untuk
 > `pdt_laporan_kiriman` (tabel itu TOTAL frozen sejak baris pertama, nol kolom status — Rule 24
 > butuh cara menandai "dicabut" tanpa melanggar `UPDATE` yang diblok trigger), benchmark seed
-> versi 1 (G2-02, `pdt_benchmark` masih nol baris), route HTTP, dan seluruh sisi Shopee (dimensi/
-> bobot berbeda, `report/shopee/skor.ts` sebagai rujukan porting berikutnya).
+> versi 1 + bentuk JSON `pdt_benchmark.nilai` (G2-02, `pdt_benchmark` masih nol baris — TANPA ini
+> `rakitInputSkorTiktok` tidak bisa disambung ke `computeSkorTiktok`, lima dari enam dimensi butuh
+> ambang benchmark), route HTTP, dan seluruh sisi Shopee (dimensi/bobot berbeda,
+> `report/shopee/skor.ts` sebagai rujukan porting berikutnya).
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah

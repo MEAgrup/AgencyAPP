@@ -10,7 +10,7 @@
  * sungguhan. Baris di-namespace `ZPDT-`.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { permission, tz } from '@cdps/core';
+import { pdt as pdtCore, permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 
 /** `date` datang dari driver sebagai string ATAU Date tergantung konfigurasi — pola sama `dailyops.ts` `ymd()`. */
@@ -33,6 +33,7 @@ import {
   planPdtReparseTick,
   platformKeVokabPdt,
   previewUploadBatch,
+  rakitInputSkorTiktok,
   reparsePdtBatch,
   siapkanUploadBatch,
   type PdtCommitOverride,
@@ -2740,5 +2741,142 @@ describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
     expect(rencana.kandidat.map((k) => k.batchId)).not.toContain(takBerpaket);
     expect(rencana.perluUploadUlang.map((s) => s.batchId)).toContain(purgedBatch);
     expect(rencana.perluUploadUlang.map((s) => s.batchId)).not.toContain(kandidatBatch);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rakitInputSkorTiktok (sesi 34 — G2-01 lanjutan) — query murni-baca yang
+// merakit `PdtSkorInputTiktok` dari fakta. Fixture di sini menulis LANGSUNG
+// ke `pdt_fact_*` (bukan lewat commitUploadBatch) supaya bebas mengontrol
+// tanggal/is_akun_toko/gmv per kasus — pola sama dengan file lain di repo
+// yang menguji lapisan agregasi terpisah dari lapisan parser.
+// ---------------------------------------------------------------------------
+describeDb('rakitInputSkorTiktok (sesi 34) — agregasi pdt_fact_* → PdtSkorInputTiktok', () => {
+  async function fixture(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', 'SHOP-ZPDT-1');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  async function insertAds(
+    batchId: number, cpId: number, sumber: string, kampanyeId: string,
+    biaya: number, gmv: number | null, pesananSku: number | null,
+  ): Promise<void> {
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, pesanan_sku)
+      values (${cpId}, ${sumber}, ${kampanyeId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${biaya}, ${gmv}, ${pesananSku})`;
+  }
+
+  async function insertContent(
+    batchId: number, cpId: number, jenis: 'video' | 'live', contentId: string,
+    isAkunToko: boolean, gmv: number | null, extra: { vv?: number | null; durasiDetik?: number | null } = {},
+  ): Promise<void> {
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv, durasi_detik)
+      values (${cpId}, ${contentId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${jenis}, ${isAkunToko}, ${gmv}, ${extra.vv ?? null}, ${extra.durasiDetik ?? null})`;
+  }
+
+  async function insertShopDaily(batchId: number, cpId: number, tanggal: string, gmv: number, pesanan: number, pengunjung: number | null): Promise<void> {
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, ${tanggal}::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${gmv}, ${pesanan}, ${pengunjung})`;
+  }
+
+  async function insertCreatorPeriod(batchId: number, cpId: number, handle: string, gmv: number | null): Promise<void> {
+    await sql`
+      insert into pdt_fact_creator_period (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv)
+      values (${cpId}, ${handle}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${gmv})`;
+  }
+
+  it('seluruh enam dimensi null bila nol baris fakta di periode ini (toko baru, belum ada batch)', async () => {
+    const { cpId } = await fixture();
+    const hasil = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil).toEqual({ ads: null, live: null, video: null, kartu: null, affiliate: null, produk: null });
+  });
+
+  it('Ads: menjumlah tt_ads_product + tt_ads_live, burnSpend HANYA baris product ber-biaya>0&gmv<=0, biayaProduk = seluruh baris product', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertAds(batchId, cpId, 'tt_ads_product', 'K1', 100_000, 500_000, 10); // untung
+    await insertAds(batchId, cpId, 'tt_ads_product', 'K2', 50_000, 0, 0); // bakar — biaya tanpa hasil
+    await insertAds(batchId, cpId, 'tt_ads_live', 'K3', 30_000, 90_000, 3);
+    // sumber DI LUAR whitelist skor (mis. meta_ads bila pernah ada) harus DIABAIKAN — di sini pakai shopee_ads_cpc sebagai representasi "bukan TikTok".
+    await insertAds(batchId, cpId, 'shopee_ads_cpc', 'K9', 999_999, 999_999, 999);
+
+    const hasil = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.ads).toEqual({ biaya: 180_000, gmv: 590_000, pesanan: 13, burnSpend: 50_000, biayaProduk: 150_000 });
+  });
+
+  it('LIVE: HANYA baris is_akun_toko=true — LIVE afiliasi TIDAK ikut dimensi ini', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertContent(batchId, cpId, 'live', 'L1', true, 400_000, { durasiDetik: 3600 * 2 });
+    await insertContent(batchId, cpId, 'live', 'L2', true, 0, { durasiDetik: 3600 }); // sesi nol
+    await insertContent(batchId, cpId, 'live', 'L3', false, 999_999_999, { durasiDetik: 3600 * 5 }); // afiliasi — HARUS diabaikan
+
+    const hasil = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.live).toEqual({ gmv: 400_000, jamTotal: 3, sesi: 2, sesiNol: 1 });
+  });
+
+  it('Video: toko + afiliasi DIGABUNG (beda dari LIVE)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertContent(batchId, cpId, 'video', 'V1', true, 200_000, { vv: 10_000 });
+    await insertContent(batchId, cpId, 'video', 'V2', false, 0, { vv: 5_000 }); // afiliasi, nol penjualan
+    await insertContent(batchId, cpId, 'video', 'V3', false, 300_000, { vv: 20_000 }); // afiliasi, ada penjualan
+
+    const hasil = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.video).toEqual({ total: 3, adaPenjualan: 2, gmv: 500_000, vv: 35_000 });
+  });
+
+  it('Kartu: gmvKartu = max(0, gmvTotalToko − Σ gmv SELURUH konten live+video, toko maupun afiliasi); cvr = Σpesanan/Σpengunjung', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertShopDaily(batchId, cpId, '2026-07-05', 1_000_000, 40, 2_000);
+    await insertShopDaily(batchId, cpId, '2026-07-20', 500_000, 20, 1_000);
+    // di luar periode Juli — TIDAK boleh ikut terhitung
+    await insertShopDaily(batchId, cpId, '2026-08-01', 999_999, 999, 999);
+    await insertContent(batchId, cpId, 'live', 'L1', true, 300_000);
+    await insertContent(batchId, cpId, 'video', 'V1', false, 200_000);
+
+    const hasil = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
+    // gmvTotalToko = 1.500.000; kontenTotal = 500.000 ⇒ gmvKartu = 1.000.000
+    expect(hasil.kartu).toEqual({ gmvKartu: 1_000_000, gmvTotal: 1_500_000, cvr: 60 / 3_000 });
+  });
+
+  it('Kartu: gmvKartu diklem ke 0 bila kontribusi konten MELEBIHI gmv toko (bukan negatif)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertShopDaily(batchId, cpId, '2026-07-05', 100_000, 5, 100);
+    await insertContent(batchId, cpId, 'live', 'L1', true, 500_000);
+
+    const hasil = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.kartu?.gmvKartu).toBe(0);
+  });
+
+  it('Affiliate: produktif = jumlah kreator ber-gmv>0; gmvKotorToko sumber SAMA dengan Kartu.gmvTotal', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertShopDaily(batchId, cpId, '2026-07-05', 2_000_000, 50, 3_000);
+    await insertCreatorPeriod(batchId, cpId, 'kreator1', 100_000);
+    await insertCreatorPeriod(batchId, cpId, 'kreator2', 0);
+    await insertCreatorPeriod(batchId, cpId, 'kreator3', null);
+
+    const hasil = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.affiliate).toEqual({ produktif: 1, total: 3, gmv: 100_000, gmvKotorToko: 2_000_000 });
+  });
+
+  it('Portfolio Produk: SELALU null (kuadran belum punya penulis, Open G2-01-KUADRAN-SKU) — meski dimensi lain terisi penuh', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertAds(batchId, cpId, 'tt_ads_product', 'K1', 10_000, 20_000, 1);
+
+    const hasil = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.produk).toBeNull();
+  });
+
+  it('periode selain awal bulan (bukan YYYY-MM-01) ⇒ ValidationError', async () => {
+    const { cpId } = await fixture();
+    await expect(rakitInputSkorTiktok(sql, cpId, '2026-07-15')).rejects.toThrow(ValidationError);
   });
 });

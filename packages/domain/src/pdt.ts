@@ -1766,3 +1766,159 @@ export async function reparsePdtBatch(
 
   return { batchId, direparse: true, alasanDilewati: null, rawDihapusPada: null };
 }
+
+// ===========================================================================
+// G2-01 lanjutan — rakit `PdtSkorInputTiktok` dari fakta tersimpan (PDT-21).
+// Query MURNI-BACA (nol tulis): satu client_platform_id + satu periode (awal
+// bulan). Pemanggil (route/G2-02, belum ada) yang menyambungkan hasilnya ke
+// `computeSkorTiktok` (`@cdps/core` pdt/skor.ts) beserta benchmark aktif —
+// bentuk JSON `pdt_benchmark.nilai` SENGAJA belum diputuskan di sini (milik
+// G2-02, dicatat COMMENT ON TABLE pdt_benchmark, migrasi G1-01).
+//
+// Portfolio Produk SELALU `null`: `pdt_fact_sku_period.kuadran` belum punya
+// penulis modul manapun (Open `G2-01-KUADRAN-SKU`, docs/backlog/PDT_BACKLOG.md
+// §2) — `computeSkorTiktok` sudah mengeluarkannya dari pembobotan (Rule 12)
+// tanpa kode tambahan apa pun di sini.
+//
+// Sumber tiap dimensi lain diverifikasi dari mesin LAMA yang SEDANG PRODUKSI
+// (`report/metrik.ts`/`report/skor.ts`, docs/DECISIONS.md), bukan ditebak:
+//  - LIVE Streaming: HANYA baris `is_akun_toko = true` — mesin lama memisahkan
+//    `slots.live_toko` (dimensi skor) dari `slots.live_aff` (masuk dimensi
+//    Affiliate, bukan LIVE). Menyamakan keduanya akan mencampur kesehatan
+//    siaran toko sendiri dengan performa afiliasi yang go-live — dua sinyal
+//    berbeda yang mesin lama sengaja pisah.
+//  - Video/Konten: SELURUH baris (toko + afiliasi) — `videoReport` mesin lama
+//    menerima `vid_toko` DAN `vid_aff` sekaligus (`toko`/`afiliasi` cuma count
+//    tampilan, bukan filter skor).
+//  - Kartu Produk & Shop Tab: `gmvKartu = max(0, gmvTotalToko − Σ gmv SELURUH
+//    baris pdt_fact_content jenis live+video, toko MAUPUN afiliasi)` — cermin
+//    persis `baseline/metrik.ts` `other = gmv − liveAff − liveToko − vidAff −
+//    vidToko` (dijumlah dulu SEMUA kontribusi konten, baru dikurangkan dari
+//    GMV toko, bukan hanya baris `is_akun_toko`).
+//  - Affiliate: `produktif` = jumlah baris `pdt_fact_creator_period` ber-
+//    `gmv > 0` — cermin persis `produktif: gmv > 0` per-kreator mesin lama.
+//    `gmvKotorToko` sumber SAMA dengan `PdtSkorInputKartuTiktok.gmvTotal`.
+// ===========================================================================
+
+const MSG_PDT_PERIODE_INVALID = '[periode tidak valid]';
+
+function validasiPeriodeAwalBulan(periodeAwalBulan: string): void {
+  if (!/^\d{4}-\d{2}-01$/.test(periodeAwalBulan)) {
+    throw new ValidationError(MSG_PDT_PERIODE_INVALID);
+  }
+}
+
+/**
+ * Rakit `PdtSkorInputTiktok` dari `pdt_fact_*` untuk SATU client_platform_id +
+ * SATU periode (awal bulan, format `YYYY-MM-01`). Dimensi tanpa baris fakta
+ * sama sekali ⇒ `null` (Rule 12 ditegakkan di `computeSkorTiktok` yang
+ * menerima hasil ini — bukan ditebak angka netral di sini).
+ */
+export async function rakitInputSkorTiktok(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+): Promise<pdt.PdtSkorInputTiktok> {
+  validasiPeriodeAwalBulan(periodeAwalBulan);
+
+  const [adsRow] = await sql<{
+    n: number; biaya: string; gmv: string; pesanan: string; burn_spend: string; biaya_produk: string;
+  }[]>`
+    select count(*)::int as n,
+           coalesce(sum(biaya), 0) as biaya,
+           coalesce(sum(gmv), 0) as gmv,
+           coalesce(sum(pesanan_sku), 0) as pesanan,
+           coalesce(sum(case when sumber = 'tt_ads_product' and biaya > 0 and coalesce(gmv, 0) <= 0 then biaya else 0 end), 0) as burn_spend,
+           coalesce(sum(case when sumber = 'tt_ads_product' then biaya else 0 end), 0) as biaya_produk
+      from pdt_fact_ads
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and sumber in ('tt_ads_product', 'tt_ads_live')`;
+  const ads: pdt.PdtSkorInputAdsTiktok | null = adsRow.n === 0 ? null : {
+    biaya: Number(adsRow.biaya),
+    gmv: Number(adsRow.gmv),
+    pesanan: Number(adsRow.pesanan),
+    burnSpend: Number(adsRow.burn_spend),
+    biayaProduk: Number(adsRow.biaya_produk),
+  };
+
+  const [liveRow] = await sql<{ sesi: number; durasi_detik: string; gmv: string; sesi_nol: number }[]>`
+    select count(*)::int as sesi,
+           coalesce(sum(durasi_detik), 0) as durasi_detik,
+           coalesce(sum(gmv), 0) as gmv,
+           coalesce(sum(case when coalesce(gmv, 0) <= 0 then 1 else 0 end), 0)::int as sesi_nol
+      from pdt_fact_content
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and jenis = 'live'
+       and is_akun_toko = true`;
+  const live: pdt.PdtSkorInputLiveTiktok | null = liveRow.sesi === 0 ? null : {
+    gmv: Number(liveRow.gmv),
+    jamTotal: Number(liveRow.durasi_detik) / 3600,
+    sesi: liveRow.sesi,
+    sesiNol: liveRow.sesi_nol,
+  };
+
+  const [videoRow] = await sql<{ total: number; ada_penjualan: number; gmv: string; vv: string }[]>`
+    select count(*)::int as total,
+           coalesce(sum(case when coalesce(gmv, 0) > 0 then 1 else 0 end), 0)::int as ada_penjualan,
+           coalesce(sum(gmv), 0) as gmv,
+           coalesce(sum(vv), 0) as vv
+      from pdt_fact_content
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and jenis = 'video'`;
+  const video: pdt.PdtSkorInputVideoTiktok | null = videoRow.total === 0 ? null : {
+    total: videoRow.total,
+    adaPenjualan: videoRow.ada_penjualan,
+    gmv: Number(videoRow.gmv),
+    vv: Number(videoRow.vv),
+  };
+
+  const [contentGmvRow] = await sql<{ gmv: string }[]>`
+    select coalesce(sum(gmv), 0) as gmv
+      from pdt_fact_content
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and jenis in ('live', 'video')`;
+  const gmvKontenTotal = Number(contentGmvRow.gmv);
+
+  const [shopRow] = await sql<{ n: number; gmv: string; pesanan: string; pengunjung: string }[]>`
+    select count(*)::int as n,
+           coalesce(sum(gmv), 0) as gmv,
+           coalesce(sum(pesanan), 0) as pesanan,
+           coalesce(sum(pengunjung), 0) as pengunjung
+      from pdt_fact_shop_daily
+     where client_platform_id = ${clientPlatformId}
+       and basis = 'net'
+       and tanggal >= ${periodeAwalBulan}::date
+       and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
+  const gmvTotalToko = Number(shopRow.gmv);
+  const pengunjungTotal = Number(shopRow.pengunjung);
+  const pesananTotal = Number(shopRow.pesanan);
+  const kartu: pdt.PdtSkorInputKartuTiktok | null = shopRow.n === 0 ? null : {
+    gmvKartu: Math.max(0, gmvTotalToko - gmvKontenTotal),
+    gmvTotal: gmvTotalToko,
+    cvr: pengunjungTotal === 0 ? 0 : pesananTotal / pengunjungTotal,
+  };
+
+  const [affRow] = await sql<{ total: number; produktif: number; gmv: string }[]>`
+    select count(*)::int as total,
+           coalesce(sum(case when coalesce(gmv, 0) > 0 then 1 else 0 end), 0)::int as produktif,
+           coalesce(sum(gmv), 0) as gmv
+      from pdt_fact_creator_period
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date`;
+  const affiliate: pdt.PdtSkorInputAffiliateTiktok | null = affRow.total === 0 ? null : {
+    produktif: affRow.produktif,
+    total: affRow.total,
+    gmv: Number(affRow.gmv),
+    gmvKotorToko: gmvTotalToko,
+  };
+
+  // Portfolio Produk: lihat docblock berkas di atas — SELALU null sampai
+  // G2-01-KUADRAN-SKU membangun penulis `pdt_fact_sku_period.kuadran`.
+  const produk: pdt.PdtSkorInputProdukTiktok | null = null;
+
+  return { ads, live, video, kartu, affiliate, produk };
+}
