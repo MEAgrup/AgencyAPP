@@ -1,6 +1,6 @@
 /**
  * Shared secret gate for the internal cron tick routes
- * (`internal/{health,performance,plan,penugasan}/tick`). This was copy-pasted
+ * (`internal/{health,performance,plan,penugasan,pdt/purge}/tick`). This was copy-pasted
  * into all four route files; consolidated here so the accepted credential shapes
  * stay identical across every tick and can only ever change in one place.
  *

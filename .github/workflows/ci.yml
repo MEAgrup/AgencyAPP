@@ -260,12 +260,15 @@ jobs:
       # +1 event katalog v17 `m5.installment.amount_mismatch` (74→75) — F-5
       # koreksi, NOL tabel baru (payment_verifications sudah ada sejak wave 1).
       # F-2 + F-4 mengubah tabel/kolom yang sudah ada, jadi sm_machines TETAP 35.
-      - name: Verify migration seed counts (35 machines, 75 events, catalog registry consistent)
+      # PDT G1-10 job purge harian: +1 event katalog v18 `pdt.purge.guard_exceeded`
+      # (75→76) — Rule 48, NOL tabel baru (pdt_upload_batch sudah punya seluruh
+      # kolom sejak G1-01), sm_machines TETAP 35 (tick tidak lewat sm_transition).
+      - name: Verify migration seed counts (35 machines, 76 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 35 then raise exception 'expected 35 machines'; end if;
-               if (select count(*) from notif_events) <> 75 then raise exception 'expected 75 events'; end if;
+               if (select count(*) from notif_events) <> 76 then raise exception 'expected 76 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;

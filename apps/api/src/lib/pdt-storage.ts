@@ -14,9 +14,10 @@
  * AM mengklik "unduh paket asli"; `buatPdtRawSignedUploadUrl` (unggah) dan
  * `unduhPdtRawObjek` (unduh server-ke-server) dipanggil dari route
  * preview/commit — lihat catatan G1-09-BODY-BESAR di kepala masing-masing
- * fungsi. Pengecekan `canUploadBatch`/`canReadBatch` ada di lapisan pemanggil
- * (`packages/domain`), BUKAN di sini — berkas ini murni pembungkus REST, nol
- * keputusan otorisasi.
+ * fungsi. `hapusPdtRawObjek` (G1-10) dipanggil dari
+ * `internal/pdt/purge/tick` — job purge harian, bukan aksi AM. Pengecekan
+ * `canUploadBatch`/`canReadBatch` ada di lapisan pemanggil (`packages/domain`),
+ * BUKAN di sini — berkas ini murni pembungkus REST, nol keputusan otorisasi.
  */
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -165,4 +166,41 @@ export async function unduhPdtRawObjek(path: string, fetchImpl?: FetchLike): Pro
     throw new Error(`gagal mengunduh pdt-raw/${path}: ${res.status}`);
   }
   return Buffer.from(await res.arrayBuffer());
+}
+
+interface DeleteResponse {
+  message?: string;
+}
+
+/**
+ * Hapus SATU objek di bucket `pdt-raw` (G1-10 Flow E langkah 4/5 — purge
+ * harian menghapus objek storage, bukan baris DB). Storage REST hanya
+ * menyediakan bulk-delete (`DELETE /object/{bucket}` + body
+ * `{prefixes:[...]}`) — dipanggil dengan SATU path per panggilan, bukan
+ * dikumpulkan jadi satu batch besar, supaya kegagalan satu objek (Rule 46
+ * error path: "kegagalan hapus pada satu objek tidak menghentikan sisanya")
+ * tidak menggagalkan objek lain dalam tick yang sama — pemanggil (route
+ * tick, `packages/domain/src/pdt.ts` `planPdtPurgeTick`/`finalizePdtPurgeTick`
+ * membungkus hasilnya) yang mengiterasi dan menangkap tiap kegagalan sendiri.
+ * Tidak melempar bila objek memang sudah tidak ada (200 dengan array kosong
+ * dari Storage) — purge yang mencoba lagi objek yang kebetulan sudah hilang
+ * bukan kegagalan.
+ */
+export async function hapusPdtRawObjek(path: string, fetchImpl?: FetchLike): Promise<void> {
+  const { url, serviceRoleKey } = config();
+  const doFetch = fetchImpl ?? fetch;
+
+  const res = await doFetch(`${url}/storage/v1/object/pdt-raw`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+    },
+    body: JSON.stringify({ prefixes: [path] }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as DeleteResponse;
+    throw new Error(`gagal menghapus pdt-raw/${path}: ${res.status} ${body.message ?? ''}`.trim());
+  }
 }

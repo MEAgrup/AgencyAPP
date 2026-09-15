@@ -178,7 +178,13 @@ check() { # nama · sql · harapan
 check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "176"
 check "entity_prefix"    "select count(*) from entity_prefix"    "45"
 check "sm_machines"      "select count(*) from sm_machines"      "35"
-check "notif_events"     "select count(*) from notif_events"     "75"
+check "notif_events"     "select count(*) from notif_events"     "76"
+# --- PDT G1-10 (job purge harian, Rule 48) --------------------------------
+# notif_events 75→76: `pdt.purge.guard_exceeded` (pagar 5%/hari terlampaui →
+#       Directors). Nol tabel baru (pdt_upload_batch sudah punya seluruh
+#       kolom sejak G1-01) ⇒ tabel public TETAP 176, entity_prefix TETAP 45,
+#       sm_machines TETAP 35 (nol lifecycle ber-role-gate — pola sama
+#       pdt_upload_batch, tick tidak lewat sm_transition).
 # --- Feedback lapangan 2026-09-14 — F-2 + F-4
 #     (20261020010000_feedback_lapangan_20260914.sql) -----------------------
 # notif_events 74→75: `m5.installment.amount_mismatch` (F-5 koreksi — NOL tabel

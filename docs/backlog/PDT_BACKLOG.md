@@ -620,6 +620,23 @@ mundur platform adalah instruksi yang mustahil dijalankan.
 **DoD:** purge jalan di staging, `audit_logs` terisi · pagar 5% diuji dengan sengaja
 melampauinya (harus berhenti di nol objek) · selesai < 2 menit pada 500 klien × 12 bulan riwayat.
 
+> **Status 2026-09-15 (sesi 26, pass PERTAMA Flow E selesai — lihat `docs/DECISIONS.md` baris
+> teratas) — job purge harian dibangun.** `POST/GET /api/v1/internal/pdt/purge/tick` (pola sama
+> `plan`/`health`/`performance`/`penugasan` tick, `tickSecretOk` dibagi) memanggil
+> `pdt.planPdtPurgeTick` (langkah 1-3: pilih kandidat `retensi_sampai < today` + `legal_hold=false`
+> + belum dihapus, pagar 5%/hari Rule 48) lalu, untuk tiap kandidat, `hapusPdtRawObjek`
+> (`pdt-storage.ts`, baru) satu-per-satu (Rule 46 error path) sebelum `pdt.finalizePdtPurgeTick`
+> (langkah 4/6: isi `raw_dihapus_pada` untuk yang berhasil + SATU `audit_log` rekap per tick, Rule
+> 47). Pagar terlampaui ⇒ notifikasi katalog v18 baru `pdt.purge.guard_exceeded` ke Directors,
+> kandidat dikosongkan, nol baris disentuh — DoD "pagar 5% diuji dengan sengaja melampauinya"
+> terpenuhi (`pdt.test.ts`). Cron terdaftar `apps/api/vercel.json` (`45 17 * * *` = 00:45 WIB
+> harian). **BELUM dibangun (sengaja, dicatat `docs/DECISIONS.md` Open baru):** recompute
+> perpanjangan retensi PENUH (Rule 45 langkah 2 — dua dari empat pemicu menunjuk tabel yang belum
+> ada, `G1-10-RETENSI-RECOMPUTE`) dan pass KEDUA Flow E (Rule 49, objek yatim > 7 hari — butuh
+> listing bucket rekursif, `G1-10-ORPHAN-PASS`). DoD "selesai < 2 menit pada 500 klien × 12 bulan"
+> tidak diuji beban sungguhan (tidak ada 500 klien nyata) — pola loop per-objek sekuensial sama
+> `sweepPlanSatuanPeriodeBerjalan` dkk., bukan batch/paralel.
+
 ### G1-11 · Reparse dari paket ZIP (Flow D)
 - `parser_versi` dicatat **per batch dan per baris fakta**.
 - Job reparse mengunduh paket batch lama yang **masih dalam masa retensi**, memparse ulang,

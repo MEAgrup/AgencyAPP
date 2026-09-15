@@ -207,6 +207,14 @@ export const EVENTS = {
   // numbers had drifted). Emitter: packages/domain/src/finance.ts verifyPayment().
   InstallmentAmountMismatch: 'm5.installment.amount_mismatch', // -> Sales PIC + Finance lead
 
+  // ----- catalog v18 (PDT G1-10 — purge harian) — 1 event -----
+  // Rule 48 (PDT PRD §3, Flow E langkah 3): pagar 5%/hari terlampaui ⇒ job
+  // berhenti, NOL objek dihapus, Director diberi tahu. Dotted `mN`-style tidak
+  // dipakai (PDT bukan modul M-berangka) — konvensi `pdt.*` sendiri, sama alasan
+  // `bridge.order.masuk` memakai namanya sendiri. Emitter:
+  // packages/domain/src/pdt.ts planPdtPurgeTick().
+  PdtPurgeGuardExceeded: 'pdt.purge.guard_exceeded', // -> Directors
+
 } as const;
 
 /** A cataloged event type. */
@@ -344,6 +352,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'Feedback lapangan 2026-09-14 (F-5) — 1 event: m5.installment.amount_mismatch (termin settle dengan total diterima ≠ rencana, dari payment_verifications yang sudah ada sejak wave 1) → Sales PIC + lead Finance, sebelum rekap bulanan.',
     eventCount: 1,
     decisionRef: 'docs/DECISIONS.md 2026-09-14 (F-5, koreksi diagnosis handoff)',
+  },
+  {
+    version: 18,
+    description:
+      'PDT G1-10 (job purge harian) — 1 event: pdt.purge.guard_exceeded (pagar 5%/hari, Rule 48, terlampaui → Directors, nol objek dihapus tick itu).',
+    eventCount: 1,
+    decisionRef: 'docs/DECISIONS.md 2026-09-15 (G1-10 purge harian)',
   },
 ] as const;
 
@@ -518,6 +533,14 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
     description: 'Termin settle dengan total diterima ≠ rencana — ke Sales PIC + lead Finance',
     resolver: 'explicitOrLeads',
     version: 17,
+  },
+
+  // --- v18 (PDT G1-10 — purge harian, Rule 48). Description/resolver WAJIB
+  // sama persis dengan seed migrasi <lihat migrasi G1-10 purge>. ---
+  [EVENTS.PdtPurgeGuardExceeded]: {
+    description: 'Pagar 5%/hari purge PDT terlampaui — nol objek dihapus, ke Directors',
+    resolver: 'explicit',
+    version: 18,
   },
 };
 
