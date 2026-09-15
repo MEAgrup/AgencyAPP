@@ -817,6 +817,39 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 - Pencabutan **wajib** memicu hitung ulang `total_sales`, Health Score, baseline Ads.
   **Nol jalan keluar lewat SQL manual** (Rule 24).
 
+> **Koreksi 2026-09-15 (sesi 34)** — catatan "yang meringankan — sebagian sudah terbangun" DI
+> ATAS menyesatkan pada satu hal: `publishReport`/`republishReport`/`revokeReport`/
+> `recomputeTotalSales` adalah mesin LAMA `client_reports` (draft/publish/revoke narasi insight),
+> BUKAN kode PDT yang tinggal disambung ke `pdt_laporan_kiriman`/`pdt_fact_*`. Yang benar-benar
+> sudah ada sebelum sesi ini: skema DB (`pdt_laporan_kiriman`+`pdt_benchmark`, G1-01) dan tiga
+> predikat izin (`canKirimLaporan`/`canKelolaBenchmark`/`canUploadBatch`, `pdt.ts`). Mesin skor/
+> laporan itu sendiri **belum ada sama sekali** sebelum sesi 34.
+>
+> **Status 2026-09-15 (sesi 34) — tiga langkah prasyarat DITUTUP, platform TikTok dipilih lebih
+> dulu (keputusan pemilik).** (1) Celah `pdt_fact_shop_daily` (nol penulis sejak G1-01, prasyarat
+> GMV harian shop-level) ditutup untuk TikTok — lihat §G1-09 di atas & `docs/DECISIONS.md`. (2)
+> Kolom `periode` ditambah ke `pdt_fact_content` (migrasi `20261029010000`) — tabel itu SATU-
+> SATUNYA fakta G1-01 yang lahir tanpa periode, akan menimpa data lintas bulan tanpa perbaikan
+> ini. (3) `packages/core/src/pdt/skor.ts` `computeSkorTiktok` — mesin skor MURNI (fungsi, nol
+> DB) enam dimensi TikTok, porting formula mesin lama (`report/skor.ts`) TAPI dengan Rule 12
+> ditegakkan sampai level sub-formula (bukan cuma level dimensi seperti keputusan 2026-09-13) —
+> lihat `docs/DECISIONS.md` untuk rincian lengkap.
+>
+> **Open baru, ditemukan sesi ini**: dimensi Portfolio Produk `computeSkorTiktok` butuh
+> `pdt_fact_sku_period.kuadran` (kolom sudah ada sejak migrasi G1-01) TERISI per SKU — kolom ini
+> **belum pernah ditulis** modul manapun (G1-09 sub-langkah 2b-ii menulis field lain
+> `pdt_fact_sku_period`, tidak pernah `kuadran`). Klasifikasi kuadran (percentile klik/CVR per
+> SKU, `quad_klik`/`quad_cvr` di benchmark) adalah pekerjaan TERSENDIRI sebelum dimensi ini bisa
+> hidup dari data sungguhan — dicatat `G2-01-KUADRAN-SKU` (Open), di luar cakupan sesi 34.
+>
+> **Belum dikerjakan (sengaja, urutan berikutnya):** query agregasi SQL yang membaca
+> `pdt_fact_*`/`pdt_fact_sku_period.kuadran` per periode dan merakit `PdtSkorInputTiktok` (domain
+> layer, `packages/domain/src/pdt.ts`), keputusan mekanisme "pencabutan"/revoke untuk
+> `pdt_laporan_kiriman` (tabel itu TOTAL frozen sejak baris pertama, nol kolom status — Rule 24
+> butuh cara menandai "dicabut" tanpa melanggar `UPDATE` yang diblok trigger), benchmark seed
+> versi 1 (G2-02, `pdt_benchmark` masih nol baris), route HTTP, dan seluruh sisi Shopee (dimensi/
+> bobot berbeda, `report/shopee/skor.ts` sebagai rujukan porting berikutnya).
+
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**
