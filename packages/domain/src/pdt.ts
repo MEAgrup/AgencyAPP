@@ -13,7 +13,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { notification, pdt, permission, tz } from '@cdps/core';
-import { executors, withTransaction, type Sql } from '@cdps/db';
+import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
 
 /**
@@ -740,254 +740,17 @@ export async function commitUploadBatch(
              ${b.kolomDipanen}, ${[...b.kolomBaru]}, ${parseStatusDb}, ${parseStatusDb === 'ok' ? null : b.pesan})`;
       }
 
-      // G1-09 sub-langkah 2b-ii — baris fakta tertipe, `shopee_ads_live` → `pdt_fact_ads`
-      // (modul PERTAMA dipetakan, lihat docblock `ekstrakBarisShopeeAdsLive`, `@cdps/core`
-      // `pdt/fakta.ts`, untuk kenapa modul ini dan bukan `shopee_ads_cpc`/`shopee_ads_search`).
-      // `uq_pdt_fact_ads` TIDAK AMAN dipakai lewat `ON CONFLICT` di sini — `sku_id`/`content_id`
-      // SELALU NULL untuk modul ini (dua kolom itu bagian kunci unik), dan Postgres tidak
-      // pernah menganggap NULL=NULL saat memeriksa keunikan, jadi commit ULANG periode yang
-      // sama tidak akan pernah "conflict" — ia akan menambah baris duplikat, bukan menimpa.
-      // Jalan aman: HAPUS baris toko+periode+sumber ini lebih dulu, lalu tulis ulang dari
-      // batch yang sedang di-commit (replace-on-recommit) — sah karena baris fakta adalah
-      // data TURUNAN yang selalu bisa dihitung ulang (aturan rumah #4), bukan riwayat
-      // immutable (itu tanggung jawab `audit_log`, di bawah).
-      if (berkasAdsLive.length > 0) {
-        await tx`
-          delete from pdt_fact_ads
-           where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_live' and periode = ${periodeAwalBulan}::date`;
-        for (const b of berkasAdsLive) {
-          for (const baris of pdt.ekstrakBarisShopeeAdsLive(b.aoa, b.barisHeader)) {
-            await tx`
-              insert into pdt_fact_ads
-                (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-                 parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
-              values
-                (${clientPlatformId}, 'shopee_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-                 ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
-          }
-        }
-      }
-
-      // G1-09 sub-langkah 2b-ii — modul KEENAM, `shopee_ads_cpc` → `pdt_fact_ads`
-      // (lihat docblock `ekstrakBarisShopeeAdsCpc`, `@cdps/core` `pdt/fakta.ts`).
-      // Sama pola replace-on-recommit `shopee_ads_live` di atas — `sku_id`/
-      // `content_id` SELALU NULL di sini juga (lihat docblock kepala berkas
-      // `fakta.ts` untuk kenapa `sku_id` TIDAK diisi walau `pdt_sku_master`
-      // sudah ada: `Kode Produk` level induk, `pdt_sku_master` berkunci per
-      // varian — lookup langsung akan mengarang varian mana yang dipilih).
-      // `platform_product_id` DIISI sesi 23 (`G1-09-2BII-ADS-CPC-SKU` DITUTUP
-      // — pemilik: "kebutuhan hanya GMV per produk bukan sampai varian") —
-      // salinan identitas `Kode Produk`, bukan lookup.
-      if (berkasAdsCpc.length > 0) {
-        await tx`
-          delete from pdt_fact_ads
-           where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_cpc' and periode = ${periodeAwalBulan}::date`;
-        for (const b of berkasAdsCpc) {
-          for (const baris of pdt.ekstrakBarisShopeeAdsCpc(b.aoa, b.barisHeader)) {
-            await tx`
-              insert into pdt_fact_ads
-                (client_platform_id, sumber, kampanye_id, platform_product_id, sku_id, content_id, periode, batch_id,
-                 parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
-              values
-                (${clientPlatformId}, 'shopee_ads_cpc', ${baris.kampanyeId}, ${baris.platformProductId}, null, null, ${periodeAwalBulan}::date, ${id},
-                 ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
-          }
-        }
-      }
-
-      // G1-09 sub-langkah 2b-ii — modul KETUJUH (sesi 22), `shopee_ads_search` → `pdt_fact_ads`
-      // (lihat docblock `ekstrakBarisShopeeAdsSearch`, `@cdps/core` `pdt/fakta.ts`). Sama pola
-      // replace-on-recommit `shopee_ads_cpc`/`shopee_ads_live` di atas — `sku_id`/`content_id`
-      // SELALU NULL di sini juga (modul ini tidak punya identitas produk sama sekali di
-      // whitelist). `kampanye_id` KOMPOSIT (`nama iklan :: kata pencarian`, bukan nama iklan
-      // polos) — lihat docblock kepala berkas `fakta.ts` untuk alasan (satu iklan search bisa
-      // punya banyak baris keyword per periode, belum terbukti aman disamakan ke `shopee_ads_cpc`).
-      if (berkasAdsSearch.length > 0) {
-        await tx`
-          delete from pdt_fact_ads
-           where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_search' and periode = ${periodeAwalBulan}::date`;
-        for (const b of berkasAdsSearch) {
-          for (const baris of pdt.ekstrakBarisShopeeAdsSearch(b.aoa, b.barisHeader)) {
-            await tx`
-              insert into pdt_fact_ads
-                (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-                 parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
-              values
-                (${clientPlatformId}, 'shopee_ads_search', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-                 ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
-          }
-        }
-      }
-
-      // G1-09 sub-langkah 2b-ii — modul KEDUA, `tt_video` → `pdt_fact_content` (lihat
-      // docblock `ekstrakBarisTtVideo`, `@cdps/core` `pdt/fakta.ts`). Beda dari
-      // `shopee_ads_live`/`pdt_fact_ads`: kunci unik `pdt_fact_content`
-      // (`client_platform_id, platform_content_id`) TIDAK punya komponen NULL (`ID Video`
-      // selalu ada untuk baris yang ditulis — baris kosong sudah dilewati di
-      // `ekstrakBarisTtVideo`), jadi `ON CONFLICT ... DO UPDATE` sungguhan AMAN dipakai di
-      // sini (beda dari alasan replace-on-recommit `pdt_fact_ads` di atas). `sku_id`/
-      // `waktu_posting` SELALU NULL (SKU master belum ada; nol parser terverifikasi untuk
-      // format kolom `Waktu` — lihat docblock `ekstrakBarisTtVideo`).
-      if (berkasTtVideo.length > 0) {
-        for (const b of berkasTtVideo) {
-          for (const baris of pdt.ekstrakBarisTtVideo(b.aoa, b.barisHeader, row.akun_konten_toko)) {
-            await tx`
-              insert into pdt_fact_content
-                (client_platform_id, platform_content_id, batch_id, parser_versi, jenis,
-                 creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
-                 vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
-              values
-                (${clientPlatformId}, ${baris.platformContentId}, ${id}, ${pdt.PDT_PARSER_VERSI}, 'video',
-                 ${baris.creatorPlatformId}, ${baris.creatorHandle}, ${baris.isAkunToko}, null, null,
-                 ${baris.vv}, ${baris.likes}, null, ${baris.dibagikan}, null, null, ${baris.klikProduk}, ${baris.gmv}, null)
-              on conflict (client_platform_id, platform_content_id) do update set
-                batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-                creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
-                is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, likes = excluded.likes,
-                dibagikan = excluded.dibagikan, klik_produk = excluded.klik_produk, gmv = excluded.gmv`;
-          }
-        }
-      }
-
-      // G1-09 sub-langkah 2b-ii — modul KESEMBILAN (sesi 24), `shopee_live` → `pdt_fact_content`
-      // (lihat docblock `ekstrakBarisShopeeLive`, `@cdps/core` `pdt/fakta.ts`). Sama pola
-      // `ON CONFLICT ... DO UPDATE` seperti `tt_video` di atas — `platform_content_id` (digit
-      // mentah `Waktu Mulai`) SELALU ada untuk baris yang ditulis (baris tanpa `Waktu Mulai`
-      // yang valid sudah dilewati di `ekstrakBarisShopeeLive`), jadi unique index tidak punya
-      // komponen NULL. `sku_id`/`creator_platform_id`/`creator_handle` SELALU NULL (modul ini
-      // tidak punya identitas produk maupun kreator terpisah); `is_akun_toko` SELALU `true`
-      // (sesi live Shopee secara struktural HANYA akun toko sendiri, bukan afiliasi).
-      if (berkasShopeeLive.length > 0) {
-        for (const b of berkasShopeeLive) {
-          for (const baris of pdt.ekstrakBarisShopeeLive(b.aoa, b.barisHeader)) {
-            await tx`
-              insert into pdt_fact_content
-                (client_platform_id, platform_content_id, batch_id, parser_versi, jenis,
-                 creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
-                 vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
-              values
-                (${clientPlatformId}, ${baris.platformContentId}, ${id}, ${pdt.PDT_PARSER_VERSI}, 'live',
-                 null, null, true, ${baris.waktuPosting}, null,
-                 ${baris.vv}, null, null, null, null, null, null, ${baris.gmv}, null)
-              on conflict (client_platform_id, platform_content_id) do update set
-                batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-                waktu_posting = excluded.waktu_posting, vv = excluded.vv, gmv = excluded.gmv`;
-          }
-        }
-      }
-
-      // G1-09 sub-langkah 2b-ii — modul KETIGA, `pdt_sku_master` (lihat docblock
-      // `ekstrakBarisSkuMasterShopeeParentSku`/`ekstrakBarisSkuMasterTtOrders`,
-      // `@cdps/core` `pdt/fakta.ts`). BEDA dari `pdt_fact_ads`/`pdt_fact_content` di atas:
-      // ini tabel MASTER, bukan fakta per-periode — Rule 19 (`docs/PRD` §3.4) SKU tidak
-      // pernah dihapus, hanya `status_listing`/`last_seen_at` yang berubah. UPSERT sungguhan
-      // (`ON CONFLICT (client_platform_id, platform_product_id, platform_variation_id) DO
-      // UPDATE`, kunci = `uq_pdt_sku_master`), field opsional (`seller_sku`/`nama_produk`/
-      // `nama_variasi`/`kategori_platform`/`harga_satuan_terakhir`) di-COALESCE dengan nilai
-      // lama supaya sumber yang tidak membawa field itu (mis. `shopee_parent_sku` untuk
-      // nama/kategori/harga) tidak menimpanya jadi NULL. `status_listing` selalu diset
-      // 'aktif' di sini — SKU yang muncul di batch berarti masih terlihat; transisi ke
-      // 'nonaktif'/'dihapus_platform' (SKU yang BERHENTI muncul) butuh perbandingan lintas
-      // batch yang belum ada mesinnya (`G1-09-2BII-SKU-STATUS-TRANSISI`, Open baru).
-      for (const b of [...berkasParentSkuUntukMaster, ...berkasTtOrders]) {
-        const ekstrak = b.modul.kode === 'shopee_parent_sku'
-          ? pdt.ekstrakBarisSkuMasterShopeeParentSku(b.aoa, b.barisHeader)
-          : pdt.ekstrakBarisSkuMasterTtOrders(b.aoa, b.barisHeader);
-        for (const baris of ekstrak) {
-          await tx`
-            insert into pdt_sku_master
-              (client_platform_id, platform_product_id, platform_variation_id, seller_sku,
-               nama_produk, nama_variasi, kategori_platform, harga_satuan_terakhir,
-               status_listing, first_seen_at, last_seen_at)
-            values
-              (${clientPlatformId}, ${baris.platformProductId}, ${baris.platformVariationId}, ${baris.sellerSku},
-               ${baris.namaProduk}, ${baris.namaVariasi}, ${baris.kategoriPlatform}, ${baris.hargaSatuanTerakhir},
-               'aktif', ${now.toISOString()}, ${now.toISOString()})
-            on conflict (client_platform_id, platform_product_id, platform_variation_id) do update set
-              seller_sku = coalesce(excluded.seller_sku, pdt_sku_master.seller_sku),
-              nama_produk = coalesce(excluded.nama_produk, pdt_sku_master.nama_produk),
-              nama_variasi = coalesce(excluded.nama_variasi, pdt_sku_master.nama_variasi),
-              kategori_platform = coalesce(excluded.kategori_platform, pdt_sku_master.kategori_platform),
-              harga_satuan_terakhir = coalesce(excluded.harga_satuan_terakhir, pdt_sku_master.harga_satuan_terakhir),
-              status_listing = 'aktif',
-              last_seen_at = excluded.last_seen_at`;
-        }
-      }
-
-      // G1-09 sub-langkah 2b-ii — modul KEEMPAT, `tt_transaction_creator` → `pdt_fact_creator_period`
-      // (lihat docblock `ekstrakBarisKreatorTtTransactionCreator`, `@cdps/core` `pdt/fakta.ts`).
-      // Kunci unik `pdt_fact_creator_period` (`client_platform_id, creator_handle, periode`)
-      // TIDAK pernah punya komponen NULL (baris ber-`Creator name` kosong sudah dilewati di
-      // ekstraksi) — `ON CONFLICT ... DO UPDATE` sungguhan AMAN, sama pola `pdt_fact_content`
-      // (bukan delete-then-insert seperti `pdt_fact_ads`).
-      if (berkasTtTransactionCreator.length > 0) {
-        for (const b of berkasTtTransactionCreator) {
-          for (const baris of pdt.ekstrakBarisKreatorTtTransactionCreator(b.aoa, b.barisHeader)) {
-            await tx`
-              insert into pdt_fact_creator_period
-                (client_platform_id, creator_handle, periode, batch_id, parser_versi,
-                 gmv, gmv_live, gmv_video, pesanan_teratribusi, aov, ctor, jumlah_live, jumlah_video, sampel_terkirim)
-              values
-                (${clientPlatformId}, ${baris.creatorHandle}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
-                 ${baris.gmv}, null, null, ${baris.pesananTeratribusi}, ${baris.aov}, ${baris.ctor}, ${baris.jumlahLive}, ${baris.jumlahVideo}, null)
-              on conflict (client_platform_id, creator_handle, periode) do update set
-                batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-                gmv = excluded.gmv, pesanan_teratribusi = excluded.pesanan_teratribusi,
-                aov = excluded.aov, ctor = excluded.ctor, jumlah_live = excluded.jumlah_live, jumlah_video = excluded.jumlah_video`;
-          }
-        }
-      }
-
-      // G1-09 sub-langkah 2b-ii — modul KELIMA, `shopee_ams_afiliasi` → `pdt_fact_creator_period`
-      // (lihat docblock `ekstrakBarisKreatorShopeeAmsAfiliasi`, `@cdps/core` `pdt/fakta.ts`) —
-      // sisi Shopee, sama pola `ON CONFLICT DO UPDATE` seperti modul KEEMPAT (TikTok) di atas.
-      // `gmv_live`/`gmv_video`/`aov`/`ctor`/`jumlah_live`/`jumlah_video`/`sampel_terkirim` TIDAK
-      // disentuh (COALESCE tidak dipakai di sini — modul ini tidak membawanya sama sekali, dan
-      // beda dari `pdt_sku_master`, tabel fakta ini tidak butuh field opsional dijaga dari
-      // penimpaan lintas-platform karena Shopee/TikTok selalu punya `client_platform_id` berbeda).
-      if (berkasShopeeAmsAfiliasi.length > 0) {
-        for (const b of berkasShopeeAmsAfiliasi) {
-          for (const baris of pdt.ekstrakBarisKreatorShopeeAmsAfiliasi(b.aoa, b.barisHeader)) {
-            await tx`
-              insert into pdt_fact_creator_period
-                (client_platform_id, creator_handle, periode, batch_id, parser_versi,
-                 gmv, gmv_live, gmv_video, pesanan_teratribusi, aov, ctor, jumlah_live, jumlah_video, sampel_terkirim)
-              values
-                (${clientPlatformId}, ${baris.creatorHandle}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
-                 ${baris.gmv}, null, null, ${baris.pesananTeratribusi}, null, null, null, null, null)
-              on conflict (client_platform_id, creator_handle, periode) do update set
-                batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-                gmv = excluded.gmv, pesanan_teratribusi = excluded.pesanan_teratribusi`;
-          }
-        }
-      }
-
-      // G1-09 sub-langkah 2b-ii — modul KEDELAPAN (sesi 23), `shopee_ams_produk` →
-      // `pdt_fact_sku_period` (lihat docblock `ekstrakBarisShopeeAmsProduk`, `@cdps/core`
-      // `pdt/fakta.ts`). `sku_id` SELALU NULL (level produk-induk, `G1-09-2BII-ADS-CPC-SKU`
-      // DITUTUP sesi ini) — replace-on-recommit (DELETE scope lalu INSERT), sama alasan
-      // `pdt_fact_ads` di atas: baris LAMA yang `platform_product_id`-nya sudah tidak muncul di
-      // batch baru (produk delisting dari laporan AMS) harus ikut hilang, bukan cuma di-upsert
-      // per baris — `ON CONFLICT` pada unique index PARSIAL `uq_pdt_fact_sku_period_produk`
-      // tidak menutupi kasus itu. `basis = 'dibayar'` LITERAL (bukan dari kolom manapun di
-      // berkas — keputusan pemilik, lihat docblock `ekstrakBarisShopeeAmsProduk`).
-      if (berkasShopeeAmsProduk.length > 0) {
-        await tx`
-          delete from pdt_fact_sku_period
-           where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'dibayar'
-             and periode = ${periodeAwalBulan}::date`;
-        for (const b of berkasShopeeAmsProduk) {
-          for (const baris of pdt.ekstrakBarisShopeeAmsProduk(b.aoa, b.barisHeader)) {
-            await tx`
-              insert into pdt_fact_sku_period
-                (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id,
-                 parser_versi, gmv, produk_terjual, pesanan)
-              values
-                (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'dibayar', ${id},
-                 ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.produkTerjual}, ${baris.pesanan})`;
-          }
-        }
-      }
+      // G1-09 sub-langkah 2b-ii / G1-11 (reparse) — baris fakta tertipe, SEMBILAN modul,
+      // diekstrak ke `tulisFaktaModulTerparse` (di bawah `commitUploadBatch`) supaya
+      // `reparsePdtBatch` (Flow D) bisa memakai PERSIS SQL yang sama tanpa duplikasi —
+      // lihat docblock fungsi itu untuk rincian per modul (delete-then-insert vs
+      // ON CONFLICT DO UPDATE, kenapa masing-masing).
+      await tulisFaktaModulTerparse(tx, {
+        id, clientPlatformId, periodeAwalBulan, akunKontenToko: row.akun_konten_toko, now,
+        berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive,
+        berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
+        berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk,
+      });
 
       await executors(tx).audit.insertAudit({
         entityType: 'pdt_upload_batch',
@@ -1037,6 +800,307 @@ function isUniqueViolation(e: unknown): boolean {
   return typeof e === 'object' && e !== null && (e as { code?: string }).code === '23505';
 }
 
+interface TulisFaktaModulTerparseInput {
+  id: number;
+  clientPlatformId: number;
+  periodeAwalBulan: string;
+  akunKontenToko: readonly string[] | null;
+  now: Date;
+  berkasAdsLive: readonly BerkasTerparse[];
+  berkasAdsCpc: readonly BerkasTerparse[];
+  berkasAdsSearch: readonly BerkasTerparse[];
+  berkasTtVideo: readonly BerkasTerparse[];
+  berkasShopeeLive: readonly BerkasTerparse[];
+  berkasParentSkuUntukMaster: readonly BerkasTerparse[];
+  berkasTtOrders: readonly BerkasTerparse[];
+  berkasTtTransactionCreator: readonly BerkasTerparse[];
+  berkasShopeeAmsAfiliasi: readonly BerkasTerparse[];
+  berkasShopeeAmsProduk: readonly BerkasTerparse[];
+}
+
+/**
+ * tulisFaktaModulTerparse — SEMBILAN blok penulis baris fakta tertipe (G1-09
+ * sub-langkah 2b-ii), diekstrak dari `commitUploadBatch` sesi G1-11 supaya
+ * `reparsePdtBatch` (Flow D, di bawah) bisa memakai SQL yang PERSIS SAMA
+ * tanpa duplikasi — reparse dan commit-baru sama-sama berakhir di "tulis
+ * baris fakta untuk (client_platform_id, periode) ini dari `terparse` yang
+ * diberikan", beda HANYA pada `id` (batch baru vs batch lama yang sama) dan
+ * pada langkah SEBELUM ini (insert `pdt_upload_batch` baru vs baca batch
+ * lama) — nol perbedaan logika penulisan fakta itu sendiri.
+ *
+ * `id`/`clientPlatformId`/`periodeAwalBulan` dipakai APA ADANYA dari
+ * pemanggil (bukan diturunkan ulang di sini) — untuk reparse ini SENGAJA
+ * bukan re-derive dari isi berkas yang diparse ulang (Rule 5 periode adalah
+ * gerbang UPLOAD BARU, reparse menyasar SATU slot (toko, periode) yang
+ * sudah ada, bukan menciptakan slot baru).
+ *
+ * Setiap blok delete-then-insert ("replace-on-recommit") menghapus
+ * SCOPE (toko+periode+sumber/basis) sebelum menulis ulang — dipanggil
+ * ulang untuk toko+periode yang SAMA (baik commit-ulang maupun reparse)
+ * otomatis mengganti baris lama, TIDAK menduplikasi. Blok `ON CONFLICT ...
+ * DO UPDATE` sama-sama aman dipanggil ulang untuk alasan yang sama
+ * (kunci unik toko+identitas persisten, bukan toko+periode+batch).
+ * `pdt_sku_master` UPSERT murni (bukan per-periode) — reparse SKU master
+ * sama amannya dengan commit pertama.
+ */
+async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerparseInput): Promise<void> {
+  const {
+    id, clientPlatformId, periodeAwalBulan, akunKontenToko, now,
+    berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive,
+    berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
+    berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk,
+  } = input;
+
+  // G1-09 sub-langkah 2b-ii — baris fakta tertipe, `shopee_ads_live` → `pdt_fact_ads`
+  // (modul PERTAMA dipetakan, lihat docblock `ekstrakBarisShopeeAdsLive`, `@cdps/core`
+  // `pdt/fakta.ts`, untuk kenapa modul ini dan bukan `shopee_ads_cpc`/`shopee_ads_search`).
+  // `uq_pdt_fact_ads` TIDAK AMAN dipakai lewat `ON CONFLICT` di sini — `sku_id`/`content_id`
+  // SELALU NULL untuk modul ini (dua kolom itu bagian kunci unik), dan Postgres tidak
+  // pernah menganggap NULL=NULL saat memeriksa keunikan, jadi commit ULANG periode yang
+  // sama tidak akan pernah "conflict" — ia akan menambah baris duplikat, bukan menimpa.
+  // Jalan aman: HAPUS baris toko+periode+sumber ini lebih dulu, lalu tulis ulang dari
+  // batch yang sedang di-commit (replace-on-recommit) — sah karena baris fakta adalah
+  // data TURUNAN yang selalu bisa dihitung ulang (aturan rumah #4), bukan riwayat
+  // immutable (itu tanggung jawab `audit_log`, di pemanggil).
+  if (berkasAdsLive.length > 0) {
+    await tx`
+      delete from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_live' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasAdsLive) {
+      for (const baris of pdt.ekstrakBarisShopeeAdsLive(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_ads
+            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+          values
+            (${clientPlatformId}, 'shopee_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+      }
+    }
+  }
+
+  // G1-09 sub-langkah 2b-ii — modul KEENAM, `shopee_ads_cpc` → `pdt_fact_ads`
+  // (lihat docblock `ekstrakBarisShopeeAdsCpc`, `@cdps/core` `pdt/fakta.ts`).
+  // Sama pola replace-on-recommit `shopee_ads_live` di atas — `sku_id`/
+  // `content_id` SELALU NULL di sini juga (lihat docblock kepala berkas
+  // `fakta.ts` untuk kenapa `sku_id` TIDAK diisi walau `pdt_sku_master`
+  // sudah ada: `Kode Produk` level induk, `pdt_sku_master` berkunci per
+  // varian — lookup langsung akan mengarang varian mana yang dipilih).
+  // `platform_product_id` DIISI sesi 23 (`G1-09-2BII-ADS-CPC-SKU` DITUTUP
+  // — pemilik: "kebutuhan hanya GMV per produk bukan sampai varian") —
+  // salinan identitas `Kode Produk`, bukan lookup.
+  if (berkasAdsCpc.length > 0) {
+    await tx`
+      delete from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_cpc' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasAdsCpc) {
+      for (const baris of pdt.ekstrakBarisShopeeAdsCpc(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_ads
+            (client_platform_id, sumber, kampanye_id, platform_product_id, sku_id, content_id, periode, batch_id,
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+          values
+            (${clientPlatformId}, 'shopee_ads_cpc', ${baris.kampanyeId}, ${baris.platformProductId}, null, null, ${periodeAwalBulan}::date, ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+      }
+    }
+  }
+
+  // G1-09 sub-langkah 2b-ii — modul KETUJUH (sesi 22), `shopee_ads_search` → `pdt_fact_ads`
+  // (lihat docblock `ekstrakBarisShopeeAdsSearch`, `@cdps/core` `pdt/fakta.ts`). Sama pola
+  // replace-on-recommit `shopee_ads_cpc`/`shopee_ads_live` di atas — `sku_id`/`content_id`
+  // SELALU NULL di sini juga (modul ini tidak punya identitas produk sama sekali di
+  // whitelist). `kampanye_id` KOMPOSIT (`nama iklan :: kata pencarian`, bukan nama iklan
+  // polos) — lihat docblock kepala berkas `fakta.ts` untuk alasan (satu iklan search bisa
+  // punya banyak baris keyword per periode, belum terbukti aman disamakan ke `shopee_ads_cpc`).
+  if (berkasAdsSearch.length > 0) {
+    await tx`
+      delete from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_search' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasAdsSearch) {
+      for (const baris of pdt.ekstrakBarisShopeeAdsSearch(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_ads
+            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+          values
+            (${clientPlatformId}, 'shopee_ads_search', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+      }
+    }
+  }
+
+  // G1-09 sub-langkah 2b-ii — modul KEDUA, `tt_video` → `pdt_fact_content` (lihat
+  // docblock `ekstrakBarisTtVideo`, `@cdps/core` `pdt/fakta.ts`). Beda dari
+  // `shopee_ads_live`/`pdt_fact_ads`: kunci unik `pdt_fact_content`
+  // (`client_platform_id, platform_content_id`) TIDAK punya komponen NULL (`ID Video`
+  // selalu ada untuk baris yang ditulis — baris kosong sudah dilewati di
+  // `ekstrakBarisTtVideo`), jadi `ON CONFLICT ... DO UPDATE` sungguhan AMAN dipakai di
+  // sini (beda dari alasan replace-on-recommit `pdt_fact_ads` di atas). `sku_id`/
+  // `waktu_posting` SELALU NULL (SKU master belum ada; nol parser terverifikasi untuk
+  // format kolom `Waktu` — lihat docblock `ekstrakBarisTtVideo`).
+  if (berkasTtVideo.length > 0) {
+    for (const b of berkasTtVideo) {
+      for (const baris of pdt.ekstrakBarisTtVideo(b.aoa, b.barisHeader, akunKontenToko)) {
+        await tx`
+          insert into pdt_fact_content
+            (client_platform_id, platform_content_id, batch_id, parser_versi, jenis,
+             creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
+             vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
+          values
+            (${clientPlatformId}, ${baris.platformContentId}, ${id}, ${pdt.PDT_PARSER_VERSI}, 'video',
+             ${baris.creatorPlatformId}, ${baris.creatorHandle}, ${baris.isAkunToko}, null, null,
+             ${baris.vv}, ${baris.likes}, null, ${baris.dibagikan}, null, null, ${baris.klikProduk}, ${baris.gmv}, null)
+          on conflict (client_platform_id, platform_content_id) do update set
+            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+            creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
+            is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, likes = excluded.likes,
+            dibagikan = excluded.dibagikan, klik_produk = excluded.klik_produk, gmv = excluded.gmv`;
+      }
+    }
+  }
+
+  // G1-09 sub-langkah 2b-ii — modul KESEMBILAN (sesi 24), `shopee_live` → `pdt_fact_content`
+  // (lihat docblock `ekstrakBarisShopeeLive`, `@cdps/core` `pdt/fakta.ts`). Sama pola
+  // `ON CONFLICT ... DO UPDATE` seperti `tt_video` di atas — `platform_content_id` (digit
+  // mentah `Waktu Mulai`) SELALU ada untuk baris yang ditulis (baris tanpa `Waktu Mulai`
+  // yang valid sudah dilewati di `ekstrakBarisShopeeLive`), jadi unique index tidak punya
+  // komponen NULL. `sku_id`/`creator_platform_id`/`creator_handle` SELALU NULL (modul ini
+  // tidak punya identitas produk maupun kreator terpisah); `is_akun_toko` SELALU `true`
+  // (sesi live Shopee secara struktural HANYA akun toko sendiri, bukan afiliasi).
+  if (berkasShopeeLive.length > 0) {
+    for (const b of berkasShopeeLive) {
+      for (const baris of pdt.ekstrakBarisShopeeLive(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_content
+            (client_platform_id, platform_content_id, batch_id, parser_versi, jenis,
+             creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
+             vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
+          values
+            (${clientPlatformId}, ${baris.platformContentId}, ${id}, ${pdt.PDT_PARSER_VERSI}, 'live',
+             null, null, true, ${baris.waktuPosting}, null,
+             ${baris.vv}, null, null, null, null, null, null, ${baris.gmv}, null)
+          on conflict (client_platform_id, platform_content_id) do update set
+            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+            waktu_posting = excluded.waktu_posting, vv = excluded.vv, gmv = excluded.gmv`;
+      }
+    }
+  }
+
+  // G1-09 sub-langkah 2b-ii — modul KETIGA, `pdt_sku_master` (lihat docblock
+  // `ekstrakBarisSkuMasterShopeeParentSku`/`ekstrakBarisSkuMasterTtOrders`,
+  // `@cdps/core` `pdt/fakta.ts`). BEDA dari `pdt_fact_ads`/`pdt_fact_content` di atas:
+  // ini tabel MASTER, bukan fakta per-periode — Rule 19 (`docs/PRD` §3.4) SKU tidak
+  // pernah dihapus, hanya `status_listing`/`last_seen_at` yang berubah. UPSERT sungguhan
+  // (`ON CONFLICT (client_platform_id, platform_product_id, platform_variation_id) DO
+  // UPDATE`, kunci = `uq_pdt_sku_master`), field opsional (`seller_sku`/`nama_produk`/
+  // `nama_variasi`/`kategori_platform`/`harga_satuan_terakhir`) di-COALESCE dengan nilai
+  // lama supaya sumber yang tidak membawa field itu (mis. `shopee_parent_sku` untuk
+  // nama/kategori/harga) tidak menimpanya jadi NULL. `status_listing` selalu diset
+  // 'aktif' di sini — SKU yang muncul di batch berarti masih terlihat; transisi ke
+  // 'nonaktif'/'dihapus_platform' (SKU yang BERHENTI muncul) butuh perbandingan lintas
+  // batch yang belum ada mesinnya (`G1-09-2BII-SKU-STATUS-TRANSISI`, Open baru).
+  for (const b of [...berkasParentSkuUntukMaster, ...berkasTtOrders]) {
+    const ekstrak = b.modul.kode === 'shopee_parent_sku'
+      ? pdt.ekstrakBarisSkuMasterShopeeParentSku(b.aoa, b.barisHeader)
+      : pdt.ekstrakBarisSkuMasterTtOrders(b.aoa, b.barisHeader);
+    for (const baris of ekstrak) {
+      await tx`
+        insert into pdt_sku_master
+          (client_platform_id, platform_product_id, platform_variation_id, seller_sku,
+           nama_produk, nama_variasi, kategori_platform, harga_satuan_terakhir,
+           status_listing, first_seen_at, last_seen_at)
+        values
+          (${clientPlatformId}, ${baris.platformProductId}, ${baris.platformVariationId}, ${baris.sellerSku},
+           ${baris.namaProduk}, ${baris.namaVariasi}, ${baris.kategoriPlatform}, ${baris.hargaSatuanTerakhir},
+           'aktif', ${now.toISOString()}, ${now.toISOString()})
+        on conflict (client_platform_id, platform_product_id, platform_variation_id) do update set
+          seller_sku = coalesce(excluded.seller_sku, pdt_sku_master.seller_sku),
+          nama_produk = coalesce(excluded.nama_produk, pdt_sku_master.nama_produk),
+          nama_variasi = coalesce(excluded.nama_variasi, pdt_sku_master.nama_variasi),
+          kategori_platform = coalesce(excluded.kategori_platform, pdt_sku_master.kategori_platform),
+          harga_satuan_terakhir = coalesce(excluded.harga_satuan_terakhir, pdt_sku_master.harga_satuan_terakhir),
+          status_listing = 'aktif',
+          last_seen_at = excluded.last_seen_at`;
+    }
+  }
+
+  // G1-09 sub-langkah 2b-ii — modul KEEMPAT, `tt_transaction_creator` → `pdt_fact_creator_period`
+  // (lihat docblock `ekstrakBarisKreatorTtTransactionCreator`, `@cdps/core` `pdt/fakta.ts`).
+  // Kunci unik `pdt_fact_creator_period` (`client_platform_id, creator_handle, periode`)
+  // TIDAK pernah punya komponen NULL (baris ber-`Creator name` kosong sudah dilewati di
+  // ekstraksi) — `ON CONFLICT ... DO UPDATE` sungguhan AMAN, sama pola `pdt_fact_content`
+  // (bukan delete-then-insert seperti `pdt_fact_ads`).
+  if (berkasTtTransactionCreator.length > 0) {
+    for (const b of berkasTtTransactionCreator) {
+      for (const baris of pdt.ekstrakBarisKreatorTtTransactionCreator(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_creator_period
+            (client_platform_id, creator_handle, periode, batch_id, parser_versi,
+             gmv, gmv_live, gmv_video, pesanan_teratribusi, aov, ctor, jumlah_live, jumlah_video, sampel_terkirim)
+          values
+            (${clientPlatformId}, ${baris.creatorHandle}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
+             ${baris.gmv}, null, null, ${baris.pesananTeratribusi}, ${baris.aov}, ${baris.ctor}, ${baris.jumlahLive}, ${baris.jumlahVideo}, null)
+          on conflict (client_platform_id, creator_handle, periode) do update set
+            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+            gmv = excluded.gmv, pesanan_teratribusi = excluded.pesanan_teratribusi,
+            aov = excluded.aov, ctor = excluded.ctor, jumlah_live = excluded.jumlah_live, jumlah_video = excluded.jumlah_video`;
+      }
+    }
+  }
+
+  // G1-09 sub-langkah 2b-ii — modul KELIMA, `shopee_ams_afiliasi` → `pdt_fact_creator_period`
+  // (lihat docblock `ekstrakBarisKreatorShopeeAmsAfiliasi`, `@cdps/core` `pdt/fakta.ts`) —
+  // sisi Shopee, sama pola `ON CONFLICT DO UPDATE` seperti modul KEEMPAT (TikTok) di atas.
+  // `gmv_live`/`gmv_video`/`aov`/`ctor`/`jumlah_live`/`jumlah_video`/`sampel_terkirim` TIDAK
+  // disentuh (COALESCE tidak dipakai di sini — modul ini tidak membawanya sama sekali, dan
+  // beda dari `pdt_sku_master`, tabel fakta ini tidak butuh field opsional dijaga dari
+  // penimpaan lintas-platform karena Shopee/TikTok selalu punya `client_platform_id` berbeda).
+  if (berkasShopeeAmsAfiliasi.length > 0) {
+    for (const b of berkasShopeeAmsAfiliasi) {
+      for (const baris of pdt.ekstrakBarisKreatorShopeeAmsAfiliasi(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_creator_period
+            (client_platform_id, creator_handle, periode, batch_id, parser_versi,
+             gmv, gmv_live, gmv_video, pesanan_teratribusi, aov, ctor, jumlah_live, jumlah_video, sampel_terkirim)
+          values
+            (${clientPlatformId}, ${baris.creatorHandle}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
+             ${baris.gmv}, null, null, ${baris.pesananTeratribusi}, null, null, null, null, null)
+          on conflict (client_platform_id, creator_handle, periode) do update set
+            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+            gmv = excluded.gmv, pesanan_teratribusi = excluded.pesanan_teratribusi`;
+      }
+    }
+  }
+
+  // G1-09 sub-langkah 2b-ii — modul KEDELAPAN (sesi 23), `shopee_ams_produk` →
+  // `pdt_fact_sku_period` (lihat docblock `ekstrakBarisShopeeAmsProduk`, `@cdps/core`
+  // `pdt/fakta.ts`). `sku_id` SELALU NULL (level produk-induk, `G1-09-2BII-ADS-CPC-SKU`
+  // DITUTUP sesi ini) — replace-on-recommit (DELETE scope lalu INSERT), sama alasan
+  // `pdt_fact_ads` di atas: baris LAMA yang `platform_product_id`-nya sudah tidak muncul di
+  // batch baru (produk delisting dari laporan AMS) harus ikut hilang, bukan cuma di-upsert
+  // per baris — `ON CONFLICT` pada unique index PARSIAL `uq_pdt_fact_sku_period_produk`
+  // tidak menutupi kasus itu. `basis = 'dibayar'` LITERAL (bukan dari kolom manapun di
+  // berkas — keputusan pemilik, lihat docblock `ekstrakBarisShopeeAmsProduk`).
+  if (berkasShopeeAmsProduk.length > 0) {
+    await tx`
+      delete from pdt_fact_sku_period
+       where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'dibayar'
+         and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasShopeeAmsProduk) {
+      for (const baris of pdt.ekstrakBarisShopeeAmsProduk(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_sku_period
+            (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id,
+             parser_versi, gmv, produk_terjual, pesanan)
+          values
+            (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'dibayar', ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.produkTerjual}, ${baris.pesanan})`;
+      }
+    }
+  }
+}
+
 /**
  * markRawStored — dipanggil route commit SEGERA setelah `commitUploadBatch`
  * berhasil DAN byte paket ZIP sudah diunggah ke `rawPath` (`unggahPdtRawObjek`,
@@ -1073,21 +1137,33 @@ export async function markRawStored(sql: Sql, batchId: number, rawPath: string, 
 // sisanya); hasilnya dikumpulkan lalu diserahkan ke `finalizePdtPurgeTick`
 // (langkah 4/6, tulis).
 //
-// Cakupan SENGAJA dipersempit dari Rule 45/49 penuh sesi ini (dicatat
-// `docs/DECISIONS.md` — Open baru):
-//   (a) recompute perpanjangan retensi (Rule 45 langkah 2) HARI INI hanya
-//       membaca `retensi_sampai`/`legal_hold` yang sudah tersimpan (default
-//       120 hari verified / 30 hari ditolak, migrasi G1-01) — DUA dari EMPAT
-//       pemicu perpanjangan ("menopang laporan yang sudah dikirim" →
-//       `pdt_laporan_kiriman`, "SKU di katalog PX" → `px_sku_volume`)
-//       menunjuk tabel yang BELUM ADA (G2-01/G5 belum dibangun). Purge hari
-//       ini tidak bisa salah memperpanjang retensi yang seharusnya
-//       diperpanjang oleh dua pemicu itu — karena tidak ada baris yang bisa
-//       dibaca untuk memutuskannya — tapi juga tidak bisa BENAR
-//       melakukannya. Menutup gap ini adalah pekerjaan lanjutan G2-01/G5.
-//   (b) pass kedua Flow E (Rule 49 — objek yatim > 7 hari) BELUM dibangun:
-//       butuh listing bucket rekursif yang `pdt-storage.ts` belum punya
-//       pembungkusnya (baru get/put/delete per-path yang sudah tahu path-nya).
+// Cakupan SENGAJA dipersempit dari Rule 45 penuh sesi 26 (dicatat
+// `docs/DECISIONS.md` — Open, BELUM ditutup sesi 28):
+//   recompute perpanjangan retensi (Rule 45 langkah 2) HARI INI hanya
+//   membaca `retensi_sampai`/`legal_hold` yang sudah tersimpan (default
+//   120 hari verified / 30 hari ditolak, migrasi G1-01) — DUA dari EMPAT
+//   pemicu perpanjangan ("menopang laporan yang sudah dikirim" →
+//   `pdt_laporan_kiriman`, "SKU di katalog PX" → `px_sku_volume`)
+//   menunjuk tabel yang BELUM ADA (G2-01/G5 belum dibangun). Purge hari
+//   ini tidak bisa salah memperpanjang retensi yang seharusnya
+//   diperpanjang oleh dua pemicu itu — karena tidak ada baris yang bisa
+//   dibaca untuk memutuskannya — tapi juga tidak bisa BENAR
+//   melakukannya. Menutup gap ini adalah pekerjaan lanjutan G2-01/G5.
+//
+// Pass KEDUA Flow E (Rule 49 — objek yatim > 7 hari) dibangun sesi 28
+// (`G1-10-ORPHAN-PASS`, `docs/DECISIONS.md`): `planPdtOrphanPurgeTick` di
+// bawah menerima daftar SELURUH objek bucket sebagai parameter (bukan
+// memanggil Storage sendiri — domain tidak pernah bicara Storage REST
+// langsung, pola sama pass pertama) hasil `listPdtRawObjekRekursif`
+// (`apps/api/src/lib/pdt-storage.ts`, baru), lalu memutuskan mana yang
+// "yatim": path yang TIDAK muncul di `pdt_upload_batch.raw_path` MANA PUN
+// (bukan hanya yang aktif — batch yang sudah `raw_dihapus_pada` pun raw_path-nya
+// tetap "dikenal", objek fisiknya harusnya sudah tidak ada; kalaupun ada sisa
+// karena kegagalan hapus lampau, itu tanggung jawab pass PERTAMA mencoba lagi,
+// bukan pass ini) DAN umurnya (`createdAt` Storage) > 7 hari. Objek yang
+// umurnya TIDAK diketahui (Storage tidak mengembalikan `created_at`) SENGAJA
+// tidak pernah jadi kandidat — pagar konservatif yang sama semangatnya dengan
+// Rule 48: tidak bisa membuktikan umur berarti tidak boleh menghapus.
 // ===========================================================================
 
 /** Rule 48 — pagar harian: tidak boleh menghapus > 5% objek aktif per hari tanpa ACC Director. */
@@ -1241,4 +1317,308 @@ export async function finalizePdtPurgeTick(
   }
 
   return { today, dihapus: berhasil.length, bytesDihapus, gagal, pagarTerlampaui: false };
+}
+
+/** Umur minimum (hari) sebelum objek yatim boleh dipurge (Rule 49). */
+export const PDT_ORPHAN_UMUR_HARI = 7;
+
+/** Satu objek storage sungguhan — hasil `listPdtRawObjekRekursif` (lapisan `apps/api`). */
+export interface PdtRawObjekStorage {
+  path: string;
+  createdAt: string | null;
+}
+
+/** Satu objek yatim yang lolos gerbang Rule 49 dan siap dihapus. */
+export interface PdtOrphanCandidate {
+  path: string;
+}
+
+/** Rencana pass kedua tick hari ini — hasil `planPdtOrphanPurgeTick`. */
+export interface PdtOrphanPurgeTickPlan {
+  today: string;
+  kandidat: readonly PdtOrphanCandidate[];
+}
+
+/** Hasil mencoba menghapus SATU objek yatim — dilaporkan balik route setelah memanggil Storage. */
+export interface PdtOrphanPurgeOutcome {
+  path: string;
+  berhasil: boolean;
+}
+
+/** Rekap akhir pass kedua tick — hasil `finalizePdtOrphanPurgeTick`. */
+export interface PdtOrphanPurgeTickResult {
+  today: string;
+  dihapus: number;
+  gagal: number;
+}
+
+/**
+ * planPdtOrphanPurgeTick — Flow E langkah 5 (Rule 49). Menerima `semuaObjek`
+ * (SUDAH dilisting rekursif oleh pemanggil, `listPdtRawObjekRekursif` —
+ * fungsi ini murni membandingkan, nol panggilan Storage) dan menandai yang
+ * TIDAK punya baris `pdt_upload_batch.raw_path` MANA PUN (verified, ditolak,
+ * sudah dihapus — semuanya "dikenal", hanya path yang benar-benar nol baris
+ * yang yatim) DAN `createdAt`-nya lebih tua dari `PDT_ORPHAN_UMUR_HARI` hari.
+ * Objek ber-`createdAt` null (umur tidak diketahui) TIDAK PERNAH jadi
+ * kandidat — pagar konservatif, bukan bug. Nol pagar 5% di sini: Rule 48
+ * ("tidak boleh menghapus objek yang retensi_sampai-nya belum lewat")
+ * bicara tentang batch yang retensinya belum lewat, dan objek yatim
+ * (Rule 49) tidak punya `retensi_sampai` sama sekali — tidak dikenakan
+ * Rule 48.
+ */
+export async function planPdtOrphanPurgeTick(
+  sql: Sql,
+  today: string,
+  semuaObjek: readonly PdtRawObjekStorage[],
+): Promise<PdtOrphanPurgeTickPlan> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    throw new ValidationError(MSG_PDT_PURGE_TANGGAL_INVALID);
+  }
+
+  const dikenalRows = await sql<{ raw_path: string }[]>`
+    select raw_path from pdt_upload_batch where raw_path is not null`;
+  const dikenal = new Set(dikenalRows.map((r) => r.raw_path));
+
+  const ambangWaktu = new Date(`${today}T00:00:00.000Z`).getTime() - PDT_ORPHAN_UMUR_HARI * 24 * 60 * 60 * 1000;
+  const kandidat: PdtOrphanCandidate[] = semuaObjek
+    .filter((o) => !dikenal.has(o.path))
+    .filter((o) => o.createdAt !== null && new Date(o.createdAt).getTime() < ambangWaktu)
+    .map((o) => ({ path: o.path }));
+
+  return { today, kandidat };
+}
+
+/**
+ * finalizePdtOrphanPurgeTick — rekap pass kedua. Objek yatim tidak punya
+ * baris `pdt_upload_batch` untuk ditandai (beda dari pass pertama) — hanya
+ * SATU entri `audit_log` (`action='pdt_raw_orphan_purged'`) per tick yang
+ * berhasil menghapus ≥1 objek (Rule 47, pola sama pass pertama).
+ */
+export async function finalizePdtOrphanPurgeTick(
+  sql: Sql,
+  today: string,
+  hasil: readonly PdtOrphanPurgeOutcome[],
+): Promise<PdtOrphanPurgeTickResult> {
+  const berhasil = hasil.filter((h) => h.berhasil);
+  const gagal = hasil.length - berhasil.length;
+
+  if (berhasil.length > 0) {
+    await executors(sql).audit.insertAudit({
+      entityType: 'pdt_purge_tick',
+      entityId: today,
+      actorEmployeeId: PDT_PURGE_ACTOR,
+      action: 'pdt_raw_orphan_purged',
+      beforeJson: null,
+      afterJson: { jumlah_objek: berhasil.length, paths: berhasil.map((h) => h.path) },
+      createdBy: PDT_PURGE_ACTOR,
+    });
+  }
+
+  return { today, dihapus: berhasil.length, gagal };
+}
+
+// ===========================================================================
+// G1-11 — Job reparse dari paket ZIP (Flow D; `docs/backlog/PDT_BACKLOG.md`
+// G1-11, `docs/prd/CDPS_PDT_Pusat_Data_Toko.md` §3/§4).
+//
+// **Cakupan SENGAJA dipersempit ke bacaan literal Flow D** (dicatat
+// `docs/DECISIONS.md` sesi 28): Flow D menyebut TIGA hal — "memparse ulang",
+// "menaikkan parser_versi baris fakta", "mencatat audit_logs" — nol
+// penyebutan status batch (`verified`/`ditolak`/dst.), identitas, periode,
+// atau `reconcile_delta_pct`. `reparsePdtBatch` di bawah karena itu HANYA
+// menulis ulang baris fakta (lewat `tulisFaktaModulTerparse`, SAMA fungsi
+// yang dipakai `commitUploadBatch`) untuk (client_platform_id, periode)
+// batch yang SUDAH ADA, memakai `id` batch itu APA ADANYA — TIDAK pernah
+// membuat baris `pdt_upload_batch` baru, TIDAK menyentuh
+// `status`/`alasan_ditolak`/`reconcile_delta_pct`/`identitas_sumber`/
+// `retensi_sampai`, dan TIDAK menulis ulang `pdt_file` (metadata deteksi
+// batch ASLI tetap sebagai riwayat apa adanya). Ini BUKAN kelalaian:
+// `commitUploadBatch`'s error message sendiri (`isUniqueViolation` di atas)
+// SUDAH mengarahkan AM ke "reparse batch lama (Flow D) alih-alih mengunggah
+// batch verified baru untuk periode yang sama" — status batch yang
+// dipertahankan apa adanya adalah PRASYARAT supaya saran itu tidak
+// menciptakan konflik `uq_pdt_upload_batch_verified` baru terhadap dirinya
+// sendiri. Kalau kelak reparse ternyata JUGA harus boleh mengubah status
+// (mis. bug parser yang diperbaiki mengubah hasil rekonsiliasi Rule 13-16),
+// itu keputusan arsitektur terpisah yang BELUM diminta PRD — dicatat sebagai
+// Open baru (`G1-11-REPARSE-RECOMPUTE-STATUS`), bukan ditebak di sini.
+//
+// AM override (`pdt_file.deteksi_oleh = 'override_am'`) dari commit ASLI
+// dipertahankan otomatis (dibaca ulang dari `pdt_file`, bukan parameter
+// terpisah) — modul lain di-deteksi ULANG dengan `tandaTanganKolom`
+// TERKINI, supaya bug deteksi yang sudah diperbaiki (mis. PR #387 ambiguitas
+// `shopee_ams_afiliasi`) ikut membetulkan batch lama, bukan hanya batch
+// baru. Route (`internal/pdt/reparse/tick`) menjalankan pipeline
+// unduh-ekstrak-deteksi YANG SAMA dengan commit (Flow A) — domain tidak
+// pernah menyentuh Storage/ZIP.
+//
+// Trigger: TICK HARIAN (pola sama G1-10 purge) memindai
+// `parser_versi < PDT_PARSER_VERSI` — nol biaya pada hari biasa (predikat
+// itu kosong sampai `PDT_PARSER_VERSI` dinaikkan), otomatis memproses
+// backlog begitu ia naik. PRD tidak menyebut mekanisme trigger secara
+// eksplisit ("job reparse" saja) — cron harian dipilih karena Flow D
+// terstruktur SEJAJAR Flow E ("Purge harian (otomatis)") di PRD §4, bukan
+// sebagai aksi manual AM/engineer yang PRD juga tidak sebutkan aktornya.
+// ===========================================================================
+
+const PDT_REPARSE_ACTOR = 'SISTEM';
+
+/** Satu batch yang layak direparse — `parser_versi` ketinggalan DAN paketnya masih ada. */
+export interface PdtReparseCandidate {
+  batchId: number;
+  clientPlatformId: number;
+  rawPath: string;
+}
+
+/** Satu batch yang TIDAK bisa direparse — paketnya sudah dipurge (Rule 46 error path, Flow D langkah 4). */
+export interface PdtReparseSkipped {
+  batchId: number;
+  rawDihapusPada: string;
+}
+
+/** Rencana tick — hasil `planPdtReparseTick`. */
+export interface PdtReparseTickPlan {
+  kandidat: readonly PdtReparseCandidate[];
+  perluUploadUlang: readonly PdtReparseSkipped[];
+}
+
+/**
+ * planPdtReparseTick — memilih batch `parser_versi < PDT_PARSER_VERSI` DAN
+ * `raw_path IS NOT NULL` (batch yang belum pernah menyelesaikan upload tidak
+ * relevan). Dipisah dua daftar: `kandidat` (paket masih ada, `raw_dihapus_pada
+ * IS NULL`) untuk route proses lewat `reparsePdtBatch`, dan
+ * `perluUploadUlang` (paket sudah dipurge) — Flow D langkah 4: "dilewati dan
+ * dilaporkan sebagai daftar, bukan digagalkan diam-diam". Murni baca — nol
+ * tulis, nol keputusan (beda dari `planPdtPurgeTick` yang punya pagar 5%;
+ * Flow D tidak menyebut pagar volume untuk reparse).
+ */
+export async function planPdtReparseTick(sql: Sql): Promise<PdtReparseTickPlan> {
+  const rows = await sql<{ id: number; client_platform_id: number; raw_path: string; raw_dihapus_pada: Date | string | null }[]>`
+    select id, client_platform_id, raw_path, raw_dihapus_pada
+      from pdt_upload_batch
+     where parser_versi < ${pdt.PDT_PARSER_VERSI} and raw_path is not null
+     order by id`;
+
+  const kandidat: PdtReparseCandidate[] = [];
+  const perluUploadUlang: PdtReparseSkipped[] = [];
+  for (const r of rows) {
+    if (r.raw_dihapus_pada != null) {
+      perluUploadUlang.push({ batchId: r.id, rawDihapusPada: new Date(r.raw_dihapus_pada).toISOString() });
+    } else {
+      kandidat.push({ batchId: r.id, clientPlatformId: r.client_platform_id, rawPath: r.raw_path });
+    }
+  }
+  return { kandidat, perluUploadUlang };
+}
+
+/** Hasil `reparsePdtBatch` untuk SATU batch. */
+export interface PdtReparseHasil {
+  batchId: number;
+  direparse: boolean;
+  /** `'paket_terpurge'` bila `raw_dihapus_pada` sudah terisi — nol tulis terjadi. */
+  alasanDilewati: 'paket_terpurge' | null;
+  rawDihapusPada: string | null;
+}
+
+/**
+ * reparsePdtBatch — Flow D langkah 2-3. Menerima `berkasInput` (SUDAH
+ * diunduh+diekstrak+dideteksi ULANG oleh pemanggil dari `pdt_upload_batch.raw_path`
+ * SAAT INI, pola sama `commitUploadBatch`: domain tidak pernah menyentuh
+ * Storage/ZIP). AM override dari commit ASLI dibaca ulang dari `pdt_file`
+ * (`deteksi_oleh = 'override_am'`) — berkas lain di-deteksi ulang dari
+ * `modulTerdeteksi` yang pemanggil kirim (hasil `detectPdtModule` TERKINI).
+ *
+ * Batch dengan `raw_dihapus_pada` terisi (paket sudah dipurge) mengembalikan
+ * `direparse: false` TANPA melempar dan TANPA menulis apa pun — pemanggil
+ * (tick) mengumpulkan ini ke daftar `perlu_upload_ulang`, bukan menggagalkan
+ * seluruh tick. Batch tidak ditemukan ⇒ `NotFoundError` (beda kasus: ini
+ * SALAH PEMANGGILAN, bukan kondisi normal Flow D).
+ *
+ * `id`/`clientPlatformId`/`periodeAwalBulan` dipakai APA ADANYA dari batch
+ * yang SUDAH ADA (lihat docblock seksi G1-11 di atas untuk kenapa TIDAK
+ * di-re-derive dari isi berkas yang diparse ulang) — `tulisFaktaModulTerparse`
+ * yang SAMA dipakai `commitUploadBatch` menulis ulang baris fakta, lalu
+ * `pdt_upload_batch.parser_versi` dinaikkan ke `PDT_PARSER_VERSI` dan SATU
+ * `audit_log` (`action = 'pdt_reparse'`) mencatat versi lama→baru.
+ */
+export async function reparsePdtBatch(
+  sql: Sql,
+  batchId: number,
+  berkasInput: readonly PdtPreviewBerkasInput[],
+  now: Date = new Date(),
+): Promise<PdtReparseHasil> {
+  const rows = await sql<{
+    id: number;
+    client_platform_id: number;
+    platform: string;
+    raw_dihapus_pada: Date | string | null;
+    periode_awal_bulan: string;
+    parser_versi: number;
+  }[]>`
+    select id, client_platform_id, platform, raw_dihapus_pada, parser_versi,
+           to_char(date_trunc('month', periode_mulai), 'YYYY-MM-DD') as periode_awal_bulan
+      from pdt_upload_batch
+     where id = ${batchId}`;
+  const batch = rows[0];
+  if (!batch) throw new NotFoundError('[batch PDT tidak ditemukan]');
+
+  if (batch.raw_dihapus_pada != null) {
+    return {
+      batchId,
+      direparse: false,
+      alasanDilewati: 'paket_terpurge',
+      rawDihapusPada: new Date(batch.raw_dihapus_pada).toISOString(),
+    };
+  }
+
+  const clientPlatformId = batch.client_platform_id;
+  const cpRow = await loadClientPlatformUntukPdt(sql, clientPlatformId);
+
+  const overrideRows = await sql<{ nama_entri: string; modul_kode: string | null }[]>`
+    select nama_entri, modul_kode from pdt_file
+     where batch_id = ${batchId} and deteksi_oleh = 'override_am' and modul_kode is not null`;
+  const overrideByNama = new Map(overrideRows.map((r) => [r.nama_entri, r.modul_kode as string]));
+
+  const terparse: BerkasTerparse[] = [];
+  for (const b of berkasInput) {
+    const overrideKode = overrideByNama.get(b.nama);
+    const berlakuOverride = overrideKode != null && b.aoa != null;
+    const efektif: PdtPreviewBerkasInput = berlakuOverride ? { ...b, modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] } : b;
+    const { terparse: t } = bangunSatuPreviewBerkas(efektif);
+    if (t) terparse.push(t);
+  }
+
+  await withTransaction(sql, async (tx) => {
+    await tulisFaktaModulTerparse(tx, {
+      id: batchId,
+      clientPlatformId,
+      periodeAwalBulan: batch.periode_awal_bulan,
+      akunKontenToko: cpRow.akun_konten_toko,
+      now,
+      berkasAdsLive: terparse.filter((b) => b.modul.kode === 'shopee_ads_live'),
+      berkasAdsCpc: terparse.filter((b) => b.modul.kode === 'shopee_ads_cpc'),
+      berkasAdsSearch: terparse.filter((b) => b.modul.kode === 'shopee_ads_search'),
+      berkasTtVideo: terparse.filter((b) => b.modul.kode === 'tt_video'),
+      berkasShopeeLive: terparse.filter((b) => b.modul.kode === 'shopee_live'),
+      berkasParentSkuUntukMaster: terparse.filter((b) => b.modul.kode === 'shopee_parent_sku'),
+      berkasTtOrders: terparse.filter((b) => b.modul.kode === 'tt_orders'),
+      berkasTtTransactionCreator: terparse.filter((b) => b.modul.kode === 'tt_transaction_creator'),
+      berkasShopeeAmsAfiliasi: terparse.filter((b) => b.modul.kode === 'shopee_ams_afiliasi'),
+      berkasShopeeAmsProduk: terparse.filter((b) => b.modul.kode === 'shopee_ams_produk'),
+    });
+
+    await tx`update pdt_upload_batch set parser_versi = ${pdt.PDT_PARSER_VERSI} where id = ${batchId}`;
+
+    await executors(tx).audit.insertAudit({
+      entityType: 'pdt_upload_batch',
+      entityId: String(batchId),
+      actorEmployeeId: PDT_REPARSE_ACTOR,
+      action: 'pdt_reparse',
+      beforeJson: { parser_versi: batch.parser_versi },
+      afterJson: { parser_versi: pdt.PDT_PARSER_VERSI, jumlah_berkas_terparse: terparse.length },
+      createdBy: PDT_REPARSE_ACTOR,
+    });
+  });
+
+  return { batchId, direparse: true, alasanDilewati: null, rawDihapusPada: null };
 }

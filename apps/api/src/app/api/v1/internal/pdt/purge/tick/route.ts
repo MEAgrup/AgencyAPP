@@ -15,9 +15,11 @@
  * membawa body). `tanggal` (`YYYY-MM-DD`) di body POST menimpa tanggal WIB
  * untuk backfill/pengujian; default hari ini WIB.
  *
- * Urutan kerja (Flow E, dipecah dua panggilan domain — lihat docblock
- * `packages/domain/src/pdt.ts` `planPdtPurgeTick`/`finalizePdtPurgeTick`
- * untuk alasan pemecahannya):
+ * Urutan kerja (Flow E, dipecah dua PASS — masing-masing dipecah lagi dua
+ * panggilan domain, lihat docblock `packages/domain/src/pdt.ts` untuk alasan
+ * pemecahannya):
+ *
+ * **Pass pertama (langkah 1-4, batch `retensi_sampai` lewat):**
  *   1. `planPdtPurgeTick` — pilih kandidat (langkah 1) + pagar 5%/hari
  *      (langkah 3, Rule 48). Pagar terlampaui ⇒ kandidat kosong, notifikasi
  *      Director SUDAH dikirim di dalam fungsi ini, NOL objek disentuh.
@@ -30,8 +32,17 @@
  *   3. `finalizePdtPurgeTick` — isi `raw_dihapus_pada` untuk yang berhasil +
  *      SATU entri `audit_log` merekap jumlah objek/byte (Rule 47).
  *
- * Pass kedua Flow E (Rule 49, objek yatim > 7 hari) BELUM dibangun — lihat
- * catatan cakupan di kepala fungsi domain.
+ * **Pass kedua (langkah 5, objek yatim > 7 hari, Rule 49 — G1-10-ORPHAN-PASS):**
+ *   4. `listPdtRawObjekRekursif` (`@/lib/pdt-storage`) — list SELURUH objek
+ *      bucket `pdt-raw` (I/O, lapisan route; domain tidak pernah bicara
+ *      Storage REST).
+ *   5. `planPdtOrphanPurgeTick` — bandingkan terhadap `pdt_upload_batch.raw_path`
+ *      yang dikenal + umur (Rule 49: > 7 hari, `createdAt` tidak diketahui ⇒
+ *      TIDAK PERNAH kandidat).
+ *   6. Untuk TIAP kandidat: `hapusPdtRawObjek` SATU per SATU (Rule 46 error
+ *      path, sama pass pertama).
+ *   7. `finalizePdtOrphanPurgeTick` — SATU entri `audit_log`
+ *      (`pdt_raw_orphan_purged`) merekap jumlah objek (Rule 47).
  *
  * Route ini TIDAK punya pemanggil `web-internal` by design (route-parity
  * adalah FE→API): cron adalah satu-satunya klien.
@@ -40,7 +51,7 @@ import { tz } from '@cdps/core';
 import { pdt } from '@cdps/domain';
 import { db } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
-import { hapusPdtRawObjek } from '@/lib/pdt-storage';
+import { hapusPdtRawObjek, listPdtRawObjekRekursif } from '@/lib/pdt-storage';
 import { tickSecretOk } from '@/lib/tick-auth';
 
 interface Body {
@@ -67,6 +78,25 @@ async function runTick(override: string | null): Promise<Response> {
   }
 
   const rekap = await pdt.finalizePdtPurgeTick(sql, today, hasil);
+
+  // Pass kedua (Rule 49, G1-10-ORPHAN-PASS) — jalan TERLEPAS dari hasil pass
+  // pertama (termasuk saat pagar 5% pass pertama terlampaui): objek yatim
+  // tidak dikenakan pagar itu (lihat docblock `planPdtOrphanPurgeTick`).
+  const semuaObjek = await listPdtRawObjekRekursif();
+  const rencanaYatim = await pdt.planPdtOrphanPurgeTick(sql, today, semuaObjek);
+  const hasilYatim: pdt.PdtOrphanPurgeOutcome[] = [];
+  for (const kandidat of rencanaYatim.kandidat) {
+    try {
+      await hapusPdtRawObjek(kandidat.path);
+      hasilYatim.push({ path: kandidat.path, berhasil: true });
+    } catch {
+      // Rule 46 error path — sama pass pertama: satu objek gagal tidak
+      // menghentikan sisanya, dicoba lagi tick besok (umurnya hanya bertambah).
+      hasilYatim.push({ path: kandidat.path, berhasil: false });
+    }
+  }
+  const rekapYatim = await pdt.finalizePdtOrphanPurgeTick(sql, today, hasilYatim);
+
   return json({
     today: rekap.today,
     dihapus: rekap.dihapus,
@@ -75,6 +105,8 @@ async function runTick(override: string | null): Promise<Response> {
     pagar_terlampaui: rencana.pagarTerlampaui,
     total_objek_aktif: rencana.totalObjekAktif,
     ambang_objek: rencana.ambangObjek,
+    yatim_dihapus: rekapYatim.dihapus,
+    yatim_gagal: rekapYatim.gagal,
   });
 }
 

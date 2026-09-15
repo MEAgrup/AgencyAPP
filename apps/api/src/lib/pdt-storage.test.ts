@@ -12,6 +12,7 @@ import {
   buatPdtRawSignedUploadUrl,
   buatPdtRawSignedUrl,
   hapusPdtRawObjek,
+  listPdtRawObjekRekursif,
   PDT_RAW_SIGNED_URL_MAX_DETIK,
   unduhPdtRawObjek,
   unggahPdtRawObjek,
@@ -191,6 +192,86 @@ describe('hapusPdtRawObjek (G1-10 — purge harian) — bentuk request (fetch di
   it('melempar error server saat Supabase belum dikonfigurasi', async () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     await expect(hapusPdtRawObjek('a.zip', vi.fn())).rejects.toThrow(/tidak dikonfigurasi/);
+  });
+});
+
+describe('listPdtRawObjekRekursif (G1-10 pass kedua, Rule 49) — bentuk request (fetch disuntik)', () => {
+  it('menelusuri folder secara rekursif, mengumpulkan hanya FILE (id bukan-null), path digabung penuh', async () => {
+    const calls: Array<{ prefix: string }> = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://proj.supabase.co/storage/v1/object/list/pdt-raw');
+      expect(init?.method).toBe('POST');
+      const headers = init?.headers as Record<string, string>;
+      expect(headers.apikey).toBe('service-role-key');
+      const body = JSON.parse(init?.body as string) as { prefix: string };
+      calls.push({ prefix: body.prefix });
+      if (body.prefix === '') {
+        return jsonResponse([
+          { name: 'CLI-1', id: null }, // folder client_id
+          { name: '_staging', id: null }, // folder staging
+        ]);
+      }
+      if (body.prefix === 'CLI-1/') {
+        return jsonResponse([{ name: '1', id: null }]); // folder client_platform_id
+      }
+      if (body.prefix === 'CLI-1/1/') {
+        return jsonResponse([{ name: '2026-07-31', id: null }]); // folder periode
+      }
+      if (body.prefix === 'CLI-1/1/2026-07-31/') {
+        return jsonResponse([{ name: '42.zip', id: 'obj-1', created_at: '2026-06-01T00:00:00Z' }]);
+      }
+      if (body.prefix === '_staging/') {
+        return jsonResponse([{ name: 'yatim.zip', id: 'obj-2', created_at: '2026-06-10T00:00:00Z' }]);
+      }
+      throw new Error(`prefix tak terduga: ${body.prefix}`);
+    });
+
+    const hasil = await listPdtRawObjekRekursif(fetchImpl);
+    expect(hasil).toEqual(
+      expect.arrayContaining([
+        { path: 'CLI-1/1/2026-07-31/42.zip', createdAt: '2026-06-01T00:00:00Z' },
+        { path: '_staging/yatim.zip', createdAt: '2026-06-10T00:00:00Z' },
+      ]),
+    );
+    expect(hasil).toHaveLength(2);
+    expect(calls.map((c) => c.prefix).sort()).toEqual(
+      ['', '_staging/', 'CLI-1/', 'CLI-1/1/', 'CLI-1/1/2026-07-31/'].sort(),
+    );
+  });
+
+  it('memaginasi satu folder yang isinya persis di batas limit (1000)', async () => {
+    const folderPenuh = Array.from({ length: 1000 }, (_, i) => ({
+      name: `f${i}.zip`,
+      id: `obj-${i}`,
+      created_at: '2026-06-01T00:00:00Z',
+    }));
+    let call = 0;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as { offset: number };
+      call += 1;
+      if (body.offset === 0) return jsonResponse(folderPenuh);
+      return jsonResponse([]); // halaman kedua kosong — berhenti
+    });
+
+    const hasil = await listPdtRawObjekRekursif(fetchImpl);
+    expect(hasil).toHaveLength(1000);
+    expect(call).toBe(2);
+  });
+
+  it('objek tanpa created_at (tidak diketahui umurnya) tetap terkumpul dengan createdAt null', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse([{ name: 'tanpa-tanggal.zip', id: 'obj-3' }]));
+    const hasil = await listPdtRawObjekRekursif(fetchImpl);
+    expect(hasil).toEqual([{ path: 'tanpa-tanggal.zip', createdAt: null }]);
+  });
+
+  it('melempar error yang menyebut status saat Storage API menolak', async () => {
+    const fetchImpl = vi.fn(async () => new Response('rusak', { status: 500 }));
+    await expect(listPdtRawObjekRekursif(fetchImpl)).rejects.toThrow(/500/);
+  });
+
+  it('melempar error server saat Supabase belum dikonfigurasi', async () => {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    await expect(listPdtRawObjekRekursif(vi.fn())).rejects.toThrow(/tidak dikonfigurasi/);
   });
 });
 
