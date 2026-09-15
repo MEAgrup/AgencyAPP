@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeSkorTiktok, labelSkorPdt, scale, type PdtBenchmarkTiktok, type PdtSkorInputTiktok } from './skor';
+import { computeSkorShopee, computeSkorTiktok, labelSkorPdt, scale, type PdtBenchmarkTiktok, type PdtSkorInputShopee, type PdtSkorInputTiktok } from './skor';
 
 const BENCH: PdtBenchmarkTiktok = {
   roi_gmvmax: { good: 8, warn: 4 },
@@ -200,6 +200,192 @@ describe('computeSkorTiktok — Rule 12: renormalisasi lintas dimensi (reproduks
     expect(gmvmax?.disertakan).toBe(false);
     expect(gmvmax?.bobotEfektif).toBe(0);
     // Σ bobotEfektif dimensi yang tersedia = 1 (renormalisasi penuh, bukan sisa 0,78)
+    const sisaBobot = hasil.dimensi.filter((d) => d.disertakan).reduce((s, d) => s + d.bobotEfektif, 0);
+    expect(sisaBobot).toBeCloseTo(1, 6);
+    // Total TIDAK diseret turun oleh dimensi absen — dengan lima dimensi lain semuanya tinggi, total harus SEHAT
+    expect(hasil.total).not.toBeNull();
+    expect(hasil.label).toBe('SEHAT');
+  });
+});
+
+// =============================================================================
+// Shopee (sesi 34 lanjutan, riset G2-01 Shopee) — `computeSkorShopee`, TIDAK
+// menerima parameter benchmark (asimetri asli mesin produksi, lihat docblock
+// `skor.ts`). Ambang tiap dimensi diverifikasi dari `report/shopee/skor.ts`
+// (mesin PRODUKSI, dibaca langsung — bukan ditebak).
+// =============================================================================
+
+const INPUT_KOSONG_SHOPEE: PdtSkorInputShopee = { ads: null, dibuat: null, produk: null, live: null, kesehatan: null };
+
+describe('computeSkorShopee — seluruh dimensi absen', () => {
+  it('total null, label null, keenam dimensi disertakan=false', () => {
+    const hasil = computeSkorShopee(INPUT_KOSONG_SHOPEE);
+    expect(hasil.total).toBeNull();
+    expect(hasil.label).toBeNull();
+    expect(hasil.dimensi).toHaveLength(6);
+    expect(hasil.dimensi.every((d) => !d.disertakan)).toBe(true);
+  });
+
+  it('bobot dasar keenam dimensi berjumlah 1 (0,22+0,22+0,18+0,14+0,12+0,12)', () => {
+    const hasil = computeSkorShopee(INPUT_KOSONG_SHOPEE);
+    const total = hasil.dimensi.reduce((s, d) => s + d.bobotDasar, 0);
+    expect(total).toBeCloseTo(1, 6);
+  });
+});
+
+describe('computeSkorShopee — dimensi ROAS & Channel (ambang piecewise, bukan scale())', () => {
+  it('ads null ⇒ dimensi null', () => {
+    const hasil = computeSkorShopee(INPUT_KOSONG_SHOPEE);
+    expect(hasil.dimensi.find((d) => d.kode === 'roas_channel')?.nilai).toBeNull();
+  });
+
+  it('omzet null (basis tidak diketahui) ⇒ dimensi null, BUKAN netral 5', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, ads: { spend: 1_000_000, omzet: null, ctr: null } });
+    expect(hasil.dimensi.find((d) => d.kode === 'roas_channel')?.nilai).toBeNull();
+  });
+
+  it('roas >= 6 ⇒ 10', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, ads: { spend: 1_000_000, omzet: 8_000_000, ctr: null } });
+    expect(hasil.dimensi.find((d) => d.kode === 'roas_channel')?.nilai).toBe(10);
+  });
+
+  it('roas di [4,6) ⇒ 7 + (roas-4)*1,5', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, ads: { spend: 1_000_000, omzet: 5_000_000, ctr: null } });
+    expect(hasil.dimensi.find((d) => d.kode === 'roas_channel')?.nilai).toBeCloseTo(7 + 1 * 1.5, 6);
+  });
+
+  it('roas di [2,4) ⇒ 4 + (roas-2)*1,5', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, ads: { spend: 1_000_000, omzet: 3_000_000, ctr: null } });
+    expect(hasil.dimensi.find((d) => d.kode === 'roas_channel')?.nilai).toBeCloseTo(4 + 1 * 1.5, 6);
+  });
+
+  it('roas < 2 ⇒ max(1, roas*3)', () => {
+    const rendah = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, ads: { spend: 1_000_000, omzet: 200_000, ctr: null } });
+    expect(rendah.dimensi.find((d) => d.kode === 'roas_channel')?.nilai).toBe(1); // 0,2*3=0,6 diklem ke lantai 1
+    const sedikitLebihTinggi = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, ads: { spend: 1_000_000, omzet: 1_500_000, ctr: null } });
+    expect(sedikitLebihTinggi.dimensi.find((d) => d.kode === 'roas_channel')?.nilai).toBeCloseTo(4.5, 6);
+  });
+});
+
+describe('computeSkorShopee — dimensi Traffic Quality', () => {
+  it('ads dan dibuat keduanya absen ⇒ dimensi null', () => {
+    const hasil = computeSkorShopee(INPUT_KOSONG_SHOPEE);
+    expect(hasil.dimensi.find((d) => d.kode === 'traffic_quality')?.nilai).toBeNull();
+  });
+
+  it('ctr dan cr di batas atas rentang ⇒ rata-rata 10', () => {
+    const hasil = computeSkorShopee({
+      ...INPUT_KOSONG_SHOPEE,
+      ads: { spend: 1, omzet: null, ctr: 0.03 },
+      dibuat: { cr: 0.06, repeatRate: null, cancelRate: null },
+    });
+    expect(hasil.dimensi.find((d) => d.kode === 'traffic_quality')?.nilai).toBeCloseTo(10, 6);
+  });
+
+  it('hanya cr tersedia (ctr null) ⇒ sub-suku ctr dikecualikan, cr dipakai penuh', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, dibuat: { cr: 0.06, repeatRate: null, cancelRate: null } });
+    expect(hasil.dimensi.find((d) => d.kode === 'traffic_quality')?.nilai).toBeCloseTo(10, 6);
+  });
+});
+
+describe('computeSkorShopee — dimensi Conversion & Retention (cancel rate DIBALIK/invert)', () => {
+  it('dibuat absen ⇒ dimensi null', () => {
+    const hasil = computeSkorShopee(INPUT_KOSONG_SHOPEE);
+    expect(hasil.dimensi.find((d) => d.kode === 'conversion_retention')?.nilai).toBeNull();
+  });
+
+  it('hanya cr tersedia (repeatRate/cancelRate null — G2-01-SHOPEE-CANCEL-REPEAT-RATE belum ditutup) ⇒ skor sebagian dari cr saja', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, dibuat: { cr: 0.06, repeatRate: null, cancelRate: null } });
+    expect(hasil.dimensi.find((d) => d.kode === 'conversion_retention')?.nilai).toBeCloseTo(10, 6);
+  });
+
+  it('cancel rate rendah (batas bawah rentang) ⇒ sub-suku cancel bernilai 10 (dibalik)', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, dibuat: { cr: 0.06, repeatRate: 0.3, cancelRate: 0.02 } });
+    expect(hasil.dimensi.find((d) => d.kode === 'conversion_retention')?.nilai).toBeCloseTo(10, 6);
+  });
+
+  it('cancel rate tinggi (batas atas rentang) ⇒ sub-suku cancel bernilai 0 (dibalik), menyeret total turun', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, dibuat: { cr: 0.06, repeatRate: 0.3, cancelRate: 0.2 } });
+    // cr(10)*0,5 + repeat(10)*0,2 + cancel(0)*0,3 = 7
+    expect(hasil.dimensi.find((d) => d.kode === 'conversion_retention')?.nilai).toBeCloseTo(7, 6);
+  });
+});
+
+describe('computeSkorShopee — dimensi Product Performance (dibobot HITUNGAN SKU, bukan GMV — beda TikTok)', () => {
+  it('produk absen ⇒ dimensi null', () => {
+    const hasil = computeSkorShopee(INPUT_KOSONG_SHOPEE);
+    expect(hasil.dimensi.find((d) => d.kode === 'product_performance')?.nilai).toBeNull();
+  });
+
+  it('kuadran ADA tapi nol produk aktif ⇒ 3 (bukan null)', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, produk: { baik: 0, buruk: 0, aktifTotal: 0 } });
+    expect(hasil.dimensi.find((d) => d.kode === 'product_performance')?.nilai).toBe(3);
+  });
+
+  it('100% SKU aktif di kuadran baik ⇒ skor maksimal (3 + 1*7 - 0*4 = 10)', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, produk: { baik: 10, buruk: 0, aktifTotal: 10 } });
+    expect(hasil.dimensi.find((d) => d.kode === 'product_performance')?.nilai).toBe(10);
+  });
+
+  it('100% SKU aktif di kuadran buruk ⇒ skor rendah (3 + 0*7 - 1*4 = -1, diklem ke 0)', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, produk: { baik: 0, buruk: 10, aktifTotal: 10 } });
+    expect(hasil.dimensi.find((d) => d.kode === 'product_performance')?.nilai).toBe(0);
+  });
+});
+
+describe('computeSkorShopee — dimensi Live Streaming (tiga kondisi mesin lama)', () => {
+  it('tidak pernah diunggah ⇒ dimensi null (Rule 12 — beda dari mesin lama yang dulu netral 5)', () => {
+    const hasil = computeSkorShopee(INPUT_KOSONG_SHOPEE);
+    expect(hasil.dimensi.find((d) => d.kode === 'live_streaming')?.nilai).toBeNull();
+    const diunggahFalse = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, live: { diunggah: false, sesi: 5 } });
+    expect(diunggahFalse.dimensi.find((d) => d.kode === 'live_streaming')?.nilai).toBeNull();
+  });
+
+  it('diunggah tapi nol sesi ⇒ 1 (sinyal sungguhan, bukan data hilang)', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, live: { diunggah: true, sesi: 0 } });
+    expect(hasil.dimensi.find((d) => d.kode === 'live_streaming')?.nilai).toBe(1);
+  });
+
+  it('diunggah dengan aktivitas APA PUN ⇒ flat 5 (quirk metodologi asli, tidak dilihat volumenya)', () => {
+    const sedikit = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, live: { diunggah: true, sesi: 1 } });
+    const banyak = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, live: { diunggah: true, sesi: 50 } });
+    expect(sedikit.dimensi.find((d) => d.kode === 'live_streaming')?.nilai).toBe(5);
+    expect(banyak.dimensi.find((d) => d.kode === 'live_streaming')?.nilai).toBe(5);
+  });
+});
+
+describe('computeSkorShopee — dimensi Kesehatan Toko', () => {
+  it('kesehatan absen ⇒ dimensi null (G2-01-SHOPEE-KESEHATAN-WRITER belum ditutup)', () => {
+    const hasil = computeSkorShopee(INPUT_KOSONG_SHOPEE);
+    expect(hasil.dimensi.find((d) => d.kode === 'kesehatan_toko')?.nilai).toBeNull();
+  });
+
+  it('0 poin penalti ⇒ 10', () => {
+    const hasil = computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, kesehatan: { poinTotal: 0 } });
+    expect(hasil.dimensi.find((d) => d.kode === 'kesehatan_toko')?.nilai).toBe(10);
+  });
+
+  it('1/2/3+ poin penalti ⇒ 5/3/1', () => {
+    expect(computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, kesehatan: { poinTotal: 1 } }).dimensi.find((d) => d.kode === 'kesehatan_toko')?.nilai).toBe(5);
+    expect(computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, kesehatan: { poinTotal: 2 } }).dimensi.find((d) => d.kode === 'kesehatan_toko')?.nilai).toBe(3);
+    expect(computeSkorShopee({ ...INPUT_KOSONG_SHOPEE, kesehatan: { poinTotal: 3 } }).dimensi.find((d) => d.kode === 'kesehatan_toko')?.nilai).toBe(1);
+  });
+});
+
+describe('computeSkorShopee — Rule 12: renormalisasi lintas dimensi', () => {
+  it('satu dimensi absen (kesehatan) ⇒ bobotnya TIDAK jatuh ke total sebagai netral, lima dimensi lain dinormalisasi ulang', () => {
+    const input: PdtSkorInputShopee = {
+      ads: { spend: 1_000_000, omzet: 8_000_000, ctr: 0.03 },
+      dibuat: { cr: 0.06, repeatRate: 0.3, cancelRate: 0.02 },
+      produk: { baik: 10, buruk: 0, aktifTotal: 10 },
+      live: { diunggah: true, sesi: 5 },
+      kesehatan: null, // absen — dulu akan diberi 5/10 dan tetap menggigit bobot 12%
+    };
+    const hasil = computeSkorShopee(input);
+    const kesehatan = hasil.dimensi.find((d) => d.kode === 'kesehatan_toko');
+    expect(kesehatan?.disertakan).toBe(false);
+    expect(kesehatan?.bobotEfektif).toBe(0);
+    // Σ bobotEfektif dimensi yang tersedia = 1 (renormalisasi penuh, bukan sisa 0,88)
     const sisaBobot = hasil.dimensi.filter((d) => d.disertakan).reduce((s, d) => s + d.bobotEfektif, 0);
     expect(sisaBobot).toBeCloseTo(1, 6);
     // Total TIDAK diseret turun oleh dimensi absen — dengan lima dimensi lain semuanya tinggi, total harus SEHAT

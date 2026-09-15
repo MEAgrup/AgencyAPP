@@ -930,6 +930,31 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > verifikasi) — mesin skor Shopee berikutnya realistis akan mengembalikan `null` untuk Product
 > Performance dan Kesehatan Toko sampai kedua Open itu ditutup, mirip pola `null` Portfolio Produk
 > TikTok hari ini.
+>
+> **Status 2026-09-15 (sesi 34 lanjutan) — `computeSkorShopee` (fungsi murni, nol I/O) DIBANGUN
+> di `packages/core/src/pdt/skor.ts`, mengikuti pola `computeSkorTiktok` di berkas yang sama.**
+> Ambang tiap dimensi (piecewise ROAS, rentang `scale()` Traffic Quality/Conversion & Retention,
+> pembobotan hitungan-SKU Product Performance, tiga-kondisi Live Streaming, poin penalti
+> Kesehatan Toko) diverifikasi LANGSUNG dari `report/shopee/skor.ts` yang SEDANG PRODUKSI, bukan
+> ditebak. **Diverifikasi TIDAK menerima benchmark** (asimetri dipertahankan apa adanya, sesuai
+> catatan riset di atas). Fix Rule 12 yang sama diterapkan seperti TikTok: setiap cabang
+> "berkas/modul tidak ada" yang dulu netral 5/10 sekarang `null` (dikeluarkan, bobot dinormalisasi
+> ulang) — KECUALI satu sinyal Live Streaming yang dipertahankan apa adanya karena ia SUNGGUHAN
+> (diunggah tapi nol sesi ⇒ 1, bukan data hilang) dan satu quirk metodologi ASLI yang sengaja
+> tidak "diperbaiki" (diunggah dengan aktivitas APA PUN ⇒ flat 5 tanpa memandang volume,
+> dicatat eksplisit di docblock mesin lama sebagai non-fix, bukan oversight porting). Tiga input
+> (`PdtSkorInputShopee.dibuat.repeatRate`/`.cancelRate`, `.produk`, `.kesehatan`) tetap `| null`
+> menunggu Open masing-masing (`G2-01-SHOPEE-CANCEL-REPEAT-RATE`/`G2-01-KUADRAN-SKU`/
+> `G2-01-SHOPEE-KESEHATAN-WRITER`) — TIDAK berubah sesi ini, hanya kontrak inputnya yang sudah
+> siap begitu masing-masing writer dibangun. **Belum dikerjakan (sengaja, urutan berikutnya):**
+> perakit agregasi SQL `rakitInputSkorShopee` (padanan `rakitInputSkorTiktok`) — termasuk
+> keputusan pemetaan `sumber` `pdt_fact_ads` (`shopee_ads_cpc`/`shopee_ads_live`/
+> `shopee_ads_search`) ke agregat ROAS & Channel/Traffic Quality, yang BELUM diverifikasi
+> terhadap kategori "toko/produk/banner/live" mesin lama — SENGAJA ditunda ke PR perakit
+> (pure function ini tidak butuh keputusan itu, hanya bentuk kontrak input). Diverifikasi:
+> `@cdps/core` 1305/1305 (naik dari 1279 — 26 tes baru murni unit, nol DB), typecheck 3 paket
+> (`core`/`domain`/`api`) + lint bersih; `domain`/`db`/`api` TIDAK disentuh sesi ini (nol
+> pemanggil `computeSkorShopee` ada, jadi nol risiko regresi lintas paket).
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
