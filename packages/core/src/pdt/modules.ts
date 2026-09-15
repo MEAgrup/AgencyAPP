@@ -468,7 +468,33 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // SELALU `parse_status='gagal'` untuk berkas asli walau modul KELIMA (sesi
     // 17) sudah menulis `pdt_fact_creator_period` dari sini; fixture tes lama
     // memalsukan header persis kelas yang sama dengan `shopee_ads_cpc`.
-    tandaTanganKolom: { must: ['Omzet'], anyOf: [{ must: ['Username'] }, { must: ['Kreator'] }, { must: ['Creator'] }] },
+    //
+    // `mustNot: ['ID Toko']` DITAMBAHKAN sesi 27 (`G1-09-DETEKSI-PREAMBLE-
+    // AMBIGU` DITUTUP, `docs/DECISIONS.md`) — sample EKSPOR ASLI (Fim Motor,
+    // ZIP "Sample nama asli" pemilik) MEMBUKTIKAN ambiguitas ini nyata, bukan
+    // hipotetis: `Data+Keseluruhan+Iklan+Shopee-*.csv` (shopee_ads_cpc) dan
+    // `Search-Ads-Overall-Data-*.csv` (shopee_ads_search) SAMA-SAMA membawa
+    // preamble baris 2 `Username,<nama_toko>` (Rule 2) — memenuhi `anyOf`
+    // ('Username') — DAN kolom header masing-masing mengandung substring
+    // 'Omzet' ('omzet penjualan'/'Omzet Penjualan') — memenuhi `must`
+    // ('Omzet') — sehingga `detectPdtModule` (memindai SELURUH sheet, bukan
+    // cuma baris header) mencocokkan KEDUANYA ke modul ini juga, persis
+    // seperti dugaan `G1-09-DETEKSI-PREAMBLE-AMBIGU`. Pola sama
+    // `shopee_ams_produk` (`mustNot: 'ID Affiliates'` di atas): 'ID Toko'
+    // adalah baris preamble Rule 2 yang HANYA dimiliki laporan per-toko
+    // (`shopee_ads_cpc`/`shopee_ads_search`/`shopee_ads_live`/
+    // `shopee_shop_stats`/dst.) — export AMS backend (`AMSAffiliatePerformance_
+    // *.csv`/`ProductPerformance_*.csv`) TERBUKTI di sample asli TIDAK PERNAH
+    // membawa baris ini sama sekali (nol identitas toko, murni tabel per-
+    // kreator/produk). `shopee_ads_live` TIDAK ambigu dengan cara yang sama
+    // (preamble-nya tidak membawa baris `Username`) — dikonfirmasi lewat
+    // sample yang sama, `mustNot` di sini murni menutup DUA modul yang
+    // terbukti bentrok, bukan tebakan defensif.
+    tandaTanganKolom: {
+      must: ['Omzet'],
+      mustNot: ['ID Toko'],
+      anyOf: [{ must: ['Username'] }, { must: ['Kreator'] }, { must: ['Creator'] }],
+    },
     barisHeaderHint: 1,
     kolomDipanen: ['ID Affiliates', 'Username Affiliate', 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi Komisi(Rp)', 'ROI'],
     wajib: false,

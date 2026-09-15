@@ -168,10 +168,17 @@ describe('detectPdtModule — Shopee (15 modul, 2 belum terverifikasi)', () => {
     );
   });
 
-  it('shopee_ads_cpc (header baris 8)', () => {
+  // Preamble LENGKAP (baris 1-6, Rule 2) — bukan hanya 'ID Toko'/'Periode' seperti
+  // fixture lama. `Username,<toko>` (baris 2) TERBUKTI ada di sample asli (ZIP
+  // "Sample nama asli" pemilik, sesi 27) — fixture lama yang mengosongkannya
+  // adalah kelas kesalahan yang sama persis PERSIS yang membuat
+  // `G1-09-DETEKSI-PREAMBLE-AMBIGU` tidak pernah kelihatan di suite manapun
+  // sebelum sesi 27 (lihat `docs/DECISIONS.md`).
+  it('shopee_ads_cpc (header baris 8, preamble LENGKAP dengan baris Username)', () => {
     expectExactMatch(
       [
-        ['ID Toko: 938284780'], ['Periode: 01/07/2026 - 31/07/2026'], [], [], [], [], [],
+        ['Semua Laporan Iklan CPC - Shopee Indonesia'], ['Username,fim_motor'], ['Nama Toko,Fim_Motor'],
+        ['ID Toko: 938284780'], ['Waktu Laporan Dibuat,10/08/2026 15:14'], ['Periode: 01/07/2026 - 31/07/2026'], [],
         ['Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya', 'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Biaya Iklan Terhadap Omzet (ACOS) (%)'],
         ['SKU-A', '50000', '2000', '80', '5000000', 'Kampanye A', '40000000', '8,00', '12,50%'],
       ],
@@ -179,15 +186,46 @@ describe('detectPdtModule — Shopee (15 modul, 2 belum terverifikasi)', () => {
     );
   });
 
-  it('shopee_ads_search (header baris 8)', () => {
+  it('shopee_ads_search (header baris 8, preamble LENGKAP dengan baris Username)', () => {
     expectExactMatch(
       [
-        [], [], [], [], [], [], [],
-        ['Kata Pencarian', 'SOV', 'Klik', 'Konversi', 'Biaya'],
-        ['baju flanel', '12%', '100', '8', '200000'],
+        ['Search Ads Report - Shopee Indonesia'], ['Username,fim_motor'], ['Nama Toko,Fim_Motor'],
+        ['ID Toko: 938284780'], ['Waktu Laporan Dibuat,10/08/2026 15:14'], ['Periode: 01/07/2026 - 31/07/2026'], [],
+        ['Kata Pencarian', 'SOV', 'Klik', 'Konversi', 'Biaya', 'Omzet Penjualan'],
+        ['baju flanel', '12%', '100', '8', '200000', '4000000'],
       ],
       'shopee_ads_search',
     );
+  });
+
+  // G1-09-DETEKSI-PREAMBLE-AMBIGU DITUTUP (docs/DECISIONS.md sesi 27) — regresi
+  // eksplisit terhadap DUA kasus yang TERBUKTI ambigu di sample asli (ZIP "Sample
+  // nama asli" pemilik) SEBELUM `mustNot: ['ID Toko']` ditambahkan ke
+  // `shopee_ams_afiliasi`: preamble ber-`Username` + header ber-'Omzet' membuat
+  // detektor lama mencocokkan KEDUA modul sekaligus. Dua fixture di atas SUDAH
+  // membuktikan ini (expectExactMatch menolak ambigu) — tes berikut menegaskan
+  // ALASANNYA secara eksplisit, supaya regresi di masa depan gagal dengan pesan
+  // yang jelas, bukan cuma "bukan [modul]".
+  it('preamble ber-Username TIDAK membuat shopee_ads_cpc/shopee_ads_search ambigu dengan shopee_ams_afiliasi', () => {
+    const cpc = detectPdtModule(
+      [
+        ['Username,fim_motor'], ['Nama Toko,Fim_Motor'], ['ID Toko: 938284780'], [], [], [],
+        ['Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya', 'nama iklan', 'omzet penjualan', 'Efektifitas Iklan'],
+        ['SKU-A', '50000', '2000', '80', '5000000', 'Kampanye A', '40000000', '8,00'],
+      ],
+      SHOPEE,
+    );
+    expect(cpc.matches).not.toContain('shopee_ams_afiliasi');
+
+    const search = detectPdtModule(
+      [
+        ['Username,fim_motor'], ['Nama Toko,Fim_Motor'], ['ID Toko: 938284780'], [], [], [],
+        ['Kata Pencarian', 'Omzet Penjualan', 'Biaya'],
+        ['baju flanel', '4000000', '200000'],
+      ],
+      SHOPEE,
+    );
+    expect(search.matches).not.toContain('shopee_ams_afiliasi');
   });
 
   it('shopee_ads_live (header baris 7)', () => {
