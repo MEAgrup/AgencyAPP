@@ -109,7 +109,7 @@ SELECT set_config('request.jwt.claims',
 DO $$
 DECLARE t text; denied boolean;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['sessions','employee_credentials','id_sequences','sm_edges','role_mappings','strategi_share_token','strategi_share_access_log','page_views','pdt_benchmark','pdt_usulan_katalog'] LOOP
+  FOREACH t IN ARRAY ARRAY['sessions','employee_credentials','id_sequences','sm_edges','role_mappings','strategi_share_token','strategi_share_access_log','page_views','pdt_benchmark','pdt_usulan_katalog','px_sku_volume','px_coverage_push'] LOOP
     denied := false;
     BEGIN
       EXECUTE format('SELECT 1 FROM public.%I LIMIT 1', t);
@@ -1225,6 +1225,18 @@ DECLARE
     'plan_actual_select','plan_flag_select',
     'plan_gate_config_select','plan_review_select','plan_target_select',
     'prospect_attempt_nq_reasons_select',
+    -- `px_coverage_snapshot_sel` (Product Exchange M3-B, migrasi 20261031010000)
+    -- masuk daftar ini DENGAN SENGAJA, dicatat `docs/DECISIONS.md` 2026-09-15
+    -- (PX-M3-…) — bukan ditambahkan agar tes hijau. Baris ini adalah AGREGAT
+    -- lintas (level2_category, price_segment) yang berasal dari MCN (D-20):
+    -- nol data klien, nol identitas kreator (K-2) — tidak ada satu kolom pun
+    -- yang bisa ditelusuri balik ke satu klien atau satu kreator. Halaman
+    -- Kandidat PX butuh dropdown kategori (Rule 10 PRD M3) dari sini pada hari
+    -- nol kandidat sekalipun. Baris KERJA-nya (`px_sku_eligibility`,
+    -- `px_sku_kategori`) TETAP ber-lengan AM-pemilik/lead-Account dan karena
+    -- itu tidak ada di daftar ini; `px_coverage_push` (payload mentah) default-
+    -- deny total, juga tidak di sini.
+    'px_coverage_snapshot_sel',
     'qualified_form_services_select','qualified_forms_select',
     'sales_level_labels_select',
     -- `scs_kategori_select` (M19 separuh SCS, migrasi 20260928010000) masuk
@@ -1611,6 +1623,89 @@ SELECT set_config('request.jwt.claims', '{}', true);
 DO $$ BEGIN
   IF (SELECT count(*) FROM storage.objects WHERE bucket_id = 'pdt-raw' AND name LIKE 'ZPDT-RLS-0001/%') <> 0
   THEN RAISE EXCEPTION 'storage.objects pdt-raw: klaim kosong harus melihat nol baris'; END IF;
+END $$;
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 48. Product Exchange M3-B (migrasi 20261031010000) — RLS variant B untuk
+--     px_sku_kategori/px_sku_eligibility (AM pemilik/lead Account/Director/OD),
+--     dan justifikasi `USING(true)` di px_coverage_snapshot: agregat lintas
+--     kategori/segmen TANPA data klien atau kreator — tidak ada baris di sini
+--     yang identifiable ke satu klien, jadi membuka SELECT ke `authenticated`
+--     bukan pelebaran akses (bukan "biar tes hijau" — lihat komentar migrasi).
+-- ---------------------------------------------------------------------------
+INSERT INTO clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                      sales_pic_id, commission_payment_pic_id, assigned_am_id, created_by)
+VALUES ('ZPX-RLS-0001', 'PIC PX RLS', 'Toko PX RLS', 'Jakarta', 'https://example.test/px-rls',
+        'Fashion', 0, 0, 'EMP-0001', 'EMP-0001', 'EMP-0002', 'SYSTEM');
+INSERT INTO client_platforms (client_id, platform, active, shop_id, created_by)
+VALUES ('ZPX-RLS-0001', 'TikTok Shop', true, 'shop-zpx-rls', 'SYSTEM');
+INSERT INTO px_sku_kategori (client_platform_id, platform_product_id, level2_category, dikonfirmasi_oleh)
+SELECT cp.id, 'ZPX-PRODUK-0001', 'Sepatu Wanita', 'EMP-0002'
+  FROM client_platforms cp WHERE cp.client_id = 'ZPX-RLS-0001';
+INSERT INTO px_sku_eligibility (client_platform_id, platform_product_id, versi_policy, verdict, lapis_gagal)
+SELECT cp.id, 'ZPX-PRODUK-0001', 1, 'volume_kurang', 2
+  FROM client_platforms cp WHERE cp.client_id = 'ZPX-RLS-0001';
+INSERT INTO px_coverage_snapshot (batch_key, snapshot_at, level2_category, price_segment,
+                                   creator_count, total_slots_available, total_proven_gmv, status)
+VALUES ('zpx-rls-batch-0001', now(), 'Sepatu Wanita', 'mid', 7, 19, 1284000000.00, 'covered');
+
+-- Tabel-tabel ini BARU (migrasi 20261031010000) dan hanya diisi di §48 —
+-- `count(*)` TANPA WHERE aman menyimpulkan "baris fixture ini terlihat atau
+-- tidak" untuk seluruh transaksi tes. WHERE client_platform_id=<id> DIHINDARI
+-- SENGAJA: `client_platforms_select` (baseline RLS) sendiri TIDAK punya
+-- lengan lead (`jwt_can_read_all() OR created_by=jwt_employee_id() OR
+-- jwt_owns_client(client_id)`), jadi sub-select id lewat tabel itu di bawah
+-- klaim lead Account balik nol baris — bukan px_sku_kategori/px_sku_eligibility
+-- yang salah, tapi lookup id-nya sendiri kena RLS induk lebih dulu.
+SET LOCAL ROLE authenticated;
+
+-- AM pemilik toko melihat kategori/eligibility kliennya.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-0002","division":"Account","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM px_sku_kategori) <> 1
+  THEN RAISE EXCEPTION 'px_sku_kategori: AM pemilik klien harus melihat kategori kliennya'; END IF;
+  IF (SELECT count(*) FROM px_sku_eligibility) <> 1
+  THEN RAISE EXCEPTION 'px_sku_eligibility: AM pemilik klien harus melihat verdict kliennya'; END IF;
+END $$;
+
+-- Staf divisi lain, bukan pemilik, TIDAK melihat.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-0004","division":"Ads","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM px_sku_kategori) <> 0
+  THEN RAISE EXCEPTION 'px_sku_kategori: staf divisi lain yang bukan pemilik tidak boleh melihat'; END IF;
+  IF (SELECT count(*) FROM px_sku_eligibility) <> 0
+  THEN RAISE EXCEPTION 'px_sku_eligibility: staf divisi lain yang bukan pemilik tidak boleh melihat'; END IF;
+END $$;
+
+-- Lead Account (divisi-wide) dan Director (lintas-divisi) tetap melihat.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-RLS-ACCLEAD","division":"Account","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM px_sku_kategori) <> 1
+  THEN RAISE EXCEPTION 'px_sku_kategori: lead Account harus melihat divisinya'; END IF;
+END $$;
+SELECT set_config('request.jwt.claims', '{"app_metadata":{"employee_id":"EMP-0008","director":true}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM px_sku_eligibility) <> 1
+  THEN RAISE EXCEPTION 'px_sku_eligibility: Director harus membaca lintas-divisi'; END IF;
+END $$;
+
+-- Klaim kosong ⇒ default deny untuk keduanya.
+SELECT set_config('request.jwt.claims', '{}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM px_sku_kategori) <> 0
+  THEN RAISE EXCEPTION 'px_sku_kategori: klaim kosong harus melihat nol baris'; END IF;
+  IF (SELECT count(*) FROM px_sku_eligibility) <> 0
+  THEN RAISE EXCEPTION 'px_sku_eligibility: klaim kosong harus melihat nol baris'; END IF;
+END $$;
+
+-- px_coverage_snapshot: `USING(true)` — SIAPA PUN authenticated membaca, TERMASUK
+-- staf divisi yang sama sekali tidak berhubungan dengan klien manapun di atas
+-- (agregat lintas kategori/segmen, nol data klien/kreator).
+DO $$ BEGIN
+  IF (SELECT count(*) FROM px_coverage_snapshot WHERE batch_key = 'zpx-rls-batch-0001') <> 1
+  THEN RAISE EXCEPTION 'px_coverage_snapshot: siapa pun authenticated harus membaca snapshot agregat (USING(true), justifikasi komentar migrasi)'; END IF;
 END $$;
 
 RESET ROLE;

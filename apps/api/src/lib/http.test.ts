@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { bi } from '@cdps/core';
-import { account, ads, creative, demo, kol, task } from '@cdps/domain';
+import { account, ads, creative, demo, kol, productexchange, task } from '@cdps/domain';
 import {
   BadRequestError,
   UnauthorizedError,
@@ -101,6 +101,13 @@ describe('mapError', () => {
     expect(mapError(new kol.ForbiddenError(kol.MSG_FINANCE_FORBIDDEN)).status).toBe(403);
     expect(mapError(new kol.NotFoundError()).status).toBe(404);
     expect(mapError(new kol.ConflictError(kol.MSG_REVISION_CAP_REACHED)).status).toBe(409);
+  });
+
+  it('maps Product Exchange M3-B ContractError to 422 (PX-M3-04, deviasi sadar dari 400)', async () => {
+    const msg = "[payload coverage tidak sesuai kontrak: kolom 'creator_id' tidak dikenal]";
+    const res = mapError(new productexchange.ContractError(msg));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: msg });
   });
 });
 

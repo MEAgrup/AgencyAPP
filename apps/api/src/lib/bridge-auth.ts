@@ -29,3 +29,25 @@ export function bridgeSecretOk(request: Request): boolean {
   const got = auth.replace(/^Bearer\s+/i, '');
   return tokenEqual(got, expected);
 }
+
+/**
+ * bridgePxSecretOk gates `POST /api/v1/internal/bridge/px-coverage` (Product
+ * Exchange M3-B, Flow C). Its OWN secret, `BRIDGE_PX_SECRET` — SEPARATE from
+ * `BRIDGE_INGEST_SECRET` (MSDPS→CDPS orders) and `CRON_SECRET`/`PLAN_TICK_SECRET`
+ * (internal tick routes), same reasoning as `bridgeSecretOk`'s docblock: a
+ * bridge credential and a cron credential rotate on different schedules and
+ * are held by different systems. Held by the MCN coverage-push pipeline
+ * (`mcnapp`'s `src/lib/px/coverage-push.ts`), not by a human.
+ *
+ * Same fail-closed posture: unset secret ⇒ every request is rejected. Only
+ * `Authorization: Bearer <secret>` is accepted (PRD M3 §7) — there is no
+ * cron caller here forcing a second header shape.
+ */
+export function bridgePxSecretOk(request: Request): boolean {
+  const expected = process.env.BRIDGE_PX_SECRET;
+  if (!expected) return false; // unconfigured = closed
+  const auth = request.headers.get('authorization');
+  if (!auth || !/^Bearer\s+/i.test(auth)) return false;
+  const got = auth.replace(/^Bearer\s+/i, '');
+  return tokenEqual(got, expected);
+}

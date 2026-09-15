@@ -1,0 +1,31 @@
+{
+  "snapshot_at": "2026-09-18T02:14:00Z",
+  "source": "mcnapp",
+  "policy_note": "aggregate-only; no creator identity (K-2)",
+  "rows": [
+    {
+      "level2_category": "Sepatu Wanita",
+      "price_segment": "mid",
+      "creator_count": 7,
+      "total_slots_available": 19,
+      "total_proven_gmv": 1284000000.00,
+      "status": "covered"
+    },
+    {
+      "level2_category": "Tas Wanita",
+      "price_segment": "mid",
+      "creator_count": 0,
+      "total_slots_available": 0,
+      "total_proven_gmv": 0,
+      "status": "kosong"
+    },
+    {
+      "level2_category": "Elektronik Rumah Tangga",
+      "price_segment": "high",
+      "creator_count": 3,
+      "total_slots_available": 5,
+      "total_proven_gmv": 640000000.00,
+      "status": "covered"
+    }
+  ]
+}
