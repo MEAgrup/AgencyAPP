@@ -2017,3 +2017,140 @@ export async function hitungSkorTiktok(
   ]);
   return { hasil: pdt.computeSkorTiktok(input, bench), benchmarkVersi };
 }
+
+// ===========================================================================
+// G2-01 Shopee lanjutan — rakit `PdtSkorInputShopee` dari fakta tersimpan.
+// Query MURNI-BACA (nol tulis), pola sama `rakitInputSkorTiktok` di atas.
+//
+// **Pemetaan `sumber` `pdt_fact_ads` ↔ kategori mesin lama — DIVERIFIKASI dari
+// `report/shopee/detect.ts` (kode PRODUKSI, docblock eksplisit), bukan
+// ditebak** (menutup penundaan yang dicatat sengaja di PR `computeSkorShopee`
+// dan `docs/DECISIONS.md`):
+//  - `shopee_ads_cpc` ↔ `ads_toko` lama ("Data+Keseluruhan+Iklan+Shopee" —
+//    `detect.ts` baris "keseluruhan" → `ads_toko`).
+//  - `shopee_ads_search` ↔ `ads_produk` lama ("Search-Ads-Overall-Data" —
+//    `detect.ts` baris "search-ads" → `ads_produk`).
+//  - `shopee_ads_live` ↔ `ads_live` lama (docblock modul `shopee_ads_live`,
+//    `pdt/modules.ts`, sudah menyatakan ini eksplisit).
+//  - `ads_banner` lama TIDAK punya padanan modul PDT sama sekali — bukan gap
+//    baru, catatan `detect.ts` sendiri sudah bilang trio `ads_toko`/
+//    `ads_produk`/`ads_banner` "diparse SATU parser dan DIJUMLAH bersama
+//    untuk SETIAP angka terhitung (spend, omzet, ROAS, ACOS, health flags) —
+//    tertukar posisi memindahkan satu kampanye antar daftar tampil dan TIDAK
+//    mengubah satu angka pun". Karena itu spend/omzet Shopee di sini adalah
+//    Σ seluruh TIGA sumber PDT yang ADA (`shopee_ads_cpc`+`shopee_ads_search`+
+//    `shopee_ads_live`) — persis padanan Σ empat kategori lama dikurangi satu
+//    kategori (`ads_banner`) yang memang belum punya modul, bukan salah hitung.
+//  - CTR (`Σklik/Σtayangan`) mesin lama HANYA dari `ads_toko`+`ads_produk`+
+//    `ads_banner` — `computeHealth` menyetel `dilihat: null, klik: null`
+//    eksplisit untuk baris `ads_live` sebelum menjumlahkannya (lihat
+//    `report/shopee/metrik.ts` `computeHealth`), jadi `shopee_ads_live`
+//    DIKECUALIKAN dari agregat CTR di sini juga (meski TETAP masuk agregat
+//    spend/omzet di atas).
+//
+// **Live Streaming** butuh status TERUNGGAH-atau-TIDAK yang TIDAK bisa
+// dibaca dari `pdt_fact_content` semata (nol baris di sana ambigu — lihat
+// docblock `PdtSkorInputLiveShopee`, `@cdps/core` `pdt/skor.ts`) — dibaca dari
+// `pdt_file`/`pdt_upload_batch` (modul `shopee_live` PERNAH terdeteksi untuk
+// batch mana pun yang periodenya mencakup periode ini, batch TIDAK ditolak).
+//
+// **TIGA dimensi TETAP `null`** (Open belum ditutup, TIDAK ditebak di sini):
+// `dibuat.repeatRate`/`.cancelRate` (`G2-01-SHOPEE-CANCEL-REPEAT-RATE`),
+// `produk` (`G2-01-KUADRAN-SKU`), `kesehatan` (`G2-01-SHOPEE-KESEHATAN-WRITER`).
+// ===========================================================================
+
+/**
+ * Rakit `PdtSkorInputShopee` dari `pdt_fact_*` untuk SATU client_platform_id +
+ * SATU periode (awal bulan, format `YYYY-MM-01`). Dimensi tanpa baris fakta
+ * sama sekali ⇒ `null` (Rule 12 ditegakkan di `computeSkorShopee`).
+ */
+export async function rakitInputSkorShopee(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+): Promise<pdt.PdtSkorInputShopee> {
+  validasiPeriodeAwalBulan(periodeAwalBulan);
+
+  const [adsRow] = await sql<{ n: number; spend: string; omzet: string | null; klik: string | null; tayangan: string | null }[]>`
+    select count(*)::int as n,
+           coalesce(sum(biaya), 0) as spend,
+           sum(gmv) as omzet,
+           sum(case when sumber <> 'shopee_ads_live' then klik end) as klik,
+           sum(case when sumber <> 'shopee_ads_live' then tayangan end) as tayangan
+      from pdt_fact_ads
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and sumber in ('shopee_ads_cpc', 'shopee_ads_search', 'shopee_ads_live')`;
+  const klik = adsRow.klik == null ? null : Number(adsRow.klik);
+  const tayangan = adsRow.tayangan == null ? null : Number(adsRow.tayangan);
+  const ads: pdt.PdtSkorInputAdsShopee | null = adsRow.n === 0 ? null : {
+    spend: Number(adsRow.spend),
+    omzet: adsRow.omzet == null ? null : Number(adsRow.omzet),
+    ctr: klik == null || tayangan == null || tayangan <= 0 ? null : klik / tayangan,
+  };
+
+  const [dibuatRow] = await sql<{ n: number; pesanan: string; pengunjung: string }[]>`
+    select count(*)::int as n,
+           coalesce(sum(pesanan), 0) as pesanan,
+           coalesce(sum(pengunjung), 0) as pengunjung
+      from pdt_fact_shop_daily
+     where client_platform_id = ${clientPlatformId}
+       and basis = 'dibuat'
+       and tanggal >= ${periodeAwalBulan}::date
+       and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
+  const pengunjungTotal = Number(dibuatRow.pengunjung);
+  const pesananTotal = Number(dibuatRow.pesanan);
+  const dibuat: pdt.PdtSkorInputPesananDibuatShopee | null = dibuatRow.n === 0 ? null : {
+    cr: pengunjungTotal === 0 ? 0 : pesananTotal / pengunjungTotal,
+    // G2-01-SHOPEE-CANCEL-REPEAT-RATE — kolom sumber ada, `pdt_fact_shop_daily`
+    // belum punya kolomnya. TIDAK ditebak di sini.
+    repeatRate: null,
+    cancelRate: null,
+  };
+
+  // Product Performance: SELALU null sampai G2-01-KUADRAN-SKU membangun
+  // penulis `pdt_fact_sku_period.kuadran` (sama gap TikTok).
+  const produk: pdt.PdtSkorInputProdukShopee | null = null;
+
+  const [liveDiunggahRow] = await sql<{ diunggah: boolean }[]>`
+    select exists (
+      select 1
+        from pdt_file f
+        join pdt_upload_batch b on b.id = f.batch_id
+       where b.client_platform_id = ${clientPlatformId}
+         and b.status <> 'ditolak'
+         and f.modul_kode = 'shopee_live'
+         and b.periode_mulai <= (${periodeAwalBulan}::date + interval '1 month' - interval '1 day')::date
+         and b.periode_selesai >= ${periodeAwalBulan}::date
+    ) as diunggah`;
+  const [liveSesiRow] = await sql<{ sesi: number }[]>`
+    select count(*)::int as sesi
+      from pdt_fact_content
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and jenis = 'live'`;
+  const live: pdt.PdtSkorInputLiveShopee | null = liveDiunggahRow.diunggah
+    ? { diunggah: true, sesi: liveSesiRow.sesi }
+    : null;
+
+  // Kesehatan Toko: SELALU null sampai G2-01-SHOPEE-KESEHATAN-WRITER dibangun
+  // (modul `shopee_kesehatan` terdaftar, nol penulis fakta).
+  const kesehatan: pdt.PdtSkorInputKesehatanShopee | null = null;
+
+  return { ads, dibuat, produk, live, kesehatan };
+}
+
+/**
+ * Rakit fakta (`rakitInputSkorShopee`) + hitung (`computeSkorShopee`,
+ * `@cdps/core`) dalam satu pemanggilan. BEDA dari `hitungSkorTiktok`: Shopee
+ * tidak punya benchmark (asimetri asli mesin produksi, lihat docblock
+ * `computeSkorShopee`) — nol `benchmarkVersi` dikembalikan.
+ */
+export async function hitungSkorShopee(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+): Promise<{ hasil: pdt.PdtSkorHasilShopee }> {
+  const input = await rakitInputSkorShopee(sql, clientPlatformId, periodeAwalBulan);
+  return { hasil: pdt.computeSkorShopee(input) };
+}
