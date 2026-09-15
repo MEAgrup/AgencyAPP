@@ -2154,3 +2154,88 @@ export async function hitungSkorShopee(
   const input = await rakitInputSkorShopee(sql, clientPlatformId, periodeAwalBulan);
   return { hasil: pdt.computeSkorShopee(input) };
 }
+
+// ===========================================================================
+// G2-01 lanjutan — payload "laporan" v1 (PDT-21 Rule 21). Query MURNI-BACA
+// (nol tulis) + panggilan `hitungSkorTiktok`/`hitungSkorShopee` yang SUDAH
+// ada, dirakit lewat `pdt.bangunLaporanTiktok`/`pdt.bangunLaporanShopee`
+// (`@cdps/core`, keputusan scope v1 lewat `AskUserQuestion` — lihat docblock
+// `laporan.ts` untuk sebelas bagian mesin lama yang SENGAJA belum dikerjakan).
+//
+// Basis KPI ringkas per platform DIVERIFIKASI dari PRD, bukan ditebak:
+// TikTok = GMV−refund (Rule 15) dibaca dari `pdt_fact_shop_daily` basis
+// `'net'` (gmv/refund disimpan MENTAH, "GMV−refund" adalah kontrak
+// KONSUMEN — sama seperti dokblock TikTok G2-01 di atas); Shopee = basis
+// `'siap_dikirim'` ("Basis default untuk laporan klien Shopee = Pesanan
+// Siap Dikirim", Rule 16) — BEDA dari basis `'dibuat'` yang dipakai
+// `rakitInputSkorShopee` untuk dimensi Conversion & Retention (dua tujuan
+// berbeda, PRD memisahkan keduanya secara eksplisit).
+//
+// Nol pemeriksaan `canKirimLaporan`/permission di sini — sama pola
+// `hitungSkorTiktok`/`hitungSkorShopee`/`rakitInputSkorTiktok` di atas:
+// pemanggil (route, belum ada) yang menegakkan gerbang peran.
+// ===========================================================================
+
+async function bacaKpiShopDaily(sql: Sql, clientPlatformId: number, periodeAwalBulan: string, basis: string): Promise<pdt.PdtLaporanKpiInput | null> {
+  const [row] = await sql<{ n: number; gmv: string; pesanan: string; pengunjung: string }[]>`
+    select count(*)::int as n,
+           coalesce(sum(gmv), 0) as gmv,
+           coalesce(sum(pesanan), 0) as pesanan,
+           coalesce(sum(pengunjung), 0) as pengunjung
+      from pdt_fact_shop_daily
+     where client_platform_id = ${clientPlatformId}
+       and basis = ${basis}
+       and tanggal >= ${periodeAwalBulan}::date
+       and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
+  return row.n === 0 ? null : { gmv: Number(row.gmv), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung) };
+}
+
+async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKpiInput | null> {
+  const [row] = await sql<{ n: number; gmv: string; refund: string; pesanan: string; pengunjung: string }[]>`
+    select count(*)::int as n,
+           coalesce(sum(gmv), 0) as gmv,
+           coalesce(sum(refund), 0) as refund,
+           coalesce(sum(pesanan), 0) as pesanan,
+           coalesce(sum(pengunjung), 0) as pengunjung
+      from pdt_fact_shop_daily
+     where client_platform_id = ${clientPlatformId}
+       and basis = 'net'
+       and tanggal >= ${periodeAwalBulan}::date
+       and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
+  if (row.n === 0) return null;
+  return { gmv: Number(row.gmv) - Number(row.refund), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung) };
+}
+
+/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + `hitungSkorTiktok`. */
+export async function rakitLaporanTiktok(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+  now: Date = new Date(),
+): Promise<pdt.PdtLaporanTiktok> {
+  validasiPeriodeAwalBulan(periodeAwalBulan);
+  const [kpi, { hasil: skor, benchmarkVersi }] = await Promise.all([
+    bacaKpiTiktokNet(sql, clientPlatformId, periodeAwalBulan),
+    hitungSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
+  ]);
+  return pdt.bangunLaporanTiktok({
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, skor, benchmarkVersi,
+  });
+}
+
+/** Rakit payload laporan Shopee v1: KPI ringkas basis `'siap_dikirim'` (Rule 16) + `hitungSkorShopee`. */
+export async function rakitLaporanShopee(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+  now: Date = new Date(),
+): Promise<pdt.PdtLaporanShopee> {
+  validasiPeriodeAwalBulan(periodeAwalBulan);
+  const [kpi, { hasil: skor }] = await Promise.all([
+    bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim'),
+    hitungSkorShopee(sql, clientPlatformId, periodeAwalBulan),
+  ]);
+  return pdt.bangunLaporanShopee({
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, skor,
+  });
+}
