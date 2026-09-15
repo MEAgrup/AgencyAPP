@@ -329,38 +329,40 @@ function ttVideoBerkas(nama: string, idKreator: string): PdtPreviewBerkasInput {
 }
 
 /**
- * Sama seperti `ttVideoBerkas`, + kolom 'Rentang Tanggal' (Rule 5,
- * `KANDIDAT_KOLOM_PERIODE_TIKTOK`) — `tt_video` sendiri tidak membawa
- * kolom periode (`ttVideoBerkas` polos cukup untuk tes identitas/status
- * berkas yang tidak menyentuh commit, yang MEWAJIBKAN periode batch sah).
+ * Sama seperti `ttVideoBerkas`, + PREAMBLE `'Rentang Tanggal: ...'` (Rule 5,
+ * `ekstrakPeriodePreambleTiktok` — DITUTUP via sample asli "Tiktok -
+ * Avitaskin.zip", `docs/DECISIONS.md` G1-06-PERIODE-TIKTOK) — `tt_video`
+ * sendiri tidak membawa periode (`ttVideoBerkas` polos cukup untuk tes
+ * identitas/status berkas yang tidak menyentuh commit, yang MEWAJIBKAN
+ * periode batch sah).
  */
 function ttVideoBerkasDenganPeriode(nama: string, idKreator: string, rentang: string): PdtPreviewBerkasInput {
-  const header = ['ID Kreator', 'ID Video', 'Waktu', 'Rentang Tanggal', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Nama Kreator', 'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'];
+  const header = ['ID Kreator', 'ID Video', 'Waktu', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Nama Kreator', 'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'];
   const aoa: unknown[][] = [
-    [], [],
+    [`Rentang Tanggal: ${rentang}`], [],
     header,
-    [idKreator, 'V1', '01/07/2026', rentang, 'Produk A', '100', '10', '2', '5', 'Kreator A', 'info', '1000', '50000'],
+    [idKreator, 'V1', '01/07/2026', 'Produk A', '100', '10', '2', '5', 'Kreator A', 'info', '1000', '50000'],
   ];
   return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
 }
 
 /**
  * `tt_video` LENGKAP untuk uji `pdt_fact_content` (G1-09 sub-langkah 2b-ii,
- * modul kedua) — parametrized per baris video, + 'Rentang Tanggal' (sama
- * seperti `ttVideoBerkasDenganPeriode`, tt_video sendiri tidak membawa
- * kolom periode) supaya `commitUploadBatch` (yang MEWAJIBKAN periode sah)
- * bisa dipanggil dengan HANYA berkas ini.
+ * modul kedua) — parametrized per baris video, + PREAMBLE `'Rentang
+ * Tanggal: ...'` (sama seperti `ttVideoBerkasDenganPeriode`, tt_video
+ * sendiri tidak membawa periode) supaya `commitUploadBatch` (yang
+ * MEWAJIBKAN periode sah) bisa dipanggil dengan HANYA berkas ini.
  */
 function ttVideoBerkasLengkap(
   nama: string,
   rentang: string,
   baris: readonly [string, string, string, string, string, string, string][],
 ): PdtPreviewBerkasInput {
-  const header = ['ID Kreator', 'ID Video', 'Waktu', 'Rentang Tanggal', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Nama Kreator', 'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'];
+  const header = ['ID Kreator', 'ID Video', 'Waktu', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Nama Kreator', 'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'];
   const aoa: unknown[][] = [
-    [], [],
+    [`Rentang Tanggal: ${rentang}`], [],
     header,
-    ...baris.map(([idKreator, idVideo, vv, likes, dibagikan, klikProduk, gmv]) => [idKreator, idVideo, '01/07/2026', rentang, 'Produk A', vv, likes, dibagikan, klikProduk, 'Kreator', 'info', '1000', gmv]),
+    ...baris.map(([idKreator, idVideo, vv, likes, dibagikan, klikProduk, gmv]) => [idKreator, idVideo, '01/07/2026', 'Produk A', vv, likes, dibagikan, klikProduk, 'Kreator', 'info', '1000', gmv]),
   ];
   return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
 }
@@ -761,7 +763,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — status batch dari ident
     expect(cp[0].shop_id).toBeNull();
   });
 
-  it("identitas 'cocok' TikTok ⇒ status parsing (rekonsiliasi TikTok belum ada, G1-07-TIKTOK-REKONSILIASI — beda dari Shopee, lihat describeDb rekonsiliasi di bawah)", async () => {
+  it("identitas 'cocok' TikTok ⇒ status parsing (batch tidak membawa tt_shop_analytics/tt_product_analytics untuk rekonsiliasi — lihat describeDb rekonsiliasi TikTok di bawah untuk jalur lengkapnya)", async () => {
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
     const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, ['kreator-a']);
@@ -778,19 +780,23 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — status batch dari ident
     // 2 — mewarisi dari berkas lain), jadi Shopee tanpa satu pun berkas Ads 'ok' TIDAK BISA
     // punya periode valid (lihat ekstrakPreambleShopee/MODUL_PREAMBLE_SHOPEE) — kombinasi
     // "tidak_dapat_divalidasi + periode valid" hanya mungkin di TikTok, yang membaca periode
-    // dari SETIAP berkas 'ok' (ekstrakPeriodeKolomTiktok), independen dari 'ID Kreator'.
+    // dari PREAMBLE SETIAP berkas 'ok' (ekstrakPeriodePreambleTiktok, DITUTUP via sample asli
+    // "Tiktok - Avitaskin.zip" — docs/DECISIONS.md G1-06-PERIODE-TIKTOK), independen dari
+    // 'ID Kreator'. Bentuk preamble persis sample asli (Shop Analytics): baris 0 "Tanggal
+    // analisis: ...", baris 1 "Ringkasan data", header di baris 2.
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
     const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
     const header = [
       'GMV', 'Pesanan', 'Pembeli', 'Pesanan SKU', 'Pengunjung', 'Persentase konversi', 'Pendapatan bruto',
       'Pengembalian dana', 'GMV dari LIVE kreator', 'GMV dari LIVE akun tertaut', 'GMV dari video afiliasi',
-      'GMV dari video akun tertaut', 'Tanggal analisis',
+      'GMV dari video akun tertaut',
     ];
-    const dataRow = ['1000000', '10', '8', '12', '500', '2', '1000000', '0', '200000', '100000', '50000', '50000', '01/07/2026 - 31/07/2026'];
+    const dataRow = ['1000000', '10', '8', '12', '500', '2', '1000000', '0', '200000', '100000', '50000', '50000'];
     const berkas: PdtPreviewBerkasInput = {
       nama: 'shop-analytics.xlsx', sha256: 's-sa', bytes: 20, ditolakPagar: null, decodeGagal: null,
-      aoa: [header, dataRow], sheets: null, modulTerdeteksi: 'tt_shop_analytics', ambiguous: false, matches: ['tt_shop_analytics'],
+      aoa: [['Tanggal analisis: 01/07/2026-31/07/2026'], ['Ringkasan data'], header, dataRow],
+      sheets: null, modulTerdeteksi: 'tt_shop_analytics', ambiguous: false, matches: ['tt_shop_analytics'],
     };
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
     expect(persiapan.identitas.status).toBe('tidak_dapat_divalidasi');
@@ -875,6 +881,140 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-i) — rekonsiliasi Shopee',
       shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
       shopeeShopStatsBerkas('shop-stats.xlsx', 1_000_000, 100),
       shopeeParentSkuBerkas('parent-sku.xlsx', 1_000_000),
+    ];
+    const pertama = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(pertama.status).toBe('verified');
+    await expect(commitUploadBatch(sql, ownerActor(), cpId, berkas, [])).rejects.toBeInstanceOf(ValidationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch — rekonsiliasi TikTok (Rule 13-16). `G1-07-TIKTOK-
+// REKONSILIASI` DITUTUP via sample asli "Tiktok - Avitaskin.zip" — BEDA dari
+// Shopee, perbandingan pesanan TIDAK dilewati (Σ 'Pesanan SKU' per-SKU
+// TERBUKTI sama dengan shop-level di sample asli juga, lihat docblock
+// `parseTiktokShopAnalytics`, `@cdps/core` `pdt/rekonsiliasi.ts`).
+// ---------------------------------------------------------------------------
+// kolomDipanen PERSIS tt_shop_analytics (modules.ts) — Rule 9 memvalidasi SELURUH daftar,
+// bukan sebagian, jadi fixture harus membawa keduabelasnya supaya parse_status='ok'.
+// Sel pertama '' (kolom label baris, `'Total nilai'`/`'Perubahan persentase'`) — sama pola
+// bentuk asli (Shop Analytics_Key metrics_*.xlsx) supaya indeks header==indeks nilai lurus.
+const HEADER_TT_SHOP_ANALYTICS = [
+  '', 'GMV', 'Pesanan', 'Pembeli', 'Pesanan SKU', 'Pengunjung', 'Persentase konversi', 'Pendapatan bruto',
+  'Pengembalian dana', 'GMV dari LIVE kreator', 'GMV dari LIVE akun tertaut', 'GMV dari video afiliasi',
+  'GMV dari video akun tertaut',
+];
+
+/** `tt_shop_analytics` — preamble persis bentuk asli (`'Tanggal analisis: ...'` + `'Ringkasan data'` sebelum header, `'Total nilai'` tepat sesudahnya). */
+function ttShopAnalyticsBerkas(nama: string, gmv: number, pesananSku: number): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    ['Tanggal analisis: 01/07/2026-31/07/2026'],
+    ['Ringkasan data'],
+    HEADER_TT_SHOP_ANALYTICS,
+    ['Total nilai', String(gmv), '10', '8', String(pesananSku), '500', '2', '1000000', '0', '200000', '100000', '50000', '50000'],
+  ];
+  return {
+    nama, sha256: 'sha-tt-shopanalytics', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'tt_shop_analytics', ambiguous: false, matches: ['tt_shop_analytics'],
+  };
+}
+
+// kolomDipanen PERSIS tt_product_analytics (modules.ts).
+const HEADER_TT_PRODUCT_ANALYTICS = [
+  'ID Produk', 'GMV', 'GMV dari kreator', 'GMV dari video penjual', 'GMV dari LIVE penjual', 'Pesanan SKU',
+  'AOV', 'CTR', 'CTOR', 'Impresi produk', 'Status daftar produk', 'Nama', 'Klik produk',
+];
+
+/** `tt_product_analytics` — tidak membawa preamble/periode sendiri (pola sama `shopeeParentSkuBerkas`). */
+function ttProductAnalyticsBerkas(nama: string, gmvTotal: number, pesananSkuTotal: number): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TT_PRODUCT_ANALYTICS,
+    ['P1', String(gmvTotal), '0', '0', '0', String(pesananSkuTotal), '0', '0%', '0%', '0', 'Active', 'Produk A', '0'],
+  ];
+  return {
+    nama, sha256: 'sha-tt-productanalytics', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'tt_product_analytics', ambiguous: false, matches: ['tt_product_analytics'],
+  };
+}
+
+describeDb('commitUploadBatch (G1-07-TIKTOK-REKONSILIASI DITUTUP) — rekonsiliasi TikTok', () => {
+  async function fixtureCocok(): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'TikTok Shop', null, ['kreator-a']); // akun_konten_toko SUDAH terikat ⇒ identitas 'cocok'
+  }
+
+  it('GMV DAN Pesanan SKU per-SKU Σ = shop-level ⇒ verified, reconcile_delta_pct = 0', async () => {
+    const cpId = await fixtureCocok();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkas('shop-analytics.xlsx', 1_000_000, 100),
+      ttProductAnalyticsBerkas('product-analytics.xlsx', 1_000_000, 100),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('verified');
+    expect(persiapan.reconcileDeltaPct).toBe(0);
+    const row = await loadBatch(persiapan.batchId);
+    expect(row.status).toBe('verified');
+    expect(Number(row.reconcile_delta_pct)).toBe(0);
+  });
+
+  it('GMV per-SKU Σ menyimpang > 0,5% dari shop-level ⇒ ditolak, alasan menyebut selisih GMV', async () => {
+    const cpId = await fixtureCocok();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkas('shop-analytics.xlsx', 1_000_000, 100),
+      ttProductAnalyticsBerkas('product-analytics.xlsx', 500_000, 100), // GMV separuh — jauh > 0,5%
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(persiapan.alasanDitolak).toContain('selisih rekonsiliasi GMV');
+    expect(persiapan.reconcileDeltaPct).toBeCloseTo(50, 0);
+  });
+
+  it('HANYA Pesanan SKU menyimpang (GMV cocok) ⇒ ditolak, alasan menyebut selisih pesanan — BEDA dari Shopee (pesanan tidak dilewati)', async () => {
+    const cpId = await fixtureCocok();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkas('shop-analytics.xlsx', 1_000_000, 100),
+      ttProductAnalyticsBerkas('product-analytics.xlsx', 1_000_000, 50), // Pesanan SKU separuh — jauh > 0,5%
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(persiapan.alasanDitolak).toContain('selisih rekonsiliasi pesanan');
+  });
+
+  it('hanya tt_shop_analytics TANPA tt_product_analytics (pasangan tidak lengkap) ⇒ tetap parsing, reconcile_delta_pct null', async () => {
+    const cpId = await fixtureCocok();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkas('shop-analytics.xlsx', 1_000_000, 100),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('parsing');
+    expect(persiapan.reconcileDeltaPct).toBeNull();
+  });
+
+  it("identitas 'usulkan_ikat' (akun_konten_toko belum terikat) ⇒ rekonsiliasi TIDAK dicoba meski berkas lengkap (identitas gate lebih dulu)", async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null); // akun_konten_toko belum terikat
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkas('shop-analytics.xlsx', 1_000_000, 100),
+      ttProductAnalyticsBerkas('product-analytics.xlsx', 1_000_000, 100),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('identitas_belum_terikat');
+    expect(persiapan.reconcileDeltaPct).toBeNull();
+  });
+
+  it('batch verified KEDUA untuk (toko, periode) yang sama ⇒ ValidationError BI (uq_pdt_upload_batch_verified, Rule 36), bukan 500 mentah', async () => {
+    const cpId = await fixtureCocok();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkas('shop-analytics.xlsx', 1_000_000, 100),
+      ttProductAnalyticsBerkas('product-analytics.xlsx', 1_000_000, 100),
     ];
     const pertama = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(pertama.status).toBe('verified');
@@ -1250,6 +1390,7 @@ interface FactContentRow {
   dibagikan: number | null;
   klik_produk: number | null;
   gmv: string | null;
+  durasi_detik: number | null;
 }
 
 async function loadFactContent(clientPlatformId: number): Promise<FactContentRow[]> {
@@ -1877,6 +2018,116 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KESEMBILAN) — sh
     const berkas = [
       shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
       shopeeLiveBerkas('live.xlsx', [['Judul', '03-07-2026 15:21', '100', '0']]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(await loadFactContent(cpId)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KESEPULUH) — tt_live →
+// pdt_fact_content. `G1-09-2BII-TTLIVE` DITUTUP via sample asli "Tiktok -
+// Avitaskin.zip" — lihat fakta.ts @cdps/core `ekstrakBarisTtLive` untuk bukti
+// keunikan idKreator+Waktu Live (149 baris nyata, nol duplikat).
+// ---------------------------------------------------------------------------
+const HEADER_TT_LIVE = ['ID Kreator', 'Kreator', 'Waktu Live', 'Durasi', 'GMV dari LIVE (Rp)', 'Produk Terjual', 'Penonton', 'CTOR'];
+
+/** `tt_live` — tidak membawa preamble/periode sendiri, dipasangkan dengan `ttVideoBerkasDenganPeriode` di tes di bawah (sama pola `shopeeLiveBerkas`+`shopeeAdsCpcBerkas`). */
+function ttLiveBerkas(nama: string, baris: readonly [string, string, string, string, string, string, string, string][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [HEADER_TT_LIVE, ...baris];
+  return {
+    nama, sha256: 'sha-tt-live', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'tt_live', ambiguous: false, matches: ['tt_live'],
+  };
+}
+
+describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KESEPULUH) — tt_live → pdt_fact_content', () => {
+  it('satu baris per sesi live, platform_content_id dari idKreator+digit Waktu Live, jenis=live, creator/is_akun_toko terisi', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, ['6916141288326202370']);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', '6916141288326202370', '01/07/2026 - 31/07/2026'), // identitas+periode
+      ttLiveBerkas('live.xlsx', [
+        ['6916141288326202370', 'bidanku.afita', '2026/07/31/ 19:06', '2h 53min', '556308', '2', '7048', '1.14%'],
+        ['KR-LAIN', 'Afiliasi', '2026/07/31/ 17:29', '1h 35min', '0', '0', '2452', '0.00%'],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(3); // 1 tt_video + 2 tt_live
+    const live = rows.filter((r) => r.jenis === 'live');
+    expect(live).toHaveLength(2);
+    expect(live[0]).toMatchObject({
+      platform_content_id: '6916141288326202370-202607311906', jenis: 'live', batch_id: persiapan.batchId,
+      creator_platform_id: '6916141288326202370', creator_handle: 'bidanku.afita', is_akun_toko: true, sku_id: null,
+      vv: 7048, durasi_detik: 2 * 3600 + 53 * 60,
+    });
+    expect(live[0].waktu_posting).toBeNull(); // zona waktu dashboard TikTok belum terverifikasi
+    expect(Number(live[0].gmv)).toBe(556308);
+    expect(live[1]).toMatchObject({ platform_content_id: 'KR-LAIN-202607311729', creator_platform_id: 'KR-LAIN', is_akun_toko: false });
+  });
+
+  it('dua kreator BERBEDA live di menit yang SAMA tetap dua baris terpisah (idKreator bagian identitas)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttLiveBerkas('live.xlsx', [
+        ['KR-1', 'Toko', '2026/07/31/ 19:06', '0h 5min', '0', '0', '0', '0%'],
+        ['KR-2', 'Afiliasi', '2026/07/31/ 19:06', '0h 5min', '0', '0', '0', '0%'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = (await loadFactContent(cpId)).filter((r) => r.jenis === 'live');
+    expect(rows.map((r) => r.platform_content_id)).toEqual(['KR-1-202607311906', 'KR-2-202607311906']);
+  });
+
+  it('commit ULANG (idKreator+Waktu Live sama) ⇒ ON CONFLICT DO UPDATE — baris diperbarui di tempat, bukan digandakan', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const pertama = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttLiveBerkas('live.xlsx', [['KR-1', 'Toko', '2026/07/31/ 19:06', '0h 5min', '100', '0', '10', '0%']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect((await loadFactContent(cpId)).filter((r) => r.jenis === 'live')).toHaveLength(1);
+
+    const kedua = [
+      ttVideoBerkasDenganPeriode('video-2.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttLiveBerkas('live-revisi.xlsx', [['KR-1', 'Toko', '2026/07/31/ 19:06', '1h 0min', '1.500.000', '0', '99', '0%']]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = (await loadFactContent(cpId)).filter((r) => r.jenis === 'live');
+    expect(rows).toHaveLength(1); // BUKAN 2 — ON CONFLICT DO UPDATE
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(rows[0].vv).toBe(99);
+    expect(rows[0].durasi_detik).toBe(3600);
+    expect(Number(rows[0].gmv)).toBe(1500000);
+  });
+
+  it('baris "ID Kreator"/"Waktu Live" tidak valid dilewati — nol baris fakta untuk baris itu', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttLiveBerkas('live.xlsx', [['', 'Toko', 'bukan tanggal', '0h 5min', '0', '0', '0', '0%']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect((await loadFactContent(cpId)).filter((r) => r.jenis === 'live')).toHaveLength(0);
+  });
+
+  it("identitas 'tolak' (ID Kreator tt_video tidak terdaftar) ⇒ NOL baris fakta ditulis (tt_live)", async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, ['KR-LAIN-YANG-TERDAFTAR']);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttLiveBerkas('live.xlsx', [['KR-1', 'Toko', '2026/07/31/ 19:06', '0h 5min', '100', '0', '10', '0%']]),
     ];
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(persiapan.status).toBe('ditolak');

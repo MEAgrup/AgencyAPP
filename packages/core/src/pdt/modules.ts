@@ -134,6 +134,10 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     platform: 'tiktok',
     namaTampilan: 'TikTok — Live Analysis',
     // Sama persis `baseline/detect.ts` TYPES.live_toko/live_aff.
+    // G1-09-2BII-TTLIVE DITUTUP — sample asli ("Tiktok - Avitaskin.zip") membuktikan
+    // `ID Kreator` + `Waktu Live` (menit presisi) 100% unik (149 baris nyata, nol
+    // duplikat) — dipakai sebagai `platform_content_id` (`ekstrakBarisTtLive`,
+    // `fakta.ts`), pola sama `shopee_live`/`Waktu Mulai`.
     tandaTanganKolom: { must: ['GMV dari LIVE (Rp)', 'Waktu Live'] },
     barisHeaderHint: 3, // Rule 7
     kolomDipanen: ['ID Kreator', 'Waktu Live', 'Durasi', 'GMV dari LIVE (Rp)', 'Produk Terjual', 'Penonton', 'CTOR', 'Kreator'],

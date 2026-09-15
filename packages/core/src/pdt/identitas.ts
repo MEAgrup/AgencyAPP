@@ -19,14 +19,26 @@
  * dicatat `docs/DECISIONS.md` G1-06, bukan ditebak diam-diam.
  *
  * **Kolom periode TikTok (`Date Range`/`Rentang Tanggal`/`Tanggal analisis`,
- * Rule 5) BELUM terverifikasi sama sekali** — nol kemunculan literalnya di
- * `PDT_KOLOM_DIPANEN.md`/PRD §7/kode manapun di repo. `KANDIDAT_KOLOM_PERIODE_TIKTOK`
- * di bawah adalah SENTINEL kandidat (pola sama `UNVERIFIED_SIGNATURE`,
- * `modules.ts`) — berkas TikTok yang tidak membawa satu pun kandidatnya
- * sederhana saja dianggap "tidak membawa tanggal terbaca" dan mewarisi
- * periode dari berkas lain di batch yang sama (Rule 5 ayat 2), BUKAN gagal.
- * Dicatat sebagai pertanyaan terbuka `docs/DECISIONS.md` G1-06-PERIODE-TIKTOK
- * — tidak memblokir G1 (preseden P-04/P-07/dst: dicatat, bukan menghalangi).
+ * Rule 5) — DITUTUP `G1-06-PERIODE-TIKTOK` (`docs/DECISIONS.md`) lewat sample
+ * asli "Tiktok - Avitaskin.zip".** Ketiga kandidat TERNYATA ADA di sample —
+ * tapi bukan sebagai NAMA KOLOM header (tebakan awal), melainkan sebagai
+ * PREAMBLE satu-sel "Label: value" TEPAT SEBELUM baris header, pola SAMA
+ * dengan preamble Shopee (`ekstrakPreambleShopee`), dengan variasi
+ * label/format per jenis berkas:
+ *  - `Shop Analytics_Key metrics_*.xlsx` / `product_list_20260701.xlsx`:
+ *    `"Tanggal analisis: 01/07/2026–01/07/2026"` — DD/MM/YYYY, pemisah EN
+ *    DASH "–" (U+2013), BUKAN hyphen ASCII.
+ *  - `Live Analysis*.xlsx`: `"Date Range: 2026-07-01 ~ 2026-07-31\n"` —
+ *    YYYY-MM-DD, pemisah tilde "~", baris diakhiri newline literal di sel.
+ *  - `Video Performance List_*.xlsx`: `"[Rentang Tanggal]: 2026-07-01 ~
+ *    2026-07-31\n"` — label DIBUNGKUS KURUNG SIKU, sisanya sama pola
+ *    `Live Analysis`.
+ *  - `product_list.xlsx` (varian TANPA "ID Produk"): `"2026-07-01 ~
+ *    2026-07-31"` — TANPA label sama sekali, seluruh sel HANYA rentangnya.
+ * `ekstrakPeriodePreambleTiktok` di bawah menangani KEEMPAT bentuk ini —
+ * bukan kolom header sama sekali, jadi fungsi lama `ekstrakPeriodeKolomTiktok`
+ * (yang mencari NAMA KOLOM di baris header) DIHAPUS, bukan diperbaiki di
+ * tempat (arsitekturnya salah total, bukan cuma kandidatnya).
  */
 
 const normLabel = (s: unknown): string => String(s ?? '').trim().toLowerCase();
@@ -40,6 +52,19 @@ export function parseTanggalId(s: string): string | null {
   const year = Number(m[3]);
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   // Bulatkan-ke-belakang kalender (mis. 31/02) ditolak — Date.UTC round-trip.
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** "YYYY-MM-DD" → sama persis (ternormalisasi ulang), atau `null` bila bentuk/kalendernya tidak valid. Dipakai preamble TikTok (`Date Range`/`[Rentang Tanggal]`, lihat docblock berkas) — beda dari `parseTanggalId` (Shopee, DD/MM/YYYY). */
+export function parseTanggalIso(s: string): string | null {
+  const m = /^\s*(\d{4})-(\d{2})-(\d{2})\s*$/.exec(s);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   const d = new Date(Date.UTC(year, month - 1, day));
   if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null;
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -149,27 +174,67 @@ export function kolomTerbanyak(
 }
 
 /**
- * Kandidat nama kolom periode TikTok — **BELUM terverifikasi ke sample asli**
- * (lihat docblock berkas + `docs/DECISIONS.md` G1-06-PERIODE-TIKTOK). Dipakai
- * best-effort oleh `ekstrakPeriodeKolomTiktok`; berkas yang tidak membawa
- * satu pun dari ini mewarisi periode dari berkas lain di batch (Rule 5).
+ * Label preamble periode TikTok yang TERVERIFIKASI ke sample asli
+ * ("Tiktok - Avitaskin.zip", `docs/DECISIONS.md` G1-06-PERIODE-TIKTOK) —
+ * dibandingkan SETELAH kurung siku `[...]` dilepas dan dinormalisasi
+ * (lihat `ekstrakPeriodePreambleTiktok`), BUKAN nama kolom header.
  */
-export const KANDIDAT_KOLOM_PERIODE_TIKTOK: readonly string[] = ['Date Range', 'Rentang Tanggal', 'Tanggal analisis'];
+export const KANDIDAT_LABEL_PERIODE_TIKTOK: readonly string[] = ['Date Range', 'Rentang Tanggal', 'Tanggal analisis'];
 
-/** Best-effort: baca rentang tanggal dari salah satu kandidat kolom periode TikTok pada baris data pertama. */
-export function ekstrakPeriodeKolomTiktok(aoa: readonly (readonly unknown[])[], barisHeader: number): PdtRentangTanggal | null {
-  const header = aoa[barisHeader - 1] ?? [];
-  const barisData = aoa[barisHeader];
-  if (!barisData) return null;
-  for (const kandidat of KANDIDAT_KOLOM_PERIODE_TIKTOK) {
-    const idx = header.findIndex((c) => normLabel(c) === normLabel(kandidat));
-    if (idx === -1) continue;
-    const nilai = String(barisData[idx] ?? '').trim();
-    const rentang = parseRentangTanggal(nilai);
-    if (rentang) return rentang;
-    // Nilai tanggal TUNGGAL (bukan rentang) — perlakukan sebagai satu hari.
-    const satuHari = parseTanggalId(nilai);
-    if (satuHari) return { mulai: satuHari, selesai: satuHari };
+/** "DD/MM/YYYY-DD/MM/YYYY" (hyphen ASCII ATAU en dash "–") atau "YYYY-MM-DD~YYYY-MM-DD" → rentang, atau `null`. Dua bentuk TERVERIFIKASI sample asli TikTok (lihat docblock berkas) — BEDA dari `parseRentangTanggal` (Shopee, hyphen ASCII saja), sengaja dipisah supaya perluasan bentuk TikTok tidak diam-diam melonggarkan parser Shopee. */
+export function parseRentangTanggalTiktok(s: string): PdtRentangTanggal | null {
+  const mId = /^\s*(\d{1,2}\/\d{1,2}\/\d{4})\s*[-–]\s*(\d{1,2}\/\d{1,2}\/\d{4})\s*$/.exec(s);
+  if (mId) {
+    const mulai = parseTanggalId(mId[1]);
+    const selesai = parseTanggalId(mId[2]);
+    if (mulai != null && selesai != null) return { mulai, selesai };
+  }
+  const mIso = /^\s*(\d{4}-\d{2}-\d{2})\s*~\s*(\d{4}-\d{2}-\d{2})\s*$/.exec(s);
+  if (mIso) {
+    const mulai = parseTanggalIso(mIso[1]);
+    const selesai = parseTanggalIso(mIso[2]);
+    if (mulai != null && selesai != null) return { mulai, selesai };
+  }
+  return null;
+}
+
+/**
+ * Baca rentang tanggal dari PREAMBLE TikTok (baris sebelum `barisHeader`,
+ * satu sel BERISI per baris — lihat docblock kepala berkas untuk keempat
+ * bentuk TERVERIFIKASI). **Sel setelah yang pertama boleh ADA tapi harus
+ * kosong** — bukan hanya kelonggaran, ini KEHARUSAN: `XLSX.utils.sheet_to_json`
+ * (`header:1, defval:''`) MEMADATKAN setiap baris ke lebar kolom SHEET
+ * (bukan lebar baris itu sendiri, dibuktikan lewat sample asli DAN
+ * round-trip nyata `aoa_to_sheet`→tulis→baca) — preamble asli SENDIRI
+ * datang sebagai `['Tanggal analisis: ...', '', '', ..., '']`, bukan
+ * `['Tanggal analisis: ...']` polos; memeriksa `row.length === 1` GAGAL
+ * terhadap bentuk asli maupun round-trip. Untuk tiap baris preamble: coba
+ * pisah `"Label: value"` lalu cocokkan label (kurung siku dilepas, case-
+ * insensitive) ke `KANDIDAT_LABEL_PERIODE_TIKTOK`; bila tidak cocok/tidak
+ * ada titik dua, coba PULA seluruh isi sel sebagai rentang TANPA label
+ * (bentuk `product_list.xlsx`). `null` bila nol baris preamble menghasilkan
+ * rentang yang bisa diparse — berkas ini dianggap "tidak membawa periode
+ * terbaca" dan mewarisi periode batch (Rule 5 ayat 2), BUKAN gagal.
+ */
+export function ekstrakPeriodePreambleTiktok(aoa: readonly (readonly unknown[])[], barisHeader: number): PdtRentangTanggal | null {
+  const batasBaris = Math.max(0, barisHeader - 1);
+  for (const row of aoa.slice(0, batasBaris)) {
+    if (!row || row.length === 0) continue;
+    if (!row.slice(1).every((c) => String(c ?? '').trim() === '')) continue; // sel ke-2+ HARUS kosong (padding sheet, bukan data sungguhan)
+    const cell = String(row[0] ?? '').replace(/[\r\n]+/g, '').trim();
+    if (cell === '') continue;
+    const idx = cell.indexOf(':');
+    if (idx !== -1) {
+      const label = cell.slice(0, idx).replace(/[[\]]/g, '').trim();
+      const nilai = cell.slice(idx + 1).trim();
+      if (KANDIDAT_LABEL_PERIODE_TIKTOK.some((k) => normLabel(k) === normLabel(label)) && nilai !== '') {
+        const rentang = parseRentangTanggalTiktok(nilai);
+        if (rentang) return rentang;
+      }
+    }
+    // Bentuk TANPA label (`product_list.xlsx`) — seluruh sel adalah rentangnya sendiri.
+    const bareRentang = parseRentangTanggalTiktok(cell);
+    if (bareRentang) return bareRentang;
   }
   return null;
 }

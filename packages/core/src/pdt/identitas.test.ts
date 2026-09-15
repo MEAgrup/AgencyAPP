@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   bangunIdentitasSumberShopee,
-  ekstrakPeriodeKolomTiktok,
+  ekstrakPeriodePreambleTiktok,
   ekstrakPreambleShopee,
   kolomTerbanyak,
   parseRentangTanggal,
+  parseRentangTanggalTiktok,
   parseTanggalId,
+  parseTanggalIso,
   resolvePeriodeBatch,
   validasiIdentitasShopee,
   validasiIdentitasTiktok,
@@ -117,21 +119,86 @@ describe('kolomTerbanyak (Rule 4 — ID Kreator terbanyak TikTok)', () => {
   });
 });
 
-describe('ekstrakPeriodeKolomTiktok — kandidat kolom UNVERIFIED (docs/DECISIONS.md G1-06-PERIODE-TIKTOK)', () => {
-  it('membaca rentang bila salah satu kandidat kolom ada', () => {
-    const aoa = [
-      ['ID Kreator', 'Date Range'],
-      ['CR-001', '01/07/2026 - 31/07/2026'],
-    ];
-    expect(ekstrakPeriodeKolomTiktok(aoa, 1)).toEqual({ mulai: '2026-07-01', selesai: '2026-07-31' });
+describe('parseTanggalIso', () => {
+  it('mem-parse YYYY-MM-DD', () => {
+    expect(parseTanggalIso('2026-07-01')).toBe('2026-07-01');
+    expect(parseTanggalIso('2026-12-31')).toBe('2026-12-31');
   });
 
-  it('null bila tidak satu pun kandidat cocok — berkas mewarisi periode batch (Rule 5)', () => {
+  it('menolak kalender tidak valid / bentuk salah', () => {
+    expect(parseTanggalIso('2026-02-31')).toBeNull();
+    expect(parseTanggalIso('2026-13-01')).toBeNull();
+    expect(parseTanggalIso('01/07/2026')).toBeNull();
+  });
+});
+
+describe('parseRentangTanggalTiktok — dua bentuk TERVERIFIKASI sample asli (docs/DECISIONS.md G1-06-PERIODE-TIKTOK)', () => {
+  it('DD/MM/YYYY–DD/MM/YYYY dengan EN DASH (Shop Analytics/product_list_20260701, "Tanggal analisis")', () => {
+    expect(parseRentangTanggalTiktok('01/07/2026–31/07/2026')).toEqual({ mulai: '2026-07-01', selesai: '2026-07-31' });
+  });
+
+  it('DD/MM/YYYY-DD/MM/YYYY dengan hyphen ASCII tetap diterima', () => {
+    expect(parseRentangTanggalTiktok('01/07/2026-31/07/2026')).toEqual({ mulai: '2026-07-01', selesai: '2026-07-31' });
+  });
+
+  it('YYYY-MM-DD ~ YYYY-MM-DD dengan tilde (Live Analysis/Video Performance List, "Date Range"/"[Rentang Tanggal]")', () => {
+    expect(parseRentangTanggalTiktok('2026-07-01 ~ 2026-07-31')).toEqual({ mulai: '2026-07-01', selesai: '2026-07-31' });
+  });
+
+  it('null bila salah satu sisi rusak atau bentuk tidak dikenal', () => {
+    expect(parseRentangTanggalTiktok('01/07/2026–bukan tanggal')).toBeNull();
+    expect(parseRentangTanggalTiktok('2026-07-01')).toBeNull();
+    expect(parseRentangTanggalTiktok('bukan rentang sama sekali')).toBeNull();
+  });
+});
+
+describe('ekstrakPeriodePreambleTiktok — DITUTUP via sample asli "Tiktok - Avitaskin.zip" (docs/DECISIONS.md G1-06-PERIODE-TIKTOK)', () => {
+  it('preamble berlabel "Tanggal analisis:" (Shop Analytics/product_list_20260701, en dash)', () => {
+    const aoa = [['Tanggal analisis: 01/07/2026–31/07/2026'], ['Ringkasan data'], ['GMV', 'Pesanan'], ['26560049', '143']];
+    expect(ekstrakPeriodePreambleTiktok(aoa, 3)).toEqual({ mulai: '2026-07-01', selesai: '2026-07-31' });
+  });
+
+  it('preamble berlabel "Date Range:" dengan newline literal di sel (Live Analysis)', () => {
+    const aoa = [['Date Range: 2026-07-01 ~ 2026-07-31\n'], [], ['ID Kreator', 'Waktu Live'], ['CR-1', '2026/07/15/ 11:00']];
+    expect(ekstrakPeriodePreambleTiktok(aoa, 3)).toEqual({ mulai: '2026-07-01', selesai: '2026-07-31' });
+  });
+
+  it('preamble berlabel "[Rentang Tanggal]:" berkurung siku (Video Performance List)', () => {
+    const aoa = [['[Rentang Tanggal]: 2026-07-01 ~ 2026-07-31\n'], [], ['ID Kreator', 'ID Video'], ['CR-1', 'VID-1']];
+    expect(ekstrakPeriodePreambleTiktok(aoa, 3)).toEqual({ mulai: '2026-07-01', selesai: '2026-07-31' });
+  });
+
+  it('preamble TANPA label — seluruh sel adalah rentangnya sendiri (product_list.xlsx)', () => {
+    const aoa = [['2026-07-01 ~ 2026-07-31'], [], ['ID', 'Produk'], ['123', 'Nama Produk']];
+    expect(ekstrakPeriodePreambleTiktok(aoa, 3)).toEqual({ mulai: '2026-07-01', selesai: '2026-07-31' });
+  });
+
+  it('null bila nol baris preamble menghasilkan rentang — berkas mewarisi periode batch (Rule 5)', () => {
+    const aoa = [['Sesuatu yang lain'], [], ['ID Kreator', 'ID Video'], ['CR-001', 'VID-1']];
+    expect(ekstrakPeriodePreambleTiktok(aoa, 3)).toBeNull();
+  });
+
+  it('baris preamble DIPADATKAN ke lebar sheet (sel ke-2+ string kosong, bukan array satu-elemen) — bentuk NYATA XLSX.utils.sheet_to_json(header:1,defval:""), bukan cuma bentuk ideal', () => {
+    // Bentuk asli sample DAN round-trip XLSX.write/read SUNGGUHAN sama-sama memadatkan baris
+    // pendek ke lebar kolom sheet — regresi bug nyata (route.test.ts "ZIP TikTok sungguhan"
+    // sempat gagal 400 "tidak ada berkas ... periode terbaca" sebelum diperbaiki).
     const aoa = [
-      ['ID Kreator', 'ID Video'],
-      ['CR-001', 'VID-1'],
+      ['Tanggal analisis: 01/07/2026-31/07/2026', '', '', '', '', '', '', '', '', '', '', '', ''],
+      ['', '', '', '', '', '', '', '', '', '', '', '', ''],
+      ['ID Kreator', 'ID Video', '', '', '', '', '', '', '', '', '', '', ''],
+      ['CR-001', 'VID-1', '', '', '', '', '', '', '', '', '', '', ''],
     ];
-    expect(ekstrakPeriodeKolomTiktok(aoa, 1)).toBeNull();
+    expect(ekstrakPeriodePreambleTiktok(aoa, 3)).toEqual({ mulai: '2026-07-01', selesai: '2026-07-31' });
+  });
+
+  it('baris dengan sel KEDUA berisi (bukan padding kosong) BUKAN preamble label — dilewati, bukan dipaksa parse', () => {
+    const aoa = [['Tanggal analisis: 01/07/2026-31/07/2026', 'kolom lain berisi'], [], ['ID Kreator', 'ID Video'], ['CR-001', 'VID-1']];
+    expect(ekstrakPeriodePreambleTiktok(aoa, 3)).toBeNull();
+  });
+
+  it('null bila barisHeader di baris pertama — nol baris preamble untuk dipindai', () => {
+    const aoa = [['ID Kreator', 'ID Video'], ['CR-001', 'VID-1']];
+    expect(ekstrakPeriodePreambleTiktok(aoa, 1)).toBeNull();
   });
 });
 

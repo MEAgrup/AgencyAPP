@@ -322,7 +322,7 @@ function resolvePeriodePreview(platform: pdt.PdtPlatform, terparse: readonly Ber
       if (!MODUL_PREAMBLE_SHOPEE.includes(b.modul.kode)) return { nama: b.nama, periode: null };
       return { nama: b.nama, periode: pdt.ekstrakPreambleShopee(b.aoa, b.barisHeader).periode };
     }
-    return { nama: b.nama, periode: pdt.ekstrakPeriodeKolomTiktok(b.aoa, b.barisHeader) };
+    return { nama: b.nama, periode: pdt.ekstrakPeriodePreambleTiktok(b.aoa, b.barisHeader) };
   });
   return pdt.resolvePeriodeBatch(daftar);
 }
@@ -574,24 +574,27 @@ export interface PdtCommitPersiapan {
  * tersimpan agar dapat didiagnosis TANPA UPLOAD ULANG"), karena periode
  * sudah diketahui sah di titik itu.
  *
- * **Rekonsiliasi (Rule 13-16, sub-langkah 2b-i) — Shopee SAJA, basis Siap
- * Dikirim.** Berjalan HANYA ketika identitas `cocok`/`tidak_dapat_divalidasi`
- * (identitas `tolak`/`usulkan_ikat` tidak masuk akal direkonsiliasi — batch
- * belum tentu punya toko yang benar) DAN batch membawa `shopee_shop_stats`
- * + `shopee_parent_sku` yang KEDUANYA `status='ok'`. Basis dipilih Rule 16
- * (default laporan klien = **Pesanan Siap Dikirim** — basis Dibayar/PDT-19
- * adalah gerbang Product Exchange TERPISAH, di luar cakupan gerbang Flow A
- * ini). **Perbandingan pesanan (separuh Rule 13) DILEWATI** —
- * `shopee_parent_sku.kolomDipanen` (`PDT_KOLOM_DIPANEN.md` §2.2, bucket 1+2
- * SUDAH lengkap dicek) nol kolom jumlah-pesanan per-SKU terverifikasi;
- * `rekonsiliasiGmvPesanan` menerima ini (parameter opsional, G1-07 direvisi
- * sub-langkah ini) dan menilai HANYA dari GMV sampai kolomnya ditemukan —
- * dicatat `G1-07-PERSKU-PESANAN` (Open, `docs/DECISIONS.md`). TikTok TIDAK
- * direkonsiliasi sama sekali di sini — G1-07 tidak (belum) punya fungsi
- * pembaca shop-level-vs-per-SKU untuk TikTok setara punya Shopee
- * (`parseShopeeShopStatsBasisTerisolasi`/`sumShopeeParentSkuGmv`); batch TikTok
- * berhenti di `'parsing'`, dicatat `G1-07-TIKTOK-REKONSILIASI` (Open).
- * Lolos ambang ⇒ `status='verified'` — **`uq_pdt_upload_batch_verified`**
+ * **Rekonsiliasi (Rule 13-16, sub-langkah 2b-i) — Shopee (basis Siap Dikirim)
+ * DAN TikTok, keduanya berdiri sendiri.** Berjalan HANYA ketika identitas
+ * `cocok`/`tidak_dapat_divalidasi` (identitas `tolak`/`usulkan_ikat` tidak
+ * masuk akal direkonsiliasi — batch belum tentu punya toko yang benar).
+ * **Shopee**: butuh `shopee_shop_stats` + `shopee_parent_sku` KEDUANYA
+ * `status='ok'`. Basis dipilih Rule 16 (default laporan klien = **Pesanan
+ * Siap Dikirim** — basis Dibayar/PDT-19 adalah gerbang Product Exchange
+ * TERPISAH, di luar cakupan gerbang Flow A ini). **Perbandingan pesanan
+ * (separuh Rule 13) DILEWATI** — `shopee_parent_sku.kolomDipanen`
+ * (`PDT_KOLOM_DIPANEN.md` §2.2, bucket 1+2 SUDAH lengkap dicek) nol kolom
+ * jumlah-pesanan per-SKU terverifikasi; `rekonsiliasiGmvPesanan` menerima
+ * ini (parameter opsional) dan menilai HANYA dari GMV sampai kolomnya
+ * ditemukan — dicatat `G1-07-PERSKU-PESANAN` (Open, `docs/DECISIONS.md`).
+ * **TikTok**: butuh `tt_shop_analytics` + `tt_product_analytics` KEDUANYA
+ * `status='ok'` — `G1-07-TIKTOK-REKONSILIASI` DITUTUP lewat sample asli
+ * ("Tiktok - Avitaskin.zip"): BEDA dari Shopee, perbandingan pesanan TIDAK
+ * dilewati — Σ `'Pesanan SKU'` per-SKU (`tt_product_analytics`) TERBUKTI
+ * SAMA PERSIS dengan shop-level (`tt_shop_analytics`), sama seperti GMV
+ * (lihat docblock `parseTiktokShopAnalytics`, `@cdps/core`
+ * `pdt/rekonsiliasi.ts`, untuk bukti aritmetika lengkap). Lolos ambang ⇒
+ * `status='verified'` — **`uq_pdt_upload_batch_verified`**
  * (partial unique index, Rule 36) menolak batch verified KEDUA untuk
  * `(client_platform_id, periode_mulai, periode_selesai)` yang sama; commit
  * ini menerjemahkan pelanggaran itu jadi `ValidationError` BI, bukan 500
@@ -690,9 +693,40 @@ export async function commitUploadBatch(
       }
       // Salah satu/keduanya absen atau bukan 'ok' — nol dasar untuk rekonsiliasi, berhenti di
       // 'parsing' menunggu batch berikutnya yang membawa keduanya lengkap.
+    } else if (platform === 'tiktok') {
+      // G1-07-TIKTOK-REKONSILIASI DITUTUP — `tt_shop_analytics` (shop-level) vs
+      // `tt_product_analytics` (Σ per-SKU), KEDUA metrik (GMV DAN Pesanan SKU) TERVERIFIKASI
+      // sample asli (lihat docblock `parseTiktokShopAnalytics`, `@cdps/core` `pdt/rekonsiliasi.ts`)
+      // — beda dari Shopee yang harus melewati pesanan (G1-07-PERSKU-PESANAN).
+      const shopStatsBerkas = terparse.find((b) => b.modul.kode === 'tt_shop_analytics');
+      const productAnalyticsBerkas = terparse.find((b) => b.modul.kode === 'tt_product_analytics');
+      if (shopStatsBerkas && productAnalyticsBerkas) {
+        const shopLevel = pdt.parseTiktokShopAnalytics(shopStatsBerkas.aoa, shopStatsBerkas.barisHeader);
+        if (shopLevel) {
+          const perSku = pdt.sumTiktokProductAnalyticsGmv(productAnalyticsBerkas.aoa, productAnalyticsBerkas.barisHeader);
+          const modulTerlibat = hasilBerkas
+            .filter((b) => b.modulKode != null)
+            .map((b) => ({ kode: b.modulKode as string, parseStatusOk: b.status === 'ok' }));
+          const hasilRekon = pdt.rekonsiliasiGmvPesanan({
+            perSkuGmv: perSku.gmv, shopLevelGmv: shopLevel.gmv,
+            perSkuPesanan: perSku.pesanan, shopLevelPesanan: shopLevel.pesanan,
+            modulTerlibat,
+          });
+          if (hasilRekon.status === 'verified') {
+            status = 'verified';
+            reconcileDeltaPct = hasilRekon.deltaGmvPct;
+          } else {
+            status = 'ditolak';
+            alasanDitolak = hasilRekon.pesan;
+            reconcileDeltaPct = hasilRekon.deltaPct;
+          }
+        }
+        // shopLevel absen (kolom 'GMV'/'Pesanan SKU' tidak ditemukan di berkas ini) — berhenti
+        // di 'parsing', sama seperti pasangan berkas yang tidak lengkap (di bawah).
+      }
+      // Salah satu/keduanya absen atau bukan 'ok' — nol dasar untuk rekonsiliasi, berhenti di
+      // 'parsing' menunggu batch berikutnya yang membawa keduanya lengkap.
     }
-    // platform === 'tiktok' — G1-07-TIKTOK-REKONSILIASI (Open): belum ada mesin shop-level-
-    // vs-per-SKU untuk TikTok, berhenti di 'parsing'.
   }
 
   // Q-3 (docs/DECISIONS.md 2026-09-13): pdt_fact_ads.periode adalah AWAL BULAN, bukan
@@ -734,6 +768,11 @@ export async function commitUploadBatch(
   // (lihat docblock `ekstrakBarisShopeeLive`, `@cdps/core` `pdt/fakta.ts`) — `G1-09-2BII-
   // SHOPEELIVE` DITUTUP sesi ini (`Waktu Mulai` sebagai identitas, bukan `Informasi Streaming`).
   const berkasShopeeLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_live');
+  // G1-09 sub-langkah 2b-ii — modul KESEPULUH, `tt_live` → `pdt_fact_content` (lihat
+  // docblock `ekstrakBarisTtLive`, `@cdps/core` `pdt/fakta.ts`) — `G1-09-2BII-TTLIVE`
+  // DITUTUP (sample asli "Tiktok - Avitaskin.zip": `ID Kreator` + `Waktu Live` menit
+  // presisi TERBUKTI 100% unik, pola sama `shopee_live`/`Waktu Mulai`).
+  const berkasTtLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_live');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -780,7 +819,7 @@ export async function commitUploadBatch(
       // ON CONFLICT DO UPDATE, kenapa masing-masing).
       await tulisFaktaModulTerparse(tx, {
         id, clientPlatformId, periodeAwalBulan, akunKontenToko: row.akun_konten_toko, now,
-        berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive,
+        berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
         berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
         berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk,
       });
@@ -844,6 +883,7 @@ interface TulisFaktaModulTerparseInput {
   berkasAdsSearch: readonly BerkasTerparse[];
   berkasTtVideo: readonly BerkasTerparse[];
   berkasShopeeLive: readonly BerkasTerparse[];
+  berkasTtLive: readonly BerkasTerparse[];
   berkasParentSkuUntukMaster: readonly BerkasTerparse[];
   berkasTtOrders: readonly BerkasTerparse[];
   berkasTtTransactionCreator: readonly BerkasTerparse[];
@@ -879,7 +919,7 @@ interface TulisFaktaModulTerparseInput {
 async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerparseInput): Promise<void> {
   const {
     id, clientPlatformId, periodeAwalBulan, akunKontenToko, now,
-    berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive,
+    berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
     berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
     berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk,
   } = input;
@@ -1016,6 +1056,35 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
           on conflict (client_platform_id, platform_content_id) do update set
             batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
             waktu_posting = excluded.waktu_posting, vv = excluded.vv, gmv = excluded.gmv`;
+      }
+    }
+  }
+
+  // G1-09 sub-langkah 2b-ii — modul KESEPULUH, `tt_live` → `pdt_fact_content` (lihat
+  // docblock `ekstrakBarisTtLive`, `@cdps/core` `pdt/fakta.ts`) — `G1-09-2BII-TTLIVE`
+  // DITUTUP (sample asli "Tiktok - Avitaskin.zip": `ID Kreator` + `Waktu Live` menit
+  // presisi TERBUKTI 100% unik, sama pola `shopee_live`). BEDA dari `shopee_live`:
+  // `creator_platform_id`/`creator_handle` TERISI (laporan ini campuran toko+afiliasi,
+  // `is_akun_toko` per baris membedakannya — pola sama `tt_video`), `waktu_posting`
+  // SELALU NULL (zona waktu dashboard TikTok belum terverifikasi, lihat docblock
+  // `ekstrakBarisTtLive`), `durasi_detik` TERISI (`Durasi` "Xh Ymin" → detik).
+  if (berkasTtLive.length > 0) {
+    for (const b of berkasTtLive) {
+      for (const baris of pdt.ekstrakBarisTtLive(b.aoa, b.barisHeader, akunKontenToko)) {
+        await tx`
+          insert into pdt_fact_content
+            (client_platform_id, platform_content_id, batch_id, parser_versi, jenis,
+             creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
+             vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
+          values
+            (${clientPlatformId}, ${baris.platformContentId}, ${id}, ${pdt.PDT_PARSER_VERSI}, 'live',
+             ${baris.creatorPlatformId}, ${baris.creatorHandle}, ${baris.isAkunToko}, null, null,
+             ${baris.vv}, null, null, null, null, null, null, ${baris.gmv}, ${baris.durasiDetik})
+          on conflict (client_platform_id, platform_content_id) do update set
+            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+            creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
+            is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, gmv = excluded.gmv,
+            durasi_detik = excluded.durasi_detik`;
       }
     }
   }
@@ -1638,6 +1707,7 @@ export async function reparsePdtBatch(
       berkasAdsSearch: terparse.filter((b) => b.modul.kode === 'shopee_ads_search'),
       berkasTtVideo: terparse.filter((b) => b.modul.kode === 'tt_video'),
       berkasShopeeLive: terparse.filter((b) => b.modul.kode === 'shopee_live'),
+      berkasTtLive: terparse.filter((b) => b.modul.kode === 'tt_live'),
       berkasParentSkuUntukMaster: terparse.filter((b) => b.modul.kode === 'shopee_parent_sku'),
       berkasTtOrders: terparse.filter((b) => b.modul.kode === 'tt_orders'),
       berkasTtTransactionCreator: terparse.filter((b) => b.modul.kode === 'tt_transaction_creator'),

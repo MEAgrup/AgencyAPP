@@ -9,6 +9,7 @@ import {
   ekstrakBarisShopeeLive,
   ekstrakBarisSkuMasterShopeeParentSku,
   ekstrakBarisSkuMasterTtOrders,
+  ekstrakBarisTtLive,
   ekstrakBarisTtVideo,
 } from './fakta';
 
@@ -169,6 +170,79 @@ describe('ekstrakBarisShopeeLive (modul KESEMBILAN, sesi 24)', () => {
     expect(baris.vv).toBeNull();
     expect(baris.gmv).toBeNull();
     expect(baris.platformContentId).toBe('202607031521');
+  });
+});
+
+// Header persis kolomDipanen tt_live (real sample "Live Analysis*.xlsx", "Tiktok - Avitaskin.zip").
+const HEADER_TT_LIVE = ['ID Kreator', 'Kreator', 'Waktu Live', 'Durasi', 'GMV dari LIVE (Rp)', 'Produk Terjual', 'Penonton', 'CTOR'];
+
+describe('ekstrakBarisTtLive (modul KESEPULUH, G1-09-2BII-TTLIVE DITUTUP via sample asli)', () => {
+  it('memetakan platformContentId dari idKreator + digit mentah Waktu Live (bukan hanya salah satu), field lain terisi', () => {
+    const aoa = [
+      HEADER_TT_LIVE,
+      ['6916141288326202370', 'bidanku.afita', '2026/07/31/ 19:06', '2h 53min', '556308', '2', '7048', '1.14%'],
+    ];
+    expect(ekstrakBarisTtLive(aoa, 1, null)).toEqual([
+      {
+        platformContentId: '6916141288326202370-202607311906',
+        creatorPlatformId: '6916141288326202370', creatorHandle: 'bidanku.afita', isAkunToko: false,
+        vv: 7048, gmv: 556308, durasiDetik: 2 * 3600 + 53 * 60,
+      },
+    ]);
+  });
+
+  it('dua kreator BERBEDA live di menit yang SAMA tetap dua baris terpisah (idKreator bagian identitas, bukan waktu saja)', () => {
+    const aoa = [
+      HEADER_TT_LIVE,
+      ['KR-1', 'Toko', '2026/07/31/ 19:06', '0h 5min', '0', '0', '0', '0%'],
+      ['KR-2', 'Afiliasi', '2026/07/31/ 19:06', '0h 5min', '0', '0', '0', '0%'],
+    ];
+    const hasil = ekstrakBarisTtLive(aoa, 1, null);
+    expect(hasil.map((b) => b.platformContentId)).toEqual(['KR-1-202607311906', 'KR-2-202607311906']);
+  });
+
+  it('isAkunToko true bila ID Kreator ada di akunKontenToko, false bila tidak/belum terikat', () => {
+    const aoa = [
+      HEADER_TT_LIVE,
+      ['KR-TOKO', 'Toko', '2026/07/01/ 10:00', '0h 5min', '0', '0', '0', '0%'],
+      ['KR-LAIN', 'Afiliasi', '2026/07/01/ 10:00', '0h 5min', '0', '0', '0', '0%'],
+    ];
+    const hasil = ekstrakBarisTtLive(aoa, 1, ['KR-TOKO']);
+    expect(hasil.find((b) => b.creatorPlatformId === 'KR-TOKO')!.isAkunToko).toBe(true);
+    expect(hasil.find((b) => b.creatorPlatformId === 'KR-LAIN')!.isAkunToko).toBe(false);
+    expect(ekstrakBarisTtLive(aoa, 1, null).every((b) => !b.isAkunToko)).toBe(true);
+  });
+
+  it('konvensi Seller Center (titik ribuan, koma desimal) — bukan Ads Manager', () => {
+    const aoa = [HEADER_TT_LIVE, ['KR-1', 'Toko', '2026/07/01/ 10:00', '0h 5min', '1.234.567,89', '0', '1.234', '0%']];
+    const [baris] = ekstrakBarisTtLive(aoa, 1, null);
+    expect(baris.vv).toBe(1234);
+    expect(baris.gmv).toBe(1234567.89);
+  });
+
+  it('baris ber-"ID Kreator" kosong dilewati (bukan baris data sungguhan)', () => {
+    const aoa = [HEADER_TT_LIVE, ['', 'Toko', '2026/07/01/ 10:00', '0h 5min', '0', '0', '0', '0%']];
+    expect(ekstrakBarisTtLive(aoa, 1, null)).toHaveLength(0);
+  });
+
+  it('"Waktu Live" kosong ATAU tidak cocok pola dilewati (bukan crash)', () => {
+    const aoa = [
+      HEADER_TT_LIVE,
+      ['KR-1', 'Toko', '', '0h 5min', '0', '0', '0', '0%'],
+      ['KR-1', 'Toko', 'bukan tanggal', '0h 5min', '0', '0', '0', '0%'],
+    ];
+    expect(ekstrakBarisTtLive(aoa, 1, null)).toHaveLength(0);
+  });
+
+  it('kolom "Kreator"/"Durasi"/"GMV dari LIVE (Rp)"/"Penonton" hilang ⇒ null untuk field itu (bukan 0)', () => {
+    const headerMinimal = ['ID Kreator', 'Waktu Live'];
+    const aoa = [headerMinimal, ['KR-1', '2026/07/01/ 10:00']];
+    expect(ekstrakBarisTtLive(aoa, 1, null)).toEqual([
+      {
+        platformContentId: 'KR-1-202607011000', creatorPlatformId: 'KR-1', creatorHandle: null, isAkunToko: false,
+        vv: null, gmv: null, durasiDetik: null,
+      },
+    ]);
   });
 });
 
