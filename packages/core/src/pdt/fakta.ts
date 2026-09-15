@@ -40,15 +40,11 @@
  * periode)` (`uq_pdt_fact_ads`, migrasi G1-01) adalah kunci yang SAH tanpa
  * perlu resolusi SKU apa pun.
  *
- * `shopee_ads_search` SENGAJA BELUM dipetakan di sini — dicatat
- * `docs/DECISIONS.md` (G1-09-2BII-ADS-SEARCH). `shopee_ads_cpc` LIHAT Modul
- * KEENAM di bawah — blocker grainnya AKHIRNYA terbuka sesi ini (sample asli
- * Fim Motor, bukan lagi ditebak):
- *  - `shopee_ads_search`: `kolomDipanen` (`modules.ts`) hanya `['klik',
- *    'konversi']` (bucket 3 `Kata Pencarian`/`SOV` DITAHAN, Q-6) — nol
- *    `biaya` (NOT NULL di skema) dan nol identitas kampanye/produk. Tidak
- *    ada baris `pdt_fact_ads` yang SAH bisa ditulis dari whitelist ini hari
- *    ini sama sekali.
+ * `shopee_ads_cpc` LIHAT Modul KEENAM di bawah — blocker grainnya AKHIRNYA
+ * terbuka sesi lalu (sample asli Fim Motor, bukan lagi ditebak). `shopee_ads_search`
+ * LIHAT Modul KETUJUH di bawah — blocker `G1-09-2BII-ADS-SEARCH` ("nol kolom
+ * biaya/identitas") ditutup sesi ini, sample yang sama membuktikan premis itu
+ * sudah usang.
  *
  * **Modul KEEMPAT (sesi ini): `tt_transaction_creator` → `pdt_fact_creator_period`**
  * (lihat `ekstrakBarisKreatorTtTransactionCreator` di bawah) — tabel fakta
@@ -130,7 +126,51 @@
  * diam di sini. Dicatat `G1-09-2BII-ADS-CPC-SKU` (Open baru, `docs/DECISIONS.md`).
  * Angka: `parsePdtAngka(v, true)` — konvensi Ads Manager, sama seperti
  * `shopee_ads_live` (berkas dari dashboard Ads Manager yang sama).
+ *
+ * **Modul KETUJUH (sesi 22): `shopee_ads_search` → `pdt_fact_ads`** (lihat
+ * `ekstrakBarisShopeeAdsSearch` di bawah) — `G1-09-2BII-ADS-SEARCH` DITUTUP.
+ * `HANDOFF_PDT_SESI21.md` §3.B: sample asli Fim Motor (`Search-Ads-Overall-
+ * Data-*.csv`) TERNYATA punya `Nama Iklan`/`Biaya`, premis blocker lama ("nol
+ * kolom biaya/identitas") sudah usang — murni pekerjaan implementasi mengikuti
+ * pola `shopee_ads_cpc` di atas, ditandai boleh dikerjakan TANPA menunggu
+ * pemilik. **`kampanye_id` KOMPOSIT** — `` `${namaIklan} :: ${kataPencarian}` ``,
+ * BUKAN `nama iklan` polos seperti `shopee_ads_cpc` — sample yang tersedia
+ * hanya SATU baris data, tidak membuktikan apakah satu iklan search bisa
+ * muncul berkali-kali dengan `Kata Pencarian` berbeda dalam satu periode
+ * (satu iklan menargetkan banyak keyword, satu baris per keyword). Kalau itu
+ * terjadi dan `kampanye_id` cuma `nama iklan`, replace-on-recommit
+ * (DELETE+INSERT, sama pola `shopee_ads_cpc`/`shopee_ads_live`) akan diam-diam
+ * menimpa baris keyword lain sebagai baris terakhir yang di-loop — bukan
+ * error yang kelihatan. Komposit ini aman di kedua kasus: kalau `Kata
+ * Pencarian` SELALU `"Semua"` (tidak spesifik keyword, seperti satu-satunya
+ * baris sample), komposit berkurang jadi setara `nama iklan` saja (nol
+ * downside). `Kata Pencarian` DIBACA di sini tapi SENGAJA TIDAK ditambahkan
+ * ke `kolomDipanen` (`modules.ts`) — isinya (bucket 3, Q-6) masih DITAHAN
+ * sebagai dimensi laporan, tapi memakainya untuk MEMBENTUK identitas baris
+ * bukan pelanggaran penahanan itu (beda tujuan: kunci unik, bukan metrik).
+ * `sku_id` tetap `null` — modul ini tidak punya identitas produk sama sekali
+ * di whitelist. Angka: `parsePdtAngka(v, true)` — konvensi Ads Manager, sama
+ * seperti `shopee_ads_cpc`/`shopee_ads_live`.
+ *
+ * **Modul KESEMBILAN (sesi 24): `shopee_live` → `pdt_fact_content`** (lihat
+ * `ekstrakBarisShopeeLive` di bawah) — `G1-09-2BII-SHOPEELIVE` DITUTUP.
+ * `Informasi Streaming` (judul sesi live, ditulis bebas AM) TIDAK stabil
+ * sebagai identitas (bisa berulang — sample asli PUNYA judul yang sama untuk
+ * DUA sesi berbeda). `Waktu Mulai` (menit presisi, `DD-MM-YYYY HH:mm`)
+ * TIDAK PERNAH berulang di sample — satu akun Shopee cuma bisa menjalankan
+ * SATU sesi live pada satu waktu, jadi menit presisi SANGAT mungkin unik
+ * per akun selama-lamanya (bukan cuma kebetulan sample). `platform_content_id`
+ * dibentuk dari DIGIT MENTAH string (`YYYYMMDDHHmm`, concat langsung — BUKAN
+ * lewat objek `Date`/konversi zona waktu) supaya identitasnya tidak
+ * tersandung ambiguitas WIB↔UTC; `waktuPosting` (kolom informasi, bukan
+ * identitas) TETAP dihitung sebagai instant UTC sungguhan (WIB − 7 jam,
+ * `WIB_OFFSET_HOURS` — Shopee Seller Center Indonesia SELALU WIB, tidak ada
+ * DST). `Informasi Streaming` TIDAK dipetakan ke kolom manapun (deskriptif,
+ * `pdt_fact_content` tidak punya slot judul). Angka: `parsePdtAngka(v)`
+ * TANPA `raw` — konvensi Seller Center, sama seperti `tt_video` (berkas dari
+ * dashboard Seller Center, bukan Ads Manager).
  */
+import { WIB_OFFSET_HOURS } from '../tz';
 import { parsePdtAngka } from './angka';
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
@@ -263,6 +303,67 @@ export function ekstrakBarisTtVideo(
       likes: iLikes === -1 ? null : parsePdtAngka(row?.[iLikes]),
       dibagikan: iDibagikan === -1 ? null : parsePdtAngka(row?.[iDibagikan]),
       klikProduk: iKlikProduk === -1 ? null : parsePdtAngka(row?.[iKlikProduk]),
+      gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv]),
+    });
+  }
+  return hasil;
+}
+
+/** `DD-MM-YYYY HH:mm` (Shopee `Waktu Mulai`) → `{ digitMentah, instantUtc }`, atau `null` bila tidak cocok pola. `digitMentah` adalah string angka MENTAH (`YYYYMMDDHHmm`, concat langsung dari komponen tertulis) — untuk identitas, tidak lewat objek Date. `instantUtc` adalah instant UTC sungguhan (WIB − `WIB_OFFSET_HOURS`) — untuk kolom informasi `waktu_posting`, BUKAN untuk identitas. */
+function parseWaktuMulaiShopeeLive(w: string): { digitMentah: string; instantUtc: Date } | null {
+  const m = w.trim().match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const [, dd, mm, yyyy, hh, min] = m;
+  const hhPad = hh.padStart(2, '0');
+  const digitMentah = `${yyyy}${mm}${dd}${hhPad}${min}`;
+  const instantUtc = new Date(Date.UTC(+yyyy, +mm - 1, +dd, +hh - WIB_OFFSET_HOURS, +min));
+  if (isNaN(instantUtc.getTime())) return null;
+  return { digitMentah, instantUtc };
+}
+
+/** Satu baris `pdt_fact_content` mentah dari `shopee_live`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi). `sku_id`/`creatorPlatformId`/`creatorHandle` SELALU `null` — modul ini tidak punya identitas produk maupun kreator terpisah di whitelist (sesi live Shopee adalah akun toko sendiri, bukan afiliasi). `isAkunToko` SELALU `true` — beda dari `tt_video` (yang membandingkan `creatorPlatformId` ke `akunKontenToko`), laporan ini secara struktural HANYA berisi sesi live akun toko (tidak ada laporan afiliasi dalam bentuk ini). */
+export interface PdtBarisContentShopeeLive {
+  platformContentId: string;
+  waktuPosting: Date;
+  vv: number | null;
+  gmv: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `shopee_live` (Modul KESEMBILAN — lihat
+ * docblock kepala berkas untuk kenapa blocker `G1-09-2BII-SHOPEELIVE`
+ * akhirnya ditutup sesi ini). Rule 8 whitelist `modules.ts`: `['Informasi
+ * Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan (Pesanan Siap
+ * Dikirim)(Rp)']`. `platform_content_id` dibentuk dari `Waktu Mulai`
+ * (`parseWaktuMulaiShopeeLive`, digit mentah `YYYYMMDDHHmm`) — BUKAN dari
+ * `Informasi Streaming` (judul bebas, bisa berulang, lihat docblock kepala
+ * berkas). Baris ber-`Waktu Mulai` kosong ATAU tidak cocok pola `DD-MM-YYYY
+ * HH:mm` dilewati (bukan baris data sungguhan — tidak ada identitas yang
+ * bisa dibentuk). `Pengunjung` → `vv` (kolom itu comment-nya eksplisit
+ * "konsumen: report.dimensi_video/live", dipakai bersama oleh `tt_video`/
+ * modul ini). Angka: `parsePdtAngka(v)` TANPA `raw` — konvensi Seller
+ * Center, sama seperti `tt_video`.
+ */
+export function ekstrakBarisShopeeLive(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisContentShopeeLive[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iWaktuMulai = idx('Waktu Mulai');
+  const iPengunjung = idx('Pengunjung');
+  const iGmv = idx('Penjualan (Pesanan Siap Dikirim)(Rp)');
+
+  const hasil: PdtBarisContentShopeeLive[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const waktuMulaiRaw = iWaktuMulai === -1 ? '' : String(row?.[iWaktuMulai] ?? '').trim();
+    if (waktuMulaiRaw === '') continue;
+    const parsed = parseWaktuMulaiShopeeLive(waktuMulaiRaw);
+    if (parsed == null) continue;
+    hasil.push({
+      platformContentId: parsed.digitMentah,
+      waktuPosting: parsed.instantUtc,
+      vv: iPengunjung === -1 ? null : parsePdtAngka(row?.[iPengunjung]),
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv]),
     });
   }
@@ -490,9 +591,76 @@ export function ekstrakBarisKreatorShopeeAmsAfiliasi(
   return hasil;
 }
 
-/** Satu baris `pdt_fact_ads` mentah dari `shopee_ads_cpc`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi, pola sama fungsi lain di paket ini). `sku_id`/`content_id` SELALU `null` di pemanggil — lihat docblock kepala berkas untuk kenapa (`Kode Produk` level induk, `pdt_sku_master` berkunci per varian). */
+/**
+ * Satu baris `pdt_fact_sku_period` mentah dari `shopee_ams_produk`, SEBELUM
+ * `client_platform_id`/`batch_id`/`periode`/`parser_versi`/`basis`
+ * (pemanggil yang melengkapi — `basis` bukan hasil fungsi ini karena bukan
+ * diturunkan dari kolom apa pun di sini, lihat docblock `ekstrakBarisShopeeAmsProduk`).
+ * `sku_id` SELALU `null` di pemanggil (level produk-induk, lihat docblock
+ * kepala berkas — `G1-09-2BII-ADS-CPC-SKU`).
+ */
+export interface PdtBarisSkuPeriodShopeeAmsProduk {
+  platformProductId: string;
+  gmv: number | null;
+  produkTerjual: number | null;
+  pesanan: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `shopee_ams_produk` (Modul KEDELAPAN, sesi 23
+ * — `G1-09-2BII-ADS-CPC-SKU` DITUTUP juga membuka blocker modul ini:
+ * `pdt_fact_sku_period.sku_id` sekarang NULLABLE, lihat docblock kepala
+ * berkas). Rule 8 whitelist `modules.ts`: `['Kode Item', 'Nama Item',
+ * 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi
+ * Komisi(Rp)', 'ROI']` — `Nama Item` TIDAK dipetakan (tampilan UI saja,
+ * Rule 20 melarangnya jadi kunci). `Estimasi Komisi(Rp)`/`ROI` SENGAJA
+ * TIDAK ditulis ke tabel ini — `PDT_KOLOM_DIPANEN.md` §2.10: `Estimasi
+ * Komisi(Rp)` adalah sumber `commission_pct` untuk PX Flow D (konsumen
+ * domain LAIN, belum dibangun), dan `pdt_fact_sku_period` memang tidak
+ * punya kolom komisi/ROI sama sekali — sama pola `shopee_ams_afiliasi`/
+ * modul KELIMA di atas. `sku_id` SELALU `null` di pemanggil — `Kode Item`
+ * level PRODUK INDUK, `pdt_sku_master` berkunci per varian (lihat docblock
+ * kepala berkas, `G1-09-2BII-ADS-CPC-SKU`: pemilik menjawab "kebutuhan
+ * hanya GMV per produk bukan sampai varian"). Baris ber-`Kode Item` kosong
+ * dilewati (bukan baris data sungguhan, sama pola modul lain di paket ini).
+ * **`basis = 'dibayar'`** — DITETAPKAN pemanggil (bukan diturunkan di sini),
+ * keputusan pemilik (`AskUserQuestion` sesi 23): AMS tidak menyebutkan
+ * basis GMV-nya secara eksplisit (beda dari `shopee_parent_sku`/G1-07 yang
+ * memang menulisnya di nama kolom), diperlakukan sebagai "Pesanan
+ * Dibayar/Selesai" (lazim untuk program afiliasi — komisi biasanya baru
+ * dihitung dari pesanan yang benar-benar selesai, mencegah kecurangan lewat
+ * order yang dibatalkan). Angka: `parsePdtAngka(v, true)` — konvensi Ads
+ * Manager, sama seperti `shopee_ams_afiliasi` (dashboard AMS yang sama).
+ */
+export function ekstrakBarisShopeeAmsProduk(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisSkuPeriodShopeeAmsProduk[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iKodeItem = idx('Kode Item');
+  const iOmzet = idx('Omzet Penjualan(Rp)');
+  const iProdukTerjual = idx('Produk Terjual');
+  const iPesanan = idx('Pesanan');
+
+  const hasil: PdtBarisSkuPeriodShopeeAmsProduk[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const platformProductId = iKodeItem === -1 ? '' : String(row?.[iKodeItem] ?? '').trim();
+    if (platformProductId === '') continue;
+    hasil.push({
+      platformProductId,
+      gmv: iOmzet === -1 ? null : parsePdtAngka(row?.[iOmzet], true),
+      produkTerjual: iProdukTerjual === -1 ? null : parsePdtAngka(row?.[iProdukTerjual], true),
+      pesanan: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
+    });
+  }
+  return hasil;
+}
+
+/** Satu baris `pdt_fact_ads` mentah dari `shopee_ads_cpc`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi, pola sama fungsi lain di paket ini). `sku_id`/`content_id` SELALU `null` di pemanggil — lihat docblock kepala berkas untuk kenapa (`Kode Produk` level induk, `pdt_sku_master` berkunci per varian). `platformProductId` DIISI (sesi 23, `G1-09-2BII-ADS-CPC-SKU`) — salinan identitas `Kode Produk`, BUKAN lookup ke `pdt_sku_master`. */
 export interface PdtBarisAdsShopeeCpc {
   kampanyeId: string;
+  platformProductId: string | null;
   tayangan: number | null;
   klik: number | null;
   pesananSku: number | null;
@@ -514,6 +682,13 @@ export interface PdtBarisAdsShopeeCpc {
  * ber-`nama iklan` kosong dilewati (bukan baris data sungguhan — sama alasan
  * legacy: `if (!nama) continue`). Angka: `parsePdtAngka(v, true)` — konvensi
  * Ads Manager, sama seperti `shopee_ads_live`.
+ *
+ * `platformProductId` (sesi 23, `G1-09-2BII-ADS-CPC-SKU` DITUTUP — pemilik:
+ * "kebutuhan hanya GMV per produk bukan sampai varian") — `Kode Produk`
+ * disalin LANGSUNG (bukan lookup `pdt_sku_master`, yang berkunci per
+ * varian). Nilai `'-'` (sample "Shop GMV Max" Fim Motor asli, iklan TOKO
+ * tanpa produk) dan sel kosong SAMA-SAMA dipetakan `null`, BUKAN string
+ * literal `'-'` — `'-'` bukan identitas produk sungguhan.
  */
 export function ekstrakBarisShopeeAdsCpc(
   aoa: readonly (readonly unknown[])[],
@@ -522,6 +697,7 @@ export function ekstrakBarisShopeeAdsCpc(
   const header = aoa[barisHeader - 1] ?? [];
   const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
   const iKampanye = idx('nama iklan');
+  const iKodeProduk = idx('Kode Produk');
   const iTayangan = idx('Dilihat');
   const iKlik = idx('Jumlah Klik');
   const iPesanan = idx('Konversi');
@@ -533,8 +709,69 @@ export function ekstrakBarisShopeeAdsCpc(
   for (const row of aoa.slice(barisHeader)) {
     const kampanyeId = iKampanye === -1 ? '' : String(row?.[iKampanye] ?? '').trim();
     if (kampanyeId === '') continue;
+    const kodeProduk = iKodeProduk === -1 ? '' : String(row?.[iKodeProduk] ?? '').trim();
     hasil.push({
       kampanyeId,
+      platformProductId: kodeProduk === '' || kodeProduk === '-' ? null : kodeProduk,
+      tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
+      klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik], true),
+      pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
+      gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
+      biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
+      roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+    });
+  }
+  return hasil;
+}
+
+/** Satu baris `pdt_fact_ads` mentah dari `shopee_ads_search`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi). */
+export interface PdtBarisAdsShopeeSearch {
+  kampanyeId: string;
+  tayangan: number | null;
+  klik: number | null;
+  pesananSku: number | null;
+  gmv: number | null;
+  biaya: number;
+  roas: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `shopee_ads_search` (Modul KETUJUH — lihat
+ * docblock kepala berkas untuk kenapa blocker `G1-09-2BII-ADS-SEARCH`
+ * akhirnya ditutup sesi ini). Rule 8 whitelist `modules.ts`: `['Jumlah
+ * Klik', 'Konversi', 'Nama Iklan', 'Biaya']` — `Kata Pencarian` DIBACA di
+ * sini untuk membentuk `kampanye_id` KOMPOSIT tapi SENGAJA TIDAK ditambah
+ * ke `kolomDipanen` (Q-6 masih DITAHAN, isinya belum boleh jadi dimensi
+ * laporan). `kampanye_id` memakai `` `${namaIklan} :: ${kataPencarian}` ``
+ * (bukan `nama iklan` polos seperti `shopee_ads_cpc`) — lihat docblock
+ * kepala berkas untuk alasan lengkap. Baris ber-`Nama Iklan` kosong
+ * dilewati (bukan baris data sungguhan — sama pola `shopee_ads_cpc`/
+ * `shopee_ads_live`). Angka: `parsePdtAngka(v, true)` — konvensi Ads
+ * Manager, sama seperti `shopee_ads_cpc`/`shopee_ads_live` (berkas dari
+ * dashboard yang sama).
+ */
+export function ekstrakBarisShopeeAdsSearch(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisAdsShopeeSearch[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iKampanye = idx('Nama Iklan');
+  const iKataPencarian = idx('Kata Pencarian');
+  const iTayangan = idx('Dilihat');
+  const iKlik = idx('Jumlah Klik');
+  const iPesanan = idx('Konversi');
+  const iGmv = idx('Omzet Penjualan');
+  const iBiaya = idx('Biaya');
+  const iRoas = idx('Efektifitas Iklan');
+
+  const hasil: PdtBarisAdsShopeeSearch[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const namaIklan = iKampanye === -1 ? '' : String(row?.[iKampanye] ?? '').trim();
+    if (namaIklan === '') continue;
+    const kataPencarian = iKataPencarian === -1 ? '' : String(row?.[iKataPencarian] ?? '').trim();
+    hasil.push({
+      kampanyeId: `${namaIklan} :: ${kataPencarian}`,
       tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
       klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik], true),
       pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),

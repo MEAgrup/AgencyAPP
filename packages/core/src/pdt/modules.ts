@@ -257,19 +257,23 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // Q-6 menunggu Anty), kolomnya sendiri boleh dipakai untuk DETEKSI.
     tandaTanganKolom: { must: ['Kata Pencarian'] },
     barisHeaderHint: 8, // PRD §7.2: "header baris 8"; DIKONFIRMASI baris 8 persis lewat sample asli Fim Motor (Search-Ads-Overall-Data-*.csv).
-    // Ejaan DIKOREKSI terhadap sample asli Fim Motor sesi ini — casing lama
+    // Ejaan DIKOREKSI terhadap sample asli Fim Motor sesi lalu — casing lama
     // huruf kecil ('klik'/'konversi') TIDAK PERNAH cocok header nyata
     // (`validasiKolomWajib` exact per-sel setelah normalisasi kosakata, sel
     // sungguhan ber-'Jumlah Klik'/'Konversi', bukan sel literal 'klik'/
-    // 'konversi' — bug laten kelas sama `shopee_ads_cpc` sesi 19). Sample
-    // yang sama JUGA membuktikan kolom 'Nama Iklan' (identitas kampanye) dan
-    // 'Biaya' (NOT NULL di `pdt_fact_ads`) SUNGGUH ADA di berkas ini —
-    // premis `G1-09-2BII-ADS-SEARCH` ("nol kolom biaya/identitas") sudah
-    // usang, TAPI belum ditambahkan ke kolomDipanen di sini: menambah
-    // keduanya berarti keputusan desain whitelist baru (sama kelas Q-6),
-    // bukan sekadar koreksi ejaan — dicatat sebagai temuan baru di
-    // `docs/DECISIONS.md`, bukan diam-diam diperluas sesi ini.
-    kolomDipanen: ['Jumlah Klik', 'Konversi'],
+    // 'konversi' — bug laten kelas sama `shopee_ads_cpc` sesi 19).
+    // **`G1-09-2BII-ADS-SEARCH` DITUTUP sesi ini (docs/DECISIONS.md
+    // 2026-09-14, modul KETUJUH)** — 'Nama Iklan'/'Biaya' DITAMBAHKAN:
+    // sample yang sama membuktikan keduanya SUNGGUH ADA (identitas kampanye
+    // + NOT NULL `pdt_fact_ads.biaya`), murni pekerjaan implementasi
+    // mengikuti pola `shopee_ads_cpc` (handoff SESI21 §3.B, "boleh langsung
+    // dikerjakan TANPA menunggu pemilik"). 'Kata Pencarian' SENGAJA TETAP
+    // TIDAK ada di sini — Q-6 (bucket 3, isinya) masih DITAHAN menunggu
+    // Anty, TAPI kolomnya tetap dibaca oleh `ekstrakBarisShopeeAdsSearch`
+    // (`@cdps/core` `pdt/fakta.ts`) untuk membentuk `kampanye_id` KOMPOSIT —
+    // itu memakai IDENTITAS baris, bukan menjadikan isinya dimensi laporan,
+    // jadi tidak melanggar penahanan Q-6.
+    kolomDipanen: ['Jumlah Klik', 'Konversi', 'Nama Iklan', 'Biaya'],
     wajib: false,
   },
   {
@@ -291,11 +295,17 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // 'Penjualan' DIKOREKSI ke ejaan PERSIS sample asli — ejaan lama adalah
     // TEBAKAN yang tidak pernah cocok berkas nyata (kolom sungguhan
     // 'Penjualan (Pesanan Siap Dikirim)(Rp)'), bug laten kelas sama
-    // `shopee_ads_cpc` sesi 19. TIDAK menutup `G1-09-2BII-SHOPEELIVE` —
-    // blocker itu soal `Informasi Streaming` (judul bebas AM, bukan ID
-    // platform stabil) sebagai identitas `pdt_fact_content`, sample yang
-    // sama TIDAK membawa kolom ID sesi live mana pun; koreksi ini murni
-    // ejaan whitelist, bukan resolusi identitas.
+    // `shopee_ads_cpc` sesi 19.
+    // **`G1-09-2BII-SHOPEELIVE` DITUTUP sesi 24 (docs/DECISIONS.md
+    // 2026-09-14)** — blocker itu soal `Informasi Streaming` (judul bebas
+    // AM, bukan ID platform stabil) sebagai identitas `pdt_fact_content`.
+    // Sample asli membuktikan `Waktu Mulai` (menit presisi, format `DD-MM-
+    // YYYY HH:mm`) TIDAK PERNAH berulang untuk satu akun (satu toko cuma
+    // bisa live SATU sesi pada satu waktu) — dipakai sebagai identitas
+    // sebagai gantinya (`platform_content_id`, lihat docblock
+    // `ekstrakBarisShopeeLive`, `@cdps/core` `pdt/fakta.ts`). `Informasi
+    // Streaming` TETAP di `kolomDipanen` (deskriptif) tapi TIDAK dipetakan
+    // ke kolom manapun di `pdt_fact_content` (tabel tidak punya slot judul).
     kolomDipanen: ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan (Pesanan Siap Dikirim)(Rp)'],
     wajib: true, // menutup dimensi Live Shopee yang hari ini struktural maks 5/10 (PRD §7.2)
   },
@@ -303,13 +313,21 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     kode: 'shopee_video',
     platform: 'shopee',
     namaTampilan: 'Shopee — Video Overview',
-    // BELUM TERVERIFIKASI — lihat catatan panjang di kepala berkas ini dan
-    // docs/DECISIONS.md 2026-09-13 G1-02. Baris tetap di-seed (DoD), deteksi
-    // sengaja tidak pernah menang sampai sample asli tersedia.
+    // TERVERIFIKASI DEFINITIF sesi lanjutan pasca-sesi 20 (PR #380, docs/DECISIONS.md
+    // 2026-09-14) — TIDAK "belum diverifikasi", tapi berkas "Video Overview" (`video-overview-
+    // v3*.csv`) TERBUKTI secara struktural tidak bisa menulis apa pun ke sini: sample dibaca
+    // PENUH (32 baris), satu-satunya baris data adalah AGREGAT SATU AKUN untuk seluruh periode,
+    // NOL dari 54 kolom adalah identitas video. `tandaTanganKolom` TETAP `UNVERIFIED_SIGNATURE`
+    // (menyalakan deteksi untuk berkas yang tidak bisa menulis apa pun tetap tidak berguna).
     tandaTanganKolom: UNVERIFIED_SIGNATURE,
     barisHeaderHint: 1, // header 2 lapis (Rule 7) — readSheet sudah menangani kolom duplikat lewat sufiks nama#j
     kolomDipanen: [],
-    wajib: true, // menutup dimensi Video Shopee (PRD §7.2) — belum bisa dipanen otomatis sampai gap ini tertutup
+    // `wajib` DITURUNKAN true → false sesi 23 (docs/DECISIONS.md 2026-09-14, `G1-09-2BII-
+    // SHOPEEVIDEO-GRAIN` DITUTUP) — deviasi PRD §7.2, DISETUJUI PEMILIK langsung: dikonfirmasi
+    // Shopee Seller Center TIDAK punya laporan lain yang satu baris per video ("D. Tidak ada").
+    // Dimensi Video HANYA terisi dari TikTok (`tt_video`, sudah jalan) sampai Shopee mengekspos
+    // laporan begitu di masa depan.
+    wajib: false,
   },
   {
     kode: 'shopee_voucher',
@@ -330,28 +348,40 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     kode: 'shopee_diskon',
     platform: 'shopee',
     namaTampilan: 'Shopee — Diskon Toko',
-    // BELUM TERVERIFIKASI — UAT Fim Motor (SHP-3, docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md
-    // §7.1) menyelesaikan pasangan diskon/flash-sale lewat NAMA BERKAS MENTAH
-    // ('discount_'/'flash_sale'), yang Rule 6 PDT larang. PDT_KOLOM_DIPANEN §2.8
-    // menyamakan strukturnya dengan shopee_voucher ("penjualan 2 basis, klaim,
-    // tingkat penggunaan, biaya promo") TANPA kolom pembeda ('Nama Voucher'
-    // adalah satu-satunya jangkar unik voucher, dan modul ini tidak punya
-    // padanannya). Dicatat docs/DECISIONS.md 2026-09-13 sebagai pertanyaan
-    // terbuka, bukan ditebak.
-    tandaTanganKolom: UNVERIFIED_SIGNATURE,
+    // **`G1-09-2BII-DISKON-FLASHSALE-STRUKTUR` DITUTUP sesi 23 (docs/DECISIONS.md 2026-09-14,
+    // MVP dipilih pemilik — "jalan rekomendasi").** Deskripsi lama ("sama struktur
+    // shopee_voucher") TERBUKTI SALAH sesi lanjutan pasca-sesi 20 — sample asli Fim Motor
+    // (`discount_*.xlsx` sheet "Kriteria Utama") TIDAK punya `Klaim`/`Tingkat Penggunaan`/
+    // `Total Biaya` sama sekali; strukturnya 26 kolom (`Tanggal`, `Tipe Promosi`, penjualan 2
+    // basis, produk terjual 2 basis, pembeli 2 basis, PLUS rincian Paket Diskon/Kombo Hemat).
+    // Whitelist di sini SENGAJA MVP — HANYA agregat harian sheet "Kriteria Utama" ("berapa GMV
+    // dari diskon toko per hari"), BUKAN sheet "Rincian Performa" (per-promosi individual, 20+
+    // kolom lagi, belum ada yang minta — HANDOFF_PDT_SESI21.md §3.C opsi 2, ditunda). Nol writer
+    // fact-table — sama seperti shopee_voucher/shopee_chat/shopee_chat_broadcast/meta_ads,
+    // modul ini cuma perlu parse_status='ok' + audit kolom, konsumen fact table menyusul.
+    tandaTanganKolom: { must: ['Tanggal', 'Tipe Promosi'] },
     barisHeaderHint: 1,
-    kolomDipanen: [],
+    kolomDipanen: [
+      'Tanggal', 'Tipe Promosi', 'Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+      'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)',
+    ],
     wajib: false,
   },
   {
     kode: 'shopee_flash_sale',
     platform: 'shopee',
     namaTampilan: 'Shopee — Flash Sale Toko',
-    // BELUM TERVERIFIKASI — lihat catatan `shopee_diskon` di atas (pasangan
-    // yang sama, gap yang sama).
-    tandaTanganKolom: UNVERIFIED_SIGNATURE,
+    // `G1-09-2BII-DISKON-FLASHSALE-STRUKTUR` DITUTUP sesi 23 bersama `shopee_diskon` di atas —
+    // lihat catatannya untuk konteks lengkap. Struktur asli (`In_Shop_Flash_Sale_Metrics_*.xlsx`
+    // sheet "Kriteria Utama") lebih dekat ke `shopee_voucher` (sama-sama `Periode Waktu`) TAPI
+    // juga tidak punya `Klaim`/`Total Biaya` — kolom uniknya `Jumlah Produk Dilihat`/`Produk
+    // Diklik` (funnel tampilan, satu-satunya hal unik dibanding diskon/voucher), dipanen di sini.
+    tandaTanganKolom: { must: ['Periode Waktu', 'Jumlah Produk Dilihat'] },
     barisHeaderHint: 1,
-    kolomDipanen: [],
+    kolomDipanen: [
+      'Periode Waktu', 'Penjualan (Pesanan Dibuat)(Rp)', 'Penjualan (Pesanan Siap Dikirim)(Rp)',
+      'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)', 'Jumlah Produk Dilihat', 'Produk Diklik',
+    ],
     wajib: false,
   },
   {

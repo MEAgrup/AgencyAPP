@@ -251,7 +251,14 @@ Bucket 2 (derived-add — `report/shopee/metrik.ts:250` `pengunjung_produk`, sum
 > iklan`, bukan `Kode Produk` (lihat `packages/core/src/pdt/fakta.ts` docblock kepala berkas untuk
 > rincian). `Kode Produk` **TIDAK** dipakai sebagai `pdt_fact_ads.sku_id` (dikoreksi dari baris di
 > bawah) — ia level PRODUK INDUK, `pdt_sku_master` berkunci PER VARIAN, jadi lookup langsung akan
-> mengarang varian; `sku_id` modul ini tetap `null` (Open `G1-09-2BII-ADS-CPC-SKU`).
+> mengarang varian; `sku_id` modul ini tetap `null`.
+>
+> **`G1-09-2BII-ADS-CPC-SKU` DITUTUP sesi 23 (docs/DECISIONS.md 2026-09-14)** — pemilik: "kebutuhan
+> hanya GMV per produk bukan sampai varian". `Kode Produk` sekarang DISALIN LANGSUNG ke
+> `pdt_fact_ads.platform_product_id varchar(128) NULL` (BUKAN lookup `pdt_sku_master`, `sku_id`
+> tetap `null`) — `'-'`/kosong dipetakan `null`, bukan string `'-'`. Konsumen "GMV per produk" query
+> `platform_product_id` langsung; JOIN opsional ke `pdt_sku_master WHERE platform_product_id = ...`
+> (1-ke-banyak varian) kalau perlu daftar varian di baliknya.
 
 Preamble (Rule 2, DIVALIDASI terpisah dari kolom baris header — lihat `ekstrakPreambleShopee`,
 bukan bagian `kolomDipanen`):
@@ -281,19 +288,24 @@ Bucket 2 (derived-add — `report/shopee/metrik.ts:460-477` `ads_toko`/`ads_prod
 | `Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)` | -- konsumen: `HealthAds.acos`, B-4.3 (`metrik.ts:465-466`) — TIDAK ada kolom skema `pdt_fact_ads` untuknya, konsumennya domain LAIN | ACOS toko tak terhitung |
 
 ### 2.4 `shopee_ads_search` — `Search-Ads-Overall-Data-*.csv` (header baris 8)
-Bucket 1: `Jumlah Klik`, `Konversi` ⇒ `pdt_fact_ads`. **Ejaan DIKOREKSI sesi lanjutan pasca-sesi
-20 (docs/DECISIONS.md 2026-09-14)** terhadap sample EKSPOR ASLI Fim Motor — ejaan huruf kecil
-sebelumnya (`klik`/`konversi`) tidak pernah diverifikasi dan tidak pernah cocok berkas nyata.
+Bucket 1: `Jumlah Klik`, `Konversi`, `Nama Iklan`, `Biaya` ⇒ `pdt_fact_ads`. **Ejaan DIKOREKSI
+sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** terhadap sample EKSPOR ASLI Fim
+Motor — ejaan huruf kecil sebelumnya (`klik`/`konversi`) tidak pernah diverifikasi dan tidak
+pernah cocok berkas nyata.
 
-**Temuan baru sesi ini (belum diimplementasikan, belum jadi keputusan whitelist):** sample asli
-JUGA membuktikan kolom `Nama Iklan` (identitas kampanye) dan `Biaya` (`pdt_fact_ads.biaya` NOT
-NULL) SUNGGUH ADA di berkas ini — premis `G1-09-2BII-ADS-SEARCH` ("nol kolom biaya/identitas")
-sudah usang. Menambah keduanya ke `kolomDipanen` (memungkinkan modul ini akhirnya menulis
-`pdt_fact_ads`, pola sama `shopee_ads_cpc`) BELUM dilakukan — itu keputusan desain whitelist baru
-(sama kelas Q-6), bukan koreksi ejaan, sengaja tidak ditebak sesi ini.
+**`G1-09-2BII-ADS-SEARCH` DITUTUP sesi 22 (docs/DECISIONS.md 2026-09-14, modul KETUJUH):**
+`Nama Iklan` (identitas kampanye) dan `Biaya` (`pdt_fact_ads.biaya` NOT NULL) DITAMBAHKAN ke
+`kolomDipanen` — sample asli membuktikan keduanya sungguh ada, premis blocker lama ("nol kolom
+biaya/identitas") sudah usang. `ekstrakBarisShopeeAdsSearch` (`packages/core/src/pdt/fakta.ts`)
++ writer `pdt_fact_ads` di `commitUploadBatch` sudah dibangun. `kampanye_id` **KOMPOSIT**
+(`` `${namaIklan} :: ${kataPencarian}` ``, BUKAN `nama iklan` polos seperti `shopee_ads_cpc`) —
+sample yang tersedia hanya satu baris, tidak membuktikan apakah satu iklan search bisa muncul
+berkali-kali dengan `Kata Pencarian` berbeda dalam satu periode; komposit aman di kedua kasus.
 
-Bucket 3 (human call — **ditahan**, bukan dibuang, ketokan Q-6): `Kata Pencarian`, `SOV`. Riset
-keyword belum punya konsumen yang dibangun; menunggu Anty menjawab apakah dibangun atau memang
+Bucket 3 (human call — **ditahan**, bukan dibuang, ketokan Q-6): `Kata Pencarian`, `SOV`. `Kata
+Pencarian` DIBACA oleh `ekstrakBarisShopeeAdsSearch` untuk membentuk `kampanye_id` (identitas
+baris) — TIDAK ditambahkan ke `kolomDipanen` (isinya masih bukan dimensi laporan). Riset keyword
+sendiri belum punya konsumen yang dibangun; menunggu Anty menjawab apakah dibangun atau memang
 dibuang secara permanen (§6 handoff, baris ketiga).
 
 ### 2.5 `shopee_ads_live` — `Data-Semua-Iklan-Live-*.csv` (header baris 7)
@@ -304,8 +316,15 @@ Tidak ada baris bucket 2.
 Bucket 1: `Informasi Streaming`, `Waktu Mulai`, `Pengunjung`, `Penjualan (Pesanan Siap Dikirim)(Rp)`
 ⇒ `pdt_fact_content` jenis `live`. **Ejaan kolom terakhir DIKOREKSI sesi lanjutan pasca-sesi 20**
 terhadap sample asli Fim Motor (`'Penjualan'` polos tidak pernah cocok). Tidak ada baris bucket 2.
-Blocker identitas `G1-09-2BII-SHOPEELIVE` (tidak ada kolom ID sesi live yang stabil di sample yang
-sama) TETAP terbuka — koreksi ini tidak menyentuhnya.
+
+> **`G1-09-2BII-SHOPEELIVE` DITUTUP sesi 24 (docs/DECISIONS.md 2026-09-14, modul KESEMBILAN)** —
+> `Waktu Mulai` (menit presisi, format `DD-MM-YYYY HH:mm`) dipakai sebagai `platform_content_id`
+> (digit mentah `YYYYMMDDHHmm`, BUKAN lewat `Informasi Streaming` yang bisa berulang). Sample asli
+> membuktikan `Waktu Mulai` TIDAK PERNAH berulang untuk satu akun, bahkan saat judul sesi sama
+> persis — satu akun cuma bisa live satu sesi pada satu waktu. `Informasi Streaming` TETAP
+> divalidasi (`kolomDipanen`) tapi TIDAK dipetakan ke kolom `pdt_fact_content` manapun (tidak ada
+> slot judul di tabel ini). `is_akun_toko` SELALU `true` (laporan ini struktural hanya sesi live
+> akun toko sendiri).
 
 ### 2.7 `shopee_video` — `video-overview-v3*.csv` (header 2 lapis, 54 kolom)
 > **TEMUAN DEFINITIF sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** — sample asli
@@ -327,8 +346,13 @@ sama) TETAP terbuka — koreksi ini tidak menyentuhnya.
 > sendiri secara struktural salah bentuk untuk tujuan modul ini. `tandaTanganKolom` TETAP
 > `UNVERIFIED_SIGNATURE` (kode TIDAK diubah) — menyalakan deteksi untuk berkas yang tidak bisa
 > menulis apa pun tetap tidak berguna. Kemungkinan sumber per-video yang benar (`Content
-> Performance`/daftar video individual Shopee Seller Center) BELUM pernah diunggah — dicatat
-> Open baru `docs/DECISIONS.md` `G1-09-2BII-SHOPEEVIDEO-GRAIN`.
+> Performance`/daftar video individual Shopee Seller Center) BELUM pernah diunggah.
+>
+> **`G1-09-2BII-SHOPEEVIDEO-GRAIN` DITUTUP sesi 23 (docs/DECISIONS.md 2026-09-14)** — pemilik
+> mengonfirmasi Shopee Seller Center TIDAK punya laporan per-video lain ("Tidak ada"). `wajib`
+> modul ini diturunkan `true` → `false` (deviasi PRD §7.2, disetujui pemilik langsung) — dimensi
+> Video PDT sekarang HANYA terisi dari TikTok (`tt_video`, sudah jalan) sampai Shopee mengekspos
+> laporan per-video di masa depan. `tandaTanganKolom`/`kolomDipanen` TETAP tidak berubah.
 
 Bucket 1 LAMA (sebelum temuan di atas — TIDAK BERLAKU lagi, dipertahankan di sini sebagai
 riwayat): transaksi, kunjungan, sumber penonton, konversi (11 dari 54 kolom) ⇒ `pdt_fact_content`.
@@ -357,13 +381,19 @@ baris bucket 2.
 > pembeda yang terverifikasi: `Periode Waktu`+`Jumlah Produk Dilihat` (tidak dimiliki
 > `shopee_voucher`/`shopee_diskon`).
 >
-> **Kenapa TIDAK langsung dikodekan sesi ini**: sinyal deteksi (`tandaTanganKolom`) BISA ditulis
-> dari temuan di atas, tapi `kolomDipanen` (kolom mana yang genuinely mau dipanen dari struktur
-> yang TERNYATA beda dari asumsi PRD) adalah keputusan desain baru — kelas sama Q-6 — bukan
-> koreksi ejaan. Menyalakan deteksi TANPA `kolomDipanen` yang diputuskan berarti modul akan
-> `parse_status='ok'` vakum (nol kolom divalidasi, nol data dipanen) tanpa AM pernah tahu —
-> lebih berbahaya daripada tetap `UNVERIFIED_SIGNATURE`. Dicatat sebagai Open baru
-> `docs/DECISIONS.md` untuk Anty/Hans: kolom mana dari struktur asli di atas yang mau dipanen.
+> **`G1-09-2BII-DISKON-FLASHSALE-STRUKTUR` DITUTUP sesi 23 (docs/DECISIONS.md 2026-09-14)** —
+> pemilik: "Jalan rekomendasi" (MVP, opsi 1). Kedua modul dinyalakan dari `UNVERIFIED_SIGNATURE`:
+> `shopee_diskon` `tandaTanganKolom: { must: ['Tanggal', 'Tipe Promosi'] }`,
+> `kolomDipanen: ['Tanggal', 'Tipe Promosi', 'Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan
+> (Pesanan Siap Dikirim) (IDR)', 'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)']` —
+> agregat harian sheet "Kriteria Utama" SAJA, BUKAN sheet "Rincian Performa" (per-promosi
+> individual, ditunda sampai ada yang minta — opsi 2). `shopee_flash_sale`
+> `tandaTanganKolom: { must: ['Periode Waktu', 'Jumlah Produk Dilihat'] }`,
+> `kolomDipanen: ['Periode Waktu', 'Penjualan (Pesanan Dibuat)(Rp)', 'Penjualan (Pesanan Siap
+> Dikirim)(Rp)', 'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)', 'Jumlah Produk
+> Dilihat', 'Produk Diklik']`. **Nol writer fact-table** untuk keduanya — sama seperti
+> `shopee_voucher`/`shopee_chat`/`shopee_chat_broadcast`/`meta_ads`, cukup `parse_status='ok'` +
+> audit `pdt_file.kolom_dipanen`; konsumen fact-table menyusul kalau ada yang butuh.
 
 ### 2.9 `shopee_chat` / `shopee_chat_broadcast`
 > **`kolomDipanen` DIKOREKSI sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** terhadap
@@ -394,6 +424,18 @@ Shopee / `pdt_fact_creator_period` Shopee (afiliasi saja — `shopee_ams_produk`
 lihat catatan `fakta.ts` kenapa saudaranya TIDAK dipetakan ke tabel per-kreator ini). `Estimasi
 Komisi(Rp)` di sini adalah sumber **`commission_pct`** Shopee untuk PX Flow D (celah PX #1, §4) —
 sudah bucket 1, bukan tambahan baru. Tidak ada baris bucket 2.
+
+> **`shopee_ams_produk` DIPETAKAN sesi 23 (docs/DECISIONS.md 2026-09-14, modul KEDELAPAN) ke
+> `pdt_fact_sku_period`** — `G1-09-2BII-ADS-CPC-SKU` DITUTUP membuka blocker `sku_id NOT NULL`
+> yang menahannya sejak lahir. `Kode Item`→`platform_product_id` (salinan langsung, `sku_id`
+> tetap NULL — level PRODUK INDUK, sama alasan `shopee_ads_cpc` §2.3), `Omzet Penjualan(Rp)`→
+> `gmv`, `Produk Terjual`→`produk_terjual`, `Pesanan`→`pesanan`. `Estimasi Komisi(Rp)`/`ROI` TETAP
+> tidak ditulis ke tabel manapun (`pdt_fact_sku_period` tidak punya kolom komisi/ROI sama
+> sekali — sumbernya `commission_pct` PX Flow D di atas, konsumen domain LAIN yang belum
+> dibangun). **`basis = 'dibayar'` LITERAL** — AMS tidak menyebutkan basis GMV-nya di kolom
+> manapun (beda dari `shopee_parent_sku`/G1-07 yang eksplisit menulisnya di nama kolom);
+> ditanyakan ke pemilik (`AskUserQuestion`), dijawab "Pesanan Dibayar/Selesai" (lazim untuk
+> program afiliasi — komisi dihitung dari pesanan yang benar-benar selesai).
 
 ### 2.11 `shopee_kesehatan` — **MODUL BARU, tidak ada di §7 sama sekali**
 Bucket 2 (derived-add — modul penuh, `report/shopee/metrik.ts:516-540` `parseKesehatan`,

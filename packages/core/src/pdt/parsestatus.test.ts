@@ -109,6 +109,24 @@ describe('validasiKolomWajib × PDT_MODULES.kolomDipanen — header PERSIS sampl
     ];
     expect(validasiKolomWajib(header, kolomDipanenModul('meta_ads'))).toEqual([]);
   });
+
+  it('shopee_diskon — sheet "Kriteria Utama", discount_*.xlsx (sesi 23, MVP disetujui pemilik)', () => {
+    const header = [
+      'Tanggal', 'Tipe Promosi', 'Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+      'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)', 'Produk Terjual (Pesanan Dibuat)',
+      'Produk Terjual (Pesanan Siap Dikirim)', 'Pembeli (Pesanan Dibuat)', 'Pembeli (Pesanan Siap Dikirim)',
+    ];
+    expect(validasiKolomWajib(header, kolomDipanenModul('shopee_diskon'))).toEqual([]);
+  });
+
+  it('shopee_flash_sale — sheet "Kriteria Utama", In_Shop_Flash_Sale_Metrics_*.xlsx (sesi 23)', () => {
+    const header = [
+      'Periode Waktu', 'Penjualan (Pesanan Dibuat)(Rp)', 'Penjualan (Pesanan Siap Dikirim)(Rp)',
+      'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)', 'Jumlah Produk Dilihat', 'Produk Diklik',
+      'Persentase Klik',
+    ];
+    expect(validasiKolomWajib(header, kolomDipanenModul('shopee_flash_sale'))).toEqual([]);
+  });
 });
 
 describe('turunkanParseStatus (Rule 10)', () => {

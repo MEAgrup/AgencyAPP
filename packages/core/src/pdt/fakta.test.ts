@@ -4,6 +4,9 @@ import {
   ekstrakBarisKreatorTtTransactionCreator,
   ekstrakBarisShopeeAdsCpc,
   ekstrakBarisShopeeAdsLive,
+  ekstrakBarisShopeeAdsSearch,
+  ekstrakBarisShopeeAmsProduk,
+  ekstrakBarisShopeeLive,
   ekstrakBarisSkuMasterShopeeParentSku,
   ekstrakBarisSkuMasterTtOrders,
   ekstrakBarisTtVideo,
@@ -108,6 +111,64 @@ describe('ekstrakBarisTtVideo', () => {
     expect(ekstrakBarisTtVideo(aoa, 1, null)).toEqual([
       { platformContentId: 'V1', creatorPlatformId: null, creatorHandle: null, isAkunToko: false, vv: null, likes: null, dibagikan: null, klikProduk: null, gmv: null },
     ]);
+  });
+});
+
+// Header persis kolomDipanen shopee_live (sheet "Daftar Streaming", live_streaming_*.xlsx).
+const HEADER_SHOPEE_LIVE = ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan (Pesanan Siap Dikirim)(Rp)'];
+
+describe('ekstrakBarisShopeeLive (modul KESEMBILAN, sesi 24)', () => {
+  it('memetakan platformContentId dari digit mentah Waktu Mulai (bukan Informasi Streaming), vv/gmv terisi', () => {
+    const aoa = [
+      HEADER_SHOPEE_LIVE,
+      ['jual berbagai body motor', '03-07-2026 15:21', '1.234', '5.000.000'],
+    ];
+    expect(ekstrakBarisShopeeLive(aoa, 1)).toEqual([
+      { platformContentId: '202607031521', waktuPosting: new Date(Date.UTC(2026, 6, 3, 8, 21)), vv: 1234, gmv: 5000000 },
+    ]);
+  });
+
+  it('judul BERULANG (dua sesi live, Informasi Streaming sama) tetap dua baris terpisah — Waktu Mulai membedakan', () => {
+    const aoa = [
+      HEADER_SHOPEE_LIVE,
+      ['jual berbagai body motor', '03-07-2026 15:21', '100', '0'],
+      ['jual berbagai body motor', '04-07-2026 11:11', '200', '0'],
+    ];
+    const hasil = ekstrakBarisShopeeLive(aoa, 1);
+    expect(hasil.map((b) => b.platformContentId)).toEqual(['202607031521', '202607041111']);
+  });
+
+  it('konversi WIB→UTC benar untuk waktuPosting (WIB − 7 jam)', () => {
+    const aoa = [HEADER_SHOPEE_LIVE, ['Judul', '01-01-2026 00:30', '0', '0']];
+    const [baris] = ekstrakBarisShopeeLive(aoa, 1);
+    // 01-01-2026 00:30 WIB = 31-12-2025 17:30 UTC (hari sebelumnya, WIB lebih dulu)
+    expect(baris.waktuPosting.toISOString()).toBe('2025-12-31T17:30:00.000Z');
+  });
+
+  it('konvensi Seller Center (titik ribuan, koma desimal) — bukan Ads Manager', () => {
+    const aoa = [HEADER_SHOPEE_LIVE, ['Judul', '03-07-2026 15:21', '1.234', '1.234.567,89']];
+    const [baris] = ekstrakBarisShopeeLive(aoa, 1);
+    expect(baris.vv).toBe(1234);
+    expect(baris.gmv).toBe(1234567.89);
+  });
+
+  it('baris ber-"Waktu Mulai" kosong dilewati (bukan baris data sungguhan)', () => {
+    const aoa = [HEADER_SHOPEE_LIVE, ['Judul', '', '0', '0']];
+    expect(ekstrakBarisShopeeLive(aoa, 1)).toHaveLength(0);
+  });
+
+  it('"Waktu Mulai" tidak cocok pola DD-MM-YYYY HH:mm dilewati (bukan crash)', () => {
+    const aoa = [HEADER_SHOPEE_LIVE, ['Judul', 'bukan tanggal', '0', '0']];
+    expect(ekstrakBarisShopeeLive(aoa, 1)).toHaveLength(0);
+  });
+
+  it('kolom "Pengunjung"/"Penjualan (...)(Rp)" hilang ⇒ null untuk field itu (bukan 0)', () => {
+    const headerMinimal = ['Waktu Mulai'];
+    const aoa = [headerMinimal, ['03-07-2026 15:21']];
+    const [baris] = ekstrakBarisShopeeLive(aoa, 1);
+    expect(baris.vv).toBeNull();
+    expect(baris.gmv).toBeNull();
+    expect(baris.platformContentId).toBe('202607031521');
   });
 });
 
@@ -290,27 +351,69 @@ describe('ekstrakBarisKreatorShopeeAmsAfiliasi', () => {
   });
 });
 
+// Header persis kolomDipanen shopee_ams_produk (PDT_KOLOM_DIPANEN.md §2.10, dikoreksi sesi 20).
+const HEADER_SHOPEE_AMS_PRODUK = ['Kode Item', 'Nama Item', 'Omzet Penjualan(Rp)', 'Produk Terjual', 'Pesanan', 'Estimasi Komisi(Rp)', 'ROI'];
+
+describe('ekstrakBarisShopeeAmsProduk (modul KEDELAPAN, sesi 23)', () => {
+  it('memetakan Kode Item/Omzet/Produk Terjual/Pesanan — Nama Item/Estimasi Komisi/ROI TIDAK dipetakan (nol kolom di pdt_fact_sku_period)', () => {
+    const aoa = [
+      HEADER_SHOPEE_AMS_PRODUK,
+      ['22571212550', 'Cover Body Vario 125', '54587884', '120', '95', '2729394', '7.5'],
+    ];
+    expect(ekstrakBarisShopeeAmsProduk(aoa, 1)).toEqual([
+      { platformProductId: '22571212550', gmv: 54587884, produkTerjual: 120, pesanan: 95 },
+    ]);
+  });
+
+  it('konvensi Ads Manager (titik desimal, koma ribuan) — bukan Seller Center', () => {
+    const aoa = [HEADER_SHOPEE_AMS_PRODUK, ['PRD-1', 'Produk A', '2,000,000.5', '0', '0', '0', '0']];
+    expect(ekstrakBarisShopeeAmsProduk(aoa, 1)[0].gmv).toBe(2000000.5);
+  });
+
+  it('baris ber-"Kode Item" kosong dilewati (bukan baris data sungguhan)', () => {
+    const aoa = [HEADER_SHOPEE_AMS_PRODUK, ['', 'Produk A', '0', '0', '0', '0', '0']];
+    expect(ekstrakBarisShopeeAmsProduk(aoa, 1)).toHaveLength(0);
+  });
+
+  it('dua produk terpisah tetap terpetakan masing-masing', () => {
+    const aoa = [
+      HEADER_SHOPEE_AMS_PRODUK,
+      ['PRD-1', 'Produk A', '1000000', '0', '0', '0', '0'],
+      ['PRD-2', 'Produk B', '500000', '0', '0', '0', '0'],
+    ];
+    expect(ekstrakBarisShopeeAmsProduk(aoa, 1).map((b) => b.platformProductId)).toEqual(['PRD-1', 'PRD-2']);
+  });
+
+  it('kolom opsional hilang ⇒ null untuk field itu', () => {
+    const headerMinimal = ['Kode Item'];
+    const aoa = [headerMinimal, ['PRD-1']];
+    expect(ekstrakBarisShopeeAmsProduk(aoa, 1)).toEqual([
+      { platformProductId: 'PRD-1', gmv: null, produkTerjual: null, pesanan: null },
+    ]);
+  });
+});
+
 // Kolom persis Fim Motor asli (`Data+Keseluruhan+Iklan+Shopee-01_07_2026-31_07_2026.csv`,
-// baris header 8) — subset yang dipanen; kolom lain di berkas asli (Status, Jenis Iklan,
-// Kode Produk, dst.) sengaja tidak semuanya diulang di sini, `Kode Produk` diikutkan di
-// beberapa tes untuk membuktikan kolom itu TIDAK dibaca fungsi ini sama sekali.
+// baris header 8) — subset yang dipanen; kolom lain di berkas asli (Status, Jenis Iklan, dst.)
+// sengaja tidak semuanya diulang di sini. `Kode Produk` DIBACA sejak sesi 23 (platformProductId,
+// G1-09-2BII-ADS-CPC-SKU) — beda dari sesi-sesi sebelumnya yang membuktikan kolom itu diabaikan.
 const HEADER_SHOPEE_ADS_CPC = ['nama iklan', 'Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'omzet penjualan', 'Biaya', 'Efektifitas Iklan'];
 
 describe('ekstrakBarisShopeeAdsCpc', () => {
-  it('memetakan satu baris lengkap ke kampanyeId/tayangan/klik/pesananSku/gmv/biaya/roas', () => {
+  it('memetakan satu baris lengkap ke kampanyeId/platformProductId/tayangan/klik/pesananSku/gmv/biaya/roas', () => {
     const aoa = [
       HEADER_SHOPEE_ADS_CPC,
       ['Tameng Depan Besar Kecil Vario Techno 125', '19484539752', '447740', '21428', '616', '105473414', '10628677', '9.92'],
     ];
     expect(ekstrakBarisShopeeAdsCpc(aoa, 1)).toEqual([
       {
-        kampanyeId: 'Tameng Depan Besar Kecil Vario Techno 125',
+        kampanyeId: 'Tameng Depan Besar Kecil Vario Techno 125', platformProductId: '19484539752',
         tayangan: 447740, klik: 21428, pesananSku: 616, gmv: 105473414, biaya: 10628677, roas: 9.92,
       },
     ]);
   });
 
-  it('baris "Shop GMV Max" (sample Fim Motor asli) TANPA Kode Produk tetap masuk — kampanyeId dari nama iklan, bukan Kode Produk', () => {
+  it('baris "Shop GMV Max" (sample Fim Motor asli) Kode Produk="-" ⇒ platformProductId null (iklan TOKO, bukan produk)', () => {
     const aoa = [
       HEADER_SHOPEE_ADS_CPC,
       ['Shop GMV Max', '-', '608677', '29556', '1377', '146650117', '10500000', '13.97'],
@@ -318,6 +421,7 @@ describe('ekstrakBarisShopeeAdsCpc', () => {
     const hasil = ekstrakBarisShopeeAdsCpc(aoa, 1);
     expect(hasil).toHaveLength(1);
     expect(hasil[0].kampanyeId).toBe('Shop GMV Max');
+    expect(hasil[0].platformProductId).toBeNull();
   });
 
   it('konvensi Ads Manager (titik desimal, koma ribuan) — bukan Seller Center', () => {
@@ -337,7 +441,7 @@ describe('ekstrakBarisShopeeAdsCpc', () => {
     expect(ekstrakBarisShopeeAdsCpc(aoa, 1)).toHaveLength(1);
   });
 
-  it('dua iklan untuk PRODUK yang SAMA (Kode Produk identik) tetap dua baris terpisah — kampanyeId membedakan, bukan Kode Produk', () => {
+  it('dua iklan untuk PRODUK yang SAMA (Kode Produk identik) tetap dua baris terpisah — kampanyeId membedakan, platformProductId SAMA di keduanya', () => {
     const aoa = [
       HEADER_SHOPEE_ADS_CPC,
       ['Iklan Manual', 'PRD-1', '1000', '100', '20', '2000000', '150000', '13.33'],
@@ -345,13 +449,90 @@ describe('ekstrakBarisShopeeAdsCpc', () => {
     ];
     const hasil = ekstrakBarisShopeeAdsCpc(aoa, 1);
     expect(hasil.map((b) => b.kampanyeId)).toEqual(['Iklan Manual', 'Iklan Otomatis']);
+    expect(hasil.map((b) => b.platformProductId)).toEqual(['PRD-1', 'PRD-1']);
+  });
+
+  it('kolom "Kode Produk" hilang ⇒ platformProductId null (bukan crash)', () => {
+    const headerTanpaKodeProduk = ['nama iklan', 'Biaya'];
+    const aoa = [headerTanpaKodeProduk, ['Iklan A', '150000']];
+    const [baris] = ekstrakBarisShopeeAdsCpc(aoa, 1);
+    expect(baris.platformProductId).toBeNull();
   });
 
   it('kolom "Dilihat"/"Jumlah Klik"/"Konversi"/"omzet penjualan"/"Efektifitas Iklan" hilang ⇒ null untuk field itu, biaya tetap 0', () => {
     const headerTanpaOpsional = ['nama iklan', 'Biaya'];
     const aoa = [headerTanpaOpsional, ['Iklan A', '150000']];
     expect(ekstrakBarisShopeeAdsCpc(aoa, 1)).toEqual([
-      { kampanyeId: 'Iklan A', tayangan: null, klik: null, pesananSku: null, gmv: null, biaya: 150000, roas: null },
+      {
+        kampanyeId: 'Iklan A', platformProductId: null,
+        tayangan: null, klik: null, pesananSku: null, gmv: null, biaya: 150000, roas: null,
+      },
+    ]);
+  });
+});
+
+// Header persis sample asli Fim Motor (Search-Ads-Overall-Data-*.csv, header baris 8) — subset
+// yang relevan untuk fungsi ini; 'Urutan'/'Status'/'SOV'/dst. sengaja tidak semuanya diulang.
+const HEADER_SHOPEE_ADS_SEARCH = [
+  'Nama Iklan', 'Kata Pencarian', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Omzet Penjualan', 'Biaya', 'Efektifitas Iklan',
+];
+
+describe('ekstrakBarisShopeeAdsSearch', () => {
+  it('memetakan satu baris lengkap ke kampanyeId KOMPOSIT (nama iklan :: kata pencarian)/tayangan/klik/pesananSku/gmv/biaya/roas', () => {
+    const aoa = [
+      HEADER_SHOPEE_ADS_SEARCH,
+      ['Iklan toko by MEA', 'Semua', '3', '20677', '330', '32480316', '6200000', '5.24'],
+    ];
+    expect(ekstrakBarisShopeeAdsSearch(aoa, 1)).toEqual([
+      {
+        kampanyeId: 'Iklan toko by MEA :: Semua',
+        tayangan: 3, klik: 20677, pesananSku: 330, gmv: 32480316, biaya: 6200000, roas: 5.24,
+      },
+    ]);
+  });
+
+  it('dua keyword untuk IKLAN yang SAMA (Nama Iklan identik) tetap dua baris terpisah — komposit membedakan, bukan nama iklan saja', () => {
+    const aoa = [
+      HEADER_SHOPEE_ADS_SEARCH,
+      ['Iklan Search A', 'sepatu wanita', '1000', '100', '20', '2000000', '150000', '13.33'],
+      ['Iklan Search A', 'sepatu pria', '500', '50', '5', '400000', '50000', '8'],
+    ];
+    const hasil = ekstrakBarisShopeeAdsSearch(aoa, 1);
+    expect(hasil.map((b) => b.kampanyeId)).toEqual(['Iklan Search A :: sepatu wanita', 'Iklan Search A :: sepatu pria']);
+  });
+
+  it('konvensi Ads Manager (titik desimal, koma ribuan) — bukan Seller Center', () => {
+    const aoa = [HEADER_SHOPEE_ADS_SEARCH, ['Iklan A', 'Semua', '1,000', '100', '20', '2,000,000', '150000.5', '13.33']];
+    const [baris] = ekstrakBarisShopeeAdsSearch(aoa, 1);
+    expect(baris.tayangan).toBe(1000);
+    expect(baris.gmv).toBe(2000000);
+    expect(baris.biaya).toBe(150000.5);
+  });
+
+  it('baris ber-"Nama Iklan" kosong dilewati (bukan baris data sungguhan, sama pola shopee_ads_cpc)', () => {
+    const aoa = [
+      HEADER_SHOPEE_ADS_SEARCH,
+      ['', 'Semua', '0', '0', '0', '0', '0', '0'],
+      ['Iklan A', 'Semua', '1000', '100', '20', '2000000', '150000', '13.33'],
+    ];
+    expect(ekstrakBarisShopeeAdsSearch(aoa, 1)).toHaveLength(1);
+  });
+
+  it('kolom "Kata Pencarian" hilang ⇒ komposit berkurang jadi "nama iklan :: " (string kosong di sisi kanan)', () => {
+    const headerTanpaKataPencarian = ['Nama Iklan', 'Biaya'];
+    const aoa = [headerTanpaKataPencarian, ['Iklan A', '150000']];
+    const [baris] = ekstrakBarisShopeeAdsSearch(aoa, 1);
+    expect(baris.kampanyeId).toBe('Iklan A :: ');
+  });
+
+  it('kolom "Dilihat"/"Jumlah Klik"/"Konversi"/"Omzet Penjualan"/"Efektifitas Iklan" hilang ⇒ null untuk field itu, biaya tetap 0', () => {
+    const headerTanpaOpsional = ['Nama Iklan', 'Kata Pencarian', 'Biaya'];
+    const aoa = [headerTanpaOpsional, ['Iklan A', 'Semua', '150000']];
+    expect(ekstrakBarisShopeeAdsSearch(aoa, 1)).toEqual([
+      {
+        kampanyeId: 'Iklan A :: Semua',
+        tayangan: null, klik: null, pesananSku: null, gmv: null, biaya: 150000, roas: null,
+      },
     ]);
   });
 });
