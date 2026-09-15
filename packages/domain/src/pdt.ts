@@ -1922,3 +1922,52 @@ export async function rakitInputSkorTiktok(
 
   return { ads, live, video, kartu, affiliate, produk };
 }
+
+// ===========================================================================
+// G2-02 — benchmark TikTok aktif (PDT-21 Rule 23). `pdt_benchmark` berversi
+// PER PLATFORM (PK majemuk `platform, versi`; keputusan pemilik lewat
+// `AskUserQuestion` sesi ini — lihat migrasi `20261030010000` untuk alasan
+// lengkap: TikTok/Shopee dikalibrasi ulang di waktu berbeda, satu versi
+// global akan memaksa rekalibrasi Shopee membump nomor versi TikTok juga).
+// Pola baca IDENTIK `report.ts` (`report_benchmark where aktif = true order
+// by versi desc limit 1`) — nol validasi bentuk `nilai` di sini, sama
+// seperti preseden itu: tabel `pdt_benchmark` default-deny (nol RLS policy),
+// hanya bisa ditulis lewat domain yang sudah menjamin bentuknya benar.
+// ===========================================================================
+
+const MSG_PDT_BENCHMARK_KOSONG = '[benchmark PDT belum dikonfigurasi]';
+
+export interface PdtBenchmarkAktifTiktok {
+  versi: number;
+  bench: pdt.PdtBenchmarkTiktok;
+}
+
+/** Baca versi `pdt_benchmark` TikTok aktif TERTINGGI. Melempar `ValidationError` bila belum ada satu pun (G2-02 belum menyeed). */
+export async function bacaBenchmarkAktifTiktok(sql: Sql): Promise<PdtBenchmarkAktifTiktok> {
+  const rows = await sql<{ versi: number; nilai: pdt.PdtBenchmarkTiktok }[]>`
+    select versi, nilai from pdt_benchmark
+     where platform = 'tiktok' and aktif = true
+     order by versi desc limit 1`;
+  if (rows.length === 0) throw new ValidationError(MSG_PDT_BENCHMARK_KOSONG);
+  return { versi: rows[0].versi, bench: rows[0].nilai };
+}
+
+/**
+ * Rakit fakta (`rakitInputSkorTiktok`) + baca benchmark aktif
+ * (`bacaBenchmarkAktifTiktok`) + hitung (`computeSkorTiktok`, `@cdps/core`)
+ * dalam satu pemanggilan — jalur LENGKAP pertama dari `pdt_fact_*` sampai
+ * skor TikTok siap ditampilkan/dikirim. `benchmarkVersi` dikembalikan
+ * terpisah supaya pemanggil (Flow B langkah 4, belum ada) bisa menyimpannya
+ * ke `pdt_laporan_kiriman.benchmark_versi` saat mengirim laporan (Rule 23).
+ */
+export async function hitungSkorTiktok(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+): Promise<{ hasil: pdt.PdtSkorHasilTiktok; benchmarkVersi: number }> {
+  const [input, { versi: benchmarkVersi, bench }] = await Promise.all([
+    rakitInputSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
+    bacaBenchmarkAktifTiktok(sql),
+  ]);
+  return { hasil: pdt.computeSkorTiktok(input, bench), benchmarkVersi };
+}

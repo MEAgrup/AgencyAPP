@@ -21,12 +21,14 @@ import {
   ForbiddenError,
   NotFoundError,
   ValidationError,
+  bacaBenchmarkAktifTiktok,
   canKelolaBenchmark,
   canKirimLaporan,
   canUploadBatch,
   commitUploadBatch,
   finalizePdtOrphanPurgeTick,
   finalizePdtPurgeTick,
+  hitungSkorTiktok,
   markRawStored,
   planPdtOrphanPurgeTick,
   planPdtPurgeTick,
@@ -2878,5 +2880,72 @@ describeDb('rakitInputSkorTiktok (sesi 34) — agregasi pdt_fact_* → PdtSkorIn
   it('periode selain awal bulan (bukan YYYY-MM-01) ⇒ ValidationError', async () => {
     const { cpId } = await fixture();
     await expect(rakitInputSkorTiktok(sql, cpId, '2026-07-15')).rejects.toThrow(ValidationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34, G2-02 lanjutan) —
+// `pdt_benchmark` diseed migrasi `20261030010000` (versi 1 TikTok, PORT
+// REPORT_BENCH_V1 apa adanya) DAN append-only (trigger blokir UPDATE/DELETE)
+// — tes di sini SENGAJA tidak menyisipkan/menghapus baris `pdt_benchmark`
+// sendiri, mengandalkan seed migrasi persis seperti test suite `report.ts`
+// mengandalkan seed `report_benchmark` (nol tes untuk "benchmark kosong",
+// tidak bisa direproduksi tanpa menghapus seed yang di-frozen trigger).
+// ---------------------------------------------------------------------------
+describeDb('bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34) — benchmark aktif + jalur lengkap fakta→skor', () => {
+  async function fixture(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', 'SHOP-ZPDT-2');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  it('bacaBenchmarkAktifTiktok: mengembalikan versi 1 TikTok — PORT REPORT_BENCH_V1 apa adanya (delapan kunci)', async () => {
+    const hasil = await bacaBenchmarkAktifTiktok(sql);
+    expect(hasil).toEqual({
+      versi: 1,
+      bench: {
+        roi_gmvmax: { good: 8, warn: 4 },
+        cpa_ratio: { good: 0.1, warn: 0.2 },
+        gmv_per_jam_live: { good: 300000, warn: 150000 },
+        sesi_live: { good: 20, warn: 12 },
+        gpm_video: { good: 30000, warn: 10000 },
+        pct_video_sales: { good: 0.05, warn: 0.02 },
+        cvr_toko: { good: 0.015, warn: 0.008 },
+        pct_kreator_produktif: { good: 0.2, warn: 0.1 },
+      },
+    });
+  });
+
+  it('hitungSkorTiktok: merakit fakta + benchmark aktif + computeSkorTiktok — total & benchmarkVersi cocok hitungan langsung dari input yang SAMA', async () => {
+    const { cpId, batchId } = await fixture();
+    // Satu dimensi saja (Ads) supaya nilai yang diharapkan mudah dihitung ulang secara independen.
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, pesanan_sku)
+      values (${cpId}, 'tt_ads_product', 'K1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100000, 500000, 10)`;
+
+    const { hasil, benchmarkVersi } = await hitungSkorTiktok(sql, cpId, '2026-07-01');
+    expect(benchmarkVersi).toBe(1);
+
+    const inputLangsung = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
+    const { bench } = await bacaBenchmarkAktifTiktok(sql);
+    const harapan = pdtCore.computeSkorTiktok(inputLangsung, bench);
+    expect(hasil).toEqual(harapan);
+    // Hanya dimensi Ads yang punya data ⇒ Rule 12 mengecualikan lima dimensi lain, bukan skor netral.
+    expect(hasil.dimensi.filter((d) => d.disertakan)).toHaveLength(1);
+    expect(hasil.dimensi.find((d) => d.kode === 'gmvmax')?.disertakan).toBe(true);
+  });
+
+  it('hitungSkorTiktok: nol baris fakta sama sekali ⇒ total & label null (Rule 12/aturan rumah #7 — bukan KRITIS palsu)', async () => {
+    const { cpId } = await fixture();
+    const { hasil } = await hitungSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.total).toBeNull();
+    expect(hasil.label).toBeNull();
   });
 });

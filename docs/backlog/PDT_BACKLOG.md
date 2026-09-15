@@ -855,19 +855,37 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > lama menerima `vid_toko` DAN `vid_aff` sekaligus ke satu `videoReport`). Portfolio Produk TETAP
 > `null` (lihat Open `G2-01-KUADRAN-SKU` di atas — tidak berubah).
 >
-> **Belum dikerjakan (sengaja, urutan berikutnya):** keputusan mekanisme "pencabutan"/revoke untuk
-> `pdt_laporan_kiriman` (tabel itu TOTAL frozen sejak baris pertama, nol kolom status — Rule 24
-> butuh cara menandai "dicabut" tanpa melanggar `UPDATE` yang diblok trigger), benchmark seed
-> versi 1 + bentuk JSON `pdt_benchmark.nilai` (G2-02, `pdt_benchmark` masih nol baris — TANPA ini
-> `rakitInputSkorTiktok` tidak bisa disambung ke `computeSkorTiktok`, lima dari enam dimensi butuh
-> ambang benchmark), route HTTP, dan seluruh sisi Shopee (dimensi/bobot berbeda,
-> `report/shopee/skor.ts` sebagai rujukan porting berikutnya).
+> **Status 2026-09-15 (sesi 34, lanjutan) — jalur LENGKAP fakta→skor TikTok hidup.**
+> `hitungSkorTiktok` (`packages/domain/src/pdt.ts`) merakit `rakitInputSkorTiktok` +
+> `bacaBenchmarkAktifTiktok` + `computeSkorTiktok` dalam satu pemanggilan — pertama kalinya skor
+> TikTok bisa dihitung dari `pdt_fact_*` sungguhan sampai selesai. `pdt_benchmark` sekarang
+> berversi **PER PLATFORM** (PK majemuk `platform, versi`, migrasi `20261030010000`; keputusan
+> pemilik lewat `AskUserQuestion` — lihat `docs/DECISIONS.md`), diseed versi 1 TikTok = PORT
+> `REPORT_BENCH_V1` (`report/bench.ts`) apa adanya, delapan kunci `PdtBenchmarkTiktok`. `versi`
+> TETAP UNIQUE global (constraint terpisah dari PK) supaya `pdt_laporan_kiriman.benchmark_versi`
+> tidak perlu kolom `platform` tambahan.
+>
+> **Belum dikerjakan (sengaja, urutan berikutnya):** UI/route admin untuk menambah versi
+> benchmark baru TANPA migrasi+deploy (Rule 25 — hari ini versi baru MASIH lewat migrasi SQL,
+> seperti seed versi 1; G2-02 belum benar-benar "selesai" sampai Director bisa menambah versi
+> lewat UI), keputusan mekanisme "pencabutan"/revoke untuk `pdt_laporan_kiriman` (tabel itu TOTAL
+> frozen sejak baris pertama, nol kolom status — Rule 24 butuh cara menandai "dicabut" tanpa
+> melanggar `UPDATE` yang diblok trigger), route HTTP untuk `hitungSkorTiktok`, dan seluruh sisi
+> Shopee (dimensi/bobot berbeda, benchmark versi Shopee sendiri, `report/shopee/skor.ts` sebagai
+> rujukan porting berikutnya).
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**
 - Mengubah ambang **tidak boleh lagi** butuh migrasi SQL + deploy (Rule 25).
 - Gate: `canKelolaBenchmark(actor)` = **Director saja** (preseden `productexchange.canKelolaPolicy`).
+
+> **Status 2026-09-15 (sesi 34, lanjutan) — skema + seed versi 1 TikTok DITUTUP, UI admin BELUM.**
+> `pdt_benchmark` berversi per platform + `bacaBenchmarkAktifTiktok` (baca versi aktif tertinggi)
+> sudah ada — lihat status G2-01 di atas untuk rincian lengkap. Rule 25 ("mengubah ambang tidak
+> boleh lagi butuh migrasi+deploy") **belum** terpenuhi: menambah versi baru hari ini masih lewat
+> migrasi SQL (sama seperti seed versi 1), belum ada route/UI Director untuk INSERT baris baru
+> langsung. Itu pekerjaan tersisa G2-02.
 
 **DoD:** mengubah ambang lewat UI menggeser skor laporan belum-terkirim dan **tidak** menggeser
 yang sudah terkirim, dibuktikan satu tes.
