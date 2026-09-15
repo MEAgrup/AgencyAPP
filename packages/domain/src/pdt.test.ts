@@ -366,16 +366,14 @@ function ttVideoBerkasLengkap(
 }
 
 // ---------------------------------------------------------------------------
-// Fixture rekonsiliasi Shopee (G1-09 sub-langkah 2b-i) — shopee_shop_stats
-// BUKAN satu header, tapi DUA struktur berbeda dalam satu sheet: (a) baris
-// 15-metrik DATAR (HEADER_SHOP_STATS_15) yang divalidasi validasiKolomWajib
-// (Rule 9, `kolomDipanen`); (b) mini-tabel PER BASIS (marker 'Pesanan Siap
-// Dikirim' → header 'Periode Waktu'/'Total Penjualan (IDR)'/'Total Pesanan'
-// → baris Total) yang dibaca `parseShopeeShopStatsPerBasis` (G1-07) —
-// terpisah dari (a), lihat rekonsiliasi.test.ts FIM_MOTOR_SHOP_STATS untuk
-// bentuk aslinya. Detection (`detectPdtModule`) TIDAK disentuh di sini
-// (fixture domain-level menyuntik `modulTerdeteksi` langsung), jadi hanya
-// (a)+(b) yang perlu benar, bukan `tandaTanganKolom`.
+// Fixture rekonsiliasi Shopee (G1-09 sub-langkah 2b-i) — sheet `shopee_shop_stats`
+// SUDAH terisolasi per basis (`namaSheet`, G1-09-SHEET-BUKAN-PERTAMA): header
+// (HEADER_SHOP_STATS_15, dites `validasiKolomWajib` Rule 9 DAN dibaca
+// `parseShopeeShopStatsBasisTerisolasi`, G1-07) diikuti LANGSUNG oleh baris
+// ringkasan periode — bentuk PERSIS sample asli terverifikasi (rekonsiliasi.test.ts
+// FIM_MOTOR_SHOP_STATS_SIAP_DIKIRIM). Detection (`detectPdtModuleAntarSheet`)
+// TIDAK disentuh di sini (fixture domain-level menyuntik `modulTerdeteksi`
+// langsung), jadi hanya bentuk baris yang perlu benar, bukan `tandaTanganKolom`.
 // ---------------------------------------------------------------------------
 const HEADER_SHOP_STATS_15 = [
   'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik', 'Total Pengunjung',
@@ -386,14 +384,7 @@ const HEADER_SHOP_STATS_15 = [
 
 function shopeeShopStatsBerkas(nama: string, gmvSiapKirim: number, pesananSiapKirim: number): PdtPreviewBerkasInput {
   const dataRow15 = [String(gmvSiapKirim), String(pesananSiapKirim), '0', '0', '500', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'];
-  const aoa: unknown[][] = [
-    HEADER_SHOP_STATS_15,
-    dataRow15,
-    [],
-    ['Pesanan Siap Dikirim'],
-    ['Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan'],
-    ['Total', String(gmvSiapKirim), String(pesananSiapKirim)],
-  ];
+  const aoa: unknown[][] = [HEADER_SHOP_STATS_15, dataRow15];
   return {
     nama, sha256: 'sha-shopstats', bytes: 100, ditolakPagar: null, decodeGagal: null,
     aoa, sheets: null, modulTerdeteksi: 'shopee_shop_stats', ambiguous: false, matches: ['shopee_shop_stats'],

@@ -589,7 +589,7 @@ export interface PdtCommitPersiapan {
  * dicatat `G1-07-PERSKU-PESANAN` (Open, `docs/DECISIONS.md`). TikTok TIDAK
  * direkonsiliasi sama sekali di sini — G1-07 tidak (belum) punya fungsi
  * pembaca shop-level-vs-per-SKU untuk TikTok setara punya Shopee
- * (`parseShopeeShopStatsPerBasis`/`sumShopeeParentSkuGmv`); batch TikTok
+ * (`parseShopeeShopStatsBasisTerisolasi`/`sumShopeeParentSkuGmv`); batch TikTok
  * berhenti di `'parsing'`, dicatat `G1-07-TIKTOK-REKONSILIASI` (Open).
  * Lolos ambang ⇒ `status='verified'` — **`uq_pdt_upload_batch_verified`**
  * (partial unique index, Rule 36) menolak batch verified KEDUA untuk
@@ -667,7 +667,7 @@ export async function commitUploadBatch(
       const shopStatsBerkas = terparse.find((b) => b.modul.kode === 'shopee_shop_stats');
       const parentSkuBerkas = terparse.find((b) => b.modul.kode === 'shopee_parent_sku');
       if (shopStatsBerkas && parentSkuBerkas) {
-        const shopLevel = pdt.parseShopeeShopStatsPerBasis(shopStatsBerkas.aoa).siap_dikirim;
+        const shopLevel = pdt.parseShopeeShopStatsBasisTerisolasi(shopStatsBerkas.aoa);
         if (shopLevel) {
           const perSkuGmv = pdt.sumShopeeParentSkuGmv(
             parentSkuBerkas.aoa, 'Penjualan (Pesanan Siap Dikirim) (IDR)', parentSkuBerkas.barisHeader,
