@@ -36,11 +36,21 @@ function zipkan(entries: { nama: string; isi: Buffer }[]): Promise<Buffer> {
   });
 }
 
-/** Tulis AoA jadi bytes `.xlsx` SUNGGUHAN — mitra tulis dari `decodePdtAoa`. */
-function xlsxDariAoa(aoa: Aoa): Buffer {
+/** Tulis AoA jadi bytes `.xlsx` SUNGGUHAN — mitra tulis dari `decodePdtAoa`. `namaSheet` default 'Sheet1' (mayoritas modul, tanpa `namaSheet`). */
+function xlsxDariAoa(aoa: Aoa, namaSheet = 'Sheet1'): Buffer {
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+  XLSX.utils.book_append_sheet(wb, ws, namaSheet);
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+}
+
+/**
+ * Tulis workbook MULTI-SHEET sungguhan — dipakai G1-09-SHEET-BUKAN-PERTAMA:
+ * `sheets` berurutan sesuai `wb.SheetNames` (sheet PERTAMA = elemen pertama).
+ */
+function xlsxMultiSheetDariAoa(sheets: readonly { nama: string; aoa: Aoa }[]): Buffer {
+  const wb = XLSX.utils.book_new();
+  for (const s of sheets) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s.aoa), s.nama);
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 }
 
@@ -56,7 +66,7 @@ function csvDariAoa(aoa: Aoa, bom = false): Buffer {
 // TikTok + 13 Shopee, termasuk 2 varian ejaan `shopee_kesehatan` + 1 meta_ads
 // = 22 modul berbeda). Disalin literal, bukan dikarang ulang.
 // ---------------------------------------------------------------------------
-const FIXTURES: { nama: string; kode: string; aoa: Aoa; csv?: boolean; bom?: boolean }[] = [
+const FIXTURES: { nama: string; kode: string; aoa: Aoa; csv?: boolean; bom?: boolean; sheetName?: string }[] = [
   {
     nama: 'f01_tiktok_orders.xlsx',
     kode: 'tt_orders',
@@ -138,13 +148,16 @@ const FIXTURES: { nama: string; kode: string; aoa: Aoa; csv?: boolean; bom?: boo
   {
     nama: 'f10_shop_stats.xlsx',
     kode: 'shopee_shop_stats',
+    // G1-09-SHEET-BUKAN-PERTAMA: sheet TERISOLASI per basis (`namaSheet:
+    // 'Pesanan Siap Dikirim'`, modules.ts) — header LANGSUNG di baris
+    // pertama, nol baris penanda seksi (beda dari tebakan lama).
+    sheetName: 'Pesanan Siap Dikirim',
     aoa: [
-      ['Pesanan Dibuat'],
-      ['Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik',
+      ['Tanggal', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik',
         'Total Pengunjung', 'Tingkat Konversi Pesanan', 'Pesanan Dibatalkan', 'Penjualan Dibatalkan',
         'Pesanan Dikembalikan', 'Penjualan Dikembalikan', 'Pembeli', 'Total Pembeli Baru',
         'Total Pembeli Saat Ini', 'Total Potensi Pembeli', 'Tingkat Pembelian Berulang'],
-      ['Total', 'Rp1.624.937.476', '13568', 'Rp119.762', '5000', '20627', '2,46%', '2785', 'Rp359.295.534', '140', 'Rp24.586.464', '11452', '300', '600', '50', '12,97%'],
+      ['01/07/2026', 'Rp1.624.937.476', '13568', 'Rp119.762', '5000', '20627', '2,46%', '2785', 'Rp359.295.534', '140', 'Rp24.586.464', '11452', '300', '600', '50', '12,97%'],
     ],
   },
   {
@@ -193,6 +206,8 @@ const FIXTURES: { nama: string; kode: string; aoa: Aoa; csv?: boolean; bom?: boo
   {
     nama: 'f15_shopee_live.xlsx',
     kode: 'shopee_live',
+    // G1-09-SHEET-BUKAN-PERTAMA: sheet "Daftar Streaming" (modules.ts `namaSheet`).
+    sheetName: 'Daftar Streaming',
     aoa: [
       ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan'],
       ['Live Juli', '2026-07-10 20:00', '500', 'Rp5.000.000'],
@@ -280,7 +295,7 @@ describe('parsePdtZipEntries / decodePdtAoa (G1-05) — dekode + deteksi lewat p
   it('23 berkas (9 TikTok + 13 Shopee + 1 meta_ads, campuran .xlsx/.csv, satu ber-BOM utf-8-sig) — semua terdekode & tepat satu modul per berkas, nol salah-slot, nol gagal', async () => {
     const entries = FIXTURES.map((f) => ({
       nama: f.nama,
-      isi: f.csv ? csvDariAoa(f.aoa, f.bom) : xlsxDariAoa(f.aoa),
+      isi: f.csv ? csvDariAoa(f.aoa, f.bom) : xlsxDariAoa(f.aoa, f.sheetName),
     }));
     const paket = await zipkan(entries);
 
@@ -303,6 +318,63 @@ describe('parsePdtZipEntries / decodePdtAoa (G1-05) — dekode + deteksi lewat p
       expect(hasil?.modul, `${f.nama} (${f.kode})`).toBe(f.kode);
       expect(hasil?.aoa.length, `${f.nama} AoA kosong`).toBeGreaterThan(0);
     }
+  });
+
+  // G1-09-SHEET-BUKAN-PERTAMA (docs/DECISIONS.md) — REGRESI eksplisit: sample
+  // asli membuktikan workbook `shopee_live`/`shopee_shop_stats` punya sheet
+  // TIDAK relevan sebagai sheet PERTAMA ("Tinjauan"/ringkasan agregat), dan
+  // sheet yang modul ini sungguhan butuhkan ada di posisi LAIN. Tes ini
+  // MENIRU bentuk itu persis (bukan workbook satu-sheet seperti FIXTURES di
+  // atas) — sebelum perbaikan `namaSheet`, ini akan GAGAL (modul: null,
+  // aoa dari sheet "Tinjauan" yang tidak pernah cocok tanda tangan apa pun).
+  it('workbook multi-sheet: sheet target BUKAN sheet pertama tetap terdeteksi benar (bug asli, sebelum namaSheet)', async () => {
+    const sheetShopeeLive = xlsxMultiSheetDariAoa([
+      { nama: 'Tinjauan', aoa: [['Ringkasan agregat tidak relevan — struktur beda total']] },
+      { nama: 'Tren Metrik', aoa: [['Metrik lain, juga tidak relevan']] },
+      { nama: 'Daftar Streaming', aoa: [
+        ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan'],
+        ['Live Juli', '2026-07-10 20:00', '500', 'Rp5.000.000'],
+      ] },
+    ]);
+    const sheetShopStats = xlsxMultiSheetDariAoa([
+      { nama: 'Pesanan Dibuat', aoa: [
+        ['Tanggal', 'Total Penjualan (IDR)', 'Total Pengunjung'],
+        ['01/07/2026', 'Rp100.000', '500'],
+      ] },
+      { nama: 'Pesanan Siap Dikirim', aoa: [
+        ['Tanggal', 'Total Penjualan (IDR)', 'Total Pengunjung'],
+        ['01/07/2026', 'Rp90.000', '480'],
+      ] },
+      { nama: 'Pesanan Dibayar', aoa: [
+        ['Tanggal', 'Total Penjualan (IDR)', 'Total Pengunjung'],
+        ['01/07/2026', 'Rp85.000', '470'],
+      ] },
+    ]);
+    const paket = await zipkan([
+      { nama: 'live_streaming.xlsx', isi: sheetShopeeLive },
+      { nama: 'shop_stats.xlsx', isi: sheetShopStats },
+    ]);
+
+    const zipHasil = await bacaDanEkstrakPdtZip(paket);
+    if (zipHasil.direktoriSementara) direktoriUntukDibersihkan.push(zipHasil.direktoriSementara);
+    const parseHasil = await parsePdtZipEntries(zipHasil.diekstrak, PDT_MODULES);
+    expect(parseHasil.gagal).toEqual([]);
+
+    const live = parseHasil.berkas.find((b) => b.nama === 'live_streaming.xlsx');
+    expect(live?.modul).toBe('shopee_live');
+    expect(live?.ambiguous).toBe(false);
+    expect(live?.aoa).toEqual([
+      ['Informasi Streaming', 'Waktu Mulai', 'Pengunjung', 'Penjualan'],
+      ['Live Juli', '2026-07-10 20:00', '500', 'Rp5.000.000'],
+    ]);
+
+    const shopStats = parseHasil.berkas.find((b) => b.nama === 'shop_stats.xlsx');
+    expect(shopStats?.modul).toBe('shopee_shop_stats');
+    expect(shopStats?.ambiguous).toBe(false);
+    expect(shopStats?.aoa).toEqual([
+      ['Tanggal', 'Total Penjualan (IDR)', 'Total Pengunjung'],
+      ['01/07/2026', 'Rp90.000', '480'],
+    ]); // basis 'Pesanan Siap Dikirim' — BUKAN 'Pesanan Dibuat' (sheet pertama) atau 'Pesanan Dibayar'
   });
 
   it('kegagalan dekode SATU entri (berkas rusak) tidak menjatuhkan batch — entri lain tetap diproses', async () => {

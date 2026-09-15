@@ -189,11 +189,32 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     kode: 'shopee_shop_stats',
     platform: 'shopee',
     namaTampilan: 'Shopee — Bisnis Saya (Home, 12 sheet)',
-    // Sama persis `report/shopee/detect.ts` CONTENT_SIGNATURES.bisnis_home.
-    // Baris penanda seksi ('Pesanan Dibuat') + header sebenarnya cocok lewat
-    // pemindaian-semua-baris (Rule 7), bukan indeks tetap.
-    tandaTanganKolom: { must: ['Pesanan Dibuat', 'Total Pengunjung'] },
-    barisHeaderHint: 2, // baris 1 = penanda seksi, baris 2 = header metrik (report/shopee/shopee.test.ts bisnisHomeAoa)
+    // G1-09-SHEET-BUKAN-PERTAMA (docs/DECISIONS.md, sesi 27 menemukan, sesi
+    // berikutnya menutup): tanda tangan LAMA (`must: ['Pesanan Dibuat', 'Total
+    // Pengunjung']`, "penanda seksi + header cocok lewat pemindaian-semua-baris")
+    // TERBUKTI SALAH terhadap sample asli 12-sheet (`fim_motor.shopee-shop-stats.*.xlsx`):
+    // 'Pesanan Dibuat' HANYA muncul sebagai NAMA TAB (sheet pertama dari 12),
+    // BUKAN sebagai isi sel — isi sheet itu LANGSUNG dimulai dari header
+    // ('Tanggal'/'Total Penjualan (IDR)'/dst.), nol baris penanda. Ketiga basis
+    // GMV (Rule 16: Dibuat/Siap Dikirim/Dibayar) ternyata SHEET TERPISAH
+    // (nama tab persis 'Pesanan Dibuat'/'Pesanan Siap Dikirim'/'Pesanan
+    // Dibayar'), bukan tiga section dalam satu sheet seperti tebakan lama.
+    // `commitUploadBatch` (packages/domain/src/pdt.ts) HANYA memakai basis
+    // 'Siap Dikirim' (default laporan klien, Rule 16) — `namaSheet` di bawah
+    // mengunci modul ini ke SATU sheet itu; sinyal deteksi diganti ke kolom
+    // yang SUNGGUH ADA di dalamnya (sudah di `kolomDipanen` sejak awal).
+    // ⚠️ Ini HANYA memperbaiki DETEKSI (modul ini berhenti jadi kode mati).
+    // Pembacaan NILAI shop-level dari sheet yang SUDAH terisolasi begini
+    // (`parseShopeeShopStatsPerBasis`, `rekonsiliasi.ts`) MASIH mengasumsikan
+    // format lama (marker + baris Total sesudahnya) — TIDAK diubah di sini
+    // karena struktur baris DI DALAM sheet terisolasi (ada baris Total, atau
+    // murni harian?) belum terverifikasi ke sample. Dicatat Open baru
+    // `G1-09-SHOPEESHOPSTATS-BASIS-TOTAL` — bukan regresi (jalur ini SUDAH
+    // nol dari sumber ini sebelum perbaikan ini juga, karena modul tidak
+    // pernah terdeteksi sama sekali).
+    namaSheet: 'Pesanan Siap Dikirim',
+    tandaTanganKolom: { must: ['Total Penjualan (IDR)', 'Total Pengunjung'] },
+    barisHeaderHint: 1, // header LANGSUNG di baris 1 di sheet terisolasi (nol baris penanda seksi)
     // 14-15 metrik per basis (PDT_KOLOM_DIPANEN §2.1: "3 basis × 14 metrik" —
     // literal di bawah diverifikasi lewat report/shopee/metrik.ts + shopee.test.ts
     // HOME_HEADER, dites terhadap angka Fim Motor UAT persis). "Asal kunjungan"/
@@ -290,6 +311,15 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     kode: 'shopee_live',
     platform: 'shopee',
     namaTampilan: 'Shopee — Live Streaming',
+    // G1-09-SHEET-BUKAN-PERTAMA (docs/DECISIONS.md, sesi 27 menemukan, sesi
+    // berikutnya menutup): `namaSheet` di bawah TERLAMBAT satu sesi — sesi 24
+    // SUDAH mengonfirmasi sheet ini ke sample asli (komentar `barisHeaderHint`
+    // di bawah), tapi tidak ada yang mengecek apakah PIPELINE (`pdt-parse.ts`)
+    // benar-benar membaca sheet itu. Sebelum ini pipeline SELALU membaca sheet
+    // PERTAMA workbook ("Tinjauan", ringkasan agregat struktur beda total,
+    // tidak pernah cocok tanda tangan ini) — modul ini adalah kode mati di
+    // produksi sampai `namaSheet` menutup celah itu.
+    namaSheet: 'Daftar Streaming',
     tandaTanganKolom: { must: ['Informasi Streaming', 'Waktu Mulai'] },
     barisHeaderHint: 1, // DIKONFIRMASI: sheet "Daftar Streaming" (dari 3 sheet workbook), sample asli Fim Motor `live_streaming_*.xlsx`.
     // 'Penjualan' DIKOREKSI ke ejaan PERSIS sample asli — ejaan lama adalah

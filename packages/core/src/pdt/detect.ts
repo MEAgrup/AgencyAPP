@@ -71,3 +71,45 @@ export function detectPdtModule(rows: readonly (readonly unknown[])[], modules: 
   if (matches.length === 1) return { kode: matches[0], ambiguous: false, matches };
   return { kode: null, ambiguous: matches.length > 1, matches };
 }
+
+export interface DetectPdtModuleAntarSheetResult extends DetectPdtModuleResult {
+  /**
+   * AoA milik SATU modul pemenang (`kode`) — isi sheet yang `namaSheet`-nya
+   * modul itu minta (default sheet PERTAMA bila `namaSheet` tidak diisi).
+   * `null` bila `kode` null (nol/lebih dari satu cocok) — TIDAK ada satu AoA
+   * yang bisa mewakili hasil ambigu/nol-cocok (modul yang cocok bisa saja
+   * hidup di sheet BERBEDA satu sama lain).
+   */
+  aoa: readonly (readonly unknown[])[] | null;
+}
+
+/**
+ * `detectPdtModule` untuk workbook MULTI-SHEET (G1-09-SHEET-BUKAN-PERTAMA,
+ * `docs/DECISIONS.md`) — setiap modul dicocokkan terhadap SHEET-NYA SENDIRI
+ * (`PdtModuleDef.namaSheet`, default sheet pertama bila tidak diisi), bukan
+ * satu sheet yang sama dipaksakan untuk seluruh modul seperti `detectPdtModule`.
+ * Modul yang `namaSheet`-nya tidak ada di workbook ini TIDAK PERNAH cocok
+ * (bukan error — banyak berkas hanya punya satu sheet, sebagian besar modul
+ * tidak butuh sheet spesifik sama sekali).
+ */
+export function detectPdtModuleAntarSheet(
+  sheets: ReadonlyMap<string, readonly (readonly unknown[])[]>,
+  urutanSheet: readonly string[],
+  modules: readonly PdtModuleDef[],
+): DetectPdtModuleAntarSheetResult {
+  const sheetPertama = urutanSheet[0];
+  const matches: string[] = [];
+  let aoaPemenang: readonly (readonly unknown[])[] | null = null;
+  for (const m of modules) {
+    const namaSheet = m.namaSheet ?? sheetPertama;
+    if (namaSheet == null) continue;
+    const rows = sheets.get(namaSheet);
+    if (!rows) continue; // workbook tidak punya sheet ini — modul ini tidak mungkin cocok
+    if (matchesSignature(rows, m.tandaTanganKolom)) {
+      matches.push(m.kode);
+      aoaPemenang = rows;
+    }
+  }
+  if (matches.length === 1) return { kode: matches[0], ambiguous: false, matches, aoa: aoaPemenang };
+  return { kode: null, ambiguous: matches.length > 1, matches, aoa: null };
+}

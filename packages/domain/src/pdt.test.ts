@@ -207,11 +207,11 @@ beforeAll(async () => {
 });
 
 const decodeGagalBerkas = (nama: string, pesan: string): PdtPreviewBerkasInput => ({
-  nama, sha256: null, bytes: null, ditolakPagar: null, decodeGagal: pesan, aoa: null, modulTerdeteksi: null, ambiguous: false, matches: [],
+  nama, sha256: null, bytes: null, ditolakPagar: null, decodeGagal: pesan, aoa: null, sheets: null, modulTerdeteksi: null, ambiguous: false, matches: [],
 });
 
 const ditolakPagarBerkas = (nama: string, pesan: string): PdtPreviewBerkasInput => ({
-  nama, sha256: null, bytes: null, ditolakPagar: { pesan }, decodeGagal: null, aoa: null, modulTerdeteksi: null, ambiguous: false, matches: [],
+  nama, sha256: null, bytes: null, ditolakPagar: { pesan }, decodeGagal: null, aoa: null, sheets: null, modulTerdeteksi: null, ambiguous: false, matches: [],
 });
 
 /** Berkas shopee_ads_cpc LENGKAP (seluruh kolomDipanen + preamble) — cukup untuk status 'ok' dan sinyal identitas/periode. */
@@ -231,7 +231,7 @@ function shopeeAdsCpcBerkas(nama: string, idToko: string, periode: string): PdtP
     header,
     ['P1', '01/07/2026', 'PRD-1', '100', '10', '2', '5000', 'Iklan A', '200000', '4x', '2,5'],
   ];
-  return { nama, sha256: 'sha-cpc', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_ads_cpc', ambiguous: false, matches: ['shopee_ads_cpc'] };
+  return { nama, sha256: 'sha-cpc', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'shopee_ads_cpc', ambiguous: false, matches: ['shopee_ads_cpc'] };
 }
 
 /**
@@ -255,7 +255,7 @@ function shopeeAdsLiveBerkas(nama: string, idToko: string, periode: string, bari
     header,
     ...baris.map(([namaIklan, idIklan, penonton, pesanan, omzet, biaya]) => [namaIklan, idIklan, penonton, pesanan, omzet, biaya, '10']),
   ];
-  return { nama, sha256: 'sha-adslive', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_ads_live', ambiguous: false, matches: ['shopee_ads_live'] };
+  return { nama, sha256: 'sha-adslive', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'shopee_ads_live', ambiguous: false, matches: ['shopee_ads_live'] };
 }
 
 /**
@@ -285,7 +285,7 @@ function shopeeAdsCpcBerkasLengkap(
     header,
     ...baris.map(([namaIklan, kodeProduk, dilihat, klik, konversi, omzet, biaya]) => [namaIklan, kodeProduk, dilihat, klik, konversi, omzet, biaya, '10%']),
   ];
-  return { nama, sha256: 'sha-adscpc-lengkap', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_ads_cpc', ambiguous: false, matches: ['shopee_ads_cpc'] };
+  return { nama, sha256: 'sha-adscpc-lengkap', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'shopee_ads_cpc', ambiguous: false, matches: ['shopee_ads_cpc'] };
 }
 
 /**
@@ -313,7 +313,7 @@ function shopeeAdsSearchBerkasLengkap(
     header,
     ...baris.map(([namaIklan, kataPencarian, dilihat, klik, konversi, omzet, biaya]) => [namaIklan, kataPencarian, dilihat, klik, konversi, omzet, biaya, '5.24']),
   ];
-  return { nama, sha256: 'sha-adssearch-lengkap', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'shopee_ads_search', ambiguous: false, matches: ['shopee_ads_search'] };
+  return { nama, sha256: 'sha-adssearch-lengkap', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'shopee_ads_search', ambiguous: false, matches: ['shopee_ads_search'] };
 }
 
 /** Berkas tt_video LENGKAP — cukup untuk status 'ok' dan sinyal identitas TikTok ('ID Kreator' terbanyak). */
@@ -325,7 +325,7 @@ function ttVideoBerkas(nama: string, idKreator: string): PdtPreviewBerkasInput {
     [idKreator, 'V1', '01/07/2026', 'Produk A', '100', '10', '2', '5', 'Kreator A', 'info', '1000', '50000'],
     [idKreator, 'V2', '02/07/2026', 'Produk B', '200', '20', '4', '10', 'Kreator A', 'info', '2000', '80000'],
   ];
-  return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
+  return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
 }
 
 /**
@@ -341,7 +341,7 @@ function ttVideoBerkasDenganPeriode(nama: string, idKreator: string, rentang: st
     header,
     [idKreator, 'V1', '01/07/2026', rentang, 'Produk A', '100', '10', '2', '5', 'Kreator A', 'info', '1000', '50000'],
   ];
-  return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
+  return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
 }
 
 /**
@@ -362,7 +362,7 @@ function ttVideoBerkasLengkap(
     header,
     ...baris.map(([idKreator, idVideo, vv, likes, dibagikan, klikProduk, gmv]) => [idKreator, idVideo, '01/07/2026', rentang, 'Produk A', vv, likes, dibagikan, klikProduk, 'Kreator', 'info', '1000', gmv]),
   ];
-  return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
+  return { nama, sha256: 'sha-video', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_video', ambiguous: false, matches: ['tt_video'] };
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +396,7 @@ function shopeeShopStatsBerkas(nama: string, gmvSiapKirim: number, pesananSiapKi
   ];
   return {
     nama, sha256: 'sha-shopstats', bytes: 100, ditolakPagar: null, decodeGagal: null,
-    aoa, modulTerdeteksi: 'shopee_shop_stats', ambiguous: false, matches: ['shopee_shop_stats'],
+    aoa, sheets: null, modulTerdeteksi: 'shopee_shop_stats', ambiguous: false, matches: ['shopee_shop_stats'],
   };
 }
 
@@ -413,7 +413,7 @@ function shopeeParentSkuBerkas(nama: string, gmvSiapKirimTotal: number): PdtPrev
   ];
   return {
     nama, sha256: 'sha-parentsku', bytes: 100, ditolakPagar: null, decodeGagal: null,
-    aoa, modulTerdeteksi: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'],
+    aoa, sheets: null, modulTerdeteksi: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'],
   };
 }
 
@@ -533,7 +533,7 @@ describeDb('previewUploadBatch (G1-09) — status per berkas', () => {
     const cpId = await fixture();
     const input: PdtPreviewBerkasInput = {
       nama: 'c.xlsx', sha256: 's', bytes: 1, ditolakPagar: null, decodeGagal: null,
-      aoa: [['x']], modulTerdeteksi: null, ambiguous: true, matches: ['shopee_diskon', 'shopee_flash_sale'],
+      aoa: [['x']], sheets: null, modulTerdeteksi: null, ambiguous: true, matches: ['shopee_diskon', 'shopee_flash_sale'],
     };
     const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [input]);
     expect(hasil.berkas[0].status).toBe('perlu_pilih_modul');
@@ -545,7 +545,7 @@ describeDb('previewUploadBatch (G1-09) — status per berkas', () => {
     const cpId = await fixture();
     const input: PdtPreviewBerkasInput = {
       nama: 'd.xlsx', sha256: 's', bytes: 1, ditolakPagar: null, decodeGagal: null,
-      aoa: [['x']], modulTerdeteksi: null, ambiguous: false, matches: [],
+      aoa: [['x']], sheets: null, modulTerdeteksi: null, ambiguous: false, matches: [],
     };
     const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [input]);
     expect(hasil.berkas[0].status).toBe('perlu_pilih_modul');
@@ -569,7 +569,7 @@ describeDb('previewUploadBatch (G1-09) — status per berkas', () => {
     const input: PdtPreviewBerkasInput = {
       nama: 'f.xlsx', sha256: 's', bytes: 1, ditolakPagar: null, decodeGagal: null,
       aoa: [['Kode Produk', 'Dilihat', 'Biaya']], // shopee_ads_cpc, tapi 6 dari 9 kolomDipanen hilang
-      modulTerdeteksi: 'shopee_ads_cpc', ambiguous: false, matches: ['shopee_ads_cpc'],
+      sheets: null, modulTerdeteksi: 'shopee_ads_cpc', ambiguous: false, matches: ['shopee_ads_cpc'],
     };
     const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [input]);
     expect(hasil.berkas[0].status).toBe('gagal');
@@ -614,7 +614,7 @@ describeDb('previewUploadBatch (G1-09) — identitas (Rule 2-4) + periode (Rule 
     const header = ['Pesanan Dibuat', 'Total Pengunjung']; // shopee_shop_stats, tak ada preamble
     const berkas: PdtPreviewBerkasInput = {
       nama: 'stats.xlsx', sha256: 's', bytes: 1, ditolakPagar: null, decodeGagal: null,
-      aoa: [header], modulTerdeteksi: 'shopee_shop_stats', ambiguous: false, matches: ['shopee_shop_stats'],
+      aoa: [header], sheets: null, modulTerdeteksi: 'shopee_shop_stats', ambiguous: false, matches: ['shopee_shop_stats'],
     };
     const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [berkas]);
     expect(hasil.identitas.status).toBe('tidak_dapat_divalidasi');
@@ -799,7 +799,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — status batch dari ident
     const dataRow = ['1000000', '10', '8', '12', '500', '2', '1000000', '0', '200000', '100000', '50000', '50000', '01/07/2026 - 31/07/2026'];
     const berkas: PdtPreviewBerkasInput = {
       nama: 'shop-analytics.xlsx', sha256: 's-sa', bytes: 20, ditolakPagar: null, decodeGagal: null,
-      aoa: [header, dataRow], modulTerdeteksi: 'tt_shop_analytics', ambiguous: false, matches: ['tt_shop_analytics'],
+      aoa: [header, dataRow], sheets: null, modulTerdeteksi: 'tt_shop_analytics', ambiguous: false, matches: ['tt_shop_analytics'],
     };
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkas], []);
     expect(persiapan.identitas.status).toBe('tidak_dapat_divalidasi');
@@ -948,7 +948,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — baris pdt_file per stat
     const cpId = await fixture();
     const ambigu: PdtPreviewBerkasInput = {
       nama: 'ambigu.xlsx', sha256: 's-amb', bytes: 5, ditolakPagar: null, decodeGagal: null,
-      aoa: [['x']], modulTerdeteksi: null, ambiguous: true, matches: ['shopee_diskon', 'shopee_flash_sale'],
+      aoa: [['x']], sheets: null, modulTerdeteksi: null, ambiguous: true, matches: ['shopee_diskon', 'shopee_flash_sale'],
     };
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026'), ambigu], []);
     const files = await loadFiles(persiapan.batchId);
@@ -961,7 +961,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — baris pdt_file per stat
     const cpId = await fixture();
     const ambigu: PdtPreviewBerkasInput = {
       nama: 'ambigu.xlsx', sha256: 's-amb', bytes: 5, ditolakPagar: null, decodeGagal: null,
-      aoa: [['x']], modulTerdeteksi: null, ambiguous: true, matches: ['shopee_diskon', 'shopee_flash_sale'],
+      aoa: [['x']], sheets: null, modulTerdeteksi: null, ambiguous: true, matches: ['shopee_diskon', 'shopee_flash_sale'],
     };
     const overrides: PdtCommitOverride[] = [{ nama: 'ambigu.xlsx', modulKode: 'shopee_diskon' }];
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026'), ambigu], overrides);
@@ -1365,7 +1365,7 @@ function shopeeParentSkuBerkasMulti(nama: string, baris: readonly [string, strin
   ];
   return {
     nama, sha256: 'sha-parentsku-multi', bytes: 100, ditolakPagar: null, decodeGagal: null,
-    aoa, modulTerdeteksi: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'],
+    aoa, sheets: null, modulTerdeteksi: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'],
   };
 }
 
@@ -1385,7 +1385,7 @@ function ttOrdersBerkas(nama: string, baris: readonly [string, string, string, s
   ];
   return {
     nama, sha256: 'sha-ttorders', bytes: 100, ditolakPagar: null, decodeGagal: null,
-    aoa, modulTerdeteksi: 'tt_orders', ambiguous: false, matches: ['tt_orders'],
+    aoa, sheets: null, modulTerdeteksi: 'tt_orders', ambiguous: false, matches: ['tt_orders'],
   };
 }
 
@@ -1539,7 +1539,7 @@ function ttTransactionCreatorBerkas(nama: string, baris: readonly [string, strin
   ];
   return {
     nama, sha256: 'sha-ttcreator', bytes: 100, ditolakPagar: null, decodeGagal: null,
-    aoa, modulTerdeteksi: 'tt_transaction_creator', ambiguous: false, matches: ['tt_transaction_creator'],
+    aoa, sheets: null, modulTerdeteksi: 'tt_transaction_creator', ambiguous: false, matches: ['tt_transaction_creator'],
   };
 }
 
@@ -1623,7 +1623,7 @@ function shopeeAmsAfiliasiBerkas(nama: string, baris: readonly [string, string, 
   ];
   return {
     nama, sha256: 'sha-amsafiliasi', bytes: 100, ditolakPagar: null, decodeGagal: null,
-    aoa, modulTerdeteksi: 'shopee_ams_afiliasi', ambiguous: false, matches: ['shopee_ams_afiliasi'],
+    aoa, sheets: null, modulTerdeteksi: 'shopee_ams_afiliasi', ambiguous: false, matches: ['shopee_ams_afiliasi'],
   };
 }
 
@@ -1724,7 +1724,7 @@ function shopeeAmsProdukBerkas(nama: string, baris: readonly [string, string, st
   ];
   return {
     nama, sha256: 'sha-amsproduk', bytes: 100, ditolakPagar: null, decodeGagal: null,
-    aoa, modulTerdeteksi: 'shopee_ams_produk', ambiguous: false, matches: ['shopee_ams_produk'],
+    aoa, sheets: null, modulTerdeteksi: 'shopee_ams_produk', ambiguous: false, matches: ['shopee_ams_produk'],
   };
 }
 
@@ -1804,7 +1804,7 @@ function shopeeLiveBerkas(nama: string, baris: readonly [string, string, string,
   const aoa: unknown[][] = [HEADER_SHOPEE_LIVE, ...baris];
   return {
     nama, sha256: 'sha-live', bytes: 100, ditolakPagar: null, decodeGagal: null,
-    aoa, modulTerdeteksi: 'shopee_live', ambiguous: false, matches: ['shopee_live'],
+    aoa, sheets: null, modulTerdeteksi: 'shopee_live', ambiguous: false, matches: ['shopee_live'],
   };
 }
 
@@ -1890,6 +1890,52 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KESEMBILAN) — sh
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(persiapan.status).toBe('ditolak');
     expect(await loadFactContent(cpId)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1-09-SHEET-BUKAN-PERTAMA — override AM ke modul ber-`namaSheet` HARUS
+// membaca sheet YANG DIMINTA modul itu (`input.sheets`), bukan `input.aoa`
+// yang sudah kadung dipilih deteksi OTOMATIS (biasanya sheet pertama/salah).
+// Cermin persis bug asli: workbook multi-sheet, deteksi otomatis gagal total
+// (aoa = sheet pertama, sheet ringkasan tidak relevan) — AM memilih manual
+// `shopee_live` dari dropdown `moduleOptions`, dan hasilnya HARUS berasal
+// dari isi sheet "Daftar Streaming" yang sesungguhnya, bukan sheet ringkasan.
+// ---------------------------------------------------------------------------
+function shopeeLiveBerkasOverrideMultiSheet(
+  nama: string,
+  baris: readonly [string, string, string, string][],
+): PdtPreviewBerkasInput {
+  const aoaSheetRingkasan: unknown[][] = [['Ringkasan agregat — bukan Daftar Streaming, struktur beda total']];
+  const aoaDaftarStreaming: unknown[][] = [HEADER_SHOPEE_LIVE, ...baris];
+  return {
+    nama, sha256: 'sha-live-multisheet', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    // Deteksi OTOMATIS gagal total (aoa = sheet ringkasan, matches kosong) —
+    // sengaja meniru bug asli: pipeline lama SELALU membaca sheet pertama.
+    aoa: aoaSheetRingkasan, modulTerdeteksi: null, ambiguous: false, matches: [],
+    sheets: new Map([
+      ['Tinjauan', aoaSheetRingkasan],
+      ['Daftar Streaming', aoaDaftarStreaming],
+    ]),
+  };
+}
+
+describeDb('commitUploadBatch — override AM ke modul ber-namaSheet MEMBACA sheet yang benar (G1-09-SHEET-BUKAN-PERTAMA)', () => {
+  it('override ke shopee_live pada berkas yang deteksi otomatisnya gagal ⇒ fakta ditulis dari sheet "Daftar Streaming", BUKAN dari aoa sheet pertama', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', '938284780');
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeLiveBerkasOverrideMultiSheet('live.xlsx', [['Live Juli', '03-07-2026 15:21', '1.234', '5.000.000']]),
+    ];
+    const overrides: PdtCommitOverride[] = [{ nama: 'live.xlsx', modulKode: 'shopee_live' }];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, overrides);
+
+    const rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ platform_content_id: '202607031521', jenis: 'live', batch_id: persiapan.batchId, vv: 1234 });
+    expect(Number(rows[0].gmv)).toBe(5000000);
   });
 });
 
@@ -2209,7 +2255,7 @@ describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
     const berkasAmbigu: PdtPreviewBerkasInput = {
       nama: 'entri-ambigu.csv', sha256: 'sha-x', bytes: 100, ditolakPagar: null, decodeGagal: null,
       aoa: shopeeAdsCpcBerkasLengkap('x', '938284780', '01/07/2026 - 31/07/2026', [['Iklan A', 'PRD-1', '100', '10', '2', '2000000', '150000']]).aoa,
-      modulTerdeteksi: null, ambiguous: true, matches: ['shopee_ads_cpc', 'shopee_ads_search'],
+      sheets: null, modulTerdeteksi: null, ambiguous: true, matches: ['shopee_ads_cpc', 'shopee_ads_search'],
     };
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkasAmbigu], [{ nama: 'entri-ambigu.csv', modulKode: 'shopee_ads_cpc' }]);
     expect(await loadFactAds(cpId)).toHaveLength(1);

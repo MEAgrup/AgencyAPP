@@ -62,6 +62,18 @@ export interface PdtModuleDef {
   platform: PdtPlatform;
   namaTampilan: string;
   tandaTanganKolom: PdtSignature;
+  /**
+   * Nama sheet PERSIS (case-sensitive) tempat modul ini hidup di workbook —
+   * `undefined` berarti SHEET PERTAMA (`wb.SheetNames[0]`, perilaku lama).
+   * Ditambahkan G1-09-SHEET-BUKAN-PERTAMA (`docs/DECISIONS.md`): pipeline
+   * dulu SELALU membaca sheet pertama saja, dan TERBUKTI dua modul ber-sinyal-
+   * terverifikasi (`shopee_live`/`shopee_shop_stats`) datanya justru ada di
+   * sheet lain pada workbook multi-sheet asli — nol baris pernah tertulis
+   * untuk keduanya walau kode penulisnya sudah lengkap. Dicek SEBELUM
+   * `tandaTanganKolom`: modul ini TIDAK PERNAH cocok bila workbook tidak
+   * punya sheet bernama ini (lihat `detect.ts` `detectPdtModuleAntarSheet`).
+   */
+  namaSheet?: string;
   /** Baris header, 1-terindeks — HINT untuk parser (Rule 7: dicari, bukan diasumsikan), bukan indeks mutlak. */
   barisHeaderHint: number;
   /** Whitelist PDT-27 (`docs/backlog/PDT_KOLOM_DIPANEN.md`) — kolom yang benar-benar dipanen ke tabel fakta. Boleh berbeda dari `tandaTanganKolom` (sinyal deteksi boleh memakai kolom yang tidak dipanen). */
