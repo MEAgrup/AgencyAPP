@@ -2239,3 +2239,31 @@ export async function rakitLaporanShopee(
     clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, skor,
   });
 }
+
+/**
+ * Flow B langkah 1: "AM membuka laporan periode X → laporan dirender dari
+ * view atas fakta". Gerbang izin `canKirimLaporan` (Flow B satu-satunya
+ * predikat bernama — melihat sebelum memutuskan kirim adalah bagian dari
+ * flow yang sama, bukan gerbang terpisah). Platform toko dibaca dari
+ * `client_platforms.platform` (bukan parameter caller) — pola sama
+ * `previewUploadBatch`/`commitUploadBatch`.
+ */
+export async function bacaLaporanPdt(
+  sql: Sql,
+  actor: Actor,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+  now: Date = new Date(),
+): Promise<pdt.PdtLaporanTiktok | pdt.PdtLaporanShopee> {
+  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
+  if (!canKirimLaporan(actor, row.assigned_am_id)) throw new ForbiddenError();
+
+  const platform = platformKeVokabPdt(row.platform);
+  if (!platform) {
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+  }
+
+  return platform === 'tiktok'
+    ? rakitLaporanTiktok(sql, clientPlatformId, periodeAwalBulan, now)
+    : rakitLaporanShopee(sql, clientPlatformId, periodeAwalBulan, now);
+}

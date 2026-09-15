@@ -787,6 +787,11 @@ const WIRE_TO_FE: Record<string, string> = {
   // PDT G1-09 sub-langkah 2a — commit (menulis pdt_upload_batch/pdt_file sungguhan).
   PdtCommitBatchWire: 'pdt.ts::PdtCommitBatch',
   PdtCommitBerkasWire: 'pdt.ts::PdtCommitBerkas',
+  // PDT G2-01 lanjutan — payload "laporan" v1 (GET /account/pdt/laporan).
+  PdtLaporanWire: 'pdt.ts::PdtLaporan',
+  PdtLaporanKpiWire: 'pdt.ts::PdtLaporanKpi',
+  PdtLaporanSkorWire: 'pdt.ts::PdtLaporanSkor',
+  PdtLaporanDimensiWire: 'pdt.ts::PdtLaporanDimensi',
 };
 
 /**

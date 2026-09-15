@@ -35,6 +35,7 @@ import {
   planPdtPurgeTick,
   planPdtReparseTick,
   platformKeVokabPdt,
+  bacaLaporanPdt,
   previewUploadBatch,
   rakitInputSkorShopee,
   rakitInputSkorTiktok,
@@ -3365,5 +3366,49 @@ describeDb('rakitLaporanShopee (sesi 34 lanjutan) — KPI basis siap_dikirim (Ru
   it('periode selain awal bulan ⇒ ValidationError', async () => {
     const { cpId } = await fixture();
     await expect(rakitLaporanShopee(sql, cpId, '2026-07-15')).rejects.toThrow(ValidationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bacaLaporanPdt (sesi 34 lanjutan, Flow B langkah 1) — gerbang izin
+// `canKirimLaporan` + pemilihan platform dari `client_platforms.platform`
+// (bukan parameter caller), pola sama `previewUploadBatch`/`commitUploadBatch`.
+// ---------------------------------------------------------------------------
+describeDb('bacaLaporanPdt (sesi 34 lanjutan) — gerbang izin + pemilihan platform', () => {
+  async function fixture(platform: 'TikTok Shop' | 'Shopee', ownerAm: string | null = OWNER): Promise<{ cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, ownerAm);
+    const cpId = await insertClientPlatform(clientId, platform);
+    return { cpId };
+  }
+
+  it('client_platform_id tidak ada ⇒ NotFoundError', async () => {
+    await expect(bacaLaporanPdt(sql, am(), 999_999_999, '2026-07-01')).rejects.toThrow(NotFoundError);
+  });
+
+  it('AM bukan pemilik ⇒ ForbiddenError', async () => {
+    const { cpId } = await fixture('Shopee');
+    await expect(bacaLaporanPdt(sql, am('ZPDT-LAIN'), cpId, '2026-07-01')).rejects.toThrow(ForbiddenError);
+  });
+
+  it('AM pemilik, lead Account, atau Director ⇒ diizinkan (delegasi ke rakitLaporanTiktok/Shopee)', async () => {
+    const { cpId: cpTiktok } = await fixture('TikTok Shop');
+    await expect(bacaLaporanPdt(sql, am(), cpTiktok, '2026-07-01')).resolves.toHaveProperty('platform', 'tiktok');
+    await expect(bacaLaporanPdt(sql, accountLead(), cpTiktok, '2026-07-01')).resolves.toHaveProperty('platform', 'tiktok');
+    await expect(bacaLaporanPdt(sql, director(), cpTiktok, '2026-07-01')).resolves.toHaveProperty('platform', 'tiktok');
+  });
+
+  it('platform TikTok Shop ⇒ merakit via rakitLaporanTiktok (benchmarkVersi terisi)', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const hasil = await bacaLaporanPdt(sql, am(), cpId, '2026-07-01');
+    expect(hasil.schema).toBe('cdps.pdt.laporan.tiktok.v1');
+    expect((hasil as { benchmarkVersi: number }).benchmarkVersi).toBe(1);
+  });
+
+  it('platform Shopee ⇒ merakit via rakitLaporanShopee (nol field benchmarkVersi)', async () => {
+    const { cpId } = await fixture('Shopee');
+    const hasil = await bacaLaporanPdt(sql, am(), cpId, '2026-07-01');
+    expect(hasil.schema).toBe('cdps.pdt.laporan.shopee.v1');
+    expect('benchmarkVersi' in hasil).toBe(false);
   });
 });

@@ -1008,11 +1008,30 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > Tidak relevan bagi v1 di sini (murni VIEW, nol tulis ke `pdt_laporan_kiriman`) — dicatat supaya
 > tidak jadi kejutan saat "Kirim ke klien" mulai dibangun untuk Shopee.
 >
-> **Belum dikerjakan (sengaja, urutan berikutnya):** route HTTP yang mengeksposkan
-> `rakitLaporanTiktok`/`rakitLaporanShopee`, sepuluh bagian payload laporan yang belum tercakup
-> di atas, mekanisme "Kirim ke klien" (Flow B langkah 4, termasuk menyelesaikan catatan skema
-> `benchmark_versi` NOT NULL di atas), dan G2-02 (UI admin benchmark TikTok, revoke mechanism
-> `pdt_laporan_kiriman`) yang sudah tercatat sebelumnya.
+> **Status 2026-09-15 (sesi 34 lanjutan) — route HTTP DIBANGUN: `GET /api/v1/account/pdt/laporan`
+> (Flow B langkah 1).** Query `client_platform_id`+`periode`; platform toko dibaca dari
+> `client_platforms.platform` sendiri (bukan parameter caller), pola sama `previewUploadBatch`/
+> `commitUploadBatch` — domain baru `pdt.bacaLaporanPdt` (gerbang `canKirimLaporan` + pemilihan
+> `rakitLaporanTiktok`/`rakitLaporanShopee`). **Route memakai `db()` (koneksi service-role), BUKAN
+> `readAsActor`** — `pdt_benchmark` sengaja NOL policy RLS ("dibaca/ditulis HANYA service-role saat
+> menskor", migrasi G1-01); memakai `readAsActor` di sini akan mengosongkan `pdt_benchmark` diam-
+> diam untuk laporan TikTok. Wire baru (`apps/api/src/lib/wire.ts`): `PdtLaporanWire`/
+> `PdtLaporanKpiWire`/`PdtLaporanSkorWire`/`PdtLaporanDimensiWire` — SATU bentuk wire untuk kedua
+> platform (`platform` diskriminator), `benchmark_versi` SELALU ada sebagai kunci (aturan rumah
+> #4/O43), `null` eksplisit untuk Shopee. Tipe FE cermin ditambahkan `web-internal/src/lib/pdt.ts`
+> (`PdtLaporan`/`PdtLaporanKpi`/`PdtLaporanSkor`/`PdtLaporanDimensi`) dan didaftarkan
+> `shape-parity.test.ts` — belum ada halaman yang memanggilnya, sama seperti `PdtPreviewBatch`/
+> `PdtCommitBatch` sebelumnya (kontrak datanya lebih dulu). Diverifikasi (DB lokal rebuild bersih,
+> 249 migrasi — nol migrasi baru): `@cdps/core` 1311/1311, `@cdps/domain` 2676/2677 (1 skip, NOL
+> gagal — rebuild bersih juga menutup flakiness `client.test.ts` yang terlihat beberapa kali sesi
+> ini), `@cdps/db` 107/107, `@cdps/api` 603/605 (2 skip); typecheck `core`/`domain`/`api`/
+> `web-internal` + lint keempatnya bersih.
+>
+> **Belum dikerjakan (sengaja, urutan berikutnya):** halaman `web-internal` yang memanggil route
+> ini, sepuluh bagian payload laporan yang belum tercakup, mekanisme "Kirim ke klien" (Flow B
+> langkah 4, termasuk menyelesaikan catatan skema `benchmark_versi` NOT NULL di atas), dan G2-02
+> (UI admin benchmark TikTok, revoke mechanism `pdt_laporan_kiriman`) yang sudah tercatat
+> sebelumnya.
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah

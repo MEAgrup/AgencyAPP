@@ -9035,3 +9035,90 @@ export function pdtCommitBatchToWire(h: pdt.PdtCommitPersiapan): PdtCommitBatchW
     identitas: pdtPreviewIdentitasToWire(h.identitas),
   };
 }
+
+// ===========================================================================
+// G2-01 lanjutan — payload "laporan" v1 (PDT-21 Rule 21). `rakitLaporanTiktok`/
+// `rakitLaporanShopee` (`@cdps/domain`) sudah camelCase; satu bentuk wire
+// BERSAMA untuk kedua platform (`platform` diskriminator) supaya
+// `web-internal` tidak perlu dua tipe nyaris identik. `benchmark_versi`
+// SELALU ada sebagai kunci (aturan rumah #4/O43) — `null` untuk Shopee
+// (asimetri asli, `PdtLaporanShopee` tidak punya field ini sama sekali),
+// BUKAN kunci yang hilang.
+// ===========================================================================
+
+export interface PdtLaporanKpiWire {
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  cvr: number | null;
+}
+
+export interface PdtLaporanDimensiWire {
+  kode: string;
+  label: string;
+  bobot_dasar: number;
+  nilai: number | null;
+  disertakan: boolean;
+  bobot_efektif: number;
+  label_tampil: string;
+}
+
+export interface PdtLaporanSkorWire {
+  total: number | null;
+  label: string | null;
+  dimensi: PdtLaporanDimensiWire[];
+}
+
+export interface PdtLaporanWire {
+  schema: string;
+  platform: string;
+  client_platform_id: number;
+  periode_awal_bulan: string;
+  generated_at: string;
+  kpi: PdtLaporanKpiWire;
+  skor: PdtLaporanSkorWire;
+  /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
+  benchmark_versi: number | null;
+}
+
+function pdtLaporanSkorToWire(s: pdtCore.PdtSkorHasilTiktok | pdtCore.PdtSkorHasilShopee): PdtLaporanSkorWire {
+  return {
+    total: s.total,
+    label: s.label,
+    dimensi: s.dimensi.map((d) => ({
+      kode: d.kode,
+      label: d.label,
+      bobot_dasar: d.bobotDasar,
+      nilai: d.nilai,
+      disertakan: d.disertakan,
+      bobot_efektif: d.bobotEfektif,
+      label_tampil: d.labelTampil,
+    })),
+  };
+}
+
+export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanWire {
+  return {
+    schema: l.schema,
+    platform: l.platform,
+    client_platform_id: l.clientPlatformId,
+    periode_awal_bulan: l.periodeAwalBulan,
+    generated_at: l.generatedAt,
+    kpi: { ...l.kpi },
+    skor: pdtLaporanSkorToWire(l.skor),
+    benchmark_versi: l.benchmarkVersi,
+  };
+}
+
+export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanWire {
+  return {
+    schema: l.schema,
+    platform: l.platform,
+    client_platform_id: l.clientPlatformId,
+    periode_awal_bulan: l.periodeAwalBulan,
+    generated_at: l.generatedAt,
+    kpi: { ...l.kpi },
+    skor: pdtLaporanSkorToWire(l.skor),
+    benchmark_versi: null,
+  };
+}
