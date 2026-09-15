@@ -11,7 +11,8 @@
  * dan Rule 12 (skor netral dihapus, renormalisasi bobot dimensi), `header.ts`
  * untuk Rule 7 (baris header dicari, bukan diasumsikan) + Rule 8 (kolom
  * dipanen/kolom baru, G1-09), `fakta.ts` untuk baris fakta tertipe
- * (`pdt_fact_ads` dari `shopee_ads_live`, G1-09 sub-langkah 2b-ii).
+ * (`pdt_fact_ads` dari `shopee_ads_live`, G1-09 sub-langkah 2b-ii), `skor.ts`
+ * untuk mesin skor TikTok (G2-01, Rule 21, enam dimensi via `renormalisasiDimensi`).
  */
 export * from './types';
 export * from './modules';
@@ -23,3 +24,4 @@ export * from './rekonsiliasi';
 export * from './parsestatus';
 export * from './header';
 export * from './fakta';
+export * from './skor';
