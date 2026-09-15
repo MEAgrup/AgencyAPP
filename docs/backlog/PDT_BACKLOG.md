@@ -582,6 +582,25 @@ punya `null` eksplisit.
 > penulis** (`pdt_fact_content` kini `tt_video`+`shopee_live`, kedua-duanya). Diverifikasi (DB
 > lokal rebuild bersih): `@cdps/core` 1206/1206, `@cdps/domain` 2599/2599 (1 skip), `@cdps/db`
 > 107/107, `@cdps/api` 576/576 (2 skip); typecheck + lint bersih.
+>
+> **Status 2026-09-15 (sesi 27) — `G1-09-DETEKSI-PREAMBLE-AMBIGU` DITUTUP dengan sample asli;
+> TEMUAN BARU severity tinggi: `G1-09-SHEET-BUKAN-PERTAMA`.** Pemilik mengunggah ZIP "Sample nama
+> asli" (Fim Motor/Shopee + Avitaskin/TikTok, sample nyata bukan fixture). Ambiguitas CPC/Search
+> vs `shopee_ams_afiliasi` TERBUKTI nyata (bukan hipotetis) lewat `detectPdtModule` sungguhan —
+> ditutup dengan `mustNot: ['ID Toko']` di `shopee_ams_afiliasi` (pola sama `shopee_ams_produk`).
+> Investigasi yang sama membuka temuan JAUH LEBIH SERIUS: pipeline (`pdt-parse.ts`) hanya pernah
+> membaca SHEET PERTAMA tiap xlsx — tapi `shopee_live` (modul KESEMBILAN, DITUTUP sesi 24) data
+> sungguhannya ada di sheet KETIGA ("Daftar Streaming") dari workbook 3-sheet, dan
+> `shopee_shop_stats` (basis rekonsiliasi G1-07) markernya ('Pesanan Dibuat' dkk.) ternyata NAMA
+> TAB sheet pada workbook 12-sheet, bukan isi sel yang bisa dicocokkan `detectPdtModule` maupun
+> `parseShopeeShopStatsPerBasis` (keduanya baca SATU aoa sheet pertama). **Kedua modul TIDAK
+> PERNAH terdeteksi/berfungsi untuk berkas ASLI** — dicatat `docs/DECISIONS.md` `G1-09-SHEET-
+> BUKAN-PERTAMA` sebagai Open BARU (butuh keputusan arsitektur pemilik: satu ZIP entry masih 1
+> baris `pdt_file`, atau berubah jadi 1 per sheet yang cocok — PRD tidak pernah membahas workbook
+> multi-sheet). **Tidak diperbaiki sesi ini** — di luar cakupan (butuh keputusan arsitektur
+> lebih dulu). Tes baru `detect.test.ts` (+1 regresi ambiguitas + 2 fixture CPC/Search preamble
+> penuh). Diverifikasi (DB lokal rebuild bersih ×2): `@cdps/core` 1207/1207, `@cdps/domain`
+> 2605/2605 (1 skip), `@cdps/api` 584/584 (2 skip); typecheck 4 paket + lint bersih.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
