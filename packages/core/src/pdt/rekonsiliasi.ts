@@ -35,6 +35,31 @@
  * SHP-1). Dicatat `docs/DECISIONS.md` G1-07-PERSKU-DIBAYAR, tidak
  * memblokir — rekonsiliasi basis `dibayar` PX (PDT-19) tetap bisa jalan
  * shop-level-vs-shop-level sampai kolomnya ketemu.
+ *
+ * **`parseTiktokShopAnalytics`/`sumTiktokProductAnalyticsGmv`** menutup
+ * `G1-07-TIKTOK-REKONSILIASI` — TERVERIFIKASI ke sample asli ("Tiktok -
+ * Avitaskin.zip"): `tt_shop_analytics` (`Shop Analytics_Key metrics_*.xlsx`)
+ * kolom `'GMV'`/`'Pesanan SKU'` di baris TEPAT SESUDAH header (label kolom
+ * pertama `'Total nilai'`) ADALAH GMV shop-level Rule 15 (GMV kotor — lihat
+ * catatan refund di bawah); `tt_product_analytics` (`product_list_20260701.xlsx`)
+ * punya kolom `'GMV'`/`'Pesanan SKU'` PER SKU yang Σ-nya PERSIS SAMA dengan
+ * shop-level (26.560.049 = 26.560.049 GMV; 145 = 145 Pesanan SKU, dihitung
+ * ulang dari file asli). **Catatan bentuk berkas nyata**: `tt_product_analytics`
+ * adalah laporan LEBAR dengan header BERULANG per kelompok kategori (baris
+ * SEBELUM header: `'Semua'`/`'LIVE penjual'`/`'Video penjual'`/dst berulang
+ * per blok kolom) — nama kolom `'GMV'`/`'Pesanan SKU'` MUNCUL LEBIH DARI
+ * SEKALI (total "Semua" DI DEPAN, lalu breakdown per kategori menyusul).
+ * `header.findIndex` (kecocokan PERTAMA) mengambil kolom di bawah kelompok
+ * "Semua" — TERBUKTI benar secara aritmetika (Σ kolom pertama = shop-level;
+ * kolom kedua dst adalah breakdown, BUKAN duplikat kebetulan). **Rule 15
+ * "TikTok = GMV − refund"** bicara soal definisi `pdt_fact_shop_daily.gmv`
+ * (tabel itu SENDIRI belum dibangun — G2, dicek: nol pemanggil menulisnya
+ * hari ini) — gerbang rekonsiliasi (Rule 13-14) di sini murni memeriksa
+ * KONSISTENSI basis antara shop-level dan per-SKU pada metrik MENTAH yang
+ * SAMA (persis pola Shopee: `parseShopeeShopStatsBasisTerisolasi` juga
+ * membaca GMV kotor, bukan net-of-return), bukan menghitung angka akhir
+ * yang akan disimpan — netting refund adalah pekerjaan sesi yang membangun
+ * `pdt_fact_shop_daily`.
  */
 import { parsePdtAngka } from './angka';
 
@@ -80,6 +105,46 @@ export function sumShopeeParentSkuGmv(aoa: readonly (readonly unknown[])[], kolo
   let total = 0;
   for (const row of aoa.slice(barisHeader)) total += parsePdtAngka(row?.[idx]);
   return total;
+}
+
+/**
+ * Baca ringkasan shop-level `tt_shop_analytics` (Rule 13, GMV/Pesanan SKU
+ * kotor — lihat docblock kepala berkas untuk bukti verifikasi sample asli).
+ * Header di `aoa[barisHeader - 1]` (hasil `temukanBarisHeader`, TIDAK selalu
+ * baris pertama sheet — bentuk asli punya preamble `'Tanggal analisis: ...'`
+ * + `'Ringkasan data'` di atasnya); baris TEPAT SESUDAHNYA (`'Total nilai'`)
+ * adalah ringkasan PERIODE PENUH, pola SAMA `parseShopeeShopStatsBasisTerisolasi`.
+ * `null` bila baris ringkasan atau salah satu kolom tidak ditemukan.
+ */
+export function parseTiktokShopAnalytics(aoa: readonly (readonly unknown[])[], barisHeader: number): PdtShopStatsTotal | null {
+  const header = aoa[barisHeader - 1];
+  const totalRow = aoa[barisHeader];
+  if (!header || !totalRow) return null;
+  const idxGmv = header.findIndex((c) => norm(c) === 'gmv');
+  const idxPesanan = header.findIndex((c) => norm(c) === 'pesanan sku');
+  if (idxGmv === -1 || idxPesanan === -1) return null;
+  return { gmv: parsePdtAngka(totalRow[idxGmv]), pesanan: parsePdtAngka(totalRow[idxPesanan]) };
+}
+
+/**
+ * Σ kolom `'GMV'`/`'Pesanan SKU'` `tt_product_analytics` (Rule 13 — Σ per-SKU).
+ * `header.findIndex` mengambil kecocokan PERTAMA — pada bentuk asli (header
+ * berulang per kelompok kategori), kolom PERTAMA berlabel `'GMV'`/`'Pesanan
+ * SKU'` berada di bawah kelompok kategori `'Semua'` (grand total), BUKAN di
+ * bawah breakdown kategori (`'LIVE penjual'`/dst yang menyusul) — TERBUKTI
+ * benar secara aritmetika terhadap sample asli (lihat docblock kepala berkas).
+ */
+export function sumTiktokProductAnalyticsGmv(aoa: readonly (readonly unknown[])[], barisHeader: number): PdtShopStatsTotal {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idxGmv = header.findIndex((c) => norm(c) === 'gmv');
+  const idxPesanan = header.findIndex((c) => norm(c) === 'pesanan sku');
+  let gmv = 0;
+  let pesanan = 0;
+  for (const row of aoa.slice(barisHeader)) {
+    if (idxGmv !== -1) gmv += parsePdtAngka(row?.[idxGmv]);
+    if (idxPesanan !== -1) pesanan += parsePdtAngka(row?.[idxPesanan]);
+  }
+  return { gmv, pesanan };
 }
 
 /**

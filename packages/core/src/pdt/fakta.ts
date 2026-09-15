@@ -370,6 +370,89 @@ export function ekstrakBarisShopeeLive(
   return hasil;
 }
 
+/** `YYYY/MM/DD/ HH:mm` (TikTok `Waktu Live`, format TERVERIFIKASI — sama pola `report/metrik.ts` `parseWaktuLive`) → digit mentah `YYYYMMDDHHmm` (identitas, bukan lewat objek Date/zona waktu — pola sama `parseWaktuMulaiShopeeLive`). `null` bila tidak cocok pola. */
+function parseWaktuLiveTiktokDigit(w: string): string | null {
+  const m = w.trim().match(/^(\d{4})\/(\d{2})\/(\d{2})\/?\s+(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const [, yyyy, mm, dd, hh, min] = m;
+  return `${yyyy}${mm}${dd}${hh.padStart(2, '0')}${min}`;
+}
+
+/** `"Xh Ymin"` (TikTok `Durasi`, mis. `"2h 53min"`/`"0h 19min"`) → detik, atau `null` bila tidak cocok pola. */
+function parseDurasiTiktokDetik(s: string): number | null {
+  const m = s.trim().match(/^(\d+)h\s*(\d+)min$/);
+  if (!m) return null;
+  return Number(m[1]) * 3600 + Number(m[2]) * 60;
+}
+
+/** Satu baris `pdt_fact_content` mentah dari `tt_live`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi). `waktuPosting` SELALU `null` — zona waktu dashboard TikTok BELUM terverifikasi di repo manapun (beda dari `shopee_live`, yang punya dasar terverifikasi "Seller Center Indonesia SELALU WIB"); `platformContentId` tidak butuh interpretasi zona waktu (digit mentah dari string, bukan lewat objek Date), jadi identitas tetap aman ditulis walau `waktuPosting` ditahan. */
+export interface PdtBarisContentTtLive {
+  platformContentId: string;
+  creatorPlatformId: string | null;
+  creatorHandle: string | null;
+  isAkunToko: boolean;
+  vv: number | null;
+  gmv: number | null;
+  durasiDetik: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `tt_live` (Rule 8 whitelist `modules.ts`:
+ * `['ID Kreator', 'Waktu Live', 'Durasi', 'GMV dari LIVE (Rp)', 'Produk
+ * Terjual', 'Penonton', 'CTOR', 'Kreator']`) — **`G1-09-2BII-TTLIVE`
+ * DITUTUP** lewat sample asli ("Tiktok - Avitaskin.zip"): berkas `Live
+ * Analysis*.xlsx` sungguhan TIDAK membawa kolom ID sesi live terpisah (sama
+ * seperti tebakan awal), tapi kombinasi `ID Kreator` + `Waktu Live` (menit
+ * presisi) TERBUKTI 100% unik di SELURUH 149 baris sample nyata (nol
+ * duplikat) — pola SAMA PERSIS `shopee_live`/`Waktu Mulai`
+ * (`G1-09-2BII-SHOPEELIVE`): satu kreator (toko ATAU afiliasi — beda dari
+ * `shopee_live`, laporan ini MEMUAT sesi live afiliasi juga, lihat
+ * `isAkunToko`) tidak bisa menjalankan dua sesi live sekaligus pada menit
+ * yang sama. `platformContentId` = `${idKreator}-${digitMentah}`
+ * (`parseWaktuLiveTiktokDigit`, format `YYYY/MM/DD/ HH:mm` TERVERIFIKASI,
+ * sama pola `report/metrik.ts` `parseWaktuLive`) — `idKreator` WAJIB ikut
+ * (beda dari `shopee_live` yang HANYA akun toko sendiri) karena berkas ini
+ * mencampur banyak kreator berbeda, yang secara teori bisa live di menit
+ * yang sama SATU SAMA LAIN (bukan cuma menit yang sama dengan diri sendiri).
+ * Baris ber-`ID Kreator` kosong ATAU `Waktu Live` tidak cocok pola dilewati
+ * (nol identitas yang bisa dibentuk). `Durasi` (`"Xh Ymin"`,
+ * `parseDurasiTiktokDetik`) → `durasi_detik`. Angka: `parsePdtAngka(v)`
+ * TANPA `raw` — konvensi Seller Center, sama seperti `tt_video`/`shopee_live`.
+ */
+export function ekstrakBarisTtLive(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+  akunKontenToko: readonly string[] | null,
+): PdtBarisContentTtLive[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iIdKreator = idx('ID Kreator');
+  const iWaktuLive = idx('Waktu Live');
+  const iKreator = idx('Kreator');
+  const iDurasi = idx('Durasi');
+  const iGmv = idx('GMV dari LIVE (Rp)');
+  const iPenonton = idx('Penonton');
+
+  const hasil: PdtBarisContentTtLive[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const idKreator = iIdKreator === -1 ? '' : String(row?.[iIdKreator] ?? '').trim();
+    const waktuLiveRaw = iWaktuLive === -1 ? '' : String(row?.[iWaktuLive] ?? '').trim();
+    if (idKreator === '' || waktuLiveRaw === '') continue;
+    const digitMentah = parseWaktuLiveTiktokDigit(waktuLiveRaw);
+    if (digitMentah == null) continue;
+    hasil.push({
+      platformContentId: `${idKreator}-${digitMentah}`,
+      creatorPlatformId: idKreator,
+      creatorHandle: iKreator === -1 ? null : (String(row?.[iKreator] ?? '').trim() || null),
+      isAkunToko: akunKontenToko != null && akunKontenToko.includes(idKreator),
+      vv: iPenonton === -1 ? null : parsePdtAngka(row?.[iPenonton]),
+      gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv]),
+      durasiDetik: iDurasi === -1 ? null : parseDurasiTiktokDetik(String(row?.[iDurasi] ?? '')),
+    });
+  }
+  return hasil;
+}
+
 /**
  * Satu baris (SATU SKU/varian, sesudah dedup) `pdt_sku_master`, SEBELUM
  * `client_platform_id`/`batch_id`/`parser_versi` (pemanggil yang melengkapi,

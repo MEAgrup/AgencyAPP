@@ -184,12 +184,15 @@ afterEach(async () => {
 // lewat pipeline deteksi SUNGGUHAN — beda dari fixture domain (pdt.test.ts) yang
 // menyuntik modulTerdeteksi langsung, memotong detectPdtModule sama sekali. Bukan
 // bug dari sub-langkah ini (G1-02 detect.ts, di luar cakupan) — dicatat di handoff.
+// Periode dari PREAMBLE satu-sel `'Rentang Tanggal: ...'` sebelum header (`ekstrakPeriodePreambleTiktok`,
+// DITUTUP via sample asli "Tiktok - Avitaskin.zip" — docs/DECISIONS.md G1-06-PERIODE-TIKTOK), BUKAN
+// kolom header — tt_video sendiri tidak membawa periode.
 function ttVideoXlsxAoa(idKreator: string, rentang: string): unknown[][] {
-  const header = ['ID Kreator', 'ID Video', 'Waktu', 'Rentang Tanggal', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Nama Kreator', 'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'];
+  const header = ['ID Kreator', 'ID Video', 'Waktu', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Nama Kreator', 'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'];
   return [
-    [], [],
+    [`Rentang Tanggal: ${rentang}`], [],
     header,
-    [idKreator, 'V1', '01/07/2026', rentang, 'Produk A', '100', '10', '2', '5', 'Kreator A', 'info', '1000', '50000'],
+    [idKreator, 'V1', '01/07/2026', 'Produk A', '100', '10', '2', '5', 'Kreator A', 'info', '1000', '50000'],
   ];
 }
 

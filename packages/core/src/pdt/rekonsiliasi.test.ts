@@ -3,8 +3,10 @@ import {
   AMBANG_REKONSILIASI_PERSEN,
   hitungDeltaPersen,
   parseShopeeShopStatsBasisTerisolasi,
+  parseTiktokShopAnalytics,
   rekonsiliasiGmvPesanan,
   sumShopeeParentSkuGmv,
+  sumTiktokProductAnalyticsGmv,
 } from './rekonsiliasi';
 
 /**
@@ -57,6 +59,61 @@ describe('parseShopeeShopStatsBasisTerisolasi — Fim Motor (sheet asli "Pesanan
 
   it('null bila aoa kosong total', () => {
     expect(parseShopeeShopStatsBasisTerisolasi([])).toBeNull();
+  });
+});
+
+/**
+ * Fixture SUNGGUHAN — `Shop Analytics_Key metrics_20260810.xlsx` dari sample
+ * asli "Tiktok - Avitaskin.zip" (G1-07-TIKTOK-REKONSILIASI). Baris 0 preamble
+ * `'Tanggal analisis: ...'`, baris 1 `'Ringkasan data'`, baris 2 header (28
+ * kolom asli, disingkat ke yang relevan tes ini), baris 3 `'Total nilai'` —
+ * angka SAMA PERSIS dengan file asli (GMV 26.560.049, Pesanan SKU 145).
+ */
+const AVITASKIN_SHOP_ANALYTICS: readonly (readonly unknown[])[] = [
+  ['Tanggal analisis: 01/07/2026–31/07/2026'],
+  ['Ringkasan data'],
+  ['', 'GMV', 'Pesanan', 'Pembeli', 'Produk terjual', 'Pengembalian dana', 'Pesanan SKU', 'Pendapatan bruto', 'Tayangan halaman', 'Pengunjung'],
+  ['Total nilai', '26560049', '143', '137', '147', '334640', '145', '28175046', '27238', '20627'],
+  ['Perubahan persentase', '1.41%', '0.00%', '3.79%', '-0.68%', '62.08%', '-2.03%', '-2.02%', '7.10%', '5.86%'],
+];
+
+describe('parseTiktokShopAnalytics — Avitaskin (Shop Analytics_Key metrics, sample asli)', () => {
+  it('membaca ringkasan periode (baris tepat sesudah header), bukan baris "Perubahan persentase"', () => {
+    expect(parseTiktokShopAnalytics(AVITASKIN_SHOP_ANALYTICS, 3)).toEqual({ gmv: 26560049, pesanan: 145 });
+  });
+
+  it('null bila header tidak membawa kolom GMV/Pesanan SKU yang dikenal (bukan sheet tt_shop_analytics)', () => {
+    const aoa = [
+      ['ID Produk', 'Nama'],
+      ['P1', 'Produk A'],
+    ];
+    expect(parseTiktokShopAnalytics(aoa, 1)).toBeNull();
+  });
+
+  it('null bila baris ringkasan tidak ada (header di baris terakhir aoa)', () => {
+    expect(parseTiktokShopAnalytics([AVITASKIN_SHOP_ANALYTICS[2]], 1)).toBeNull();
+  });
+});
+
+describe('sumTiktokProductAnalyticsGmv — header BERULANG per kelompok kategori (bentuk asli product_list_20260701.xlsx)', () => {
+  // Bentuk asli: kolom 'GMV'/'Pesanan SKU' MUNCUL LEBIH DARI SEKALI di baris header (grand
+  // total kelompok 'Semua' DI DEPAN, breakdown per kategori LIVE/video/afiliasi MENYUSUL
+  // dengan label kolom yang SAMA) — findIndex kecocokan PERTAMA harus mengambil kolom di
+  // bawah 'Semua', bukan breakdown. Dua baris data ANGKA ASLI dari sample (Avitaskin
+  // "[ BUNDLING ] ... Face Wash, Day Cream dan Night Cream" / "... 1 Paket Isi 5").
+  const HEADER_BERULANG = ['Nama', 'ID Produk', 'GMV', 'Pesanan SKU', 'GMV dari LIVE penjual', 'GMV', 'Pesanan SKU'];
+
+  it('menjumlah kolom GMV/Pesanan SKU PERTAMA (grand total "Semua"), mengabaikan breakdown yang berlabel sama', () => {
+    const aoa = [
+      HEADER_BERULANG,
+      ['[ BUNDLING ] Avitaskin Glow & Brightening Series Face Wash, Day Cream dan Night Cream', 'P1', '10945407', '57', '0', '999999999', '999'],
+      ['[ BUNDLING ] Avitaskin Beauty Care Glow & Brightening Series 1 Paket Isi 5', 'P2', '8769094', '27', '0', '999999999', '999'],
+    ];
+    expect(sumTiktokProductAnalyticsGmv(aoa, 1)).toEqual({ gmv: 10945407 + 8769094, pesanan: 57 + 27 });
+  });
+
+  it('0/0 bila kolom GMV/Pesanan SKU tidak ditemukan', () => {
+    expect(sumTiktokProductAnalyticsGmv([['Kolom Lain'], ['isi']], 1)).toEqual({ gmv: 0, pesanan: 0 });
   });
 });
 

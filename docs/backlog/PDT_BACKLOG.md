@@ -286,9 +286,11 @@ kedua nilai · `linked_accounts` tidak lagi diketik di jalur PDT.
   (Rp 295.710.122 = **18,2%**) adalah akibat pencampuran ini.
 - Basis default laporan klien Shopee = **Pesanan Siap Dikirim**; basis gerbang PX =
   **Pesanan Dibayar** (PDT-19). Keduanya hidup berdampingan karena keduanya tersimpan.
-- ⚠️ **`tt_shop_analytics` tidak boleh jadi satu-satunya sisi rekonsiliasi TikTok** sampai P-01
-  terjawab (dua sample punya 11 vs 14 kolom dan angka jauh berbeda). Pakai `tt_orders` sebagai
-  sisi kanonik.
+- ~~⚠️ `tt_shop_analytics` tidak boleh jadi satu-satunya sisi rekonsiliasi TikTok sampai P-01
+  terjawab. Pakai `tt_orders` sebagai sisi kanonik.~~ **SUPERSEDED sesi 33** (§6 P-01) — sample
+  asli membuktikan `tt_shop_analytics` (shop-level) vs `tt_product_analytics` (Σ per-SKU) cocok
+  PERSIS (GMV dan Pesanan SKU keduanya), jadi keduanya dipakai langsung — lihat
+  `docs/DECISIONS.md` sesi 33.
 
 **DoD:** kasus Fim Motor direproduksi sebagai fixture dan **ditolak** oleh gerbang 0,5% ketika
 basisnya dicampur, lolos ketika tidak.
@@ -645,6 +647,26 @@ punya `null` eksplisit.
 > tetap SELALU `'aktif'` sekali SKU pernah terlihat; SKU yang delisted/dihapus platform tidak
 > pernah pindah status sampai G2/G4 dibangun DAN sesi yang membangunnya memutuskan ulang (opsi
 > (a)/(b) tetap tercatat sebagai jalan yang tersedia bila keputusan berubah).
+>
+> **Status 2026-09-15 (sesi 33) — TIGA Open TikTok DITUTUP SEKALIGUS lewat sample asli pertama
+> "Tiktok - Avitaskin.zip": `G1-06-PERIODE-TIKTOK`, `G1-09-2BII-TTLIVE`, `G1-07-TIKTOK-
+> REKONSILIASI`.** Pemilik mengunggah 13 berkas TikTok nyata bersamaan dengan ZIP Shopee kedua.
+> **Periode** (G1-06): ketiga kandidat label (`Date Range`/`Rentang Tanggal`/`Tanggal analisis`)
+> TERNYATA ada, tapi sebagai PREAMBLE satu-sel sebelum header (pola sama Shopee), bukan kolom —
+> `ekstrakPeriodeKolomTiktok` (arsitektur salah total) diganti `ekstrakPeriodePreambleTiktok`.
+> **Bug ditemukan+diperbaiki SEBELUM merge**: `XLSX.utils.sheet_to_json` memadatkan baris pendek
+> ke lebar sheet (bukan ragged array) — cek `row.length===1` gagal terhadap bentuk ASLI maupun
+> round-trip xlsx nyata (ditemukan lewat test `apps/api` yang menulis xlsx sungguhan, bukan
+> menyuntik AOA langsung). **`tt_live`** (G1-09-2BII-TTLIVE): `ID Kreator`+`Waktu Live` menit
+> presisi TERBUKTI 100% unik (149 baris nyata) — `ekstrakBarisTtLive` baru, modul KESEPULUH ke
+> `pdt_fact_content`. **Rekonsiliasi TikTok** (G1-07-TIKTOK-REKONSILIASI): `tt_shop_analytics`
+> vs `tt_product_analytics` — GMV DAN Pesanan SKU keduanya Σ PERSIS sama (26.560.049/145,
+> dihitung ulang dari sample) — BEDA dari Shopee, pesanan TIDAK perlu dilewati. Diverifikasi (DB
+> lokal rebuild bersih, 247 migrasi — nol migrasi baru): `@cdps/core` 1237/1237, `@cdps/domain`
+> 2630/2630 (1 skip), `@cdps/db` 107/107, `@cdps/api` 595/595 (2 skip); typecheck 5 paket + lint
+> bersih. **G1 SEKARANG genuinely nol Open TikTok tersisa** — sisa Open G1 hanyalah
+> `G1-10-RETENSI-RECOMPUTE` (menunggu G2-01/G5 punya baris produksi pertama, struktural bukan
+> data) dan `G1-11-REPARSE-RECOMPUTE-STATUS` (pertanyaan desain jarang-terjadi, tidak memblokir).
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
@@ -893,7 +915,7 @@ sekarang tertutup. Sisa dua: **P-04** (🟠 sebagian) dan **P-07** (🟡 terbuka
 
 | # | Status | Temuan | Penjawab | Memblokir |
 |---|---|---|---|---|
-| **P-01** | ✅ **tertutup (sesi 2)** | Dua sample adalah **TikTok vs Tokopedia** (`shop_tt`/`shop_tp`, 35 baris sama, periode sama), bukan filter produk — `baseline/detect.ts:26-27`. `tt_orders` tetap kanonik | Claude (verifikasi kode) | selesai — G1-07 memakai `tt_orders`, bukan `tt_shop_analytics`, sebagai sisi rekonsiliasi TikTok |
+| **P-01** | ✅ **tertutup (sesi 2), rekomendasi DIREVISI sesi 33 via sample asli** | Dua sample sesi 2 adalah **TikTok vs Tokopedia** (`shop_tt`/`shop_tp`, 35 baris sama, periode sama), bukan filter produk — `baseline/detect.ts:26-27`, verifikasi KODE saja (nol sample TikTok asli sesi itu). Rekomendasi awal ("pakai `tt_orders`, hindari `tt_shop_analytics`") **DIREVISI** sesi 33 begitu sample asli PERTAMA ("Tiktok - Avitaskin.zip") tersedia: `tt_shop_analytics` TERNYATA berstruktur jelas (kolomDipanen SUDAH cocok persis sejak G1-02) dan Σ `tt_product_analytics` per-SKU (`'GMV'`/`'Pesanan SKU'`) TERBUKTI SAMA PERSIS dengan shop-level `tt_shop_analytics` (26.560.049/145, dihitung ulang dari file asli) — bukti aritmetika langsung mengalahkan kekhawatiran spekulatif sesi 2 yang lahir dari investigasi kode TANPA data nyata. `tt_orders` (order-level, butuh agregasi tambahan tanpa manfaat lebih) tidak jadi dipakai. | Claude (sesi 2: verifikasi kode; sesi 33: verifikasi sample asli, direkomendasikan ulang) | selesai — G1-07 memakai `tt_shop_analytics` + `tt_product_analytics`, `docs/DECISIONS.md` sesi 33 |
 | **P-02** | 🔴 **premis salah** | `level2_category` **nol hasil** di `supabase/migrations/**`; ia hidup di MCN | Hans | **G5** |
 | **P-03** | 🔴 **premis salah** | enum `price_segment_t` **tidak ada di CDPS sama sekali** | Hans | **G5** |
 | **P-04** | 🟠 **sebagian** | `readSheet` memang dipakai bersama — tapi ada **4 registry tanda tangan terpisah** + **2 parser angka beda perilaku** (`n()`→0 vs `parseIndonesianNumber()`→NaN) | — | melebarkan **G1-02/G1-03** |
