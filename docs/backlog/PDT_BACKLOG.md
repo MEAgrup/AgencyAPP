@@ -974,10 +974,45 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > **G2-01 Shopee sekarang paritas TikTok**: jalur fakta→skor LENGKAP untuk kedua platform, sisa
 > gap TERSTRUKTUR (dicatat sebagai `null` sampai Open ditutup) identik posisinya — Portfolio
 > Produk/Product Performance sama-sama menunggu `G2-01-KUADRAN-SKU`, sisanya platform-spesifik
-> (`G2-01-SHOPEE-CANCEL-REPEAT-RATE`, `G2-01-SHOPEE-KESEHATAN-WRITER`). **Belum dikerjakan
-> (sengaja, urutan berikutnya):** route HTTP untuk `hitungSkorTiktok`/`hitungSkorShopee`, desain
-> payload "laporan" (view gabungan skor+metrik+narasi untuk dikirim), dan G2-02 (UI admin
-> benchmark TikTok, revoke mechanism `pdt_laporan_kiriman`) yang sudah tercatat sebelumnya.
+> (`G2-01-SHOPEE-CANCEL-REPEAT-RATE`, `G2-01-SHOPEE-KESEHATAN-WRITER`).
+>
+> **Status 2026-09-15 (sesi 34 lanjutan, keputusan pemilik via `AskUserQuestion` — DUA kali)
+> — payload "laporan" v1 DIRANCANG dan DIBANGUN: KPI ringkas + skor, route HTTP BELUM ada.**
+> Sebelum membangun route sempit `GET /pdt/skor` yang kemungkinan besar harus diganti total
+> begitu payload laporan lengkap dirancang (risiko dua-route-berbeda-bentuk yang sama, dikonfirmasi
+> pemilik), didesain dulu bentuk payload "laporan" (`packages/core/src/pdt/laporan.ts`,
+> `bangunLaporanTiktok`/`bangunLaporanShopee`) + perakit agregasinya (`packages/domain/src/pdt.ts`,
+> `rakitLaporanTiktok`/`rakitLaporanShopee`). **Mesin laporan LAMA (`report/payload.ts`
+> `buildReportPayload`) punya DUA BELAS bagian** (kpi, kanal, iklan, live, video, produk, afiliasi,
+> tokopedia, ads_manager, skor, tahap, insight) — v1 di sini SENGAJA hanya mencakup DUA (kpi ringkas
+> + skor, keputusan pemilik eksplisit); SEPULUH bagian lain (kanal/iklan/live/video/produk/afiliasi/
+> tokopedia/ads_manager/tahap/insight) TETAP di luar cakupan, masing-masing butuh fungsi agregasi
+> fakta BARU (pola sama `rakitInputSkorTiktok`/`Shopee`) yang belum ada satupun — ditambahkan
+> satu-per-satu di sesi mendatang, TIDAK ditebak/dibangun sekaligus.
+>
+> **Basis KPI ringkas per platform DIVERIFIKASI dari PRD (bukan ditebak)**: TikTok = basis `'net'`,
+> GMV−refund (Rule 15 — `pdt_fact_shop_daily` menyimpan gmv/refund MENTAH, netting dihitung
+> pemanggil); Shopee = basis `'siap_dikirim'` (Rule 16, "Basis default untuk laporan klien Shopee =
+> Pesanan Siap Dikirim") — BEDA dari basis `'dibuat'` yang dipakai `rakitInputSkorShopee` untuk
+> dimensi Conversion & Retention (dua tujuan berbeda, PRD memisahkan eksplisit). GMV Shopee TIDAK
+> di-net-kan dengan refund — Rule 15 hanya menyebut netting untuk TikTok secara eksplisit.
+> Diverifikasi (DB lokal rebuild bersih, 249 migrasi — nol migrasi baru): `@cdps/core` 1311/1311
+> (naik dari 1305 — 12 tes baru murni unit, nol DB), `@cdps/domain` 2669/2672 (2 gagal pre-existing
+> tidak terkait — 1 skip), `@cdps/db` 107/107, `@cdps/api` 595/597 (2 skip); typecheck 3 paket +
+> lint bersih.
+>
+> **Catatan skema ditemukan, BELUM diselesaikan (di luar cakupan v1 ini)**: `pdt_laporan_kiriman.
+> benchmark_versi` adalah `NOT NULL REFERENCES pdt_benchmark(versi)` — kolom ini akan bentrok saat
+> laporan SHOPEE (nol benchmark, `hitungSkorShopee`/`rakitLaporanShopee` tidak mengembalikan
+> `benchmarkVersi` sama sekali) dibekukan ke tabel itu (Flow B langkah 4, "Kirim ke klien").
+> Tidak relevan bagi v1 di sini (murni VIEW, nol tulis ke `pdt_laporan_kiriman`) — dicatat supaya
+> tidak jadi kejutan saat "Kirim ke klien" mulai dibangun untuk Shopee.
+>
+> **Belum dikerjakan (sengaja, urutan berikutnya):** route HTTP yang mengeksposkan
+> `rakitLaporanTiktok`/`rakitLaporanShopee`, sepuluh bagian payload laporan yang belum tercakup
+> di atas, mekanisme "Kirim ke klien" (Flow B langkah 4, termasuk menyelesaikan catatan skema
+> `benchmark_versi` NOT NULL di atas), dan G2-02 (UI admin benchmark TikTok, revoke mechanism
+> `pdt_laporan_kiriman`) yang sudah tercatat sebelumnya.
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah

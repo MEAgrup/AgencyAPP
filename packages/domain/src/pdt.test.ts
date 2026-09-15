@@ -38,6 +38,8 @@ import {
   previewUploadBatch,
   rakitInputSkorShopee,
   rakitInputSkorTiktok,
+  rakitLaporanShopee,
+  rakitLaporanTiktok,
   reparsePdtBatch,
   siapkanUploadBatch,
   type PdtCommitOverride,
@@ -3261,5 +3263,107 @@ describeDb('hitungSkorShopee (sesi 34 lanjutan) — jalur lengkap fakta→skor, 
     const { hasil } = await hitungSkorShopee(sql, cpId, '2026-07-01');
     expect(hasil.total).toBeNull();
     expect(hasil.label).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rakitLaporanTiktok + rakitLaporanShopee (sesi 34 lanjutan, payload laporan
+// v1) — basis KPI ringkas per platform DIVERIFIKASI dari PRD: TikTok = basis
+// `'net'` GMV−refund (Rule 15), Shopee = basis `'siap_dikirim'` (Rule 16,
+// "Basis default untuk laporan klien Shopee"). Lihat docblock
+// `packages/core/src/pdt/laporan.ts` untuk cakupan v1 (KPI ringkas + skor
+// SAJA — sebelas bagian mesin lama lainnya di luar cakupan, keputusan
+// pemilik).
+// ---------------------------------------------------------------------------
+describeDb('rakitLaporanTiktok (sesi 34 lanjutan) — KPI basis net (Rule 15, GMV−refund) + hitungSkorTiktok', () => {
+  async function fixture(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', 'SHOP-ZPDT-3');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  it('KPI net = Σgmv − Σrefund basis net, cvr = Σpesanan/Σpengunjung; skor+benchmarkVersi dari hitungSkorTiktok', async () => {
+    const { cpId, batchId } = await fixture();
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1_000_000, 50_000, 40, 2_000)`;
+    // basis lain (SIAP DIKIRIM tidak relevan TikTok) sengaja TIDAK disisipkan — hanya 'net' yang dibaca.
+
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.schema).toBe('cdps.pdt.laporan.tiktok.v1');
+    expect(hasil.platform).toBe('tiktok');
+    expect(hasil.clientPlatformId).toBe(cpId);
+    expect(hasil.periodeAwalBulan).toBe('2026-07-01');
+    expect(hasil.kpi).toEqual({ gmv: 950_000, pesanan: 40, pengunjung: 2_000, cvr: 0.02 });
+    expect(hasil.benchmarkVersi).toBe(1);
+
+    const skorLangsung = await hitungSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.skor).toEqual(skorLangsung.hasil);
+  });
+
+  it('nol baris basis net ⇒ kpi seluruhnya null (BUKAN 0)', async () => {
+    const { cpId } = await fixture();
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+  });
+
+  it('periode selain awal bulan ⇒ ValidationError', async () => {
+    const { cpId } = await fixture();
+    await expect(rakitLaporanTiktok(sql, cpId, '2026-07-15')).rejects.toThrow(ValidationError);
+  });
+});
+
+describeDb('rakitLaporanShopee (sesi 34 lanjutan) — KPI basis siap_dikirim (Rule 16) + hitungSkorShopee', () => {
+  async function fixture(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  it('KPI = Σgmv basis siap_dikirim TANPA net-refund (beda TikTok), cvr = Σpesanan/Σpengunjung; skor dari hitungSkorShopee, nol benchmarkVersi', async () => {
+    const { cpId, batchId } = await fixture();
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'siap_dikirim', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 800_000, 50_000, 20, 1_000)`;
+    // basis 'dibuat' (dipakai rakitInputSkorShopee, BUKAN KPI laporan) disisipkan angka BEDA
+    // untuk membuktikan KPI laporan tidak ikut membaca basis ini.
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'dibuat', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 999_999, 999, 999)`;
+
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.schema).toBe('cdps.pdt.laporan.shopee.v1');
+    expect(hasil.platform).toBe('shopee');
+    // GMV TIDAK dikurangi refund (beda TikTok) — 800_000 apa adanya.
+    expect(hasil.kpi).toEqual({ gmv: 800_000, pesanan: 20, pengunjung: 1_000, cvr: 0.02 });
+    expect('benchmarkVersi' in hasil).toBe(false);
+
+    const skorLangsung = await hitungSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.skor).toEqual(skorLangsung.hasil);
+  });
+
+  it('nol baris basis siap_dikirim ⇒ kpi seluruhnya null (BUKAN 0)', async () => {
+    const { cpId } = await fixture();
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+  });
+
+  it('periode selain awal bulan ⇒ ValidationError', async () => {
+    const { cpId } = await fixture();
+    await expect(rakitLaporanShopee(sql, cpId, '2026-07-15')).rejects.toThrow(ValidationError);
   });
 });
