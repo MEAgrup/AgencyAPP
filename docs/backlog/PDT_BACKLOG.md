@@ -946,15 +946,38 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > (`PdtSkorInputShopee.dibuat.repeatRate`/`.cancelRate`, `.produk`, `.kesehatan`) tetap `| null`
 > menunggu Open masing-masing (`G2-01-SHOPEE-CANCEL-REPEAT-RATE`/`G2-01-KUADRAN-SKU`/
 > `G2-01-SHOPEE-KESEHATAN-WRITER`) — TIDAK berubah sesi ini, hanya kontrak inputnya yang sudah
-> siap begitu masing-masing writer dibangun. **Belum dikerjakan (sengaja, urutan berikutnya):**
-> perakit agregasi SQL `rakitInputSkorShopee` (padanan `rakitInputSkorTiktok`) — termasuk
-> keputusan pemetaan `sumber` `pdt_fact_ads` (`shopee_ads_cpc`/`shopee_ads_live`/
-> `shopee_ads_search`) ke agregat ROAS & Channel/Traffic Quality, yang BELUM diverifikasi
-> terhadap kategori "toko/produk/banner/live" mesin lama — SENGAJA ditunda ke PR perakit
-> (pure function ini tidak butuh keputusan itu, hanya bentuk kontrak input). Diverifikasi:
+> siap begitu masing-masing writer dibangun. Diverifikasi:
 > `@cdps/core` 1305/1305 (naik dari 1279 — 26 tes baru murni unit, nol DB), typecheck 3 paket
 > (`core`/`domain`/`api`) + lint bersih; `domain`/`db`/`api` TIDAK disentuh sesi ini (nol
 > pemanggil `computeSkorShopee` ada, jadi nol risiko regresi lintas paket).
+>
+> **Status 2026-09-15 (sesi 34 lanjutan) — `rakitInputSkorShopee` DIBANGUN, jalur LENGKAP
+> fakta→skor Shopee hidup (`hitungSkorShopee`).** Pemetaan `sumber` `pdt_fact_ads` ↔ kategori
+> mesin lama yang sebelumnya ditunda kini DITUTUP — diverifikasi dari `report/shopee/detect.ts`
+> (docblock produksi eksplisit, bukan ditebak): `shopee_ads_cpc` ↔ `ads_toko` lama, `shopee_
+> ads_search` ↔ `ads_produk` lama, `shopee_ads_live` ↔ `ads_live` lama; `ads_banner` lama TIDAK
+> punya padanan modul PDT (bukan gap baru — trio `ads_toko`/`ads_produk`/`ads_banner` "diparse
+> SATU parser dan DIJUMLAH bersama untuk SETIAP angka terhitung", kutipan `detect.ts`, jadi
+> kehilangan satu dari tiga TIDAK mengubah metodologi, hanya mengurangi volume Σ). Spend/omzet
+> Shopee = Σ ketiga sumber PDT yang ada; CTR (`Σklik/Σtayangan`) HANYA dari `shopee_ads_cpc`+
+> `shopee_ads_search` — `shopee_ads_live` DIKECUALIKAN dari CTR (mesin lama `computeHealth`
+> menyetel `dilihat: null, klik: null` eksplisit untuk baris `ads_live` sebelum menjumlahkan).
+> **Live Streaming** butuh status "pernah diunggah" yang TIDAK bisa dibaca dari `pdt_fact_content`
+> semata (nol baris ambigu antara "tidak pernah diunggah" vs "diunggah, sungguh nol sesi") —
+> dibaca dari `pdt_file`/`pdt_upload_batch` (modul `shopee_live` PERNAH terdeteksi di batch
+> BUKAN `ditolak` yang periodenya mencakup periode target). `hitungSkorShopee` BEDA dari
+> `hitungSkorTiktok`: nol `benchmarkVersi` dikembalikan (asimetri asli, Shopee tidak punya
+> benchmark). Diverifikasi (DB lokal rebuild bersih, 249 migrasi — nol migrasi baru):
+> `@cdps/domain` 2663/2666 (2 gagal pre-existing tidak terkait, `client.test.ts` — 1 skip),
+> `@cdps/db` 107/107, `@cdps/api` 595/597 (2 skip); typecheck 3 paket + lint bersih.
+>
+> **G2-01 Shopee sekarang paritas TikTok**: jalur fakta→skor LENGKAP untuk kedua platform, sisa
+> gap TERSTRUKTUR (dicatat sebagai `null` sampai Open ditutup) identik posisinya — Portfolio
+> Produk/Product Performance sama-sama menunggu `G2-01-KUADRAN-SKU`, sisanya platform-spesifik
+> (`G2-01-SHOPEE-CANCEL-REPEAT-RATE`, `G2-01-SHOPEE-KESEHATAN-WRITER`). **Belum dikerjakan
+> (sengaja, urutan berikutnya):** route HTTP untuk `hitungSkorTiktok`/`hitungSkorShopee`, desain
+> payload "laporan" (view gabungan skor+metrik+narasi untuk dikirim), dan G2-02 (UI admin
+> benchmark TikTok, revoke mechanism `pdt_laporan_kiriman`) yang sudah tercatat sebelumnya.
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah

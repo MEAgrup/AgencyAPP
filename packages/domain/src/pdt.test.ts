@@ -28,6 +28,7 @@ import {
   commitUploadBatch,
   finalizePdtOrphanPurgeTick,
   finalizePdtPurgeTick,
+  hitungSkorShopee,
   hitungSkorTiktok,
   markRawStored,
   planPdtOrphanPurgeTick,
@@ -35,6 +36,7 @@ import {
   planPdtReparseTick,
   platformKeVokabPdt,
   previewUploadBatch,
+  rakitInputSkorShopee,
   rakitInputSkorTiktok,
   reparsePdtBatch,
   siapkanUploadBatch,
@@ -3056,6 +3058,207 @@ describeDb('bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34) — benchmark 
   it('hitungSkorTiktok: nol baris fakta sama sekali ⇒ total & label null (Rule 12/aturan rumah #7 — bukan KRITIS palsu)', async () => {
     const { cpId } = await fixture();
     const { hasil } = await hitungSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.total).toBeNull();
+    expect(hasil.label).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rakitInputSkorShopee + hitungSkorShopee (sesi 34 lanjutan, G2-01 Shopee) —
+// padanan blok TikTok di atas. Pemetaan sumber pdt_fact_ads ↔ kategori mesin
+// lama (dan pengecualian shopee_ads_live dari agregat CTR) diverifikasi dari
+// `report/shopee/detect.ts`/`metrik.ts` — lihat docblock `rakitInputSkorShopee`
+// (`pdt.ts`) dan `docs/DECISIONS.md` untuk rincian lengkap.
+// ---------------------------------------------------------------------------
+describeDb('rakitInputSkorShopee (sesi 34 lanjutan) — agregasi pdt_fact_* → PdtSkorInputShopee', () => {
+  async function fixture(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  async function insertAdsShopee(
+    batchId: number, cpId: number, sumber: string, kampanyeId: string,
+    biaya: number, gmv: number | null, klik: number | null, tayangan: number | null,
+  ): Promise<void> {
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, klik, tayangan)
+      values (${cpId}, ${sumber}, ${kampanyeId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${biaya}, ${gmv}, ${klik}, ${tayangan})`;
+  }
+
+  async function insertDibuat(batchId: number, cpId: number, tanggal: string, pesanan: number, pengunjung: number | null): Promise<void> {
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, ${tanggal}::date, 'dibuat', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 0, ${pesanan}, ${pengunjung})`;
+  }
+
+  async function insertLiveContent(batchId: number, cpId: number, contentId: string): Promise<void> {
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv)
+      values (${cpId}, ${contentId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 0)`;
+  }
+
+  async function insertPdtFile(batchId: number, modulKode: string): Promise<void> {
+    await sql`
+      insert into pdt_file (batch_id, modul_kode, nama_entri, sha256, bytes, baris_header, deteksi_oleh, kolom_dipanen, parse_status, baris_terparse)
+      values (${batchId}, ${modulKode}, 'test.xlsx', 'deadbeef', 100, 1, 'tanda_tangan', 1, 'ok', 1)`;
+  }
+
+  it('seluruh lima input null bila nol baris fakta di periode ini (toko baru, belum ada batch)', async () => {
+    const { cpId } = await fixture();
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil).toEqual({ ads: null, dibuat: null, produk: null, live: null, kesehatan: null });
+  });
+
+  it('Ads: spend/omzet menjumlah SELURUH TIGA sumber (cpc+search+live), CTR HANYA dari cpc+search (live dikecualikan)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertAdsShopee(batchId, cpId, 'shopee_ads_cpc', 'K1', 100_000, 500_000, 200, 10_000);
+    await insertAdsShopee(batchId, cpId, 'shopee_ads_search', 'K2', 50_000, 200_000, 50, 2_000);
+    await insertAdsShopee(batchId, cpId, 'shopee_ads_live', 'K3', 30_000, 90_000, null, 5_000);
+    // sumber DI LUAR whitelist Shopee (TikTok) harus DIABAIKAN.
+    await insertAdsShopee(batchId, cpId, 'tt_ads_product', 'K9', 999_999, 999_999, 999, 999);
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.ads?.spend).toBe(180_000);
+    expect(hasil.ads?.omzet).toBe(790_000);
+    // ctr = (200+50) / (10_000+2_000) — tayangan/klik shopee_ads_live (5_000, null) TIDAK ikut
+    expect(hasil.ads?.ctr).toBeCloseTo(250 / 12_000, 10);
+  });
+
+  it('Ads: omzet null bila SEMUA baris omzet(gmv) tidak diketahui (bukan omzet 0 sungguhan)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertAdsShopee(batchId, cpId, 'shopee_ads_cpc', 'K1', 100_000, null, 200, 10_000);
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.ads?.spend).toBe(100_000);
+    expect(hasil.ads?.omzet).toBeNull();
+  });
+
+  it('Ads: ctr null bila tayangan cpc+search nol/tidak ada (hanya ada baris live)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertAdsShopee(batchId, cpId, 'shopee_ads_live', 'K1', 30_000, 90_000, null, 5_000);
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.ads?.ctr).toBeNull();
+  });
+
+  it('dibuat: cr = Σpesanan/Σpengunjung, 0 bila pengunjung nol (data ADA, bukan data hilang)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertDibuat(batchId, cpId, '2026-07-05', 40, 2_000);
+    await insertDibuat(batchId, cpId, '2026-07-20', 20, 1_000);
+    // di luar periode Juli — TIDAK boleh ikut terhitung
+    await insertDibuat(batchId, cpId, '2026-08-01', 999, 999);
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.dibuat).toEqual({ cr: 60 / 3_000, repeatRate: null, cancelRate: null });
+  });
+
+  it('dibuat: pengunjung nol ⇒ cr 0 (bukan null)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertDibuat(batchId, cpId, '2026-07-05', 0, 0);
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.dibuat?.cr).toBe(0);
+  });
+
+  it('produk: SELALU null (kuadran belum punya penulis, Open G2-01-KUADRAN-SKU)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertAdsShopee(batchId, cpId, 'shopee_ads_cpc', 'K1', 10_000, 20_000, 5, 100);
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.produk).toBeNull();
+  });
+
+  it('kesehatan: SELALU null (modul shopee_kesehatan terdaftar, nol penulis fakta — Open G2-01-SHOPEE-KESEHATAN-WRITER)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertAdsShopee(batchId, cpId, 'shopee_ads_cpc', 'K1', 10_000, 20_000, 5, 100);
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.kesehatan).toBeNull();
+  });
+
+  it('live: modul shopee_live TIDAK PERNAH terdeteksi di batch manapun ⇒ null (meski ada baris pdt_fact_content)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertLiveContent(batchId, cpId, 'L1');
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.live).toBeNull();
+  });
+
+  it('live: modul shopee_live terdeteksi di batch yang periodenya mencakup periode ini ⇒ diunggah=true + sesi dihitung', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertPdtFile(batchId, 'shopee_live');
+    await insertLiveContent(batchId, cpId, 'L1');
+    await insertLiveContent(batchId, cpId, 'L2');
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.live).toEqual({ diunggah: true, sesi: 2 });
+  });
+
+  it('live: diunggah=true tapi nol baris pdt_fact_content ⇒ sesi=0 (bukan null — beda dari "tidak pernah diunggah")', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertPdtFile(batchId, 'shopee_live');
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.live).toEqual({ diunggah: true, sesi: 0 });
+  });
+
+  it('live: batch berstatus ditolak TIDAK dihitung sebagai diunggah', async () => {
+    const { cpId, batchId } = await fixture();
+    await sql`update pdt_upload_batch set status = 'ditolak', alasan_ditolak = 'tes' where id = ${batchId}`;
+    await insertPdtFile(batchId, 'shopee_live');
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.live).toBeNull();
+  });
+
+  it('periode selain awal bulan (bukan YYYY-MM-01) ⇒ ValidationError', async () => {
+    const { cpId } = await fixture();
+    await expect(rakitInputSkorShopee(sql, cpId, '2026-07-15')).rejects.toThrow(ValidationError);
+  });
+});
+
+describeDb('hitungSkorShopee (sesi 34 lanjutan) — jalur lengkap fakta→skor, nol benchmark (asimetri asli mesin produksi)', () => {
+  async function fixture(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  it('merakit fakta + computeSkorShopee — total cocok hitungan langsung dari input yang SAMA, nol benchmarkVersi dikembalikan', async () => {
+    const { cpId, batchId } = await fixture();
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, klik, tayangan)
+      values (${cpId}, 'shopee_ads_cpc', 'K1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100000, 800000, 200, 10000)`;
+
+    const hasilWrapper = await hitungSkorShopee(sql, cpId, '2026-07-01');
+    expect('benchmarkVersi' in hasilWrapper).toBe(false);
+    const { hasil } = hasilWrapper;
+
+    const inputLangsung = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    const harapan = pdtCore.computeSkorShopee(inputLangsung);
+    expect(hasil).toEqual(harapan);
+    // Hanya dimensi ROAS & Channel + Traffic Quality yang punya data ads (dibuat masih kosong).
+    expect(hasil.dimensi.find((d) => d.kode === 'roas_channel')?.disertakan).toBe(true);
+  });
+
+  it('nol baris fakta sama sekali ⇒ total & label null (Rule 12/aturan rumah #7)', async () => {
+    const { cpId } = await fixture();
+    const { hasil } = await hitungSkorShopee(sql, cpId, '2026-07-01');
     expect(hasil.total).toBeNull();
     expect(hasil.label).toBeNull();
   });
