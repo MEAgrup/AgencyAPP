@@ -228,6 +228,10 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   StoreOpsConflictError: 409, // storeops.ConflictError
   TaskConflictError: 409, // task.ConflictError
   TutupBukuConflictError: 409, // tutupbuku.ConflictError
+  // 422 — PX-M3-04, deviasi SADAR dari konvensi HTTP repo di atas (validasi
+  // lain semuanya 400): PRD M3 §4 Flow C langkah 4/§7 eksplisit meminta 422
+  // untuk kontrak payload bridge coverage MCN→CDPS.
+  ProductExchangeContractError: 422, // productexchange.ContractError (PX-M3-B)
   // 429 — the two app-level throttles: login (all realms) and the Client
   // Portal complaint form (spec §5.2). Both carry a BI `[...]` message.
   AuthRateLimitedError: 429, // auth.RateLimitedError

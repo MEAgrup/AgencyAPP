@@ -175,10 +175,21 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "176"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "181"
 check "entity_prefix"    "select count(*) from entity_prefix"    "45"
 check "sm_machines"      "select count(*) from sm_machines"      "35"
 check "notif_events"     "select count(*) from notif_events"     "76"
+# --- Product Exchange M3-B (20261031010000) -------------------------------
+# 181 = 176 + 5 tabel px_* (M3-B): px_sku_volume, px_sku_kategori,
+#       px_sku_eligibility, px_coverage_snapshot, px_coverage_push. Nol
+#       prefix baru (PX-M3-01: seluruh baris berkunci client_platform_id+
+#       platform_product_id atau bigint identity, bukan PREFIX- id) ⇒
+#       entity_prefix TETAP 45. Nol lifecycle ber-sm_transition (status
+#       ditulis domain langsung, sama pola pdt_upload_batch) ⇒ sm_machines
+#       TETAP 35. Nol event katalog baru Phase 1 (kandidat tampil di halaman
+#       Kandidat PX, bukan notifikasi — dicatat docs/DECISIONS.md PX-M3-…)
+#       ⇒ notif_events TETAP 76. View px_catalog_item_v BUKAN base table,
+#       nol pengaruh ke gate ini.
 # --- PDT G1-10 (job purge harian, Rule 48) --------------------------------
 # notif_events 75→76: `pdt.purge.guard_exceeded` (pagar 5%/hari terlampaui →
 #       Directors). Nol tabel baru (pdt_upload_batch sudah punya seluruh

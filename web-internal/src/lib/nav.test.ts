@@ -637,6 +637,26 @@ describe('visibleNav — layered OD / Director', () => {
     expect(hrefs(role('Account', 'lead', { od: true }))).not.toContain('/px/eligibility-policy');
     expect(hrefs(role('Account', 'staff', { director: true }))).toContain('/px/eligibility-policy');
   });
+
+  it('Kandidat PX (M3-B): AM divisi Account (staff maupun lead) + Director; OD murni (divisi lain) TIDAK', () => {
+    expect(hrefs(role('Account', 'staff'))).toContain('/px/kandidat');
+    expect(hrefs(role('Account', 'lead'))).toContain('/px/kandidat');
+    expect(hrefs(role('Account', 'staff', { director: true }))).toContain('/px/kandidat');
+    // Staff+OD berlapis di divisi Account TETAP melihat menu divisinya sendiri
+    // (pola sama "a staff+OD layered account keeps its own division menus too").
+    expect(hrefs(role('Account', 'staff', { od: true }))).toContain('/px/kandidat');
+    // OD murni di divisi LAIN tidak mendapat akses lintas-divisi ke alat kerja AM ini.
+    expect(hrefs(role('Ads', 'staff', { od: true }))).not.toContain('/px/kandidat');
+    expect(hrefs(role('Ads', 'staff'))).not.toContain('/px/kandidat');
+  });
+
+  it('Katalog PX (M3-B): Lead Account/Director/OD; AM staff TIDAK', () => {
+    expect(hrefs(role('Account', 'lead'))).toContain('/px/katalog');
+    expect(hrefs(role('Account', 'staff', { director: true }))).toContain('/px/katalog');
+    expect(hrefs(role('Account', 'lead', { od: true }))).toContain('/px/katalog');
+    expect(hrefs(role('Ads', 'staff', { od: true }))).toContain('/px/katalog'); // OD lintas-divisi
+    expect(hrefs(role('Account', 'staff'))).not.toContain('/px/katalog');
+  });
 });
 
 describe('visibleNav — section shape', () => {
@@ -720,6 +740,7 @@ describe('Sidebar IA v3 — struktur 9 grup', () => {
       '/penugasan', '/portal/team', '/performance',
       '/admin/employees', '/admin/role-mappings', '/admin/hari-libur',
       '/admin/vendor-accounts', '/admin/client-contacts', '/px/eligibility-policy',
+      '/px/kandidat', '/px/katalog',
     ]) {
       expect(ALL_HREFS, `${href} hilang dari model navigasi`).toContain(href);
     }
