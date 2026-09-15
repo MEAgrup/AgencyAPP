@@ -601,6 +601,23 @@ punya `null` eksplisit.
 > lebih dulu). Tes baru `detect.test.ts` (+1 regresi ambiguitas + 2 fixture CPC/Search preamble
 > penuh). Diverifikasi (DB lokal rebuild bersih ×2): `@cdps/core` 1207/1207, `@cdps/domain`
 > 2605/2605 (1 skip), `@cdps/api` 584/584 (2 skip); typecheck 4 paket + lint bersih.
+>
+> **Status 2026-09-15 (sesi 30) — `G1-09-SHEET-BUKAN-PERTAMA` DITUTUP.** Pemilik menjawab lewat
+> `AskUserQuestion`: opsi (c), `namaSheet` eksplisit per modul (`PdtModuleDef.namaSheet?: string`,
+> `undefined` = sheet pertama). `detectPdtModuleAntarSheet` (baru, `@cdps/core` `pdt/detect.ts`)
+> mencocokkan tiap modul terhadap sheet-nya SENDIRI, bukan satu sheet dipaksakan untuk semua —
+> `shopee_live` dikunci ke `'Daftar Streaming'`, `shopee_shop_stats` ke `'Pesanan Siap Dikirim'`
+> (basis default laporan klien, sudah dipakai `commitUploadBatch`) dengan tanda tangan diperbaiki
+> (marker 'Pesanan Dibuat' yang TERBUKTI salah → kolom yang sungguh ada di sheet terisolasi).
+> Override AM ikut diperbaiki (`PdtPreviewBerkasInput.sheets` baru membawa seluruh sheet relevan,
+> `aoaUntukModulEfektif` me-remap ke sheet yang benar saat override) — root cause yang sama,
+> bukan tiket terpisah. Migrasi baru `20261028010000_g1_09_shopee_shop_stats_sheet_terisolasi.sql`
+> (UPDATE seed `pdt_parser_modul`, gerbang dual-home). **Sengaja TIDAK diubah**: pembacaan NILAI
+> shop-level dari sheet terisolasi (`parseShopeeShopStatsPerBasis`) — struktur baris di dalamnya
+> belum terverifikasi ke sample, dicatat Open baru `G1-09-SHOPEESHOPSTATS-BASIS-TOTAL` (bukan
+> regresi — jalur itu sudah nol dari sumber ini sebelum perbaikan ini juga). Diverifikasi (DB
+> lokal rebuild bersih, 247 migrasi): `@cdps/core` 1212/1212, `@cdps/domain` 2619/2619 (1 skip),
+> `@cdps/db` 107/107, `@cdps/api` 595/595 (2 skip); typecheck 5 paket + lint bersih.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

@@ -17,8 +17,9 @@
  * salah slot ke modul lain manapun (nol salah-slot).
  */
 import { describe, expect, it } from 'vitest';
-import { detectPdtModule } from './detect';
+import { detectPdtModule, detectPdtModuleAntarSheet } from './detect';
 import { PDT_MODULES, UNVERIFIED_SIGNATURE } from './modules';
+import type { PdtModuleDef } from './types';
 
 const TIKTOK = PDT_MODULES.filter((m) => m.platform === 'tiktok');
 const SHOPEE = PDT_MODULES.filter((m) => m.platform === 'shopee');
@@ -142,15 +143,19 @@ describe('detectPdtModule — TikTok (9 modul)', () => {
 });
 
 describe('detectPdtModule — Shopee (15 modul, 2 belum terverifikasi)', () => {
-  it('shopee_shop_stats (marker "Pesanan Dibuat" + header terpisah baris)', () => {
+  // G1-09-SHEET-BUKAN-PERTAMA (docs/DECISIONS.md): tanda tangan LAMA (marker
+  // 'Pesanan Dibuat' sebagai baris penanda seksi) TERBUKTI salah — sample asli
+  // membuktikan 'Pesanan Dibuat' HANYA nama TAB sheet (dari 12-sheet workbook),
+  // bukan isi sel. Sheet terisolasi per basis (`namaSheet: 'Pesanan Siap
+  // Dikirim'`, modules.ts) LANGSUNG dimulai dari header, nol baris penanda.
+  it('shopee_shop_stats (header LANGSUNG di baris pertama — sheet sudah terisolasi per basis)', () => {
     expectExactMatch(
       [
-        ['Pesanan Dibuat'],
-        ['Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik',
+        ['Tanggal', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik',
           'Total Pengunjung', 'Tingkat Konversi Pesanan', 'Pesanan Dibatalkan', 'Penjualan Dibatalkan',
           'Pesanan Dikembalikan', 'Penjualan Dikembalikan', 'Pembeli', 'Total Pembeli Baru',
           'Total Pembeli Saat Ini', 'Total Potensi Pembeli', 'Tingkat Pembelian Berulang'],
-        ['Total', 'Rp1.624.937.476', '13568', 'Rp119.762', '5000', '20627', '2,46%', '2785', 'Rp359.295.534', '140', 'Rp24.586.464', '11452', '300', '600', '50', '12,97%'],
+        ['01/07/2026', 'Rp1.624.937.476', '13568', 'Rp119.762', '5000', '20627', '2,46%', '2785', 'Rp359.295.534', '140', 'Rp24.586.464', '11452', '300', '600', '50', '12,97%'],
       ],
       'shopee_shop_stats',
     );
@@ -375,5 +380,81 @@ describe('detectPdtModule — registry', () => {
       if (UNVERIFIED.has(m.kode)) continue;
       expect(m.tandaTanganKolom).not.toEqual(UNVERIFIED_SIGNATURE);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1-09-SHEET-BUKAN-PERTAMA (docs/DECISIONS.md) — `detectPdtModuleAntarSheet`,
+// pencocok MULTI-SHEET yang menggantikan asumsi "sheet pertama untuk seluruh
+// modul" yang terbukti membuat `shopee_live`/`shopee_shop_stats` jadi kode
+// mati untuk berkas asli.
+// ---------------------------------------------------------------------------
+describe('detectPdtModuleAntarSheet — deteksi multi-sheet (G1-09-SHEET-BUKAN-PERTAMA)', () => {
+  const MODUL_SHEET0: PdtModuleDef = {
+    kode: 'sheet0_saja', platform: 'shopee', namaTampilan: 'Sheet pertama saja',
+    tandaTanganKolom: { must: ['Kolom A'] }, barisHeaderHint: 1, kolomDipanen: ['Kolom A'], wajib: false,
+  };
+  const MODUL_SHEET_KHUSUS: PdtModuleDef = {
+    kode: 'sheet_khusus', platform: 'shopee', namaTampilan: 'Sheet khusus',
+    tandaTanganKolom: { must: ['Kolom B'] }, barisHeaderHint: 1, kolomDipanen: ['Kolom B'], wajib: false,
+    namaSheet: 'Sheet Target',
+  };
+
+  it('modul TANPA namaSheet cocok terhadap sheet PERTAMA workbook (perilaku lama dipertahankan)', () => {
+    const sheets = new Map([
+      ['Ringkasan', [['Kolom A'], ['nilai']]],
+      ['Lain', [['Kolom B'], ['nilai']]],
+    ]);
+    const r = detectPdtModuleAntarSheet(sheets, ['Ringkasan', 'Lain'], [MODUL_SHEET0, MODUL_SHEET_KHUSUS]);
+    expect(r.kode).toBe('sheet0_saja');
+    expect(r.aoa).toEqual([['Kolom A'], ['nilai']]);
+  });
+
+  it('modul BER-namaSheet cocok terhadap sheet-nya sendiri walau bukan sheet pertama', () => {
+    const sheets = new Map([
+      ['Tinjauan', [['Ringkasan tidak relevan']]],
+      ['Sheet Target', [['Kolom B'], ['nilai']]],
+    ]);
+    const r = detectPdtModuleAntarSheet(sheets, ['Tinjauan', 'Sheet Target'], [MODUL_SHEET0, MODUL_SHEET_KHUSUS]);
+    expect(r.kode).toBe('sheet_khusus');
+    expect(r.aoa).toEqual([['Kolom B'], ['nilai']]);
+  });
+
+  it('modul BER-namaSheet TIDAK PERNAH cocok bila workbook tidak punya sheet bernama itu', () => {
+    const sheets = new Map([['Tinjauan', [['Kolom B'], ['nilai']]]]); // isinya cocok, tapi nama sheet-nya salah
+    const r = detectPdtModuleAntarSheet(sheets, ['Tinjauan'], [MODUL_SHEET_KHUSUS]);
+    expect(r.kode).toBeNull();
+    expect(r.matches).toEqual([]);
+    expect(r.aoa).toBeNull();
+  });
+
+  it('dua modul cocok di sheet MASING-MASING ⇒ ambigu, aoa null (nol AoA tunggal yang mewakili keduanya)', () => {
+    const sheets = new Map([
+      ['Ringkasan', [['Kolom A'], ['nilai']]],
+      ['Sheet Target', [['Kolom A'], ['nilai']]], // sengaja juga membawa 'Kolom A'
+    ]);
+    const modulKeduaDiSheetTarget = { ...MODUL_SHEET_KHUSUS, tandaTanganKolom: { must: ['Kolom A'] } };
+    const r = detectPdtModuleAntarSheet(sheets, ['Ringkasan', 'Sheet Target'], [MODUL_SHEET0, modulKeduaDiSheetTarget]);
+    expect(r.ambiguous).toBe(true);
+    expect(r.kode).toBeNull();
+    expect(r.aoa).toBeNull();
+    expect([...r.matches].sort()).toEqual(['sheet0_saja', 'sheet_khusus'].sort());
+  });
+
+  it('registry PENUH (PDT_MODULES) lewat detectPdtModuleAntarSheet menghasilkan hasil IDENTIK detectPdtModule untuk workbook satu-sheet', () => {
+    // Sanity: bila workbook cuma satu sheet dan TIDAK ADA modul lain yang
+    // mengklaim sheet itu via namaSheet, kedua fungsi harus sepakat — regresi
+    // nol untuk seluruh 23 modul yang TIDAK terlibat G1-09-SHEET-BUKAN-PERTAMA.
+    const rows = [
+      ['Kode Produk', 'Kode Variasi', 'SKU Induk', 'Total Penjualan (Pesanan Dibuat) (IDR)',
+        'Penjualan (Pesanan Siap Dikirim) (IDR)', 'Jumlah Produk Dilihat', 'Produk Diklik',
+        'Tingkat Konversi (Pesanan yang Dibuat)', 'repeat order', 'Pengunjung Produk (Kunjungan)'],
+      ['SKU-A', 'VAR-A1', 'SKU-A', 'Rp90.000.000', 'Rp84.000.000', '5000', '900', '30,00%', '25,00%', '1000'],
+    ];
+    const lama = detectPdtModule(rows, PDT_MODULES);
+    const baru = detectPdtModuleAntarSheet(new Map([['Sheet1', rows]]), ['Sheet1'], PDT_MODULES);
+    expect(baru.kode).toBe(lama.kode);
+    expect(baru.matches).toEqual(lama.matches);
+    expect(baru.ambiguous).toBe(lama.ambiguous);
   });
 });

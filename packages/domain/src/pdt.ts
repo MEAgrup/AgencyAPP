@@ -94,12 +94,39 @@ export interface PdtPreviewBerkasInput {
   ditolakPagar: { pesan: string } | null;
   /** Terisi bila entri lolos pagar tapi GAGAL diekstrak/didekode (G1-04 `gagalEkstrak` / G1-05 `gagal`). */
   decodeGagal: string | null;
-  /** `null` bila `ditolakPagar`/`decodeGagal` terisi. Sheet PERTAMA, array-of-arrays. */
+  /**
+   * `null` bila `ditolakPagar`/`decodeGagal` terisi. AoA milik modul yang
+   * terdeteksi (sheet `namaSheet`-nya, G1-09-SHEET-BUKAN-PERTAMA) — atau
+   * sheet pertama bila nol/lebih dari satu modul cocok.
+   */
   aoa: readonly (readonly unknown[])[] | null;
-  /** Hasil `detectPdtModule` (G1-02) — `null` bila nol/lebih dari satu tanda tangan cocok. */
+  /**
+   * SELURUH sheet workbook yang relevan (sheet pertama ∪ tiap `namaSheet`
+   * modul di registry) yang ADA di berkas ini, nama→AoA. `null` sama seperti
+   * `aoa`. Dipakai untuk me-remap `aoa` ke sheet yang BENAR saat AM
+   * meng-override modul (lihat `commitUploadBatch`/`reparsePdtBatch`) ke
+   * modul ber-`namaSheet` yang berbeda dari yang otomatis terdeteksi.
+   */
+  sheets: ReadonlyMap<string, readonly (readonly unknown[])[]> | null;
+  /** Hasil `detectPdtModuleAntarSheet` (G1-02/G1-09) — `null` bila nol/lebih dari satu tanda tangan cocok. */
   modulTerdeteksi: string | null;
   ambiguous: boolean;
   matches: readonly string[];
+}
+
+/**
+ * `input.aoa`, dikoreksi ke sheet `namaSheet` modul `kodeEfektif` bila
+ * `input.sheets` punya sheet itu (G1-09-SHEET-BUKAN-PERTAMA) — dipakai TIAP
+ * kali modul EFEKTIF suatu berkas bisa berbeda dari yang `detectPdtModuleAntarSheet`
+ * otomatis pilih (override AM, `commitUploadBatch`/`reparsePdtBatch`).
+ * `input.aoa` apa adanya bila sheet yang diminta tidak ada di `input.sheets`
+ * (mis. override ke modul yang `namaSheet`-nya memang tidak ada di berkas
+ * ini — tidak ada sheet lain yang bisa dipakai sebagai gantinya).
+ */
+function aoaUntukModulEfektif(input: PdtPreviewBerkasInput, kodeEfektif: string): readonly (readonly unknown[])[] | null {
+  const modul = modulPlatform(kodeEfektif);
+  if (!modul?.namaSheet) return input.aoa;
+  return input.sheets?.get(modul.namaSheet) ?? input.aoa;
 }
 
 /** Status TAMPILAN pratinjau per berkas — beda dari `pdt_file.parse_status` (DB, hanya lahir saat commit): di sini ada dua status TAMBAHAN (`ditolak_pagar`/`perlu_pilih_modul`) yang belum berhak jadi baris DB sama sekali. */
@@ -602,7 +629,13 @@ export async function commitUploadBatch(
     // Override hanya berlaku untuk berkas yang benar-benar terekstrak (b.aoa != null) — berkas
     // ditolakPagar/decodeGagal tidak punya sheet untuk diparse ulang dengan modul apa pun.
     const berlakuOverride = overrideKode != null && b.aoa != null;
-    const efektif: PdtPreviewBerkasInput = berlakuOverride ? { ...b, modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] } : b;
+    // `aoa` DIKOREKSI ke sheet `namaSheet` modul override (G1-09-SHEET-BUKAN-PERTAMA) —
+    // tanpa ini, AM yang meng-override ke modul ber-sheet-spesifik (mis. `shopee_live`)
+    // akan tetap membaca sheet yang deteksi OTOMATIS pilih (biasanya sheet pertama),
+    // BUKAN sheet yang modul override itu sungguhan minta.
+    const efektif: PdtPreviewBerkasInput = berlakuOverride
+      ? { ...b, aoa: aoaUntukModulEfektif(b, overrideKode), modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] }
+      : b;
     const { hasil, terparse: t } = bangunSatuPreviewBerkas(efektif);
     hasilBerkas.push({ ...hasil, deteksiOleh: berlakuOverride ? 'override_am' : 'tanda_tangan' });
     if (t) terparse.push(t);
@@ -1583,7 +1616,12 @@ export async function reparsePdtBatch(
   for (const b of berkasInput) {
     const overrideKode = overrideByNama.get(b.nama);
     const berlakuOverride = overrideKode != null && b.aoa != null;
-    const efektif: PdtPreviewBerkasInput = berlakuOverride ? { ...b, modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] } : b;
+    // `aoa` DIKOREKSI ke sheet `namaSheet` modul override, sama alasan `commitUploadBatch`
+    // (G1-09-SHEET-BUKAN-PERTAMA) — reparse membaca ULANG dari ZIP mentah, jadi
+    // `b.sheets` yang dibawa `parsePdtZipEntries` TERKINI selalu tersedia untuk ini.
+    const efektif: PdtPreviewBerkasInput = berlakuOverride
+      ? { ...b, aoa: aoaUntukModulEfektif(b, overrideKode), modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] }
+      : b;
     const { terparse: t } = bangunSatuPreviewBerkas(efektif);
     if (t) terparse.push(t);
   }

@@ -39,7 +39,7 @@ describe('bangunPreviewBerkasInputs — sintetik', () => {
     expect(hasil).toEqual([{
       nama: 'nested.zip', sha256: null, bytes: null,
       ditolakPagar: { pesan: "[berkas 'nested.zip' adalah ZIP bersarang, tidak didukung]" },
-      decodeGagal: null, aoa: null, modulTerdeteksi: null, ambiguous: false, matches: [],
+      decodeGagal: null, aoa: null, sheets: null, modulTerdeteksi: null, ambiguous: false, matches: [],
     }]);
   });
 
@@ -51,7 +51,7 @@ describe('bangunPreviewBerkasInputs — sintetik', () => {
     const hasil = bangunPreviewBerkasInputs(zip, { berkas: [], gagal: [], durasiMs: 0 });
     expect(hasil).toEqual([{
       nama: 'a.xlsx', sha256: null, bytes: null, ditolakPagar: null,
-      decodeGagal: 'ukuran tidak cocok', aoa: null, modulTerdeteksi: null, ambiguous: false, matches: [],
+      decodeGagal: 'ukuran tidak cocok', aoa: null, sheets: null, modulTerdeteksi: null, ambiguous: false, matches: [],
     }]);
   });
 
@@ -65,7 +65,7 @@ describe('bangunPreviewBerkasInputs — sintetik', () => {
     const hasil = bangunPreviewBerkasInputs(zip, { berkas: [], gagal: [{ nama: 'b.xlsx', pesan: 'berkas tidak berisi sheet apa pun' }], durasiMs: 0 });
     expect(hasil).toEqual([{
       nama: 'b.xlsx', sha256: 'sha-b', bytes: 42, ditolakPagar: null,
-      decodeGagal: 'berkas tidak berisi sheet apa pun', aoa: null, modulTerdeteksi: null, ambiguous: false, matches: [],
+      decodeGagal: 'berkas tidak berisi sheet apa pun', aoa: null, sheets: null, modulTerdeteksi: null, ambiguous: false, matches: [],
     }]);
   });
 
@@ -77,13 +77,14 @@ describe('bangunPreviewBerkasInputs — sintetik', () => {
       gagalEkstrak: [], direktoriSementara: '/tmp/x',
     };
     const aoa = [['Kode Produk', 'Kode Variasi', 'SKU Induk']];
+    const sheets = new Map([['Sheet1', aoa]]);
     const hasil = bangunPreviewBerkasInputs(zip, {
-      berkas: [{ nama: 'c.xlsx', aoa, modul: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'] }],
+      berkas: [{ nama: 'c.xlsx', aoa, sheets, modul: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'] }],
       gagal: [], durasiMs: 0,
     });
     expect(hasil).toEqual([{
       nama: 'c.xlsx', sha256: 'sha-c', bytes: 99, ditolakPagar: null, decodeGagal: null,
-      aoa, modulTerdeteksi: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'],
+      aoa, sheets, modulTerdeteksi: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'],
     }]);
   });
 
@@ -102,7 +103,7 @@ describe('bangunPreviewBerkasInputs — sintetik', () => {
       gagalEkstrak: [], direktoriSementara: '/tmp/x',
     };
     const hasil = bangunPreviewBerkasInputs(zip, {
-      berkas: [{ nama: 'b.xlsx', aoa: [['x']], modul: null, ambiguous: false, matches: [] }],
+      berkas: [{ nama: 'b.xlsx', aoa: [['x']], sheets: new Map(), modul: null, ambiguous: false, matches: [] }],
       gagal: [], durasiMs: 0,
     });
     expect(hasil.map((h) => h.nama)).toEqual(['a.zip', 'b.xlsx']); // .DS_Store dibuang
@@ -153,5 +154,6 @@ describe('bangunPreviewBerkasInputs — end-to-end (ZIP sungguhan)', () => {
     expect(hasil[0].ditolakPagar).toBeNull();
     expect(hasil[0].sha256).toEqual(expect.any(String));
     expect(hasil[0].aoa).toEqual(aoa);
+    expect(hasil[0].sheets?.get('Sheet1')).toEqual(aoa);
   });
 });

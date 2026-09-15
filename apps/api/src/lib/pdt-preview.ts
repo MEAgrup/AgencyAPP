@@ -34,7 +34,7 @@ export function bangunPreviewBerkasInputs(
       hasil.push({
         nama: meta.nama, sha256: null, bytes: null,
         ditolakPagar: { pesan: formatAlasanTolakEntri(meta.nama, keputusan.alasan) },
-        decodeGagal: null, aoa: null, modulTerdeteksi: null, ambiguous: false, matches: [],
+        decodeGagal: null, aoa: null, sheets: null, modulTerdeteksi: null, ambiguous: false, matches: [],
       });
       continue;
     }
@@ -45,7 +45,7 @@ export function bangunPreviewBerkasInputs(
     if (gagalEkstrak) {
       hasil.push({
         nama: meta.nama, sha256: null, bytes: null, ditolakPagar: null,
-        decodeGagal: gagalEkstrak.pesan, aoa: null, modulTerdeteksi: null, ambiguous: false, matches: [],
+        decodeGagal: gagalEkstrak.pesan, aoa: null, sheets: null, modulTerdeteksi: null, ambiguous: false, matches: [],
       });
       continue;
     }
@@ -55,7 +55,7 @@ export function bangunPreviewBerkasInputs(
     if (gagalDecode) {
       hasil.push({
         nama: meta.nama, sha256: diekstrak?.sha256 ?? null, bytes: diekstrak?.bytes ?? null,
-        ditolakPagar: null, decodeGagal: gagalDecode.pesan, aoa: null, modulTerdeteksi: null, ambiguous: false, matches: [],
+        ditolakPagar: null, decodeGagal: gagalDecode.pesan, aoa: null, sheets: null, modulTerdeteksi: null, ambiguous: false, matches: [],
       });
       continue;
     }
@@ -67,7 +67,7 @@ export function bangunPreviewBerkasInputs(
       // Dijaga di sini supaya kegagalan itu terlihat sebagai baris, bukan entri yang lenyap diam-diam.
       hasil.push({
         nama: meta.nama, sha256: null, bytes: null, ditolakPagar: null,
-        decodeGagal: 'berkas hilang dari hasil ekstraksi/parse (bug internal)', aoa: null,
+        decodeGagal: 'berkas hilang dari hasil ekstraksi/parse (bug internal)', aoa: null, sheets: null,
         modulTerdeteksi: null, ambiguous: false, matches: [],
       });
       continue;
@@ -75,7 +75,7 @@ export function bangunPreviewBerkasInputs(
 
     hasil.push({
       nama: meta.nama, sha256: diekstrak.sha256, bytes: diekstrak.bytes, ditolakPagar: null,
-      decodeGagal: null, aoa: berkas.aoa as unknown[][], modulTerdeteksi: berkas.modul,
+      decodeGagal: null, aoa: berkas.aoa as unknown[][], sheets: berkas.sheets, modulTerdeteksi: berkas.modul,
       ambiguous: berkas.ambiguous, matches: berkas.matches,
     });
   }
