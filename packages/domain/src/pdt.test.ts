@@ -30,8 +30,10 @@ import {
   markRawStored,
   planPdtOrphanPurgeTick,
   planPdtPurgeTick,
+  planPdtReparseTick,
   platformKeVokabPdt,
   previewUploadBatch,
+  reparsePdtBatch,
   siapkanUploadBatch,
   type PdtCommitOverride,
   type PdtPreviewBerkasInput,
@@ -2144,5 +2146,134 @@ describeDb('planPdtOrphanPurgeTick / finalizePdtOrphanPurgeTick (G1-10 pass kedu
     const after = await sql<{ n: number }[]>`
       select count(*)::int as n from audit_log where entity_type = 'pdt_purge_tick' and entity_id = '2026-06-12'`;
     expect(after[0].n).toBe(before[0].n);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1-11 — job reparse dari paket ZIP (Flow D). `reparsePdtBatch` menulis
+// ULANG baris fakta batch yang SUDAH ADA (bukan membuat batch baru) — diuji
+// lewat commit pertama (fixture "lama") lalu reparse dengan fixture "baru"
+// (mensimulasikan parser yang sudah diperbaiki menghasilkan angka berbeda
+// dari berkas ASLI yang sama), memverifikasi baris fakta BERUBAH dan
+// `parser_versi` batch naik kembali ke `PDT_PARSER_VERSI` (setelah sengaja
+// diturunkan manual — mensimulasikan batch "ketinggalan versi").
+// ---------------------------------------------------------------------------
+describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<{ clientId: string; cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', shopId);
+    return { clientId, cpId };
+  }
+
+  it('reparse menulis ULANG baris fakta dengan angka BARU dan menaikkan parser_versi batch + baris fakta — batch id, status TIDAK berubah', async () => {
+    const { cpId } = await fixture();
+    const lama = shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan A', 'PRD-1', '100', '10', '2', '2000000', '150000'],
+    ]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [lama], []);
+
+    // Simulasikan batch "ketinggalan versi" — parser_versi batch DAN baris fakta diturunkan
+    // manual (di dunia nyata ini terjadi karena batch dikomit SEBELUM PDT_PARSER_VERSI naik).
+    await sql`update pdt_upload_batch set parser_versi = 0 where id = ${persiapan.batchId}`;
+    await sql`update pdt_fact_ads set parser_versi = 0 where batch_id = ${persiapan.batchId}`;
+
+    const baru = shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan A', 'PRD-1', '100', '10', '2', '2500000', '175000'], // angka "diperbaiki"
+    ]);
+    const hasil = await reparsePdtBatch(sql, persiapan.batchId, [baru]);
+    expect(hasil).toMatchObject({ batchId: persiapan.batchId, direparse: true, alasanDilewati: null });
+
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — replace-on-recommit, bukan duplikat
+    expect(Number(rows[0].gmv)).toBe(2500000);
+    expect(Number(rows[0].biaya)).toBe(175000);
+    expect(rows[0].parser_versi).toBe(1);
+    expect(rows[0].batch_id).toBe(persiapan.batchId); // batch id SAMA — bukan batch baru
+
+    const batchRow = await sql<{ parser_versi: number; status: string }[]>`
+      select parser_versi, status from pdt_upload_batch where id = ${persiapan.batchId}`;
+    expect(batchRow[0].parser_versi).toBe(1);
+    expect(batchRow[0].status).toBe(persiapan.status); // status TIDAK disentuh reparse
+
+    const audit = await sql<{ before_json: { parser_versi: number }; after_json: { parser_versi: number; jumlah_berkas_terparse: number } }[]>`
+      select before_json, after_json from audit_log
+       where entity_type = 'pdt_upload_batch' and entity_id = ${String(persiapan.batchId)} and action = 'pdt_reparse'
+       order by id desc limit 1`;
+    expect(audit[0]?.before_json).toMatchObject({ parser_versi: 0 });
+    expect(audit[0]?.after_json).toMatchObject({ parser_versi: 1, jumlah_berkas_terparse: 1 });
+  });
+
+  it('AM override dari commit ASLI dipertahankan otomatis pada reparse (dibaca dari pdt_file, bukan parameter)', async () => {
+    const { cpId } = await fixture();
+    const berkasAmbigu: PdtPreviewBerkasInput = {
+      nama: 'entri-ambigu.csv', sha256: 'sha-x', bytes: 100, ditolakPagar: null, decodeGagal: null,
+      aoa: shopeeAdsCpcBerkasLengkap('x', '938284780', '01/07/2026 - 31/07/2026', [['Iklan A', 'PRD-1', '100', '10', '2', '2000000', '150000']]).aoa,
+      modulTerdeteksi: null, ambiguous: true, matches: ['shopee_ads_cpc', 'shopee_ads_search'],
+    };
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [berkasAmbigu], [{ nama: 'entri-ambigu.csv', modulKode: 'shopee_ads_cpc' }]);
+    expect(await loadFactAds(cpId)).toHaveLength(1);
+
+    await sql`update pdt_upload_batch set parser_versi = 0 where id = ${persiapan.batchId}`;
+
+    // Reparse: berkas dikirim ULANG masih ambigu (modulTerdeteksi null) — TANPA override
+    // eksplisit dari pemanggil. reparsePdtBatch membaca override 'entri-ambigu.csv' →
+    // 'shopee_ads_cpc' dari pdt_file (deteksi_oleh='override_am') secara otomatis.
+    const hasil = await reparsePdtBatch(sql, persiapan.batchId, [{ ...berkasAmbigu }]);
+    expect(hasil.direparse).toBe(true);
+    expect(await loadFactAds(cpId)).toHaveLength(1);
+  });
+
+  it('batch dengan paket sudah dipurge (raw_dihapus_pada terisi) TIDAK direparse — nol tulis, dilaporkan alasanDilewati', async () => {
+    const { cpId } = await fixture();
+    const lama = shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Iklan A', 'PRD-1', '100', '10', '2', '2000000', '150000'],
+    ]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [lama], []);
+    const purgedAt = new Date('2026-01-01T00:00:00Z');
+    // ck_pdt_upload_batch_raw_purge — raw_dihapus_pada terisi mensyaratkan raw_path pernah ada.
+    await sql`
+      update pdt_upload_batch
+         set parser_versi = 0, raw_path = 'CLI-1/1/2026-07-31/z.zip', raw_dihapus_pada = ${purgedAt}
+       where id = ${persiapan.batchId}`;
+
+    const hasil = await reparsePdtBatch(sql, persiapan.batchId, [lama]);
+    expect(hasil).toMatchObject({ batchId: persiapan.batchId, direparse: false, alasanDilewati: 'paket_terpurge' });
+    expect(hasil.rawDihapusPada).toBe(purgedAt.toISOString());
+
+    const rows = await loadFactAds(cpId);
+    expect(Number(rows[0].gmv)).toBe(2000000); // TIDAK berubah — nol tulis terjadi
+    const batchRow = await sql<{ parser_versi: number }[]>`select parser_versi from pdt_upload_batch where id = ${persiapan.batchId}`;
+    expect(batchRow[0].parser_versi).toBe(0); // TIDAK dinaikkan
+  });
+
+  it('batch tidak ditemukan ⇒ NotFoundError', async () => {
+    await expect(reparsePdtBatch(sql, 999999999, [])).rejects.toThrow(NotFoundError);
+  });
+
+  it('planPdtReparseTick: memilih parser_versi < PDT_PARSER_VERSI + raw_path ada, memisah kandidat vs perlu_upload_ulang', async () => {
+    const { cpId } = await fixture();
+
+    const kandidatBatch = (await commitUploadBatch(sql, ownerActor(), cpId, [
+      shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [['Iklan A', 'PRD-1', '100', '10', '2', '2000000', '150000']]),
+    ], [])).batchId;
+    await sql`update pdt_upload_batch set parser_versi = 0, raw_path = 'CLI-1/1/2026-07-31/x.zip' where id = ${kandidatBatch}`;
+
+    const purgedBatch = (await commitUploadBatch(sql, ownerActor(), cpId, [
+      shopeeAdsCpcBerkasLengkap('ads-cpc2.csv', '938284780', '01/08/2026 - 31/08/2026', [['Iklan B', 'PRD-2', '1', '1', '1', '1', '1']]),
+    ], [])).batchId;
+    await sql`update pdt_upload_batch set parser_versi = 0, raw_path = 'CLI-1/1/2026-08-31/y.zip', raw_dihapus_pada = now() where id = ${purgedBatch}`;
+
+    const takBerpaket = (await commitUploadBatch(sql, ownerActor(), cpId, [
+      shopeeAdsCpcBerkasLengkap('ads-cpc3.csv', '938284780', '01/09/2026 - 30/09/2026', [['Iklan C', 'PRD-3', '1', '1', '1', '1', '1']]),
+    ], [])).batchId;
+    await sql`update pdt_upload_batch set parser_versi = 0 where id = ${takBerpaket}`; // raw_path tetap NULL (belum markRawStored)
+
+    const rencana = await planPdtReparseTick(sql);
+    expect(rencana.kandidat.map((k) => k.batchId)).toContain(kandidatBatch);
+    expect(rencana.kandidat.map((k) => k.batchId)).not.toContain(purgedBatch);
+    expect(rencana.kandidat.map((k) => k.batchId)).not.toContain(takBerpaket);
+    expect(rencana.perluUploadUlang.map((s) => s.batchId)).toContain(purgedBatch);
+    expect(rencana.perluUploadUlang.map((s) => s.batchId)).not.toContain(kandidatBatch);
   });
 });

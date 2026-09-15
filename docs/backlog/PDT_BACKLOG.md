@@ -683,6 +683,22 @@ melampauinya (harus berhenti di nol objek) · selesai < 2 menit pada 500 klien �
 **DoD:** reparse mengubah angka pada fixture yang sengaja diparse dengan parser lama · batch
 ber-paket-terpurge muncul di daftar laporan, bukan hilang.
 
+> **Status 2026-09-15 (sesi 29, DITUTUP — `docs/DECISIONS.md`) — job reparse dibangun.**
+> `POST/GET /api/v1/internal/pdt/reparse/tick` (pola sama `pdt/purge` tick) memanggil
+> `pdt.planPdtReparseTick` (pilih `parser_versi < PDT_PARSER_VERSI` + `raw_path` ada, pisah
+> `kandidat`/`perluUploadUlang`) lalu, untuk tiap kandidat, mengulang pipeline unduh-ekstrak-
+> deteksi commit (Flow A: `unduhPdtRawObjek` → `bacaDanEkstrakPdtZip` → `parsePdtZipEntries`
+> dengan `tandaTanganKolom` TERKINI → `bangunPreviewBerkasInputs`) sebelum `pdt.reparsePdtBatch`
+> menulis ulang baris fakta (via `tulisFaktaModulTerparse`, diekstrak dari `commitUploadBatch`
+> supaya SQL-nya identik, nol duplikasi) + menaikkan `parser_versi` batch + satu `audit_log`
+> (`pdt_reparse`). AM override commit asli (`pdt_file.deteksi_oleh='override_am'`) dipertahankan
+> otomatis. **Cakupan SENGAJA dipersempit ke bacaan literal Flow D** (dicatat `docs/DECISIONS.md`
+> Open baru `G1-11-REPARSE-RECOMPUTE-STATUS`): status/identitas/periode/reconcile batch TIDAK
+> disentuh — hanya baris fakta + `parser_versi`. Cron `apps/api/vercel.json` (`0 18 * * *`).
+> `perlu_upload_ulang` (Flow D langkah 4) TIDAK butuh kolom/migrasi baru — status ini derived
+> sejak migrasi G1-01 (dicatat di sana: "dihitung job G1-10/pembaca G1-11"), tick ini melaporkannya
+> di respons JSON, bukan menulis kolom.
+
 ---
 
 ## 2. G2 — Laporan sebagai view + benchmark UI admin
