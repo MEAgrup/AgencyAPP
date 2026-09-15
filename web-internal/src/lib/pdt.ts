@@ -81,3 +81,44 @@ export interface PdtCommitBatch {
   berkas: PdtCommitBerkas[];
   identitas: PdtPreviewIdentitas;
 }
+
+// G2-01 lanjutan — payload "laporan" v1 (GET /account/pdt/laporan, PDT-21
+// Rule 21, Flow B langkah 1). Bentuk SAMA untuk TikTok/Shopee (`platform`
+// diskriminator); `benchmark_versi` SELALU ada sebagai kunci (aturan rumah
+// #4/O43) — `null` untuk Shopee (nol benchmark, asimetri asli mesin
+// produksi). v1 SENGAJA sempit: KPI ringkas + skor saja — belum ada halaman
+// yang memanggilnya, sama seperti PdtPreviewBatch/PdtCommitBatch, kontrak
+// datanya lebih dulu.
+export interface PdtLaporanKpi {
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  cvr: number | null;
+}
+
+export interface PdtLaporanDimensi {
+  kode: string;
+  label: string;
+  bobot_dasar: number;
+  nilai: number | null;
+  disertakan: boolean;
+  bobot_efektif: number;
+  label_tampil: string;
+}
+
+export interface PdtLaporanSkor {
+  total: number | null;
+  label: string | null;
+  dimensi: PdtLaporanDimensi[];
+}
+
+export interface PdtLaporan {
+  schema: string;
+  platform: string;
+  client_platform_id: number;
+  periode_awal_bulan: string;
+  generated_at: string;
+  kpi: PdtLaporanKpi;
+  skor: PdtLaporanSkor;
+  benchmark_versi: number | null;
+}
