@@ -216,6 +216,13 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // (`rekonsiliasi.ts`, menggantikan `parseShopeeShopStatsPerBasis` yang
     // dihapus) membaca baris itu langsung — nol tebakan tersisa.
     namaSheet: 'Pesanan Siap Dikirim',
+    // G1-09-2BII-SHOPDAILY-SHOPEE (sesi 34 lanjutan): dua sheet basis LAIN
+    // (Rule 16) untuk EKSTRAKSI `pdt_fact_shop_daily` (`ekstrakBarisShopDailyShopee`,
+    // `fakta.ts`) — BUKAN untuk deteksi (`namaSheet` di atas tidak berubah,
+    // tanda tangan tetap hanya dicek terhadap 'Pesanan Siap Dikirim'). Lihat
+    // `PdtModuleDef.sheetTambahan` (`types.ts`) untuk kenapa DUA modul
+    // terpisah ber-tanda-tangan identik akan meregresi deteksi jadi ambigu.
+    sheetTambahan: ['Pesanan Dibuat', 'Pesanan Dibayar'],
     tandaTanganKolom: { must: ['Total Penjualan (IDR)', 'Total Pengunjung'] },
     barisHeaderHint: 1, // header LANGSUNG di baris 1 di sheet terisolasi (nol baris penanda seksi)
     // 14-15 metrik per basis (PDT_KOLOM_DIPANEN §2.1: "3 basis × 14 metrik" —

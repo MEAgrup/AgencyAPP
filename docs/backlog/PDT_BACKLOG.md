@@ -684,7 +684,7 @@ punya `null` eksplisit.
 > 2635/2635 (1 skip), `@cdps/db` 107/107, `@cdps/api` 595/595 (2 skip); typecheck 4 paket + lint
 > bersih.
 
-### G1-09-2BII-SHOPDAILY-SHOPEE (Open, sesi 34)
+### G1-09-2BII-SHOPDAILY-SHOPEE (DITUTUP, sesi 34 lanjutan)
 `shopee_shop_stats` (sheet terisolasi `'Pesanan Siap Dikirim'`, sudah dipakai G1-07 rekonsiliasi
 lewat `parseShopeeShopStatsBasisTerisolasi`) belum dipetakan ke `pdt_fact_shop_daily`. Sheet ini
 SUDAH terbukti membawa baris harian (sesi 31, "31 baris harian" dibuktikan aritmetika terhadap
@@ -695,6 +695,41 @@ sudah diverifikasi strukturnya sesi 31 — perlu dicek ulang di BENTUK yang samp
 Shopee juga TIGA basis (`dibuat`/`siap_dikirim`/`dibayar`), tapi sheet terisolasi HANYA membawa
 SATU basis (`siap_dikirim`) — dua basis lain butuh sheet lain yang belum dianalisis untuk baris
 harian sama sekali. Tidak memblokir G2-01 TikTok; perlu ditutup sebelum G2-01 Shopee dimulai.
+
+> **Status 2026-09-15 (sesi 34 lanjutan, DITUTUP — `docs/DECISIONS.md`) — TIGA basis Shopee
+> sekaligus, dari SATU berkas.** Diverifikasi dari sample nyata ("Shopee - Fim Motor.zip"):
+> workbook 12-sheet punya TIGA sheet basis (`'Pesanan Dibuat'`/`'Pesanan Siap Dikirim'`/
+> `'Pesanan Dibayar'`) dengan struktur IDENTIK (header → ringkasan → baris kosong → header
+> berulang → baris harian). `ekstrakBarisShopDailyShopee` (`@cdps/core` `pdt/fakta.ts`) memetakan
+> kolom harian → `pdt_fact_shop_daily` (gmv, pesanan, pengunjung, produk_diklik, cr, pembeli,
+> pembeli_baru, refund). Ditemukan format tanggal BEDA dari yang sudah ada: kolom `Tanggal` baris
+> harian pakai DASH `DD-MM-YYYY` (`parseTanggalIdStrip`, baru), bukan SLASH `DD/MM/YYYY` yang
+> dipakai preamble ads (`parseTanggalId`, existing) — fungsi baru ditambah, kontrak lama tidak
+> diubah.
+>
+> **Perluasan arsitektur registry parser** (keputusan pemilik via `AskUserQuestion`): satu berkas
+> `shopee_shop_stats` perlu TIGA sheet sekaligus, tapi modul PDT selama ini asumsi satu-sheet-satu-
+> modul (`namaSheet` dipakai baik untuk deteksi MAUPUN ekstraksi). Opsi naif — daftarkan tiga
+> modul sibling yang masing-masing mengunci satu sheet basis — akan MEREGRESI deteksi: karena
+> `detectPdtModuleAntarSheet` mencocokkan tanda tangan kolom per sheet, satu berkas dengan tiga
+> sheet bertanda-tangan identik akan cocok ke TIGA kode modul sekaligus → `ambiguous: true`,
+> merusak deteksi `shopee_shop_stats` yang sudah berjalan untuk pengguna existing. Fix yang
+> dipilih: field baru `PdtModuleDef.sheetTambahan?: readonly string[]` — TS-only (bukan kolom
+> `pdt_parser_modul`, tidak disentuh sinkronisasi dual-home, tidak diperiksa
+> `pdt.registry.test.ts`), hanya memengaruhi `decodeSheetsRelevan` (sheet mana yang dikumpulkan
+> ke `PdtPreviewBerkasInput.sheets`), TIDAK PERNAH dibaca `detectPdtModuleAntarSheet`. Satu modul
+> (`shopee_shop_stats`) tetap satu-satunya yang dideteksi; fungsi ekstraksinya membaca ketiga
+> sheet lewat `input.sheets.get(nama)`.
+>
+> **Open baru**: `pdt_fact_shop_daily` belum punya kolom untuk `Pesanan Dibatalkan`/
+> `Penjualan Dibatalkan`/`Tingkat Pembelian Berulang` — kolom sumbernya TERVERIFIKASI ada di
+> sample nyata dan sudah masuk whitelist `kolomDipanen` modul, tapi belum ada tempat menyimpannya.
+> Dicatat `G2-01-SHOPEE-CANCEL-REPEAT-RATE` (Open) — memblokir sebagian dimensi Conversion &
+> Retention mesin skor Shopee (lihat §G2-01 di bawah untuk gap G2-01 Shopee selengkapnya).
+> Diverifikasi (DB lokal rebuild bersih, 249 migrasi — nol migrasi baru): `@cdps/core` 1279/1279,
+> `@cdps/domain` 2651/2651 (2 gagal — flaky pre-existing tidak terkait, `client.test.ts` audit-
+> count di bawah beban paralel — 1 skip), `@cdps/db` 27/27 (80 skip), `@cdps/api` 530/530 (67
+> skip); lint bersih.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
@@ -873,6 +908,28 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > melanggar `UPDATE` yang diblok trigger), route HTTP untuk `hitungSkorTiktok`, dan seluruh sisi
 > Shopee (dimensi/bobot berbeda, benchmark versi Shopee sendiri, `report/shopee/skor.ts` sebagai
 > rujukan porting berikutnya).
+>
+> **Riset G2-01 Shopee (sesi 34 lanjutan, keputusan pemilik via `AskUserQuestion`) — celah data
+> LEBIH BANYAK dari TikTok, dicatat sebelum mesin skor Shopee mulai dibangun.**
+> `report/shopee/skor.ts` (mesin PRODUKSI, rujukan porting) punya ENAM dimensi berbeda dari
+> TikTok — ROAS & Channel 0.22, Traffic Quality 0.22, Conversion & Retention 0.18, Product
+> Performance 0.14, Live Streaming 0.12, Kesehatan Toko 0.12 — dan (asimetri nyata, BUKAN bug
+> untuk "diperbaiki" saat porting) `computeSkor(M: ShopeeMetrics)` TIDAK menerima parameter
+> benchmark sama sekali: setiap ambang adalah konstanta hardcode di dalam fungsi, beda total dari
+> pola TikTok. Prasyarat `shopee_shop_stats` → `pdt_fact_shop_daily` (tiga basis) sudah DITUTUP
+> (§G1-09-2BII-SHOPDAILY-SHOPEE di atas), tapi tiga dimensi lain masih terblokir data:
+> - **Conversion & Retention** — sebagian terblokir: `G2-01-SHOPEE-CANCEL-REPEAT-RATE` (kolom
+>   cancel-rate/repeat-rate belum ada di `pdt_fact_shop_daily`, lihat catatan G1-09-2BII di atas).
+> - **Product Performance** — terblokir gap YANG SAMA dengan TikTok, `G2-01-KUADRAN-SKU`
+>   (`pdt_fact_sku_period.kuadran` belum pernah ditulis modul manapun).
+> - **Kesehatan Toko** — terblokir TOTAL: modul parser `shopee_kesehatan` sudah terdaftar dan bisa
+>   dideteksi, tapi NOL fungsi penulis fakta untuk modul ini di manapun dalam skema — dicatat Open
+>   baru `G2-01-SHOPEE-KESEHATAN-WRITER`.
+>
+> Tidak ditebak/dibangun di sesi ini (konsisten aturan rumah: tidak menebak skema/ambang tanpa
+> verifikasi) — mesin skor Shopee berikutnya realistis akan mengembalikan `null` untuk Product
+> Performance dan Kesehatan Toko sampai kedua Open itu ditutup, mirip pola `null` Portfolio Produk
+> TikTok hari ini.
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah

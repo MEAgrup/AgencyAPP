@@ -7,6 +7,7 @@ import {
   ekstrakBarisShopeeAdsSearch,
   ekstrakBarisShopeeAmsProduk,
   ekstrakBarisShopeeLive,
+  ekstrakBarisShopDailyShopee,
   ekstrakBarisShopDailyTiktok,
   ekstrakBarisSkuMasterShopeeParentSku,
   ekstrakBarisSkuMasterTtOrders,
@@ -702,5 +703,84 @@ describe('ekstrakBarisShopDailyTiktok (sesi 34 — celah pdt_fact_shop_daily dit
       ['bukan-tanggal', '100', '1', '1', '1', '-', '1', '100', '10', '10', '0.1', '10', '10', '1', '1', '100'],
     ];
     expect(ekstrakBarisShopDailyTiktok(aoa)).toEqual([]);
+  });
+});
+
+const HEADER_SHOP_DAILY_SHOPEE = [
+  'Tanggal', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik', 'Total Pengunjung',
+  'Tingkat Konversi Pesanan', 'Pesanan Dibatalkan', 'Penjualan Dibatalkan', 'Pesanan Dikembalikan',
+  'Penjualan Dikembalikan', 'Pembeli', 'Total Pembeli Baru', 'Total Pembeli Saat Ini',
+  'Total Potensi Pembeli', 'Tingkat Pembelian Berulang',
+];
+
+/** Bentuk sheet basis asli `fim_motor.shopee-shop-stats.*.xlsx` (mis. 'Pesanan Siap Dikirim'): header + ringkasan periode penuh + baris kosong + header berulang + baris harian. */
+function shopStatsBasisAoa(dailyRows: readonly unknown[][]): unknown[][] {
+  return [
+    HEADER_SHOP_DAILY_SHOPEE,
+    ['01-07-2026-31-07-2026', '1515002476', '12801', '118350,32', '552545', '361197', '2,32%', '2016', '249181974', '140', '24586464', '11046', '10461', '585', '51417', '11,35%'],
+    [],
+    HEADER_SHOP_DAILY_SHOPEE,
+    ...dailyRows,
+  ];
+}
+
+describe('ekstrakBarisShopDailyShopee (sesi 34 lanjutan — G1-09-2BII-SHOPDAILY-SHOPEE ditutup)', () => {
+  it('memetakan satu baris harian lengkap (angka sample asli Fim Motor, 01-07-2026)', () => {
+    const aoa = shopStatsBasisAoa([
+      ['01-07-2026', '53089166', '438', '121208,14', '16583', '15095', '2,64%', '56', '6458732', '8', '1648328', '393', '347', '46', '1679', '9,41%'],
+    ]);
+    const [baris] = ekstrakBarisShopDailyShopee(aoa);
+    expect(baris.tanggal).toBe('2026-07-01');
+    expect(baris.gmv).toBe(53089166);
+    expect(baris.pesanan).toBe(438);
+    expect(baris.produkDiklik).toBe(16583);
+    expect(baris.pengunjung).toBe(15095);
+    expect(baris.cr).toBeCloseTo(0.0264, 5);
+    expect(baris.pembeli).toBe(393);
+    expect(baris.pembeliBaru).toBe(347);
+    expect(baris.refund).toBe(1648328);
+  });
+
+  it('tanpa header harian berulang (hanya ringkasan) ⇒ array kosong', () => {
+    const aoa = [
+      HEADER_SHOP_DAILY_SHOPEE,
+      ['01-07-2026-31-07-2026', '100', '1', '100', '10', '10', '10%', '0', '0', '0', '0', '1', '1', '0', '1', '0%'],
+    ];
+    expect(ekstrakBarisShopDailyShopee(aoa)).toEqual([]);
+  });
+
+  it('baris kosong penutup section (Tanggal kosong) dilewati, bukan error', () => {
+    const aoa = shopStatsBasisAoa([
+      ['01-07-2026', '100', '1', '100', '10', '10', '10%', '0', '0', '0', '0', '1', '1', '0', '1', '0%'],
+      [],
+    ]);
+    expect(ekstrakBarisShopDailyShopee(aoa)).toHaveLength(1);
+  });
+
+  it('kolom opsional hilang (mis. berkas tanpa "Pembeli") ⇒ null untuk field itu, gmv/pesanan tetap wajib', () => {
+    const aoa = [
+      ['Tanggal', 'Total Penjualan (IDR)', 'Total Pesanan'],
+      ['01-07-2026-31-07-2026', '100', '1'],
+      [],
+      ['Tanggal', 'Total Penjualan (IDR)', 'Total Pesanan'],
+      ['01-07-2026', '100', '1'],
+    ];
+    expect(ekstrakBarisShopDailyShopee(aoa)).toEqual([
+      { tanggal: '2026-07-01', gmv: 100, pesanan: 1, produkDiklik: null, pengunjung: null, cr: null, pembeli: null, pembeliBaru: null, refund: null },
+    ]);
+  });
+
+  it('tanggal tak terbaca dilewati (baris ganjil, bukan error)', () => {
+    const aoa = shopStatsBasisAoa([
+      ['bukan-tanggal', '100', '1', '100', '10', '10', '10%', '0', '0', '0', '0', '1', '1', '0', '1', '0%'],
+    ]);
+    expect(ekstrakBarisShopDailyShopee(aoa)).toEqual([]);
+  });
+
+  it('format tanggal SLASH (preamble Shopee lain, DD/MM/YYYY) TIDAK cocok — kolom Tanggal di sini wajib STRIP', () => {
+    const aoa = shopStatsBasisAoa([
+      ['01/07/2026', '100', '1', '100', '10', '10', '10%', '0', '0', '0', '0', '1', '1', '0', '1', '0%'],
+    ]);
+    expect(ekstrakBarisShopDailyShopee(aoa)).toEqual([]);
   });
 });

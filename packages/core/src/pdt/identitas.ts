@@ -57,6 +57,26 @@ export function parseTanggalId(s: string): string | null {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+/**
+ * "DD-MM-YYYY" (STRIP, bukan slash) → "YYYY-MM-DD", atau `null` bila bentuk/
+ * kalendernya tidak valid. Beda dari `parseTanggalId` (Shopee preamble
+ * `Date Range`, SLASH) — sesi 34, verifikasi sample asli "Shopee - Fim
+ * Motor.zip" (`fim_motor.shopee-shop-stats.*.xlsx`, kolom `Tanggal` baris
+ * harian): dua modul Shopee yang BERBEDA membawa dua bentuk tanggal yang
+ * BERBEDA secara nyata, bukan salah satu tebakan yang lalu diseragamkan.
+ */
+export function parseTanggalIdStrip(s: string): string | null {
+  const m = /^\s*(\d{1,2})-(\d{1,2})-(\d{4})\s*$/.exec(s);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 /** "YYYY-MM-DD" → sama persis (ternormalisasi ulang), atau `null` bila bentuk/kalendernya tidak valid. Dipakai preamble TikTok (`Date Range`/`[Rentang Tanggal]`, lihat docblock berkas) — beda dari `parseTanggalId` (Shopee, DD/MM/YYYY). */
 export function parseTanggalIso(s: string): string | null {
   const m = /^\s*(\d{4})-(\d{2})-(\d{2})\s*$/.exec(s);

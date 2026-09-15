@@ -97,14 +97,23 @@ function decodeSheetAoa(wb: XLSX.WorkBook, namaSheet: string): unknown[][] {
 /**
  * Dekode SELURUH sheet yang mungkin dibutuhkan modul manapun di `modules`
  * (G1-09-SHEET-BUKAN-PERTAMA) — sheet PERTAMA workbook (fallback lama) SELALU
- * ikut, ditambah tiap `namaSheet` yang benar-benar ADA di workbook INI (sheet
- * yang tidak ada di berkas ini dilewati, bukan error — kebanyakan berkas
- * hanya bawa sebagian kecil dari seluruh sheet yang registry sebut).
+ * ikut, ditambah tiap `namaSheet` DAN `sheetTambahan` (sesi 34) yang benar-
+ * benar ADA di workbook INI (sheet yang tidak ada di berkas ini dilewati,
+ * bukan error — kebanyakan berkas hanya bawa sebagian kecil dari seluruh
+ * sheet yang registry sebut). `sheetTambahan` murni menambah cakupan
+ * ekstraksi, TIDAK ikut proses deteksi (`detectPdtModuleAntarSheet` hanya
+ * membaca `namaSheet`).
  */
 function decodeSheetsRelevan(wb: XLSX.WorkBook, modules: readonly PdtModuleDef[]): Map<string, unknown[][]> {
   const namaDibutuhkan = new Set<string>();
   if (wb.SheetNames[0]) namaDibutuhkan.add(wb.SheetNames[0]);
-  for (const m of modules) if (m.namaSheet) namaDibutuhkan.add(m.namaSheet);
+  for (const m of modules) {
+    if (m.namaSheet) namaDibutuhkan.add(m.namaSheet);
+    // `sheetTambahan` (sesi 34, G1-09-2BII-SHOPDAILY-SHOPEE): sheet EKSTRA
+    // yang modul ini butuh selain `namaSheet` — murni supaya ikut masuk
+    // `input.sheets`, bukan sinyal deteksi (lihat `PdtModuleDef.sheetTambahan`).
+    for (const nama of m.sheetTambahan ?? []) namaDibutuhkan.add(nama);
+  }
 
   const sheets = new Map<string, unknown[][]>();
   for (const nama of namaDibutuhkan) {

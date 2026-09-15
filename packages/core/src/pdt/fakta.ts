@@ -172,7 +172,7 @@
  */
 import { WIB_OFFSET_HOURS } from '../tz';
 import { parsePdtAngka } from './angka';
-import { parseTanggalId } from './identitas';
+import { parseTanggalId, parseTanggalIdStrip } from './identitas';
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
 
@@ -946,6 +946,93 @@ export function ekstrakBarisShopDailyTiktok(aoa: readonly (readonly unknown[])[]
       produkDiklik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik]),
       cr: iCr === -1 ? null : parsePdtAngka(row?.[iCr]),
       pembeli: iPembeli === -1 ? null : parsePdtAngka(row?.[iPembeli]),
+      refund: iRefund === -1 ? null : parsePdtAngka(row?.[iRefund]),
+    });
+  }
+  return hasil;
+}
+
+/** Satu baris `pdt_fact_shop_daily` mentah dari `shopee_shop_stats` (satu basis), SEBELUM `client_platform_id`/`batch_id`/`basis`/`parser_versi` (pemanggil yang melengkapi — `basis` bergantung SHEET mana yang dipanggil, fungsi ini generik untuk ketiganya). */
+export interface PdtBarisShopDailyShopee {
+  tanggal: string;
+  gmv: number;
+  pesanan: number;
+  produkDiklik: number | null;
+  pengunjung: number | null;
+  cr: number | null;
+  pembeli: number | null;
+  pembeliBaru: number | null;
+  refund: number | null;
+}
+
+/**
+ * Ekstrak baris harian SATU sheet basis `shopee_shop_stats` →
+ * `pdt_fact_shop_daily` (G1-09-2BII-SHOPDAILY-SHOPEE, ditemukan+ditutup sesi
+ * 34 lanjutan — dicatat sebagai gap eksplisit sejak `ekstrakBarisShopDailyTiktok`
+ * ditutup TikTok-saja). Sample asli ("Shopee - Fim Motor.zip",
+ * `fim_motor.shopee-shop-stats.*.xlsx`) TERNYATA membawa TIGA SHEET terpisah
+ * bernama persis `'Pesanan Dibuat'`/`'Pesanan Siap Dikirim'`/`'Pesanan
+ * Dibayar'` (Rule 16 — tiga basis TIDAK PERNAH dicampur) — bukan tiga section
+ * dalam satu sheet seperti bentuk TikTok. Modul `shopee_shop_stats` sudah
+ * mengunci `namaSheet` ke SATU basis ('Siap Dikirim', default laporan klien);
+ * `sheetTambahan` (`modules.ts`, baru sesi ini) menambahkan dua sheet lain
+ * KHUSUS untuk ekstraksi — fungsi ini dipanggil TIGA KALI oleh domain layer,
+ * sekali per sheet, `aoa` masing-masing diambil dari `input.sheets.get(nama)`.
+ *
+ * Bentuk tiap sheet SAMA PERSIS: header di baris 1 (`aoa[0]`), ringkasan
+ * PERIODE PENUH di baris 2 (`aoa[1]`, sudah dipakai
+ * `parseShopeeShopStatsBasisTerisolasi`/rekonsiliasi — kolom `Tanggal` berisi
+ * RENTANG `DD-MM-YYYY-DD-MM-YYYY`, bukan satu tanggal), baris kosong, HEADER
+ * BERULANG persis identik, baru baris harian. Fungsi ini mencari kemunculan
+ * KEDUA kolom `'Tanggal'` di kolom pertama (baris ringkasan TIDAK PERNAH lolos
+ * — isinya rentang, bukan `'tanggal'`) — Rule 7 "dicari, bukan diasumsikan",
+ * pola sama `ekstrakBarisShopDailyTiktok` tapi marker berupa HEADER BERULANG,
+ * bukan teks penanda seksi.
+ *
+ * **Tanggal berformat STRIP** (`DD-MM-YYYY`, BUKAN slash seperti preamble
+ * Shopee lain) — `parseTanggalIdStrip` (`identitas.ts`, baru sesi ini),
+ * diverifikasi langsung dari sample ("01-07-2026").
+ *
+ * **Kolom yang TIDAK dipanen di sini, meski ADA di `kolomDipanen` modul**:
+ * `Pesanan Dibatalkan`/`Penjualan Dibatalkan` (cancel rate) dan `Tingkat
+ * Pembelian Berulang` (repeat rate) — `pdt_fact_shop_daily` BELUM punya
+ * kolom untuk keduanya (skema G1-01 dirancang sebelum kolom-kolom ini
+ * terverifikasi ada). Dicatat sebagai Open baru
+ * `G2-01-SHOPEE-CANCEL-REPEAT-RATE`, TIDAK memblokir gap shop_daily
+ * mendasar ini (GMV/pesanan/CR/pengunjung harian) — mengikuti pola yang sama
+ * dengan `G2-01-KUADRAN-SKU` (kolom terverifikasi ada di sumber, tapi
+ * penulisnya/skemanya belum, dicatat eksplisit alih-alih ditebak/diselundupkan).
+ */
+export function ekstrakBarisShopDailyShopee(aoa: readonly (readonly unknown[])[]): PdtBarisShopDailyShopee[] {
+  const idxHeaderHarian = aoa.findIndex((row, i) => i > 0 && norm(row?.[0]) === 'tanggal');
+  if (idxHeaderHarian === -1) return [];
+  const header = aoa[idxHeaderHarian] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iTanggal = idx('Tanggal');
+  const iGmv = idx('Total Penjualan (IDR)');
+  const iPesanan = idx('Total Pesanan');
+  const iKlik = idx('Produk Diklik');
+  const iPengunjung = idx('Total Pengunjung');
+  const iCr = idx('Tingkat Konversi Pesanan');
+  const iPembeli = idx('Pembeli');
+  const iPembeliBaru = idx('Total Pembeli Baru');
+  const iRefund = idx('Penjualan Dikembalikan');
+
+  const hasil: PdtBarisShopDailyShopee[] = [];
+  for (const row of aoa.slice(idxHeaderHarian + 1)) {
+    const tanggalRaw = iTanggal === -1 ? '' : String(row?.[iTanggal] ?? '').trim();
+    if (tanggalRaw === '') continue;
+    const tanggal = parseTanggalIdStrip(tanggalRaw);
+    if (tanggal == null) continue;
+    hasil.push({
+      tanggal,
+      gmv: iGmv === -1 ? 0 : parsePdtAngka(row?.[iGmv]),
+      pesanan: iPesanan === -1 ? 0 : parsePdtAngka(row?.[iPesanan]),
+      produkDiklik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik]),
+      pengunjung: iPengunjung === -1 ? null : parsePdtAngka(row?.[iPengunjung]),
+      cr: iCr === -1 ? null : parsePdtAngka(row?.[iCr]),
+      pembeli: iPembeli === -1 ? null : parsePdtAngka(row?.[iPembeli]),
+      pembeliBaru: iPembeliBaru === -1 ? null : parsePdtAngka(row?.[iPembeliBaru]),
       refund: iRefund === -1 ? null : parsePdtAngka(row?.[iRefund]),
     });
   }

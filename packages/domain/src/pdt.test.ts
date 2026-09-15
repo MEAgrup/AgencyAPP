@@ -399,6 +399,49 @@ function shopeeShopStatsBerkas(nama: string, gmvSiapKirim: number, pesananSiapKi
   };
 }
 
+/** Bentuk sheet basis asli `shopee_shop_stats` (mis. 'Pesanan Siap Dikirim'): header + ringkasan periode penuh + baris kosong + header berulang + baris harian — sama pola `shopStatsBasisAoa` (`@cdps/core` `fakta.test.ts`). */
+function shopStatsBasisAoaDomain(gmvTotal: number, pesananTotal: number, dailyRows: readonly (readonly string[])[]): (readonly unknown[])[] {
+  const header = [
+    'Tanggal', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik', 'Total Pengunjung',
+    'Tingkat Konversi Pesanan', 'Pesanan Dibatalkan', 'Penjualan Dibatalkan', 'Pesanan Dikembalikan',
+    'Penjualan Dikembalikan', 'Pembeli', 'Total Pembeli Baru', 'Total Pembeli Saat Ini',
+    'Total Potensi Pembeli', 'Tingkat Pembelian Berulang',
+  ];
+  return [
+    header,
+    ['01-07-2026-31-07-2026', String(gmvTotal), String(pesananTotal), '0', '0', '0', '0%', '0', '0', '0', '0', '0', '0', '0', '0', '0%'],
+    [],
+    header,
+    ...dailyRows,
+  ];
+}
+
+/**
+ * `shopee_shop_stats` DENGAN `sheets` TIGA BASIS (sesi 34 lanjutan,
+ * G1-09-2BII-SHOPDAILY-SHOPEE) — beda dari `shopeeShopStatsBerkas` (di bawah,
+ * hanya `aoa` satu basis untuk tes rekonsiliasi G1-07). `aoa` terkunci ke
+ * 'Pesanan Siap Dikirim' (`namaSheet` modul, `modules.ts`), `sheets` membawa
+ * ketiganya lewat `PdtModuleDef.sheetTambahan` — pola persis bentuk asli yang
+ * `apps/api` `decodeSheetsRelevan` hasilkan dari workbook 12-sheet sungguhan.
+ */
+function shopeeShopStatsBerkasTigaBasis(
+  nama: string,
+  basisRows: { dibuat: readonly (readonly string[])[]; siapDikirim: readonly (readonly string[])[]; dibayar: readonly (readonly string[])[] },
+): PdtPreviewBerkasInput {
+  const aoaDibuat = shopStatsBasisAoaDomain(0, 0, basisRows.dibuat);
+  const aoaSiapDikirim = shopStatsBasisAoaDomain(0, 0, basisRows.siapDikirim);
+  const aoaDibayar = shopStatsBasisAoaDomain(0, 0, basisRows.dibayar);
+  const sheets = new Map<string, readonly (readonly unknown[])[]>([
+    ['Pesanan Dibuat', aoaDibuat],
+    ['Pesanan Siap Dikirim', aoaSiapDikirim],
+    ['Pesanan Dibayar', aoaDibayar],
+  ]);
+  return {
+    nama, sha256: 'sha-shopstats-3basis', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa: aoaSiapDikirim, sheets, modulTerdeteksi: 'shopee_shop_stats', ambiguous: false, matches: ['shopee_shop_stats'],
+  };
+}
+
 const HEADER_PARENT_SKU = [
   'Kode Produk', 'Kode Variasi', 'SKU Induk', 'Total Penjualan (Pesanan Dibuat) (IDR)',
   'Penjualan (Pesanan Siap Dikirim) (IDR)', 'Jumlah Produk Dilihat', 'Produk Diklik',
@@ -1046,6 +1089,7 @@ interface FactShopDailyRow {
   produk_diklik: number | null;
   cr: string | null;
   pembeli: number | null;
+  pembeli_baru: number | null;
   refund: string | null;
 }
 
@@ -1174,6 +1218,73 @@ describeDb('commitUploadBatch (sesi 34) — tt_shop_analytics → pdt_fact_shop_
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(persiapan.status).toBe('verified'); // rekonsiliasi Rule 13-14 tidak bergantung pada blok harian
     expect(await loadFactShopDaily(cpId)).toHaveLength(0);
+  });
+});
+
+describeDb('commitUploadBatch (sesi 34 lanjutan, G1-09-2BII-SHOPDAILY-SHOPEE) — shopee_shop_stats → pdt_fact_shop_daily, TIGA basis', () => {
+  async function fixture(): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', '938284780'); // shop_id sudah terikat ⇒ identitas 'cocok'
+  }
+
+  it('SATU berkas shopee_shop_stats ⇒ TIGA baris per tanggal (basis dibuat/siap_dikirim/dibayar), nol tercampur (Rule 16)', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeShopStatsBerkasTigaBasis('shop-stats.xlsx', {
+        dibuat: [['01-07-2026', '56385206', '459', '0', '16583', '15095', '2,77%', '75', '9540132', '8', '1648328', '411', '363', '48', '1661', '9,73%']],
+        siapDikirim: [['01-07-2026', '53089166', '438', '0', '16583', '15095', '2,64%', '56', '6458732', '8', '1648328', '393', '347', '46', '1679', '9,41%']],
+        dibayar: [['01-07-2026', '50278794', '400', '0', '16583', '15095', '2,41%', '9', '1274092', '7', '1002102', '379', '350', '29', '1693', '4,49%']],
+      }),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactShopDaily(cpId);
+    expect(rows).toHaveLength(3);
+    const byBasis = new Map(rows.map((r) => [r.basis, r]));
+    expect(Number(byBasis.get('dibuat')?.gmv)).toBe(56385206);
+    expect(byBasis.get('dibuat')?.pesanan).toBe(459);
+    expect(Number(byBasis.get('siap_dikirim')?.gmv)).toBe(53089166);
+    expect(byBasis.get('siap_dikirim')?.pesanan).toBe(438);
+    expect(Number(byBasis.get('dibayar')?.gmv)).toBe(50278794);
+    expect(byBasis.get('dibayar')?.pesanan).toBe(400);
+    // Kolom SAMA yang dipetakan TikTok — pengunjung/produk_diklik/cr/pembeli/pembeli_baru/refund.
+    expect(byBasis.get('siap_dikirim')?.pengunjung).toBe(15095);
+    expect(byBasis.get('siap_dikirim')?.produk_diklik).toBe(16583);
+    expect(Number(byBasis.get('siap_dikirim')?.cr)).toBeCloseTo(0.0264, 3); // numeric(6,3) — presisi kolom, sama pola tes TikTok
+    expect(byBasis.get('siap_dikirim')?.pembeli).toBe(393);
+    expect(byBasis.get('siap_dikirim')?.pembeli_baru).toBe(347);
+    expect(Number(byBasis.get('siap_dikirim')?.refund)).toBe(1648328);
+  });
+
+  it('commit ULANG (tanggal+basis sama) ⇒ ON CONFLICT DO UPDATE per basis — baris diperbarui, bukan digandakan', async () => {
+    const cpId = await fixture();
+    const pertama = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeShopStatsBerkasTigaBasis('shop-stats.xlsx', {
+        dibuat: [['01-07-2026', '100', '1', '0', '1', '1', '10%', '0', '0', '0', '0', '1', '1', '0', '1', '0%']],
+        siapDikirim: [['01-07-2026', '100', '1', '0', '1', '1', '10%', '0', '0', '0', '0', '1', '1', '0', '1', '0%']],
+        dibayar: [['01-07-2026', '100', '1', '0', '1', '1', '10%', '0', '0', '0', '0', '1', '1', '0', '1', '0%']],
+      }),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect(await loadFactShopDaily(cpId)).toHaveLength(3);
+
+    const kedua = [
+      shopeeAdsCpcBerkas('ads-2.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeShopStatsBerkasTigaBasis('shop-stats-revisi.xlsx', {
+        dibuat: [['01-07-2026', '200', '2', '0', '1', '1', '10%', '0', '0', '0', '0', '1', '1', '0', '1', '0%']],
+        siapDikirim: [['01-07-2026', '200', '2', '0', '1', '1', '10%', '0', '0', '0', '0', '1', '1', '0', '1', '0%']],
+        dibayar: [['01-07-2026', '200', '2', '0', '1', '1', '10%', '0', '0', '0', '0', '1', '1', '0', '1', '0%']],
+      }),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = await loadFactShopDaily(cpId);
+    expect(rows).toHaveLength(3); // BUKAN 6 — ON CONFLICT DO UPDATE per basis
+    for (const r of rows) {
+      expect(Number(r.gmv)).toBe(200);
+      expect(r.pesanan).toBe(2);
+    }
   });
 });
 

@@ -74,6 +74,26 @@ export interface PdtModuleDef {
    * punya sheet bernama ini (lihat `detect.ts` `detectPdtModuleAntarSheet`).
    */
   namaSheet?: string;
+  /**
+   * Sheet TAMBAHAN (nama persis) yang modul ini juga butuh untuk EKSTRAKSI —
+   * BUKAN untuk deteksi (`detectPdtModuleAntarSheet` tidak pernah membacanya,
+   * `tandaTanganKolom` tetap hanya dicek terhadap `namaSheet`). Ditambahkan
+   * sesi 34 (G1-09-2BII-SHOPDAILY-SHOPEE): `shopee_shop_stats` sungguhan
+   * TIGA sheet basis terpisah (`Pesanan Dibuat`/`Pesanan Siap Dikirim`/
+   * `Pesanan Dibayar`, tab persis) untuk SATU modul yang sama — mendaftarkan
+   * dua sheet lain sebagai modul TERPISAH ber-`tandaTanganKolom` identik akan
+   * membuat SATU berkas cocok ke BEBERAPA `kode` sekaligus
+   * (`detectPdtModuleAntarSheet` menghitungnya sebagai `matches.length > 1`
+   * ⇒ ambigu, meregresi deteksi `shopee_shop_stats` yang sudah benar).
+   * Field ini murni menambah entri ke `namaDibutuhkan`
+   * (`apps/api/src/lib/pdt-parse.ts` `decodeSheetsRelevan`) supaya sheet itu
+   * ikut masuk `PdtPreviewBerkasInput.sheets`, dibaca lewat `input.sheets.get(...)`
+   * oleh fungsi ekstraksi modul yang SAMA — bukan lewat `aoa`/`namaSheet` modul
+   * lain. TS-only, TIDAK ada kolom pasangannya di `pdt_parser_modul` (sama
+   * seperti `namaSheet` sendiri — `packages/db/src/pdt.registry.test.ts` tidak
+   * membandingkannya).
+   */
+  sheetTambahan?: readonly string[];
   /** Baris header, 1-terindeks — HINT untuk parser (Rule 7: dicari, bukan diasumsikan), bukan indeks mutlak. */
   barisHeaderHint: number;
   /** Whitelist PDT-27 (`docs/backlog/PDT_KOLOM_DIPANEN.md`) — kolom yang benar-benar dipanen ke tabel fakta. Boleh berbeda dari `tandaTanganKolom` (sinyal deteksi boleh memakai kolom yang tidak dipanen). */
