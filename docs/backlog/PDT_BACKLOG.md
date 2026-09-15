@@ -655,6 +655,19 @@ melampauinya (harus berhenti di nol objek) · selesai < 2 menit pada 500 klien �
 > listing bucket rekursif, `G1-10-ORPHAN-PASS`). DoD "selesai < 2 menit pada 500 klien × 12 bulan"
 > tidak diuji beban sungguhan (tidak ada 500 klien nyata) — pola loop per-objek sekuensial sama
 > `sweepPlanSatuanPeriodeBerjalan` dkk., bukan batch/paralel.
+>
+> **Status 2026-09-15 (sesi 28, pass KEDUA Flow E selesai — `G1-10-ORPHAN-PASS` DITUTUP,
+> `docs/DECISIONS.md`) — job purge harian sekarang menjalankan Rule 49.** Route yang SAMA
+> (`internal/pdt/purge/tick`) menjalankan pass kedua setelah pass pertama: `listPdtRawObjekRekursif`
+> (`pdt-storage.ts`, baru — Storage REST tidak punya mode rekursif bawaan, folder ditandai `id:
+> null` di respons, fungsi menelusuri sendiri) me-list SELURUH objek bucket, `pdt.planPdtOrphanPurgeTick`
+> menandai yang path-nya nol baris `pdt_upload_batch` MANA PUN dan `createdAt`-nya > 7 hari
+> (umur tak diketahui ⇒ tidak pernah kandidat — pagar konservatif), lalu `hapusPdtRawObjek`
+> per-objek (Rule 46) dan `pdt.finalizePdtOrphanPurgeTick` (satu `audit_log`
+> `pdt_raw_orphan_purged` per tick, Rule 47). Nol pagar 5% di pass ini (Rule 48 bicara soal
+> `retensi_sampai`, objek yatim tidak punya kolom itu). **`G1-10-RETENSI-RECOMPUTE` TETAP
+> TERBUKA** (di luar cakupan, menunggu G2-01/G5) — G1-10 sekarang selesai untuk seluruh cakupan
+> yang bisa dikerjakan tanpa tabel itu.
 
 ### G1-11 · Reparse dari paket ZIP (Flow D)
 - `parser_versi` dicatat **per batch dan per baris fakta**.

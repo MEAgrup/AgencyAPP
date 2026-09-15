@@ -25,8 +25,10 @@ import {
   canKirimLaporan,
   canUploadBatch,
   commitUploadBatch,
+  finalizePdtOrphanPurgeTick,
   finalizePdtPurgeTick,
   markRawStored,
+  planPdtOrphanPurgeTick,
   planPdtPurgeTick,
   platformKeVokabPdt,
   previewUploadBatch,
@@ -2052,5 +2054,95 @@ describeDb('planPdtPurgeTick / finalizePdtPurgeTick (G1-10 — Flow E, Rule 45-4
 
   it('planPdtPurgeTick menolak format tanggal tidak valid', async () => {
     await expect(planPdtPurgeTick(sql, '01-06-2026')).rejects.toThrow('[tanggal tick tidak valid]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1-10-ORPHAN-PASS — pass kedua Flow E (Rule 49, objek yatim > 7 hari).
+// `planPdtOrphanPurgeTick` menerima daftar objek storage sebagai PARAMETER
+// (fungsi murni baca DB + bandingkan, nol panggilan Storage — listing
+// sungguhan `listPdtRawObjekRekursif` ada di `apps/api`, diuji terpisah di
+// sana lewat fetch disuntik).
+// ---------------------------------------------------------------------------
+describeDb('planPdtOrphanPurgeTick / finalizePdtOrphanPurgeTick (G1-10 pass kedua — Rule 49)', () => {
+  async function orphanFixture(): Promise<{ clientId: string; cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    return { clientId, cpId };
+  }
+
+  it('objek yang path-nya TIDAK dikenal pdt_upload_batch DAN umurnya > 7 hari ⇒ kandidat', async () => {
+    const rencana = await planPdtOrphanPurgeTick(sql, '2026-06-10', [
+      { path: '_staging/tak-dikenal/lama.zip', createdAt: '2026-06-01T00:00:00Z' }, // 9 hari
+    ]);
+    expect(rencana.kandidat).toEqual([{ path: '_staging/tak-dikenal/lama.zip' }]);
+  });
+
+  it('objek yang path-nya DIKENAL (ada baris pdt_upload_batch, walau sudah dihapus) TIDAK pernah kandidat', async () => {
+    const { clientId, cpId } = await orphanFixture();
+    const rawPath = `ZPDT-ORPHAN/${cpId}.zip`;
+    await sql`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
+         parser_versi, retensi_sampai, retensi_alasan, raw_path, raw_bytes, legal_hold,
+         raw_dihapus_pada, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2020-01-01'::date, '2020-01-31'::date, 'parsing',
+         1, '2020-01-01'::date, 'default', ${rawPath}, 1000, false, ${new Date('2020-01-01')}, ${OWNER_AM})`;
+
+    const rencana = await planPdtOrphanPurgeTick(sql, '2026-06-10', [
+      { path: rawPath, createdAt: '2026-06-01T00:00:00Z' },
+    ]);
+    expect(rencana.kandidat).toEqual([]);
+  });
+
+  it('umur < 7 hari ⇒ belum jadi kandidat', async () => {
+    const rencana = await planPdtOrphanPurgeTick(sql, '2026-06-10', [
+      { path: '_staging/tak-dikenal/baru.zip', createdAt: '2026-06-05T00:00:00Z' }, // 5 hari
+    ]);
+    expect(rencana.kandidat).toEqual([]);
+  });
+
+  it('umur == tepat 7 hari ⇒ belum jadi kandidat (Rule 49 "setelah 7 hari", bukan "pada")', async () => {
+    const rencana = await planPdtOrphanPurgeTick(sql, '2026-06-10', [
+      { path: '_staging/tak-dikenal/pas.zip', createdAt: '2026-06-03T00:00:00Z' }, // pas 7×24 jam
+    ]);
+    expect(rencana.kandidat).toEqual([]);
+  });
+
+  it('createdAt tidak diketahui (null) ⇒ TIDAK PERNAH kandidat (pagar konservatif)', async () => {
+    const rencana = await planPdtOrphanPurgeTick(sql, '2026-06-10', [
+      { path: '_staging/tak-dikenal/entah.zip', createdAt: null },
+    ]);
+    expect(rencana.kandidat).toEqual([]);
+  });
+
+  it('planPdtOrphanPurgeTick menolak format tanggal tidak valid', async () => {
+    await expect(planPdtOrphanPurgeTick(sql, '01-06-2026', [])).rejects.toThrow('[tanggal tick tidak valid]');
+  });
+
+  it('finalizePdtOrphanPurgeTick: SATU entri audit_log merekap paths yang berhasil, path gagal tidak masuk', async () => {
+    const rekap = await finalizePdtOrphanPurgeTick(sql, '2026-06-11', [
+      { path: '_staging/a/berhasil.zip', berhasil: true },
+      { path: '_staging/a/gagal.zip', berhasil: false },
+    ]);
+    expect(rekap).toMatchObject({ dihapus: 1, gagal: 1 });
+
+    const audit = await sql<{ after_json: { jumlah_objek: number; paths: string[] } }[]>`
+      select after_json from audit_log
+       where entity_type = 'pdt_purge_tick' and entity_id = '2026-06-11' and action = 'pdt_raw_orphan_purged'
+       order by id desc limit 1`;
+    expect(audit[0]?.after_json).toMatchObject({ jumlah_objek: 1, paths: ['_staging/a/berhasil.zip'] });
+  });
+
+  it('finalizePdtOrphanPurgeTick dengan hasil kosong menulis NOL entri audit_log', async () => {
+    const before = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log where entity_type = 'pdt_purge_tick' and entity_id = '2026-06-12'`;
+    const rekap = await finalizePdtOrphanPurgeTick(sql, '2026-06-12', []);
+    expect(rekap).toMatchObject({ dihapus: 0, gagal: 0 });
+    const after = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log where entity_type = 'pdt_purge_tick' and entity_id = '2026-06-12'`;
+    expect(after[0].n).toBe(before[0].n);
   });
 });

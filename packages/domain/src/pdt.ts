@@ -1073,21 +1073,33 @@ export async function markRawStored(sql: Sql, batchId: number, rawPath: string, 
 // sisanya); hasilnya dikumpulkan lalu diserahkan ke `finalizePdtPurgeTick`
 // (langkah 4/6, tulis).
 //
-// Cakupan SENGAJA dipersempit dari Rule 45/49 penuh sesi ini (dicatat
-// `docs/DECISIONS.md` — Open baru):
-//   (a) recompute perpanjangan retensi (Rule 45 langkah 2) HARI INI hanya
-//       membaca `retensi_sampai`/`legal_hold` yang sudah tersimpan (default
-//       120 hari verified / 30 hari ditolak, migrasi G1-01) — DUA dari EMPAT
-//       pemicu perpanjangan ("menopang laporan yang sudah dikirim" →
-//       `pdt_laporan_kiriman`, "SKU di katalog PX" → `px_sku_volume`)
-//       menunjuk tabel yang BELUM ADA (G2-01/G5 belum dibangun). Purge hari
-//       ini tidak bisa salah memperpanjang retensi yang seharusnya
-//       diperpanjang oleh dua pemicu itu — karena tidak ada baris yang bisa
-//       dibaca untuk memutuskannya — tapi juga tidak bisa BENAR
-//       melakukannya. Menutup gap ini adalah pekerjaan lanjutan G2-01/G5.
-//   (b) pass kedua Flow E (Rule 49 — objek yatim > 7 hari) BELUM dibangun:
-//       butuh listing bucket rekursif yang `pdt-storage.ts` belum punya
-//       pembungkusnya (baru get/put/delete per-path yang sudah tahu path-nya).
+// Cakupan SENGAJA dipersempit dari Rule 45 penuh sesi 26 (dicatat
+// `docs/DECISIONS.md` — Open, BELUM ditutup sesi 28):
+//   recompute perpanjangan retensi (Rule 45 langkah 2) HARI INI hanya
+//   membaca `retensi_sampai`/`legal_hold` yang sudah tersimpan (default
+//   120 hari verified / 30 hari ditolak, migrasi G1-01) — DUA dari EMPAT
+//   pemicu perpanjangan ("menopang laporan yang sudah dikirim" →
+//   `pdt_laporan_kiriman`, "SKU di katalog PX" → `px_sku_volume`)
+//   menunjuk tabel yang BELUM ADA (G2-01/G5 belum dibangun). Purge hari
+//   ini tidak bisa salah memperpanjang retensi yang seharusnya
+//   diperpanjang oleh dua pemicu itu — karena tidak ada baris yang bisa
+//   dibaca untuk memutuskannya — tapi juga tidak bisa BENAR
+//   melakukannya. Menutup gap ini adalah pekerjaan lanjutan G2-01/G5.
+//
+// Pass KEDUA Flow E (Rule 49 — objek yatim > 7 hari) dibangun sesi 28
+// (`G1-10-ORPHAN-PASS`, `docs/DECISIONS.md`): `planPdtOrphanPurgeTick` di
+// bawah menerima daftar SELURUH objek bucket sebagai parameter (bukan
+// memanggil Storage sendiri — domain tidak pernah bicara Storage REST
+// langsung, pola sama pass pertama) hasil `listPdtRawObjekRekursif`
+// (`apps/api/src/lib/pdt-storage.ts`, baru), lalu memutuskan mana yang
+// "yatim": path yang TIDAK muncul di `pdt_upload_batch.raw_path` MANA PUN
+// (bukan hanya yang aktif — batch yang sudah `raw_dihapus_pada` pun raw_path-nya
+// tetap "dikenal", objek fisiknya harusnya sudah tidak ada; kalaupun ada sisa
+// karena kegagalan hapus lampau, itu tanggung jawab pass PERTAMA mencoba lagi,
+// bukan pass ini) DAN umurnya (`createdAt` Storage) > 7 hari. Objek yang
+// umurnya TIDAK diketahui (Storage tidak mengembalikan `created_at`) SENGAJA
+// tidak pernah jadi kandidat — pagar konservatif yang sama semangatnya dengan
+// Rule 48: tidak bisa membuktikan umur berarti tidak boleh menghapus.
 // ===========================================================================
 
 /** Rule 48 — pagar harian: tidak boleh menghapus > 5% objek aktif per hari tanpa ACC Director. */
@@ -1241,4 +1253,102 @@ export async function finalizePdtPurgeTick(
   }
 
   return { today, dihapus: berhasil.length, bytesDihapus, gagal, pagarTerlampaui: false };
+}
+
+/** Umur minimum (hari) sebelum objek yatim boleh dipurge (Rule 49). */
+export const PDT_ORPHAN_UMUR_HARI = 7;
+
+/** Satu objek storage sungguhan — hasil `listPdtRawObjekRekursif` (lapisan `apps/api`). */
+export interface PdtRawObjekStorage {
+  path: string;
+  createdAt: string | null;
+}
+
+/** Satu objek yatim yang lolos gerbang Rule 49 dan siap dihapus. */
+export interface PdtOrphanCandidate {
+  path: string;
+}
+
+/** Rencana pass kedua tick hari ini — hasil `planPdtOrphanPurgeTick`. */
+export interface PdtOrphanPurgeTickPlan {
+  today: string;
+  kandidat: readonly PdtOrphanCandidate[];
+}
+
+/** Hasil mencoba menghapus SATU objek yatim — dilaporkan balik route setelah memanggil Storage. */
+export interface PdtOrphanPurgeOutcome {
+  path: string;
+  berhasil: boolean;
+}
+
+/** Rekap akhir pass kedua tick — hasil `finalizePdtOrphanPurgeTick`. */
+export interface PdtOrphanPurgeTickResult {
+  today: string;
+  dihapus: number;
+  gagal: number;
+}
+
+/**
+ * planPdtOrphanPurgeTick — Flow E langkah 5 (Rule 49). Menerima `semuaObjek`
+ * (SUDAH dilisting rekursif oleh pemanggil, `listPdtRawObjekRekursif` —
+ * fungsi ini murni membandingkan, nol panggilan Storage) dan menandai yang
+ * TIDAK punya baris `pdt_upload_batch.raw_path` MANA PUN (verified, ditolak,
+ * sudah dihapus — semuanya "dikenal", hanya path yang benar-benar nol baris
+ * yang yatim) DAN `createdAt`-nya lebih tua dari `PDT_ORPHAN_UMUR_HARI` hari.
+ * Objek ber-`createdAt` null (umur tidak diketahui) TIDAK PERNAH jadi
+ * kandidat — pagar konservatif, bukan bug. Nol pagar 5% di sini: Rule 48
+ * ("tidak boleh menghapus objek yang retensi_sampai-nya belum lewat")
+ * bicara tentang batch yang retensinya belum lewat, dan objek yatim
+ * (Rule 49) tidak punya `retensi_sampai` sama sekali — tidak dikenakan
+ * Rule 48.
+ */
+export async function planPdtOrphanPurgeTick(
+  sql: Sql,
+  today: string,
+  semuaObjek: readonly PdtRawObjekStorage[],
+): Promise<PdtOrphanPurgeTickPlan> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    throw new ValidationError(MSG_PDT_PURGE_TANGGAL_INVALID);
+  }
+
+  const dikenalRows = await sql<{ raw_path: string }[]>`
+    select raw_path from pdt_upload_batch where raw_path is not null`;
+  const dikenal = new Set(dikenalRows.map((r) => r.raw_path));
+
+  const ambangWaktu = new Date(`${today}T00:00:00.000Z`).getTime() - PDT_ORPHAN_UMUR_HARI * 24 * 60 * 60 * 1000;
+  const kandidat: PdtOrphanCandidate[] = semuaObjek
+    .filter((o) => !dikenal.has(o.path))
+    .filter((o) => o.createdAt !== null && new Date(o.createdAt).getTime() < ambangWaktu)
+    .map((o) => ({ path: o.path }));
+
+  return { today, kandidat };
+}
+
+/**
+ * finalizePdtOrphanPurgeTick — rekap pass kedua. Objek yatim tidak punya
+ * baris `pdt_upload_batch` untuk ditandai (beda dari pass pertama) — hanya
+ * SATU entri `audit_log` (`action='pdt_raw_orphan_purged'`) per tick yang
+ * berhasil menghapus ≥1 objek (Rule 47, pola sama pass pertama).
+ */
+export async function finalizePdtOrphanPurgeTick(
+  sql: Sql,
+  today: string,
+  hasil: readonly PdtOrphanPurgeOutcome[],
+): Promise<PdtOrphanPurgeTickResult> {
+  const berhasil = hasil.filter((h) => h.berhasil);
+  const gagal = hasil.length - berhasil.length;
+
+  if (berhasil.length > 0) {
+    await executors(sql).audit.insertAudit({
+      entityType: 'pdt_purge_tick',
+      entityId: today,
+      actorEmployeeId: PDT_PURGE_ACTOR,
+      action: 'pdt_raw_orphan_purged',
+      beforeJson: null,
+      afterJson: { jumlah_objek: berhasil.length, paths: berhasil.map((h) => h.path) },
+      createdBy: PDT_PURGE_ACTOR,
+    });
+  }
+
+  return { today, dihapus: berhasil.length, gagal };
 }

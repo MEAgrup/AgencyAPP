@@ -14,7 +14,8 @@
  * AM mengklik "unduh paket asli"; `buatPdtRawSignedUploadUrl` (unggah) dan
  * `unduhPdtRawObjek` (unduh server-ke-server) dipanggil dari route
  * preview/commit — lihat catatan G1-09-BODY-BESAR di kepala masing-masing
- * fungsi. `hapusPdtRawObjek` (G1-10) dipanggil dari
+ * fungsi. `hapusPdtRawObjek` (G1-10 pass pertama) dan
+ * `listPdtRawObjekRekursif` (G1-10 pass kedua, Rule 49) dipanggil dari
  * `internal/pdt/purge/tick` — job purge harian, bukan aksi AM. Pengecekan
  * `canUploadBatch`/`canReadBatch` ada di lapisan pemanggil (`packages/domain`),
  * BUKAN di sini — berkas ini murni pembungkus REST, nol keputusan otorisasi.
@@ -203,4 +204,78 @@ export async function hapusPdtRawObjek(path: string, fetchImpl?: FetchLike): Pro
     const body = (await res.json().catch(() => ({}))) as DeleteResponse;
     throw new Error(`gagal menghapus pdt-raw/${path}: ${res.status} ${body.message ?? ''}`.trim());
   }
+}
+
+/** Satu entri respons `POST /object/list/{bucket}` — folder punya `id: null` (dok resmi Storage). */
+interface ListEntry {
+  name: string;
+  id: string | null;
+  created_at?: string | null;
+}
+
+/** Satu objek FILE (bukan folder) sungguhan di bucket `pdt-raw`. */
+export interface PdtRawObjekStorage {
+  path: string;
+  createdAt: string | null;
+}
+
+/** Batas per panggilan `list` — dipaginasi lewat `offset` bila satu folder punya lebih dari ini. */
+const PDT_RAW_LIST_LIMIT = 1000;
+
+async function listPdtRawSatuFolder(prefix: string, doFetch: FetchLike): Promise<ListEntry[]> {
+  const { url, serviceRoleKey } = config();
+  const semua: ListEntry[] = [];
+  let offset = 0;
+  for (;;) {
+    const res = await doFetch(`${url}/storage/v1/object/list/pdt-raw`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+      body: JSON.stringify({ prefix, limit: PDT_RAW_LIST_LIMIT, offset, sortBy: { column: 'name', order: 'asc' } }),
+    });
+    if (!res.ok) {
+      throw new Error(`gagal listing pdt-raw/${prefix}: ${res.status}`);
+    }
+    const batch = (await res.json().catch(() => [])) as ListEntry[];
+    semua.push(...batch);
+    if (batch.length < PDT_RAW_LIST_LIMIT) break;
+    offset += PDT_RAW_LIST_LIMIT;
+  }
+  return semua;
+}
+
+/**
+ * List SELURUH objek FILE (bukan folder) di bucket `pdt-raw`, ditelusuri
+ * REKURSIF dari akar (G1-10 pass kedua Flow E, Rule 49 — objek yatim).
+ * Storage REST hanya menyediakan listing PER-FOLDER (`POST
+ * /object/list/{bucket}` + `prefix`) — tidak ada mode "rekursif" bawaan;
+ * folder ditandai `id: null` di tiap entri respons (dok resmi Supabase
+ * Storage), file punya `id` bukan-null. Fungsi ini menelusurinya sendiri:
+ * tiap entri folder memicu satu panggilan lagi dengan prefix diperpanjang
+ * `${prefix}${nama}/` — generik terhadap KEDUA bentuk path yang ada di
+ * bucket ini (final `{client_id}/{client_platform_id}/{periode}/{batch}.zip`,
+ * staging `_staging/{client_id}/{client_platform_id}/{uuid}.zip`), tidak
+ * mengasumsikan kedalaman tertentu.
+ */
+export async function listPdtRawObjekRekursif(fetchImpl?: FetchLike): Promise<PdtRawObjekStorage[]> {
+  const doFetch = fetchImpl ?? fetch;
+  const hasil: PdtRawObjekStorage[] = [];
+
+  async function jelajah(prefix: string): Promise<void> {
+    const entries = await listPdtRawSatuFolder(prefix, doFetch);
+    for (const entry of entries) {
+      const path = `${prefix}${entry.name}`;
+      if (entry.id === null) {
+        await jelajah(`${path}/`);
+      } else {
+        hasil.push({ path, createdAt: entry.created_at ?? null });
+      }
+    }
+  }
+
+  await jelajah('');
+  return hasil;
 }
