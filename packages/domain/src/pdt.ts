@@ -102,10 +102,15 @@ export interface PdtPreviewBerkasInput {
   aoa: readonly (readonly unknown[])[] | null;
   /**
    * SELURUH sheet workbook yang relevan (sheet pertama ∪ tiap `namaSheet`
-   * modul di registry) yang ADA di berkas ini, nama→AoA. `null` sama seperti
-   * `aoa`. Dipakai untuk me-remap `aoa` ke sheet yang BENAR saat AM
-   * meng-override modul (lihat `commitUploadBatch`/`reparsePdtBatch`) ke
-   * modul ber-`namaSheet` yang berbeda dari yang otomatis terdeteksi.
+   * ∪ tiap `sheetTambahan`, sesi 34, modul di registry) yang ADA di berkas
+   * ini, nama→AoA. `null` sama seperti `aoa`. Dipakai untuk me-remap `aoa`
+   * ke sheet yang BENAR saat AM meng-override modul (lihat
+   * `commitUploadBatch`/`reparsePdtBatch`) ke modul ber-`namaSheet` yang
+   * berbeda dari yang otomatis terdeteksi — DAN untuk fungsi ekstraksi yang
+   * butuh LEBIH dari satu sheet sekaligus dari SATU modul yang sama (mis.
+   * `ekstrakBarisShopDailyShopee` membaca ketiga sheet basis `shopee_shop_stats`
+   * lewat `input.sheets.get('Pesanan Dibuat' | 'Pesanan Siap Dikirim' | 'Pesanan Dibayar')`,
+   * bukan cuma `input.aoa` yang terkunci ke SATU basis).
    */
   sheets: ReadonlyMap<string, readonly (readonly unknown[])[]> | null;
   /** Hasil `detectPdtModuleAntarSheet` (G1-02/G1-09) — `null` bila nol/lebih dari satu tanda tangan cocok. */
@@ -208,6 +213,8 @@ export function platformKeVokabPdt(platform: string): pdt.PdtPlatform | null {
 interface BerkasTerparse {
   nama: string;
   aoa: readonly (readonly unknown[])[];
+  /** `input.sheets` apa adanya (sesi 34) — dipakai fungsi ekstraksi yang butuh LEBIH dari satu sheet dari modul yang sama (mis. `ekstrakBarisShopDailyShopee`, `PdtModuleDef.sheetTambahan`). `null` bila berkas ini hanya satu sheet/tak relevan. */
+  sheets: ReadonlyMap<string, readonly (readonly unknown[])[]> | null;
   modul: pdt.PdtModuleDef;
   barisHeader: number;
 }
@@ -252,7 +259,7 @@ function bangunSatuPreviewBerkas(input: PdtPreviewBerkasInput): { hasil: PdtPrev
   const parseStatus = pdt.turunkanParseStatus({ decodeGagal: null, kolomWajibGagal });
 
   return {
-    terparse: parseStatus.status === 'ok' ? { nama: input.nama, aoa: input.aoa, modul, barisHeader } : null,
+    terparse: parseStatus.status === 'ok' ? { nama: input.nama, aoa: input.aoa, sheets: input.sheets, modul, barisHeader } : null,
     hasil: {
       ...dasar,
       modulKode: modul.kode,
@@ -776,6 +783,9 @@ export async function commitUploadBatch(
   // Sesi 34 (riset G2-01) — `tt_shop_analytics` → `pdt_fact_shop_daily` (lihat docblock
   // `ekstrakBarisShopDailyTiktok`, `@cdps/core` `pdt/fakta.ts`).
   const berkasShopStatsTiktok = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_shop_analytics');
+  // Sesi 34 lanjutan (G1-09-2BII-SHOPDAILY-SHOPEE) — `shopee_shop_stats` → `pdt_fact_shop_daily`,
+  // TIGA basis sekaligus lewat `b.sheets` (lihat docblock `ekstrakBarisShopDailyShopee`).
+  const berkasShopStatsShopee = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_shop_stats');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -823,7 +833,7 @@ export async function commitUploadBatch(
       await tulisFaktaModulTerparse(tx, {
         id, clientPlatformId, periodeAwalBulan, akunKontenToko: row.akun_konten_toko, now,
         berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
-        berkasShopStatsTiktok, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
+        berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
         berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk,
       });
 
@@ -888,6 +898,7 @@ interface TulisFaktaModulTerparseInput {
   berkasShopeeLive: readonly BerkasTerparse[];
   berkasTtLive: readonly BerkasTerparse[];
   berkasShopStatsTiktok: readonly BerkasTerparse[];
+  berkasShopStatsShopee: readonly BerkasTerparse[];
   berkasParentSkuUntukMaster: readonly BerkasTerparse[];
   berkasTtOrders: readonly BerkasTerparse[];
   berkasTtTransactionCreator: readonly BerkasTerparse[];
@@ -924,7 +935,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   const {
     id, clientPlatformId, periodeAwalBulan, akunKontenToko, now,
     berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
-    berkasShopStatsTiktok, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
+    berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
     berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk,
   } = input;
 
@@ -1102,8 +1113,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // penemuan celah: keenam tabel fakta G1-01 sudah punya penulis KECUALI tabel ini —
   // nol pemanggil sejak lahir, luput dari seluruh sesi G1-09 sub-langkah 2b-ii).
   // Kunci unik (`client_platform_id, tanggal, basis`) nol komponen NULL — `ON CONFLICT
-  // DO UPDATE` sungguhan, pola sama `pdt_fact_content`. Sisi Shopee (`shopee_shop_stats`
-  // TIGA basis) BELUM dipetakan — di luar cakupan sesi ini (TikTok dulu).
+  // DO UPDATE` sungguhan, pola sama `pdt_fact_content`.
   if (berkasShopStatsTiktok.length > 0) {
     for (const b of berkasShopStatsTiktok) {
       for (const baris of pdt.ekstrakBarisShopDailyTiktok(b.aoa)) {
@@ -1120,6 +1130,41 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
             gmv = excluded.gmv, pesanan = excluded.pesanan, produk_terjual = excluded.produk_terjual,
             pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
             pembeli = excluded.pembeli, refund = excluded.refund`;
+      }
+    }
+  }
+
+  // Sesi 34 lanjutan (G1-09-2BII-SHOPDAILY-SHOPEE) — `shopee_shop_stats` → `pdt_fact_shop_daily`,
+  // TIGA basis Rule 16 sekaligus dari SATU berkas (lihat docblock `ekstrakBarisShopDailyShopee`,
+  // `@cdps/core` `pdt/fakta.ts`, untuk kenapa `b.sheets` bukan `b.aoa` yang terkunci ke satu
+  // basis). `produk_terjual`/`pembeli_baru` dipetakan sama seperti TikTok; `cancel rate`/
+  // `repeat rate` BELUM ada kolomnya di `pdt_fact_shop_daily` — dicatat Open baru
+  // `G2-01-SHOPEE-CANCEL-REPEAT-RATE`, tidak memblokir gap mendasar ini.
+  const BASIS_SHEET_SHOPEE: ReadonlyMap<string, string> = new Map([
+    ['Pesanan Dibuat', 'dibuat'],
+    ['Pesanan Siap Dikirim', 'siap_dikirim'],
+    ['Pesanan Dibayar', 'dibayar'],
+  ]);
+  if (berkasShopStatsShopee.length > 0) {
+    for (const b of berkasShopStatsShopee) {
+      for (const [namaSheet, basis] of BASIS_SHEET_SHOPEE) {
+        const aoaBasis = b.sheets?.get(namaSheet);
+        if (!aoaBasis) continue;
+        for (const baris of pdt.ekstrakBarisShopDailyShopee(aoaBasis)) {
+          await tx`
+            insert into pdt_fact_shop_daily
+              (client_platform_id, tanggal, basis, batch_id, parser_versi,
+               gmv, pesanan, pengunjung, produk_diklik, cr, pembeli, pembeli_baru, refund)
+            values
+              (${clientPlatformId}, ${baris.tanggal}::date, ${basis}, ${id}, ${pdt.PDT_PARSER_VERSI},
+               ${baris.gmv}, ${baris.pesanan}, ${baris.pengunjung}, ${baris.produkDiklik},
+               ${baris.cr}, ${baris.pembeli}, ${baris.pembeliBaru}, ${baris.refund})
+            on conflict (client_platform_id, tanggal, basis) do update set
+              batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+              gmv = excluded.gmv, pesanan = excluded.pesanan,
+              pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
+              pembeli = excluded.pembeli, pembeli_baru = excluded.pembeli_baru, refund = excluded.refund`;
+        }
       }
     }
   }
@@ -1744,6 +1789,7 @@ export async function reparsePdtBatch(
       berkasShopeeLive: terparse.filter((b) => b.modul.kode === 'shopee_live'),
       berkasTtLive: terparse.filter((b) => b.modul.kode === 'tt_live'),
       berkasShopStatsTiktok: terparse.filter((b) => b.modul.kode === 'tt_shop_analytics'),
+      berkasShopStatsShopee: terparse.filter((b) => b.modul.kode === 'shopee_shop_stats'),
       berkasParentSkuUntukMaster: terparse.filter((b) => b.modul.kode === 'shopee_parent_sku'),
       berkasTtOrders: terparse.filter((b) => b.modul.kode === 'tt_orders'),
       berkasTtTransactionCreator: terparse.filter((b) => b.modul.kode === 'tt_transaction_creator'),

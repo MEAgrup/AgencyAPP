@@ -7,6 +7,7 @@ import {
   parseRentangTanggal,
   parseRentangTanggalTiktok,
   parseTanggalId,
+  parseTanggalIdStrip,
   parseTanggalIso,
   resolvePeriodeBatch,
   validasiIdentitasShopee,
@@ -28,6 +29,28 @@ describe('parseTanggalId', () => {
   it('menolak bentuk yang bukan tanggal', () => {
     expect(parseTanggalId('bukan tanggal')).toBeNull();
     expect(parseTanggalId('')).toBeNull();
+  });
+});
+
+describe('parseTanggalIdStrip (sesi 34 lanjutan — kolom Tanggal harian shopee_shop_stats, DASH bukan slash)', () => {
+  it('mem-parse DD-MM-YYYY', () => {
+    expect(parseTanggalIdStrip('01-07-2026')).toBe('2026-07-01');
+    expect(parseTanggalIdStrip('31-12-2026')).toBe('2026-12-31');
+  });
+
+  it('menolak kalender tidak valid', () => {
+    expect(parseTanggalIdStrip('31-02-2026')).toBeNull();
+    expect(parseTanggalIdStrip('00-01-2026')).toBeNull();
+    expect(parseTanggalIdStrip('13-13-2026')).toBeNull();
+  });
+
+  it('menolak bentuk SLASH (bukan format ini — beda modul, beda kolom)', () => {
+    expect(parseTanggalIdStrip('01/07/2026')).toBeNull();
+  });
+
+  it('menolak bentuk yang bukan tanggal', () => {
+    expect(parseTanggalIdStrip('bukan tanggal')).toBeNull();
+    expect(parseTanggalIdStrip('')).toBeNull();
   });
 });
 
