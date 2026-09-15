@@ -203,15 +203,14 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // 'Siap Dikirim' (default laporan klien, Rule 16) — `namaSheet` di bawah
     // mengunci modul ini ke SATU sheet itu; sinyal deteksi diganti ke kolom
     // yang SUNGGUH ADA di dalamnya (sudah di `kolomDipanen` sejak awal).
-    // ⚠️ Ini HANYA memperbaiki DETEKSI (modul ini berhenti jadi kode mati).
-    // Pembacaan NILAI shop-level dari sheet yang SUDAH terisolasi begini
-    // (`parseShopeeShopStatsPerBasis`, `rekonsiliasi.ts`) MASIH mengasumsikan
-    // format lama (marker + baris Total sesudahnya) — TIDAK diubah di sini
-    // karena struktur baris DI DALAM sheet terisolasi (ada baris Total, atau
-    // murni harian?) belum terverifikasi ke sample. Dicatat Open baru
-    // `G1-09-SHOPEESHOPSTATS-BASIS-TOTAL` — bukan regresi (jalur ini SUDAH
-    // nol dari sumber ini sebelum perbaikan ini juga, karena modul tidak
-    // pernah terdeteksi sama sekali).
+    // G1-09-SHOPEESHOPSTATS-BASIS-TOTAL DITUTUP (docs/DECISIONS.md, sesi
+    // berikutnya) — pemilik mengunggah ZIP kedua ("Shopee - Fim Motor.zip",
+    // sample asli). Sheet 'Pesanan Siap Dikirim' TERBUKTI: header baris 1,
+    // baris TEPAT SESUDAHNYA (baris 2) ringkasan PERIODE PENUH (kolom
+    // `Tanggal` berisi rentang, bukan satu tanggal) — Σ 31 baris harian
+    // PERSIS sama dengan baris ringkasan itu. `parseShopeeShopStatsBasisTerisolasi`
+    // (`rekonsiliasi.ts`, menggantikan `parseShopeeShopStatsPerBasis` yang
+    // dihapus) membaca baris itu langsung — nol tebakan tersisa.
     namaSheet: 'Pesanan Siap Dikirim',
     tandaTanganKolom: { must: ['Total Penjualan (IDR)', 'Total Pengunjung'] },
     barisHeaderHint: 1, // header LANGSUNG di baris 1 di sheet terisolasi (nol baris penanda seksi)

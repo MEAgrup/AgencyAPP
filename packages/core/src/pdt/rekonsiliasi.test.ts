@@ -2,61 +2,61 @@ import { describe, expect, it } from 'vitest';
 import {
   AMBANG_REKONSILIASI_PERSEN,
   hitungDeltaPersen,
-  parseShopeeShopStatsPerBasis,
+  parseShopeeShopStatsBasisTerisolasi,
   rekonsiliasiGmvPesanan,
   sumShopeeParentSkuGmv,
 } from './rekonsiliasi';
 
 /**
- * Fixture Fim Motor SUNGGUHAN (`docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md`
- * §baris 121-128): tiga basis `shopee_shop_stats` real, GMV dan jumlah
- * pesanan PERSIS seperti yang UAT laporkan.
+ * Fixture SUNGGUHAN — sheet 'Pesanan Siap Dikirim' persis (isi ATAS dan
+ * BAWAH, bukan cuma dua baris pertama) dari `fim_motor.shopee-shop-stats.
+ * 20260701-20260731.xlsx` (ZIP kedua pemilik "Shopee - Fim Motor.zip",
+ * G1-09-SHOPEESHOPSTATS-BASIS-TOTAL). Baris 0 header, baris 1 ringkasan
+ * PERIODE PENUH (`Tanggal` = rentang `01-07-2026-31-07-2026`, BUKAN satu
+ * tanggal), baris 2 kosong, baris 3 header BERULANG, baris 4+ rincian
+ * harian — angka baris 1 dibuktikan Σ PERSIS dari seluruh baris harian di
+ * bawahnya (dihitung ulang dari file asli, bukan ditebak).
  */
-const FIM_MOTOR_SHOP_STATS: readonly (readonly unknown[])[] = [
-  ['Pesanan Dibuat'],
-  ['Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan'],
-  ['Total', 'Rp1.624.937.476', '13568'],
-  [],
-  ['Pesanan Siap Dikirim'],
-  ['Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan'],
-  ['Total', 'Rp1.515.002.476', '12801'],
-  [],
-  ['Pesanan Dibayar'],
-  ['Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan'],
-  ['Total', 'Rp1.329.227.354', '11071'],
-  [],
-  // Sheet LAIN di workbook yang sama juga memuat frasa "pesanan dibayar" di
-  // nama seksinya (temuan SHP-1 asli) — harus TIDAK tertangkap sebagai
-  // section shop-level kedua.
-  ['(pesanan dibayar)Asal Penjualan'],
-  ['Sumber', 'Persentase'],
-  ['Iklan', '40%'],
+const FIM_MOTOR_SHOP_STATS_SIAP_DIKIRIM: readonly (readonly unknown[])[] = [
+  ['Tanggal', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik', 'Total Pengunjung',
+    'Tingkat Konversi Pesanan', 'Pesanan Dibatalkan', 'Penjualan Dibatalkan', 'Pesanan Dikembalikan',
+    'Penjualan Dikembalikan', 'Pembeli', 'Total Pembeli Baru', 'Total Pembeli Saat Ini', 'Total Potensi Pembeli',
+    'Tingkat Pembelian Berulang'],
+  ['01-07-2026-31-07-2026', '1.515.002.476', '12801', '118.350,32', '552545', '361197', '2,32%', '2016',
+    '249.181.974', '140', '24.586.464', '11046', '10461', '585', '51417', '11,35%'],
+  ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+  ['Tanggal', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik', 'Total Pengunjung',
+    'Tingkat Konversi Pesanan', 'Pesanan Dibatalkan', 'Penjualan Dibatalkan', 'Pesanan Dikembalikan',
+    'Penjualan Dikembalikan', 'Pembeli', 'Total Pembeli Baru', 'Total Pembeli Saat Ini', 'Total Potensi Pembeli',
+    'Tingkat Pembelian Berulang'],
+  ['01-07-2026', '53.089.166', '438', '121.208,14', '16583', '15095', '2,64%', '56', '6.458.732', '8',
+    '1.648.328', '393', '347', '46', '1679', '9,41%'],
+  ['02-07-2026', '46.000.168', '387', '118.863,48', '16299', '13964', '2,37%', '61', '7.817.510', '8',
+    '1.540.952', '359', '314', '45', '1724', '6,69%'],
 ];
 
-describe('parseShopeeShopStatsPerBasis — Fim Motor (angka nyata UAT)', () => {
-  it('membaca ketiga basis persis angka UAT', () => {
-    expect(parseShopeeShopStatsPerBasis(FIM_MOTOR_SHOP_STATS)).toEqual({
-      dibuat: { gmv: 1624937476, pesanan: 13568 },
-      siap_dikirim: { gmv: 1515002476, pesanan: 12801 },
-      dibayar: { gmv: 1329227354, pesanan: 11071 },
+describe('parseShopeeShopStatsBasisTerisolasi — Fim Motor (sheet asli "Pesanan Siap Dikirim")', () => {
+  it('membaca baris ringkasan periode (baris tepat sesudah header), bukan baris harian pertama', () => {
+    expect(parseShopeeShopStatsBasisTerisolasi(FIM_MOTOR_SHOP_STATS_SIAP_DIKIRIM)).toEqual({
+      gmv: 1515002476,
+      pesanan: 12801,
     });
   });
 
-  it('tidak salah tertangkap oleh sheet "(pesanan dibayar)Asal Penjualan" — hanya SATU section per basis', () => {
-    const hasil = parseShopeeShopStatsPerBasis(FIM_MOTOR_SHOP_STATS);
-    expect(hasil.dibayar).toEqual({ gmv: 1329227354, pesanan: 11071 });
+  it('null bila sheet kosong (nol baris ringkasan untuk dibaca)', () => {
+    expect(parseShopeeShopStatsBasisTerisolasi([FIM_MOTOR_SHOP_STATS_SIAP_DIKIRIM[0]])).toBeNull();
   });
 
-  it('basis yang section-nya tidak ada di berkas ⇒ absen dari map (bukan 0)', () => {
+  it('null bila header tidak membawa kolom GMV/pesanan yang dikenal (bukan sheet shopee_shop_stats)', () => {
     const aoa = [
-      ['Pesanan Dibuat'],
-      ['Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan'],
-      ['Total', 'Rp100.000', '5'],
+      ['Kode Produk', 'Kode Variasi'],
+      ['SKU-A', 'VAR-A1'],
     ];
-    const hasil = parseShopeeShopStatsPerBasis(aoa);
-    expect(hasil.dibuat).toEqual({ gmv: 100000, pesanan: 5 });
-    expect(hasil.siap_dikirim).toBeUndefined();
-    expect(hasil.dibayar).toBeUndefined();
+    expect(parseShopeeShopStatsBasisTerisolasi(aoa)).toBeNull();
+  });
+
+  it('null bila aoa kosong total', () => {
+    expect(parseShopeeShopStatsBasisTerisolasi([])).toBeNull();
   });
 });
 

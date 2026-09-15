@@ -618,6 +618,21 @@ punya `null` eksplisit.
 > regresi — jalur itu sudah nol dari sumber ini sebelum perbaikan ini juga). Diverifikasi (DB
 > lokal rebuild bersih, 247 migrasi): `@cdps/core` 1212/1212, `@cdps/domain` 2619/2619 (1 skip),
 > `@cdps/db` 107/107, `@cdps/api` 595/595 (2 skip); typecheck 5 paket + lint bersih.
+>
+> **Status 2026-09-15 (sesi 31) — `G1-09-SHOPEESHOPSTATS-BASIS-TOTAL` DITUTUP.** Pemilik
+> mengunggah ZIP kedua ("Shopee - Fim Motor.zip", sample xlsx asli) segera sesudah merge sesi 30,
+> menutup gap yang baris itu sengaja tinggalkan. Sheet `'Pesanan Siap Dikirim'` TERBUKTI: header
+> baris 1, baris TEPAT SESUDAHNYA ringkasan PERIODE PENUH (kolom `Tanggal` = rentang, bukan satu
+> tanggal) — dibuktikan aritmetika (Σ 31 baris harian PERSIS sama dengan baris ringkasan itu,
+> angka identik `UAT_SHOPEE_FIM_MOTOR_20260903.md`). `parseShopeeShopStatsBasisTerisolasi` (baru,
+> `rekonsiliasi.ts`) menggantikan `parseShopeeShopStatsPerBasis`/`parseShopStatsSection`/
+> `MARKER_BASIS`/`cariBaris` (DIHAPUS, dead code — satu-satunya pemanggil sudah diganti dan
+> `namaSheet` mengunci bentuk `aoa` yang pernah sampai ke situ). Diverifikasi tambahan: script
+> ad-hoc terhadap SELURUH 15 berkas Shopee ZIP ini lewat `detectPdtModuleAntarSheet` — 14/15 tepat
+> nol ambigu (`shopee_video`→`null` memang sengaja `UNVERIFIED_SIGNATURE`, bukan cacat). Diverifikasi
+> (DB lokal rebuild bersih, 247 migrasi — nol migrasi baru): `@cdps/core` 1213/1213, `@cdps/domain`
+> 2619/2619 (1 skip), `@cdps/db` 107/107, `@cdps/api` 595/595 (2 skip); typecheck 5 paket + lint
+> bersih. **G1 sekarang benar-benar nol item murni-teknis DAN nol item severity-tinggi tersisa.**
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)

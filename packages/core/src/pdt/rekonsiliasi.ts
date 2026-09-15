@@ -6,17 +6,23 @@
  * `pdt_fact_shop_daily`/`pdt_fact_sku_period`. Pola sama dengan G1-02..06:
  * engine murni lebih dulu, penulis DB menyusul saat pipa batch lengkap.
  *
- * **`parseShopeeShopStatsPerBasis` adalah salinan ALGORITMA (bukan impor)
- * dari `report/shopee/metrik.ts` `parseBisnisHome`/`parseHomeSection`/
- * `findRow`** — mesin LAMA itu sudah membaca ketiga basis dengan benar sejak
- * perbaikan SHP-1 (`docs/DECISIONS.md` 2026-09-03, `UAT_SHOPEE_FIM_MOTOR_20260903.md`),
- * termasuk pagar penting: mencari `'pesanan siap dikirim'`/`'pesanan dibayar'`
- * MULAI SETELAH kemunculan sebelumnya, supaya sheet lain di workbook yang
- * SAMA (`"(pesanan dibayar)Asal Penjualan"`, dst.) tidak salah tertangkap
- * sebagai section-nya. PDT sengaja TIDAK mengimpor modul lama itu (PDT-17
- * strangler: PDT adalah pengganti, bukan pemakai, mesin lama) — versi di
- * sini pakai `parsePdtAngka` (G1-03) alih-alih `pn()` legacy, dan hanya
- * mengambil `gmv`/`pesanan` (yang Rule 13 sebut), bukan 14 metrik penuh.
+ * **`parseShopeeShopStatsBasisTerisolasi`** membaca shop-level Σ basis
+ * 'Siap Dikirim' dari sheet `shopee_shop_stats` YANG SUDAH TERISOLASI per
+ * basis (`PdtModuleDef.namaSheet`, G1-09-SHEET-BUKAN-PERTAMA) — TERVERIFIKASI
+ * ke sample asli (`Shopee - Fim Motor.zip`, ZIP kedua pemilik, G1-09-
+ * SHOPEESHOPSTATS-BASIS-TOTAL): sheet 'Pesanan Siap Dikirim' berbaris header
+ * di baris 1, baris TEPAT SESUDAHNYA adalah ringkasan PERIODE PENUH (kolom
+ * `Tanggal` berisi rentang `DD-MM-YYYY-DD-MM-YYYY`, bukan satu tanggal) —
+ * dibuktikan Σ 31 baris harian di bawahnya PERSIS sama dengan baris ringkasan
+ * itu (Rp1.515.002.476 / 12.801 pesanan, angka UAT Fim Motor asli yang sama
+ * dengan `docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md`). Menggantikan
+ * `parseShopeeShopStatsPerBasis` (dihapus sesi ini) yang mengasumsikan TIGA
+ * basis sebagai marker-section dalam SATU sheet gabungan — tebakan itu
+ * TERBUKTI salah (marker teksnya cuma nama TAB, bukan isi sel manapun,
+ * `docs/DECISIONS.md` G1-09-SHEET-BUKAN-PERTAMA) — dan sejak `namaSheet`
+ * mengunci modul ini ke SATU sheet basis Siap Dikirim, satu-satunya bentuk
+ * `aoa` yang pernah sampai ke pemanggil (`commitUploadBatch`) memang sheet
+ * terisolasi itu, bukan gabungan tiga basis.
  *
  * **`sumShopeeParentSkuGmv`** menjumlah kolom GMV per-basis
  * `shopee_parent_sku` (`PDT_MODULES`, `barisHeaderHint: 1`) — literal kolom
@@ -32,24 +38,7 @@
  */
 import { parsePdtAngka } from './angka';
 
-export type PdtBasisShopee = 'dibuat' | 'siap_dikirim' | 'dibayar';
-
-const MARKER_BASIS: readonly { marker: string; basis: PdtBasisShopee }[] = [
-  { marker: 'pesanan dibuat', basis: 'dibuat' },
-  { marker: 'pesanan siap dikirim', basis: 'siap_dikirim' },
-  { marker: 'pesanan dibayar', basis: 'dibayar' },
-];
-
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
-
-/** Cermin `findRow` (`report/shopee/metrik.ts`) — cari baris yang kolom pertamanya MEMUAT `needle`, mulai dari `start`. */
-function cariBaris(aoa: readonly (readonly unknown[])[], needle: string, start: number): number {
-  const n = needle.toLowerCase();
-  for (let i = start; i < aoa.length; i++) {
-    if (norm(aoa[i]?.[0]).includes(n)) return i;
-  }
-  return -1;
-}
 
 export interface PdtShopStatsTotal {
   gmv: number;
@@ -57,46 +46,24 @@ export interface PdtShopStatsTotal {
 }
 
 /**
- * Baca SATU section basis `shopee_shop_stats` mulai dari baris marker
- * (`markerIdx`, baris yang isi kolom pertamanya `'Pesanan Dibuat'`/dst. —
- * Rule 7, header sesudahnya dicari dalam 6 baris berikut, bukan diasumsikan
- * posisi tetap). Baris TOTAL = baris tepat sesudah header (cermin
- * `parseHomeSection`: baris pertama sesudah header adalah ringkasan
- * shop-level, baik berlabel `'Total'` atau tidak — labelnya sendiri tidak
- * dibaca).
+ * Baca ringkasan PERIODE shop-level dari sheet `shopee_shop_stats` basis
+ * Siap Dikirim (sheet SUDAH terisolasi lewat `namaSheet`, G1-09-SHEET-BUKAN-
+ * PERTAMA — lihat docblock kepala berkas untuk bukti verifikasi sample asli).
+ * Header di baris pertama (`aoa[0]`); baris TEPAT SESUDAHNYA (`aoa[1]`)
+ * adalah ringkasan periode PENUH, sebelum baris kosong + header berulang +
+ * rincian harian. `null` bila baris ringkasan atau salah satu kolom tidak
+ * ditemukan (berkas tidak sesuai bentuk yang diharapkan — pemanggil
+ * (`commitUploadBatch`) menahan status di `'parsing'` untuk kasus ini, bukan
+ * menulis angka yang mungkin salah).
  */
-function parseShopStatsSection(aoa: readonly (readonly unknown[])[], markerIdx: number): PdtShopStatsTotal | null {
-  let hi = -1;
-  for (let i = markerIdx; i < Math.min(markerIdx + 6, aoa.length); i++) {
-    const c0 = norm(aoa[i]?.[0]);
-    if (c0 === 'tanggal' || c0 === 'periode waktu') { hi = i; break; }
-  }
-  if (hi < 0) return null;
-  const header = aoa[hi] ?? [];
-  const totalRow = aoa[hi + 1];
-  if (!totalRow) return null;
+export function parseShopeeShopStatsBasisTerisolasi(aoa: readonly (readonly unknown[])[]): PdtShopStatsTotal | null {
+  const header = aoa[0];
+  const totalRow = aoa[1];
+  if (!header || !totalRow) return null;
   const idxGmv = header.findIndex((c) => norm(c) === 'total penjualan (idr)' || norm(c).includes('total penjualan'));
   const idxPesanan = header.findIndex((c) => norm(c).includes('total pesanan'));
   if (idxGmv === -1 || idxPesanan === -1) return null;
   return { gmv: parsePdtAngka(totalRow[idxGmv]), pesanan: parsePdtAngka(totalRow[idxPesanan]) };
-}
-
-/**
- * Baca ketiga basis `shopee_shop_stats` sekaligus. Basis yang section-nya
- * tidak ditemukan di berkas ⇒ absen dari map (bukan `0` — sel absen ≠ sel
- * kosong, house rule #4/aturan-rumah pembagi-nol/ketiadaan).
- */
-export function parseShopeeShopStatsPerBasis(aoa: readonly (readonly unknown[])[]): Partial<Record<PdtBasisShopee, PdtShopStatsTotal>> {
-  const hasil: Partial<Record<PdtBasisShopee, PdtShopStatsTotal>> = {};
-  let cari = 0;
-  for (const { marker, basis } of MARKER_BASIS) {
-    const idx = cariBaris(aoa, marker, cari);
-    if (idx === -1) continue;
-    const section = parseShopStatsSection(aoa, idx);
-    if (section) hasil[basis] = section;
-    cari = idx + 1; // Rule 7 + temuan SHP-1: cari section BERIKUTNYA setelah ini, supaya sheet lain di workbook yang sama (mis. "(pesanan dibayar)Asal Penjualan") tidak tertangkap sebagai section shop-level.
-  }
-  return hasil;
 }
 
 /**
