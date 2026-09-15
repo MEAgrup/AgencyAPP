@@ -1010,25 +1010,27 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // G1-09 sub-langkah 2b-ii — modul KEDUA, `tt_video` → `pdt_fact_content` (lihat
   // docblock `ekstrakBarisTtVideo`, `@cdps/core` `pdt/fakta.ts`). Beda dari
   // `shopee_ads_live`/`pdt_fact_ads`: kunci unik `pdt_fact_content`
-  // (`client_platform_id, platform_content_id`) TIDAK punya komponen NULL (`ID Video`
-  // selalu ada untuk baris yang ditulis — baris kosong sudah dilewati di
+  // (`client_platform_id, platform_content_id, periode`) TIDAK punya komponen NULL (`ID
+  // Video` selalu ada untuk baris yang ditulis — baris kosong sudah dilewati di
   // `ekstrakBarisTtVideo`), jadi `ON CONFLICT ... DO UPDATE` sungguhan AMAN dipakai di
   // sini (beda dari alasan replace-on-recommit `pdt_fact_ads` di atas). `sku_id`/
   // `waktu_posting` SELALU NULL (SKU master belum ada; nol parser terverifikasi untuk
-  // format kolom `Waktu` — lihat docblock `ekstrakBarisTtVideo`).
+  // format kolom `Waktu` — lihat docblock `ekstrakBarisTtVideo`). `periode` — AWAL BULAN
+  // batch (Q-3, migrasi sesi 34) — video yang GMV-nya masih berjalan di bulan berikutnya
+  // menulis baris BARU untuk periode itu, TIDAK menimpa baris bulan sebelumnya.
   if (berkasTtVideo.length > 0) {
     for (const b of berkasTtVideo) {
       for (const baris of pdt.ekstrakBarisTtVideo(b.aoa, b.barisHeader, akunKontenToko)) {
         await tx`
           insert into pdt_fact_content
-            (client_platform_id, platform_content_id, batch_id, parser_versi, jenis,
+            (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis,
              creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
              vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
           values
-            (${clientPlatformId}, ${baris.platformContentId}, ${id}, ${pdt.PDT_PARSER_VERSI}, 'video',
+            (${clientPlatformId}, ${baris.platformContentId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'video',
              ${baris.creatorPlatformId}, ${baris.creatorHandle}, ${baris.isAkunToko}, null, null,
              ${baris.vv}, ${baris.likes}, null, ${baris.dibagikan}, null, null, ${baris.klikProduk}, ${baris.gmv}, null)
-          on conflict (client_platform_id, platform_content_id) do update set
+          on conflict (client_platform_id, platform_content_id, periode) do update set
             batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
             creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
             is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, likes = excluded.likes,
@@ -1044,20 +1046,21 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // yang valid sudah dilewati di `ekstrakBarisShopeeLive`), jadi unique index tidak punya
   // komponen NULL. `sku_id`/`creator_platform_id`/`creator_handle` SELALU NULL (modul ini
   // tidak punya identitas produk maupun kreator terpisah); `is_akun_toko` SELALU `true`
-  // (sesi live Shopee secara struktural HANYA akun toko sendiri, bukan afiliasi).
+  // (sesi live Shopee secara struktural HANYA akun toko sendiri, bukan afiliasi). `periode`
+  // — AWAL BULAN batch (sama pola `tt_video` di atas, migrasi sesi 34).
   if (berkasShopeeLive.length > 0) {
     for (const b of berkasShopeeLive) {
       for (const baris of pdt.ekstrakBarisShopeeLive(b.aoa, b.barisHeader)) {
         await tx`
           insert into pdt_fact_content
-            (client_platform_id, platform_content_id, batch_id, parser_versi, jenis,
+            (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis,
              creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
              vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
           values
-            (${clientPlatformId}, ${baris.platformContentId}, ${id}, ${pdt.PDT_PARSER_VERSI}, 'live',
+            (${clientPlatformId}, ${baris.platformContentId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'live',
              null, null, true, ${baris.waktuPosting}, null,
              ${baris.vv}, null, null, null, null, null, null, ${baris.gmv}, null)
-          on conflict (client_platform_id, platform_content_id) do update set
+          on conflict (client_platform_id, platform_content_id, periode) do update set
             batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
             waktu_posting = excluded.waktu_posting, vv = excluded.vv, gmv = excluded.gmv`;
       }
@@ -1071,20 +1074,21 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // `creator_platform_id`/`creator_handle` TERISI (laporan ini campuran toko+afiliasi,
   // `is_akun_toko` per baris membedakannya — pola sama `tt_video`), `waktu_posting`
   // SELALU NULL (zona waktu dashboard TikTok belum terverifikasi, lihat docblock
-  // `ekstrakBarisTtLive`), `durasi_detik` TERISI (`Durasi` "Xh Ymin" → detik).
+  // `ekstrakBarisTtLive`), `durasi_detik` TERISI (`Durasi` "Xh Ymin" → detik). `periode`
+  // — AWAL BULAN batch (sama pola dua modul di atas, migrasi sesi 34).
   if (berkasTtLive.length > 0) {
     for (const b of berkasTtLive) {
       for (const baris of pdt.ekstrakBarisTtLive(b.aoa, b.barisHeader, akunKontenToko)) {
         await tx`
           insert into pdt_fact_content
-            (client_platform_id, platform_content_id, batch_id, parser_versi, jenis,
+            (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis,
              creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
              vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
           values
-            (${clientPlatformId}, ${baris.platformContentId}, ${id}, ${pdt.PDT_PARSER_VERSI}, 'live',
+            (${clientPlatformId}, ${baris.platformContentId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'live',
              ${baris.creatorPlatformId}, ${baris.creatorHandle}, ${baris.isAkunToko}, null, null,
              ${baris.vv}, null, null, null, null, null, null, ${baris.gmv}, ${baris.durasiDetik})
-          on conflict (client_platform_id, platform_content_id) do update set
+          on conflict (client_platform_id, platform_content_id, periode) do update set
             batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
             creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
             is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, gmv = excluded.gmv,
