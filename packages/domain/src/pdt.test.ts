@@ -185,6 +185,9 @@ afterEach(async () => {
   // pdt_fact_sku_period (G1-09 sub-langkah 2b-ii, modul KEDELAPAN shopee_ams_produk, sesi 23) —
   // sama alasan (FK ke client_platforms, kolom baru migrasi 20261025010000, TANPA ON DELETE CASCADE).
   await sql`delete from pdt_fact_sku_period where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
+  // pdt_fact_shop_daily (sesi 34, riset G2-01, tt_shop_analytics) — sama alasan (FK ke
+  // pdt_upload_batch TANPA ON DELETE CASCADE).
+  await sql`delete from pdt_fact_shop_daily where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -1019,6 +1022,155 @@ describeDb('commitUploadBatch (G1-07-TIKTOK-REKONSILIASI DITUTUP) — rekonsilia
     const pertama = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(pertama.status).toBe('verified');
     await expect(commitUploadBatch(sql, ownerActor(), cpId, berkas, [])).rejects.toBeInstanceOf(ValidationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (sesi 34, riset G2-01) — tt_shop_analytics → pdt_fact_shop_daily.
+// Celah ditemukan (bukan modul baru — G1-09 sudah "selesai" tanpa pernah menulis
+// tabel ini): lihat docblock `ekstrakBarisShopDailyTiktok`, `@cdps/core` `pdt/fakta.ts`.
+// ---------------------------------------------------------------------------
+interface FactShopDailyRow {
+  client_platform_id: number;
+  tanggal: string | Date;
+  basis: string;
+  batch_id: number;
+  parser_versi: number;
+  gmv: string;
+  pesanan: number;
+  produk_terjual: number | null;
+  pengunjung: number | null;
+  produk_diklik: number | null;
+  cr: string | null;
+  pembeli: number | null;
+  refund: string | null;
+}
+
+async function loadFactShopDaily(clientPlatformId: number): Promise<FactShopDailyRow[]> {
+  return sql<FactShopDailyRow[]>`select * from pdt_fact_shop_daily where client_platform_id = ${clientPlatformId} order by tanggal`;
+}
+
+/** `tt_shop_analytics` DENGAN blok "Data harian" (bentuk asli lengkap, beda dari `ttShopAnalyticsBerkas` yang hanya membawa "Ringkasan data" untuk tes rekonsiliasi). */
+function ttShopAnalyticsBerkasDenganHarian(
+  nama: string,
+  gmv: number,
+  pesananSku: number,
+  baris: readonly [string, string, string, string, string, string, string, string, string, string, string, string, string, string, string, string][],
+): PdtPreviewBerkasInput {
+  const HEADER_HARIAN = [
+    'Tanggal', 'GMV', 'Pesanan', 'Pembeli', 'Produk terjual', 'Pengembalian dana', 'Pesanan SKU',
+    'Pendapatan bruto', 'Tayangan halaman', 'Pengunjung', 'Persentase konversi', 'Impresi produk',
+    'Impresi produk unik', 'Klik produk', 'Klik unik', 'AOV',
+  ];
+  const aoa: unknown[][] = [
+    ['Tanggal analisis: 01/07/2026-31/07/2026'],
+    ['Ringkasan data'],
+    HEADER_TT_SHOP_ANALYTICS,
+    ['Total nilai', String(gmv), '10', '8', String(pesananSku), '500', '2', '1000000', '0', '200000', '100000', '50000', '50000'],
+    [],
+    [],
+    ['Data harian'],
+    HEADER_HARIAN,
+    ...baris,
+  ];
+  return {
+    nama, sha256: 'sha-tt-shopanalytics-harian', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'tt_shop_analytics', ambiguous: false, matches: ['tt_shop_analytics'],
+  };
+}
+
+describeDb('commitUploadBatch (sesi 34) — tt_shop_analytics → pdt_fact_shop_daily', () => {
+  async function fixture(): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'TikTok Shop', null, ['kreator-a']); // akun_konten_toko terikat ⇒ identitas 'cocok'
+  }
+
+  it('satu baris per tanggal, basis="net", gmv/refund APA ADANYA (tidak di-net-kan)', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkasDenganHarian('shop-analytics.xlsx', 1_600_000, 15, [
+        ['01/07/2026', '1000000', '10', '9', '10', '-', '10', '1050000', '100', '80', '0.1256', '500', '400', '50', '40', '100000'],
+        ['02/07/2026', '600000', '5', '5', '5', '50000', '5', '650000', '60', '50', '0.1', '300', '250', '30', '25', '120000'],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactShopDaily(cpId);
+    expect(rows).toHaveLength(2);
+    expect(ymd(rows[0].tanggal)).toBe('2026-07-01');
+    expect(rows[0]).toMatchObject({ basis: 'net', batch_id: persiapan.batchId, pesanan: 10, produk_terjual: 10, pengunjung: 80, produk_diklik: 50, pembeli: 9 });
+    expect(Number(rows[0].gmv)).toBe(1000000);
+    expect(Number.isNaN(Number(rows[0].cr))).toBe(false);
+    expect(Number(rows[0].cr)).toBeCloseTo(0.1256, 3);
+    expect(ymd(rows[1].tanggal)).toBe('2026-07-02');
+    expect(Number(rows[1].gmv)).toBe(600000); // GMV MENTAH, bukan 600000 - 50000
+    expect(Number(rows[1].refund)).toBe(50000);
+  });
+
+  it('"Pengembalian dana"="-" ⇒ refund NaN tersimpan (Postgres numeric mendukung NaN), bukan 0', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkasDenganHarian('shop-analytics.xlsx', 1_000_000, 10, [
+        ['01/07/2026', '1000000', '10', '9', '10', '-', '10', '1050000', '100', '80', '0.1256', '500', '400', '50', '40', '100000'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const [row] = await loadFactShopDaily(cpId);
+    expect(Number.isNaN(Number(row.refund))).toBe(true);
+  });
+
+  it('commit ULANG (tanggal+basis sama) ⇒ ON CONFLICT DO UPDATE — baris diperbarui di tempat, bukan digandakan', async () => {
+    const cpId = await fixture();
+    const pertama = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkasDenganHarian('shop-analytics.xlsx', 1_000_000, 10, [
+        ['01/07/2026', '1000000', '10', '9', '10', '-', '10', '1050000', '100', '80', '0.1256', '500', '400', '50', '40', '100000'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect(await loadFactShopDaily(cpId)).toHaveLength(1);
+
+    const kedua = [
+      ttVideoBerkasDenganPeriode('video-2.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkasDenganHarian('shop-analytics-revisi.xlsx', 2_000_000, 20, [
+        ['01/07/2026', '2000000', '20', '18', '20', '-', '20', '2100000', '200', '160', '0.25', '1000', '800', '100', '80', '100000'],
+      ]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = await loadFactShopDaily(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — ON CONFLICT DO UPDATE
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(Number(rows[0].gmv)).toBe(2000000);
+    expect(rows[0].pesanan).toBe(20);
+  });
+
+  it("identitas 'usulkan_ikat' (akun_konten_toko belum terikat) ⇒ baris fakta TETAP ditulis (client_platform_id sudah diketahui — gate 'tolak' saja, pola sama modul lain)", async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null); // belum terikat
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkasDenganHarian('shop-analytics.xlsx', 1_000_000, 10, [
+        ['01/07/2026', '1000000', '10', '9', '10', '-', '10', '1050000', '100', '80', '0.1256', '500', '400', '50', '40', '100000'],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('identitas_belum_terikat');
+    expect(await loadFactShopDaily(cpId)).toHaveLength(1);
+  });
+
+  it('berkas tanpa blok "Data harian" (mis. hanya Ringkasan) ⇒ nol baris fakta shop_daily, rekonsiliasi tetap jalan dari Ringkasan', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkas('shop-analytics.xlsx', 1_000_000, 100),
+      ttProductAnalyticsBerkas('product-analytics.xlsx', 1_000_000, 100),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('verified'); // rekonsiliasi Rule 13-14 tidak bergantung pada blok harian
+    expect(await loadFactShopDaily(cpId)).toHaveLength(0);
   });
 });
 

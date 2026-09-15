@@ -667,6 +667,34 @@ punya `null` eksplisit.
 > bersih. **G1 SEKARANG genuinely nol Open TikTok tersisa** — sisa Open G1 hanyalah
 > `G1-10-RETENSI-RECOMPUTE` (menunggu G2-01/G5 punya baris produksi pertama, struktural bukan
 > data) dan `G1-11-REPARSE-RECOMPUTE-STATUS` (pertanyaan desain jarang-terjadi, tidak memblokir).
+>
+> **Status 2026-09-15 (sesi 34, riset G2-01) — celah `pdt_fact_shop_daily` (nol penulis sejak
+> lahir) DITUTUP untuk TikTok, `tt_shop_analytics` → `pdt_fact_shop_daily`.** Ditemukan saat
+> riset arsitektur G2-01 (§2 di bawah): dari enam tabel fakta G1-01, HANYA tabel ini yang tidak
+> pernah dipetakan, meski ia paling mendasar (prasyarat mesin skor G2) — `HANDOFF_PDT_SESI14.md`
+> sudah mencatatnya "NOL modul dipetakan" sejak sesi 14, tapi tidak pernah masuk daftar kandidat
+> sembilan sesi fact-mapping sesudahnya. Sample asli sheet yang sama yang sudah dipakai G1-07
+> rekonsiliasi TERNYATA membawa blok "Data harian" di bawah "Ringkasan data" — dibuktikan
+> aritmetika (Σ GMV/Pesanan SKU 31 baris harian PERSIS sama dengan Ringkasan). `gmv`/`refund`
+> disimpan MENTAH (tidak di-net-kan) — Rule 15 "GMV−refund" adalah kontrak KONSUMEN (mesin skor
+> G2), bukan sesuatu yang dibakukan saat tulis. Lihat `docs/DECISIONS.md` untuk rincian lengkap.
+> **Sisi Shopee (`shopee_shop_stats`, tiga basis) BELUM dipetakan** — Open baru
+> `G1-09-2BII-SHOPDAILY-SHOPEE` di bawah, di luar cakupan sesi ini (TikTok dulu, atas pilihan
+> pemilik). Diverifikasi (DB lokal rebuild bersih): `@cdps/core` 1244/1244, `@cdps/domain`
+> 2635/2635 (1 skip), `@cdps/db` 107/107, `@cdps/api` 595/595 (2 skip); typecheck 4 paket + lint
+> bersih.
+
+### G1-09-2BII-SHOPDAILY-SHOPEE (Open, sesi 34)
+`shopee_shop_stats` (sheet terisolasi `'Pesanan Siap Dikirim'`, sudah dipakai G1-07 rekonsiliasi
+lewat `parseShopeeShopStatsBasisTerisolasi`) belum dipetakan ke `pdt_fact_shop_daily`. Sheet ini
+SUDAH terbukti membawa baris harian (sesi 31, "31 baris harian" dibuktikan aritmetika terhadap
+baris ringkasan) — jadi kemungkinan besar pola sama TikTok berlaku (header di `aoa[0]`, ringkasan
+di `aoa[1]`, baris harian menyusul sesudah baris kosong + header berulang), tapi BELUM diverifikasi
+posisi persis baris harian dimulai di sheet TERISOLASI ini (beda dari workbook 12-sheet asli yang
+sudah diverifikasi strukturnya sesi 31 — perlu dicek ulang di BENTUK yang sampai ke pemanggil).
+Shopee juga TIGA basis (`dibuat`/`siap_dikirim`/`dibayar`), tapi sheet terisolasi HANYA membawa
+SATU basis (`siap_dikirim`) — dua basis lain butuh sheet lain yang belum dianalisis untuk baris
+harian sama sekali. Tidak memblokir G2-01 TikTok; perlu ditutup sebelum G2-01 Shopee dimulai.
 
 ### G1-10 · Job purge harian — **Vercel Cron, BUKAN pg_cron**
 Konsekuensi P-09: pola `pg_cron`-di-balik-guard yang ada (`20260811040000_interview_cron.sql`)
