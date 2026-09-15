@@ -1528,6 +1528,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KETUJUH) — baris
 // ---------------------------------------------------------------------------
 interface FactContentRow {
   platform_content_id: string;
+  periode: string | Date;
   batch_id: number;
   parser_versi: number;
   jenis: string;
@@ -2259,6 +2260,30 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KESEPULUH) — tt_
     expect(rows[0].vv).toBe(99);
     expect(rows[0].durasi_detik).toBe(3600);
     expect(Number(rows[0].gmv)).toBe(1500000);
+  });
+
+  it('sesi live yang SAMA muncul lagi di periode BERBEDA ⇒ DUA baris terpisah (bukan menimpa periode sebelumnya, migrasi sesi 34)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const juli = [
+      ttVideoBerkasDenganPeriode('video-juli.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttLiveBerkas('live-juli.xlsx', [['KR-1', 'Toko', '2026/07/31/ 19:06', '0h 5min', '100', '0', '10', '0%']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, juli, []);
+
+    const agustus = [
+      ttVideoBerkasDenganPeriode('video-agustus.xlsx', 'KR-1', '01/08/2026 - 31/08/2026'),
+      ttLiveBerkas('live-agustus.xlsx', [['KR-1', 'Toko', '2026/07/31/ 19:06', '0h 5min', '9999', '0', '10', '0%']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, agustus, []);
+
+    const rows = (await loadFactContent(cpId)).filter((r) => r.jenis === 'live');
+    expect(rows).toHaveLength(2); // BUKAN 1 — periode berbeda, baris Juli TIDAK tertimpa Agustus
+    const juliRow = rows.find((r) => ymd(r.periode) === '2026-07-01');
+    const agustusRow = rows.find((r) => ymd(r.periode) === '2026-08-01');
+    expect(Number(juliRow?.gmv)).toBe(100); // laporan Juli yang dihitung ULANG tetap benar
+    expect(Number(agustusRow?.gmv)).toBe(9999);
   });
 
   it('baris "ID Kreator"/"Waktu Live" tidak valid dilewati — nol baris fakta untuk baris itu', async () => {
