@@ -773,6 +773,9 @@ export async function commitUploadBatch(
   // DITUTUP (sample asli "Tiktok - Avitaskin.zip": `ID Kreator` + `Waktu Live` menit
   // presisi TERBUKTI 100% unik, pola sama `shopee_live`/`Waktu Mulai`).
   const berkasTtLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_live');
+  // Sesi 34 (riset G2-01) — `tt_shop_analytics` → `pdt_fact_shop_daily` (lihat docblock
+  // `ekstrakBarisShopDailyTiktok`, `@cdps/core` `pdt/fakta.ts`).
+  const berkasShopStatsTiktok = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_shop_analytics');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -820,7 +823,7 @@ export async function commitUploadBatch(
       await tulisFaktaModulTerparse(tx, {
         id, clientPlatformId, periodeAwalBulan, akunKontenToko: row.akun_konten_toko, now,
         berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
-        berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
+        berkasShopStatsTiktok, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
         berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk,
       });
 
@@ -884,6 +887,7 @@ interface TulisFaktaModulTerparseInput {
   berkasTtVideo: readonly BerkasTerparse[];
   berkasShopeeLive: readonly BerkasTerparse[];
   berkasTtLive: readonly BerkasTerparse[];
+  berkasShopStatsTiktok: readonly BerkasTerparse[];
   berkasParentSkuUntukMaster: readonly BerkasTerparse[];
   berkasTtOrders: readonly BerkasTerparse[];
   berkasTtTransactionCreator: readonly BerkasTerparse[];
@@ -920,7 +924,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   const {
     id, clientPlatformId, periodeAwalBulan, akunKontenToko, now,
     berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
-    berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
+    berkasShopStatsTiktok, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
     berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk,
   } = input;
 
@@ -1085,6 +1089,33 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
             creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
             is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, gmv = excluded.gmv,
             durasi_detik = excluded.durasi_detik`;
+      }
+    }
+  }
+
+  // Sesi 34 (riset G2-01) — `tt_shop_analytics` → `pdt_fact_shop_daily`, basis 'net'
+  // (lihat docblock `ekstrakBarisShopDailyTiktok`, `@cdps/core` `pdt/fakta.ts`, untuk
+  // penemuan celah: keenam tabel fakta G1-01 sudah punya penulis KECUALI tabel ini —
+  // nol pemanggil sejak lahir, luput dari seluruh sesi G1-09 sub-langkah 2b-ii).
+  // Kunci unik (`client_platform_id, tanggal, basis`) nol komponen NULL — `ON CONFLICT
+  // DO UPDATE` sungguhan, pola sama `pdt_fact_content`. Sisi Shopee (`shopee_shop_stats`
+  // TIGA basis) BELUM dipetakan — di luar cakupan sesi ini (TikTok dulu).
+  if (berkasShopStatsTiktok.length > 0) {
+    for (const b of berkasShopStatsTiktok) {
+      for (const baris of pdt.ekstrakBarisShopDailyTiktok(b.aoa)) {
+        await tx`
+          insert into pdt_fact_shop_daily
+            (client_platform_id, tanggal, basis, batch_id, parser_versi,
+             gmv, pesanan, produk_terjual, pengunjung, produk_diklik, cr, pembeli, refund)
+          values
+            (${clientPlatformId}, ${baris.tanggal}::date, 'net', ${id}, ${pdt.PDT_PARSER_VERSI},
+             ${baris.gmv}, ${baris.pesanan}, ${baris.produkTerjual}, ${baris.pengunjung}, ${baris.produkDiklik},
+             ${baris.cr}, ${baris.pembeli}, ${baris.refund})
+          on conflict (client_platform_id, tanggal, basis) do update set
+            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+            gmv = excluded.gmv, pesanan = excluded.pesanan, produk_terjual = excluded.produk_terjual,
+            pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
+            pembeli = excluded.pembeli, refund = excluded.refund`;
       }
     }
   }
@@ -1708,6 +1739,7 @@ export async function reparsePdtBatch(
       berkasTtVideo: terparse.filter((b) => b.modul.kode === 'tt_video'),
       berkasShopeeLive: terparse.filter((b) => b.modul.kode === 'shopee_live'),
       berkasTtLive: terparse.filter((b) => b.modul.kode === 'tt_live'),
+      berkasShopStatsTiktok: terparse.filter((b) => b.modul.kode === 'tt_shop_analytics'),
       berkasParentSkuUntukMaster: terparse.filter((b) => b.modul.kode === 'shopee_parent_sku'),
       berkasTtOrders: terparse.filter((b) => b.modul.kode === 'tt_orders'),
       berkasTtTransactionCreator: terparse.filter((b) => b.modul.kode === 'tt_transaction_creator'),

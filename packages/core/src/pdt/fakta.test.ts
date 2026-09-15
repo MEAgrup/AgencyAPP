@@ -7,6 +7,7 @@ import {
   ekstrakBarisShopeeAdsSearch,
   ekstrakBarisShopeeAmsProduk,
   ekstrakBarisShopeeLive,
+  ekstrakBarisShopDailyTiktok,
   ekstrakBarisSkuMasterShopeeParentSku,
   ekstrakBarisSkuMasterTtOrders,
   ekstrakBarisTtLive,
@@ -608,5 +609,98 @@ describe('ekstrakBarisShopeeAdsSearch', () => {
         tayangan: null, klik: null, pesananSku: null, gmv: null, biaya: 150000, roas: null,
       },
     ]);
+  });
+});
+
+const HEADER_SHOP_DAILY_TIKTOK = [
+  'Tanggal', 'GMV', 'Pesanan', 'Pembeli', 'Produk terjual', 'Pengembalian dana', 'Pesanan SKU',
+  'Pendapatan bruto', 'Tayangan halaman', 'Pengunjung', 'Persentase konversi', 'Impresi produk',
+  'Impresi produk unik', 'Klik produk', 'Klik unik', 'AOV',
+];
+
+/** Bentuk sheet asli `Shop Analytics_Key metrics_*.xlsx`: preamble + "Ringkasan data" (dipakai G1-07) + "Data harian" (baru, sesi 34). */
+function shopAnalyticsAoa(dailyRows: readonly unknown[][]): unknown[][] {
+  return [
+    ['Tanggal analisis: 01/07/2026–31/07/2026'],
+    ['Ringkasan data'],
+    ['', 'GMV', 'Pesanan', 'Pembeli', 'Produk terjual', 'Pengembalian dana', 'Pesanan SKU'],
+    ['Total nilai', '26560049', '145', '137', '147', '334640', '145'],
+    [],
+    [],
+    ['Data harian'],
+    HEADER_SHOP_DAILY_TIKTOK,
+    ...dailyRows,
+  ];
+}
+
+describe('ekstrakBarisShopDailyTiktok (sesi 34 — celah pdt_fact_shop_daily ditemukan+ditutup untuk TikTok)', () => {
+  it('memetakan satu baris harian lengkap (angka sample asli Avitaskin, 01/07/2026)', () => {
+    const aoa = shopAnalyticsAoa([
+      ['01/07/2026', '1364124', '5', '5', '5', '-', '5', '1374706', '1278', '1020', '0.004901960784313725', '23805', '14615', '1349', '1074', '272825'],
+    ]);
+    const [baris] = ekstrakBarisShopDailyTiktok(aoa);
+    expect(baris.tanggal).toBe('2026-07-01');
+    expect(baris.gmv).toBe(1364124);
+    expect(baris.pesanan).toBe(5);
+    expect(baris.produkTerjual).toBe(5);
+    expect(baris.pengunjung).toBe(1020);
+    expect(baris.produkDiklik).toBe(1349);
+    expect(baris.cr).toBe(0.004901960784313725);
+    expect(baris.pembeli).toBe(5);
+    expect(Number.isNaN(baris.refund)).toBe(true);
+  });
+
+  it('"Pengembalian dana" berupa "-" (bukan sel kosong) ⇒ refund NaN, bukan 0 (G1-03 — "-" bukan konvensi nol)', () => {
+    const aoa = shopAnalyticsAoa([
+      ['02/07/2026', '100', '1', '1', '1', '-', '1', '100', '10', '10', '0.1', '10', '10', '1', '1', '100'],
+    ]);
+    expect(Number.isNaN(ekstrakBarisShopDailyTiktok(aoa)[0].refund)).toBe(true);
+  });
+
+  it('"Pengembalian dana" berisi angka sungguhan ⇒ terparse apa adanya, TIDAK di-net-kan ke gmv (dua kolom terpisah)', () => {
+    const aoa = shopAnalyticsAoa([
+      ['06/07/2026', '1064790', '7', '7', '7', '159400', '7', '1150811', '1103', '785', '0.0089', '39161', '22795', '1114', '786', '152113'],
+    ]);
+    const [baris] = ekstrakBarisShopDailyTiktok(aoa);
+    expect(baris.gmv).toBe(1064790);
+    expect(baris.refund).toBe(159400);
+  });
+
+  it('tanpa marker "Data harian" ⇒ array kosong (mis. berkas hanya membawa Ringkasan)', () => {
+    const aoa = [
+      ['Tanggal analisis: 01/07/2026–31/07/2026'],
+      ['Ringkasan data'],
+      ['', 'GMV', 'Pesanan'],
+      ['Total nilai', '100', '1'],
+    ];
+    expect(ekstrakBarisShopDailyTiktok(aoa)).toEqual([]);
+  });
+
+  it('baris kosong penutup section (Tanggal kosong) dilewati, bukan error', () => {
+    const aoa = shopAnalyticsAoa([
+      ['01/07/2026', '100', '1', '1', '1', '-', '1', '100', '10', '10', '0.1', '10', '10', '1', '1', '100'],
+      [],
+    ]);
+    expect(ekstrakBarisShopDailyTiktok(aoa)).toHaveLength(1);
+  });
+
+  it('kolom opsional hilang (mis. berkas tanpa "Pembeli") ⇒ null untuk field itu, gmv/pesanan tetap wajib', () => {
+    const aoa = [
+      ['Data harian'],
+      ['Tanggal', 'GMV', 'Pesanan'],
+      ['01/07/2026', '100', '1'],
+    ];
+    expect(ekstrakBarisShopDailyTiktok(aoa)).toEqual([
+      { tanggal: '2026-07-01', gmv: 100, pesanan: 1, produkTerjual: null, pengunjung: null, produkDiklik: null, cr: null, pembeli: null, refund: null },
+    ]);
+  });
+
+  it('tanggal tak terbaca dilewati (baris ganjil, bukan error)', () => {
+    const aoa = [
+      ['Data harian'],
+      HEADER_SHOP_DAILY_TIKTOK,
+      ['bukan-tanggal', '100', '1', '1', '1', '-', '1', '100', '10', '10', '0.1', '10', '10', '1', '1', '100'],
+    ];
+    expect(ekstrakBarisShopDailyTiktok(aoa)).toEqual([]);
   });
 });

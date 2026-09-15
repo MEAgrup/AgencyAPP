@@ -172,6 +172,7 @@
  */
 import { WIB_OFFSET_HOURS } from '../tz';
 import { parsePdtAngka } from './angka';
+import { parseTanggalId } from './identitas';
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
 
@@ -861,6 +862,91 @@ export function ekstrakBarisShopeeAdsSearch(
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
       roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+    });
+  }
+  return hasil;
+}
+
+/** Satu baris `pdt_fact_shop_daily` mentah dari `tt_shop_analytics`, SEBELUM `client_platform_id`/`batch_id`/`basis`/`parser_versi` (pemanggil yang melengkapi). */
+export interface PdtBarisShopDailyTiktok {
+  tanggal: string;
+  gmv: number;
+  pesanan: number;
+  produkTerjual: number | null;
+  pengunjung: number | null;
+  produkDiklik: number | null;
+  cr: number | null;
+  pembeli: number | null;
+  refund: number | null;
+}
+
+/**
+ * Ekstrak baris harian `tt_shop_analytics` → `pdt_fact_shop_daily` (basis
+ * `'net'`, Rule 15). **Ditemukan saat riset G2-01 (sesi 34)**: keenam tabel
+ * fakta G1-01 sudah punya penulis KECUALI `pdt_fact_shop_daily` — nol
+ * pemanggil menulisnya sejak lahir, celah yang lolos dari seluruh sesi
+ * G1-09 sub-langkah 2b-ii sebelumnya (sembilan modul lain sudah dipetakan,
+ * tabel ini tidak pernah masuk daftar kandidat) padahal ia yang paling
+ * mendasar (GMV harian shop-level, prasyarat mesin skor G2). Dicatat
+ * `docs/DECISIONS.md` sebagai celah yang ditemukan, bukan diselundupkan diam-diam.
+ *
+ * Sample asli ("Tiktok - Avitaskin.zip", `Shop Analytics_Key metrics_*.xlsx`)
+ * TERNYATA membawa dua blok dalam SATU sheet: "Ringkasan data" (baris total
+ * periode penuh, sudah dipakai `parseTiktokShopAnalytics`/G1-07 rekonsiliasi)
+ * DAN "Data harian" (satu baris per tanggal, kolom identik) — bukan bentuk
+ * yang `barisHeader` modul (menunjuk header "Ringkasan data") bisa jangkau,
+ * jadi fungsi ini mencari marker `'Data harian'` SENDIRI di dalam `aoa` yang
+ * sama, independen dari `barisHeader` yang dipakai fungsi rekonsiliasi.
+ *
+ * `gmv`/`refund` disalin APA ADANYA (GMV kotor per hari, refund kotor per
+ * hari) — TIDAK di-net-kan di sini. `pdt_fact_shop_daily.gmv` menyimpan
+ * angka MENTAH per basis (persis seperti tiga basis Shopee yang juga
+ * menyimpan angka mentah per status pesanan, bukan hasil akhir yang sudah
+ * diolah); "Rule 15: TikTok = GMV − refund" adalah kontrak KONSUMEN (mesin
+ * skor G2 menghitung `gmv - refund` saat membaca, sama pola `kpiToko()`
+ * mesin lama yang membedakan `gmv`/`gmvKotor`), bukan sesuatu yang dibakukan
+ * ke satu kolom saat tulis — dua kolom terpisah (`gmv`, `refund`) TETAP
+ * dibutuhkan agar laporan bisa menampilkan GMV kotor DAN net sekaligus,
+ * persis seperti mesin lama menampilkan keduanya.
+ *
+ * "Pengembalian dana" memakai `'-'` untuk hari tanpa refund (bukan `0`) —
+ * `parsePdtAngka('-')` sengaja mengembalikan `NaN` (G1-03, dibedakan dari sel
+ * kosong), BUKAN dianggap 0 di sini; menerka `'-'` selalu berarti nol adalah
+ * persis kelas asumsi yang G1-03 hindari. `NaN` yang tersimpan di kolom
+ * `refund` terlihat oleh konsumen (Postgres `numeric` mendukung `NaN`
+ * sebagai nilai sah), bukan diam-diam jadi 0.
+ */
+export function ekstrakBarisShopDailyTiktok(aoa: readonly (readonly unknown[])[]): PdtBarisShopDailyTiktok[] {
+  const idxMarker = aoa.findIndex((row) => norm(row?.[0]) === 'data harian');
+  if (idxMarker === -1) return [];
+  const header = aoa[idxMarker + 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iTanggal = idx('Tanggal');
+  const iGmv = idx('GMV');
+  const iPesanan = idx('Pesanan');
+  const iProdukTerjual = idx('Produk terjual');
+  const iPengunjung = idx('Pengunjung');
+  const iKlik = idx('Klik produk');
+  const iCr = idx('Persentase konversi');
+  const iPembeli = idx('Pembeli');
+  const iRefund = idx('Pengembalian dana');
+
+  const hasil: PdtBarisShopDailyTiktok[] = [];
+  for (const row of aoa.slice(idxMarker + 2)) {
+    const tanggalRaw = iTanggal === -1 ? '' : String(row?.[iTanggal] ?? '').trim();
+    if (tanggalRaw === '') continue;
+    const tanggal = parseTanggalId(tanggalRaw);
+    if (tanggal == null) continue;
+    hasil.push({
+      tanggal,
+      gmv: iGmv === -1 ? 0 : parsePdtAngka(row?.[iGmv]),
+      pesanan: iPesanan === -1 ? 0 : parsePdtAngka(row?.[iPesanan]),
+      produkTerjual: iProdukTerjual === -1 ? null : parsePdtAngka(row?.[iProdukTerjual]),
+      pengunjung: iPengunjung === -1 ? null : parsePdtAngka(row?.[iPengunjung]),
+      produkDiklik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik]),
+      cr: iCr === -1 ? null : parsePdtAngka(row?.[iCr]),
+      pembeli: iPembeli === -1 ? null : parsePdtAngka(row?.[iPembeli]),
+      refund: iRefund === -1 ? null : parsePdtAngka(row?.[iRefund]),
     });
   }
   return hasil;
