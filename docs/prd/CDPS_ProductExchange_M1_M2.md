@@ -66,7 +66,7 @@ Yang relevan untuk M1/M2 ditandai.
 | D-09 | Permukaan kreator = halaman baru, bukan perluasan `/portal/agency-plan` | — |
 | D-10 | Kreator swalayan di portal | — |
 | D-11 | SLA memakai **hari kerja**; kalender CDPS di-port ke MCN | — |
-| D-12 | Region MCN = `ap-southeast-1` (Singapore), sama dengan CDPS | M1 |
+| D-12 | ~~Region MCN = `ap-southeast-1` (Singapore), sama dengan CDPS~~ **KOREKSI 2026-09-16 (M3-01-REGION, `docs/DECISIONS.md`)**: diverifikasi langsung ke live Supabase project MCN MEA (`bqknstylbpwsnlgnzayw`) — regionnya **`ap-southeast-2` (Sydney)**, BEDA dari CDPS SG (`egddxfcnrtecheiykhlf`, `ap-southeast-1`). Baris asli salah; `docs/SUPABASE_MIGRATION_PLAN.md` §Fase 0 sudah benar sejak awal ("menyimpang dari pola org lama yang di Sydney `ap-southeast-2` — MSDPS/MCN MEA"). Tidak memblokir M3-B (CDPS hanya menerima push). | M1 |
 | D-14 | ID memakai **`bigint` biasa**, tanpa prefix baru | **M1, M2** |
 
 ---
