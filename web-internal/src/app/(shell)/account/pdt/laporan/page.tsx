@@ -3,10 +3,10 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + kanal + live + video + skor per toko klien, dibaca lewat
- * `GET /account/pdt/laporan`. v1 SENGAJA sempit (lima dari dua belas seksi
- * mesin laporan lama — lihat docblock `packages/core/src/pdt/laporan.ts`):
- * belum ada iklan/produk/afiliasi/dst.
+ * KPI ringkas + kanal + iklan + live + video + skor per toko klien, dibaca
+ * lewat `GET /account/pdt/laporan`. v1 SENGAJA sempit (enam dari dua belas
+ * seksi mesin laporan lama — lihat docblock `packages/core/src/pdt/laporan.ts`):
+ * belum ada produk/afiliasi/dst.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
  * via `AskUserQuestion`, 2026-09-16): TikTok lengkap (Live/Video/Kartu
@@ -30,6 +30,16 @@
  * video di periode ini). Halaman membedakan keduanya lewat `laporan.platform`:
  * Shopee menampilkan catatan "belum didukung", TikTok menyembunyikan seksi
  * seluruhnya saat `null`.
+ *
+ * **Iklan** (keputusan pemilik via `AskUserQuestion` KELIMA, 2026-09-16,
+ * setelah `tt_ads_product`/`tt_ads_live` akhirnya punya penulis fakta di PR
+ * #413): KEDUA platform dibangun sekaligus — TAPI TETAP tidak simetris,
+ * beda root cause dari "kanal": Shopee SELALU `lengkap: false` PERMANEN
+ * (`ads_banner` legacy tidak pernah punya modul PDT sama sekali, bukan
+ * writer yang belum dibangun), TikTok SELALU `lengkap: true` (dua sumber
+ * asli, keduanya sudah lengkap). `roas` per item DAN total DITURUNKAN
+ * `Σgmv÷Σbiaya`. Seksi disembunyikan seluruhnya saat `iklan` `null` (nol
+ * baris iklan seluruh sumber platform ini di periode ini).
  *
  * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
  * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
@@ -79,6 +89,11 @@ function formatCount(v: number | null): string {
 
 function formatBobot(v: number): string {
   return `${(v * 100).toFixed(0)}%`;
+}
+
+function formatRoas(v: number | null): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—';
+  return `${v.toFixed(2)}x`;
 }
 
 function currentMonth(): string {
@@ -403,6 +418,52 @@ export default function LaporanPdtPage() {
               </div>
             )}
           </section>
+
+          {laporan.iklan && (
+            <section className="card">
+              <h2>Iklan</h2>
+              {!laporan.iklan.lengkap && (
+                <div className="alert alertWarning" role="status" style={{ marginTop: 8, marginBottom: 8 }}>
+                  Belum lengkap — Iklan Toko, Pencarian, dan Live saja. Banner Ads belum diproses PDT — biaya/pendapatan
+                  dari sumber itu TIDAK berarti nol, hanya belum terhitung di sini.
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.iklan.biaya)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Total Biaya Iklan</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.iklan.gmv)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Total GMV Iklan</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatRoas(laporan.iklan.roas)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>ROAS</p>
+                </div>
+              </div>
+              <table style={{ marginTop: 16, width: '100%', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left' }}>Sumber</th>
+                    <th style={{ textAlign: 'right' }}>Biaya</th>
+                    <th style={{ textAlign: 'right' }}>GMV</th>
+                    <th style={{ textAlign: 'right' }}>ROAS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {laporan.iklan.items.map((item) => (
+                    <tr key={item.kode}>
+                      <td>{item.label}</td>
+                      <td style={{ textAlign: 'right' }}>{formatIDR(item.biaya)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatIDR(item.gmv)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatRoas(item.roas)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
 
           {laporan.live && (
             <section className="card">

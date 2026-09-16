@@ -109,6 +109,7 @@ afterEach(async () => {
   if (!sql) return;
   await sql`delete from pdt_fact_shop_daily where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_fact_content where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
+  await sql`delete from pdt_fact_ads where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-PDTLAP-%'`;
   await sql`delete from client_platforms where client_id like 'CLI-PDTLAP-%'`;
   await sql`delete from clients where id like 'CLI-PDTLAP-%'`;
@@ -154,6 +155,9 @@ describeDb('GET /pdt/laporan — real DB', () => {
     await sql`
       insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv, likes, dibagikan, klik_produk)
       values (${cpId}, 'video-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'video', true, 300_000, 5_000, 200, 10, 40)`;
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
+      values (${cpId}, 'tt_ads_product', 'CAM-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 400_000)`;
 
     const res = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01' }));
     expect(res.status).toBe(200);
@@ -174,6 +178,15 @@ describeDb('GET /pdt/laporan — real DB', () => {
       total: 1, gmv: 300_000, vv: 5_000, likes: 200, dibagikan: 10, klik_produk: 40,
       gmv_per_video: 300_000, vv_per_video: 5_000,
     });
+    // TikTok iklan SELALU lengkap:true — hanya tt_ads_product terisi, tt_ads_live jadi item null.
+    expect(body.iklan).toEqual({
+      biaya: 100_000, gmv: 400_000, roas: 4,
+      items: [
+        { kode: 'tt_ads_product', label: 'Iklan Produk', biaya: 100_000, gmv: 400_000, roas: 4 },
+        { kode: 'tt_ads_live', label: 'Iklan Live', biaya: null, gmv: null, roas: null },
+      ],
+      lengkap: true,
+    });
   });
 
   it('200 Shopee: KPI basis siap_dikirim TANPA net-refund, benchmark_versi null (kunci TETAP ada)', async () => {
@@ -191,6 +204,9 @@ describeDb('GET /pdt/laporan — real DB', () => {
     await sql`
       insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv)
       values (${cpId}, 'live-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 400_000, 1_000)`;
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
+      values (${cpId}, 'shopee_ads_cpc', 'kmp-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 300_000)`;
 
     const res = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01' }));
     expect(res.status).toBe(200);
@@ -207,5 +223,15 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.live).toEqual({ sesi: 1, gmv: 400_000, vv: 1_000, jam: null, gmv_per_sesi: 400_000, gmv_per_jam: null });
     // Shopee video SELALU null (shopee_video nol penulis fakta — tidak ada baris untuk dihitung).
     expect(body.video).toBeNull();
+    // Shopee iklan SELALU lengkap:false (ads_banner legacy tidak pernah punya modul PDT) — hanya cpc terisi.
+    expect(body.iklan).toEqual({
+      biaya: 100_000, gmv: 300_000, roas: 3,
+      items: [
+        { kode: 'shopee_ads_cpc', label: 'Iklan Toko (CPC)', biaya: 100_000, gmv: 300_000, roas: 3 },
+        { kode: 'shopee_ads_search', label: 'Iklan Pencarian', biaya: null, gmv: null, roas: null },
+        { kode: 'shopee_ads_live', label: 'Iklan Live', biaya: null, gmv: null, roas: null },
+      ],
+      lengkap: false,
+    });
   });
 });

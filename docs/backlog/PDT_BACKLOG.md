@@ -1149,9 +1149,27 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > konvensi Ads Manager raw=true BELUM diverifikasi terhadap sample asli TikTok Ads Manager (Product
 > +Live campaigns); mudah dikoreksi begitu sample muncul (kolom sudah null-aware, nol breaking
 > change struktural), tapi harus diverifikasi sebelum modul ini dianggap SELESAI seperti modul
-> `pdt_fact_ads` lain. **Bagian laporan "iklan" MASIH belum dibangun** — writer ini prasyaratnya,
-> bukan section itu sendiri; sisa ENAM bagian laporan lain (iklan, produk, afiliasi, tokopedia,
-> ads_manager, tahap, insight) TETAP di luar cakupan.
+> `pdt_fact_ads` lain.
+
+> **Status 2026-09-16 (lanjutan) — bagian laporan "iklan" DIBANGUN untuk KEDUA platform, TETAP
+> tidak simetris (beda root cause dari "kanal").** `docs/DECISIONS.md` (cari "bagian laporan
+> \"iklan\" dibangun untuk KEDUA platform") untuk alasan lengkap. Ringkas: `tt_ads_product`/
+> `tt_ads_live` (TikTok) dan `shopee_ads_cpc`/`search`/`live` (Shopee) semuanya sudah punya
+> fact-writer — TAPI Shopee legacy py EMPAT sumber iklan asli (`ads_toko`/`ads_produk`/
+> `ads_banner`/`ads_live`) dan `ads_banner` TIDAK PERNAH punya modul PDT sama sekali, sementara
+> TikTok cuma py DUA sumber asli, keduanya sudah lengkap. Hasil: TikTok `lengkap: true` PERMANEN,
+> Shopee `lengkap: false` PERMANEN. `bangunIklanTiktok`/`bangunIklanShopee` (`@cdps/core`
+> `pdt/laporan.ts`) — dua fungsi terpisah (pola "kanal", beda dari "live"/"video" satu fungsi
+> bersama) — items per sumber, `roas` per item+total DITURUNKAN `Σgmv÷Σbiaya`. Whole-object `null`
+> saat nol baris iklan seluruh sumber platform ini (cermin "live"/"video", BEDA dari "kanal" yang
+> selalu objek ada). `bacaIklanTiktok`/`bacaIklanShopee` (`@cdps/domain` `pdt.ts`) — `group by
+> sumber`, total gmv null-aware (null HANYA bila SELURUH sumber gmv tidak diketahui, bukan bila
+> satu sumber saja). Diverifikasi (DB lokal rebuild bersih, 251 migrasi — nol migrasi baru):
+> `@cdps/core` 1371/1371, `@cdps/domain` 2742/2743 (1 skip, nol gagal), `@cdps/db` 107/107,
+> `@cdps/api` 636/638 (2 skip); typecheck bersih `core`/`domain`/`api`/`web-internal`, lint
+> `@cdps/api` bersih; `npm run build` `web-internal` sukses. **Sisa: ENAM bagian laporan lain**
+> (produk, afiliasi, tokopedia, ads_manager, tahap, insight) TETAP di luar cakupan — `G1-09-2BII-
+> TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
