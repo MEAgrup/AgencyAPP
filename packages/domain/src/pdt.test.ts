@@ -202,6 +202,9 @@ afterEach(async () => {
   // pdt_laporan_kiriman (kirimLaporanPdt, Flow B langkah 4) — FK ke client_platforms TANPA
   // ON DELETE CASCADE, sama alasan baris-baris di atas.
   await sql`delete from pdt_laporan_kiriman where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
+  // pdt_fact_kesehatan_penalti (G2-01-SHOPEE-KESEHATAN-WRITER) — sama alasan (FK ke
+  // client_platforms/pdt_upload_batch TANPA ON DELETE CASCADE).
+  await sql`delete from pdt_fact_kesehatan_penalti where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -1298,6 +1301,97 @@ describeDb('commitUploadBatch (sesi 34 lanjutan, G1-09-2BII-SHOPDAILY-SHOPEE) �
       expect(Number(r.gmv)).toBe(200);
       expect(r.pesanan).toBe(2);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G2-01-SHOPEE-KESEHATAN-WRITER) — shopee_kesehatan →
+// pdt_fact_kesehatan_penalti. Modul terdaftar+terdeteksi sejak awal (signature
+// SANGAT sederhana, "seluruh sheet hanya 3 kolom" PRD §7.2), tapi belum
+// pernah punya penulis fakta sama sekali sampai migrasi ini.
+// ---------------------------------------------------------------------------
+interface FactKesehatanPenaltiRow {
+  client_platform_id: number;
+  periode: string | Date;
+  batch_id: number;
+  parser_versi: number;
+  poin: string;
+  deskripsi: string;
+  durasi: string;
+}
+
+async function loadFactKesehatanPenalti(clientPlatformId: number): Promise<FactKesehatanPenaltiRow[]> {
+  return sql<FactKesehatanPenaltiRow[]>`select * from pdt_fact_kesehatan_penalti where client_platform_id = ${clientPlatformId} order by id`;
+}
+
+const HEADER_SHOPEE_KESEHATAN = ['Poin Penalti', 'Deskripsi', 'Durasi'];
+
+function shopeeKesehatanBerkas(nama: string, baris: readonly [string, string, string][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [HEADER_SHOPEE_KESEHATAN, ...baris.map(([poin, deskripsi, durasi]) => [poin, deskripsi, durasi])];
+  return {
+    nama, sha256: 'sha-kesehatan', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'shopee_kesehatan', ambiguous: false, matches: ['shopee_kesehatan'],
+  };
+}
+
+describeDb('commitUploadBatch (G2-01-SHOPEE-KESEHATAN-WRITER) — shopee_kesehatan → pdt_fact_kesehatan_penalti', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', shopId);
+  }
+
+  it('satu baris per penalti, nol identitas natural', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'), // identitas+periode
+      shopeeKesehatanBerkas('kesehatan.xlsx', [
+        ['2', 'Kualitas produk buruk', '30 hari'],
+        ['1', 'Keterlambatan pengiriman', '7 hari'],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactKesehatanPenalti(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      client_platform_id: cpId, batch_id: persiapan.batchId, parser_versi: 1,
+      deskripsi: 'Kualitas produk buruk', durasi: '30 hari',
+    });
+    expect(Number(rows[0].poin)).toBe(2);
+    expect(Number(rows[1].poin)).toBe(1);
+  });
+
+  it('commit ULANG periode yang sama ⇒ baris LAMA diganti (replace-on-recommit) — penalti yang hilang dari batch baru IKUT terhapus', async () => {
+    const cpId = await fixture();
+    const pertama = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeKesehatanBerkas('kesehatan.xlsx', [
+        ['2', 'Pelanggaran A', '30 hari'],
+        ['1', 'Pelanggaran B', '7 hari'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect(await loadFactKesehatanPenalti(cpId)).toHaveLength(2);
+
+    const kedua = [
+      shopeeAdsCpcBerkas('ads-2.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeKesehatanBerkas('kesehatan-revisi.xlsx', [['3', 'Pelanggaran C', '60 hari']]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = await loadFactKesehatanPenalti(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 3 — replace-on-recommit
+    expect(rows[0].deskripsi).toBe('Pelanggaran C');
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+  });
+
+  it('toko bersih (sheet tanpa baris data) ⇒ nol baris ditulis, TIDAK error', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeKesehatanBerkas('kesehatan.xlsx', []),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(await loadFactKesehatanPenalti(cpId)).toHaveLength(0);
   });
 });
 
@@ -3577,12 +3671,38 @@ describeDb('rakitInputSkorShopee (sesi 34 lanjutan) — agregasi pdt_fact_* → 
     expect(hasil.produk).toBeNull();
   });
 
-  it('kesehatan: SELALU null (modul shopee_kesehatan terdaftar, nol penulis fakta — Open G2-01-SHOPEE-KESEHATAN-WRITER)', async () => {
+  it('kesehatan: null bila modul shopee_kesehatan TIDAK PERNAH terdeteksi di batch manapun (meski dimensi lain terisi)', async () => {
     const { cpId, batchId } = await fixture();
     await insertAdsShopee(batchId, cpId, 'shopee_ads_cpc', 'K1', 10_000, 20_000, 5, 100);
 
     const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
     expect(hasil.kesehatan).toBeNull();
+  });
+
+  it('kesehatan (G2-01-SHOPEE-KESEHATAN-WRITER): diunggah, toko bersih (nol baris penalti) ⇒ poinTotal=0 (BUKAN null — beda dari "tidak pernah diunggah")', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertPdtFile(batchId, 'shopee_kesehatan');
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.kesehatan).toEqual({ poinTotal: 0 });
+  });
+
+  it('kesehatan: diunggah dengan penalti ⇒ poinTotal = Σ poin seluruh baris periode ini', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertPdtFile(batchId, 'shopee_kesehatan');
+    await sql`
+      insert into pdt_fact_kesehatan_penalti (client_platform_id, periode, batch_id, parser_versi, poin, deskripsi, durasi)
+      values (${cpId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 2, 'Pelanggaran A', '30 hari')`;
+    await sql`
+      insert into pdt_fact_kesehatan_penalti (client_platform_id, periode, batch_id, parser_versi, poin, deskripsi, durasi)
+      values (${cpId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1, 'Pelanggaran B', '7 hari')`;
+    // periode LAIN — TIDAK boleh ikut terhitung
+    await sql`
+      insert into pdt_fact_kesehatan_penalti (client_platform_id, periode, batch_id, parser_versi, poin, deskripsi, durasi)
+      values (${cpId}, '2026-08-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 999, 'Periode lain', '999 hari')`;
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.kesehatan).toEqual({ poinTotal: 3 });
   });
 
   it('live: modul shopee_live TIDAK PERNAH terdeteksi di batch manapun ⇒ null (meski ada baris pdt_fact_content)', async () => {

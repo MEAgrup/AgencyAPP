@@ -968,6 +968,19 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 >   dideteksi, tapi NOL fungsi penulis fakta untuk modul ini di manapun dalam skema — dicatat Open
 >   baru `G2-01-SHOPEE-KESEHATAN-WRITER`.
 >
+> **Status 2026-09-16 — `G2-01-SHOPEE-KESEHATAN-WRITER` DITUTUP.** Tabel baru
+> `pdt_fact_kesehatan_penalti` (migrasi `20261106010000`, satu baris per pelanggaran aktif —
+> nol identitas natural di sumber, replace-on-recommit sama pola `pdt_fact_ads`).
+> `ekstrakBarisKesehatanShopee` (`@cdps/core` `pdt/fakta.ts`) — modul PALING sederhana di
+> registry ("seluruh sheet hanya 3 kolom"). `rakitInputSkorShopee`'s `kesehatan` sekarang
+> membaca "modul PERNAH terdeteksi untuk periode ini" (pola sama `live`) + Σ poin — `null`
+> hanya bila modul tidak pernah diunggah, `{poinTotal:0}` bila diunggah dan toko bersih.
+> `computeSkorShopee`'s `scoreKesehatanToko` (sudah dibangun+diuji sejak sesi 34) TIDAK
+> disentuh — nol perubahan formula, murni menyambungkan input sungguhan. Diverifikasi:
+> `@cdps/core` 1431/1431, `@cdps/domain` 2772/2773 (1 skip tak terkait), `@cdps/db` 107/107,
+> `@cdps/api` 638/640 (2 skip); DB rebuild 256 migrasi (satu tabel baru, `scripts/db-rebuild.sh`
+> gerbang `tabel public` 181→182 diperbarui).
+>
 > Tidak ditebak/dibangun di sesi ini (konsisten aturan rumah: tidak menebak skema/ambang tanpa
 > verifikasi) — mesin skor Shopee berikutnya realistis akan mengembalikan `null` untuk Product
 > Performance dan Kesehatan Toko sampai kedua Open itu ditutup, mirip pola `null` Portfolio Produk

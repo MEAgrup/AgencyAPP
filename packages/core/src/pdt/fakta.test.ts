@@ -11,6 +11,7 @@ import {
   ekstrakBarisShopDailyTiktok,
   ekstrakBarisSkuMasterShopeeParentSku,
   ekstrakBarisSkuMasterTtOrders,
+  ekstrakBarisKesehatanShopee,
   ekstrakBarisTtAdsLive,
   ekstrakBarisTtAdsProduct,
   ekstrakBarisTtLive,
@@ -940,5 +941,54 @@ describe('ekstrakBarisTtProductAnalytics (G2-01-KUADRAN-SKU langkah 1)', () => {
       ['Produk A', 'PRD-1', '1000000.5', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
     ]);
     expect(ekstrakBarisTtProductAnalytics(aoa, 4)[0].gmv).toBe(1000000.5);
+  });
+});
+
+const HEADER_SHOPEE_KESEHATAN = ['Poin Penalti', 'Deskripsi', 'Durasi'];
+
+describe('ekstrakBarisKesehatanShopee (G2-01-SHOPEE-KESEHATAN-WRITER)', () => {
+  it('memetakan satu baris penalti lengkap', () => {
+    const aoa = [
+      HEADER_SHOPEE_KESEHATAN,
+      ['2', 'Kualitas produk buruk', '30 hari'],
+    ];
+    expect(ekstrakBarisKesehatanShopee(aoa, 1)).toEqual([
+      { poin: 2, deskripsi: 'Kualitas produk buruk', durasi: '30 hari' },
+    ]);
+  });
+
+  it('beberapa baris penalti dijumlahkan pemanggil (fungsi ini hanya mengembalikan daftar apa adanya)', () => {
+    const aoa = [
+      HEADER_SHOPEE_KESEHATAN,
+      ['1', 'Pelanggaran A', '7 hari'],
+      ['2', 'Pelanggaran B', '30 hari'],
+    ];
+    const hasil = ekstrakBarisKesehatanShopee(aoa, 1);
+    expect(hasil).toHaveLength(2);
+    expect(hasil.reduce((s, x) => s + x.poin, 0)).toBe(3);
+  });
+
+  it('sheet TANPA baris data (toko bersih) ⇒ array kosong, BUKAN error', () => {
+    const aoa = [HEADER_SHOPEE_KESEHATAN];
+    expect(ekstrakBarisKesehatanShopee(aoa, 1)).toEqual([]);
+  });
+
+  it('baris ber-"Poin Penalti" DAN "Deskripsi" kosong dilewati (baris kosong sungguhan)', () => {
+    const aoa = [HEADER_SHOPEE_KESEHATAN, ['', '', '']];
+    expect(ekstrakBarisKesehatanShopee(aoa, 1)).toEqual([]);
+  });
+
+  it('"Poin Penalti" = 0 TAPI Deskripsi terisi TETAP baris sah (0 bukan "kosong")', () => {
+    const aoa = [HEADER_SHOPEE_KESEHATAN, ['0', 'Peringatan tanpa poin', '-']];
+    expect(ekstrakBarisKesehatanShopee(aoa, 1)).toEqual([
+      { poin: 0, deskripsi: 'Peringatan tanpa poin', durasi: '-' },
+    ]);
+  });
+
+  it('kolom "Durasi" hilang ⇒ string kosong untuk field itu, bukan error', () => {
+    const aoa = [['Poin Penalti', 'Deskripsi'], ['2', 'Pelanggaran']];
+    expect(ekstrakBarisKesehatanShopee(aoa, 1)).toEqual([
+      { poin: 2, deskripsi: 'Pelanggaran', durasi: '' },
+    ]);
   });
 });
