@@ -21,16 +21,20 @@
  * tidak simetris, ditandai `lengkap: false`), "live" (lihat docblock
  * `PdtLaporanLive` di bawah — keputusan pemilik via `AskUserQuestion`
  * KETIGA, 2026-09-16: SATU bentuk bersama, nol asimetri platform kali ini),
- * dan sekarang "video" (lihat docblock `PdtLaporanVideo` di bawah —
- * keputusan pemilik via `AskUserQuestion` KEEMPAT, 2026-09-16: TikTok-only,
- * Shopee `null` permanen karena `shopee_video` nol penulis fakta) sudah
- * bisa dibangun dari `pdt_fact_*` — TUJUH bagian lain (iklan, produk,
- * afiliasi, tokopedia, ads_manager, tahap, insight) butuh fungsi agregasi
- * fakta BARU per bagian (pola sama `rakitInputSkorTiktok`/
- * `rakitInputSkorShopee`) yang belum ada satupun, pekerjaan multi-sesi.
- * Tujuh bagian sisanya TETAP di luar cakupan, ditambahkan satu-per-satu
- * sesi berikutnya seperti pola G1-09 fact-writer, TIDAK ditebak/dibangun
- * sekaligus di sini.
+ * "video" (lihat docblock `PdtLaporanVideo` di bawah — keputusan pemilik
+ * via `AskUserQuestion` KEEMPAT, 2026-09-16: TikTok-only, Shopee `null`
+ * permanen karena `shopee_video` nol penulis fakta), dan sekarang "iklan"
+ * (lihat docblock `PdtLaporanIklan` di bawah — keputusan pemilik via
+ * `AskUserQuestion` KELIMA, 2026-09-16, setelah `tt_ads_product`/
+ * `tt_ads_live` akhirnya punya penulis fakta di PR #413: KEDUA platform
+ * dibangun sekaligus, TikTok `lengkap: true`, Shopee `lengkap: false`
+ * PERMANEN karena `ads_banner` legacy tidak pernah punya modul PDT) sudah
+ * bisa dibangun dari `pdt_fact_*` — ENAM bagian lain (produk, afiliasi,
+ * tokopedia, ads_manager, tahap, insight) butuh fungsi agregasi fakta BARU
+ * per bagian (pola sama `rakitInputSkorTiktok`/`rakitInputSkorShopee`)
+ * yang belum ada satupun, pekerjaan multi-sesi. Enam bagian sisanya TETAP
+ * di luar cakupan, ditambahkan satu-per-satu sesi berikutnya seperti pola
+ * G1-09 fact-writer, TIDAK ditebak/dibangun sekaligus di sini.
  *
  * **Basis KPI ringkas per platform diverifikasi dari PRD (bukan ditebak)**:
  * TikTok = GMV−refund, basis `'net'` (Rule 15); Shopee = basis
@@ -180,6 +184,109 @@ const desimal2 = (v: number | null | undefined): number | null =>
   v == null || !isFinite(v) ? null : Math.round(v * 100) / 100;
 
 /**
+ * Bagian "iklan" — dibangun 2026-09-16 setelah `tt_ads_product`/`tt_ads_live`
+ * AKHIRNYA punya penulis fakta (PR #413, sebelumnya nol writer TikTok sama
+ * sekali, root cause yang memblokir bagian ini). Keputusan pemilik via
+ * `AskUserQuestion`: KEDUA platform dibangun SEKALIGUS (beda dari "video"
+ * yang harus TikTok-only karena Shopee genuinely nol writer) — TAPI TETAP
+ * TIDAK SIMETRIS, alasan BEDA dari "kanal": bukan writer yang belum
+ * dibangun, tapi mesin lama Shopee (`report/shopee/detect.ts`/`metrik.ts`)
+ * py EMPAT sumber iklan asli (`ads_toko`/`ads_produk`/`ads_banner`/
+ * `ads_live`) dan `ads_banner` TIDAK PERNAH punya modul PDT sama sekali
+ * (bukan modul terdaftar seperti `shopee_video` — nol jejak sama sekali).
+ * TikTok sebaliknya HANYA punya DUA sumber iklan asli (`tt_ads_product`/
+ * `tt_ads_live`, Ads Manager) — keduanya SUDAH lengkap sejak PR #413, jadi
+ * `lengkap: true` PERMANEN untuk TikTok, `lengkap: false` PERMANEN untuk
+ * Shopee (mirip pola "kanal", beda root cause).
+ *
+ * `roas` PER ITEM dan TOTAL diturunkan `Σgmv ÷ Σbiaya` (bukan rata-rata
+ * kolom `roas` mentah per baris) — cermin pola `tt_ads_product`/
+ * `tt_ads_live` writer (`fakta.ts`) dan preseden `rakitInputSkorShopee`'s
+ * dimensi `ads` (biaya/omzet dijumlah dulu, rasio dihitung SETELAHNYA).
+ *
+ * Whole-object `null` saat nol baris iklan SELURUH sumber platform ini di
+ * periode ini (cermin Rule 12/pola "live"/"video"), BUKAN objek kosong
+ * ber-`items: []` — beda dari "kanal" yang selalu objek ada (dekomposisi
+ * GMV toko yang selalu ada), "iklan" adalah dimensi aktivitas (klien bisa
+ * genuinely tidak beriklan sama sekali di suatu bulan).
+ */
+export interface PdtLaporanIklanItem {
+  kode: string;
+  label: string;
+  biaya: number | null;
+  gmv: number | null;
+  /** `null` bila `gmv` `null` (belum diketahui) ATAU `biaya` 0. */
+  roas: number | null;
+}
+
+export interface PdtLaporanIklan {
+  biaya: number | null;
+  gmv: number | null;
+  roas: number | null;
+  items: PdtLaporanIklanItem[];
+  /** `false` = ADA sumber iklan legacy yang tidak pernah punya modul PDT (SELALU false untuk Shopee — `ads_banner`) — FE wajib menampilkan catatan. */
+  lengkap: boolean;
+}
+
+const iklanItem = (kode: string, label: string, biaya: number | null, gmv: number | null): PdtLaporanIklanItem => ({
+  kode,
+  label,
+  biaya: bulat(biaya),
+  gmv: bulat(gmv),
+  roas: biaya == null || gmv == null || biaya === 0 ? null : desimal2(gmv / biaya),
+});
+
+/** Agregat `pdt_fact_ads` sumber `tt_ads_product`/`tt_ads_live` untuk satu periode. `null` per sumber = nol baris sumber itu (tidak diketahui, BUKAN nol). */
+export interface PdtLaporanIklanInputTiktok {
+  product: { biaya: number; gmv: number | null } | null;
+  live: { biaya: number; gmv: number | null } | null;
+}
+
+/** Rakit "iklan" TikTok — SELALU `lengkap: true` (dua sumber asli, keduanya sudah punya penulis fakta). `null` (whole object) bila kedua sumber nol baris. */
+export function bangunIklanTiktok(input: PdtLaporanIklanInputTiktok | null): PdtLaporanIklan | null {
+  if (input == null || (input.product == null && input.live == null)) return null;
+  const biayaTotal = (input.product?.biaya ?? 0) + (input.live?.biaya ?? 0);
+  const gmvDiketahui = input.product?.gmv != null || input.live?.gmv != null;
+  const gmvTotal = gmvDiketahui ? (input.product?.gmv ?? 0) + (input.live?.gmv ?? 0) : null;
+  return {
+    biaya: bulat(biayaTotal),
+    gmv: gmvTotal == null ? null : bulat(gmvTotal),
+    roas: gmvTotal == null || biayaTotal === 0 ? null : desimal2(gmvTotal / biayaTotal),
+    items: [
+      iklanItem('tt_ads_product', 'Iklan Produk', input.product?.biaya ?? null, input.product?.gmv ?? null),
+      iklanItem('tt_ads_live', 'Iklan Live', input.live?.biaya ?? null, input.live?.gmv ?? null),
+    ],
+    lengkap: true,
+  };
+}
+
+/** Agregat `pdt_fact_ads` sumber `shopee_ads_cpc`/`search`/`live` untuk satu periode. `null` per sumber = nol baris sumber itu (tidak diketahui, BUKAN nol). */
+export interface PdtLaporanIklanInputShopee {
+  cpc: { biaya: number; gmv: number | null } | null;
+  search: { biaya: number; gmv: number | null } | null;
+  live: { biaya: number; gmv: number | null } | null;
+}
+
+/** Rakit "iklan" Shopee — SELALU `lengkap: false` (`ads_banner` tidak pernah punya modul PDT, lihat docblock tipe di atas). `null` (whole object) bila ketiga sumber nol baris. */
+export function bangunIklanShopee(input: PdtLaporanIklanInputShopee | null): PdtLaporanIklan | null {
+  if (input == null || (input.cpc == null && input.search == null && input.live == null)) return null;
+  const biayaTotal = (input.cpc?.biaya ?? 0) + (input.search?.biaya ?? 0) + (input.live?.biaya ?? 0);
+  const gmvDiketahui = input.cpc?.gmv != null || input.search?.gmv != null || input.live?.gmv != null;
+  const gmvTotal = gmvDiketahui ? (input.cpc?.gmv ?? 0) + (input.search?.gmv ?? 0) + (input.live?.gmv ?? 0) : null;
+  return {
+    biaya: bulat(biayaTotal),
+    gmv: gmvTotal == null ? null : bulat(gmvTotal),
+    roas: gmvTotal == null || biayaTotal === 0 ? null : desimal2(gmvTotal / biayaTotal),
+    items: [
+      iklanItem('shopee_ads_cpc', 'Iklan Toko (CPC)', input.cpc?.biaya ?? null, input.cpc?.gmv ?? null),
+      iklanItem('shopee_ads_search', 'Iklan Pencarian', input.search?.biaya ?? null, input.search?.gmv ?? null),
+      iklanItem('shopee_ads_live', 'Iklan Live', input.live?.biaya ?? null, input.live?.gmv ?? null),
+    ],
+    lengkap: false,
+  };
+}
+
+/**
  * Bagian "live" (Live Streaming) — keputusan pemilik via `AskUserQuestion`
  * 2026-09-16 (bagian keempat, setelah kpi/kanal/skor): SATU bentuk BERSAMA
  * untuk TikTok+Shopee (beda dari "kanal", yang butuh dua bentuk berbeda) —
@@ -310,6 +417,7 @@ export interface PdtLaporanTiktok {
   generatedAt: string;
   kpi: PdtLaporanKpiRingkas;
   kanal: PdtLaporanKanal;
+  iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
   skor: PdtSkorHasilTiktok;
@@ -324,6 +432,7 @@ export interface PdtLaporanShopee {
   generatedAt: string;
   kpi: PdtLaporanKpiRingkas;
   kanal: PdtLaporanKanal;
+  iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
   skor: PdtSkorHasilShopee;
@@ -335,6 +444,7 @@ export interface PdtLaporanTiktokOptions {
   generatedAt: string;
   kpi: PdtLaporanKpiInput | null;
   kanal: PdtLaporanKanalInputTiktok | null;
+  iklan: PdtLaporanIklanInputTiktok | null;
   live: PdtLaporanLiveInput | null;
   video: PdtLaporanVideoInput | null;
   skor: PdtSkorHasilTiktok;
@@ -347,6 +457,7 @@ export interface PdtLaporanShopeeOptions {
   generatedAt: string;
   kpi: PdtLaporanKpiInput | null;
   kanal: PdtLaporanKanalInputShopee | null;
+  iklan: PdtLaporanIklanInputShopee | null;
   live: PdtLaporanLiveInput | null;
   video: PdtLaporanVideoInput | null;
   skor: PdtSkorHasilShopee;
@@ -362,6 +473,7 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
     generatedAt: opts.generatedAt,
     kpi: bangunKpiRingkas(opts.kpi),
     kanal: bangunKanalTiktok(opts.kanal),
+    iklan: bangunIklanTiktok(opts.iklan),
     live: bangunLaporanLive(opts.live),
     video: bangunLaporanVideo(opts.video),
     skor: opts.skor,
@@ -379,6 +491,7 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
     generatedAt: opts.generatedAt,
     kpi: bangunKpiRingkas(opts.kpi),
     kanal: bangunKanalShopee(opts.kanal),
+    iklan: bangunIklanShopee(opts.iklan),
     live: bangunLaporanLive(opts.live),
     video: bangunLaporanVideo(opts.video),
     skor: opts.skor,

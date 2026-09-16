@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bangunIklanShopee,
+  bangunIklanTiktok,
   bangunKanalShopee,
   bangunKanalTiktok,
   bangunKpiRingkas,
@@ -7,6 +9,8 @@ import {
   bangunLaporanShopee,
   bangunLaporanTiktok,
   bangunLaporanVideo,
+  type PdtLaporanIklanInputShopee,
+  type PdtLaporanIklanInputTiktok,
   type PdtLaporanKanalInputShopee,
   type PdtLaporanKanalInputTiktok,
   type PdtLaporanKpiInput,
@@ -54,6 +58,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000 },
       kanal: null,
+      iklan: null,
       live: null,
       video: null,
       skor,
@@ -67,6 +72,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000, cvr: 0.02 },
       kanal: { gmvTotal: null, items: [], lengkap: true },
+      iklan: null,
       live: null,
       video: null,
       skor,
@@ -78,7 +84,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
     const skor = computeSkorTiktok(INPUT_KOSONG_TIKTOK, BENCH_KOSONG);
     const hasil = bangunLaporanTiktok({
       clientPlatformId: 1, periodeAwalBulan: '2026-07-01', generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: null, kanal: null, live: null, video: null, skor, benchmarkVersi: 1,
+      kpi: null, kanal: null, iklan: null, live: null, video: null, skor, benchmarkVersi: 1,
     });
     expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
   });
@@ -93,6 +99,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500 },
       kanal: null,
+      iklan: null,
       live: null,
       video: null,
       skor,
@@ -105,6 +112,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500, cvr: 0.02 },
       kanal: { gmvTotal: null, items: [], lengkap: false },
+      iklan: null,
       live: null,
       video: null,
       skor,
@@ -169,6 +177,102 @@ describe('bangunKanalShopee (G2-01 lanjutan — bagian "kanal", SELALU lengkap:f
     const hasil = bangunKanalShopee(input);
     expect(hasil.items.find((i) => i.kode === 'affiliate')).toEqual({ kode: 'affiliate', label: 'Affiliate', gmv: null, persen: null });
     expect(hasil.items.find((i) => i.kode === 'shopee_ads')).toEqual({ kode: 'shopee_ads', label: 'Shopee Ads', gmv: 1_600_000, persen: 0.2 });
+  });
+});
+
+describe('bangunIklanTiktok (2026-09-16, SELALU lengkap:true — dua sumber, keduanya sudah punya penulis fakta)', () => {
+  it('input null ⇒ null (whole object, BUKAN objek items kosong)', () => {
+    expect(bangunIklanTiktok(null)).toBeNull();
+  });
+
+  it('kedua sumber null ⇒ null (nol baris iklan sama sekali di periode ini)', () => {
+    expect(bangunIklanTiktok({ product: null, live: null })).toBeNull();
+  });
+
+  it('kedua sumber terisi ⇒ total dijumlah, roas TOTAL diturunkan Σgmv÷Σbiaya', () => {
+    const input: PdtLaporanIklanInputTiktok = {
+      product: { biaya: 100_000, gmv: 400_000 },
+      live: { biaya: 200_000, gmv: 1_000_000 },
+    };
+    expect(bangunIklanTiktok(input)).toEqual({
+      biaya: 300_000,
+      gmv: 1_400_000,
+      roas: 4.67, // 1_400_000 / 300_000, dibulatkan 2 desimal
+      items: [
+        { kode: 'tt_ads_product', label: 'Iklan Produk', biaya: 100_000, gmv: 400_000, roas: 4 },
+        { kode: 'tt_ads_live', label: 'Iklan Live', biaya: 200_000, gmv: 1_000_000, roas: 5 },
+      ],
+      lengkap: true,
+    });
+  });
+
+  it('hanya satu sumber terisi ⇒ sumber lain jadi item null, total tetap terhitung dari sumber yang ada', () => {
+    const input: PdtLaporanIklanInputTiktok = { product: { biaya: 100_000, gmv: 400_000 }, live: null };
+    const hasil = bangunIklanTiktok(input);
+    expect(hasil?.items.find((i) => i.kode === 'tt_ads_live')).toEqual({ kode: 'tt_ads_live', label: 'Iklan Live', biaya: null, gmv: null, roas: null });
+    expect(hasil?.biaya).toBe(100_000);
+    expect(hasil?.gmv).toBe(400_000);
+    expect(hasil?.roas).toBe(4);
+  });
+
+  it('gmv null pada satu sumber (tidak diketahui) ⇒ total gmv dijumlah dari sumber yang DIKETAHUI saja (cermin bacaLive/bacaVideo: null hanya bila SELURUH sumber gmv tidak diketahui)', () => {
+    const input: PdtLaporanIklanInputTiktok = {
+      product: { biaya: 100_000, gmv: null },
+      live: { biaya: 200_000, gmv: 1_000_000 },
+    };
+    const hasil = bangunIklanTiktok(input);
+    expect(hasil?.gmv).toBe(1_000_000);
+    expect(hasil?.roas).toBe(3.33); // 1_000_000 / 300_000
+    expect(hasil?.biaya).toBe(300_000);
+    expect(hasil?.items.find((i) => i.kode === 'tt_ads_product')?.gmv).toBeNull(); // per-item tetap null, bukan 0
+  });
+
+  it('KEDUA sumber gmv tidak diketahui ⇒ total gmv null (BUKAN 0)', () => {
+    const input: PdtLaporanIklanInputTiktok = {
+      product: { biaya: 100_000, gmv: null },
+      live: { biaya: 200_000, gmv: null },
+    };
+    const hasil = bangunIklanTiktok(input);
+    expect(hasil?.gmv).toBeNull();
+    expect(hasil?.roas).toBeNull();
+    expect(hasil?.biaya).toBe(300_000);
+  });
+
+  it('biaya total 0 (kedua sumber ada tapi biaya 0) ⇒ roas null (bukan pembagian oleh nol)', () => {
+    const input: PdtLaporanIklanInputTiktok = { product: { biaya: 0, gmv: 0 }, live: { biaya: 0, gmv: 0 } };
+    expect(bangunIklanTiktok(input)?.roas).toBeNull();
+  });
+});
+
+describe('bangunIklanShopee (2026-09-16, SELALU lengkap:false — ads_banner legacy tidak pernah punya modul PDT)', () => {
+  it('input null ⇒ null (whole object)', () => {
+    expect(bangunIklanShopee(null)).toBeNull();
+  });
+
+  it('ketiga sumber null ⇒ null', () => {
+    expect(bangunIklanShopee({ cpc: null, search: null, live: null })).toBeNull();
+  });
+
+  it('ketiga sumber terisi ⇒ tiga item, total dijumlah, lengkap:false', () => {
+    const input: PdtLaporanIklanInputShopee = {
+      cpc: { biaya: 100_000, gmv: 300_000 },
+      search: { biaya: 50_000, gmv: 100_000 },
+      live: { biaya: 200_000, gmv: 1_000_000 },
+    };
+    const hasil = bangunIklanShopee(input);
+    expect(hasil?.lengkap).toBe(false);
+    expect(hasil?.biaya).toBe(350_000);
+    expect(hasil?.gmv).toBe(1_400_000);
+    expect(hasil?.items.map((i) => i.kode)).toEqual(['shopee_ads_cpc', 'shopee_ads_search', 'shopee_ads_live']);
+    expect(hasil?.items.find((i) => i.kode === 'shopee_ads_search')).toEqual({ kode: 'shopee_ads_search', label: 'Iklan Pencarian', biaya: 50_000, gmv: 100_000, roas: 2 });
+  });
+
+  it('hanya cpc terisi ⇒ search/live jadi item null, total dari cpc saja', () => {
+    const input: PdtLaporanIklanInputShopee = { cpc: { biaya: 100_000, gmv: 300_000 }, search: null, live: null };
+    const hasil = bangunIklanShopee(input);
+    expect(hasil?.items.find((i) => i.kode === 'shopee_ads_search')).toEqual({ kode: 'shopee_ads_search', label: 'Iklan Pencarian', biaya: null, gmv: null, roas: null });
+    expect(hasil?.biaya).toBe(100_000);
+    expect(hasil?.roas).toBe(3);
   });
 });
 
