@@ -1229,6 +1229,7 @@ export function ekstrakBarisShopDailyShopee(aoa: readonly (readonly unknown[])[]
  */
 export interface PdtBarisSkuPeriodTtProductAnalytics {
   platformProductId: string;
+  namaProduk: string | null;
   gmv: number | null;
   gmvDariKreator: number | null;
   gmvVideoPenjual: number | null;
@@ -1260,14 +1261,16 @@ export interface PdtBarisSkuPeriodTtProductAnalytics {
  * berkas ini.
  *
  * Rule 8 whitelist `modules.ts` (`tt_product_analytics.kolomDipanen`):
- * `'Produk terjual'`/`'Status daftar produk'`/`'AOV'`/`'Nama'` TIDAK dipetakan
- * ke kolom manapun di sini — `'Produk terjual'` TIDAK dipanen modul ini sama
+ * `'Produk terjual'`/`'Status daftar produk'`/`'AOV'` TIDAK dipetakan ke
+ * kolom manapun di sini — `'Produk terjual'` TIDAK dipanen modul ini sama
  * sekali (beda dari `shopee_ams_produk`, jadi `produk_terjual` TETAP `null`
  * di `pdt_fact_sku_period` untuk baris TikTok, bukan celah — kolomnya memang
- * tidak pernah masuk whitelist); `'Nama'`/`'Status daftar produk'` tampilan
- * UI saja (Rule 20 melarangnya jadi kunci, dan `pdt_fact_sku_period` tidak
- * punya kolom nama); `'AOV'` tidak punya kolom skema padanan (sama pola
- * `Estimasi Komisi(Rp)`/`ROI` di `shopee_ams_produk`).
+ * tidak pernah masuk whitelist); `'Status daftar produk'` tidak punya kolom
+ * skema padanan; `'AOV'` tidak punya kolom skema padanan (sama pola
+ * `Estimasi Komisi(Rp)`/`ROI` di `shopee_ams_produk`). **`'Nama'` DIPETAKAN
+ * sejak `G2-01-KUADRAN-SKU` (lanjutan, bagian laporan "produk")** — disalin
+ * LANGSUNG (bukan lookup, TAMPILAN UI SAJA, Rule 20) ke `namaProduk`,
+ * `pdt_fact_sku_period.nama_produk` (migrasi `20261108010000`).
  *
  * `sku_id` SELALU `null` di pemanggil, `platformProductId` = `'ID Produk'`
  * disalin LANGSUNG (bukan lookup `pdt_sku_master`). Baris ber-`ID Produk`
@@ -1283,6 +1286,7 @@ export function ekstrakBarisTtProductAnalytics(
   const header = aoa[barisHeader - 1] ?? [];
   const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
   const iIdProduk = idx('ID Produk');
+  const iNama = idx('Nama');
   const iGmv = idx('GMV');
   const iGmvKreator = idx('GMV dari kreator');
   const iGmvVideo = idx('GMV dari video penjual');
@@ -1299,6 +1303,7 @@ export function ekstrakBarisTtProductAnalytics(
     if (platformProductId === '') continue;
     hasil.push({
       platformProductId,
+      namaProduk: iNama === -1 ? null : (String(row?.[iNama] ?? '').trim() || null),
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv]),
       gmvDariKreator: iGmvKreator === -1 ? null : parsePdtAngka(row?.[iGmvKreator]),
       gmvVideoPenjual: iGmvVideo === -1 ? null : parsePdtAngka(row?.[iGmvVideo]),

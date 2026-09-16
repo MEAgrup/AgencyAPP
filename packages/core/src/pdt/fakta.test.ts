@@ -952,7 +952,7 @@ describe('ekstrakBarisTtProductAnalytics (G2-01-KUADRAN-SKU langkah 1)', () => {
     ]);
     expect(ekstrakBarisTtProductAnalytics(aoa, 4)).toEqual([
       {
-        platformProductId: 'PRD-1', gmv: 1000000, gmvDariKreator: 200000, gmvVideoPenjual: 300000,
+        platformProductId: 'PRD-1', namaProduk: 'Produk A', gmv: 1000000, gmvDariKreator: 200000, gmvVideoPenjual: 300000,
         gmvLivePenjual: 400000, pesananSku: 50, impresi: 10000, klik: 500, ctr: 0.05, ctor: 0.1,
       },
     ]);
@@ -978,7 +978,7 @@ describe('ekstrakBarisTtProductAnalytics (G2-01-KUADRAN-SKU langkah 1)', () => {
     const aoa = [['preamble'], ['preamble2'], headerMinimal, ['PRD-1']];
     expect(ekstrakBarisTtProductAnalytics(aoa, 3)).toEqual([
       {
-        platformProductId: 'PRD-1', gmv: null, gmvDariKreator: null, gmvVideoPenjual: null,
+        platformProductId: 'PRD-1', namaProduk: null, gmv: null, gmvDariKreator: null, gmvVideoPenjual: null,
         gmvLivePenjual: null, pesananSku: null, impresi: null, klik: null, ctr: null, ctor: null,
       },
     ]);
@@ -989,6 +989,18 @@ describe('ekstrakBarisTtProductAnalytics (G2-01-KUADRAN-SKU langkah 1)', () => {
       ['Produk A', 'PRD-1', '1000000.5', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
     ]);
     expect(ekstrakBarisTtProductAnalytics(aoa, 4)[0].gmv).toBe(1000000.5);
+  });
+
+  // G2-01-KUADRAN-SKU lanjutan (bagian laporan "produk") — 'Nama' DIPETAKAN
+  // sejak sesi ini, disalin LANGSUNG (bukan lookup, TAMPILAN UI SAJA Rule 20).
+  it('"Nama" dipetakan ke namaProduk, sel kosong ⇒ null (bukan string kosong)', () => {
+    const aoa = ttProductAnalyticsAoa([
+      ['  Kaos Polos Hitam  ', 'PRD-1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
+      ['', 'PRD-2', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
+    ]);
+    const hasil = ekstrakBarisTtProductAnalytics(aoa, 4);
+    expect(hasil[0].namaProduk).toBe('Kaos Polos Hitam'); // trimmed
+    expect(hasil[1].namaProduk).toBeNull();
   });
 });
 

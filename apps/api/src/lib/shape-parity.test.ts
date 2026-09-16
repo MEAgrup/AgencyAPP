@@ -809,6 +809,10 @@ const WIRE_TO_FE: Record<string, string> = {
   // PDT G2-01 lanjutan — bagian "iklan" (2026-09-16, kedua platform, Shopee lengkap:false permanen).
   PdtLaporanIklanWire: 'pdt.ts::PdtLaporanIklan',
   PdtLaporanIklanItemWire: 'pdt.ts::PdtLaporanIklanItem',
+  // PDT G2-01-KUADRAN-SKU lanjutan — bagian "produk" (TikTok-only, Shopee produk:null permanen).
+  PdtLaporanProdukWire: 'pdt.ts::PdtLaporanProduk',
+  PdtLaporanProdukItemWire: 'pdt.ts::PdtLaporanProdukItem',
+  PdtLaporanProdukDistribusiWire: 'pdt.ts::PdtLaporanProdukDistribusi',
   // PDT G2-01 lanjutan — bagian "afiliasi" ringkasan (2026-09-16, kedua platform, satu bentuk).
   PdtLaporanAfiliasiWire: 'pdt.ts::PdtLaporanAfiliasi',
   // PDT G2-01 lanjutan — bagian "tahap" (2026-09-16, TikTok-only, Shopee tahap:null permanen).

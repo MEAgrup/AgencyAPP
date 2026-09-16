@@ -1323,11 +1323,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
       for (const baris of pdt.ekstrakBarisTtProductAnalytics(b.aoa, b.barisHeader)) {
         await tx`
           insert into pdt_fact_sku_period
-            (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id,
+            (sku_id, client_platform_id, platform_product_id, nama_produk, periode, basis, batch_id,
              parser_versi, gmv, gmv_dari_kreator, gmv_video_penjual, gmv_live_penjual,
              pesanan_sku, impresi, klik, ctr, ctor)
           values
-            (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'net', ${id},
+            (null, ${clientPlatformId}, ${baris.platformProductId}, ${baris.namaProduk}, ${periodeAwalBulan}::date, 'net', ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.gmvDariKreator}, ${baris.gmvVideoPenjual},
              ${baris.gmvLivePenjual}, ${baris.pesananSku}, ${baris.impresi}, ${baris.klik}, ${baris.ctr}, ${baris.ctor})`;
       }
@@ -2737,7 +2737,38 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
   };
 }
 
-/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + iklan + live + video + afiliasi + tahap + `hitungSkorTiktok`. */
+/**
+ * Bagian "produk" (Portfolio Produk/kuadran) TikTok — keputusan pemilik via
+ * `AskUserQuestion` ("G2-01-KUADRAN-SKU (produk)"), lihat docblock
+ * `pdt.bangunLaporanProduk`, `@cdps/core`. **HARUS dipanggil SETELAH
+ * `hitungSkorTiktok` selesai** (`rakitLaporanTiktok` di bawah menjamin
+ * urutan ini) — kolom `kuadran` baru ditulis `klasifikasiUlangKuadranSkuTiktok`
+ * di dalam `hitungSkorTiktok`, membaca sebelum itu akan melihat `kuadran`
+ * basi/`null` dari klasifikasi periode lain atau belum pernah sama sekali.
+ */
+async function bacaProdukTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
+  const rows = await sql<{ kuadran: string | null; nama_produk: string | null; platform_product_id: string | null; gmv: string | null; klik: number | null; ctor: string | null; pesanan_sku: number | null }[]>`
+    select kuadran, nama_produk, platform_product_id, gmv, klik, ctor, pesanan_sku
+      from pdt_fact_sku_period
+     where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'net'
+       and periode = ${periodeAwalBulan}::date`;
+  if (rows.length === 0) return null;
+  return rows.map((r) => {
+    const klik = r.klik;
+    const ctor = r.ctor == null ? null : Number(r.ctor);
+    const cvr = ctor ?? (r.pesanan_sku == null || klik == null || klik === 0 ? null : r.pesanan_sku / klik);
+    return {
+      kuadran: r.kuadran as pdt.PdtKuadranSku | null,
+      namaProduk: r.nama_produk,
+      platformProductId: r.platform_product_id,
+      gmv: r.gmv == null ? null : Number(r.gmv),
+      klik,
+      cvr,
+    };
+  });
+}
+
+/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + iklan + live + video + produk + afiliasi + tahap + `hitungSkorTiktok`. */
 export async function rakitLaporanTiktok(
   sql: Sql,
   clientPlatformId: number,
@@ -2755,8 +2786,12 @@ export async function rakitLaporanTiktok(
     bacaTahapTiktok(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
   ]);
+  // `produk` DIBACA SETELAH Promise.all di atas — hitungSkorTiktok (bagian dari
+  // Promise.all) sudah menulis kolom kuadran periode ini, membacanya SEBELUM itu
+  // akan lomba (race) dengan tulisan yang belum selesai.
+  const produk = await bacaProdukTiktok(sql, clientPlatformId, periodeAwalBulan);
   return pdt.bangunLaporanTiktok({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, iklan, live, video, afiliasi, tahap, skor, benchmarkVersi,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, iklan, live, video, produk, afiliasi, tahap, skor, benchmarkVersi,
     benchTiktok: bench,
   });
 }
