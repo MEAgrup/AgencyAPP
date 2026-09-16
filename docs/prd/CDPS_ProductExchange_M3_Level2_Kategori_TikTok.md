@@ -14,7 +14,16 @@ seluruh 198 nilai yang disebut `docs/prd/CDPS_PDT_Pusat_Data_Toko.md` P-02 sebag
 sebelum ini, satu-satunya sumber adalah `listKategoriOptions` (baca langsung dari
 `px_coverage_snapshot`, hanya nilai yang PERNAH di-push MCN, bukan katalog resmi).
 
-## Yang dokumen ini BELUM selesaikan (M3-03 TETAP terbuka)
+## Yang dokumen ini BELUM selesaikan (gap granularitas — M3-03 sendiri sudah DITUTUP 2026-09-16)
+
+> **Update 2026-09-16**: `M3-03-KATEGORI-MAPPING` (`docs/DECISIONS.md`) sudah ditutup — pemilik
+> memilih opsi (c): dropdown `level2_category` tetap TIDAK tersaring secara PERMANEN (fallback
+> Rule 10), AM tetap konfirmasi manual dari daftar penuh. Gap granularitas di bawah ini **tetap
+> nyata** dan **tetap TIDAK dipetakan otomatis** — bedanya sekarang eksplisit: pemetaan
+> `kategori_platform → level2_category` bukan lagi "menunggu Hans untuk MENUTUP tiket", melainkan
+> "sengaja tidak dibangun sampai Hans/master kategori resmi ada" (keputusan final, bukan status
+> tertunda). Dokumen ini tetap berguna sebagai referensi AM dan sebagai bahan awal kalau/ketika
+> master kategori itu dibangun.
 
 `kategori_platform` (kolom yang benar-benar ditulis `pdt_sku_master`, dibaca dari `tt_orders`
 "Product Category") **BUKAN** granularitas yang sama dengan `level2_category` di bawah — ia lebih

@@ -85,8 +85,10 @@ nol migrasi baru. Rincian tiket asli (untuk riwayat):
 ~~`M3-01-REGION`~~ dan ~~`M3-02-PRICE-SEGMENT-VALUES`~~ **SUDAH TERTUTUP** (2026-09-16 — region
 diverifikasi live, band price_segment dijawab langsung pemilik & persis cocok taksonomi MCN
 existing, `px_eligibility_policy` versi 3 migrasi `20261102010000`). ~~`M3-05-PUSH-TRIGGER`~~ juga
-tertutup (M3-A `mcnapp` merge). Masih terbuka: `M3-03-KATEGORI-MAPPING` (Hans),
-`M3-08-SENGKETA-90-HARI` (Nerissa). `M3-04`
+tertutup (M3-A `mcnapp` merge). ~~`M3-03-KATEGORI-MAPPING`~~ **JUGA TERTUTUP** (2026-09-16 —
+pemilik pilih opsi (c): dropdown `level2_category` tetap tidak tersaring PERMANEN per fallback
+Rule 10, pemetaan cabang `kategori_platform→level2_category` dibiarkan terbuka ke Hans, nol kode
+diubah). Masih terbuka: `M3-08-SENGKETA-90-HARI` (Nerissa). `M3-04`
 (`optimization_tracker` sebagai basis master SKU) dan `M3-06`/`M3-07` dari PRD §8 tidak dibawa ke
 Open terpisah — M3-06 (`require_stock_in`) sudah diputuskan tidak dibaca Phase 1 (PX-M3-05, lihat
 `docs/DECISIONS.md`), M3-07 (`kolom_dipanen` lengkap) menyatu dengan tiket

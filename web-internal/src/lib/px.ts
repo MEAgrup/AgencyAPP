@@ -102,7 +102,7 @@ export function konfirmasiKategori(
   );
 }
 
-/** GET /px/kategori-options — Rule 10: `tersaring:false` sampai pemeta kategori (M3-03) ada. */
+/** GET /px/kategori-options — Rule 10: `tersaring:false` PERMANEN (M3-03 ditutup 2026-09-16, opsi (c) — bukan menunggu pemeta kategori). */
 export interface PxKategoriOption {
   options: string[];
   tersaring: boolean;

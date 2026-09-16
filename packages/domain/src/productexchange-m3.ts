@@ -582,7 +582,7 @@ export async function konfirmasiKategori(
   };
 }
 
-/** listKategoriOptions — Rule 10: distinct `level2_category` dari snapshot TERBARU (dropdown tersaring belum ada, M3-03 Open). */
+/** listKategoriOptions — Rule 10: distinct `level2_category` dari snapshot TERBARU (dropdown TIDAK tersaring, permanen — M3-03 ditutup 2026-09-16, pemilik pilih opsi ini, bukan menunggu master kategori). */
 export async function listKategoriOptions(sql: Queryable): Promise<string[]> {
   const latest = await sql<{ batch_key: string }[]>`
     select batch_key from px_coverage_snapshot order by snapshot_at desc, diterima_pada desc limit 1`;
