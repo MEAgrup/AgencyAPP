@@ -797,6 +797,21 @@ melampauinya (harus berhenti di nol objek) · selesai < 2 menit pada 500 klien �
 > `retensi_sampai`, objek yatim tidak punya kolom itu). **`G1-10-RETENSI-RECOMPUTE` TETAP
 > TERBUKA** (di luar cakupan, menunggu G2-01/G5) — G1-10 sekarang selesai untuk seluruh cakupan
 > yang bisa dikerjakan tanpa tabel itu.
+>
+> **Status 2026-09-16 — `G1-10-RETENSI-RECOMPUTE` DITUTUP: `kirimLaporanPdt` memperpanjang
+> retensi batch yang menopang laporan terkirim, G1-10 SEKARANG TERTUTUP PENUH.**
+> `docs/DECISIONS.md` (cari "G1-10-RETENSI-RECOMPUTE DITUTUP") untuk rincian lengkap. Ringkas:
+> blocker asli (`pdt_laporan_kiriman` belum ada) sudah tidak berlaku sejak G2-01 dibangun —
+> pemicu Rule 45 baris ketiga ("laporan terkirim" → +12 bulan sejak kirim) sekarang ditulis
+> LANGSUNG oleh `kirimLaporanPdt` saat kejadian terjadi, pola sama PX-M3-08 ("SKU di katalog PX",
+> pemicu keempat, sudah tertutup lebih dulu). Batch "yang menopang" dipilih lewat overlap
+> rentang tanggal `client_platform_id` yang sama dengan periode kiriman — TANPA memfilter
+> `status` batch (fakta bisa sudah tertulis sebelum batch akhirnya `ditolak` rekonsiliasi;
+> `bacaLaporanPdt` sendiri membaca `pdt_fact_*` tanpa filter status), `legal_hold` dikecualikan.
+> `retensi_alasan` baru `'laporan_terkirim'` SUDAH ada di CHECK constraint sejak migrasi G1-01 —
+> skema memang dirancang mengantisipasi ini. Nol migrasi baru. **G1-10 (kedua sub-item) SEKARANG
+> TERTUTUP PENUH.** Sisa satu-satunya item G1: `G1-11-REPARSE-RECOMPUTE-STATUS` — pertanyaan
+> desain kasus langka, genuinely menunggu pemilik/Hans/Anty, TIDAK ditebak.
 
 ### G1-11 · Reparse dari paket ZIP (Flow D)
 - `parser_versi` dicatat **per batch dan per baris fakta**.
