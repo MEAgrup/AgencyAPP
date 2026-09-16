@@ -9216,6 +9216,23 @@ export interface PdtLaporanKanalWire {
   lengkap: boolean;
 }
 
+export interface PdtLaporanIklanItemWire {
+  kode: string;
+  label: string;
+  biaya: number | null;
+  gmv: number | null;
+  roas: number | null;
+}
+
+/** `null` = nol baris iklan seluruh sumber platform ini di periode ini (bukan objek kosong) — lihat docblock `pdt.PdtLaporanIklan`, `@cdps/core`. `lengkap: false` SELALU untuk Shopee (`ads_banner` legacy tidak pernah punya modul PDT); TikTok SELALU `true`. */
+export interface PdtLaporanIklanWire {
+  biaya: number | null;
+  gmv: number | null;
+  roas: number | null;
+  items: PdtLaporanIklanItemWire[];
+  lengkap: boolean;
+}
+
 /** `null` = nol sesi live sama sekali di periode ini (bukan `sesi: 0`) — lihat docblock `pdt.PdtLaporanLive`, `@cdps/core`. `jam`/`gmv_per_jam` SELALU `null` untuk Shopee (kolom sumbernya kosong permanen). */
 export interface PdtLaporanLiveWire {
   sesi: number;
@@ -9246,6 +9263,7 @@ export interface PdtLaporanWire {
   generated_at: string;
   kpi: PdtLaporanKpiWire;
   kanal: PdtLaporanKanalWire;
+  iklan: PdtLaporanIklanWire | null;
   live: PdtLaporanLiveWire | null;
   video: PdtLaporanVideoWire | null;
   skor: PdtLaporanSkorWire;
@@ -9277,6 +9295,15 @@ function pdtLaporanKanalToWire(k: pdtCore.PdtLaporanKanal): PdtLaporanKanalWire 
   };
 }
 
+function pdtLaporanIklanToWire(i: pdtCore.PdtLaporanIklan | null): PdtLaporanIklanWire | null {
+  if (i == null) return null;
+  return {
+    biaya: i.biaya, gmv: i.gmv, roas: i.roas,
+    items: i.items.map((it) => ({ kode: it.kode, label: it.label, biaya: it.biaya, gmv: it.gmv, roas: it.roas })),
+    lengkap: i.lengkap,
+  };
+}
+
 function pdtLaporanLiveToWire(l: pdtCore.PdtLaporanLive | null): PdtLaporanLiveWire | null {
   if (l == null) return null;
   return { sesi: l.sesi, gmv: l.gmv, vv: l.vv, jam: l.jam, gmv_per_sesi: l.gmvPerSesi, gmv_per_jam: l.gmvPerJam };
@@ -9299,6 +9326,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     generated_at: l.generatedAt,
     kpi: { ...l.kpi },
     kanal: pdtLaporanKanalToWire(l.kanal),
+    iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
     skor: pdtLaporanSkorToWire(l.skor),
@@ -9315,6 +9343,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     generated_at: l.generatedAt,
     kpi: { ...l.kpi },
     kanal: pdtLaporanKanalToWire(l.kanal),
+    iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
     skor: pdtLaporanSkorToWire(l.skor),

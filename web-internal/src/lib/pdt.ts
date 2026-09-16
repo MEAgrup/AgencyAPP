@@ -161,6 +161,30 @@ export interface PdtLaporanVideo {
   vv_per_video: number | null;
 }
 
+// G2-01 lanjutan — bagian "iklan", 2026-09-16. KEDUA platform dibangun
+// sekaligus (beda dari "video" TikTok-only) — TAPI TETAP tidak simetris:
+// TikTok SELALU `lengkap: true` (tt_ads_product+tt_ads_live, dua sumber
+// asli, keduanya sudah punya penulis fakta sejak PR #413); Shopee SELALU
+// `lengkap: false` PERMANEN (`ads_banner` legacy tidak pernah punya modul
+// PDT sama sekali — beda root cause dari "kanal", sama akibatnya). `null`
+// (whole object) berarti nol baris iklan seluruh sumber platform ini di
+// periode ini, BUKAN objek kosong ber-`items: []`.
+export interface PdtLaporanIklanItem {
+  kode: string;
+  label: string;
+  biaya: number | null;
+  gmv: number | null;
+  roas: number | null;
+}
+
+export interface PdtLaporanIklan {
+  biaya: number | null;
+  gmv: number | null;
+  roas: number | null;
+  items: PdtLaporanIklanItem[];
+  lengkap: boolean;
+}
+
 export interface PdtLaporan {
   schema: string;
   platform: string;
@@ -169,6 +193,7 @@ export interface PdtLaporan {
   generated_at: string;
   kpi: PdtLaporanKpi;
   kanal: PdtLaporanKanal;
+  iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
   skor: PdtLaporanSkor;
