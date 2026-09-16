@@ -6,6 +6,8 @@
 // dibangun — ini kontrak datanya lebih dulu, sub-langkah UI menyusul di sesi
 // berikutnya (`docs/handoff/HANDOFF_PDT_SESI9.md` §3 G1-09).
 
+import { api } from '@/lib/api';
+
 export interface PdtPreviewBerkas {
   nama: string;
   modul_kode: string | null;
@@ -80,4 +82,76 @@ export interface PdtCommitBatch {
   periode_selesai: string;
   berkas: PdtCommitBerkas[];
   identitas: PdtPreviewIdentitas;
+}
+
+// G2-01 lanjutan — payload "laporan" v1 (GET /account/pdt/laporan, PDT-21
+// Rule 21, Flow B langkah 1). Bentuk SAMA untuk TikTok/Shopee (`platform`
+// diskriminator); `benchmark_versi` SELALU ada sebagai kunci (aturan rumah
+// #4/O43) — `null` untuk Shopee (nol benchmark, asimetri asli mesin
+// produksi). v1 SENGAJA sempit: KPI ringkas + skor saja — belum ada halaman
+// yang memanggilnya, sama seperti PdtPreviewBatch/PdtCommitBatch, kontrak
+// datanya lebih dulu.
+export interface PdtLaporanKpi {
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  cvr: number | null;
+}
+
+export interface PdtLaporanDimensi {
+  kode: string;
+  label: string;
+  bobot_dasar: number;
+  nilai: number | null;
+  disertakan: boolean;
+  bobot_efektif: number;
+  label_tampil: string;
+}
+
+export interface PdtLaporanSkor {
+  total: number | null;
+  label: string | null;
+  dimensi: PdtLaporanDimensi[];
+}
+
+export interface PdtLaporan {
+  schema: string;
+  platform: string;
+  client_platform_id: number;
+  periode_awal_bulan: string;
+  generated_at: string;
+  kpi: PdtLaporanKpi;
+  skor: PdtLaporanSkor;
+  benchmark_versi: number | null;
+}
+
+/**
+ * GET /account/pdt/laporan — Flow B langkah 1. `periode` wajib `YYYY-MM-01`
+ * (hari pertama bulan); halaman pemanggil mengonversi dari
+ * `<input type="month">` ("YYYY-MM") sebelum memanggil ini.
+ */
+export function getPdtLaporan(clientPlatformId: number, periode: string): Promise<PdtLaporan> {
+  const search = new URLSearchParams({ client_platform_id: String(clientPlatformId), periode });
+  return api.get<PdtLaporan>(`/account/pdt/laporan?${search.toString()}`);
+}
+
+// G2-01 — "Kirim ke klien" (POST /account/pdt/laporan/kirim, Flow B langkah
+// 4, Rule 22). Kirim kedua untuk toko+periode yang sama BUKAN error — itu
+// kirim-ulang/revisi (Flow B langkah 5, Rule 23): `menggantikan_kiriman_id`
+// menunjuk kiriman sebelumnya, nol upload ulang berkas diminta.
+export interface PdtLaporanKiriman {
+  id: number;
+  client_platform_id: number;
+  periode_mulai: string;
+  periode_selesai: string;
+  parser_versi: number;
+  benchmark_versi: number | null;
+  dikirim_pada: string;
+  dikirim_oleh: string;
+  menggantikan_kiriman_id: number | null;
+  laporan: PdtLaporan;
+}
+
+export function kirimLaporanPdt(clientPlatformId: number, periode: string): Promise<PdtLaporanKiriman> {
+  return api.post<PdtLaporanKiriman>('/account/pdt/laporan/kirim', { client_platform_id: clientPlatformId, periode });
 }

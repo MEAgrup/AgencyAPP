@@ -179,7 +179,7 @@ check "tabel public"     "select count(*) from information_schema.tables where t
 check "entity_prefix"    "select count(*) from entity_prefix"    "45"
 check "sm_machines"      "select count(*) from sm_machines"      "35"
 check "notif_events"     "select count(*) from notif_events"     "76"
-# --- Product Exchange M3-B (20261031010000) -------------------------------
+# --- Product Exchange M3-B (20261101010000) -------------------------------
 # 181 = 176 + 5 tabel px_* (M3-B): px_sku_volume, px_sku_kategori,
 #       px_sku_eligibility, px_coverage_snapshot, px_coverage_push. Nol
 #       prefix baru (PX-M3-01: seluruh baris berkunci client_platform_id+

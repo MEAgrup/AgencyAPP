@@ -1225,7 +1225,7 @@ DECLARE
     'plan_actual_select','plan_flag_select',
     'plan_gate_config_select','plan_review_select','plan_target_select',
     'prospect_attempt_nq_reasons_select',
-    -- `px_coverage_snapshot_sel` (Product Exchange M3-B, migrasi 20261031010000)
+    -- `px_coverage_snapshot_sel` (Product Exchange M3-B, migrasi 20261101010000)
     -- masuk daftar ini DENGAN SENGAJA, dicatat `docs/DECISIONS.md` 2026-09-15
     -- (PX-M3-…) — bukan ditambahkan agar tes hijau. Baris ini adalah AGREGAT
     -- lintas (level2_category, price_segment) yang berasal dari MCN (D-20):
@@ -1628,7 +1628,7 @@ END $$;
 RESET ROLE;
 
 -- ---------------------------------------------------------------------------
--- 48. Product Exchange M3-B (migrasi 20261031010000) — RLS variant B untuk
+-- 48. Product Exchange M3-B (migrasi 20261101010000) — RLS variant B untuk
 --     px_sku_kategori/px_sku_eligibility (AM pemilik/lead Account/Director/OD),
 --     dan justifikasi `USING(true)` di px_coverage_snapshot: agregat lintas
 --     kategori/segmen TANPA data klien atau kreator — tidak ada baris di sini
@@ -1651,7 +1651,7 @@ INSERT INTO px_coverage_snapshot (batch_key, snapshot_at, level2_category, price
                                    creator_count, total_slots_available, total_proven_gmv, status)
 VALUES ('zpx-rls-batch-0001', now(), 'Sepatu Wanita', 'mid', 7, 19, 1284000000.00, 'covered');
 
--- Tabel-tabel ini BARU (migrasi 20261031010000) dan hanya diisi di §48 —
+-- Tabel-tabel ini BARU (migrasi 20261101010000) dan hanya diisi di §48 —
 -- `count(*)` TANPA WHERE aman menyimpulkan "baris fixture ini terlihat atau
 -- tidak" untuk seluruh transaksi tes. WHERE client_platform_id=<id> DIHINDARI
 -- SENGAJA: `client_platforms_select` (baseline RLS) sendiri TIDAK punya

@@ -35,6 +35,8 @@ import {
   planPdtPurgeTick,
   planPdtReparseTick,
   platformKeVokabPdt,
+  bacaLaporanPdt,
+  kirimLaporanPdt,
   previewUploadBatch,
   rakitInputSkorShopee,
   rakitInputSkorTiktok,
@@ -195,6 +197,9 @@ afterEach(async () => {
   // pdt_fact_shop_daily (sesi 34, riset G2-01, tt_shop_analytics) — sama alasan (FK ke
   // pdt_upload_batch TANPA ON DELETE CASCADE).
   await sql`delete from pdt_fact_shop_daily where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
+  // pdt_laporan_kiriman (kirimLaporanPdt, Flow B langkah 4) — FK ke client_platforms TANPA
+  // ON DELETE CASCADE, sama alasan baris-baris di atas.
+  await sql`delete from pdt_laporan_kiriman where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -3365,5 +3370,159 @@ describeDb('rakitLaporanShopee (sesi 34 lanjutan) — KPI basis siap_dikirim (Ru
   it('periode selain awal bulan ⇒ ValidationError', async () => {
     const { cpId } = await fixture();
     await expect(rakitLaporanShopee(sql, cpId, '2026-07-15')).rejects.toThrow(ValidationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bacaLaporanPdt (sesi 34 lanjutan, Flow B langkah 1) — gerbang izin
+// `canKirimLaporan` + pemilihan platform dari `client_platforms.platform`
+// (bukan parameter caller), pola sama `previewUploadBatch`/`commitUploadBatch`.
+// ---------------------------------------------------------------------------
+describeDb('bacaLaporanPdt (sesi 34 lanjutan) — gerbang izin + pemilihan platform', () => {
+  async function fixture(platform: 'TikTok Shop' | 'Shopee', ownerAm: string | null = OWNER): Promise<{ cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, ownerAm);
+    const cpId = await insertClientPlatform(clientId, platform);
+    return { cpId };
+  }
+
+  it('client_platform_id tidak ada ⇒ NotFoundError', async () => {
+    await expect(bacaLaporanPdt(sql, am(), 999_999_999, '2026-07-01')).rejects.toThrow(NotFoundError);
+  });
+
+  it('AM bukan pemilik ⇒ ForbiddenError', async () => {
+    const { cpId } = await fixture('Shopee');
+    await expect(bacaLaporanPdt(sql, am('ZPDT-LAIN'), cpId, '2026-07-01')).rejects.toThrow(ForbiddenError);
+  });
+
+  it('AM pemilik, lead Account, atau Director ⇒ diizinkan (delegasi ke rakitLaporanTiktok/Shopee)', async () => {
+    const { cpId: cpTiktok } = await fixture('TikTok Shop');
+    await expect(bacaLaporanPdt(sql, am(), cpTiktok, '2026-07-01')).resolves.toHaveProperty('platform', 'tiktok');
+    await expect(bacaLaporanPdt(sql, accountLead(), cpTiktok, '2026-07-01')).resolves.toHaveProperty('platform', 'tiktok');
+    await expect(bacaLaporanPdt(sql, director(), cpTiktok, '2026-07-01')).resolves.toHaveProperty('platform', 'tiktok');
+  });
+
+  it('platform TikTok Shop ⇒ merakit via rakitLaporanTiktok (benchmarkVersi terisi)', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const hasil = await bacaLaporanPdt(sql, am(), cpId, '2026-07-01');
+    expect(hasil.schema).toBe('cdps.pdt.laporan.tiktok.v1');
+    expect((hasil as { benchmarkVersi: number }).benchmarkVersi).toBe(1);
+  });
+
+  it('platform Shopee ⇒ merakit via rakitLaporanShopee (nol field benchmarkVersi)', async () => {
+    const { cpId } = await fixture('Shopee');
+    const hasil = await bacaLaporanPdt(sql, am(), cpId, '2026-07-01');
+    expect(hasil.schema).toBe('cdps.pdt.laporan.shopee.v1');
+    expect('benchmarkVersi' in hasil).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// kirimLaporanPdt (Flow B langkah 4, "Kirim ke klien") — membekukan hasil
+// bacaLaporanPdt ke pdt_laporan_kiriman (Rule 22). Gerbang izin didelegasikan
+// SELURUHNYA ke bacaLaporanPdt (nol duplikasi) — pola pengujian di sini hanya
+// membuktikan delegasi itu bekerja (satu kasus Forbidden, satu NotFound),
+// bukan mengulang seluruh matriks peran yang sudah dibuktikan di atas.
+//
+// `dikirim_oleh` ber-FK ke `employees` (beda dari `clients.assigned_am_id`/
+// `client_platforms.created_by` yang tidak) — actor pengirim WAJIB `ownerActor()`
+// (baris employees sungguhan, `beforeAll` di atas), bukan `am()`/OWNER murni.
+// ---------------------------------------------------------------------------
+describeDb('kirimLaporanPdt (Flow B langkah 4) — bekukan snapshot ke pdt_laporan_kiriman', () => {
+  async function fixture(platform: 'TikTok Shop' | 'Shopee'): Promise<{ cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, platform);
+    return { cpId };
+  }
+
+  it('client_platform_id tidak ada ⇒ NotFoundError, nol baris ditulis', async () => {
+    await expect(kirimLaporanPdt(sql, ownerActor(), 999_999_999, '2026-07-01')).rejects.toThrow(NotFoundError);
+  });
+
+  it('AM bukan pemilik ⇒ ForbiddenError, nol baris ditulis', async () => {
+    const { cpId } = await fixture('Shopee');
+    await expect(kirimLaporanPdt(sql, otherAm(), cpId, '2026-07-01')).rejects.toThrow(ForbiddenError);
+    const rows = await sql`select id from pdt_laporan_kiriman where client_platform_id = ${cpId}`;
+    expect(rows).toHaveLength(0);
+  });
+
+  it('TikTok: benchmark_versi terisi (Rule 23), parser_versi = PDT_PARSER_VERSI, payload = hasil bacaLaporanPdt persis, kiriman pertama menggantikan_kiriman_id null', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const now = new Date('2026-08-01T09:00:00.000Z');
+    const dilihat = await bacaLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', now);
+
+    const hasil = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', now);
+    expect(hasil.clientPlatformId).toBe(cpId);
+    expect(hasil.periodeMulai).toBe('2026-07-01');
+    expect(hasil.periodeSelesai).toBe('2026-07-31');
+    expect(hasil.parserVersi).toBe(pdtCore.PDT_PARSER_VERSI);
+    expect(hasil.benchmarkVersi).toBe(1);
+    expect(hasil.dikirimOleh).toBe(OWNER_AM);
+    expect(hasil.menggantikanKirimanId).toBeNull();
+    expect(hasil.laporan).toEqual(dilihat);
+
+    const [row] = await sql<{ payload: unknown; benchmark_versi: number | null }[]>`
+      select payload, benchmark_versi from pdt_laporan_kiriman where id = ${hasil.id}`;
+    expect(row.benchmark_versi).toBe(1);
+    expect(row.payload).toEqual(JSON.parse(JSON.stringify(dilihat)));
+  });
+
+  it('Shopee: benchmark_versi NULL (migrasi 20261031010000 — nol pdt_benchmark dibaca Shopee)', async () => {
+    const { cpId } = await fixture('Shopee');
+    const hasil = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    expect(hasil.benchmarkVersi).toBeNull();
+
+    const [row] = await sql<{ benchmark_versi: number | null }[]>`
+      select benchmark_versi from pdt_laporan_kiriman where id = ${hasil.id}`;
+    expect(row.benchmark_versi).toBeNull();
+  });
+
+  it('kirim ulang periode yang sama (Flow B langkah 5) ⇒ baris baru menunjuk kiriman sebelumnya, TIDAK menimpa', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const pertama = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    const kedua = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+
+    expect(pertama.menggantikanKirimanId).toBeNull();
+    expect(kedua.menggantikanKirimanId).toBe(pertama.id);
+    expect(kedua.id).not.toBe(pertama.id);
+
+    const rows = await sql`select id from pdt_laporan_kiriman where client_platform_id = ${cpId}`;
+    expect(rows).toHaveLength(2); // append-only — kiriman pertama TIDAK dihapus/ditimpa.
+  });
+
+  it('kiriman untuk toko/periode BERBEDA tidak saling menggantikan', async () => {
+    const { cpId: cpA } = await fixture('TikTok Shop');
+    const { cpId: cpB } = await fixture('TikTok Shop');
+    const a = await kirimLaporanPdt(sql, ownerActor(), cpA, '2026-07-01');
+    const bBedaToko = await kirimLaporanPdt(sql, ownerActor(), cpB, '2026-07-01');
+    const bBedaPeriode = await kirimLaporanPdt(sql, ownerActor(), cpA, '2026-08-01');
+
+    expect(bBedaToko.menggantikanKirimanId).toBeNull();
+    expect(bBedaPeriode.menggantikanKirimanId).toBeNull();
+    expect(a.id).not.toBe(bBedaToko.id);
+  });
+
+  it('baris tertulis immutable — UPDATE mentah ditolak trigger (Rule 22, aturan rumah #3)', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const hasil = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    await expect(sql`update pdt_laporan_kiriman set benchmark_versi = null where id = ${hasil.id}`)
+      .rejects.toThrow(/immutable/);
+  });
+
+  it('mencatat audit_log (aturan rumah #3 — riwayat pengiriman tidak boleh senyap)', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const hasil = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    const rows = await sql<{ action: string; actor_employee_id: string }[]>`
+      select action, actor_employee_id from audit_log
+       where entity_type = 'pdt_laporan_kiriman' and entity_id = ${String(hasil.id)}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].action).toBe('pdt_laporan_dikirim');
+    expect(rows[0].actor_employee_id).toBe(OWNER_AM);
+  });
+
+  it('periode selain awal bulan ⇒ ValidationError (delegasi ke rakitLaporanTiktok/Shopee)', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-15')).rejects.toThrow(ValidationError);
   });
 });

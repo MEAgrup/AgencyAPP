@@ -7,7 +7,7 @@
 
 ## Status M3-B: **SELESAI dibangun sesi ini** (skema, mesin, domain, API, FE) — **AKTIVASI DITUNDA**
 
-Migrasi `20261031010000` + `packages/core/src/px/` + `packages/domain/src/productexchange-m3.ts`
+Migrasi `20261101010000` + `packages/core/src/px/` + `packages/domain/src/productexchange-m3.ts`
 + enam route API + dua halaman `web-internal` (`/px/kandidat`, `/px/katalog`). Lihat
 `docs/DECISIONS.md` 2026-09-15 untuk rincian penuh (deviasi PX-M3-01..08 + verifikasi).
 

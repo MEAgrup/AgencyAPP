@@ -6,7 +6,7 @@ Baca ini dulu untuk tahu posisi sebenarnya sebelum menyentuh apa pun di modul `p
 
 Dibangun dari nol sampai selesai dalam SATU sesi, paralel dengan PDT G2 di chat lain:
 
-- Migrasi `supabase/migrations/20261031010000_px_m3b_volume_eligibility_coverage.sql` — 5 tabel
+- Migrasi `supabase/migrations/20261101010000_px_m3b_volume_eligibility_coverage.sql` — 5 tabel
   (`px_sku_volume`, `px_sku_kategori`, `px_sku_eligibility`, `px_coverage_snapshot`,
   `px_coverage_push`) + view `px_catalog_item_v` + seed `px_eligibility_policy` versi 2
   (`price_segment_bands`, `platforms: ["tiktok","shopee"]`).

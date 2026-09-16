@@ -99,7 +99,7 @@ export interface PxEvaluasiInput {
 
 export interface PxEvaluasiResult {
   verdict: PxVerdict;
-  /** `null` ⇔ `verdict === 'lolos'` (CHECK `ck_px_sku_eligibility_lapis`, migrasi 20261031010000). */
+  /** `null` ⇔ `verdict === 'lolos'` (CHECK `ck_px_sku_eligibility_lapis`, migrasi 20261101010000). */
   lapisGagal: 1 | 2 | 3 | 4 | null;
   /** Provenans — nilai yang DIPAKAI saat evaluasi ini (null sebelum L3 lolos). */
   levelCategory: string | null;

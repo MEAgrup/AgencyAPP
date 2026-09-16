@@ -199,7 +199,7 @@ BEGIN
     ) = 0, 'pdt_usulan_katalog must NOT be frozen — it is edited live via the G4-01 admin UI, unlike pdt_benchmark';
 
     ---------------------------------------------------------------------------
-    -- Product Exchange M3-B (20261031010000) — three append-only frozen
+    -- Product Exchange M3-B (20261101010000) — three append-only frozen
     -- tables. `px_sku_volume`/`px_sku_kategori` are DELIBERATELY NOT frozen:
     -- volume is UPSERTed per recompute (Flow A) and kategori is a human
     -- correction target (D-24) — history for both lives in px_sku_eligibility.

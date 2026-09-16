@@ -119,7 +119,7 @@ afterEach(async () => {
   await sql`delete from client_platforms where client_id like 'ZPX-CLI-%'`;
   await sql`delete from clients where id like 'ZPX-CLI-%'`;
   // px_eligibility_policy versions created by tests below (versi > 2 — versi 1
-  // (M2a) and versi 2 (M3-B, price_segment_bands, migrasi 20261031010000) are
+  // (M2a) and versi 2 (M3-B, price_segment_bands, migrasi 20261101010000) are
   // both migration seeds and must survive every run). Trigger disabled as
   // owner superuser and restored in `finally` — a failed cleanup must never
   // leave the table writable for the next test, same pattern as showcase.test.ts.

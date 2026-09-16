@@ -9168,3 +9168,124 @@ export function pdtCommitBatchToWire(h: pdt.PdtCommitPersiapan): PdtCommitBatchW
     identitas: pdtPreviewIdentitasToWire(h.identitas),
   };
 }
+
+// ===========================================================================
+// G2-01 lanjutan — payload "laporan" v1 (PDT-21 Rule 21). `rakitLaporanTiktok`/
+// `rakitLaporanShopee` (`@cdps/domain`) sudah camelCase; satu bentuk wire
+// BERSAMA untuk kedua platform (`platform` diskriminator) supaya
+// `web-internal` tidak perlu dua tipe nyaris identik. `benchmark_versi`
+// SELALU ada sebagai kunci (aturan rumah #4/O43) — `null` untuk Shopee
+// (asimetri asli, `PdtLaporanShopee` tidak punya field ini sama sekali),
+// BUKAN kunci yang hilang.
+// ===========================================================================
+
+export interface PdtLaporanKpiWire {
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  cvr: number | null;
+}
+
+export interface PdtLaporanDimensiWire {
+  kode: string;
+  label: string;
+  bobot_dasar: number;
+  nilai: number | null;
+  disertakan: boolean;
+  bobot_efektif: number;
+  label_tampil: string;
+}
+
+export interface PdtLaporanSkorWire {
+  total: number | null;
+  label: string | null;
+  dimensi: PdtLaporanDimensiWire[];
+}
+
+export interface PdtLaporanWire {
+  schema: string;
+  platform: string;
+  client_platform_id: number;
+  periode_awal_bulan: string;
+  generated_at: string;
+  kpi: PdtLaporanKpiWire;
+  skor: PdtLaporanSkorWire;
+  /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
+  benchmark_versi: number | null;
+}
+
+function pdtLaporanSkorToWire(s: pdtCore.PdtSkorHasilTiktok | pdtCore.PdtSkorHasilShopee): PdtLaporanSkorWire {
+  return {
+    total: s.total,
+    label: s.label,
+    dimensi: s.dimensi.map((d) => ({
+      kode: d.kode,
+      label: d.label,
+      bobot_dasar: d.bobotDasar,
+      nilai: d.nilai,
+      disertakan: d.disertakan,
+      bobot_efektif: d.bobotEfektif,
+      label_tampil: d.labelTampil,
+    })),
+  };
+}
+
+export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanWire {
+  return {
+    schema: l.schema,
+    platform: l.platform,
+    client_platform_id: l.clientPlatformId,
+    periode_awal_bulan: l.periodeAwalBulan,
+    generated_at: l.generatedAt,
+    kpi: { ...l.kpi },
+    skor: pdtLaporanSkorToWire(l.skor),
+    benchmark_versi: l.benchmarkVersi,
+  };
+}
+
+export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanWire {
+  return {
+    schema: l.schema,
+    platform: l.platform,
+    client_platform_id: l.clientPlatformId,
+    periode_awal_bulan: l.periodeAwalBulan,
+    generated_at: l.generatedAt,
+    kpi: { ...l.kpi },
+    skor: pdtLaporanSkorToWire(l.skor),
+    benchmark_versi: null,
+  };
+}
+
+// G2-01 — POST /account/pdt/laporan/kirim (Flow B langkah 4, "Kirim ke
+// klien"). `laporan` di dalam bertipe SAMA (`PdtLaporanWire`) dengan
+// `GET /account/pdt/laporan` — bentuk beku yang dikirim persis bentuk yang
+// dilihat AM sebelum menekan tombol (Rule 21-22).
+export interface PdtLaporanKirimanWire {
+  id: number;
+  client_platform_id: number;
+  periode_mulai: string;
+  periode_selesai: string;
+  parser_versi: number;
+  /** Rule 23 — `null` untuk Shopee (nol benchmark bernomor, migrasi `20261031010000`). */
+  benchmark_versi: number | null;
+  dikirim_pada: string;
+  dikirim_oleh: string;
+  /** Flow B langkah 5 — id kiriman sebelumnya bila ini kirim-ulang/revisi. `null` = kiriman pertama. */
+  menggantikan_kiriman_id: number | null;
+  laporan: PdtLaporanWire;
+}
+
+export function pdtLaporanKirimanToWire(k: pdt.PdtLaporanKirimanHasil): PdtLaporanKirimanWire {
+  return {
+    id: k.id,
+    client_platform_id: k.clientPlatformId,
+    periode_mulai: k.periodeMulai,
+    periode_selesai: k.periodeSelesai,
+    parser_versi: k.parserVersi,
+    benchmark_versi: k.benchmarkVersi,
+    dikirim_pada: k.dikirimPada,
+    dikirim_oleh: k.dikirimOleh,
+    menggantikan_kiriman_id: k.menggantikanKirimanId,
+    laporan: k.laporan.platform === 'tiktok' ? pdtLaporanTiktokToWire(k.laporan) : pdtLaporanShopeeToWire(k.laporan),
+  };
+}

@@ -103,6 +103,7 @@ describe('visibleNav — Sales', () => {
       '/marketing',
       '/marketing/performance',
       '/health',
+      '/account/pdt/laporan',
     ]) {
       expect(seen, `Sales staff must not see ${href}`).not.toContain(href);
     }
@@ -203,6 +204,7 @@ describe('visibleNav — the delivery divisions (symmetry)', () => {
         '/finance',
         '/clients',
         '/health',
+        '/account/pdt/laporan',
         '/account',
       ]) {
         expect(seen, `${division} must not see ${href}`).not.toContain(href);
@@ -254,6 +256,15 @@ describe('visibleNav — Account', () => {
     expect(seen).toContain('/tasks');
     expect(seen).toContain('/health');
     expect(seen).toContain('/clients');
+  });
+
+  it('Account staff (AM) and lead see Laporan PDT (G2-01); other divisions do not', () => {
+    expect(hrefs(role('Account', 'staff'))).toContain('/account/pdt/laporan');
+    expect(hrefs(role('Account', 'lead'))).toContain('/account/pdt/laporan');
+    for (const division of ['Sales', 'Marketing', 'Finance', 'Creative', 'Ads', 'KOL', 'Live Stream']) {
+      expect(hrefs(role(division, 'staff')), `${division} must not see /account/pdt/laporan`)
+        .not.toContain('/account/pdt/laporan');
+    }
   });
 
   it('Account STAFF does not see the division Brief queues (listDivisionQueue denies an AM)', () => {
@@ -606,6 +617,7 @@ describe('visibleNav — layered OD / Director', () => {
       '/finance',
       '/marketing',
       '/health',
+      '/account/pdt/laporan',
       '/leads',
       '/sales',
       '/admin/employees',
@@ -731,7 +743,7 @@ describe('Sidebar IA v3 — struktur 9 grup', () => {
       '/', '/portal', '/board/my-tasks', '/persetujuan',
       '/leads', '/sales', '/marketing', '/sales/kinerja', '/marketing/performance',
       '/master-services', '/sales/kalkulator',
-      '/clients', '/portal/management', '/health', '/showcase',
+      '/clients', '/portal/management', '/health', '/account/pdt/laporan', '/showcase',
       '/tasks', '/account/rekap', '/account', '/ads', '/creative', '/kol', '/livestream',
       '/tasks?division=AI+Optimizer', '/store-ops',
       '/ads/screening', '/ads/scanner',
