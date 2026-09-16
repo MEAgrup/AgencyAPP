@@ -1,9 +1,17 @@
 /**
  * POST /api/v1/account/pdt/laporan/kirim — PDT G2-01, Flow B langkah 4 ("AM
  * menekan Kirim ke klien ⇒ snapshot beku ditulis ke `pdt_laporan_kiriman`",
- * PDT-21 Rule 22). Body: `{ client_platform_id, periode }` — bentuk SAMA
- * dengan query `GET /account/pdt/laporan`, dikirim sebagai JSON body karena
- * ini mutasi (menulis baris baru), bukan pembacaan.
+ * PDT-21 Rule 22). Body: `{ client_platform_id, periode, insight? }` —
+ * `client_platform_id`/`periode` bentuk SAMA dengan query `GET
+ * /account/pdt/laporan`, dikirim sebagai JSON body karena ini mutasi
+ * (menulis baris baru), bukan pembacaan.
+ *
+ * `insight` (G2-01-INSIGHT-EDIT, opsional) — draf narasi hasil sunting AM di
+ * layar pratinjau. Diteruskan UTUH ke `pdt.kirimLaporanPdt`
+ * (`toPdtInsightDraft`, pass-through — validasi & pesan BI `[...]` adalah
+ * tugas `pdt.normalizePdtInsightDraft` di core, bukan lapisan ini, pola sama
+ * `InsightDraftBody`/`toInsightDraft` mesin lama). Diabaikan sepenuhnya kalau
+ * kunci `insight` tidak ada di body ⇒ insight mesin apa adanya.
  *
  * `pdt.kirimLaporanPdt` menghitung ULANG laporan lewat `bacaLaporanPdt`
  * (gerbang `canKirimLaporan` + pemilihan platform sudah ditegakkan di sana)
@@ -20,7 +28,7 @@ import { pdt } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { BadRequestError, handle, json } from '@/lib/http';
-import { pdtLaporanKirimanToWire } from '@/lib/wire';
+import { pdtLaporanKirimanToWire, toPdtInsightDraft, type PdtInsightDraftBody } from '@/lib/wire';
 
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
@@ -29,6 +37,7 @@ export async function POST(request: Request): Promise<Response> {
     const body = (await request.json().catch(() => ({}))) as {
       client_platform_id?: unknown;
       periode?: unknown;
+      insight?: PdtInsightDraftBody;
     };
     const clientPlatformId = typeof body.client_platform_id === 'number' ? body.client_platform_id : NaN;
     if (!Number.isInteger(clientPlatformId) || clientPlatformId <= 0) {
@@ -40,7 +49,8 @@ export async function POST(request: Request): Promise<Response> {
       throw new BadRequestError('periode is required (YYYY-MM-01)');
     }
 
-    const hasil = await pdt.kirimLaporanPdt(db(), actor, clientPlatformId, periode);
+    const insightDraft = body.insight === undefined ? undefined : toPdtInsightDraft(body.insight);
+    const hasil = await pdt.kirimLaporanPdt(db(), actor, clientPlatformId, periode, new Date(), insightDraft);
 
     return json(pdtLaporanKirimanToWire(hasil));
   });

@@ -9404,6 +9404,36 @@ function pdtLaporanTahapToWire(t: pdtCore.PdtLaporanTahap | null): PdtLaporanTah
   };
 }
 
+/**
+ * G2-01-INSIGHT-EDIT — bentuk body draf sunting AM (`POST .../laporan/kirim`),
+ * field `insight` opsional. Pola sama `InsightDraftBody`/`toInsightDraft`
+ * (mesin lama): diteruskan UTUH termasuk string kosong/kunci hilang — core
+ * (`pdt.normalizePdtInsightDraft`) yang memutuskan apa yang kurang dan
+ * mengucapkannya dalam Bahasa Indonesia, bukan lapisan ini. Tidak ikut
+ * `PdtLaporanInsightWire` (bentuk RESPONS, field wajib) — ini bentuk
+ * REQUEST draf, seluruh field opsional/longgar tipenya karena datang dari
+ * form yang bisa mengirim apa saja.
+ */
+export interface PdtInsightDraftBody {
+  ringkasan?: string;
+  poin?: string[];
+  rekomendasi_tinggi?: PdtLaporanRekomendasiWire[];
+  rekomendasi_sedang?: PdtLaporanRekomendasiWire[];
+  outlook?: string;
+  indikator?: { nama: string; target: string }[];
+}
+
+export function toPdtInsightDraft(b: PdtInsightDraftBody): pdtCore.PdtInsightDraft {
+  return {
+    ringkasan: b.ringkasan,
+    poin: b.poin,
+    rekomendasi_tinggi: b.rekomendasi_tinggi,
+    rekomendasi_sedang: b.rekomendasi_sedang,
+    outlook: b.outlook,
+    indikator: b.indikator,
+  };
+}
+
 function pdtLaporanInsightToWire(i: pdtCore.PdtLaporanInsight): PdtLaporanInsightWire {
   const rekomendasi = (r: pdtCore.PdtLaporanRekomendasi): PdtLaporanRekomendasiWire =>
     ({ judul: r.judul, target: r.target, dampak: r.dampak, timeline: r.timeline });

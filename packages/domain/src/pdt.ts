@@ -2688,6 +2688,15 @@ export interface PdtLaporanKirimanHasil {
  * "kirim"), belum ada mekanismenya sama sekali (`pdt_laporan_kiriman` nol
  * kolom status, Flow B tidak menyebutnya), dicatat di `PDT_BACKLOG.md` §2
  * sebagai tiket sendiri.
+ *
+ * `insightDraft` (G2-01-INSIGHT-EDIT, opsional) — AM menyunting narasi
+ * "insight" di layar pratinjau sebelum menekan Kirim; kalau diisi,
+ * `pdt.normalizePdtInsightDraft` (`@cdps/core`) memvalidasi + menggantikan
+ * `laporan.insight` mesin SEBELUM dibekukan. `PdtInsightDraftError`
+ * diterjemahkan ke `ValidationError` (pesan BI `[...]` sama persis) supaya
+ * `apps/api` tidak perlu tahu error itu lahir di core, bukan domain — pola
+ * sama semua gerbang validasi lain di modul ini. Diabaikan (`undefined`) ⇒
+ * insight mesin apa adanya, perilaku SAMA sebelum parameter ini ada.
  */
 export async function kirimLaporanPdt(
   sql: Sql,
@@ -2695,8 +2704,17 @@ export async function kirimLaporanPdt(
   clientPlatformId: number,
   periodeAwalBulan: string,
   now: Date = new Date(),
+  insightDraft?: pdt.PdtInsightDraft,
 ): Promise<PdtLaporanKirimanHasil> {
   const laporan = await bacaLaporanPdt(sql, actor, clientPlatformId, periodeAwalBulan, now);
+  if (insightDraft !== undefined) {
+    try {
+      laporan.insight = pdt.normalizePdtInsightDraft(insightDraft);
+    } catch (err) {
+      if (err instanceof pdt.PdtInsightDraftError) throw new ValidationError(err.message);
+      throw err;
+    }
+  }
   const benchmarkVersi = laporan.platform === 'tiktok' ? laporan.benchmarkVersi : null;
 
   return withTransaction(sql, async (tx) => {

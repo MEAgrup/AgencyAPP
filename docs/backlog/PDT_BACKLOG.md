@@ -1241,6 +1241,24 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > membacanya via WA/export, TANPA mengubah Rule 22 (`kirimLaporanPdt` tetap satu aksi atomik).
 > `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
 
+> **Status 2026-09-16 (lanjutan) — `G2-01-INSIGHT-EDIT` DITUTUP: AM sekarang bisa menyunting narasi
+> "insight" di layar pratinjau, divalidasi sebelum menggantikan insight mesin pada payload beku.**
+> `docs/DECISIONS.md` (cari "G2-01-INSIGHT-EDIT") untuk rincian lengkap. Ringkas: `packages/core/src/
+> pdt/insight-edit.ts` (BARU) — `normalizePdtInsightDraft`, batas karakter/daftar + pesan BI DISALIN
+> persis `report/insight-edit.ts` (fitur identik, sudah disetujui pemilik), MINUS narasi tahap (tahap
+> PDT sudah data terstruktur). `kirimLaporanPdt` dapat parameter opsional `insightDraft` (ke-6, append —
+> nol call site lama berubah); gagal validasi ⇒ `pdt.ValidationError` SEBELUM transaksi dibuka, nol
+> baris ditulis. `POST .../laporan/kirim` menerima kunci `insight` opsional (`toPdtInsightDraft` di
+> `wire.ts`, pass-through — satu-satunya pengecualian house rule wire↔domain, gerbang sungguhannya di
+> core). FE: editor baru (state lokal `insightDraft`, nol persistensi) dengan `PoinEditor`/`RekEditor`/
+> `IndEditor` disalin+disederhanakan dari `InsightEditor.tsx` mesin lama. Nol tabel/kolom/migrasi baru.
+> Diverifikasi (DB lokal rebuild bersih, 253 migrasi — nol migrasi baru): `@cdps/core` 1408/1408 (naik
+> dari 1394), `@cdps/domain` 2754/2755 (1 skip, naik dari 2750), `@cdps/db` 107/107, `@cdps/api`
+> 638/640 (2 skip, naik dari 636); typecheck bersih `core`/`domain`/`api`/`web-internal`, lint
+> `@cdps/api` bersih; `next build`+test `web-internal` sukses. **Sisa: TIGA bagian laporan lain**
+> (produk, tokopedia, ads_manager) TETAP di luar cakupan — semuanya hard-blocked (butuh fact-writer
+> baru sekelas G1-09). `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
+
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**

@@ -315,8 +315,21 @@ export interface PdtLaporanKiriman {
   laporan: PdtLaporan;
 }
 
-export function kirimLaporanPdt(clientPlatformId: number, periode: string): Promise<PdtLaporanKiriman> {
-  return api.post<PdtLaporanKiriman>('/account/pdt/laporan/kirim', { client_platform_id: clientPlatformId, periode });
+// G2-01-INSIGHT-EDIT — draf sunting AM (layar pratinjau, sebelum "Kirim ke
+// Klien"). Field OPSIONAL/longgar — validasi + pesan BI `[...]` sepenuhnya
+// tugas server (`pdt.normalizePdtInsightDraft`, @cdps/core); FE mengirim apa
+// adanya, termasuk baris kosong (server yang membuang/menolak).
+export interface PdtInsightDraft {
+  ringkasan?: string;
+  poin?: string[];
+  rekomendasi_tinggi?: PdtLaporanRekomendasi[];
+  rekomendasi_sedang?: PdtLaporanRekomendasi[];
+  outlook?: string;
+  indikator?: { nama: string; target: string }[];
+}
+
+export function kirimLaporanPdt(clientPlatformId: number, periode: string, insight?: PdtInsightDraft): Promise<PdtLaporanKiriman> {
+  return api.post<PdtLaporanKiriman>('/account/pdt/laporan/kirim', { client_platform_id: clientPlatformId, periode, insight });
 }
 
 // G2-01 — riwayat kiriman (GET /account/pdt/laporan/kiriman, Flow B langkah

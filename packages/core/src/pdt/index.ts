@@ -29,3 +29,4 @@ export * from './header';
 export * from './fakta';
 export * from './skor';
 export * from './laporan';
+export * from './insight-edit';
