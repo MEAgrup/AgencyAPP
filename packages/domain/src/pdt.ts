@@ -12,7 +12,7 @@
  * lain — konsisten dengan ketokan PX-M2a (`docs/DECISIONS.md` 2026-09-12).
  */
 import { randomUUID } from 'node:crypto';
-import { notification, pdt, permission, tz } from '@cdps/core';
+import { copilot, notification, pdt, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
 
@@ -3341,4 +3341,23 @@ export async function riwayatKirimanPdt(sql: Sql, actor: Actor, clientPlatformId
     dikirimOleh: r.dikirim_oleh,
     menggantikanKirimanId: r.menggantikan_kiriman_id,
   }));
+}
+
+// ===========================================================================
+// G4-01 — katalog aksi usulan (`pdt_usulan_katalog`, migrasi `20261109010000`,
+// docs/backlog/PDT_BACKLOG.md G4-01). Murni baca — nol keputusan di sini;
+// `copilot.gabungKatalogDb` (`@cdps/core`) yang menggabungkan baris ini dengan
+// metadata kode (nama/deskripsi/dst., TETAP di kode — lihat docblock fungsi
+// itu) dan menyaring `platform_berlaku`/`aktif`. Nol gerbang actor di sini
+// (pola sama `pdt_benchmark` yang dibaca `hitungSkorTiktok` tanpa re-cek
+// permission) — pemanggil (`strategi.susunPilarUsulan`) sudah menggerbang
+// `canReadStrategi` sebelum sampai sini; `pdt_usulan_katalog` sendiri RLS
+// variant A (nol policy, service-role only), jadi `sql` di sini HARUS `db()`.
+// ===========================================================================
+
+/** Satu baris `pdt_usulan_katalog` — hanya kolom yang dikonsumsi `copilot.gabungKatalogDb` sesi ini (Rule 26/29/32). */
+export async function listAksiKatalogAktif(sql: Queryable): Promise<copilot.AksiKatalogDbRow[]> {
+  const rows = await sql<{ kode: string; platform_berlaku: string[]; kondisi: copilot.KondisiKatalogDb; aktif: boolean }[]>`
+    select kode, platform_berlaku, kondisi, aktif from pdt_usulan_katalog order by kode`;
+  return rows.map((r) => ({ kode: r.kode, platformBerlaku: r.platform_berlaku, kondisi: r.kondisi, aktif: r.aktif }));
 }

@@ -1495,6 +1495,23 @@ Yang G4 kerjakan adalah tiga hal yang belum ada:
 `satuan pdt_satuan_t`, `target_formula jsonb`, `divisi_tujuan`, `aktif`). Nol logika perhitungan
 di berkas HTML mandiri. Nol komponen LLM — seluruh usulan **deterministik**.
 
+> **Status 2026-09-16 (DITUTUP sebagian — `docs/DECISIONS.md`) — 20 aksi diseed ke DB, engine
+> membaca DB.** Migrasi `20261109010000` menerjemahkan `copilot.ts` `KATALOG` (20 aksi asli) ke
+> `pdt_usulan_katalog` — `platform_berlaku` seluruhnya `{tiktok,shopee,meta}` (perilaku produksi
+> hari ini nol cabang per platform, TIDAK ditebak dipersempit). `copilot.gabungKatalogDb` (baru)
+> menggabungkan baris DB (`platform_berlaku`/`kondisi`/`aktif` — YANG DIKONSUMSI) dengan metadata
+> kode TETAP di `copilot.ts` (nama/deskripsi/jembatan/arah/minggu/fieldIdBukti/quickWin/pilar —
+> Rule 5, label BI di-review PR bukan admin UI). `copilot.susunUsulan` sekarang WAJIB menerima
+> `katalog` (bukan default ke `KATALOG` internal); `strategi.susunPilarUsulan` merakitnya dari
+> `pdt.listAksiKatalogAktif` per panggilan. `metrik_kunci`/`satuan`/`target_formula`/
+> `divisi_tujuan` diisi BENAR (satuan dipetakan dari `unit` string: Rp→rupiah, %→persen,
+> VV→views, video/kreator→hitungan, jam→jam, x→rasio; `target_formula.ambisi_persen` = nilai
+> `skalaAmbisi(minggu)` saat ini) tapi BELUM dikonsumsi perhitungan — target hitung tetap
+> `skalaAmbisi(kat.minggu)` dari metadata kode, TIDAK berubah sesi ini (di luar cakupan "katalog
+> kode→DB"; admin-tunable target menyusul G4-02/G4-03). **Belum tertutup**: ≥6 aksi khusus Shopee
+> (G4-03), UI admin CRUD katalog (G4-03), Rule 26's "nol logika di HTML mandiri" — `am-copilot.html`
+> MASIH membawa reimplementasi penuh (KATALOG/verdict/skor/saranD5), belum disentuh sesi ini.
+
 ### G4-02 · Satuan bertipe — **tidak ada enum untuk dipakai ulang**
 Diverifikasi: `plan_row.satuan` (`varchar(32)`) dan `strategi_resource.satuan` (`varchar(24)`)
 adalah **teks bebas tanpa CHECK**; `master_service.unit` bahkan pernah harus dibersihkan migrasi

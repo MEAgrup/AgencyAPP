@@ -90,6 +90,7 @@ import {
 } from './account';
 import * as contract from './contract';
 import { getInterview, listInterviewsByClient, type Answer, type InterviewListRow } from './interview';
+import * as pdt from './pdt';
 import { generatePlanPeriods } from './plan';
 import { effectiveGate, type PlanTier } from './plangate_rules';
 import { createHash, randomBytes } from 'node:crypto';
@@ -2341,15 +2342,22 @@ export async function susunPilarUsulan(
      order by client_platform_id`;
   if (analisa.length === 0) return null;
 
+  // G4-01 — katalog aksi dari `pdt_usulan_katalog` (bukan `cp.KATALOG` hardcoded), satu
+  // pembacaan dipakai ulang untuk seluruh channel Strategi ini (Rule 26). Channel platform
+  // yang PDT tidak dukung (Tokopedia/Lazada/Blibli, `platformKeVokabPdt` null) mendapat
+  // katalog kosong — `cp.susunUsulan` tetap jalan, nol aksi tersusun, bukan error.
+  const katalogRows = await pdt.listAksiKatalogAktif(sql);
   const channels: CopilotChannelUsulan[] = analisa.map((a) => {
     const { channel, channelLain } = platformToChannel(a.platform);
+    const vokabPdt = pdt.platformKeVokabPdt(a.platform);
+    const katalog = vokabPdt ? cp.gabungKatalogDb(katalogRows, vokabPdt) : [];
     return {
       clientPlatformId: Number(a.client_platform_id),
       platform: a.platform,
       channel,
       channelLain,
       metodeBaseline: a.metode_baseline,
-      usulan: cp.susunUsulan(a.payload),
+      usulan: cp.susunUsulan(a.payload, katalog),
     };
   });
 

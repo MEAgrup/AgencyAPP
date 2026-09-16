@@ -247,7 +247,7 @@ const PAYLOAD_LEMAH = {
 };
 
 describe('susunUsulan — Section E disusun di server, tanpa export/tempel', () => {
-  const u = susunUsulan(PAYLOAD_LEMAH);
+  const u = susunUsulan(PAYLOAD_LEMAH, KATALOG);
 
   it('membaca schema, periode, dan versi benchmark payload', () => {
     expect(u.schema).toBe('cdps.baseline.tiktok.v1');
@@ -309,13 +309,13 @@ describe('susunUsulan — Section E disusun di server, tanpa export/tempel', () 
   });
 
   it('deterministik — dua kali susun dari payload sama ⇒ identik', () => {
-    expect(susunUsulan(PAYLOAD_LEMAH)).toEqual(u);
+    expect(susunUsulan(PAYLOAD_LEMAH, KATALOG)).toEqual(u);
   });
 });
 
 describe('susunUsulan — apa yang TIDAK bisa diusulkan, dikatakan', () => {
   it('payload manual / lama ⇒ nol usulan + kalimat jujur', () => {
-    const u = susunUsulan({ schema: 'cdps.baseline.manual.v1', manual: { gmv_bulan: 5_000_000 } });
+    const u = susunUsulan({ schema: 'cdps.baseline.manual.v1', manual: { gmv_bulan: 5_000_000 } }, KATALOG);
     expect(u.payloadTerbaca).toBe(false);
     expect(u.pilar).toEqual([]);
     expect(u.catatan.join(' ')).toContain('tidak memuat blok analisa');
@@ -323,7 +323,7 @@ describe('susunUsulan — apa yang TIDAK bisa diusulkan, dikatakan', () => {
 
   it('payload tanpa benchmark ⇒ aksi berambang benchmark tidak diusulkan, dan itu dikatakan', () => {
     const { benchmark_dipakai: _lepas, ...tanpaBench } = PAYLOAD_LEMAH;
-    const u = susunUsulan(tanpaBench);
+    const u = susunUsulan(tanpaBench, KATALOG);
     const kode = u.pilar.flatMap((p) => p.aksi.map((a) => a.kode));
     expect(kode).not.toContain('V1');
     // A2/A4 ambangnya bukan benchmark (kreator belum posting > 0, sampel = 0).
@@ -334,7 +334,7 @@ describe('susunUsulan — apa yang TIDAK bisa diusulkan, dikatakan', () => {
   });
 
   it('metrik yang absen tidak menyalakan pemicu (absen ≠ nol)', () => {
-    const u = susunUsulan({ benchmark_dipakai: BENCH, toko: {}, video: { toko: {} } });
+    const u = susunUsulan({ benchmark_dipakai: BENCH, toko: {}, video: { toko: {} } }, KATALOG);
     // Tanpa angka, tidak ada aksi VIDEO yang diusulkan — bukan "0 < benchmark".
     expect(u.pilar.flatMap((p) => p.aksi.map((a) => a.kode))).toEqual([]);
   });
@@ -344,7 +344,7 @@ describe('susunUsulan — apa yang TIDAK bisa diusulkan, dikatakan', () => {
       ...PAYLOAD_LEMAH,
       video: { toko: PAYLOAD_LEMAH.video.toko, afiliasi: PAYLOAD_LEMAH.video.afiliasi },
     };
-    const u = susunUsulan(tanpaAngle);
+    const u = susunUsulan(tanpaAngle, KATALOG);
     const konten = u.pilar.find((p) => p.pilar === 'VIDEO')!;
     expect(konten.aksi.length).toBeGreaterThan(0);
     expect(konten.aksi.map((a) => a.kode)).not.toContain('V3');
@@ -357,7 +357,7 @@ describe('susunUsulan — apa yang TIDAK bisa diusulkan, dikatakan', () => {
       iklan: { roas: 6.2, setara_persen_gmv: 0.11 },
       skor: { pilar: { prod: 80 } },
     };
-    const kode = susunUsulan(sehat).pilar.flatMap((p) => p.aksi.map((a) => a.kode));
+    const kode = susunUsulan(sehat, KATALOG).pilar.flatMap((p) => p.aksi.map((a) => a.kode));
     expect(kode).toEqual(['D5']);
   });
 });
