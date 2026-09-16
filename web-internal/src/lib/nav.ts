@@ -219,6 +219,13 @@ const KLIEN: NavNode[] = [
   // (trigger scan M13), bukan sekadar membaca snapshot (keputusan pemilik
   // 2026-09-04 — keduanya dipertahankan).
   { href: '/health', label: 'Client Health', access: ownedBy(ACCOUNT) },
+  // G2-01 — laporan PDT (Pusat Data Toko) per toko klien (Flow B langkah 1,
+  // PDT-21 Rule 21). Gerbang baris sesungguhnya (`canKirimLaporan`: AM pemilik
+  // toko, atau lead/Director Account) ada di server; menu ini memakai
+  // `ownedBy(ACCOUNT)` — pola sama `/health` di atas — karena memangkas lebih
+  // sempit akan menyembunyikan halaman dari AM yang justru pemiliknya
+  // (kepala berkas ini: "hiding something reachable = a silent regression").
+  { href: '/account/pdt/laporan', label: 'Laporan PDT', access: ownedBy(ACCOUNT) },
   // Gelombang C — Showcase Klien Terbaik. Gerbangnya mencerminkan
   // `domain/showcase.canReadShowcase`, dan ia adalah **satu-satunya baris di
   // seluruh tabel ini yang memberi divisi Sales akses ke data klien**
