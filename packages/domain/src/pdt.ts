@@ -796,6 +796,10 @@ export async function commitUploadBatch(
   // docblock `ekstrakBarisTtProductAnalytics`, `@cdps/core` `pdt/fakta.ts`) — sisi TikTok
   // untuk tabel yang sebelumnya hanya diisi Shopee (`shopee_ams_produk`, modul KEDELAPAN).
   const berkasTtProductAnalytics = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_product_analytics');
+  // G2-01-SHOPEE-KESEHATAN-WRITER — `shopee_kesehatan` → `pdt_fact_kesehatan_penalti`
+  // (lihat docblock `ekstrakBarisKesehatanShopee`, `@cdps/core` `pdt/fakta.ts`) — modul
+  // ini terdaftar+terdeteksi sejak awal, tapi belum pernah punya penulis fakta sama sekali.
+  const berkasShopeeKesehatan = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_kesehatan');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -845,6 +849,7 @@ export async function commitUploadBatch(
         berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
         berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
         berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
+        berkasShopeeKesehatan,
       });
 
       await executors(tx).audit.insertAudit({
@@ -917,6 +922,7 @@ interface TulisFaktaModulTerparseInput {
   berkasTtAdsProduct: readonly BerkasTerparse[];
   berkasTtAdsLive: readonly BerkasTerparse[];
   berkasTtProductAnalytics: readonly BerkasTerparse[];
+  berkasShopeeKesehatan: readonly BerkasTerparse[];
 }
 
 /**
@@ -950,6 +956,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
     berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
     berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
+    berkasShopeeKesehatan,
   } = input;
 
   // G1-09 sub-langkah 2b-ii — baris fakta tertipe, `shopee_ads_live` → `pdt_fact_ads`
@@ -1323,6 +1330,27 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
             (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'net', ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.gmvDariKreator}, ${baris.gmvVideoPenjual},
              ${baris.gmvLivePenjual}, ${baris.pesananSku}, ${baris.impresi}, ${baris.klik}, ${baris.ctr}, ${baris.ctor})`;
+      }
+    }
+  }
+
+  // G2-01-SHOPEE-KESEHATAN-WRITER — `shopee_kesehatan` → `pdt_fact_kesehatan_penalti`
+  // (lihat docblock `ekstrakBarisKesehatanShopee`, `@cdps/core` `pdt/fakta.ts`). Nol
+  // identitas natural per-baris di sumber (sama alasan `pdt_fact_ads`) — replace-on-
+  // recommit: DELETE scope (client_platform_id+periode) lalu INSERT ulang seluruh
+  // baris dari batch yang sedang di-commit.
+  if (berkasShopeeKesehatan.length > 0) {
+    await tx`
+      delete from pdt_fact_kesehatan_penalti
+       where client_platform_id = ${clientPlatformId} and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasShopeeKesehatan) {
+      for (const baris of pdt.ekstrakBarisKesehatanShopee(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_kesehatan_penalti
+            (client_platform_id, periode, batch_id, parser_versi, poin, deskripsi, durasi)
+          values
+            (${clientPlatformId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
+             ${baris.poin}, ${baris.deskripsi}, ${baris.durasi})`;
       }
     }
   }
@@ -1886,6 +1914,7 @@ export async function reparsePdtBatch(
       berkasTtAdsProduct: terparse.filter((b) => b.modul.kode === 'tt_ads_product'),
       berkasTtAdsLive: terparse.filter((b) => b.modul.kode === 'tt_ads_live'),
       berkasTtProductAnalytics: terparse.filter((b) => b.modul.kode === 'tt_product_analytics'),
+      berkasShopeeKesehatan: terparse.filter((b) => b.modul.kode === 'shopee_kesehatan'),
     });
 
     await tx`update pdt_upload_batch set parser_versi = ${pdt.PDT_PARSER_VERSI} where id = ${batchId}`;
@@ -2214,9 +2243,12 @@ export async function hitungSkorTiktok(
 // `pdt_file`/`pdt_upload_batch` (modul `shopee_live` PERNAH terdeteksi untuk
 // batch mana pun yang periodenya mencakup periode ini, batch TIDAK ditolak).
 //
-// **TIGA dimensi TETAP `null`** (Open belum ditutup, TIDAK ditebak di sini):
-// `dibuat.repeatRate`/`.cancelRate` (`G2-01-SHOPEE-CANCEL-REPEAT-RATE`),
-// `produk` (`G2-01-KUADRAN-SKU`), `kesehatan` (`G2-01-SHOPEE-KESEHATAN-WRITER`).
+// **DUA dimensi TETAP `null`** (Open belum ditutup, TIDAK ditebak di sini):
+// `dibuat.repeatRate` (`G2-01-SHOPEE-CANCEL-REPEAT-RATE`, separuh — ditunda
+// sengaja, `cancelRate` sudah hidup) dan `produk` (`G2-01-KUADRAN-SKU`, methodology
+// Shopee beda total dari TikTok, belum ada modul sumber data). `kesehatan`
+// SEKARANG hidup (`G2-01-SHOPEE-KESEHATAN-WRITER`, DITUTUP) — lihat query
+// `kesehatanDiunggahRow`/`kesehatanPoinRow` di bawah.
 // ===========================================================================
 
 /**
@@ -2297,9 +2329,30 @@ export async function rakitInputSkorShopee(
     ? { diunggah: true, sesi: liveSesiRow.sesi }
     : null;
 
-  // Kesehatan Toko: SELALU null sampai G2-01-SHOPEE-KESEHATAN-WRITER dibangun
-  // (modul `shopee_kesehatan` terdaftar, nol penulis fakta).
-  const kesehatan: pdt.PdtSkorInputKesehatanShopee | null = null;
+  // Kesehatan Toko (G2-01-SHOPEE-KESEHATAN-WRITER) — `diunggah` dibaca dari
+  // `pdt_file`/`pdt_upload_batch` (pola SAMA `live` di atas): nol baris
+  // `pdt_fact_kesehatan_penalti` ambigu antara "modul tidak pernah diunggah"
+  // dan "diunggah, toko genuinely bersih" — dua kondisi yang `scoreKesehatanToko`
+  // (mesin lama) sengaja beda skornya (5 netral vs 10 bersih).
+  const [kesehatanDiunggahRow] = await sql<{ diunggah: boolean }[]>`
+    select exists (
+      select 1
+        from pdt_file f
+        join pdt_upload_batch b on b.id = f.batch_id
+       where b.client_platform_id = ${clientPlatformId}
+         and b.status <> 'ditolak'
+         and f.modul_kode = 'shopee_kesehatan'
+         and b.periode_mulai <= (${periodeAwalBulan}::date + interval '1 month' - interval '1 day')::date
+         and b.periode_selesai >= ${periodeAwalBulan}::date
+    ) as diunggah`;
+  const [kesehatanPoinRow] = await sql<{ poin_total: string }[]>`
+    select coalesce(sum(poin), 0) as poin_total
+      from pdt_fact_kesehatan_penalti
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date`;
+  const kesehatan: pdt.PdtSkorInputKesehatanShopee | null = kesehatanDiunggahRow.diunggah
+    ? { poinTotal: Number(kesehatanPoinRow.poin_total) }
+    : null;
 
   return { ads, dibuat, produk, live, kesehatan };
 }

@@ -1265,3 +1265,51 @@ export function ekstrakBarisTtProductAnalytics(
   }
   return hasil;
 }
+
+/**
+ * Satu baris `pdt_fact_kesehatan_penalti` mentah dari `shopee_kesehatan`,
+ * SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil
+ * yang melengkapi). Nol identitas natural — pemanggil replace-on-recommit,
+ * sama pola `pdt_fact_ads` (sku_id/content_id selalu null).
+ */
+export interface PdtBarisKesehatanShopee {
+  poin: number;
+  deskripsi: string;
+  durasi: string;
+}
+
+/**
+ * Ekstrak seluruh baris `shopee_kesehatan` (G2-01-SHOPEE-KESEHATAN-WRITER) —
+ * modul PALING sederhana di registry (`modules.ts`: "seluruh sheet hanya 3
+ * kolom", `barisHeaderHint: 1`, nol preamble) — satu baris = satu pelanggaran
+ * aktif. Cermin `report/shopee/metrik.ts` `parseKesehatan`: baris ber-`Poin
+ * Penalti` KOSONG DAN `Deskripsi` kosong dilewati (bukan baris data
+ * sungguhan — beda dari modul lain di berkas ini yang memakai SATU kolom
+ * identitas untuk filter, di sini dua kolom sekaligus karena `Poin Penalti`
+ * `0` yang genuinely valid tidak boleh disalahartikan "baris kosong").
+ * Sheet TANPA satu pun baris data (toko bersih, nol penalti) mengembalikan
+ * array kosong — pemanggil (`rakitInputSkorShopee`) yang membedakan "nol
+ * penalti" dari "modul tidak pernah diunggah" lewat `pdt_file`/`pdt_upload_batch`
+ * (pola sama `PdtSkorInputLiveShopee.diunggah`), bukan dari baris fakta.
+ */
+export function ekstrakBarisKesehatanShopee(aoa: readonly (readonly unknown[])[], barisHeader: number): PdtBarisKesehatanShopee[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iPoin = idx('Poin Penalti');
+  const iDeskripsi = idx('Deskripsi');
+  const iDurasi = idx('Durasi');
+
+  const hasil: PdtBarisKesehatanShopee[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const deskripsi = iDeskripsi === -1 ? '' : String(row?.[iDeskripsi] ?? '').trim();
+    const poinRaw = iPoin === -1 ? null : row?.[iPoin];
+    const poinKosong = poinRaw == null || String(poinRaw).trim() === '';
+    if (poinKosong && deskripsi === '') continue;
+    hasil.push({
+      poin: poinKosong ? 0 : parsePdtAngka(poinRaw),
+      deskripsi,
+      durasi: iDurasi === -1 ? '' : String(row?.[iDurasi] ?? '').trim(),
+    });
+  }
+  return hasil;
+}
