@@ -1,4 +1,6 @@
 {
+  "autoCompactEnabled": true,
+  "autoCompactWindow": 120000,
   "permissions": {
     "allow": [
       "Bash(git status*)",
@@ -23,7 +25,16 @@
       "Bash(cd web-internal && npm run build*)",
       "Bash(cd web-internal && npm run lint*)",
       "Bash(cd /home/user/AgencyAPP/web-internal && npm run build*)",
-      "Bash(cd /home/user/AgencyAPP/web-internal && npm run lint*)"
+      "Bash(cd /home/user/AgencyAPP/web-internal && npm run lint*)",
+      "Bash(npm install*)",
+      "Bash(npm test*)",
+      "Bash(npm run test*)",
+      "Bash(npm run typecheck*)",
+      "Bash(npm run db:rebuild*)",
+      "Bash(npx vitest*)",
+      "Bash(npx tsc*)",
+      "Bash(service postgresql start*)",
+      "Bash(su postgres -c*)"
     ]
   }
 }
