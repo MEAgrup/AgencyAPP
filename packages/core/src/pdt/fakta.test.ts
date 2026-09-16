@@ -68,97 +68,145 @@ describe('ekstrakBarisShopeeAdsLive', () => {
   });
 });
 
-const HEADER_TT_ADS_PRODUCT = ['ID Campaign', 'Nama kampanye', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor'];
+const HEADER_TT_ADS_PRODUCT = ['ID Campaign', 'Nama kampanye', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor', 'Impresi iklan produk', 'Jumlah klik iklan produk'];
 
-describe('ekstrakBarisTtAdsProduct (2026-09-16, TANPA sample asli — lihat docblock fakta.ts)', () => {
-  it('memetakan satu baris lengkap ke kampanyeId/biaya/pesananSku/gmv, roas DITURUNKAN gmv÷biaya', () => {
+describe('ekstrakBarisTtAdsProduct', () => {
+  it('memetakan satu baris lengkap ke kampanyeId/biaya/pesananSku/gmv/tayangan/klik, roas DITURUNKAN gmv÷biaya', () => {
     const aoa = [
       HEADER_TT_ADS_PRODUCT,
-      ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'avitaskin_official', '100000', '5', '20000', '400000'],
+      ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'avitaskin_official', '100000', '5', '20000', '400000', '10000', '150'],
     ];
     expect(ekstrakBarisTtAdsProduct(aoa, 1)).toEqual([
-      { kampanyeId: 'CAM-1', biaya: 100000, pesananSku: 5, gmv: 400000, roas: 4 },
+      { kampanyeId: 'CAM-1', biaya: 100000, pesananSku: 5, gmv: 400000, roas: 4, tayangan: 10000, klik: 150 },
     ]);
   });
 
   it('konvensi Ads Manager (titik desimal, koma ribuan)', () => {
-    const aoa = [HEADER_TT_ADS_PRODUCT, ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '150000.5', '20', '7500', '2,000,000']];
+    const aoa = [HEADER_TT_ADS_PRODUCT, ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '150000.5', '20', '7500', '2,000,000', '1,000', '20']];
     const [baris] = ekstrakBarisTtAdsProduct(aoa, 1);
     expect(baris.biaya).toBe(150000.5);
     expect(baris.gmv).toBe(2000000);
+    expect(baris.tayangan).toBe(1000);
   });
 
   it('baris dengan ID Campaign kosong dilewati', () => {
     const aoa = [
       HEADER_TT_ADS_PRODUCT,
-      ['', '', '', '', '', '', '', '', ''],
-      ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '100000', '5', '20000', '400000'],
+      ['', '', '', '', '', '', '', '', '', '', ''],
+      ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '100000', '5', '20000', '400000', '10000', '150'],
     ];
     expect(ekstrakBarisTtAdsProduct(aoa, 1)).toHaveLength(1);
   });
 
-  it('gmv kosong ⇒ roas null (tidak bisa diturunkan tanpa gmv)', () => {
+  it('gmv/tayangan/klik kosong ⇒ null (tidak bisa diturunkan tanpa gmv, kolom tidak ada)', () => {
     const headerTanpaGmv = ['ID Campaign', 'Biaya', 'Pesanan SKU'];
     const aoa = [headerTanpaGmv, ['CAM-1', '100000', '5']];
     expect(ekstrakBarisTtAdsProduct(aoa, 1)).toEqual([
-      { kampanyeId: 'CAM-1', biaya: 100000, pesananSku: 5, gmv: null, roas: null },
+      { kampanyeId: 'CAM-1', biaya: 100000, pesananSku: 5, gmv: null, roas: null, tayangan: null, klik: null },
     ]);
   });
 
   it('biaya 0 ⇒ roas null (bukan pembagian oleh nol yang mengarang Infinity)', () => {
-    const aoa = [HEADER_TT_ADS_PRODUCT, ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '0', '0', '0', '400000']];
+    const aoa = [HEADER_TT_ADS_PRODUCT, ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '0', '0', '0', '400000', '0', '0']];
     expect(ekstrakBarisTtAdsProduct(aoa, 1)[0].roas).toBeNull();
   });
 
   it('ID produk/ID video/Akun TikTok/Biaya per pesanan TIDAK diekstrak (nol kolom skema pdt_fact_ads)', () => {
-    const aoa = [HEADER_TT_ADS_PRODUCT, ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '100000', '5', '20000', '400000']];
+    const aoa = [HEADER_TT_ADS_PRODUCT, ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '100000', '5', '20000', '400000', '10000', '150']];
     const [baris] = ekstrakBarisTtAdsProduct(aoa, 1);
     expect(baris).not.toHaveProperty('platformProductId');
     expect(baris).not.toHaveProperty('platformContentId');
-    expect(Object.keys(baris).sort()).toEqual(['biaya', 'gmv', 'kampanyeId', 'pesananSku', 'roas']);
+    expect(Object.keys(baris).sort()).toEqual(['biaya', 'gmv', 'kampanyeId', 'klik', 'pesananSku', 'roas', 'tayangan']);
+  });
+
+  // Diverifikasi 2026-09-16 (`G1-09-2BII-TTADS-SAMPLE` DITUTUP) terhadap sample
+  // ekspor asli klien (Avitaskin, "creative data for product campaigns", Juli
+  // 2026) — header 26 kolom A–Z persis, `Biaya`/`Pendapatan kotor` adalah
+  // STRING desimal-titik TANPA pemisah ribuan (bukan sel numerik Excel), dan
+  // `ID produk`/`ID video` bernilai literal `"N/A"` untuk baris "Kartu produk"
+  // tanpa video (dilewati fungsi ini karena tidak diekstrak sama sekali).
+  it('sample asli Avitaskin Juli 2026 (baris kartu produk, ID produk/ID video = "N/A")', () => {
+    const headerAsli = [
+      'Nama kampanye', 'ID Campaign', 'ID produk', 'Jenis materi iklan', 'Judul video', 'ID video',
+      'Akun TikTok', 'Waktu posting', 'Status', 'Status sekunder penjelajahan', 'Jenis otorisasi',
+      'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor', 'Impresi iklan produk',
+      'Jumlah klik iklan produk', 'Tingkat klik iklan produk', 'Rasio konversi iklan',
+      'Rasio tayang video iklan 2 detik', 'Rasio tayang video iklan 6 detik', 'Rasio tayang video iklan 25%',
+      'Rasio tayang video iklan 50%', 'Rasio tayang video iklan 75%', 'Rasio tayang video iklan 100%', 'Mata uang',
+    ];
+    const baris = [
+      'MEA - [ BUNDLING ] Avitaskin Glow & Brightening Series Face Wash, Day Cream dan Night Cream',
+      '1868208924571729', '1731432176719595405', 'Kartu produk', '-', 'N/A', '-', '-', 'Menjelajahi',
+      'Menjelajahi', 'N/A', '1407834.000', 20, '70391.700', '3980319.527', 105135, 1349, 0.0128, 0.0044,
+      '-', '-', '-', '-', '-', '-', 'IDR',
+    ];
+    const [hasil] = ekstrakBarisTtAdsProduct([headerAsli, baris], 1);
+    expect(hasil.kampanyeId).toBe('1868208924571729');
+    expect(hasil.biaya).toBe(1407834);
+    expect(hasil.pesananSku).toBe(20);
+    expect(hasil.gmv).toBe(3980319.527);
+    expect(hasil.tayangan).toBe(105135);
+    expect(hasil.klik).toBe(1349);
+    expect(hasil.roas).toBeCloseTo(2.827264810339855, 9);
   });
 });
 
-const HEADER_TT_ADS_LIVE = ['Nama LIVE', 'ID Campaign', 'Nama kampanye', 'Biaya', 'Pesanan SKU', 'ROI', 'Pendapatan kotor'];
+const HEADER_TT_ADS_LIVE = ['Nama LIVE', 'ID Campaign', 'Nama kampanye', 'Biaya', 'Pesanan SKU', 'ROI (Toko saat ini)', 'Pendapatan kotor', 'Tayangan LIVE'];
 
-describe('ekstrakBarisTtAdsLive (2026-09-16, TANPA sample asli — lihat docblock fakta.ts)', () => {
-  it('memetakan satu baris lengkap ke kampanyeId/biaya/pesananSku/gmv, roas DITURUNKAN gmv÷biaya (kolom ROI mentah diabaikan)', () => {
+describe('ekstrakBarisTtAdsLive', () => {
+  it('memetakan satu baris lengkap ke kampanyeId/biaya/pesananSku/gmv/tayangan, roas DITURUNKAN gmv÷biaya (kolom ROI mentah diabaikan)', () => {
     const aoa = [
       HEADER_TT_ADS_LIVE,
-      ['LIVE Kampanye A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '3.16', '3160000'],
+      ['LIVE Kampanye A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '3.16', '3160000', '50000'],
     ];
     expect(ekstrakBarisTtAdsLive(aoa, 1)).toEqual([
-      { kampanyeId: 'CAM-2', biaya: 1000000, pesananSku: 10, gmv: 3160000, roas: 3.16 },
+      { kampanyeId: 'CAM-2', biaya: 1000000, pesananSku: 10, gmv: 3160000, roas: 3.16, tayangan: 50000 },
     ]);
   });
 
   it('kolom ROI mentah TIDAK dipakai walau berbeda dari roas turunan', () => {
     // ROI mentah '99' sengaja tidak sama dengan gmv÷biaya (3160000/1000000 = 3.16) — roas harus 3.16, bukan 99.
-    const aoa = [HEADER_TT_ADS_LIVE, ['LIVE A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '99', '3160000']];
+    const aoa = [HEADER_TT_ADS_LIVE, ['LIVE A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '99', '3160000', '50000']];
     expect(ekstrakBarisTtAdsLive(aoa, 1)[0].roas).toBe(3.16);
   });
 
   it('baris dengan ID Campaign kosong dilewati', () => {
     const aoa = [
       HEADER_TT_ADS_LIVE,
-      ['', '', '', '', '', '', ''],
-      ['LIVE A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '3.16', '3160000'],
+      ['', '', '', '', '', '', '', ''],
+      ['LIVE A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '3.16', '3160000', '50000'],
     ];
     expect(ekstrakBarisTtAdsLive(aoa, 1)).toHaveLength(1);
   });
 
   it('Nama LIVE TIDAK diekstrak (nol kolom skema pdt_fact_ads)', () => {
-    const aoa = [HEADER_TT_ADS_LIVE, ['LIVE A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '3.16', '3160000']];
+    const aoa = [HEADER_TT_ADS_LIVE, ['LIVE A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '3.16', '3160000', '50000']];
     const [baris] = ekstrakBarisTtAdsLive(aoa, 1);
-    expect(Object.keys(baris).sort()).toEqual(['biaya', 'gmv', 'kampanyeId', 'pesananSku', 'roas']);
+    expect(Object.keys(baris).sort()).toEqual(['biaya', 'gmv', 'kampanyeId', 'pesananSku', 'roas', 'tayangan']);
   });
 
-  it('gmv kosong ⇒ roas null', () => {
+  it('gmv/tayangan kosong ⇒ null', () => {
     const headerTanpaGmv = ['ID Campaign', 'Biaya', 'Pesanan SKU'];
     const aoa = [headerTanpaGmv, ['CAM-2', '1000000', '10']];
     expect(ekstrakBarisTtAdsLive(aoa, 1)).toEqual([
-      { kampanyeId: 'CAM-2', biaya: 1000000, pesananSku: 10, gmv: null, roas: null },
+      { kampanyeId: 'CAM-2', biaya: 1000000, pesananSku: 10, gmv: null, roas: null, tayangan: null },
     ]);
+  });
+
+  // Sample asli klien (Avitaskin, "livestream data for live campaigns", Juli
+  // 2026, `G1-09-2BII-TTADS-SAMPLE` DITUTUP) mengonfirmasi HEADER (19 kolom
+  // A–S, termasuk nama kolom 'ID Campaign' dan 'ROI (Toko saat ini)' — BUKAN
+  // 'ROI' polos) tapi NOL baris data (toko ini nol kampanye LIVE aktif
+  // periode itu) — jadi hanya deteksi/whitelist yang terverifikasi empiris di
+  // sini, bukan format angka baris nyata (lihat docblock fungsi ini).
+  it('header sample asli (19 kolom A–S) tanpa baris data ⇒ hasil kosong (bukan error)', () => {
+    const headerAsli = [
+      'Nama LIVE', 'Waktu peluncuran', 'Status', 'Nama kampanye', 'ID Campaign', 'Biaya', 'Biaya Bersih',
+      'Pesanan SKU', 'Pesanan SKU (Toko saat ini)', 'Biaya per pesanan (Toko saat ini)', 'Pendapatan kotor',
+      'Penghasilan bruto (Toko saat ini)', 'ROI (Toko saat ini)', 'Tayangan LIVE', 'Biaya per tayangan LIVE',
+      'Tayangan LIVE 10 detik', 'Biaya per tayangan LIVE 10 detik', 'Pengikut saat LIVE', 'Mata uang',
+    ];
+    expect(ekstrakBarisTtAdsLive([headerAsli], 1)).toEqual([]);
   });
 });
 

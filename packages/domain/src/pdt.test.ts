@@ -1779,22 +1779,30 @@ async function loadFactContent(clientPlatformId: number): Promise<FactContentRow
 // SELALU null. Tidak membawa preamble/periode sendiri (sama pola `tt_live`),
 // dipasangkan dengan `ttVideoBerkasDenganPeriode` untuk identitas+periode.
 // ---------------------------------------------------------------------------
-const HEADER_TT_ADS_PRODUCT = ['ID Campaign', 'Nama kampanye', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor'];
+// 'Impresi iklan produk'/'Jumlah klik iklan produk' ditambahkan 2026-09-16
+// (`G1-09-2BII-TTADS-SAMPLE` DITUTUP) — SEKARANG bagian `kolomDipanen`
+// (`@cdps/core` `pdt/modules.ts`), jadi WAJIB ada di fixture supaya
+// `validasiKolomWajib` tidak menolak berkas ini (lihat komentar di sana).
+const HEADER_TT_ADS_PRODUCT = ['ID Campaign', 'Nama kampanye', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor', 'Impresi iklan produk', 'Jumlah klik iklan produk'];
 
 function ttAdsProductBerkas(nama: string, baris: readonly [string, string, string, string][]): PdtPreviewBerkasInput {
   const aoa: unknown[][] = [
     HEADER_TT_ADS_PRODUCT,
-    ...baris.map(([kampanyeId, biaya, pesananSku, gmv]) => [kampanyeId, 'Kampanye A', 'PRD-1', 'VID-1', 'akun', biaya, pesananSku, '0', gmv]),
+    ...baris.map(([kampanyeId, biaya, pesananSku, gmv]) => [kampanyeId, 'Kampanye A', 'PRD-1', 'VID-1', 'akun', biaya, pesananSku, '0', gmv, '0', '0']),
   ];
   return { nama, sha256: 'sha-tt-ads-product', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_ads_product', ambiguous: false, matches: ['tt_ads_product'] };
 }
 
-const HEADER_TT_ADS_LIVE = ['Nama LIVE', 'ID Campaign', 'Nama kampanye', 'Biaya', 'Pesanan SKU', 'ROI', 'Pendapatan kotor'];
+// 'ROI' (nama SALAH, dugaan awal) DIGANTI 'Tayangan LIVE' 2026-09-16
+// (`G1-09-2BII-TTADS-SAMPLE` DITUTUP) — lihat komentar `modules.ts`: kolom
+// asli bernama `ROI (Toko saat ini)`, dan `ROI` tidak pernah diekstrak, jadi
+// dikeluarkan dari `kolomDipanen`; `Tayangan LIVE` SEKARANG wajib (diekstrak).
+const HEADER_TT_ADS_LIVE = ['Nama LIVE', 'ID Campaign', 'Nama kampanye', 'Biaya', 'Pesanan SKU', 'Pendapatan kotor', 'Tayangan LIVE'];
 
 function ttAdsLiveBerkas(nama: string, baris: readonly [string, string, string, string][]): PdtPreviewBerkasInput {
   const aoa: unknown[][] = [
     HEADER_TT_ADS_LIVE,
-    ...baris.map(([kampanyeId, biaya, pesananSku, gmv]) => ['LIVE A', kampanyeId, 'Kampanye Live A', biaya, pesananSku, '99', gmv]),
+    ...baris.map(([kampanyeId, biaya, pesananSku, gmv]) => ['LIVE A', kampanyeId, 'Kampanye Live A', biaya, pesananSku, gmv, '0']),
   ];
   return { nama, sha256: 'sha-tt-ads-live', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_ads_live', ambiguous: false, matches: ['tt_ads_live'] };
 }
@@ -1812,8 +1820,11 @@ describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_product → pd
     const rows = await loadFactAds(cpId);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
+      // tayangan/klik: 0 (BUKAN null) — fixture `ttAdsProductBerkas` SEKARANG
+      // selalu membawa 'Impresi iklan produk'/'Jumlah klik iklan produk' (wajib
+      // sejak `G1-09-2BII-TTADS-SAMPLE`), default '0' untuk baris di luar fokus.
       sumber: 'tt_ads_product', kampanye_id: 'CAM-1', platform_product_id: null, sku_id: null, content_id: null,
-      batch_id: persiapan.batchId, parser_versi: 1, tayangan: null, klik: null, pesanan_sku: 5,
+      batch_id: persiapan.batchId, parser_versi: 1, tayangan: 0, klik: 0, pesanan_sku: 5,
     });
     expect(Number(rows[0].biaya)).toBe(100000);
     expect(Number(rows[0].gmv)).toBe(400000);
@@ -1841,6 +1852,27 @@ describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_product → pd
     expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
     expect(Number(rows[0].biaya)).toBe(150000);
   });
+
+  // `G1-09-2BII-TTADS-SAMPLE` DITUTUP 2026-09-16 — `tayangan`/`klik` diisi dari
+  // 'Impresi iklan produk'/'Jumlah klik iklan produk' (kolom nyata, diverifikasi
+  // sample asli Avitaskin — lihat docblock `ekstrakBarisTtAdsProduct`, `@cdps/core`).
+  it('tayangan/klik terisi dari Impresi iklan produk/Jumlah klik iklan produk', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const aoa: unknown[][] = [
+      HEADER_TT_ADS_PRODUCT,
+      ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '100000', '5', '20000', '400000', '10000', '150'],
+    ];
+    const berkas: PdtPreviewBerkasInput[] = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      { nama: 'ads-product.xlsx', sha256: 'sha-tt-ads-product-2', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_ads_product', ambiguous: false, matches: ['tt_ads_product'] },
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const [row] = await loadFactAds(cpId);
+    expect(row.tayangan).toBe(10000);
+    expect(row.klik).toBe(150);
+  });
 });
 
 describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_live → pdt_fact_ads', () => {
@@ -1856,8 +1888,11 @@ describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_live → pdt_f
     const rows = await loadFactAds(cpId);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
+      // tayangan: 0 (BUKAN null) — fixture `ttAdsLiveBerkas` SEKARANG selalu
+      // membawa 'Tayangan LIVE' (wajib sejak `G1-09-2BII-TTADS-SAMPLE`),
+      // default '0'. `klik` TETAP null — modul ini tidak punya kolom klik.
       sumber: 'tt_ads_live', kampanye_id: 'CAM-2', sku_id: null, content_id: null,
-      batch_id: persiapan.batchId, tayangan: null, klik: null, pesanan_sku: 10,
+      batch_id: persiapan.batchId, tayangan: 0, klik: null, pesanan_sku: 10,
     });
     expect(Number(rows[0].biaya)).toBe(1000000);
     expect(Number(rows[0].gmv)).toBe(3160000);
@@ -1876,6 +1911,26 @@ describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_live → pdt_f
     await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     const rows = await loadFactAds(cpId);
     expect(rows.map((r) => r.sumber).sort()).toEqual(['tt_ads_live', 'tt_ads_product']);
+  });
+
+  // `G1-09-2BII-TTADS-SAMPLE` DITUTUP 2026-09-16 — `tayangan` diisi dari
+  // 'Tayangan LIVE' (`klik` TETAP null, modul ini tidak punya kolom klik).
+  it('tayangan terisi dari Tayangan LIVE, klik tetap null', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const aoa: unknown[][] = [
+      HEADER_TT_ADS_LIVE,
+      ['LIVE A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '3160000', '50000'],
+    ];
+    const berkas: PdtPreviewBerkasInput[] = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      { nama: 'ads-live.xlsx', sha256: 'sha-tt-ads-live-2', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_ads_live', ambiguous: false, matches: ['tt_ads_live'] },
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const [row] = await loadFactAds(cpId);
+    expect(row.tayangan).toBe(50000);
+    expect(row.klik).toBeNull();
   });
 });
 
