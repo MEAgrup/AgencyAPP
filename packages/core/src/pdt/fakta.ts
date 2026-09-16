@@ -169,6 +169,35 @@
  * `pdt_fact_content` tidak punya slot judul). Angka: `parsePdtAngka(v)`
  * TANPA `raw` — konvensi Seller Center, sama seperti `tt_video` (berkas dari
  * dashboard Seller Center, bukan Ads Manager).
+ *
+ * **`tt_ads_product`/`tt_ads_live` → `pdt_fact_ads` (2026-09-16, keputusan
+ * pemilik via `AskUserQuestion` — dibangun KONSERVATIF, TANPA sample file
+ * asli, beda dari SETIAP modul `pdt_fact_ads` lain yang selalu mengutip
+ * sample nyata sebelum dibangun).** `roas` DITURUNKAN (`gmv ÷ biaya`,
+ * `null` bila `gmv` `null` atau `biaya` 0) untuk KEDUA modul — cermin PERSIS
+ * `report/metrik.ts` `adsReport()` legacy, yang menghitung `div(rev, biaya)`
+ * untuk sisi produk MAUPUN live, MENGABAIKAN kolom `ROI` mentah `tt_ads_live`
+ * meski kolom itu ada di whitelist (`PDT_KOLOM_DIPANEN.md` §1.9 menyebutnya
+ * "turunan", `tt_ads_product` malah TIDAK PUNYA kolom ROI/efektivitas sama
+ * sekali di whitelistnya — tidak ada rumus lain yang bisa diverifikasi).
+ * `sku_id`/`content_id` SELALU `null` — TIDAK dilakukan lookup FK ke
+ * `pdt_sku_master`/`pdt_fact_content` meski komentar skema migrasi G1-01
+ * menyiratkan `content_id` seharusnya diisi via `ID video`: nol kode PDT
+ * manapun pernah melakukan lookup FK semacam itu untuk `pdt_fact_ads`, dan
+ * kesalahan SERUPA sudah pernah terjadi (`shopee_ads_cpc` awalnya disangka
+ * bisa lookup `sku_id` dari `Kode Produk`, TERNYATA salah setelah sample
+ * asli diperiksa — `G1-09-2BII-ADS-CPC-SKU`, `docs/DECISIONS.md`). Pola SAMA
+ * `shopee_ads_search`/`shopee_ads_live`: raw string identitas dibaca untuk
+ * kunci baris saja (`ID Campaign`), TIDAK ditulis ke kolom identitas produk
+ * apa pun. `Akun TikTok`/`Nama LIVE` (konsumen "label kreatif"/"pdt_fact_ads
+ * label", `PDT_KOLOM_DIPANEN.md` §1.8/§1.9) dan `Biaya per pesanan` (turunan
+ * CPA) TIDAK diekstrak — tidak ada kolom skema `pdt_fact_ads` untuk
+ * ketiganya (pola sama `shopee_ads_cpc`'s ACOS, dicatat bukan hilang diam-
+ * diam). Angka: `parsePdtAngka(v, true)` — konvensi Ads Manager, sesuai
+ * komentar eksplisit `report/metrik.ts` untuk file jenis ini persis
+ * ("Ads Manager sends plain floats... hence raw=true"). Asumsi ini dicatat
+ * `docs/DECISIONS.md` — mudah dikoreksi begitu sample asli muncul (kolom
+ * sudah null-aware, nol breaking change struktural).
  */
 import { WIB_OFFSET_HOURS } from '../tz';
 import { parsePdtAngka } from './angka';
@@ -217,6 +246,102 @@ export function ekstrakBarisShopeeAdsLive(
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
       roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+    });
+  }
+  return hasil;
+}
+
+const roasTurunan = (gmv: number | null, biaya: number): number | null =>
+  gmv == null || biaya === 0 ? null : gmv / biaya;
+
+/** Satu baris `pdt_fact_ads` mentah dari `tt_ads_product`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi`. `roas` DITURUNKAN (lihat docblock berkas) — modul ini TIDAK PUNYA kolom ROI/efektivitas mentah sama sekali. */
+export interface PdtBarisAdsTtProduct {
+  kampanyeId: string;
+  biaya: number;
+  pesananSku: number | null;
+  gmv: number | null;
+  roas: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `tt_ads_product` (Rule 8 whitelist `modules.ts`:
+ * `['ID Campaign', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan
+ * SKU', 'Biaya per pesanan', 'Pendapatan kotor']`). Hanya `ID Campaign`
+ * (kampanye_id), `Biaya`, `Pesanan SKU`, `Pendapatan kotor` (gmv) yang punya
+ * kolom skema `pdt_fact_ads` — `ID produk`/`ID video`/`Akun TikTok`/`Biaya
+ * per pesanan` TIDAK diekstrak (lihat docblock berkas untuk alasan lengkap
+ * per kolom). Baris ber-`ID Campaign` kosong dilewati (bukan baris data
+ * sungguhan).
+ */
+export function ekstrakBarisTtAdsProduct(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisAdsTtProduct[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iKampanye = idx('ID Campaign');
+  const iPesanan = idx('Pesanan SKU');
+  const iGmv = idx('Pendapatan kotor');
+  const iBiaya = idx('Biaya');
+
+  const hasil: PdtBarisAdsTtProduct[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const kampanyeId = iKampanye === -1 ? '' : String(row?.[iKampanye] ?? '').trim();
+    if (kampanyeId === '') continue;
+    const biaya = iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true);
+    const gmv = iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true);
+    hasil.push({
+      kampanyeId,
+      biaya,
+      pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
+      gmv,
+      roas: roasTurunan(gmv, biaya),
+    });
+  }
+  return hasil;
+}
+
+/** Satu baris `pdt_fact_ads` mentah dari `tt_ads_live`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi`. `roas` DITURUNKAN (lihat docblock berkas) — kolom `ROI` mentah SENGAJA diabaikan, cermin `report/metrik.ts` legacy. */
+export interface PdtBarisAdsTtLive {
+  kampanyeId: string;
+  biaya: number;
+  pesananSku: number | null;
+  gmv: number | null;
+  roas: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `tt_ads_live` (Rule 8 whitelist `modules.ts`:
+ * `['Nama LIVE', 'ID Campaign', 'Biaya', 'Pesanan SKU', 'ROI', 'Pendapatan
+ * kotor']`). Hanya `ID Campaign` (kampanye_id), `Biaya`, `Pesanan SKU`,
+ * `Pendapatan kotor` (gmv) yang punya kolom skema `pdt_fact_ads` — `Nama
+ * LIVE` TIDAK diekstrak (label, bukan kolom skema), `ROI` mentah TIDAK
+ * dipakai (lihat docblock berkas — `roas` diturunkan `gmv÷biaya`, bukan
+ * dibaca langsung). Baris ber-`ID Campaign` kosong dilewati.
+ */
+export function ekstrakBarisTtAdsLive(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisAdsTtLive[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iKampanye = idx('ID Campaign');
+  const iPesanan = idx('Pesanan SKU');
+  const iGmv = idx('Pendapatan kotor');
+  const iBiaya = idx('Biaya');
+
+  const hasil: PdtBarisAdsTtLive[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const kampanyeId = iKampanye === -1 ? '' : String(row?.[iKampanye] ?? '').trim();
+    if (kampanyeId === '') continue;
+    const biaya = iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true);
+    const gmv = iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true);
+    hasil.push({
+      kampanyeId,
+      biaya,
+      pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
+      gmv,
+      roas: roasTurunan(gmv, biaya),
     });
   }
   return hasil;

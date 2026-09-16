@@ -1128,6 +1128,31 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > yang digerbang CI) bersih; `npm run build` `web-internal` sukses. **Sisa: TUJUH bagian laporan
 > lain** (iklan, produk, afiliasi, tokopedia, ads_manager, tahap, insight) TETAP di luar cakupan.
 
+> **Status 2026-09-16 (lanjutan) — `tt_ads_product`/`tt_ads_live` → `pdt_fact_ads` AKHIRNYA punya
+> penulis fakta, dibangun KONSERVATIF TANPA sample file asli.** `docs/DECISIONS.md` (cari
+> "tt_ads_product/tt_ads_live") untuk alasan lengkap dan gap yang ditemukan. Ringkas: kedua modul
+> terdaftar sbg parser (`PDT_MODULES`) sejak G1-01 tapi NOL baris pernah ditulis — root cause yang
+> memblokir bagian laporan "iklan" (asimetri kebalikan "video": Shopee lengkap, TikTok nol) DAN
+> "ads_manager". `ekstrakBarisTtAdsProduct`/`ekstrakBarisTtAdsLive` (`@cdps/core` `pdt/fakta.ts`)
+> HANYA mengekstrak `ID Campaign`→`kampanye_id`, `Biaya`, `Pesanan SKU`, `Pendapatan kotor`→`gmv`
+> (kolom skema nyata) — `roas` DITURUNKAN `gmv÷biaya` (BUKAN dibaca dari kolom `ROI` mentah
+> `tt_ads_live`, cermin `report/metrik.ts` legacy yang juga mengabaikannya), `sku_id`/`content_id`
+> SELALU `null` (nol lookup FK ke `pdt_sku_master`/`pdt_fact_content` — belum ada sample asli untuk
+> memverifikasi format `ID produk`/`ID video`, menghindari mengulang kesalahan
+> `G1-09-2BII-ADS-CPC-SKU`). `rakitInputSkorTiktok`'s dimensi `ads` (`packages/domain/src/pdt.ts`)
+> NOL diubah — query itu SUDAH benar sejak ditulis sesi 34, cuma menunggu jalur data; kini otomatis
+> terisi begitu klien TikTok upload file Ads Manager asli. **Nol migrasi baru.** Diverifikasi (DB
+> lokal rebuild bersih, 251 migrasi): `@cdps/core` — 11 tes baru extractor; `@cdps/domain` — 5 tes
+> baru `commitUploadBatch` (satu baris per kampanye, replace-on-recommit, roas diturunkan bukan ROI
+> mentah, dua sumber tidak saling menimpa); typecheck bersih `core`/`domain`. **Open baru
+> (belum ada tiket sebelumnya):** `G1-09-2BII-TTADS-SAMPLE` — asumsi roas-diturunkan/sku_id-null/
+> konvensi Ads Manager raw=true BELUM diverifikasi terhadap sample asli TikTok Ads Manager (Product
+> +Live campaigns); mudah dikoreksi begitu sample muncul (kolom sudah null-aware, nol breaking
+> change struktural), tapi harus diverifikasi sebelum modul ini dianggap SELESAI seperti modul
+> `pdt_fact_ads` lain. **Bagian laporan "iklan" MASIH belum dibangun** — writer ini prasyaratnya,
+> bukan section itu sendiri; sisa ENAM bagian laporan lain (iklan, produk, afiliasi, tokopedia,
+> ads_manager, tahap, insight) TETAP di luar cakupan.
+
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**
