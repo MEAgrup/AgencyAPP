@@ -260,13 +260,20 @@ async function evaluateStoreProducts(
 
     if (berubah) {
       const batchKeyDicatat = hasil.lapisGagal === 4 || hasil.verdict === 'lolos' ? coverage.batchKey : null;
+      // PX-M3-08 opsi B: snapshot volume yang MENDASARI baris verdict ini,
+      // disalin dari px_sku_volume saat ditulis — permanen (kolom nullable
+      // di tabel append-only), terpisah dari retensi 90-hari file ZIP
+      // mentah di bawah. Menutup gap "klaim kelayakan tanpa riwayat" untuk
+      // sengketa yang muncul setelah file mentahnya sendiri sudah dipurge.
       await tx`
         insert into px_sku_eligibility
           (client_platform_id, platform_product_id, versi_policy, verdict, lapis_gagal,
-           level2_category, price_segment, coverage_snapshot_batch_key)
+           level2_category, price_segment, coverage_snapshot_batch_key,
+           gmv_30d, jendela_mulai, jendela_selesai, batch_ids)
         values
           (${clientPlatformId}, ${v.platform_product_id}, ${policy.versi}, ${hasil.verdict}, ${hasil.lapisGagal},
-           ${hasil.levelCategory}, ${hasil.priceSegment}, ${batchKeyDicatat})`;
+           ${hasil.levelCategory}, ${hasil.priceSegment}, ${batchKeyDicatat},
+           ${v.gmv_30d}, ${v.jendela_mulai}::date, ${v.jendela_selesai}::date, ${v.batch_ids})`;
     }
 
     if (hasil.verdict === 'lolos') {
