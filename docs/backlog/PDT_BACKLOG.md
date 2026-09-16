@@ -1109,6 +1109,25 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > TETAP di luar cakupan — masing-masing punya keterbatasannya sendiri, dicatat di `DECISIONS.md`
 > untuk rujukan sesi berikutnya.
 
+> **Status 2026-09-16 (lanjutan) — bagian laporan "video" (Video/Konten) DIBANGUN, TikTok-only.**
+> `docs/DECISIONS.md` (cari "bagian laporan \"video\"") untuk alasan lengkap. Ringkas:
+> `pdt_fact_content` jenis `'video'` — `tt_video` sudah punya penulis fakta (G1-09, `vv`/`likes`/
+> `dibagikan`/`klik_produk`/`gmv` terisi), TAPI `shopee_video` MASIH cuma modul parser terdaftar
+> (`PDT_MODULES`) — NOL baris pernah ditulis, beda sifat dari "kanal": bukan cakupan parsial,
+> genuinely KOSONG PERMANEN sampai ada yang membangun writer-nya. `pdt.bacaVideo` TETAP SATU query
+> platform-agnostic (sama pola `bacaLive`) — Shopee otomatis `null` karena nol baris nyata di
+> produksi, BUKAN filter platform eksplisit di kode (dibuktikan lewat tes baris mentah). SELURUH
+> baris (toko+afiliasi) diikutkan TANPA filter `is_akun_toko` (cermin dimensi skor Video, beda
+> dimensi skor LIVE). `komentar`/`pengikut_baru`/`produk_dilihat` ADA di skema tapi tidak pernah
+> diisi `tt_video` — TIDAK diikutkan (aturan rumah #7). Whole-object `null` saat nol baris video
+> (cermin Rule 12), BUKAN `total: 0`; halaman `web-internal` membedakan pesan lewat
+> `laporan.platform` — Shopee catatan "belum didukung", TikTok sembunyikan seksi seluruhnya.
+> Diverifikasi (DB lokal rebuild bersih, 251 migrasi — nol migrasi baru): `@cdps/core` 1349/1349,
+> `@cdps/domain` 2733/2733 (1 skip, nol gagal), `@cdps/db` 107/107, `@cdps/api` 636/638 (2 skip);
+> typecheck bersih `core`/`domain`/`api`/`web-internal`, lint `@cdps/api` (satu-satunya workspace
+> yang digerbang CI) bersih; `npm run build` `web-internal` sukses. **Sisa: TUJUH bagian laporan
+> lain** (iklan, produk, afiliasi, tokopedia, ads_manager, tahap, insight) TETAP di luar cakupan.
+
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**

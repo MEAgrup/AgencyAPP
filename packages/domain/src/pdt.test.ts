@@ -3570,6 +3570,87 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "live" (2026-09-16)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// rakitLaporanTiktok/Shopee — bagian "video" (G2-01 lanjutan, keputusan
+// pemilik via `AskUserQuestion` 2026-09-16, KEEMPAT: TikTok-only). SATU
+// query dipakai kedua platform (`pdt.bacaVideo` di domain) — platform-
+// agnostic, TAPI Shopee di dunia nyata SELALU `null` karena `shopee_video`
+// nol penulis fakta ke `pdt_fact_content` (bukan filter platform eksplisit
+// di query). Tes Shopee di bawah insert baris MENTAH langsung (bypass
+// `commitUploadBatch`, tidak ada jalur nyata yang menulisnya hari ini) —
+// membuktikan query TIDAK diam-diam menyaring platform, murni nol baris
+// di produksi yang membuat Shopee selalu kosong.
+// ---------------------------------------------------------------------------
+describeDb('rakitLaporanTiktok/Shopee — bagian "video" (2026-09-16)', () => {
+  async function fixtureTiktok(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  async function fixtureShopee(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  it('TikTok: vv/likes/dibagikan/klik_produk/gmv terisi (tt_video, toko+afiliasi) ⇒ semua terhitung, gmvPerVideo+vvPerVideo terhitung', async () => {
+    const { cpId, batchId } = await fixtureTiktok();
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv, likes, dibagikan, klik_produk)
+      values (${cpId}, 'video-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'video', true, 3_000_000, 50_000, 2_000, 100, 400),
+             (${cpId}, 'video-2', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'video', false, 2_000_000, 50_000, 2_000, 100, 400)`;
+
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.video).toEqual({
+      total: 2, gmv: 5_000_000, vv: 100_000, likes: 4_000, dibagikan: 200, klikProduk: 800,
+      gmvPerVideo: 2_500_000, vvPerVideo: 50_000,
+    });
+  });
+
+  it('nol baris pdt_fact_content jenis video ⇒ video null (BUKAN total:0) — cermin realita Shopee hari ini (shopee_video nol penulis)', async () => {
+    const { cpId } = await fixtureTiktok();
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.video).toBeNull();
+  });
+
+  it('Shopee: baris mentah (bypass writer, membuktikan query platform-agnostic) ⇒ tetap terhitung persis sama seperti TikTok', async () => {
+    const { cpId, batchId } = await fixtureShopee();
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv)
+      values (${cpId}, 'video-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'video', true, 1_000_000, 20_000)`;
+
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.video).toEqual({
+      total: 1, gmv: 1_000_000, vv: 20_000, likes: null, dibagikan: null, klikProduk: null,
+      gmvPerVideo: 1_000_000, vvPerVideo: 20_000,
+    });
+  });
+
+  it('baris jenis live TIDAK ikut terhitung ke video', async () => {
+    const { cpId, batchId } = await fixtureTiktok();
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv)
+      values (${cpId}, 'live-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 9_999_999, 9_999)`;
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.video).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // bacaLaporanPdt (sesi 34 lanjutan, Flow B langkah 1) — gerbang izin
 // `canKirimLaporan` + pemilihan platform dari `client_platforms.platform`
 // (bukan parameter caller), pola sama `previewUploadBatch`/`commitUploadBatch`.

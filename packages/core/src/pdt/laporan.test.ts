@@ -6,10 +6,12 @@ import {
   bangunLaporanLive,
   bangunLaporanShopee,
   bangunLaporanTiktok,
+  bangunLaporanVideo,
   type PdtLaporanKanalInputShopee,
   type PdtLaporanKanalInputTiktok,
   type PdtLaporanKpiInput,
   type PdtLaporanLiveInput,
+  type PdtLaporanVideoInput,
 } from './laporan';
 import { computeSkorShopee, computeSkorTiktok, type PdtSkorInputShopee, type PdtSkorInputTiktok } from './skor';
 
@@ -53,6 +55,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000 },
       kanal: null,
       live: null,
+      video: null,
       skor,
       benchmarkVersi: 1,
     });
@@ -65,6 +68,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000, cvr: 0.02 },
       kanal: { gmvTotal: null, items: [], lengkap: true },
       live: null,
+      video: null,
       skor,
       benchmarkVersi: 1,
     });
@@ -74,7 +78,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
     const skor = computeSkorTiktok(INPUT_KOSONG_TIKTOK, BENCH_KOSONG);
     const hasil = bangunLaporanTiktok({
       clientPlatformId: 1, periodeAwalBulan: '2026-07-01', generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: null, kanal: null, live: null, skor, benchmarkVersi: 1,
+      kpi: null, kanal: null, live: null, video: null, skor, benchmarkVersi: 1,
     });
     expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
   });
@@ -90,6 +94,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500 },
       kanal: null,
       live: null,
+      video: null,
       skor,
     });
     expect(hasil).toEqual({
@@ -101,6 +106,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500, cvr: 0.02 },
       kanal: { gmvTotal: null, items: [], lengkap: false },
       live: null,
+      video: null,
       skor,
     });
     expect('benchmarkVersi' in hasil).toBe(false);
@@ -201,5 +207,41 @@ describe('bangunLaporanLive (G2-01 lanjutan — bagian "live", 2026-09-16, SATU 
   it('jam dibulatkan 2 desimal', () => {
     const input: PdtLaporanLiveInput = { sesi: 3, gmv: 1_000_000, vv: 100, jam: 7.12345 };
     expect(bangunLaporanLive(input)?.jam).toBe(7.12);
+  });
+});
+
+describe('bangunLaporanVideo (G2-01 lanjutan — bagian "video", 2026-09-16, TikTok-only)', () => {
+  it('input null ⇒ null (whole object, BUKAN objek ber-field null)', () => {
+    expect(bangunLaporanVideo(null)).toBeNull();
+  });
+
+  it('total 0 ⇒ null (nol baris video sama sekali di periode ini — TikTok tanpa upload video, ATAU Shopee yang memang nol penulis fakta)', () => {
+    const input: PdtLaporanVideoInput = { total: 0, gmv: 0, vv: 0, likes: 0, dibagikan: 0, klikProduk: 0 };
+    expect(bangunLaporanVideo(input)).toBeNull();
+  });
+
+  it('seluruh kolom terisi ⇒ gmvPerVideo + vvPerVideo keduanya terhitung', () => {
+    const input: PdtLaporanVideoInput = { total: 10, gmv: 5_000_000, vv: 100_000, likes: 4_000, dibagikan: 200, klikProduk: 800 };
+    expect(bangunLaporanVideo(input)).toEqual({
+      total: 10, gmv: 5_000_000, vv: 100_000, likes: 4_000, dibagikan: 200, klikProduk: 800,
+      gmvPerVideo: 500_000, vvPerVideo: 10_000,
+    });
+  });
+
+  it('gmv null (nol baris dengan gmv terisi) ⇒ gmvPerVideo ikut null, vvPerVideo TETAP terhitung independen', () => {
+    const input: PdtLaporanVideoInput = { total: 5, gmv: null, vv: 50_000, likes: null, dibagikan: null, klikProduk: null };
+    const hasil = bangunLaporanVideo(input);
+    expect(hasil?.gmvPerVideo).toBeNull();
+    expect(hasil?.vvPerVideo).toBe(10_000);
+    expect(hasil?.likes).toBeNull();
+    expect(hasil?.dibagikan).toBeNull();
+    expect(hasil?.klikProduk).toBeNull();
+  });
+
+  it('vv null (nol baris dengan vv terisi) ⇒ vvPerVideo null, gmvPerVideo TETAP terhitung independen', () => {
+    const input: PdtLaporanVideoInput = { total: 5, gmv: 2_500_000, vv: null, likes: 1_000, dibagikan: 50, klikProduk: 300 };
+    const hasil = bangunLaporanVideo(input);
+    expect(hasil?.vvPerVideo).toBeNull();
+    expect(hasil?.gmvPerVideo).toBe(500_000);
   });
 });

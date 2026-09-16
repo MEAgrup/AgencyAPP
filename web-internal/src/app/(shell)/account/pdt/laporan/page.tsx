@@ -3,10 +3,10 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + kanal + live + skor per toko klien, dibaca lewat `GET
- * /account/pdt/laporan`. v1 SENGAJA sempit (empat dari dua belas seksi mesin
- * laporan lama — lihat docblock `packages/core/src/pdt/laporan.ts`): belum
- * ada iklan/video/produk/afiliasi/dst.
+ * KPI ringkas + kanal + live + video + skor per toko klien, dibaca lewat
+ * `GET /account/pdt/laporan`. v1 SENGAJA sempit (lima dari dua belas seksi
+ * mesin laporan lama — lihat docblock `packages/core/src/pdt/laporan.ts`):
+ * belum ada iklan/produk/afiliasi/dst.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
  * via `AskUserQuestion`, 2026-09-16): TikTok lengkap (Live/Video/Kartu
@@ -22,6 +22,14 @@
  * kosong permanen di penulis `shopee_live`). Seksi ini disembunyikan
  * seluruhnya (bukan ditampilkan nol) saat `live` `null` — nol sesi live
  * sama sekali di periode ini.
+ *
+ * **Video/Konten** (keputusan pemilik via `AskUserQuestion` KEEMPAT,
+ * 2026-09-16): TikTok-only. `shopee_video` masih cuma modul parser
+ * terdaftar — nol penulis fakta ke `pdt_fact_content`, jadi `video` SELALU
+ * `null` untuk Shopee, PERMANEN (beda dari TikTok `null` yang berarti nol
+ * video di periode ini). Halaman membedakan keduanya lewat `laporan.platform`:
+ * Shopee menampilkan catatan "belum didukung", TikTok menyembunyikan seksi
+ * seluruhnya saat `null`.
  *
  * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
  * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
@@ -433,6 +441,46 @@ export default function LaporanPdtPage() {
               )}
             </section>
           )}
+
+          {laporan.video ? (
+            <section className="card">
+              <h2>Video / Konten</h2>
+              <p className="muted" style={{ fontSize: 12 }}>{laporan.video.total} video periode ini</p>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.video.gmv)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>GMV Video</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.video.vv)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Penonton (VV)</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.video.gmv_per_video)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>GMV / Video</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.video.likes)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Likes</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.video.dibagikan)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Dibagikan</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.video.klik_produk)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Klik Produk</p>
+                </div>
+              </div>
+            </section>
+          ) : laporan.platform !== 'tiktok' ? (
+            <section className="card">
+              <h2>Video / Konten</h2>
+              <p className="muted" style={{ fontSize: 12 }}>
+                Belum didukung untuk Shopee — modul parser Video Shopee belum punya penulis data ke PDT.
+              </p>
+            </section>
+          ) : null}
 
           <section className="card">
             <div className="cardHeader">

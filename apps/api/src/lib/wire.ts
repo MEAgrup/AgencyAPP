@@ -9226,6 +9226,18 @@ export interface PdtLaporanLiveWire {
   gmv_per_jam: number | null;
 }
 
+/** `null` = nol baris video di periode ini — SELALU `null` untuk Shopee hari ini (`shopee_video` nol penulis fakta, bukan `total: 0`) — lihat docblock `pdt.PdtLaporanVideo`, `@cdps/core`. */
+export interface PdtLaporanVideoWire {
+  total: number;
+  gmv: number | null;
+  vv: number | null;
+  likes: number | null;
+  dibagikan: number | null;
+  klik_produk: number | null;
+  gmv_per_video: number | null;
+  vv_per_video: number | null;
+}
+
 export interface PdtLaporanWire {
   schema: string;
   platform: string;
@@ -9235,6 +9247,7 @@ export interface PdtLaporanWire {
   kpi: PdtLaporanKpiWire;
   kanal: PdtLaporanKanalWire;
   live: PdtLaporanLiveWire | null;
+  video: PdtLaporanVideoWire | null;
   skor: PdtLaporanSkorWire;
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
@@ -9269,6 +9282,14 @@ function pdtLaporanLiveToWire(l: pdtCore.PdtLaporanLive | null): PdtLaporanLiveW
   return { sesi: l.sesi, gmv: l.gmv, vv: l.vv, jam: l.jam, gmv_per_sesi: l.gmvPerSesi, gmv_per_jam: l.gmvPerJam };
 }
 
+function pdtLaporanVideoToWire(v: pdtCore.PdtLaporanVideo | null): PdtLaporanVideoWire | null {
+  if (v == null) return null;
+  return {
+    total: v.total, gmv: v.gmv, vv: v.vv, likes: v.likes, dibagikan: v.dibagikan, klik_produk: v.klikProduk,
+    gmv_per_video: v.gmvPerVideo, vv_per_video: v.vvPerVideo,
+  };
+}
+
 export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanWire {
   return {
     schema: l.schema,
@@ -9279,6 +9300,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     kpi: { ...l.kpi },
     kanal: pdtLaporanKanalToWire(l.kanal),
     live: pdtLaporanLiveToWire(l.live),
+    video: pdtLaporanVideoToWire(l.video),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: l.benchmarkVersi,
   };
@@ -9294,6 +9316,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     kpi: { ...l.kpi },
     kanal: pdtLaporanKanalToWire(l.kanal),
     live: pdtLaporanLiveToWire(l.live),
+    video: pdtLaporanVideoToWire(l.video),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: null,
   };
