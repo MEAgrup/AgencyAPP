@@ -1909,10 +1909,12 @@ export async function reparsePdtBatch(
 // bentuk JSON `pdt_benchmark.nilai` SENGAJA belum diputuskan di sini (milik
 // G2-02, dicatat COMMENT ON TABLE pdt_benchmark, migrasi G1-01).
 //
-// Portfolio Produk SELALU `null`: `pdt_fact_sku_period.kuadran` belum punya
-// penulis modul manapun (Open `G2-01-KUADRAN-SKU`, docs/backlog/PDT_BACKLOG.md
-// §2) — `computeSkorTiktok` sudah mengeluarkannya dari pembobotan (Rule 12)
-// tanpa kode tambahan apa pun di sini.
+// Portfolio Produk (G2-01-KUADRAN-SKU langkah 2, DITUTUP) — `kuadran` sekarang
+// diklasifikasi+ditulis oleh `klasifikasiUlangKuadranSkuTiktok` (dipanggil
+// `hitungSkorTiktok` sebelum fungsi ini) lalu dibaca di sini via GROUP BY;
+// `null` HANYA bila nol baris `kuadran IS NOT NULL` (belum pernah diunggah/
+// diklasifikasi periode ini) — `computeSkorTiktok` mengeluarkannya dari
+// pembobotan (Rule 12) untuk kasus itu, sama seperti dimensi lain.
 //
 // Sumber tiap dimensi lain diverifikasi dari mesin LAMA yang SEDANG PRODUKSI
 // (`report/metrik.ts`/`report/skor.ts`, docs/DECISIONS.md), bukan ditebak:
@@ -2050,9 +2052,26 @@ export async function rakitInputSkorTiktok(
     gmvKotorToko: gmvTotalToko,
   };
 
-  // Portfolio Produk: lihat docblock berkas di atas — SELALU null sampai
-  // G2-01-KUADRAN-SKU membangun penulis `pdt_fact_sku_period.kuadran`.
-  const produk: pdt.PdtSkorInputProdukTiktok | null = null;
+  // Portfolio Produk (G2-01-KUADRAN-SKU langkah 2) — kolom `kuadran` dibaca
+  // APA ADANYA (pemanggil, `hitungSkorTiktok`, sudah menjalankan
+  // `klasifikasiUlangKuadranSkuTiktok` lebih dulu di transaksi/pemanggilan
+  // yang sama). `n=0` (nol baris `kuadran IS NOT NULL` — tt_product_analytics
+  // belum pernah diunggah periode ini, ATAU diunggah tapi belum diklasifikasi)
+  // ⇒ `null`, sama konvensi dimensi lain.
+  const [produkRow] = await sql<{ n: number; gmv_bintang_hg: string; gmv_bocor: string; gmv_aktif: string }[]>`
+    select
+      count(*) filter (where kuadran is not null)::int as n,
+      coalesce(sum(gmv) filter (where kuadran in ('bintang', 'hidden_gem')), 0) as gmv_bintang_hg,
+      coalesce(sum(gmv) filter (where kuadran = 'bocor_traffic'), 0) as gmv_bocor,
+      coalesce(sum(gmv) filter (where kuadran in ('bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi')), 0) as gmv_aktif
+      from pdt_fact_sku_period
+     where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'net'
+       and periode = ${periodeAwalBulan}::date`;
+  const produk: pdt.PdtSkorInputProdukTiktok | null = produkRow.n === 0 ? null : {
+    gmvBintangHiddenGem: Number(produkRow.gmv_bintang_hg),
+    gmvBocorTraffic: Number(produkRow.gmv_bocor),
+    gmvAktifTotal: Number(produkRow.gmv_aktif),
+  };
 
   return { ads, live, video, kartu, affiliate, produk };
 }
@@ -2074,16 +2093,61 @@ const MSG_PDT_BENCHMARK_KOSONG = '[benchmark PDT belum dikonfigurasi]';
 export interface PdtBenchmarkAktifTiktok {
   versi: number;
   bench: pdt.PdtBenchmarkTiktok;
+  // G2-01-KUADRAN-SKU langkah 2 — dua kunci TAMBAHAN (migrasi `20261104010000`,
+  // versi 2) yang TIDAK dipakai `computeSkorTiktok` (lihat docblock `skor.ts`
+  // untuk kenapa `PdtBenchmarkTiktok` sengaja tidak memuatnya) — dibaca dari
+  // baris `pdt_benchmark` YANG SAMA (satu versi aktif per platform, bukan dua
+  // tabel terpisah), diekspos sebagai slice terpisah untuk konsumen berbeda
+  // (`klasifikasiUlangKuadranSkuTiktok`, bukan `computeSkorTiktok`).
+  kuadran: pdt.PdtBenchmarkKuadranTiktok;
 }
 
 /** Baca versi `pdt_benchmark` TikTok aktif TERTINGGI. Melempar `ValidationError` bila belum ada satu pun (G2-02 belum menyeed). */
 export async function bacaBenchmarkAktifTiktok(sql: Sql): Promise<PdtBenchmarkAktifTiktok> {
-  const rows = await sql<{ versi: number; nilai: pdt.PdtBenchmarkTiktok }[]>`
+  const rows = await sql<{ versi: number; nilai: pdt.PdtBenchmarkTiktok & pdt.PdtBenchmarkKuadranTiktok }[]>`
     select versi, nilai from pdt_benchmark
      where platform = 'tiktok' and aktif = true
      order by versi desc limit 1`;
   if (rows.length === 0) throw new ValidationError(MSG_PDT_BENCHMARK_KOSONG);
-  return { versi: rows[0].versi, bench: rows[0].nilai };
+  const { versi, nilai } = rows[0];
+  return { versi, bench: nilai, kuadran: { quad_klik: nilai.quad_klik, quad_cvr: nilai.quad_cvr } };
+}
+
+/**
+ * G2-01-KUADRAN-SKU langkah 2 — klasifikasi ULANG kuadran seluruh baris
+ * `pdt_fact_sku_period` (`sku_id is null`, `basis='net'` — baris TikTok
+ * `tt_product_analytics`, satu-satunya sumber hari ini) untuk SATU
+ * client_platform_id + SATU periode, lalu TULIS kolom `kuadran`. Idempotent
+ * (aman dipanggil berulang — hasil klasifikasi murni fungsi dari baris fakta
+ * + benchmark aktif SAAT INI, bukan riwayat). Dipanggil dari `hitungSkorTiktok`
+ * SEBELUM `rakitInputSkorTiktok` membaca kolom ini (Rule 4 — field turunan,
+ * selalu recomputable, tidak pernah ditulis tangan).
+ *
+ * `quad_klik`/`quad_cvr` bench diverifikasi belum ada versi aktif untuk
+ * `versi=1` (migrasi `20261030010000` SENGAJA mengecualikan dua kunci ini —
+ * lihat `PdtBenchmarkAktifTiktok`) — pemanggil pasti mendapat `versi>=2`
+ * (migrasi `20261104010000`) begitu benchmark diseed, atau `ValidationError`
+ * `MSG_PDT_BENCHMARK_KOSONG` bila `pdt_benchmark` masih kosong sama sekali
+ * (sama pola `bacaBenchmarkAktifTiktok`, ditangani pemanggil bersama).
+ */
+export async function klasifikasiUlangKuadranSkuTiktok(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+  bench: pdt.PdtBenchmarkKuadranTiktok,
+): Promise<void> {
+  const rows = await sql<{ id: number; klik: number | null; ctor: string | null; pesanan_sku: number | null }[]>`
+    select id, klik, ctor, pesanan_sku from pdt_fact_sku_period
+     where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'net'
+       and periode = ${periodeAwalBulan}::date`;
+  if (rows.length === 0) return;
+  const hasil = pdt.klasifikasikanKuadranSkuTiktok(
+    rows.map((r) => ({ id: r.id, klik: r.klik, ctor: r.ctor == null ? null : Number(r.ctor), pesananSku: r.pesanan_sku })),
+    bench,
+  );
+  for (const h of hasil) {
+    await sql`update pdt_fact_sku_period set kuadran = ${h.kuadran} where id = ${h.id}`;
+  }
 }
 
 /**
@@ -2093,16 +2157,21 @@ export async function bacaBenchmarkAktifTiktok(sql: Sql): Promise<PdtBenchmarkAk
  * skor TikTok siap ditampilkan/dikirim. `benchmarkVersi` dikembalikan
  * terpisah supaya pemanggil (Flow B langkah 4, belum ada) bisa menyimpannya
  * ke `pdt_laporan_kiriman.benchmark_versi` saat mengirim laporan (Rule 23).
+ *
+ * **G2-01-KUADRAN-SKU langkah 2** — benchmark dibaca LEBIH DULU (bukan
+ * `Promise.all` dengan `rakitInputSkorTiktok` lagi seperti sebelumnya):
+ * `klasifikasiUlangKuadranSkuTiktok` harus SELESAI menulis kolom `kuadran`
+ * SEBELUM `rakitInputSkorTiktok` membacanya untuk dimensi Portfolio Produk —
+ * dependensi berurutan, bukan lagi murni-baca paralel.
  */
 export async function hitungSkorTiktok(
   sql: Sql,
   clientPlatformId: number,
   periodeAwalBulan: string,
 ): Promise<{ hasil: pdt.PdtSkorHasilTiktok; benchmarkVersi: number; bench: pdt.PdtBenchmarkTiktok }> {
-  const [input, { versi: benchmarkVersi, bench }] = await Promise.all([
-    rakitInputSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
-    bacaBenchmarkAktifTiktok(sql),
-  ]);
+  const { versi: benchmarkVersi, bench, kuadran } = await bacaBenchmarkAktifTiktok(sql);
+  await klasifikasiUlangKuadranSkuTiktok(sql, clientPlatformId, periodeAwalBulan, kuadran);
+  const input = await rakitInputSkorTiktok(sql, clientPlatformId, periodeAwalBulan);
   return { hasil: pdt.computeSkorTiktok(input, bench), benchmarkVersi, bench };
 }
 
