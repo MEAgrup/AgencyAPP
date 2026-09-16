@@ -11,11 +11,14 @@
  * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
  * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
  * untuk toko+periode yang sama BUKAN error — itu kirim-ulang/revisi (Flow B
- * langkah 5, Rule 23), jadi tombolnya selalu aktif selama laporan termuat;
- * halaman ini TIDAK membaca riwayat kiriman sebelumnya (nol endpoint daftar
- * kiriman — di luar cakupan "tombol kirim", dicatat PDT_BACKLOG.md §2)
- * sehingga label tombol sengaja netral ("Kirim ke Klien", bukan "Kirim
- * Ulang") dan hasil kirim hanya tampil untuk sesi saat ini.
+ * langkah 5, Rule 23): riwayat kiriman toko ini (`GET /account/pdt/laporan/
+ * kiriman`, `pdt.riwayatKirimanPdt`) menentukan apakah periode yang sedang
+ * dipilih sudah pernah dikirim — label tombol jadi "Kirim Ulang" (bukan
+ * "Kirim ke Klien") kalau sudah, dan tabel "Riwayat Pengiriman" di bawah
+ * menampilkan seluruh kiriman toko ini (terbaru dulu, revisi menunjuk
+ * kiriman yang digantikannya). Riwayat dimuat SEKALI per toko (bukan
+ * per-periode — daftar ini mencakup semua periode sekaligus) dan disegarkan
+ * setelah kirim berhasil.
  *
  * Klien+platform dipilih dari daftar (bukan kolom teks bebas): `GET /clients`
  * sudah terbuka untuk Account (RLS `clients_select`), jadi tak ada alasan
@@ -28,7 +31,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { listClients, type Client } from '@/lib/clients';
-import { getPdtLaporan, kirimLaporanPdt, type PdtLaporan, type PdtLaporanKiriman } from '@/lib/pdt';
+import {
+  getPdtLaporan,
+  kirimLaporanPdt,
+  riwayatKirimanPdt,
+  type PdtKirimanRingkas,
+  type PdtLaporan,
+  type PdtLaporanKiriman,
+} from '@/lib/pdt';
 import { formatIDR } from '@/lib/money';
 
 /** Platform toko yang didukung PDT (PDT-22) — cermin `platformKeVokabPdt`. */
@@ -86,6 +96,9 @@ export default function LaporanPdtPage() {
   const [kirimErr, setKirimErr] = useState<string | null>(null);
   const [kirimHasil, setKirimHasil] = useState<PdtLaporanKiriman | null>(null);
 
+  const [riwayat, setRiwayat] = useState<PdtKirimanRingkas[]>([]);
+  const [riwayatErr, setRiwayatErr] = useState<string | null>(null);
+
   const loadClients = useCallback(async () => {
     setClientsLoading(true);
     setClientsErr(null);
@@ -135,20 +148,50 @@ export default function LaporanPdtPage() {
     void loadLaporan();
   }, [loadLaporan]);
 
+  // Riwayat mencakup SEMUA periode toko ini sekaligus — dimuat sekali per
+  // platformId (bukan per-periode seperti loadLaporan), disegarkan lagi
+  // setelah kirim berhasil (lihat handleKirim).
+  const loadRiwayat = useCallback(async () => {
+    if (platformId === '') {
+      setRiwayat([]);
+      return;
+    }
+    setRiwayatErr(null);
+    try {
+      const res = await riwayatKirimanPdt(platformId);
+      setRiwayat(res);
+    } catch (e) {
+      setRiwayat([]);
+      setRiwayatErr(errorMessage(e));
+    }
+  }, [platformId]);
+
+  useEffect(() => {
+    void loadRiwayat();
+  }, [loadRiwayat]);
+
+  const periodeIni = monthToPeriode(month);
+  // Riwayat terurut terbaru dulu — kecocokan PERTAMA untuk periode ini sudah
+  // pasti kiriman TERAKHIR (revisi terbaru), bukan sembarang kiriman lama.
+  const kirimanTerakhirUntukPeriodeIni = riwayat.find((k) => k.periode_mulai === periodeIni) ?? null;
+
   async function handleKirim() {
     if (platformId === '' || !laporan) return;
     const platformLabel = laporan.platform === 'tiktok' ? 'TikTok Shop' : 'Shopee';
-    if (!window.confirm(
-      `Kirim laporan ${platformLabel} periode ${laporan.periode_awal_bulan} ke klien? ` +
-      'Snapshot akan dibekukan (tidak bisa diubah) — kirim ulang nanti membuat revisi baru, bukan menimpa.',
-    )) {
-      return;
-    }
+    const konfirmasi = kirimanTerakhirUntukPeriodeIni
+      ? `Kirim ULANG laporan ${platformLabel} periode ${laporan.periode_awal_bulan} ke klien? ` +
+        `Ini akan jadi revisi baru — menggantikan kiriman #${kirimanTerakhirUntukPeriodeIni.id} ` +
+        `(${formatDateTime(kirimanTerakhirUntukPeriodeIni.dikirim_pada)}), bukan menimpanya. ` +
+        'Tidak meminta berkas diunggah ulang.'
+      : `Kirim laporan ${platformLabel} periode ${laporan.periode_awal_bulan} ke klien? ` +
+        'Snapshot akan dibekukan (tidak bisa diubah) — kirim ulang nanti membuat revisi baru, bukan menimpa.';
+    if (!window.confirm(konfirmasi)) return;
     setKirimLoading(true);
     setKirimErr(null);
     try {
       const hasil = await kirimLaporanPdt(platformId, monthToPeriode(month));
       setKirimHasil(hasil);
+      await loadRiwayat();
     } catch (e) {
       setKirimErr(errorMessage(e));
     } finally {
@@ -261,9 +304,15 @@ export default function LaporanPdtPage() {
                 </p>
               </div>
               <button type="button" className="btn btnPrimary btnSm" disabled={kirimLoading} onClick={() => void handleKirim()}>
-                {kirimLoading ? 'Mengirim...' : 'Kirim ke Klien'}
+                {kirimLoading ? 'Mengirim...' : kirimanTerakhirUntukPeriodeIni ? 'Kirim Ulang' : 'Kirim ke Klien'}
               </button>
             </div>
+            {kirimanTerakhirUntukPeriodeIni && !kirimHasil && (
+              <p className="muted" style={{ fontSize: 12, marginBottom: 16 }}>
+                Periode ini sudah dikirim ke klien pada {formatDateTime(kirimanTerakhirUntukPeriodeIni.dikirim_pada)}{' '}
+                oleh {kirimanTerakhirUntukPeriodeIni.dikirim_oleh}.
+              </p>
+            )}
             {kirimErr && (
               <div className="alert alertError" role="alert" style={{ marginBottom: 16 }}>{kirimErr}</div>
             )}
@@ -360,6 +409,46 @@ export default function LaporanPdtPage() {
                   Dimensi yang datanya belum ada dikeluarkan dari skor, dan bobot dasar dimensi lain
                   dinormalisasi ulang (Rule 12) — bukan dinilai netral 5/10.
                 </p>
+              </div>
+            )}
+          </section>
+
+          <section className="card">
+            <h2>Riwayat Pengiriman</h2>
+            <p className="muted" style={{ fontSize: 12 }}>
+              Seluruh periode toko ini yang pernah dikirim ke klien, terbaru dulu (Flow B langkah 5).
+            </p>
+            {riwayatErr && (
+              <div className="alert alertError" role="alert" style={{ marginTop: 12 }}>{riwayatErr}</div>
+            )}
+            {riwayat.length === 0 ? (
+              <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>Belum ada laporan yang dikirim untuk toko ini.</p>
+            ) : (
+              <div className="table-wrap" style={{ marginTop: 12 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Periode</th>
+                      <th>Dikirim Pada</th>
+                      <th>Dikirim Oleh</th>
+                      <th>Keterangan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {riwayat.map((k) => (
+                      <tr key={k.id}>
+                        <td>{k.periode_mulai}</td>
+                        <td>{formatDateTime(k.dikirim_pada)}</td>
+                        <td>{k.dikirim_oleh}</td>
+                        <td>
+                          {k.menggantikan_kiriman_id !== null
+                            ? `Revisi — menggantikan #${k.menggantikan_kiriman_id}`
+                            : 'Kiriman pertama'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>

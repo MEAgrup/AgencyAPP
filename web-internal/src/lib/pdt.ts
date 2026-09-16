@@ -155,3 +155,26 @@ export interface PdtLaporanKiriman {
 export function kirimLaporanPdt(clientPlatformId: number, periode: string): Promise<PdtLaporanKiriman> {
   return api.post<PdtLaporanKiriman>('/account/pdt/laporan/kirim', { client_platform_id: clientPlatformId, periode });
 }
+
+// G2-01 — riwayat kiriman (GET /account/pdt/laporan/kiriman, Flow B langkah
+// 5). Bentuk sama PdtLaporanKiriman MINUS `laporan` (snapshot beku sengaja
+// tidak diikutkan daftar — daftar ini untuk "kapan/oleh siapa/revisi dari
+// yang mana", bukan isi persisnya).
+export interface PdtKirimanRingkas {
+  id: number;
+  client_platform_id: number;
+  periode_mulai: string;
+  periode_selesai: string;
+  parser_versi: number;
+  benchmark_versi: number | null;
+  dikirim_pada: string;
+  dikirim_oleh: string;
+  menggantikan_kiriman_id: number | null;
+}
+
+export async function riwayatKirimanPdt(clientPlatformId: number): Promise<PdtKirimanRingkas[]> {
+  const res = await api.get<{ data: PdtKirimanRingkas[] }>(
+    `/account/pdt/laporan/kiriman?client_platform_id=${clientPlatformId}`,
+  );
+  return res.data;
+}

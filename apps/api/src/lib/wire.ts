@@ -9156,3 +9156,34 @@ export function pdtLaporanKirimanToWire(k: pdt.PdtLaporanKirimanHasil): PdtLapor
     laporan: k.laporan.platform === 'tiktok' ? pdtLaporanTiktokToWire(k.laporan) : pdtLaporanShopeeToWire(k.laporan),
   };
 }
+
+// G2-01 — GET /account/pdt/laporan/kiriman (riwayat kiriman, Flow B langkah
+// 5). Bentuk SAMA dengan `PdtLaporanKirimanWire` MINUS `laporan` — daftar ini
+// untuk "kapan/oleh siapa/revisi dari yang mana", bukan isi snapshot beku
+// (lihat docblock `pdt.riwayatKirimanPdt`). Interface PENUH (bukan `Omit<>`)
+// supaya `shape-parity.test.ts` (regex `export interface`) ikut memindainya.
+export interface PdtKirimanRingkasWire {
+  id: number;
+  client_platform_id: number;
+  periode_mulai: string;
+  periode_selesai: string;
+  parser_versi: number;
+  benchmark_versi: number | null;
+  dikirim_pada: string;
+  dikirim_oleh: string;
+  menggantikan_kiriman_id: number | null;
+}
+
+export function pdtKirimanRingkasToWire(k: pdt.PdtKirimanRingkas): PdtKirimanRingkasWire {
+  return {
+    id: k.id,
+    client_platform_id: k.clientPlatformId,
+    periode_mulai: k.periodeMulai,
+    periode_selesai: k.periodeSelesai,
+    parser_versi: k.parserVersi,
+    benchmark_versi: k.benchmarkVersi,
+    dikirim_pada: k.dikirimPada,
+    dikirim_oleh: k.dikirimOleh,
+    menggantikan_kiriman_id: k.menggantikanKirimanId,
+  };
+}
