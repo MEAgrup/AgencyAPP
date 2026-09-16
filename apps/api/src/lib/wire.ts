@@ -6351,6 +6351,139 @@ export function eligibilityPolicyToWire(p: productexchange.EligibilityPolicy): E
   };
 }
 
+// ---------------------------------------------------------------------------
+// Product Exchange M3-B — Kandidat/Katalog/laporan kreator_kosong. Angka
+// mentah (BUKAN pra-format "Rp. …") — pola sama `EligibilityPolicyValueWire`
+// di atas, FE (`web-internal/src/lib/px.ts`) memformat lokal (preseden
+// `adsscanner-ui.ts`/`skuscreener-ui.ts` `fmtRupiah`).
+// ---------------------------------------------------------------------------
+
+export interface PxKandidatWire {
+  client_platform_id: number;
+  platform_product_id: string;
+  nama_produk: string | null;
+  client_id: string;
+  nama_toko: string;
+  platform: string;
+  kategori_platform: string | null;
+  harga_satuan: number | null;
+  gmv_30d: number | null;
+  level2_category: string | null;
+  price_segment: string | null;
+  verdict: string;
+  lapis_gagal: number | null;
+  dihitung_pada: string;
+}
+
+export function pxKandidatToWire(k: productexchange.PxKandidat): PxKandidatWire {
+  return {
+    client_platform_id: k.clientPlatformId,
+    platform_product_id: k.platformProductId,
+    nama_produk: k.namaProduk,
+    client_id: k.clientId,
+    nama_toko: k.namaToko,
+    platform: k.platform,
+    kategori_platform: k.kategoriPlatform,
+    harga_satuan: k.hargaSatuan,
+    gmv_30d: k.gmv30d,
+    level2_category: k.level2Category,
+    price_segment: k.priceSegment,
+    verdict: k.verdict,
+    lapis_gagal: k.lapisGagal,
+    dihitung_pada: k.dihitungPada.toISOString(),
+  };
+}
+
+export interface PxKandidatVerdictWire {
+  client_platform_id: number;
+  platform_product_id: string;
+  verdict: string;
+  lapis_gagal: number | null;
+  level2_category: string | null;
+  price_segment: string | null;
+}
+
+export function pxKandidatVerdictToWire(v: productexchange.PxKandidatVerdict): PxKandidatVerdictWire {
+  return {
+    client_platform_id: v.clientPlatformId,
+    platform_product_id: v.platformProductId,
+    verdict: v.verdict,
+    lapis_gagal: v.lapisGagal,
+    level2_category: v.level2Category,
+    price_segment: v.priceSegment,
+  };
+}
+
+export interface PxKatalogItemWire {
+  client_platform_id: number;
+  platform_product_id: string;
+  nama_produk: string | null;
+  platform: string;
+  client_id: string;
+  nama_toko: string;
+  level2_category: string | null;
+  price_segment: string | null;
+  sudah_afiliasi: boolean;
+  dihitung_pada: string;
+}
+
+export function pxKatalogItemToWire(i: productexchange.PxKatalogItem): PxKatalogItemWire {
+  return {
+    client_platform_id: i.clientPlatformId,
+    platform_product_id: i.platformProductId,
+    nama_produk: i.namaProduk,
+    platform: i.platform,
+    client_id: i.clientId,
+    nama_toko: i.namaToko,
+    level2_category: i.level2Category,
+    price_segment: i.priceSegment,
+    sudah_afiliasi: i.sudahAfiliasi,
+    dihitung_pada: i.dihitungPada.toISOString(),
+  };
+}
+
+export interface PxCoverageMetaWire {
+  batch_key: string | null;
+  snapshot_at: string | null;
+  umur_hari: number | null;
+  basi: boolean;
+}
+
+export function pxCoverageMetaToWire(m: productexchange.PxCoverageMeta): PxCoverageMetaWire {
+  return {
+    batch_key: m.batchKey,
+    snapshot_at: m.snapshotAt === null ? null : m.snapshotAt.toISOString(),
+    umur_hari: m.umurHari,
+    basi: m.basi,
+  };
+}
+
+export interface PxKreatorKosongWire {
+  level2_category: string;
+  price_segment: string;
+  jumlah_produk: number;
+  jumlah_klien: number;
+}
+
+export function pxKreatorKosongToWire(k: productexchange.PxKreatorKosong): PxKreatorKosongWire {
+  return {
+    level2_category: k.level2Category,
+    price_segment: k.priceSegment,
+    jumlah_produk: k.jumlahProduk,
+    jumlah_klien: k.jumlahKlien,
+  };
+}
+
+/** `GET /px/kategori-options` respons — Rule 10/11: `tersaring:false` sampai pemeta kategori (M3-03) ada, agar UI menulis catatan Rule 11 apa adanya. */
+export interface PxKategoriOptionWire {
+  options: string[];
+  tersaring: boolean;
+}
+
+export function pxKategoriOptionsToWire(options: readonly string[]): PxKategoriOptionWire {
+  return { options: [...options], tersaring: false };
+}
+
 export function interviewRisetAwalToWire(r: interview.RisetAwal): InterviewRisetAwalWire {
   return {
     interview_id: r.interviewId,

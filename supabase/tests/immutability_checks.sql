@@ -197,6 +197,43 @@ BEGIN
         SELECT count(*) FROM information_schema.triggers
         WHERE event_object_table = 'pdt_usulan_katalog' AND action_statement LIKE '%frozen%'
     ) = 0, 'pdt_usulan_katalog must NOT be frozen — it is edited live via the G4-01 admin UI, unlike pdt_benchmark';
+
+    ---------------------------------------------------------------------------
+    -- Product Exchange M3-B (20261101010000) — three append-only frozen
+    -- tables. `px_sku_volume`/`px_sku_kategori` are DELIBERATELY NOT frozen:
+    -- volume is UPSERTed per recompute (Flow A) and kategori is a human
+    -- correction target (D-24) — history for both lives in px_sku_eligibility.
+    ---------------------------------------------------------------------------
+    ASSERT (
+        SELECT count(DISTINCT event_manipulation) FROM information_schema.triggers
+        WHERE event_object_table = 'px_sku_eligibility'
+          AND action_statement LIKE '%px_sku_eligibility_frozen%'
+          AND event_manipulation IN ('UPDATE', 'DELETE')
+    ) = 2, 'px_sku_eligibility must stay frozen against UPDATE and DELETE (verdict baru = baris baru)';
+
+    ASSERT (
+        SELECT count(DISTINCT event_manipulation) FROM information_schema.triggers
+        WHERE event_object_table = 'px_coverage_snapshot'
+          AND action_statement LIKE '%px_coverage_snapshot_frozen%'
+          AND event_manipulation IN ('UPDATE', 'DELETE')
+    ) = 2, 'px_coverage_snapshot must stay frozen against UPDATE and DELETE (D-20 salinan MCN, append-only)';
+
+    ASSERT (
+        SELECT count(DISTINCT event_manipulation) FROM information_schema.triggers
+        WHERE event_object_table = 'px_coverage_push'
+          AND action_statement LIKE '%px_coverage_push_frozen%'
+          AND event_manipulation IN ('UPDATE', 'DELETE')
+    ) = 2, 'px_coverage_push must stay frozen against UPDATE and DELETE (kunci idempotensi bridge, satu payload per batch_key)';
+
+    ASSERT (
+        SELECT count(*) FROM information_schema.triggers
+        WHERE event_object_table = 'px_sku_volume' AND action_statement LIKE '%frozen%'
+    ) = 0, 'px_sku_volume must NOT be frozen — UPSERT per recompute (Flow A), unlike px_sku_eligibility';
+
+    ASSERT (
+        SELECT count(*) FROM information_schema.triggers
+        WHERE event_object_table = 'px_sku_kategori' AND action_statement LIKE '%frozen%'
+    ) = 0, 'px_sku_kategori must NOT be frozen — koreksi manusia langsung (D-24), riwayat ada di px_sku_eligibility';
 END $$;
 
 ---------------------------------------------------------------------------

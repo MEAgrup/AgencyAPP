@@ -118,13 +118,14 @@ afterEach(async () => {
   if (!sql) return;
   await sql`delete from client_platforms where client_id like 'ZPX-CLI-%'`;
   await sql`delete from clients where id like 'ZPX-CLI-%'`;
-  // px_eligibility_policy versions created by tests below (versi > 1 — versi 1
-  // is the migration seed and must survive every run). Trigger disabled as
+  // px_eligibility_policy versions created by tests below (versi > 2 — versi 1
+  // (M2a) and versi 2 (M3-B, price_segment_bands, migrasi 20261101010000) are
+  // both migration seeds and must survive every run). Trigger disabled as
   // owner superuser and restored in `finally` — a failed cleanup must never
   // leave the table writable for the next test, same pattern as showcase.test.ts.
   await sql`alter table px_eligibility_policy disable trigger trg_px_eligibility_policy_frozen`;
   try {
-    await sql`delete from px_eligibility_policy where versi > 1`;
+    await sql`delete from px_eligibility_policy where versi > 2`;
   } finally {
     await sql`alter table px_eligibility_policy enable trigger trg_px_eligibility_policy_frozen`;
   }
@@ -166,26 +167,27 @@ describeDb('px_eligibility_policy — append-only, versi aktif = versi tertinggi
       .rejects.toBeInstanceOf(ValidationError);
   });
 
-  it('Director membuat versi 2: versi 1 TIDAK berubah, versi aktif berpindah ke 2', async () => {
+  it('Director membuat versi baru: versi 1 TIDAK berubah, versi aktif berpindah ke versi baru itu', async () => {
     const before = (await listEligibilityPolicy(sql, director())).find((r) => r.versi === 1);
-    const v2 = await createEligibilityPolicy(sql, director(), {
+    const vBaru = await createEligibilityPolicy(sql, director(), {
       nilai: { ...NILAI_V1, sales_threshold_idr: 250_000_000 },
       catatan: 'Kalibrasi ulang ambang, ZPX test',
     });
-    expect(v2.versi).toBe(2);
-    expect(v2.nilai.salesThresholdIdr).toBe(250_000_000);
+    expect(vBaru.versi).toBeGreaterThanOrEqual(3); // versi 1 (M2a) + versi 2 (M3-B seed) sudah ada
+    expect(vBaru.nilai.salesThresholdIdr).toBe(250_000_000);
 
     const after = (await listEligibilityPolicy(sql, director())).find((r) => r.versi === 1);
     expect(after).toEqual(before); // versi 1 sama sekali tidak tersentuh
 
     const aktif = await activeEligibilityPolicy(sql);
-    expect(aktif?.versi).toBe(2);
+    expect(aktif?.versi).toBe(vBaru.versi);
   });
 
   it('versi baru bisa lahir NON-aktif (draft/rollback) tanpa mengganggu versi aktif', async () => {
+    const aktifSebelum = await activeEligibilityPolicy(sql); // versi 2 (M3-B seed), bukan lagi versi 1
     await createEligibilityPolicy(sql, director(), { nilai: NILAI_V1, catatan: 'draft, ZPX test', aktif: false });
     const aktif = await activeEligibilityPolicy(sql);
-    expect(aktif?.versi).toBe(1); // versi 1 tetap tertinggi yang aktif
+    expect(aktif?.versi).toBe(aktifSebelum?.versi); // versi aktif TIDAK berpindah ke draft
   });
 
   it('UPDATE dan DELETE langsung ditolak trigger (append-only)', async () => {

@@ -95,4 +95,14 @@ describe('FE↔API route parity', () => {
     // permission problem, not a missing route.
     expect(routes).toContain('GET /clients/{}/assets');
   });
+
+  it('serves the two Product Exchange M3-B machine routes (nol pemanggil web-internal by design)', () => {
+    // Positive assertions, not `feCalls()` scan results: `web-internal` never
+    // calls either path (MCN's coverage-push pipeline calls the first with a
+    // bearer secret; the second is a manual/cron tick), so nothing else in this
+    // file would ever notice if the route file disappeared.
+    expect(routes).toContain('POST /internal/bridge/px-coverage');
+    expect(routes).toContain('POST /internal/px/evaluate/tick');
+    expect(routes).toContain('GET /internal/px/evaluate/tick');
+  });
 });

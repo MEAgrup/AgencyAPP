@@ -516,12 +516,16 @@ jobs:
       # (ALTER + kolom baru), F-5 (koreksi) nol tabel sama sekali.
       # F-6 Daily Activity (20261021010000_f6_daily_activities.sql): 176 = 175
       # + 1 tabel `daily_activities` (log append-only, pola prospect_activities).
-      - name: Verify table count (expect 176)
+      # Product Exchange M3-B (20261101010000): 181 = 176 + 5 tabel px_* —
+      # px_sku_volume, px_sku_kategori, px_sku_eligibility, px_coverage_snapshot,
+      # px_coverage_push. Nol prefix baru, nol mesin, nol event katalog (lihat
+      # komentar scripts/db-rebuild.sh). View px_catalog_item_v bukan base table.
+      - name: Verify table count (expect 181)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 176
+          test "$n" -eq 181
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

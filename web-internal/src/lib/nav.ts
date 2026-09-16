@@ -492,6 +492,25 @@ const ADMIN: NavNode[] = [
     label: 'Kebijakan Kelayakan SKU',
     access: (role) => Boolean(role.director),
   },
+  // M3-B — halaman Kandidat PX. AM (divisi Account, staff maupun lead) melihat
+  // kliennya sendiri; Director menembus lintas-divisi. Cermin scope
+  // `productexchange.listKandidat` (AM=miliknya, Lead Account/Director=semua) —
+  // OD SENGAJA tidak di sini (beda dari `/px/katalog` di bawah): halaman ini
+  // adalah alat kerja AM (konfirmasi kategori), bukan bacaan lintas-divisi.
+  {
+    href: '/px/kandidat',
+    label: 'Kandidat PX',
+    access: (role) => Boolean(role.director) || role.division === 'Account',
+  },
+  // M3-B — Katalog PX + laporan kreator_kosong. Lead Account/Director/OD saja
+  // (`productexchange.canLihatKatalogPx`) — AM staff TIDAK melihat halaman
+  // ini (beda dari `/px/kandidat` di atas): katalog adalah bacaan agregat
+  // lintas klien, bukan alat kerja per-klien.
+  {
+    href: '/px/katalog',
+    label: 'Katalog PX',
+    access: (role) => Boolean(role.director || role.od) || (role.level === 'lead' && role.division === 'Account'),
+  },
   // Tindak lanjut LT-61: menyediakan login vendor sendiri. Otoritas yang sama
   // dengan vendor.canManageVendor (Account lead / Director) — yang mengelola
   // catatan vendor mengelola apakah ia bisa login — plus OD read-only.
