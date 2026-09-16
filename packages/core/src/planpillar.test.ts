@@ -332,7 +332,7 @@ describe('jahitan B4→B5 — pilar usulan AM Co-Pilot server-side', () => {
     benchmark_dipakai: BENCH,
     video: { toko: { diposting_periode: 8, rate: 0.1, gpm_median: 11_000 } },
     skor: { pilar: { video: 21 } },
-  });
+  }, copilot.KATALOG);
   const aksi = usulan.pilar.flatMap((x) => x.aksi);
 
   it('Co-Pilot memang menghasilkan pilar konten untuk toko ini', () => {

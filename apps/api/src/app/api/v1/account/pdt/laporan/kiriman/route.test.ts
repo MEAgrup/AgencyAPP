@@ -159,7 +159,7 @@ describeDb('GET /pdt/laporan/kiriman — real DB', () => {
     expect(r.id).toBe(bodyKirim.id);
     expect(r.client_platform_id).toBe(cpId);
     expect(r.periode_mulai).toBe('2026-07-01');
-    expect(r.benchmark_versi).toBe(1);
+    expect(r.benchmark_versi).toBe(2); // versi 2 aktif tertinggi (G2-01-KUADRAN-SKU langkah 2, migrasi 20261104010000)
     expect(r.dikirim_oleh).toBe('ZZ-PDTRWY-AM');
     expect(r.menggantikan_kiriman_id).toBeNull();
     expect('laporan' in r).toBe(false);

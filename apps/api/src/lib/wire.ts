@@ -6351,6 +6351,35 @@ export function eligibilityPolicyToWire(p: productexchange.EligibilityPolicy): E
   };
 }
 
+/** G2-02 — satu ambang `{good, warn}` `pdt_benchmark.nilai` (PDT-21 Rule 25). */
+export interface PdtBenchBandWire {
+  good: number;
+  warn: number;
+}
+
+/** One versioned `pdt_benchmark` row (Director-only, `pdt.canKelolaBenchmark`). Preseden `EligibilityPolicyWire`. */
+export interface PdtBenchmarkVersiWire {
+  platform: string;
+  versi: number;
+  nilai: Record<string, PdtBenchBandWire>;
+  aktif: boolean;
+  catatan: string | null;
+  dibuat_pada: string;
+  dibuat_oleh: string;
+}
+
+export function pdtBenchmarkVersiToWire(v: pdt.PdtBenchmarkVersi): PdtBenchmarkVersiWire {
+  return {
+    platform: v.platform,
+    versi: v.versi,
+    nilai: v.nilai,
+    aktif: v.aktif,
+    catatan: v.catatan,
+    dibuat_pada: v.dibuatPada.toISOString(),
+    dibuat_oleh: v.dibuatOleh,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Product Exchange M3-B — Kandidat/Katalog/laporan kreator_kosong. Angka
 // mentah (BUKAN pra-format "Rp. …") — pola sama `EligibilityPolicyValueWire`
@@ -9300,6 +9329,43 @@ export interface PdtLaporanTahapWire {
   blok: PdtLaporanTahapBlokWire[];
 }
 
+export interface PdtLaporanRekomendasiWire {
+  judul: string;
+  target: string;
+  dampak: string;
+  timeline: string;
+}
+
+/** Tidak pernah `null` — lihat docblock `pdt.PdtLaporanInsight`, `@cdps/core`: `ringkasan`/`outlook` selalu punya sesuatu untuk dikatakan bahkan saat `kpi` seluruhnya `null`. AM TIDAK menyunting field ini lewat wire — penyuntingan (kalau ada) terjadi di layar pratinjau FE sebelum kirim, lihat docblock core. */
+export interface PdtLaporanInsightWire {
+  ringkasan: string;
+  poin: string[];
+  rekomendasi_tinggi: PdtLaporanRekomendasiWire[];
+  rekomendasi_sedang: PdtLaporanRekomendasiWire[];
+  outlook: string;
+  indikator: { nama: string; target: string }[];
+}
+
+export interface PdtLaporanProdukItemWire {
+  nama_produk: string | null;
+  platform_product_id: string | null;
+  gmv: number | null;
+  klik: number | null;
+  cvr: number | null;
+  kuadran: string;
+}
+
+export interface PdtLaporanProdukDistribusiWire {
+  jumlah: number;
+  gmv: number | null;
+}
+
+/** `null` (whole object) untuk Shopee SELALU — methodology kuadran beda total dari TikTok, belum ada modul PDT sumber data (lihat docblock `pdt.bangunLaporanProduk`, `@cdps/core`). */
+export interface PdtLaporanProdukWire {
+  distribusi: Record<string, PdtLaporanProdukDistribusiWire>;
+  top_aksi: PdtLaporanProdukItemWire[];
+}
+
 export interface PdtLaporanWire {
   schema: string;
   platform: string;
@@ -9311,11 +9377,13 @@ export interface PdtLaporanWire {
   iklan: PdtLaporanIklanWire | null;
   live: PdtLaporanLiveWire | null;
   video: PdtLaporanVideoWire | null;
+  produk: PdtLaporanProdukWire | null;
   afiliasi: PdtLaporanAfiliasiWire | null;
   tahap: PdtLaporanTahapWire | null;
   skor: PdtLaporanSkorWire;
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
+  insight: PdtLaporanInsightWire;
 }
 
 function pdtLaporanSkorToWire(s: pdtCore.PdtSkorHasilTiktok | pdtCore.PdtSkorHasilShopee): PdtLaporanSkorWire {
@@ -9364,6 +9432,16 @@ function pdtLaporanVideoToWire(v: pdtCore.PdtLaporanVideo | null): PdtLaporanVid
   };
 }
 
+function pdtLaporanProdukToWire(p: pdtCore.PdtLaporanProduk | null): PdtLaporanProdukWire | null {
+  if (p == null) return null;
+  return {
+    distribusi: p.distribusi,
+    top_aksi: p.topAksi.map((x) => ({
+      nama_produk: x.namaProduk, platform_product_id: x.platformProductId, gmv: x.gmv, klik: x.klik, cvr: x.cvr, kuadran: x.kuadran,
+    })),
+  };
+}
+
 function pdtLaporanAfiliasiToWire(a: pdtCore.PdtLaporanAfiliasi | null): PdtLaporanAfiliasiWire | null {
   if (a == null) return null;
   return {
@@ -9386,6 +9464,49 @@ function pdtLaporanTahapToWire(t: pdtCore.PdtLaporanTahap | null): PdtLaporanTah
   };
 }
 
+/**
+ * G2-01-INSIGHT-EDIT — bentuk body draf sunting AM (`POST .../laporan/kirim`),
+ * field `insight` opsional. Pola sama `InsightDraftBody`/`toInsightDraft`
+ * (mesin lama): diteruskan UTUH termasuk string kosong/kunci hilang — core
+ * (`pdt.normalizePdtInsightDraft`) yang memutuskan apa yang kurang dan
+ * mengucapkannya dalam Bahasa Indonesia, bukan lapisan ini. Tidak ikut
+ * `PdtLaporanInsightWire` (bentuk RESPONS, field wajib) — ini bentuk
+ * REQUEST draf, seluruh field opsional/longgar tipenya karena datang dari
+ * form yang bisa mengirim apa saja.
+ */
+export interface PdtInsightDraftBody {
+  ringkasan?: string;
+  poin?: string[];
+  rekomendasi_tinggi?: PdtLaporanRekomendasiWire[];
+  rekomendasi_sedang?: PdtLaporanRekomendasiWire[];
+  outlook?: string;
+  indikator?: { nama: string; target: string }[];
+}
+
+export function toPdtInsightDraft(b: PdtInsightDraftBody): pdtCore.PdtInsightDraft {
+  return {
+    ringkasan: b.ringkasan,
+    poin: b.poin,
+    rekomendasi_tinggi: b.rekomendasi_tinggi,
+    rekomendasi_sedang: b.rekomendasi_sedang,
+    outlook: b.outlook,
+    indikator: b.indikator,
+  };
+}
+
+function pdtLaporanInsightToWire(i: pdtCore.PdtLaporanInsight): PdtLaporanInsightWire {
+  const rekomendasi = (r: pdtCore.PdtLaporanRekomendasi): PdtLaporanRekomendasiWire =>
+    ({ judul: r.judul, target: r.target, dampak: r.dampak, timeline: r.timeline });
+  return {
+    ringkasan: i.ringkasan,
+    poin: i.poin,
+    rekomendasi_tinggi: i.rekomendasiTinggi.map(rekomendasi),
+    rekomendasi_sedang: i.rekomendasiSedang.map(rekomendasi),
+    outlook: i.outlook,
+    indikator: i.indikator,
+  };
+}
+
 export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanWire {
   return {
     schema: l.schema,
@@ -9398,10 +9519,12 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
+    produk: pdtLaporanProdukToWire(l.produk),
     afiliasi: pdtLaporanAfiliasiToWire(l.afiliasi),
     tahap: pdtLaporanTahapToWire(l.tahap),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: l.benchmarkVersi,
+    insight: pdtLaporanInsightToWire(l.insight),
   };
 }
 
@@ -9417,10 +9540,12 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
+    produk: null,
     afiliasi: pdtLaporanAfiliasiToWire(l.afiliasi),
     tahap: null,
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: null,
+    insight: pdtLaporanInsightToWire(l.insight),
   };
 }
 

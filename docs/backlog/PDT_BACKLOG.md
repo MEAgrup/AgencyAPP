@@ -797,6 +797,21 @@ melampauinya (harus berhenti di nol objek) · selesai < 2 menit pada 500 klien �
 > `retensi_sampai`, objek yatim tidak punya kolom itu). **`G1-10-RETENSI-RECOMPUTE` TETAP
 > TERBUKA** (di luar cakupan, menunggu G2-01/G5) — G1-10 sekarang selesai untuk seluruh cakupan
 > yang bisa dikerjakan tanpa tabel itu.
+>
+> **Status 2026-09-16 — `G1-10-RETENSI-RECOMPUTE` DITUTUP: `kirimLaporanPdt` memperpanjang
+> retensi batch yang menopang laporan terkirim, G1-10 SEKARANG TERTUTUP PENUH.**
+> `docs/DECISIONS.md` (cari "G1-10-RETENSI-RECOMPUTE DITUTUP") untuk rincian lengkap. Ringkas:
+> blocker asli (`pdt_laporan_kiriman` belum ada) sudah tidak berlaku sejak G2-01 dibangun —
+> pemicu Rule 45 baris ketiga ("laporan terkirim" → +12 bulan sejak kirim) sekarang ditulis
+> LANGSUNG oleh `kirimLaporanPdt` saat kejadian terjadi, pola sama PX-M3-08 ("SKU di katalog PX",
+> pemicu keempat, sudah tertutup lebih dulu). Batch "yang menopang" dipilih lewat overlap
+> rentang tanggal `client_platform_id` yang sama dengan periode kiriman — TANPA memfilter
+> `status` batch (fakta bisa sudah tertulis sebelum batch akhirnya `ditolak` rekonsiliasi;
+> `bacaLaporanPdt` sendiri membaca `pdt_fact_*` tanpa filter status), `legal_hold` dikecualikan.
+> `retensi_alasan` baru `'laporan_terkirim'` SUDAH ada di CHECK constraint sejak migrasi G1-01 —
+> skema memang dirancang mengantisipasi ini. Nol migrasi baru. **G1-10 (kedua sub-item) SEKARANG
+> TERTUTUP PENUH.** Sisa satu-satunya item G1: `G1-11-REPARSE-RECOMPUTE-STATUS` — pertanyaan
+> desain kasus langka, genuinely menunggu pemilik/Hans/Anty, TIDAK ditebak.
 
 ### G1-11 · Reparse dari paket ZIP (Flow D)
 - `parser_versi` dicatat **per batch dan per baris fakta**.
@@ -827,6 +842,18 @@ ber-paket-terpurge muncul di daftar laporan, bukan hilang.
 > `perlu_upload_ulang` (Flow D langkah 4) TIDAK butuh kolom/migrasi baru — status ini derived
 > sejak migrasi G1-01 (dicatat di sana: "dihitung job G1-10/pembaca G1-11"), tick ini melaporkannya
 > di respons JSON, bukan menulis kolom.
+>
+> **Status 2026-09-16 — `G1-11-REPARSE-RECOMPUTE-STATUS` DITUTUP: pemilik menjawab "WAJIB".**
+> `docs/DECISIONS.md` (cari "G1-11-REPARSE-RECOMPUTE-STATUS DITUTUP") untuk rincian lengkap.
+> Ringkas: `reparsePdtBatch` sekarang menjalankan ULANG `resolveStatusIdentitasRekonsiliasi`
+> (fungsi yang SAMA dipakai `commitUploadBatch`, diekstrak dari sana supaya nol duplikasi) atas
+> hasil parse baru, dan menulis ulang `status`/`alasan_ditolak`/`reconcile_delta_pct`/
+> `identitas_sumber` batch bila hasilnya berubah. `uq_pdt_upload_batch_verified` yang terbentur
+> (batch verified LAIN sudah berdiri untuk periode sama) diterjemahkan `ValidationError` BI, pola
+> sama `commitUploadBatch`. `retensi_sampai`/`retensi_alasan` TETAP tidak disentuh (di luar
+> keputusan pemilik). Snapshot laporan terkirim (`pdt_laporan_kiriman`) tetap tidak berubah — sudah
+> terjamin struktural (`reparsePdtBatch` tidak pernah menyentuh tabel itu). **G1 SEKARANG TERTUTUP
+> PENUH — nol item tersisa.**
 
 ---
 
@@ -877,6 +904,33 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > SKU, `quad_klik`/`quad_cvr` di benchmark) adalah pekerjaan TERSENDIRI sebelum dimensi ini bisa
 > hidup dari data sungguhan — dicatat `G2-01-KUADRAN-SKU` (Open), di luar cakupan sesi 34.
 >
+> **Status 2026-09-16 — `G2-01-KUADRAN-SKU` langkah 1 DITUTUP: `tt_product_analytics` →
+> `pdt_fact_sku_period` (`ekstrakBarisTtProductAnalytics`, `@cdps/core` `pdt/fakta.ts`), basis
+> `'net'`.** Re-verifikasi sesi ini menemukan sisi TikTok belum punya penulis SAMA SEKALI (beda
+> dari Shopee, yang sudah punya `shopee_ams_produk` sejak sesi 23) — modul deteksi sudah
+> terdaftar+`kolomDipanen` sudah lengkap, tinggal ekstraktor+writer. `basis='net'` diverifikasi
+> lewat kesetaraan `G1-07-TIKTOK-REKONSILIASI` (Σ GMV/Pesanan SKU per-SKU = shop-level
+> `tt_shop_analytics`, yang sudah memakai `basis='net'`), bukan ditebak. `sku_id` selalu `null`,
+> `platform_product_id` = `'ID Produk'` (pola sama `shopee_ams_produk`/`tt_ads_product`).
+> **Status 2026-09-16 — `G2-01-KUADRAN-SKU` langkah 2 DITUTUP: klasifikasi kuadran
+> ditulis+disambung ke skor.** `pdt_benchmark` TikTok versi 2 (migrasi `20261104010000`,
+> versi 1 immutable — `trg_pdt_benchmark_frozen` menolak UPDATE — jadi dua kunci baru
+> HARUS versi baru, bukan menyisipkan ke baris lama) menambah `quad_klik`/`quad_cvr` (PORT
+> `REPORT_BENCH_V1` apa adanya). `packages/core/src/pdt/kuadran.ts` — `klasifikasikanKuadranSkuTiktok`
+> (fungsi murni, disalin dari `report/metrik.ts` `kuadranProduk`, MODE BENCHMARK SAJA —
+> bukan percentile relatif mesin lama, supaya kuadran sebanding lintas bulan per Rule 19).
+> `packages/domain/src/pdt.ts` — `klasifikasiUlangKuadranSkuTiktok` membaca baris
+> `pdt_fact_sku_period` (`sku_id is null`, `basis='net'`) + benchmark aktif, menulis kolom
+> `kuadran`; dipanggil `hitungSkorTiktok` SEBELUM `rakitInputSkorTiktok` (yang sekarang
+> membaca `kuadran` sungguhan via `GROUP BY`, bukan hardcode `null`). `cvr` per SKU pakai
+> `ctor` kalau ada, fallback `pesananSku/klik` — cermin persis mesin lama. Shopee TETAP
+> `null` (methodology KUADRAN Shopee beda total — visitor/CR dari "Bisnis — Produk", modul
+> yang belum terdaftar PDT sama sekali — di luar cakupan langkah ini). Diverifikasi:
+> `@cdps/core` 1425/1425, `@cdps/domain` 2764/2765 (1 skip tak terkait), `@cdps/db` 107/107,
+> `@cdps/api` 638/640 (2 skip); DB rebuild 254 migrasi. **`G2-01-KUADRAN-SKU` SEKARANG
+> TERTUTUP PENUH untuk TikTok** — Shopee tetap Open (methodology berbeda, belum ada modul
+> sumber data).
+>
 > **Status 2026-09-15 (sesi 34, lanjutan) — query agregasi SQL DITUTUP.**
 > `rakitInputSkorTiktok` (`packages/domain/src/pdt.ts`) membaca `pdt_fact_ads`/`pdt_fact_content`/
 > `pdt_fact_shop_daily`/`pdt_fact_creator_period` per `client_platform_id`+periode dan merakit
@@ -920,11 +974,39 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > (§G1-09-2BII-SHOPDAILY-SHOPEE di atas), tapi tiga dimensi lain masih terblokir data:
 > - **Conversion & Retention** — sebagian terblokir: `G2-01-SHOPEE-CANCEL-REPEAT-RATE` (kolom
 >   cancel-rate/repeat-rate belum ada di `pdt_fact_shop_daily`, lihat catatan G1-09-2BII di atas).
+>
+> **Status 2026-09-16 — `G2-01-SHOPEE-CANCEL-REPEAT-RATE` SEPARUH DITUTUP: cancelRate hidup,
+> repeatRate SENGAJA ditunda (keputusan pemilik via `AskUserQuestion`).** `pdt_fact_shop_daily.
+> pesanan_dibatalkan` (migrasi `20261105010000`) diisi `ekstrakBarisShopDailyShopee` dari kolom
+> `'Pesanan Dibatalkan'` (sudah terverifikasi sejak sesi 27); `rakitInputSkorShopee` menghitung
+> `cancelRate = Σpesanan_dibatalkan/Σpesanan` (ratio-of-sums basis `'dibuat'` saja, pola sama
+> `cr`). **repeatRate DITUNDA**: berbeda kelas metrik dari `cr`/`cancelRate` — "pembeli unik beli
+> >1x SATU PERIODE PENUH" tidak bisa direkonstruksi dari Σ/rata-rata baris HARIAN (`pdt_fact_
+> shop_daily` berskema per-hari), Shopee sendiri hanya menyediakan SATU angka per periode.
+> Pemilik memilih tunda sampai pola penyimpanan metrik per-periode (bukan per-hari) matang —
+> kemungkinan dipakai bersama `G2-01-SHOPEE-KESEHATAN-WRITER` (skor Kesehatan Toko kemungkinan
+> juga per-periode) supaya satu solusi menutup dua Open sekaligus. `PdtSkorInputPesananDibuatShopee.
+> repeatRate` TETAP `null` — dicatat, bukan tiket baru terpisah, lanjutan `G2-01-SHOPEE-CANCEL-
+> REPEAT-RATE` yang SAMA. Diverifikasi: `@cdps/core` 1425/1425, `@cdps/domain` 2767/2768 (1 skip
+> tak terkait), `@cdps/db` 107/107, `@cdps/api` 638/640 (2 skip); DB rebuild 255 migrasi.
 > - **Product Performance** — terblokir gap YANG SAMA dengan TikTok, `G2-01-KUADRAN-SKU`
 >   (`pdt_fact_sku_period.kuadran` belum pernah ditulis modul manapun).
 > - **Kesehatan Toko** — terblokir TOTAL: modul parser `shopee_kesehatan` sudah terdaftar dan bisa
 >   dideteksi, tapi NOL fungsi penulis fakta untuk modul ini di manapun dalam skema — dicatat Open
 >   baru `G2-01-SHOPEE-KESEHATAN-WRITER`.
+>
+> **Status 2026-09-16 — `G2-01-SHOPEE-KESEHATAN-WRITER` DITUTUP.** Tabel baru
+> `pdt_fact_kesehatan_penalti` (migrasi `20261106010000`, satu baris per pelanggaran aktif —
+> nol identitas natural di sumber, replace-on-recommit sama pola `pdt_fact_ads`).
+> `ekstrakBarisKesehatanShopee` (`@cdps/core` `pdt/fakta.ts`) — modul PALING sederhana di
+> registry ("seluruh sheet hanya 3 kolom"). `rakitInputSkorShopee`'s `kesehatan` sekarang
+> membaca "modul PERNAH terdeteksi untuk periode ini" (pola sama `live`) + Σ poin — `null`
+> hanya bila modul tidak pernah diunggah, `{poinTotal:0}` bila diunggah dan toko bersih.
+> `computeSkorShopee`'s `scoreKesehatanToko` (sudah dibangun+diuji sejak sesi 34) TIDAK
+> disentuh — nol perubahan formula, murni menyambungkan input sungguhan. Diverifikasi:
+> `@cdps/core` 1431/1431, `@cdps/domain` 2772/2773 (1 skip tak terkait), `@cdps/db` 107/107,
+> `@cdps/api` 638/640 (2 skip); DB rebuild 256 migrasi (satu tabel baru, `scripts/db-rebuild.sh`
+> gerbang `tabel public` 181→182 diperbarui).
 >
 > Tidak ditebak/dibangun di sesi ini (konsisten aturan rumah: tidak menebak skema/ambang tanpa
 > verifikasi) — mesin skor Shopee berikutnya realistis akan mengembalikan `null` untuk Product
@@ -1212,6 +1294,128 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > bagian laporan lain** (produk, tokopedia, ads_manager, insight) TETAP di luar cakupan —
 > `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
 
+> **Status 2026-09-16 (lanjutan) — bagian laporan "insight" (narasi+rekomendasi) DIBANGUN KEDUA
+> platform SATU bentuk, AM menyunting di layar pratinjau (BUKAN state machine draft/publikasi baru).**
+> `docs/DECISIONS.md` (cari "bagian laporan \"insight\" (narasi+rekomendasi) dibangun KEDUA platform")
+> untuk alasan lengkap (DUA keputusan `AskUserQuestion` terpisah). Ringkas: riset (subagent Explore)
+> menemukan mesin lama punya PULUHAN aturan rekomendasi ber-ambang PER METRIK yang membaca bagian PDT
+> belum punya (`kuadran`, `meta_cpas`, dll) — port penuh tanpa verifikasi adalah menebak; dan
+> penyimpanannya (`client_report_insight`/`client_report_publikasi`, append-only revisi + status
+> draft/terbit dipaku) ada KARENA client portal terus membaca `client_reports` — PDT tidak punya
+> client portal sama sekali, jadi replika penuh berarti mengubah Rule 22 (PDT-21 "beku HANYA saat
+> dikirim") jadi dua tahap, deviasi PRD baru. Keputusan final: `PdtLaporanInsight`/
+> `bangunLaporanInsight` (`@cdps/core` `pdt/laporan.ts`) NOL query fakta baru — dirangkai dari
+> kpi/kanal/iklan/live/video/afiliasi/tahap yang SUDAH dibangun, plus `skor.dimensi` untuk rekomendasi
+> (`nilai < SKOR_PERHATIAN_MIN` → tinggi, `< SKOR_SEHAT_MIN` → sedang — ambang yang SUDAH dipakai
+> produksi, bukan ambang baru per metrik). TikTok `indikator` memakai `PdtBenchmarkTiktok` yang SAMA
+> dipakai `computeSkorTiktok` (`hitungSkorTiktok` sekarang juga mengembalikan `bench`, additive); Shopee
+> tidak punya bench serupa (ambang skornya hardcode) jadi `indikator` Shopee HANYA skor total. `insight`
+> TIDAK PERNAH `null`. Penyuntingan teks AM (kalau ada) adalah tiket TERPISAH di layar pratinjau
+> sebelum kirim — wiring override ke `kirimLaporanPdt` BELUM dibangun, dicatat di sini sebagai tiket
+> baru. Nol tabel/kolom/migrasi baru. Diverifikasi (DB lokal rebuild bersih, 253 migrasi — nol migrasi
+> PDT baru): `@cdps/core` 1394/1394 (naik dari 1386), `@cdps/domain` 2750/2751 (1 skip, nol gagal),
+> `@cdps/db` 107/107, `@cdps/api` 636/638 (2 skip); typecheck bersih `core`/`domain`/`api`/
+> `web-internal`, lint `@cdps/api` bersih; `next build`+test `web-internal` sukses. **Sisa: TIGA
+> bagian laporan lain** (produk, tokopedia, ads_manager) TETAP di luar cakupan — semuanya hard-blocked
+> (butuh fact-writer baru sekelas G1-09), bukan keputusan scope. **Tiket baru: `G2-01-INSIGHT-EDIT`** —
+> wiring override teks insight AM ke `kirimLaporanPdt` (Flow B langkah 4) + kotak edit di layar
+> pratinjau FE sebelum tombol "Kirim ke Klien", supaya AM bisa memperbaiki kalimat sebelum klien
+> membacanya via WA/export, TANPA mengubah Rule 22 (`kirimLaporanPdt` tetap satu aksi atomik).
+> `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
+
+> **Status 2026-09-16 (lanjutan) — `G2-01-INSIGHT-EDIT` DITUTUP: AM sekarang bisa menyunting narasi
+> "insight" di layar pratinjau, divalidasi sebelum menggantikan insight mesin pada payload beku.**
+> `docs/DECISIONS.md` (cari "G2-01-INSIGHT-EDIT") untuk rincian lengkap. Ringkas: `packages/core/src/
+> pdt/insight-edit.ts` (BARU) — `normalizePdtInsightDraft`, batas karakter/daftar + pesan BI DISALIN
+> persis `report/insight-edit.ts` (fitur identik, sudah disetujui pemilik), MINUS narasi tahap (tahap
+> PDT sudah data terstruktur). `kirimLaporanPdt` dapat parameter opsional `insightDraft` (ke-6, append —
+> nol call site lama berubah); gagal validasi ⇒ `pdt.ValidationError` SEBELUM transaksi dibuka, nol
+> baris ditulis. `POST .../laporan/kirim` menerima kunci `insight` opsional (`toPdtInsightDraft` di
+> `wire.ts`, pass-through — satu-satunya pengecualian house rule wire↔domain, gerbang sungguhannya di
+> core). FE: editor baru (state lokal `insightDraft`, nol persistensi) dengan `PoinEditor`/`RekEditor`/
+> `IndEditor` disalin+disederhanakan dari `InsightEditor.tsx` mesin lama. Nol tabel/kolom/migrasi baru.
+> Diverifikasi (DB lokal rebuild bersih, 253 migrasi — nol migrasi baru): `@cdps/core` 1408/1408 (naik
+> dari 1394), `@cdps/domain` 2754/2755 (1 skip, naik dari 2750), `@cdps/db` 107/107, `@cdps/api`
+> 638/640 (2 skip, naik dari 636); typecheck bersih `core`/`domain`/`api`/`web-internal`, lint
+> `@cdps/api` bersih; `next build`+test `web-internal` sukses. **Sisa: TIGA bagian laporan lain**
+> (produk, tokopedia, ads_manager) TETAP di luar cakupan — semuanya hard-blocked (butuh fact-writer
+> baru sekelas G1-09). `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
+
+> **Status 2026-09-16 (lanjutan) — `G1-09-2BII-TTADS-SAMPLE` DITUTUP: sample ekspor asli TikTok Ads
+> Manager (Avitaskin, Juli 2026) diterima dari pemilik, `tt_ads_product`/`tt_ads_live` diverifikasi.**
+> `docs/DECISIONS.md` (cari "G1-09-2BII-TTADS-SAMPLE") untuk rincian lengkap. Ringkas: sample
+> "creative data for product campaigns" (2093 baris) MEMBUKTIKAN seluruh asumsi konservatif sesi
+> sebelumnya BENAR — nama kolom `ID Campaign` persis, `Biaya`/`Pendapatan kotor` STRING desimal-titik
+> tanpa pemisah ribuan (konvensi `parsePdtAngka(v, true)` sudah tepat) — DAN menemukan dua kolom
+> funnel yang selalu terisi (`Impresi iklan produk`/`Jumlah klik iklan produk`, 100% baris), sekarang
+> diekstrak jadi `pdt_fact_ads.tayangan`/`klik` (sama pola `shopee_ads_cpc`). Sample "livestream data
+> for live campaigns" (HEADER saja, nol baris — toko ini nol kampanye LIVE Juli 2026) menemukan
+> **bug laten nyata**: `tt_ads_live.kolomDipanen` mendaftar `'ROI'` sebagai kolom WAJIB
+> (`validasiKolomWajib` memeriksa SELURUH `kolomDipanen`, bukan cuma `tandaTanganKolom.must` —
+> ditemukan lewat kegagalan tes domain saat kolom itu diperluas), padahal nama kolom asli adalah
+> `'ROI (Toko saat ini)'` — file live-campaign nyata APA PUN akan gagal parse total begitu ada baris
+> data (kolom itu toh tidak pernah dibaca, `roas` diturunkan gmv÷biaya). `ROI` DIHAPUS dari
+> `kolomDipanen`, `Tayangan LIVE` (kolom nyata, funnel) ditambahkan sebagai `tayangan`. `kolomDipanen`
+> **BUKAN** dokumentasi "semua kolom nyata" (godaan awal sesi ini, keliru — sempat menambah SELURUH
+> 26/19 kolom asli lalu ditolak `validasiKolomWajib` untuk fixture manapun yang tidak membawa semua)
+> — HANYA kolom yang benar-benar diekstrak yang boleh masuk, sisanya tetap `kolomBaru` informational
+> (Rule 8), persis preseden `shopee_ads_cpc` (`docs/DECISIONS.md` 2026-09-14 modul KEENAM). Migrasi
+> BARU (`20261107010000`, HANYA `UPDATE pdt_parser_modul.kolom_dipanen`, nol tabel/kolom) menjaga
+> registry TS≡DB sinkron (`pdt.registry.test.ts`), sama pola migrasi `shopee_ads_cpc`
+> (`20261019010000`). **Bukan `ads_manager`** — sample ini mengonfirmasi/melengkapi `tt_ads_product`/
+> `tt_ads_live` (bagian laporan "iklan", SUDAH `lengkap: true`), BUKAN bagian laporan `ads_manager`
+> yang masih di luar cakupan: `report/metrik.ts`/`report/detect.ts` legacy mengonfirmasi `ads_manager`
+> ("TikTok Ads Manager — Brand & Upper Funnel") adalah EMPAT jenis ekspor TERPISAH
+> (`ttam_consideration`/`ttam_follows`/`ttam_showcase`/`ttam_videoviews` — kolom `New consideration
+> size`/`Paid follows`/kolom funnel shop/`Video views`+`CPM`), NOL modul PDT untuk keempatnya sampai
+> hari ini (dikonfirmasi eksplisit docblock `PdtLaporanTahap`: "`ttam`/TikTok Ads Manager belum
+> punya modul PDT sama sekali"). Diverifikasi (DB lokal rebuild bersih, 257 migrasi — SATU migrasi
+> baru, seed-only): `@cdps/core` 1433/1433, `@cdps/domain` 2774/2775 (1 skip, nol gagal — satu
+> kegagalan `client.test.ts` yang sempat muncul di SATU full-suite run adalah flake test-isolation
+> pra-ada tak terkait, lolos bersih saat dijalankan sendiri MAUPUN di full-suite run berikutnya),
+> `@cdps/db` 107/107 (`pdt.registry.test.ts` TS≡DB kembali sinkron),
+> `@cdps/api` 638/640 (2 skip); typecheck bersih `core`/`domain`/`api`. **Sisa: TIGA bagian laporan
+> lain** (produk, tokopedia, ads_manager) TETAP di luar cakupan — `ads_manager` sekarang punya
+> deskripsi CONCRETE (4 jenis ekspor di atas) tapi NOL sample, ditanyakan ke pemilik terpisah dari
+> status ini (lihat `docs/DECISIONS.md`).
+
+> **Status 2026-09-16 (lanjutan) — bagian laporan "produk" (Portfolio Produk/kuadran) DIBANGUN,
+> TikTok-ONLY, keputusan pemilik via `AskUserQuestion`.** `docs/DECISIONS.md` (cari
+> "G2-01-KUADRAN-SKU (produk)") untuk rincian lengkap. Ringkas: setelah `ads_manager` (backlog)
+> di-skip pemilik (nol sample 4-jenis-ekspor, dicatat gap di atas) dan tokopedia PERMANEN manual,
+> "produk" adalah SATU-SATUNYA sisa bagian laporan yang tidak hard-blocked sample — datanya
+> (`pdt_fact_sku_period` + kolom `kuadran`, `G2-01-KUADRAN-SKU` langkah 2) sudah ada, TAPI tabel itu
+> tidak pernah menyimpan nama produk (`sku_id` selalu `null` untuk TikTok, nol join ke
+> `pdt_sku_master`) — tanpa itu v1 cuma bisa RINGKASAN jumlah per kuadran, AM tidak tahu SKU MANA
+> yang perlu ditindak. Ditanyakan ke pemilik: tambah capture `nama_produk` (disalin LANGSUNG dari
+> kolom `'Nama'` `tt_product_analytics`, sudah terverifikasi ada di whitelist sejak G1-01, BUKAN
+> lookup FK — sama pola `pdt_fact_ads.platform_product_id`) vs ringkasan-agregat-saja vs tunda.
+> Pemilik memilih tambah capture (rekomendasi). Implementasi: migrasi `20261108010000` menambah
+> `pdt_fact_sku_period.nama_produk varchar(255) NULL` (TAMPILAN UI SAJA, Rule 20, nol tabel baru);
+> `ekstrakBarisTtProductAnalytics` (`@cdps/core` `pdt/fakta.ts`) sekarang memetakan `'Nama'` (trimmed,
+> kosong ⇒ `null`); writer `tt_product_analytics` → `pdt_fact_sku_period` (`@cdps/domain` `pdt.ts`)
+> menulis kolom baru. `PdtLaporanProduk`/`bangunLaporanProduk` (`@cdps/core` `pdt/laporan.ts`) —
+> mode BENCHMARK SAJA (keputusan desain sudah diambil sebelumnya, bukan baru di sini): `distribusi`
+> (jumlah+Σgmv per KEENAM kuadran) + `topAksi` (HANYA bintang/bocor_traffic/hidden_gem, diurutkan
+> GMV desc, dipotong 12 — angka SAMA mesin lama `report/render.ts` `seksiProduk`, bukan ambang baru).
+> `bacaProdukTiktok` (`@cdps/domain` `pdt.ts`, fungsi privat sama pola `bacaTahapTiktok`) HARUS
+> dipanggil SETELAH `hitungSkorTiktok` (yang menulis kolom `kuadran` via
+> `klasifikasiUlangKuadranSkuTiktok`) — `rakitLaporanTiktok` membacanya SEBAGAI langkah SEQUENTIAL
+> setelah `Promise.all`, bukan di dalamnya (race kalau paralel). Shopee `produk: null` PERMANEN —
+> methodology kuadran Shopee beda total dari TikTok, belum ada modul PDT sumber data (sama gap
+> "tahap"). Wire: `PdtLaporanProdukWire`/`PdtLaporanProdukItemWire`/`PdtLaporanProdukDistribusiWire`
+> (`apps/api/src/lib/wire.ts`) + FE `PdtLaporanProduk`/`PdtLaporanProdukItem`/
+> `PdtLaporanProdukDistribusi` (`web-internal/src/lib/pdt.ts`, `shape-parity.test.ts` diperbarui) +
+> seksi "Portfolio Produk" baru di halaman laporan (`web-internal`, tabel Top Produk by GMV + tile
+> distribusi kuadran, label BI SAMA `report/render.ts` `KUADRAN_META`). Diverifikasi (DB lokal
+> rebuild bersih, 258 migrasi — SATU migrasi baru, satu kolom NULLABLE): `@cdps/core` 1442/1442
+> (naik dari 1433), `@cdps/domain` 2777/2778 (1 skip, nol gagal — satu kegagalan `client.test.ts`
+> yang sempat muncul di SATU full-suite run adalah flake test-isolation pra-ada tak terkait, lolos
+> bersih saat dijalankan sendiri), `@cdps/db` 107/107, `@cdps/api` 638/640 (2 skip); typecheck bersih
+> `core`/`domain`/`api`/`web-internal`, lint `@cdps/api` bersih, `next build` `web-internal` sukses.
+> **Sisa: DUA bagian laporan lain** (tokopedia, ads_manager) TETAP di luar cakupan — tokopedia
+> PERMANEN manual (PDT-22), ads_manager menunggu sample 4-jenis-ekspor dari pemilik.
+
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**
@@ -1225,8 +1429,23 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > migrasi SQL (sama seperti seed versi 1), belum ada route/UI Director untuk INSERT baris baru
 > langsung. Itu pekerjaan tersisa G2-02.
 
+> **Status 2026-09-16 — G2-02 DITUTUP: UI admin kalibrasi `pdt_benchmark` dibangun, Rule 25
+> TERPENUHI.** `docs/DECISIONS.md` (cari "G2-02 DITUTUP") untuk rincian lengkap. Ringkas: preseden
+> HURUF PER HURUF `productexchange.createEligibilityPolicy`/`listEligibilityPolicy` +
+> `/px/eligibility-policy` (append-only, `aktif` tidak pernah dibalik, versi = counter GLOBAL).
+> `pdt.listBenchmarkVersi`/`pdt.tambahVersiBenchmark` (`packages/domain/src/pdt.ts`) — TikTok SAJA
+> (platform lain ditolak eksplisit, Shopee tidak memakai `pdt_benchmark`), memvalidasi PERSIS
+> sepuluh kunci `PdtBenchmarkTiktok`+`PdtBenchmarkKuadranTiktok`. Route baru
+> `GET/POST /api/v1/account/pdt/benchmark` + halaman Director-only `/pdt/benchmark`
+> (`web-internal`, prefill dari versi aktif). Uji DoD eksplisit (kirim laporan versi lama → naikkan
+> kalibrasi → laporan belum-terkirim ikut versi baru, kiriman lama tetap versi lama) — Rule 23+25
+> dibuktikan bersama satu tes. Diverifikasi: `@cdps/core` 1442/1442, `@cdps/domain` 2784/2785
+> (1 skip, nol gagal), `@cdps/db` 107/107, `@cdps/api` 638/640 (2 skip); typecheck+lint bersih,
+> `next build` `web-internal` sukses. **Sisa tersisa G2-02:** revoke mechanism `pdt_laporan_kiriman`
+> (Rule 24) — dicatat terpisah, di luar cakupan DoD "UI admin kalibrasi" di atas.
+
 **DoD:** mengubah ambang lewat UI menggeser skor laporan belum-terkirim dan **tidak** menggeser
-yang sudah terkirim, dibuktikan satu tes.
+yang sudah terkirim, dibuktikan satu tes. **✅ TERPENUHI** (lihat status 2026-09-16 di atas).
 
 ---
 
@@ -1275,6 +1494,23 @@ Yang G4 kerjakan adalah tiga hal yang belum ada:
 `pdt_usulan_katalog` (`kode` PK, `platform_berlaku text[]`, `kondisi jsonb`, `metrik_kunci`,
 `satuan pdt_satuan_t`, `target_formula jsonb`, `divisi_tujuan`, `aktif`). Nol logika perhitungan
 di berkas HTML mandiri. Nol komponen LLM — seluruh usulan **deterministik**.
+
+> **Status 2026-09-16 (DITUTUP sebagian — `docs/DECISIONS.md`) — 20 aksi diseed ke DB, engine
+> membaca DB.** Migrasi `20261109010000` menerjemahkan `copilot.ts` `KATALOG` (20 aksi asli) ke
+> `pdt_usulan_katalog` — `platform_berlaku` seluruhnya `{tiktok,shopee,meta}` (perilaku produksi
+> hari ini nol cabang per platform, TIDAK ditebak dipersempit). `copilot.gabungKatalogDb` (baru)
+> menggabungkan baris DB (`platform_berlaku`/`kondisi`/`aktif` — YANG DIKONSUMSI) dengan metadata
+> kode TETAP di `copilot.ts` (nama/deskripsi/jembatan/arah/minggu/fieldIdBukti/quickWin/pilar —
+> Rule 5, label BI di-review PR bukan admin UI). `copilot.susunUsulan` sekarang WAJIB menerima
+> `katalog` (bukan default ke `KATALOG` internal); `strategi.susunPilarUsulan` merakitnya dari
+> `pdt.listAksiKatalogAktif` per panggilan. `metrik_kunci`/`satuan`/`target_formula`/
+> `divisi_tujuan` diisi BENAR (satuan dipetakan dari `unit` string: Rp→rupiah, %→persen,
+> VV→views, video/kreator→hitungan, jam→jam, x→rasio; `target_formula.ambisi_persen` = nilai
+> `skalaAmbisi(minggu)` saat ini) tapi BELUM dikonsumsi perhitungan — target hitung tetap
+> `skalaAmbisi(kat.minggu)` dari metadata kode, TIDAK berubah sesi ini (di luar cakupan "katalog
+> kode→DB"; admin-tunable target menyusul G4-02/G4-03). **Belum tertutup**: ≥6 aksi khusus Shopee
+> (G4-03), UI admin CRUD katalog (G4-03), Rule 26's "nol logika di HTML mandiri" — `am-copilot.html`
+> MASIH membawa reimplementasi penuh (KATALOG/verdict/skor/saranD5), belum disentuh sesi ini.
 
 ### G4-02 · Satuan bertipe — **tidak ada enum untuk dipakai ulang**
 Diverifikasi: `plan_row.satuan` (`varchar(32)`) dan `strategi_resource.satuan` (`varchar(24)`)

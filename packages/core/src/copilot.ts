@@ -117,7 +117,7 @@ export interface AksiKatalog {
    * Semua pemicu harus menyala (AND). Daftar kosong = aksi ini tidak pernah
    * diusulkan otomatis; ia hanya bisa dipilih AM sendiri di tool.
    */
-  pemicu: Pemicu[];
+  pemicu: readonly Pemicu[];
   /** Metrik yang jadi "angka sekarang" jembatan, bila payload punya. */
   sumberNilai: MetrikKunci | null;
 }
@@ -326,6 +326,58 @@ export const KATALOG: readonly AksiKatalog[] = [
 export const AKSI_BY_KODE: ReadonlyMap<string, AksiKatalog> = new Map(
   KATALOG.map((a) => [a.kode, a]),
 );
+
+// ===========================================================================
+// G4-01 — katalog aksi pindah kode → DB (`pdt_usulan_katalog`, migrasi
+// `20261109010000`). `KATALOG`/`AKSI_BY_KODE` di atas TETAP sumber metadata
+// TAMPILAN (nama/deskripsi/jembatan/arah/minggu/fieldIdBukti/quickWin/pilar/
+// divisi) — Rule 5 aturan rumah ("jangan mengarang/mengubah label BI") lebih
+// selaras label yang di-review lewat PR daripada admin UI bebas ketik; skema
+// `pdt_usulan_katalog` sendiri (PRD §6.3) TIDAK punya kolom nama/deskripsi,
+// sinyal yang sama. Yang PINDAH ke DB (Rule 26/29/32): `platform_berlaku`,
+// `kondisi` (syarat pemicu), `aktif`. `gabungKatalogDb` di bawah menggabungkan
+// baris DB dengan metadata kode, menghasilkan `AksiKatalog[]` yang `susunUsulan`
+// evaluasi — pemanggil (domain `pdt.listAksiKatalogAktif`) yang membaca DB;
+// modul ini TETAP murni (nol DB, sesuai docblock kepala berkas).
+// ===========================================================================
+
+/** Bentuk `pdt_usulan_katalog.kondisi` (CHECK mewajibkan objek, bukan array telanjang). */
+export type KondisiKatalogDb =
+  | { tipe: 'ambang'; pemicu: readonly Pemicu[] }
+  /** HANYA kode 'V3' — `evaluasiPemicu` meng-hardcode kasus ini; isi di sini murni dokumentasi niat. */
+  | { tipe: 'kehadiran_bukti'; sumber: string };
+
+/** Satu baris `pdt_usulan_katalog` sebagaimana dibaca `pdt.listAksiKatalogAktif` (bentuk domain, bukan tipe DB mentah). */
+export interface AksiKatalogDbRow {
+  kode: string;
+  platformBerlaku: readonly string[];
+  kondisi: KondisiKatalogDb;
+  aktif: boolean;
+}
+
+/**
+ * gabungKatalogDb — untuk SATU `platform` ('tiktok'/'shopee'/'meta', vokab
+ * `pdt.PdtPlatform`), saring baris DB `aktif` + `platformBerlaku` mencakup
+ * platform itu, lalu gabungkan dengan metadata kode (`AKSI_BY_KODE`) —
+ * `pemicu` DITIMPA dari `kondisi` DB (admin bisa mengubah syarat tanpa
+ * deploy, Rule 26), field lain (nama/deskripsi/jembatan/arah/minggu/dst.)
+ * TETAP dari kode. Baris DB ber-`kode` yang metadatanya belum ada di kode
+ * (mis. G4-03 menambah aksi baru sebelum PR metadatanya di-merge) DILEWATI,
+ * bukan error — konsisten Rule 46-style error path (satu baris gagal tidak
+ * menjatuhkan seluruh katalog).
+ */
+export function gabungKatalogDb(rows: readonly AksiKatalogDbRow[], platform: string): AksiKatalog[] {
+  const hasil: AksiKatalog[] = [];
+  for (const row of rows) {
+    if (!row.aktif) continue;
+    if (!row.platformBerlaku.includes(platform)) continue;
+    const meta = AKSI_BY_KODE.get(row.kode);
+    if (!meta) continue;
+    const pemicu = row.kondisi.tipe === 'ambang' ? row.kondisi.pemicu : [];
+    hasil.push({ ...meta, pemicu });
+  }
+  return hasil;
+}
 
 /** Pilar katalog → `strategi_pillar.jenis` (PILLAR_KINDS). */
 export const PILAR_KE_JENIS: Readonly<Record<PilarKode, string>> = {
@@ -825,8 +877,15 @@ export const COPILOT_SCHEMA = 'cdps.copilot.usulan.v1';
  *
  * Ini USULAN. Tidak ada baris yang tersimpan sebelum AM mencentangnya dan
  * `saveStrategiPillars` menulisnya.
+ *
+ * `katalog` (G4-01): WAJIB dikirim pemanggil (bukan default ke `KATALOG`
+ * internal) — pemanggil produksi (`strategi.susunPilarUsulan`) merakitnya
+ * lewat `gabungKatalogDb(pdt.listAksiKatalogAktif(...), platform)` supaya
+ * katalog aktif SELALU dari `pdt_usulan_katalog` (Rule 26: katalog hidup di
+ * DB, bukan hardcode). Tes yang ingin memakai katalog referensi bawaan
+ * mengirim `KATALOG` eksplisit.
  */
-export function susunUsulan(payload: unknown): UsulanCopilot {
+export function susunUsulan(payload: unknown, katalog: readonly AksiKatalog[]): UsulanCopilot {
   const p = obj(payload);
   const bench = obj(p?.benchmark_dipakai);
   const metrik = bacaMetrik(payload);
@@ -853,7 +912,7 @@ export function susunUsulan(payload: unknown): UsulanCopilot {
   }
 
   const perPilar = new Map<PilarKode, UsulanAksi[]>();
-  for (const kat of KATALOG) {
+  for (const kat of katalog) {
     const nyala = evaluasiPemicu(kat, metrik, bench, angle);
     if (!nyala.menyala) continue;
     perPilar.set(kat.pilar, [...(perPilar.get(kat.pilar) ?? []), bangunAksi(kat, metrik, angle, nyala.alasan)]);

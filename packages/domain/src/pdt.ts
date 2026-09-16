@@ -12,7 +12,7 @@
  * lain — konsisten dengan ketokan PX-M2a (`docs/DECISIONS.md` 2026-09-12).
  */
 import { randomUUID } from 'node:crypto';
-import { notification, pdt, permission, tz } from '@cdps/core';
+import { copilot, notification, pdt, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
 
@@ -607,59 +607,33 @@ export interface PdtCommitPersiapan {
  * ini menerjemahkan pelanggaran itu jadi `ValidationError` BI, bukan 500
  * mentah (lihat `catch` di bawah).
  */
-export async function commitUploadBatch(
-  sql: Sql,
-  actor: Actor,
-  clientPlatformId: number,
-  berkasInput: readonly PdtPreviewBerkasInput[],
-  overrides: readonly PdtCommitOverride[],
-  now: Date = new Date(),
-): Promise<PdtCommitPersiapan> {
-  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
-  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+interface PdtStatusRekonsiliasiHasil {
+  status: PdtCommitStatus;
+  alasanDitolak: string | null;
+  reconcileDeltaPct: number | null;
+  identitas: PdtPreviewIdentitas;
+  identitasSumber: Record<string, unknown> | null;
+}
 
-  const platform = platformKeVokabPdt(row.platform);
-  if (!platform) {
-    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
-  }
-
-  const modulValidUntukPlatform = new Set(pdt.PDT_MODULES.filter((m) => m.platform === platform).map((m) => m.kode));
-  const overrideByNama = new Map<string, string>();
-  for (const o of overrides) {
-    if (!modulValidUntukPlatform.has(o.modulKode)) {
-      throw new ValidationError(`[modul '${o.modulKode}' bukan modul platform toko ini, pilih dari daftar modul yang tersedia]`);
-    }
-    overrideByNama.set(o.nama, o.modulKode);
-  }
-
-  const hasilBerkas: PdtCommitBerkasHasil[] = [];
-  const terparse: BerkasTerparse[] = [];
-  for (const b of berkasInput) {
-    const overrideKode = overrideByNama.get(b.nama);
-    // Override hanya berlaku untuk berkas yang benar-benar terekstrak (b.aoa != null) — berkas
-    // ditolakPagar/decodeGagal tidak punya sheet untuk diparse ulang dengan modul apa pun.
-    const berlakuOverride = overrideKode != null && b.aoa != null;
-    // `aoa` DIKOREKSI ke sheet `namaSheet` modul override (G1-09-SHEET-BUKAN-PERTAMA) —
-    // tanpa ini, AM yang meng-override ke modul ber-sheet-spesifik (mis. `shopee_live`)
-    // akan tetap membaca sheet yang deteksi OTOMATIS pilih (biasanya sheet pertama),
-    // BUKAN sheet yang modul override itu sungguhan minta.
-    const efektif: PdtPreviewBerkasInput = berlakuOverride
-      ? { ...b, aoa: aoaUntukModulEfektif(b, overrideKode), modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] }
-      : b;
-    const { hasil, terparse: t } = bangunSatuPreviewBerkas(efektif);
-    hasilBerkas.push({ ...hasil, deteksiOleh: berlakuOverride ? 'override_am' : 'tanda_tangan' });
-    if (t) terparse.push(t);
-  }
-
-  const { verdict: identitas, sumber: identitasSumber } = resolveIdentitasDanSumber(platform, terparse, row.shop_id, row.akun_konten_toko);
-  const periode = resolvePeriodePreview(platform, terparse);
-
-  if (periode == null) {
-    throw new ValidationError('[tidak ada satu pun berkas dalam paket yang berhasil diproses — periksa kembali paket ZIP sebelum mengunggah ulang]');
-  }
-  if (periode.status === 'tolak') {
-    throw new ValidationError(periode.pesan);
-  }
+/**
+ * Identitas (Rule 2-4) + rekonsiliasi (Rule 13-16/PDT-16, "D-16") — diekstrak
+ * dari `commitUploadBatch` (keputusan pemilik G1-11-REPARSE-RECOMPUTE-STATUS,
+ * `docs/DECISIONS.md`: "reparse WAJIB ulang rekonsiliasi (D-16) + validasi
+ * identity, status batch di-recompute dari hasil parse baru") supaya
+ * `reparsePdtBatch` (Flow D) di bawah bisa memakai PERSIS logika yang sama
+ * TANPA duplikasi — pola sama `tulisFaktaModulTerparse` (sesi 29, baris fakta).
+ * Murni fungsi keputusan (nol tulis DB, nol pembacaan periode — periode
+ * BUKAN bagian dari keputusan status/identitas/rekonsiliasi ini, lihat
+ * `periode` terpisah di `commitUploadBatch`/docblock seksi G1-11).
+ */
+function resolveStatusIdentitasRekonsiliasi(
+  platform: pdt.PdtPlatform,
+  terparse: readonly BerkasTerparse[],
+  hasilBerkas: readonly PdtPreviewBerkasHasil[],
+  shopId: string | null,
+  akunKontenToko: readonly string[] | null,
+): PdtStatusRekonsiliasiHasil {
+  const { verdict: identitas, sumber: identitasSumber } = resolveIdentitasDanSumber(platform, terparse, shopId, akunKontenToko);
 
   let status: PdtCommitStatus = 'parsing';
   let alasanDitolak: string | null = null;
@@ -736,6 +710,65 @@ export async function commitUploadBatch(
     }
   }
 
+  return { status, alasanDitolak, reconcileDeltaPct, identitas, identitasSumber };
+}
+
+export async function commitUploadBatch(
+  sql: Sql,
+  actor: Actor,
+  clientPlatformId: number,
+  berkasInput: readonly PdtPreviewBerkasInput[],
+  overrides: readonly PdtCommitOverride[],
+  now: Date = new Date(),
+): Promise<PdtCommitPersiapan> {
+  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
+  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+
+  const platform = platformKeVokabPdt(row.platform);
+  if (!platform) {
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+  }
+
+  const modulValidUntukPlatform = new Set(pdt.PDT_MODULES.filter((m) => m.platform === platform).map((m) => m.kode));
+  const overrideByNama = new Map<string, string>();
+  for (const o of overrides) {
+    if (!modulValidUntukPlatform.has(o.modulKode)) {
+      throw new ValidationError(`[modul '${o.modulKode}' bukan modul platform toko ini, pilih dari daftar modul yang tersedia]`);
+    }
+    overrideByNama.set(o.nama, o.modulKode);
+  }
+
+  const hasilBerkas: PdtCommitBerkasHasil[] = [];
+  const terparse: BerkasTerparse[] = [];
+  for (const b of berkasInput) {
+    const overrideKode = overrideByNama.get(b.nama);
+    // Override hanya berlaku untuk berkas yang benar-benar terekstrak (b.aoa != null) — berkas
+    // ditolakPagar/decodeGagal tidak punya sheet untuk diparse ulang dengan modul apa pun.
+    const berlakuOverride = overrideKode != null && b.aoa != null;
+    // `aoa` DIKOREKSI ke sheet `namaSheet` modul override (G1-09-SHEET-BUKAN-PERTAMA) —
+    // tanpa ini, AM yang meng-override ke modul ber-sheet-spesifik (mis. `shopee_live`)
+    // akan tetap membaca sheet yang deteksi OTOMATIS pilih (biasanya sheet pertama),
+    // BUKAN sheet yang modul override itu sungguhan minta.
+    const efektif: PdtPreviewBerkasInput = berlakuOverride
+      ? { ...b, aoa: aoaUntukModulEfektif(b, overrideKode), modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] }
+      : b;
+    const { hasil, terparse: t } = bangunSatuPreviewBerkas(efektif);
+    hasilBerkas.push({ ...hasil, deteksiOleh: berlakuOverride ? 'override_am' : 'tanda_tangan' });
+    if (t) terparse.push(t);
+  }
+
+  const periode = resolvePeriodePreview(platform, terparse);
+
+  if (periode == null) {
+    throw new ValidationError('[tidak ada satu pun berkas dalam paket yang berhasil diproses — periksa kembali paket ZIP sebelum mengunggah ulang]');
+  }
+  if (periode.status === 'tolak') {
+    throw new ValidationError(periode.pesan);
+  }
+
+  const { status, alasanDitolak, reconcileDeltaPct, identitas, identitasSumber } =
+    resolveStatusIdentitasRekonsiliasi(platform, terparse, hasilBerkas, row.shop_id, row.akun_konten_toko);
+
   // Q-3 (docs/DECISIONS.md 2026-09-13): pdt_fact_ads.periode adalah AWAL BULAN, bukan
   // periode.mulai apa adanya (yang bisa jatuh di tengah bulan bila berkas tidak membawa
   // preamble tanggal presisi) — supaya partisi bulanan nanti (bila diperlukan) = DDL murni.
@@ -792,6 +825,14 @@ export async function commitUploadBatch(
   // `AskUserQuestion`, docs/DECISIONS.md).
   const berkasTtAdsProduct = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_product');
   const berkasTtAdsLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_live');
+  // G2-01-KUADRAN-SKU langkah 1 — `tt_product_analytics` → `pdt_fact_sku_period` (lihat
+  // docblock `ekstrakBarisTtProductAnalytics`, `@cdps/core` `pdt/fakta.ts`) — sisi TikTok
+  // untuk tabel yang sebelumnya hanya diisi Shopee (`shopee_ams_produk`, modul KEDELAPAN).
+  const berkasTtProductAnalytics = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_product_analytics');
+  // G2-01-SHOPEE-KESEHATAN-WRITER — `shopee_kesehatan` → `pdt_fact_kesehatan_penalti`
+  // (lihat docblock `ekstrakBarisKesehatanShopee`, `@cdps/core` `pdt/fakta.ts`) — modul
+  // ini terdaftar+terdeteksi sejak awal, tapi belum pernah punya penulis fakta sama sekali.
+  const berkasShopeeKesehatan = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_kesehatan');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -840,7 +881,8 @@ export async function commitUploadBatch(
         id, clientPlatformId, periodeAwalBulan, akunKontenToko: row.akun_konten_toko, now,
         berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
         berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
-        berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive,
+        berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
+        berkasShopeeKesehatan,
       });
 
       await executors(tx).audit.insertAudit({
@@ -912,6 +954,8 @@ interface TulisFaktaModulTerparseInput {
   berkasShopeeAmsProduk: readonly BerkasTerparse[];
   berkasTtAdsProduct: readonly BerkasTerparse[];
   berkasTtAdsLive: readonly BerkasTerparse[];
+  berkasTtProductAnalytics: readonly BerkasTerparse[];
+  berkasShopeeKesehatan: readonly BerkasTerparse[];
 }
 
 /**
@@ -944,7 +988,8 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     id, clientPlatformId, periodeAwalBulan, akunKontenToko, now,
     berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
     berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
-    berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive,
+    berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
+    berkasShopeeKesehatan,
   } = input;
 
   // G1-09 sub-langkah 2b-ii — baris fakta tertipe, `shopee_ads_live` → `pdt_fact_ads`
@@ -1145,9 +1190,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // Sesi 34 lanjutan (G1-09-2BII-SHOPDAILY-SHOPEE) — `shopee_shop_stats` → `pdt_fact_shop_daily`,
   // TIGA basis Rule 16 sekaligus dari SATU berkas (lihat docblock `ekstrakBarisShopDailyShopee`,
   // `@cdps/core` `pdt/fakta.ts`, untuk kenapa `b.sheets` bukan `b.aoa` yang terkunci ke satu
-  // basis). `produk_terjual`/`pembeli_baru` dipetakan sama seperti TikTok; `cancel rate`/
-  // `repeat rate` BELUM ada kolomnya di `pdt_fact_shop_daily` — dicatat Open baru
-  // `G2-01-SHOPEE-CANCEL-REPEAT-RATE`, tidak memblokir gap mendasar ini.
+  // basis). `produk_terjual`/`pembeli_baru` dipetakan sama seperti TikTok. `pesanan_dibatalkan`
+  // (G2-01-SHOPEE-CANCEL-REPEAT-RATE, separuh — cancelRate saja, migrasi `20261105010000`)
+  // ditulis untuk KETIGA basis (fungsi generik, sama pola kolom lain) — konsumen sesungguhnya
+  // (`rakitInputSkorShopee`) hanya membaca basis 'dibuat'. `repeat rate` TETAP tidak ada
+  // kolomnya (ditunda sengaja, lihat docblock migrasi yang sama).
   const BASIS_SHEET_SHOPEE: ReadonlyMap<string, string> = new Map([
     ['Pesanan Dibuat', 'dibuat'],
     ['Pesanan Siap Dikirim', 'siap_dikirim'],
@@ -1162,16 +1209,17 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
           await tx`
             insert into pdt_fact_shop_daily
               (client_platform_id, tanggal, basis, batch_id, parser_versi,
-               gmv, pesanan, pengunjung, produk_diklik, cr, pembeli, pembeli_baru, refund)
+               gmv, pesanan, pengunjung, produk_diklik, cr, pembeli, pembeli_baru, refund, pesanan_dibatalkan)
             values
               (${clientPlatformId}, ${baris.tanggal}::date, ${basis}, ${id}, ${pdt.PDT_PARSER_VERSI},
                ${baris.gmv}, ${baris.pesanan}, ${baris.pengunjung}, ${baris.produkDiklik},
-               ${baris.cr}, ${baris.pembeli}, ${baris.pembeliBaru}, ${baris.refund})
+               ${baris.cr}, ${baris.pembeli}, ${baris.pembeliBaru}, ${baris.refund}, ${baris.pesananDibatalkan})
             on conflict (client_platform_id, tanggal, basis) do update set
               batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
               gmv = excluded.gmv, pesanan = excluded.pesanan,
               pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
-              pembeli = excluded.pembeli, pembeli_baru = excluded.pembeli_baru, refund = excluded.refund`;
+              pembeli = excluded.pembeli, pembeli_baru = excluded.pembeli_baru, refund = excluded.refund,
+              pesanan_dibatalkan = excluded.pesanan_dibatalkan`;
         }
       }
     }
@@ -1290,12 +1338,63 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     }
   }
 
+  // G2-01-KUADRAN-SKU langkah 1 — `tt_product_analytics` → `pdt_fact_sku_period` (lihat
+  // docblock `ekstrakBarisTtProductAnalytics`, `@cdps/core` `pdt/fakta.ts`). `sku_id` SELALU
+  // NULL (level produk-induk, sama keputusan pemilik `G1-09-2BII-ADS-CPC-SKU` dipakai
+  // `shopee_ams_produk` di atas) — replace-on-recommit, sama alasan persis. `basis = 'net'`
+  // LITERAL — TERVERIFIKASI (bukan ditebak): `G1-07-TIKTOK-REKONSILIASI` (`docs/DECISIONS.md`)
+  // membuktikan Σ GMV/Pesanan SKU per-SKU berkas ini SAMA PERSIS dengan `tt_shop_analytics`
+  // shop-level, dan `tt_shop_analytics` → `pdt_fact_shop_daily` sudah memakai `basis = 'net'`
+  // (lihat docblock `ekstrakBarisShopDailyTiktok`) — kesetaraan angka yang sudah dibuktikan
+  // sample asli, bukan basis baru yang diasumsikan.
+  if (berkasTtProductAnalytics.length > 0) {
+    await tx`
+      delete from pdt_fact_sku_period
+       where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'net'
+         and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasTtProductAnalytics) {
+      for (const baris of pdt.ekstrakBarisTtProductAnalytics(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_sku_period
+            (sku_id, client_platform_id, platform_product_id, nama_produk, periode, basis, batch_id,
+             parser_versi, gmv, gmv_dari_kreator, gmv_video_penjual, gmv_live_penjual,
+             pesanan_sku, impresi, klik, ctr, ctor)
+          values
+            (null, ${clientPlatformId}, ${baris.platformProductId}, ${baris.namaProduk}, ${periodeAwalBulan}::date, 'net', ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.gmvDariKreator}, ${baris.gmvVideoPenjual},
+             ${baris.gmvLivePenjual}, ${baris.pesananSku}, ${baris.impresi}, ${baris.klik}, ${baris.ctr}, ${baris.ctor})`;
+      }
+    }
+  }
+
+  // G2-01-SHOPEE-KESEHATAN-WRITER — `shopee_kesehatan` → `pdt_fact_kesehatan_penalti`
+  // (lihat docblock `ekstrakBarisKesehatanShopee`, `@cdps/core` `pdt/fakta.ts`). Nol
+  // identitas natural per-baris di sumber (sama alasan `pdt_fact_ads`) — replace-on-
+  // recommit: DELETE scope (client_platform_id+periode) lalu INSERT ulang seluruh
+  // baris dari batch yang sedang di-commit.
+  if (berkasShopeeKesehatan.length > 0) {
+    await tx`
+      delete from pdt_fact_kesehatan_penalti
+       where client_platform_id = ${clientPlatformId} and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasShopeeKesehatan) {
+      for (const baris of pdt.ekstrakBarisKesehatanShopee(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_kesehatan_penalti
+            (client_platform_id, periode, batch_id, parser_versi, poin, deskripsi, durasi)
+          values
+            (${clientPlatformId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
+             ${baris.poin}, ${baris.deskripsi}, ${baris.durasi})`;
+      }
+    }
+  }
+
   // 2026-09-16 — `tt_ads_product` → `pdt_fact_ads` (lihat docblock
   // `ekstrakBarisTtAdsProduct`, `@cdps/core` `pdt/fakta.ts`, untuk kenapa `roas`
-  // DITURUNKAN dan `sku_id`/`content_id` SELALU null — dibangun tanpa sample asli,
-  // keputusan pemilik via `AskUserQuestion`, docs/DECISIONS.md). Replace-on-recommit,
+  // DITURUNKAN dan `sku_id`/`content_id` SELALU null). Replace-on-recommit,
   // sama alasan `shopee_ads_live` di atas (`sku_id`/`content_id` NULL ⇒ `ON CONFLICT`
-  // tidak aman dipakai lewat `uq_pdt_fact_ads`).
+  // tidak aman dipakai lewat `uq_pdt_fact_ads`). `tayangan`/`klik` diisi 2026-09-16
+  // (`G1-09-2BII-TTADS-SAMPLE` DITUTUP — sample asli mengonfirmasi `Impresi iklan
+  // produk`/`Jumlah klik iklan produk` sebagai kolom nyata).
   if (berkasTtAdsProduct.length > 0) {
     await tx`
       delete from pdt_fact_ads
@@ -1308,14 +1407,16 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
              parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
           values
             (${clientPlatformId}, 'tt_ads_product', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, null, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
       }
     }
   }
 
   // 2026-09-16 — `tt_ads_live` → `pdt_fact_ads` (lihat docblock `ekstrakBarisTtAdsLive`,
   // `@cdps/core` `pdt/fakta.ts` — sama alasan `tt_ads_product` di atas untuk `roas`
-  // diturunkan/`sku_id`/`content_id` null/replace-on-recommit).
+  // diturunkan/`sku_id`/`content_id` null/replace-on-recommit). `tayangan` diisi
+  // 2026-09-16 (`G1-09-2BII-TTADS-SAMPLE` DITUTUP, dari `Tayangan LIVE`) — `klik`
+  // TETAP null, modul ini tidak punya kolom klik (sama pola `shopee_ads_live`).
   if (berkasTtAdsLive.length > 0) {
     await tx`
       delete from pdt_fact_ads
@@ -1328,7 +1429,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
              parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
           values
             (${clientPlatformId}, 'tt_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, null, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
       }
     }
   }
@@ -1654,27 +1755,77 @@ export async function finalizePdtOrphanPurgeTick(
 // G1-11 — Job reparse dari paket ZIP (Flow D; `docs/backlog/PDT_BACKLOG.md`
 // G1-11, `docs/prd/CDPS_PDT_Pusat_Data_Toko.md` §3/§4).
 //
-// **Cakupan SENGAJA dipersempit ke bacaan literal Flow D** (dicatat
-// `docs/DECISIONS.md` sesi 28): Flow D menyebut TIGA hal — "memparse ulang",
-// "menaikkan parser_versi baris fakta", "mencatat audit_logs" — nol
-// penyebutan status batch (`verified`/`ditolak`/dst.), identitas, periode,
-// atau `reconcile_delta_pct`. `reparsePdtBatch` di bawah karena itu HANYA
-// menulis ulang baris fakta (lewat `tulisFaktaModulTerparse`, SAMA fungsi
-// yang dipakai `commitUploadBatch`) untuk (client_platform_id, periode)
-// batch yang SUDAH ADA, memakai `id` batch itu APA ADANYA — TIDAK pernah
-// membuat baris `pdt_upload_batch` baru, TIDAK menyentuh
-// `status`/`alasan_ditolak`/`reconcile_delta_pct`/`identitas_sumber`/
-// `retensi_sampai`, dan TIDAK menulis ulang `pdt_file` (metadata deteksi
-// batch ASLI tetap sebagai riwayat apa adanya). Ini BUKAN kelalaian:
-// `commitUploadBatch`'s error message sendiri (`isUniqueViolation` di atas)
-// SUDAH mengarahkan AM ke "reparse batch lama (Flow D) alih-alih mengunggah
-// batch verified baru untuk periode yang sama" — status batch yang
-// dipertahankan apa adanya adalah PRASYARAT supaya saran itu tidak
-// menciptakan konflik `uq_pdt_upload_batch_verified` baru terhadap dirinya
-// sendiri. Kalau kelak reparse ternyata JUGA harus boleh mengubah status
-// (mis. bug parser yang diperbaiki mengubah hasil rekonsiliasi Rule 13-16),
-// itu keputusan arsitektur terpisah yang BELUM diminta PRD — dicatat sebagai
-// Open baru (`G1-11-REPARSE-RECOMPUTE-STATUS`), bukan ditebak di sini.
+// **G1-11-REPARSE-RECOMPUTE-STATUS DITUTUP (keputusan pemilik, `docs/DECISIONS.md`
+// 2026-09-16): "reparse WAJIB ulang rekonsiliasi (D-16/PDT-16) + validasi
+// identity. Status batch di-recompute dari hasil parse baru; snapshot laporan
+// terkirim tidak berubah (Flow D)."** Ini MELEBARKAN cakupan sesi 28/29 (yang
+// sengaja dipersempit ke bacaan literal Flow D langkah 2 — "memparse ulang",
+// "menaikkan parser_versi", "mencatat audit_logs" saja — karena PRD sendiri
+// diam soal status/identitas/rekonsiliasi) — pemilik sekarang menjawab
+// pertanyaan yang sengaja dibiarkan terbuka sesi itu: YA, reparse harus
+// menjalankan ULANG `resolveStatusIdentitasRekonsiliasi` (fungsi yang SAMA
+// dipakai `commitUploadBatch`, diekstrak justru supaya ini bisa dipakai
+// ulang tanpa duplikasi) atas hasil parse BARU, dan menulis ulang
+// `status`/`alasan_ditolak`/`reconcile_delta_pct`/`identitas_sumber` batch
+// bila hasilnya berbeda dari sebelumnya (mis. bug parser yang diperbaiki
+// mengubah hasil rekonsiliasi Rule 13-16 — batch yang tadinya `ditolak`
+// karena selisih GMV, dengan parser baru sebenarnya `verified`).
+//
+// **`retensi_sampai`/`retensi_alasan` TETAP TIDAK disentuh** — keputusan
+// pemilik hanya menyebut "status batch", bukan retensi; Rule 45 (baseline
+// 120/30 hari) berjalan HANYA saat batch dibuat (`commitUploadBatch`), dan
+// perpanjangan (G1-10-RETENSI-RECOMPUTE/G1-10-ORPHAN-PASS) sudah dipicu jalur
+// lain (kirim laporan/katalog PX) — menebak aturan retensi tambahan di sini
+// berarti mengarang scope yang tidak diminta.
+//
+// **`uq_pdt_upload_batch_verified` (Rule 36)** — kasus yang membuat sesi 28
+// awalnya ragu: bila reparse membuat batch INI jadi `verified` padahal SUDAH
+// ADA batch verified LAIN untuk `(client_platform_id, periode_mulai,
+// periode_selesai)` yang sama (mis. batch pengganti yang diunggah manual
+// SETELAH batch lama gagal rekonsiliasi), UPDATE-nya akan membentur unique
+// index itu. Ditangkap sama seperti `commitUploadBatch` (`isUniqueViolation`)
+// dan diterjemahkan jadi `ValidationError` BI — AM diberi tahu ada konflik
+// verified ganda untuk didiagnosis manual, bukan 500 mentah atau silently
+// overwrite salah satu batch.
+//
+// **Snapshot laporan terkirim TIDAK berubah** (Flow D langkah 3, PRD §4) —
+// invarian ini SUDAH terjamin struktural tanpa kode tambahan: `kirimLaporanPdt`
+// menulis `pdt_laporan_kiriman` sebagai salinan BEKU sekali saat kirim
+// (`trg_pdt_laporan_kiriman_frozen`), reparse tidak pernah menyentuh tabel
+// itu — hanya laporan yang BELUM dikirim (dibaca `bacaLaporanPdt` langsung
+// dari `pdt_fact_*`/`pdt_upload_batch` TERKINI) yang otomatis ikut status
+// baru.
+//
+// `reparsePdtBatch` di bawah menulis ulang baris fakta (lewat
+// `tulisFaktaModulTerparse`, SAMA fungsi yang dipakai `commitUploadBatch`)
+// untuk (client_platform_id, periode) batch yang SUDAH ADA, memakai `id`
+// batch itu APA ADANYA — TIDAK PERNAH membuat baris `pdt_upload_batch` baru
+// (Rule 5, periode batch tidak di-re-derive dari berkas yang diparse ulang),
+// dan TIDAK menulis ulang `pdt_file` (metadata deteksi batch ASLI tetap
+// sebagai riwayat apa adanya, override AM dibaca ulang dari sana — lihat di
+// bawah).
+//
+// **Identitas `tolak` pada reparse** mengosongkan seluruh array berkas
+// sebelum ditulis ke `tulisFaktaModulTerparse` — pola SAMA `commitUploadBatch`
+// (Rule 2-4: batch yang identitasnya tidak valid tidak boleh menyumbang baris
+// fakta BARU). **Baris fakta LAMA batch ini (ditulis sebelum reparse, saat
+// identitas masih valid) TIDAK ikut terhapus** — tiap blok
+// `tulisFaktaModulTerparse` membungkus delete-then-insert-nya dengan
+// `if (berkasXxx.length > 0)` (dicek langsung ke kode, bukan diasumsikan):
+// array kosong ⇒ delete-nya TIDAK PERNAH dijalankan sama sekali. Ini
+// batasan yang SUDAH ada, bukan yang reparse ciptakan — `commitUploadBatch`
+// sendiri punya batasan yang SAMA untuk batch baru yang lahir `tolak` (delete
+// itu berkunci `client_platform_id`+`sumber`+`periode`, BUKAN `batch_id`,
+// justru supaya upload baru yang gagal identitas tidak menghapus fakta batch
+// LAIN yang sedang menopang periode yang sama). Konsekuensinya: bila reparse
+// menemukan identitas yang TERNYATA salah, batch ditandai `ditolak` (Rule
+// 2-4, laporan berhenti memakai batch ini lewat status), tapi baris fakta
+// lama tetap ada di `pdt_fact_*` sampai batch PENGGANTI (baru, identitas
+// benar) commit ke periode yang sama dan menimpanya lewat replace-on-recommit
+// — sengaja TIDAK diperluas menjadi delete ber-`batch_id` di sini karena itu
+// mengubah kontrak `tulisFaktaModulTerparse` yang dipakai BERSAMA
+// `commitUploadBatch`, di luar cakupan keputusan pemilik ("status batch
+// di-recompute").
 //
 // AM override (`pdt_file.deteksi_oleh = 'override_am'`) dari commit ASLI
 // dipertahankan otomatis (dibaca ulang dari `pdt_file`, bukan parameter
@@ -1751,6 +1902,10 @@ export interface PdtReparseHasil {
   /** `'paket_terpurge'` bila `raw_dihapus_pada` sudah terisi — nol tulis terjadi. */
   alasanDilewati: 'paket_terpurge' | null;
   rawDihapusPada: string | null;
+  /** Status batch SETELAH reparse (recompute identitas+rekonsiliasi) — `null` bila `direparse=false`. */
+  status: PdtCommitStatus | null;
+  /** `true` bila status hasil recompute BERBEDA dari status sebelum reparse (mis. `ditolak` → `verified`). */
+  statusBerubah: boolean;
 }
 
 /**
@@ -1768,11 +1923,20 @@ export interface PdtReparseHasil {
  * SALAH PEMANGGILAN, bukan kondisi normal Flow D).
  *
  * `id`/`clientPlatformId`/`periodeAwalBulan` dipakai APA ADANYA dari batch
- * yang SUDAH ADA (lihat docblock seksi G1-11 di atas untuk kenapa TIDAK
- * di-re-derive dari isi berkas yang diparse ulang) — `tulisFaktaModulTerparse`
- * yang SAMA dipakai `commitUploadBatch` menulis ulang baris fakta, lalu
- * `pdt_upload_batch.parser_versi` dinaikkan ke `PDT_PARSER_VERSI` dan SATU
- * `audit_log` (`action = 'pdt_reparse'`) mencatat versi lama→baru.
+ * yang SUDAH ADA (Rule 5 — periode TIDAK di-re-derive dari isi berkas yang
+ * diparse ulang) — `tulisFaktaModulTerparse` yang SAMA dipakai
+ * `commitUploadBatch` menulis ulang baris fakta (dikosongkan bila identitas
+ * hasil recompute `tolak`, lihat docblock seksi G1-11 di atas), lalu
+ * `resolveStatusIdentitasRekonsiliasi` (SAMA dipakai `commitUploadBatch`)
+ * menjalankan ULANG Rule 2-4 (identitas) + Rule 13-16/PDT-16 (rekonsiliasi)
+ * atas hasil parse baru — keputusan pemilik G1-11-REPARSE-RECOMPUTE-STATUS.
+ * `pdt_upload_batch.status`/`alasan_ditolak`/`reconcile_delta_pct`/
+ * `identitas_sumber`/`parser_versi` ditulis ulang ke hasil TERBARU, dan SATU
+ * `audit_log` (`action = 'pdt_reparse'`) mencatat status+parser_versi
+ * lama→baru. `uq_pdt_upload_batch_verified` (Rule 36) yang terbentur oleh
+ * UPDATE ini (batch verified LAIN sudah berdiri untuk periode yang sama)
+ * diterjemahkan jadi `ValidationError` BI, bukan 500 mentah — pola sama
+ * `commitUploadBatch`.
  */
 export async function reparsePdtBatch(
   sql: Sql,
@@ -1784,11 +1948,16 @@ export async function reparsePdtBatch(
     id: number;
     client_platform_id: number;
     platform: string;
+    status: PdtCommitStatus;
     raw_dihapus_pada: Date | string | null;
+    periode_mulai: string;
+    periode_selesai: string;
     periode_awal_bulan: string;
     parser_versi: number;
   }[]>`
-    select id, client_platform_id, platform, raw_dihapus_pada, parser_versi,
+    select id, client_platform_id, platform, status, raw_dihapus_pada, parser_versi,
+           to_char(periode_mulai, 'YYYY-MM-DD') as periode_mulai,
+           to_char(periode_selesai, 'YYYY-MM-DD') as periode_selesai,
            to_char(date_trunc('month', periode_mulai), 'YYYY-MM-DD') as periode_awal_bulan
       from pdt_upload_batch
      where id = ${batchId}`;
@@ -1801,10 +1970,13 @@ export async function reparsePdtBatch(
       direparse: false,
       alasanDilewati: 'paket_terpurge',
       rawDihapusPada: new Date(batch.raw_dihapus_pada).toISOString(),
+      status: null,
+      statusBerubah: false,
     };
   }
 
   const clientPlatformId = batch.client_platform_id;
+  const platform = batch.platform as pdt.PdtPlatform;
   const cpRow = await loadClientPlatformUntukPdt(sql, clientPlatformId);
 
   const overrideRows = await sql<{ nama_entri: string; modul_kode: string | null }[]>`
@@ -1813,6 +1985,7 @@ export async function reparsePdtBatch(
   const overrideByNama = new Map(overrideRows.map((r) => [r.nama_entri, r.modul_kode as string]));
 
   const terparse: BerkasTerparse[] = [];
+  const hasilBerkas: PdtPreviewBerkasHasil[] = [];
   for (const b of berkasInput) {
     const overrideKode = overrideByNama.get(b.nama);
     const berlakuOverride = overrideKode != null && b.aoa != null;
@@ -1822,48 +1995,84 @@ export async function reparsePdtBatch(
     const efektif: PdtPreviewBerkasInput = berlakuOverride
       ? { ...b, aoa: aoaUntukModulEfektif(b, overrideKode), modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] }
       : b;
-    const { terparse: t } = bangunSatuPreviewBerkas(efektif);
+    const { hasil, terparse: t } = bangunSatuPreviewBerkas(efektif);
+    hasilBerkas.push(hasil);
     if (t) terparse.push(t);
   }
 
-  await withTransaction(sql, async (tx) => {
-    await tulisFaktaModulTerparse(tx, {
-      id: batchId,
-      clientPlatformId,
-      periodeAwalBulan: batch.periode_awal_bulan,
-      akunKontenToko: cpRow.akun_konten_toko,
-      now,
-      berkasAdsLive: terparse.filter((b) => b.modul.kode === 'shopee_ads_live'),
-      berkasAdsCpc: terparse.filter((b) => b.modul.kode === 'shopee_ads_cpc'),
-      berkasAdsSearch: terparse.filter((b) => b.modul.kode === 'shopee_ads_search'),
-      berkasTtVideo: terparse.filter((b) => b.modul.kode === 'tt_video'),
-      berkasShopeeLive: terparse.filter((b) => b.modul.kode === 'shopee_live'),
-      berkasTtLive: terparse.filter((b) => b.modul.kode === 'tt_live'),
-      berkasShopStatsTiktok: terparse.filter((b) => b.modul.kode === 'tt_shop_analytics'),
-      berkasShopStatsShopee: terparse.filter((b) => b.modul.kode === 'shopee_shop_stats'),
-      berkasParentSkuUntukMaster: terparse.filter((b) => b.modul.kode === 'shopee_parent_sku'),
-      berkasTtOrders: terparse.filter((b) => b.modul.kode === 'tt_orders'),
-      berkasTtTransactionCreator: terparse.filter((b) => b.modul.kode === 'tt_transaction_creator'),
-      berkasShopeeAmsAfiliasi: terparse.filter((b) => b.modul.kode === 'shopee_ams_afiliasi'),
-      berkasShopeeAmsProduk: terparse.filter((b) => b.modul.kode === 'shopee_ams_produk'),
-      berkasTtAdsProduct: terparse.filter((b) => b.modul.kode === 'tt_ads_product'),
-      berkasTtAdsLive: terparse.filter((b) => b.modul.kode === 'tt_ads_live'),
+  const { status, alasanDitolak, reconcileDeltaPct, identitas, identitasSumber } =
+    resolveStatusIdentitasRekonsiliasi(platform, terparse, hasilBerkas, cpRow.shop_id, cpRow.akun_konten_toko);
+
+  // Identitas `tolak` ⇒ nol berkas menyumbang baris fakta BARU (Rule 2-4, pola
+  // sama `commitUploadBatch`) — baris fakta LAMA batch ini (ditulis sebelum
+  // reparse) TIDAK ikut terhapus, lihat docblock seksi G1-11 di atas untuk
+  // kenapa (delete `tulisFaktaModulTerparse` dijaga `if (arr.length > 0)`,
+  // jadi array kosong = delete-nya tidak pernah berjalan).
+  const terparseUntukFakta = identitas.status === 'tolak' ? [] : terparse;
+
+  let hasilUpdate: { statusBerubah: boolean };
+  try {
+    hasilUpdate = await withTransaction(sql, async (tx) => {
+      await tulisFaktaModulTerparse(tx, {
+        id: batchId,
+        clientPlatformId,
+        periodeAwalBulan: batch.periode_awal_bulan,
+        akunKontenToko: cpRow.akun_konten_toko,
+        now,
+        berkasAdsLive: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ads_live'),
+        berkasAdsCpc: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ads_cpc'),
+        berkasAdsSearch: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ads_search'),
+        berkasTtVideo: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_video'),
+        berkasShopeeLive: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_live'),
+        berkasTtLive: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_live'),
+        berkasShopStatsTiktok: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_shop_analytics'),
+        berkasShopStatsShopee: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_shop_stats'),
+        berkasParentSkuUntukMaster: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_parent_sku'),
+        berkasTtOrders: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_orders'),
+        berkasTtTransactionCreator: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_transaction_creator'),
+        berkasShopeeAmsAfiliasi: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ams_afiliasi'),
+        berkasShopeeAmsProduk: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ams_produk'),
+        berkasTtAdsProduct: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_product'),
+        berkasTtAdsLive: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_live'),
+        berkasTtProductAnalytics: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_product_analytics'),
+        berkasShopeeKesehatan: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_kesehatan'),
+      });
+
+      await tx`
+        update pdt_upload_batch
+           set parser_versi = ${pdt.PDT_PARSER_VERSI}, status = ${status}, alasan_ditolak = ${alasanDitolak},
+               reconcile_delta_pct = ${reconcileDeltaPct}, identitas_sumber = ${tx.json(identitasSumber as never)}
+         where id = ${batchId}`;
+
+      const statusBerubah = status !== batch.status;
+      await executors(tx).audit.insertAudit({
+        entityType: 'pdt_upload_batch',
+        entityId: String(batchId),
+        actorEmployeeId: PDT_REPARSE_ACTOR,
+        action: 'pdt_reparse',
+        beforeJson: { parser_versi: batch.parser_versi, status: batch.status },
+        afterJson: {
+          parser_versi: pdt.PDT_PARSER_VERSI, jumlah_berkas_terparse: terparseUntukFakta.length,
+          status, identitas_status: identitas.status, reconcile_delta_pct: reconcileDeltaPct,
+        },
+        createdBy: PDT_REPARSE_ACTOR,
+      });
+
+      return { statusBerubah };
     });
+  } catch (e) {
+    // uq_pdt_upload_batch_verified (Rule 36) — lihat docblock seksi G1-11 di atas: reparse bisa
+    // menaikkan batch ini jadi 'verified' sementara batch verified LAIN sudah berdiri untuk
+    // periode yang sama. BI, bukan 500 mentah — pola sama `commitUploadBatch`.
+    if (isUniqueViolation(e)) {
+      throw new ValidationError(
+        `[reparse menghasilkan batch verified untuk toko dan periode ${batch.periode_mulai} s.d. ${batch.periode_selesai} ini, tapi batch verified lain untuk periode yang sama sudah ada — periksa batch lain sebelum reparse ulang]`,
+      );
+    }
+    throw e;
+  }
 
-    await tx`update pdt_upload_batch set parser_versi = ${pdt.PDT_PARSER_VERSI} where id = ${batchId}`;
-
-    await executors(tx).audit.insertAudit({
-      entityType: 'pdt_upload_batch',
-      entityId: String(batchId),
-      actorEmployeeId: PDT_REPARSE_ACTOR,
-      action: 'pdt_reparse',
-      beforeJson: { parser_versi: batch.parser_versi },
-      afterJson: { parser_versi: pdt.PDT_PARSER_VERSI, jumlah_berkas_terparse: terparse.length },
-      createdBy: PDT_REPARSE_ACTOR,
-    });
-  });
-
-  return { batchId, direparse: true, alasanDilewati: null, rawDihapusPada: null };
+  return { batchId, direparse: true, alasanDilewati: null, rawDihapusPada: null, status, statusBerubah: hasilUpdate.statusBerubah };
 }
 
 // ===========================================================================
@@ -1874,10 +2083,12 @@ export async function reparsePdtBatch(
 // bentuk JSON `pdt_benchmark.nilai` SENGAJA belum diputuskan di sini (milik
 // G2-02, dicatat COMMENT ON TABLE pdt_benchmark, migrasi G1-01).
 //
-// Portfolio Produk SELALU `null`: `pdt_fact_sku_period.kuadran` belum punya
-// penulis modul manapun (Open `G2-01-KUADRAN-SKU`, docs/backlog/PDT_BACKLOG.md
-// §2) — `computeSkorTiktok` sudah mengeluarkannya dari pembobotan (Rule 12)
-// tanpa kode tambahan apa pun di sini.
+// Portfolio Produk (G2-01-KUADRAN-SKU langkah 2, DITUTUP) — `kuadran` sekarang
+// diklasifikasi+ditulis oleh `klasifikasiUlangKuadranSkuTiktok` (dipanggil
+// `hitungSkorTiktok` sebelum fungsi ini) lalu dibaca di sini via GROUP BY;
+// `null` HANYA bila nol baris `kuadran IS NOT NULL` (belum pernah diunggah/
+// diklasifikasi periode ini) — `computeSkorTiktok` mengeluarkannya dari
+// pembobotan (Rule 12) untuk kasus itu, sama seperti dimensi lain.
 //
 // Sumber tiap dimensi lain diverifikasi dari mesin LAMA yang SEDANG PRODUKSI
 // (`report/metrik.ts`/`report/skor.ts`, docs/DECISIONS.md), bukan ditebak:
@@ -2015,9 +2226,26 @@ export async function rakitInputSkorTiktok(
     gmvKotorToko: gmvTotalToko,
   };
 
-  // Portfolio Produk: lihat docblock berkas di atas — SELALU null sampai
-  // G2-01-KUADRAN-SKU membangun penulis `pdt_fact_sku_period.kuadran`.
-  const produk: pdt.PdtSkorInputProdukTiktok | null = null;
+  // Portfolio Produk (G2-01-KUADRAN-SKU langkah 2) — kolom `kuadran` dibaca
+  // APA ADANYA (pemanggil, `hitungSkorTiktok`, sudah menjalankan
+  // `klasifikasiUlangKuadranSkuTiktok` lebih dulu di transaksi/pemanggilan
+  // yang sama). `n=0` (nol baris `kuadran IS NOT NULL` — tt_product_analytics
+  // belum pernah diunggah periode ini, ATAU diunggah tapi belum diklasifikasi)
+  // ⇒ `null`, sama konvensi dimensi lain.
+  const [produkRow] = await sql<{ n: number; gmv_bintang_hg: string; gmv_bocor: string; gmv_aktif: string }[]>`
+    select
+      count(*) filter (where kuadran is not null)::int as n,
+      coalesce(sum(gmv) filter (where kuadran in ('bintang', 'hidden_gem')), 0) as gmv_bintang_hg,
+      coalesce(sum(gmv) filter (where kuadran = 'bocor_traffic'), 0) as gmv_bocor,
+      coalesce(sum(gmv) filter (where kuadran in ('bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi')), 0) as gmv_aktif
+      from pdt_fact_sku_period
+     where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'net'
+       and periode = ${periodeAwalBulan}::date`;
+  const produk: pdt.PdtSkorInputProdukTiktok | null = produkRow.n === 0 ? null : {
+    gmvBintangHiddenGem: Number(produkRow.gmv_bintang_hg),
+    gmvBocorTraffic: Number(produkRow.gmv_bocor),
+    gmvAktifTotal: Number(produkRow.gmv_aktif),
+  };
 
   return { ads, live, video, kartu, affiliate, produk };
 }
@@ -2039,16 +2267,61 @@ const MSG_PDT_BENCHMARK_KOSONG = '[benchmark PDT belum dikonfigurasi]';
 export interface PdtBenchmarkAktifTiktok {
   versi: number;
   bench: pdt.PdtBenchmarkTiktok;
+  // G2-01-KUADRAN-SKU langkah 2 — dua kunci TAMBAHAN (migrasi `20261104010000`,
+  // versi 2) yang TIDAK dipakai `computeSkorTiktok` (lihat docblock `skor.ts`
+  // untuk kenapa `PdtBenchmarkTiktok` sengaja tidak memuatnya) — dibaca dari
+  // baris `pdt_benchmark` YANG SAMA (satu versi aktif per platform, bukan dua
+  // tabel terpisah), diekspos sebagai slice terpisah untuk konsumen berbeda
+  // (`klasifikasiUlangKuadranSkuTiktok`, bukan `computeSkorTiktok`).
+  kuadran: pdt.PdtBenchmarkKuadranTiktok;
 }
 
 /** Baca versi `pdt_benchmark` TikTok aktif TERTINGGI. Melempar `ValidationError` bila belum ada satu pun (G2-02 belum menyeed). */
 export async function bacaBenchmarkAktifTiktok(sql: Sql): Promise<PdtBenchmarkAktifTiktok> {
-  const rows = await sql<{ versi: number; nilai: pdt.PdtBenchmarkTiktok }[]>`
+  const rows = await sql<{ versi: number; nilai: pdt.PdtBenchmarkTiktok & pdt.PdtBenchmarkKuadranTiktok }[]>`
     select versi, nilai from pdt_benchmark
      where platform = 'tiktok' and aktif = true
      order by versi desc limit 1`;
   if (rows.length === 0) throw new ValidationError(MSG_PDT_BENCHMARK_KOSONG);
-  return { versi: rows[0].versi, bench: rows[0].nilai };
+  const { versi, nilai } = rows[0];
+  return { versi, bench: nilai, kuadran: { quad_klik: nilai.quad_klik, quad_cvr: nilai.quad_cvr } };
+}
+
+/**
+ * G2-01-KUADRAN-SKU langkah 2 — klasifikasi ULANG kuadran seluruh baris
+ * `pdt_fact_sku_period` (`sku_id is null`, `basis='net'` — baris TikTok
+ * `tt_product_analytics`, satu-satunya sumber hari ini) untuk SATU
+ * client_platform_id + SATU periode, lalu TULIS kolom `kuadran`. Idempotent
+ * (aman dipanggil berulang — hasil klasifikasi murni fungsi dari baris fakta
+ * + benchmark aktif SAAT INI, bukan riwayat). Dipanggil dari `hitungSkorTiktok`
+ * SEBELUM `rakitInputSkorTiktok` membaca kolom ini (Rule 4 — field turunan,
+ * selalu recomputable, tidak pernah ditulis tangan).
+ *
+ * `quad_klik`/`quad_cvr` bench diverifikasi belum ada versi aktif untuk
+ * `versi=1` (migrasi `20261030010000` SENGAJA mengecualikan dua kunci ini —
+ * lihat `PdtBenchmarkAktifTiktok`) — pemanggil pasti mendapat `versi>=2`
+ * (migrasi `20261104010000`) begitu benchmark diseed, atau `ValidationError`
+ * `MSG_PDT_BENCHMARK_KOSONG` bila `pdt_benchmark` masih kosong sama sekali
+ * (sama pola `bacaBenchmarkAktifTiktok`, ditangani pemanggil bersama).
+ */
+export async function klasifikasiUlangKuadranSkuTiktok(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+  bench: pdt.PdtBenchmarkKuadranTiktok,
+): Promise<void> {
+  const rows = await sql<{ id: number; klik: number | null; ctor: string | null; pesanan_sku: number | null }[]>`
+    select id, klik, ctor, pesanan_sku from pdt_fact_sku_period
+     where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'net'
+       and periode = ${periodeAwalBulan}::date`;
+  if (rows.length === 0) return;
+  const hasil = pdt.klasifikasikanKuadranSkuTiktok(
+    rows.map((r) => ({ id: r.id, klik: r.klik, ctor: r.ctor == null ? null : Number(r.ctor), pesananSku: r.pesanan_sku })),
+    bench,
+  );
+  for (const h of hasil) {
+    await sql`update pdt_fact_sku_period set kuadran = ${h.kuadran} where id = ${h.id}`;
+  }
 }
 
 /**
@@ -2058,17 +2331,172 @@ export async function bacaBenchmarkAktifTiktok(sql: Sql): Promise<PdtBenchmarkAk
  * skor TikTok siap ditampilkan/dikirim. `benchmarkVersi` dikembalikan
  * terpisah supaya pemanggil (Flow B langkah 4, belum ada) bisa menyimpannya
  * ke `pdt_laporan_kiriman.benchmark_versi` saat mengirim laporan (Rule 23).
+ *
+ * **G2-01-KUADRAN-SKU langkah 2** — benchmark dibaca LEBIH DULU (bukan
+ * `Promise.all` dengan `rakitInputSkorTiktok` lagi seperti sebelumnya):
+ * `klasifikasiUlangKuadranSkuTiktok` harus SELESAI menulis kolom `kuadran`
+ * SEBELUM `rakitInputSkorTiktok` membacanya untuk dimensi Portfolio Produk —
+ * dependensi berurutan, bukan lagi murni-baca paralel.
  */
 export async function hitungSkorTiktok(
   sql: Sql,
   clientPlatformId: number,
   periodeAwalBulan: string,
-): Promise<{ hasil: pdt.PdtSkorHasilTiktok; benchmarkVersi: number }> {
-  const [input, { versi: benchmarkVersi, bench }] = await Promise.all([
-    rakitInputSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
-    bacaBenchmarkAktifTiktok(sql),
-  ]);
-  return { hasil: pdt.computeSkorTiktok(input, bench), benchmarkVersi };
+): Promise<{ hasil: pdt.PdtSkorHasilTiktok; benchmarkVersi: number; bench: pdt.PdtBenchmarkTiktok }> {
+  const { versi: benchmarkVersi, bench, kuadran } = await bacaBenchmarkAktifTiktok(sql);
+  await klasifikasiUlangKuadranSkuTiktok(sql, clientPlatformId, periodeAwalBulan, kuadran);
+  const input = await rakitInputSkorTiktok(sql, clientPlatformId, periodeAwalBulan);
+  return { hasil: pdt.computeSkorTiktok(input, bench), benchmarkVersi, bench };
+}
+
+// ===========================================================================
+// G2-02 · admin tulis `pdt_benchmark` (Rule 25 — "mengubah ambang tidak boleh
+// lagi butuh migrasi+deploy"). Preseden HURUF PER HURUF
+// `productexchange.createEligibilityPolicy`/`listEligibilityPolicy`: append-
+// only (nol UPDATE — `trg_pdt_benchmark_frozen` menolaknya di DB), versi baru
+// = counter GLOBAL (`uq_pdt_benchmark_versi`, lintas platform — lihat migrasi
+// `20261030010000`), `aktif` TIDAK PERNAH dibalik (`bacaBenchmarkAktifTiktok`
+// selalu mengambil versi TERTINGGI ber-`aktif=true`, jadi versi baru yang
+// lahir aktif otomatis "menang" tanpa menyentuh baris lama).
+//
+// TikTok SAJA didukung di sini. `platform` punya CHECK DB
+// ('tiktok'/'shopee'/'meta') tapi `computeSkorShopee` TIDAK menerima
+// parameter benchmark sama sekali (asimetri sengaja, docblock `skor.ts`) —
+// menulis baris 'shopee'/'meta' hari ini hanya melahirkan baris yatim tanpa
+// pembaca. Ditolak eksplisit sampai ada konsumen sungguhan.
+// ===========================================================================
+
+const KUNCI_BENCHMARK_TIKTOK = [
+  'roi_gmvmax',
+  'cpa_ratio',
+  'gmv_per_jam_live',
+  'sesi_live',
+  'gpm_video',
+  'pct_video_sales',
+  'cvr_toko',
+  'pct_kreator_produktif',
+  'quad_klik',
+  'quad_cvr',
+] as const;
+
+export interface PdtBenchmarkVersi {
+  platform: string;
+  versi: number;
+  nilai: Record<string, { good: number; warn: number }>;
+  aktif: boolean;
+  catatan: string | null;
+  dibuatPada: Date;
+  dibuatOleh: string;
+}
+
+function rowToBenchmarkVersi(r: {
+  platform: string;
+  versi: number;
+  nilai: Record<string, unknown>;
+  aktif: boolean;
+  catatan: string | null;
+  dibuat_pada: Date;
+  dibuat_oleh: string;
+}): PdtBenchmarkVersi {
+  return {
+    platform: r.platform,
+    versi: r.versi,
+    nilai: r.nilai as Record<string, { good: number; warn: number }>,
+    aktif: r.aktif,
+    catatan: r.catatan,
+    dibuatPada: r.dibuat_pada,
+    dibuatOleh: r.dibuat_oleh,
+  };
+}
+
+/** listBenchmarkVersi — seluruh versi SATU platform, terbaru dulu. Director-only. */
+export async function listBenchmarkVersi(sql: Queryable, actor: Actor, platform: string): Promise<PdtBenchmarkVersi[]> {
+  if (!canKelolaBenchmark(actor)) throw new ForbiddenError();
+  const rows = await sql<
+    { platform: string; versi: number; nilai: Record<string, unknown>; aktif: boolean; catatan: string | null; dibuat_pada: Date; dibuat_oleh: string }[]
+  >`
+    select platform, versi, nilai, aktif, catatan, dibuat_pada, dibuat_oleh
+      from pdt_benchmark where platform = ${platform} order by versi desc`;
+  return rows.map(rowToBenchmarkVersi);
+}
+
+const MSG_PDT_BENCHMARK_NILAI_INVALID =
+  '[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]';
+
+function validasiNilaiBenchmarkTiktok(nilai: unknown): Record<string, { good: number; warn: number }> {
+  if (typeof nilai !== 'object' || nilai === null || Array.isArray(nilai)) {
+    throw new ValidationError(MSG_PDT_BENCHMARK_NILAI_INVALID);
+  }
+  const n = nilai as Record<string, unknown>;
+  const keys = Object.keys(n);
+  if (keys.length !== KUNCI_BENCHMARK_TIKTOK.length || !KUNCI_BENCHMARK_TIKTOK.every((k) => keys.includes(k))) {
+    throw new ValidationError(`[nilai benchmark harus memuat persis kunci: ${KUNCI_BENCHMARK_TIKTOK.join(', ')}]`);
+  }
+  const hasil: Record<string, { good: number; warn: number }> = {};
+  for (const kunci of KUNCI_BENCHMARK_TIKTOK) {
+    const band = n[kunci];
+    if (typeof band !== 'object' || band === null || Array.isArray(band)) {
+      throw new ValidationError(MSG_PDT_BENCHMARK_NILAI_INVALID);
+    }
+    const b = band as Record<string, unknown>;
+    if (typeof b.good !== 'number' || !Number.isFinite(b.good) || b.good < 0) {
+      throw new ValidationError(MSG_PDT_BENCHMARK_NILAI_INVALID);
+    }
+    if (typeof b.warn !== 'number' || !Number.isFinite(b.warn) || b.warn < 0) {
+      throw new ValidationError(MSG_PDT_BENCHMARK_NILAI_INVALID);
+    }
+    hasil[kunci] = { good: b.good, warn: b.warn };
+  }
+  return hasil;
+}
+
+/** Input for a new calibration version. `catatan` wajib (form FE), sama pola `EligibilityPolicyInput`. */
+export interface PdtBenchmarkVersiInput {
+  platform: string;
+  nilai: unknown;
+  catatan: string;
+  /** Lahir non-aktif (draft/rollback) bila eksplisit `false`. Default `true`. */
+  aktif?: boolean;
+}
+
+/**
+ * tambahVersiBenchmark — mint versi kalibrasi berikutnya. Director-only.
+ * Append-only: TIDAK PERNAH menyentuh baris yang sudah ada (nol langkah
+ * "matikan aktif versi lama" — `bacaBenchmarkAktifTiktok` sudah menangani ini
+ * lewat `order by versi desc limit 1`, persis `createEligibilityPolicy`).
+ */
+export async function tambahVersiBenchmark(sql: Sql, actor: Actor, input: PdtBenchmarkVersiInput): Promise<PdtBenchmarkVersi> {
+  if (!canKelolaBenchmark(actor)) throw new ForbiddenError();
+  if (input.platform !== 'tiktok') {
+    throw new ValidationError(
+      `[platform '${input.platform}' belum didukung kalibrasi benchmark — mesin skor Shopee tidak memakai pdt_benchmark]`,
+    );
+  }
+  const catatan = (input.catatan ?? '').trim();
+  if (catatan === '') throw new ValidationError(MSG_PDT_BENCHMARK_NILAI_INVALID);
+  const nilai = validasiNilaiBenchmarkTiktok(input.nilai);
+  const aktif = input.aktif ?? true;
+
+  return withTransaction(sql, async (tx) => {
+    const rows = await tx<{ versi: number }[]>`select coalesce(max(versi), 0) as versi from pdt_benchmark`;
+    const versiBaru = rows[0].versi + 1;
+    const inserted = await tx<
+      { platform: string; versi: number; nilai: Record<string, unknown>; aktif: boolean; catatan: string | null; dibuat_pada: Date; dibuat_oleh: string }[]
+    >`
+      insert into pdt_benchmark (platform, versi, nilai, aktif, catatan, dibuat_oleh)
+      values (${input.platform}, ${versiBaru}, ${tx.json(nilai as never)}, ${aktif}, ${catatan}, ${actor.employeeId})
+      returning platform, versi, nilai, aktif, catatan, dibuat_pada, dibuat_oleh`;
+    await executors(tx).audit.insertAudit({
+      entityType: 'pdt_benchmark',
+      entityId: String(versiBaru),
+      actorEmployeeId: actor.employeeId,
+      action: 'create',
+      beforeJson: null,
+      afterJson: { platform: input.platform, versi: versiBaru, nilai, aktif, catatan },
+      createdBy: actor.employeeId,
+    });
+    return rowToBenchmarkVersi(inserted[0]);
+  });
 }
 
 // ===========================================================================
@@ -2107,9 +2535,12 @@ export async function hitungSkorTiktok(
 // `pdt_file`/`pdt_upload_batch` (modul `shopee_live` PERNAH terdeteksi untuk
 // batch mana pun yang periodenya mencakup periode ini, batch TIDAK ditolak).
 //
-// **TIGA dimensi TETAP `null`** (Open belum ditutup, TIDAK ditebak di sini):
-// `dibuat.repeatRate`/`.cancelRate` (`G2-01-SHOPEE-CANCEL-REPEAT-RATE`),
-// `produk` (`G2-01-KUADRAN-SKU`), `kesehatan` (`G2-01-SHOPEE-KESEHATAN-WRITER`).
+// **DUA dimensi TETAP `null`** (Open belum ditutup, TIDAK ditebak di sini):
+// `dibuat.repeatRate` (`G2-01-SHOPEE-CANCEL-REPEAT-RATE`, separuh — ditunda
+// sengaja, `cancelRate` sudah hidup) dan `produk` (`G2-01-KUADRAN-SKU`, methodology
+// Shopee beda total dari TikTok, belum ada modul sumber data). `kesehatan`
+// SEKARANG hidup (`G2-01-SHOPEE-KESEHATAN-WRITER`, DITUTUP) — lihat query
+// `kesehatanDiunggahRow`/`kesehatanPoinRow` di bawah.
 // ===========================================================================
 
 /**
@@ -2142,10 +2573,12 @@ export async function rakitInputSkorShopee(
     ctr: klik == null || tayangan == null || tayangan <= 0 ? null : klik / tayangan,
   };
 
-  const [dibuatRow] = await sql<{ n: number; pesanan: string; pengunjung: string }[]>`
+  const [dibuatRow] = await sql<{ n: number; pesanan: string; pengunjung: string; pesanan_dibatalkan: number | null; n_batal: number }[]>`
     select count(*)::int as n,
            coalesce(sum(pesanan), 0) as pesanan,
-           coalesce(sum(pengunjung), 0) as pengunjung
+           coalesce(sum(pengunjung), 0) as pengunjung,
+           sum(pesanan_dibatalkan) as pesanan_dibatalkan,
+           count(*) filter (where pesanan_dibatalkan is not null)::int as n_batal
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = 'dibuat'
@@ -2155,10 +2588,12 @@ export async function rakitInputSkorShopee(
   const pesananTotal = Number(dibuatRow.pesanan);
   const dibuat: pdt.PdtSkorInputPesananDibuatShopee | null = dibuatRow.n === 0 ? null : {
     cr: pengunjungTotal === 0 ? 0 : pesananTotal / pengunjungTotal,
-    // G2-01-SHOPEE-CANCEL-REPEAT-RATE — kolom sumber ada, `pdt_fact_shop_daily`
-    // belum punya kolomnya. TIDAK ditebak di sini.
-    repeatRate: null,
-    cancelRate: null,
+    // G2-01-SHOPEE-CANCEL-REPEAT-RATE (separuh, langkah lanjutan) — cancelRate =
+    // Σ pesanan_dibatalkan / Σ pesanan (ratio-of-sums, sama pola `cr`). `null`
+    // bila NOL baris basis ini membawa kolom sumbernya (`n_batal=0` — berkas lama
+    // sebelum kolom ini dipanen, BUKAN nol pembatalan sungguhan, G1-03).
+    repeatRate: null, // TETAP null — ditunda sengaja, lihat migrasi 20261105010000/docs/DECISIONS.md
+    cancelRate: dibuatRow.n_batal === 0 ? null : pesananTotal === 0 ? 0 : Number(dibuatRow.pesanan_dibatalkan) / pesananTotal,
   };
 
   // Product Performance: SELALU null sampai G2-01-KUADRAN-SKU membangun
@@ -2186,9 +2621,30 @@ export async function rakitInputSkorShopee(
     ? { diunggah: true, sesi: liveSesiRow.sesi }
     : null;
 
-  // Kesehatan Toko: SELALU null sampai G2-01-SHOPEE-KESEHATAN-WRITER dibangun
-  // (modul `shopee_kesehatan` terdaftar, nol penulis fakta).
-  const kesehatan: pdt.PdtSkorInputKesehatanShopee | null = null;
+  // Kesehatan Toko (G2-01-SHOPEE-KESEHATAN-WRITER) — `diunggah` dibaca dari
+  // `pdt_file`/`pdt_upload_batch` (pola SAMA `live` di atas): nol baris
+  // `pdt_fact_kesehatan_penalti` ambigu antara "modul tidak pernah diunggah"
+  // dan "diunggah, toko genuinely bersih" — dua kondisi yang `scoreKesehatanToko`
+  // (mesin lama) sengaja beda skornya (5 netral vs 10 bersih).
+  const [kesehatanDiunggahRow] = await sql<{ diunggah: boolean }[]>`
+    select exists (
+      select 1
+        from pdt_file f
+        join pdt_upload_batch b on b.id = f.batch_id
+       where b.client_platform_id = ${clientPlatformId}
+         and b.status <> 'ditolak'
+         and f.modul_kode = 'shopee_kesehatan'
+         and b.periode_mulai <= (${periodeAwalBulan}::date + interval '1 month' - interval '1 day')::date
+         and b.periode_selesai >= ${periodeAwalBulan}::date
+    ) as diunggah`;
+  const [kesehatanPoinRow] = await sql<{ poin_total: string }[]>`
+    select coalesce(sum(poin), 0) as poin_total
+      from pdt_fact_kesehatan_penalti
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date`;
+  const kesehatan: pdt.PdtSkorInputKesehatanShopee | null = kesehatanDiunggahRow.diunggah
+    ? { poinTotal: Number(kesehatanPoinRow.poin_total) }
+    : null;
 
   return { ads, dibuat, produk, live, kesehatan };
 }
@@ -2570,7 +3026,38 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
   };
 }
 
-/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + iklan + live + video + afiliasi + tahap + `hitungSkorTiktok`. */
+/**
+ * Bagian "produk" (Portfolio Produk/kuadran) TikTok — keputusan pemilik via
+ * `AskUserQuestion` ("G2-01-KUADRAN-SKU (produk)"), lihat docblock
+ * `pdt.bangunLaporanProduk`, `@cdps/core`. **HARUS dipanggil SETELAH
+ * `hitungSkorTiktok` selesai** (`rakitLaporanTiktok` di bawah menjamin
+ * urutan ini) — kolom `kuadran` baru ditulis `klasifikasiUlangKuadranSkuTiktok`
+ * di dalam `hitungSkorTiktok`, membaca sebelum itu akan melihat `kuadran`
+ * basi/`null` dari klasifikasi periode lain atau belum pernah sama sekali.
+ */
+async function bacaProdukTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
+  const rows = await sql<{ kuadran: string | null; nama_produk: string | null; platform_product_id: string | null; gmv: string | null; klik: number | null; ctor: string | null; pesanan_sku: number | null }[]>`
+    select kuadran, nama_produk, platform_product_id, gmv, klik, ctor, pesanan_sku
+      from pdt_fact_sku_period
+     where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'net'
+       and periode = ${periodeAwalBulan}::date`;
+  if (rows.length === 0) return null;
+  return rows.map((r) => {
+    const klik = r.klik;
+    const ctor = r.ctor == null ? null : Number(r.ctor);
+    const cvr = ctor ?? (r.pesanan_sku == null || klik == null || klik === 0 ? null : r.pesanan_sku / klik);
+    return {
+      kuadran: r.kuadran as pdt.PdtKuadranSku | null,
+      namaProduk: r.nama_produk,
+      platformProductId: r.platform_product_id,
+      gmv: r.gmv == null ? null : Number(r.gmv),
+      klik,
+      cvr,
+    };
+  });
+}
+
+/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + iklan + live + video + produk + afiliasi + tahap + `hitungSkorTiktok`. */
 export async function rakitLaporanTiktok(
   sql: Sql,
   clientPlatformId: number,
@@ -2578,7 +3065,7 @@ export async function rakitLaporanTiktok(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanTiktok> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, kanal, iklan, live, video, afiliasi, tahap, { hasil: skor, benchmarkVersi }] = await Promise.all([
+  const [kpi, kanal, iklan, live, video, afiliasi, tahap, { hasil: skor, benchmarkVersi, bench }] = await Promise.all([
     bacaKpiTiktokNet(sql, clientPlatformId, periodeAwalBulan),
     bacaKanalTiktok(sql, clientPlatformId, periodeAwalBulan),
     bacaIklanTiktok(sql, clientPlatformId, periodeAwalBulan),
@@ -2588,8 +3075,13 @@ export async function rakitLaporanTiktok(
     bacaTahapTiktok(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
   ]);
+  // `produk` DIBACA SETELAH Promise.all di atas — hitungSkorTiktok (bagian dari
+  // Promise.all) sudah menulis kolom kuadran periode ini, membacanya SEBELUM itu
+  // akan lomba (race) dengan tulisan yang belum selesai.
+  const produk = await bacaProdukTiktok(sql, clientPlatformId, periodeAwalBulan);
   return pdt.bangunLaporanTiktok({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, iklan, live, video, afiliasi, tahap, skor, benchmarkVersi,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, iklan, live, video, produk, afiliasi, tahap, skor, benchmarkVersi,
+    benchTiktok: bench,
   });
 }
 
@@ -2687,6 +3179,15 @@ export interface PdtLaporanKirimanHasil {
  * "kirim"), belum ada mekanismenya sama sekali (`pdt_laporan_kiriman` nol
  * kolom status, Flow B tidak menyebutnya), dicatat di `PDT_BACKLOG.md` §2
  * sebagai tiket sendiri.
+ *
+ * `insightDraft` (G2-01-INSIGHT-EDIT, opsional) — AM menyunting narasi
+ * "insight" di layar pratinjau sebelum menekan Kirim; kalau diisi,
+ * `pdt.normalizePdtInsightDraft` (`@cdps/core`) memvalidasi + menggantikan
+ * `laporan.insight` mesin SEBELUM dibekukan. `PdtInsightDraftError`
+ * diterjemahkan ke `ValidationError` (pesan BI `[...]` sama persis) supaya
+ * `apps/api` tidak perlu tahu error itu lahir di core, bukan domain — pola
+ * sama semua gerbang validasi lain di modul ini. Diabaikan (`undefined`) ⇒
+ * insight mesin apa adanya, perilaku SAMA sebelum parameter ini ada.
  */
 export async function kirimLaporanPdt(
   sql: Sql,
@@ -2694,8 +3195,17 @@ export async function kirimLaporanPdt(
   clientPlatformId: number,
   periodeAwalBulan: string,
   now: Date = new Date(),
+  insightDraft?: pdt.PdtInsightDraft,
 ): Promise<PdtLaporanKirimanHasil> {
   const laporan = await bacaLaporanPdt(sql, actor, clientPlatformId, periodeAwalBulan, now);
+  if (insightDraft !== undefined) {
+    try {
+      laporan.insight = pdt.normalizePdtInsightDraft(insightDraft);
+    } catch (err) {
+      if (err instanceof pdt.PdtInsightDraftError) throw new ValidationError(err.message);
+      throw err;
+    }
+  }
   const benchmarkVersi = laporan.platform === 'tiktok' ? laporan.benchmarkVersi : null;
 
   return withTransaction(sql, async (tx) => {
@@ -2726,6 +3236,29 @@ export async function kirimLaporanPdt(
          ${now.toISOString()}, ${actor.employeeId}, ${prev?.id ?? null})
       returning id, periode_mulai::text, periode_selesai::text, parser_versi, benchmark_versi,
                 dikirim_pada::text, dikirim_oleh, menggantikan_kiriman_id`;
+
+    // G1-10-RETENSI-RECOMPUTE — Rule 45 baris ketiga: paket ZIP yang menopang laporan yang
+    // SUDAH DIKIRIM ke klien diperpanjang retensinya +12 bulan sejak pengiriman, tidak pernah
+    // diperpendek. Pola SAMA `productexchange-m3.ts` PX-M3-08 ("SKU di katalog PX" — pemicu
+    // KEEMPAT Rule 45, sudah tertutup): perpanjangan ditulis LANGSUNG oleh domain yang memicunya
+    // (di sini) saat kejadian terjadi, BUKAN oleh `planPdtPurgeTick` (yang hanya membaca kolom
+    // ini apa adanya). Beda dari PX-M3-08 (yang punya `batch_ids` eksplisit dari `px_sku_volume`):
+    // `pdt_fact_*` tidak menyimpan daftar batch sumber per laporan, jadi batch yang "menopang"
+    // dipilih lewat overlap rentang tanggal `client_platform_id` yang sama dengan periode laporan
+    // (`periode_mulai`/`periode_selesai` KIRIMAN, bukan batch) — TANPA memfilter `status`: baris
+    // fakta ditulis `tulisFaktaModulTerparse` bahkan untuk batch yang akhirnya `ditolak` karena
+    // rekonsiliasi (identitas tetap dicek lebih dulu), jadi status batch TIDAK bisa dipakai untuk
+    // menyingkirkan kandidat — semangat sama Rule 48 ("tidak bisa membuktikan ⇒ tidak boleh
+    // menghapus"). `legal_hold` dikecualikan (sudah tidak pernah dipurge, memperpanjang kolomnya
+    // tidak berguna).
+    await tx`
+      update pdt_upload_batch
+         set retensi_sampai = greatest(retensi_sampai, ${tz.addMonthsToDate(tz.dateString(now), 12)}::date),
+             retensi_alasan = 'laporan_terkirim'
+       where client_platform_id = ${clientPlatformId}
+         and legal_hold = false
+         and periode_mulai <= ${row.periode_selesai}::date
+         and periode_selesai >= ${row.periode_mulai}::date`;
 
     await executors(tx).audit.insertAudit({
       entityType: 'pdt_laporan_kiriman',
@@ -2808,4 +3341,23 @@ export async function riwayatKirimanPdt(sql: Sql, actor: Actor, clientPlatformId
     dikirimOleh: r.dikirim_oleh,
     menggantikanKirimanId: r.menggantikan_kiriman_id,
   }));
+}
+
+// ===========================================================================
+// G4-01 — katalog aksi usulan (`pdt_usulan_katalog`, migrasi `20261109010000`,
+// docs/backlog/PDT_BACKLOG.md G4-01). Murni baca — nol keputusan di sini;
+// `copilot.gabungKatalogDb` (`@cdps/core`) yang menggabungkan baris ini dengan
+// metadata kode (nama/deskripsi/dst., TETAP di kode — lihat docblock fungsi
+// itu) dan menyaring `platform_berlaku`/`aktif`. Nol gerbang actor di sini
+// (pola sama `pdt_benchmark` yang dibaca `hitungSkorTiktok` tanpa re-cek
+// permission) — pemanggil (`strategi.susunPilarUsulan`) sudah menggerbang
+// `canReadStrategi` sebelum sampai sini; `pdt_usulan_katalog` sendiri RLS
+// variant A (nol policy, service-role only), jadi `sql` di sini HARUS `db()`.
+// ===========================================================================
+
+/** Satu baris `pdt_usulan_katalog` — hanya kolom yang dikonsumsi `copilot.gabungKatalogDb` sesi ini (Rule 26/29/32). */
+export async function listAksiKatalogAktif(sql: Queryable): Promise<copilot.AksiKatalogDbRow[]> {
+  const rows = await sql<{ kode: string; platform_berlaku: string[]; kondisi: copilot.KondisiKatalogDb; aktif: boolean }[]>`
+    select kode, platform_berlaku, kondisi, aktif from pdt_usulan_katalog order by kode`;
+  return rows.map((r) => ({ kode: r.kode, platformBerlaku: r.platform_berlaku, kondisi: r.kondisi, aktif: r.aktif }));
 }

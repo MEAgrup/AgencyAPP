@@ -15,7 +15,9 @@
  * untuk mesin skor TikTok+Shopee (G2-01, Rule 21, enam dimensi via
  * `renormalisasiDimensi`), `laporan.ts` untuk payload "laporan" v1 (Rule 21,
  * KPI ringkas + skor — SEBELAS dari duabelas bagian mesin lama masih di luar
- * cakupan, lihat docblock berkas).
+ * cakupan, lihat docblock berkas), `insight-edit.ts` untuk validasi draf
+ * insight AM (G2-01-INSIGHT-EDIT), `kuadran.ts` untuk klasifikasi kuadran SKU
+ * TikTok (G2-01-KUADRAN-SKU langkah 2, benchmark `quad_klik`/`quad_cvr`).
  */
 export * from './types';
 export * from './modules';
@@ -29,3 +31,5 @@ export * from './header';
 export * from './fakta';
 export * from './skor';
 export * from './laporan';
+export * from './insight-edit';
+export * from './kuadran';

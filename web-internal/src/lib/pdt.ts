@@ -185,6 +185,32 @@ export interface PdtLaporanIklan {
   lengkap: boolean;
 }
 
+// G2-01-KUADRAN-SKU lanjutan — bagian "produk" (Portfolio Produk/kuadran),
+// TikTok-ONLY (`null` whole object untuk Shopee SELALU — methodology kuadran
+// beda total dari TikTok, belum ada modul PDT sumber data, sama gap "tahap").
+// Mode BENCHMARK SAJA (bukan "Mode Relatif" mesin lama). `distribusi` —
+// jumlah SKU + Σgmv per kuadran (kunci: bintang/hidden_gem/bocor_traffic/
+// evaluasi/tidur/tidak_tayang). `top_aksi` — HANYA tiga kuadran actionable
+// (bintang/bocor_traffic/hidden_gem), diurutkan GMV desc, dipotong 12.
+export interface PdtLaporanProdukItem {
+  nama_produk: string | null;
+  platform_product_id: string | null;
+  gmv: number | null;
+  klik: number | null;
+  cvr: number | null;
+  kuadran: string;
+}
+
+export interface PdtLaporanProdukDistribusi {
+  jumlah: number;
+  gmv: number | null;
+}
+
+export interface PdtLaporanProduk {
+  distribusi: Record<string, PdtLaporanProdukDistribusi>;
+  top_aksi: PdtLaporanProdukItem[];
+}
+
 // G2-01 lanjutan — bagian "afiliasi" ringkasan, 2026-09-16. KEDUA platform,
 // SATU bentuk (beda dari "kanal"/"iklan" — nol `lengkap` flag, pola sama
 // "live"/"video"): `jumlah_live`/`jumlah_video` SELALU `null` untuk Shopee
@@ -245,6 +271,31 @@ export interface PdtLaporanTahap {
   blok: PdtLaporanTahapBlok[];
 }
 
+// G2-01 lanjutan — bagian "insight" (narasi + rekomendasi), 2026-09-16, KEDUA
+// platform SATU bentuk. Tidak pernah `null` (beda `iklan`/`live`/`video`/
+// `afiliasi`/`tahap`) — `ringkasan`/`outlook` selalu punya sesuatu untuk
+// dikatakan bahkan saat `kpi` seluruhnya `null`. Rekomendasi v1 GENERIK per
+// dimensi skor (`skor.dimensi` ber-nilai rendah), BUKAN porting penuh aturan
+// per-metrik mesin lama (lihat docblock `pdt.PdtLaporanInsight`, `@cdps/core`,
+// untuk kenapa). AM TIDAK menyunting field ini di halaman ini — penyuntingan
+// (tiket terpisah) terjadi di layar pratinjau sebelum tombol "Kirim ke
+// Klien" ditekan, PDT-21 tetap utuh (nol state machine draft/publikasi baru).
+export interface PdtLaporanRekomendasi {
+  judul: string;
+  target: string;
+  dampak: string;
+  timeline: string;
+}
+
+export interface PdtLaporanInsight {
+  ringkasan: string;
+  poin: string[];
+  rekomendasi_tinggi: PdtLaporanRekomendasi[];
+  rekomendasi_sedang: PdtLaporanRekomendasi[];
+  outlook: string;
+  indikator: { nama: string; target: string }[];
+}
+
 export interface PdtLaporan {
   schema: string;
   platform: string;
@@ -256,10 +307,12 @@ export interface PdtLaporan {
   iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
+  produk: PdtLaporanProduk | null;
   afiliasi: PdtLaporanAfiliasi | null;
   tahap: PdtLaporanTahap | null;
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;
+  insight: PdtLaporanInsight;
 }
 
 /**
@@ -289,8 +342,21 @@ export interface PdtLaporanKiriman {
   laporan: PdtLaporan;
 }
 
-export function kirimLaporanPdt(clientPlatformId: number, periode: string): Promise<PdtLaporanKiriman> {
-  return api.post<PdtLaporanKiriman>('/account/pdt/laporan/kirim', { client_platform_id: clientPlatformId, periode });
+// G2-01-INSIGHT-EDIT — draf sunting AM (layar pratinjau, sebelum "Kirim ke
+// Klien"). Field OPSIONAL/longgar — validasi + pesan BI `[...]` sepenuhnya
+// tugas server (`pdt.normalizePdtInsightDraft`, @cdps/core); FE mengirim apa
+// adanya, termasuk baris kosong (server yang membuang/menolak).
+export interface PdtInsightDraft {
+  ringkasan?: string;
+  poin?: string[];
+  rekomendasi_tinggi?: PdtLaporanRekomendasi[];
+  rekomendasi_sedang?: PdtLaporanRekomendasi[];
+  outlook?: string;
+  indikator?: { nama: string; target: string }[];
+}
+
+export function kirimLaporanPdt(clientPlatformId: number, periode: string, insight?: PdtInsightDraft): Promise<PdtLaporanKiriman> {
+  return api.post<PdtLaporanKiriman>('/account/pdt/laporan/kirim', { client_platform_id: clientPlatformId, periode, insight });
 }
 
 // G2-01 — riwayat kiriman (GET /account/pdt/laporan/kiriman, Flow B langkah
@@ -314,4 +380,38 @@ export async function riwayatKirimanPdt(clientPlatformId: number): Promise<PdtKi
     `/account/pdt/laporan/kiriman?client_platform_id=${clientPlatformId}`,
   );
   return res.data;
+}
+
+// G2-02 — admin kalibrasi `pdt_benchmark` (GET/POST /account/pdt/benchmark,
+// Director-only, `pdt.canKelolaBenchmark`). Preseden HURUF PER HURUF
+// `PxEligibilityPolicy`/`listEligibilityPolicy`/`createEligibilityPolicy`
+// (`web-internal/src/lib/px.ts`) — append-only, `aktif` tidak pernah dibalik.
+export interface PdtBenchBand {
+  good: number;
+  warn: number;
+}
+
+export interface PdtBenchmarkVersi {
+  platform: string;
+  versi: number;
+  nilai: Record<string, PdtBenchBand>;
+  aktif: boolean;
+  catatan: string | null;
+  dibuat_pada: string;
+  dibuat_oleh: string;
+}
+
+export function listBenchmarkVersi(platform = 'tiktok'): Promise<{ data: PdtBenchmarkVersi[] }> {
+  return api.get<{ data: PdtBenchmarkVersi[] }>(`/account/pdt/benchmark?platform=${platform}`);
+}
+
+export interface TambahVersiBenchmarkInput {
+  platform?: string;
+  nilai: Record<string, PdtBenchBand>;
+  catatan: string;
+  aktif?: boolean;
+}
+
+export function tambahVersiBenchmark(input: TambahVersiBenchmarkInput): Promise<PdtBenchmarkVersi> {
+  return api.post<PdtBenchmarkVersi>('/account/pdt/benchmark', input);
 }

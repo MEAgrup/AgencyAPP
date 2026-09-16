@@ -17,9 +17,9 @@
  * ke tanggal lampau).
  *
  * Urutan kerja (Flow D langkah 2-4, lihat docblock seksi G1-11
- * `packages/domain/src/pdt.ts` untuk cakupan SENGAJA dipersempit — status/
- * identitas/periode/reconcile batch TIDAK disentuh, hanya baris fakta +
- * `parser_versi` + `audit_log`):
+ * `packages/domain/src/pdt.ts` untuk cakupan TERBARU — keputusan pemilik
+ * G1-11-REPARSE-RECOMPUTE-STATUS mewajibkan `pdt.reparsePdtBatch` menjalankan
+ * ULANG identitas+rekonsiliasi, bukan hanya baris fakta):
  *   1. `pdt.planPdtReparseTick` — pilih batch `parser_versi < PDT_PARSER_VERSI`
  *      DAN `raw_path IS NOT NULL`, dipecah `kandidat` (paket masih ada) vs
  *      `perluUploadUlang` (paket sudah dipurge — Flow D langkah 4: dilaporkan
@@ -29,11 +29,13 @@
  *      (`parsePdtZipEntries`, G1-05, dengan `PDT_MODULES`/`tandaTanganKolom`
  *      TERKINI — bug deteksi yang sudah diperbaiki sejak commit asli ikut
  *      membetulkan batch lama) → `bangunPreviewBerkasInputs` → `pdt.reparsePdtBatch`
- *      (menulis ulang baris fakta + menaikkan `parser_versi` + audit).
+ *      (menulis ulang baris fakta + status/identitas/rekonsiliasi hasil
+ *      recompute + menaikkan `parser_versi` + audit).
  *      SATU per SATU, di lapisan route — kegagalan satu batch (unduh gagal,
- *      ZIP rusak, dst.) TIDAK menghentikan batch lain dalam tick yang sama
- *      (Rule 46 error path, pola sama purge); batch gagal tetap kandidat
- *      tick besok (`parser_versi`-nya belum bertambah).
+ *      ZIP rusak, konflik `uq_pdt_upload_batch_verified`, dst.) TIDAK
+ *      menghentikan batch lain dalam tick yang sama (Rule 46 error path,
+ *      pola sama purge); batch gagal tetap kandidat tick besok
+ *      (`parser_versi`-nya belum bertambah).
  *   3. Respons merekap jumlah berhasil/gagal + daftar `perlu_upload_ulang`
  *      (batch_id + tanggal purge — Flow D langkah 4: "UI wajib menyebut
  *      tanggal purge-nya, bukan hanya 'tidak tersedia'"; UI konsumen daftar

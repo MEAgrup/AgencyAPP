@@ -111,6 +111,7 @@ afterEach(async () => {
   await sql`delete from pdt_fact_content where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_fact_ads where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_fact_creator_period where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
+  await sql`delete from pdt_fact_sku_period where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-PDTLAP-%'`;
   await sql`delete from client_platforms where client_id like 'CLI-PDTLAP-%'`;
   await sql`delete from clients where id like 'CLI-PDTLAP-%'`;
@@ -163,6 +164,11 @@ describeDb('GET /pdt/laporan — real DB', () => {
       insert into pdt_fact_creator_period
         (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv, pesanan_teratribusi, jumlah_live, jumlah_video)
       values (${cpId}, 'creator-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 200_000, 5, 2, 3)`;
+    // Bench aktif versi 2 seed (20261104010000): quad_klik.good=150, quad_cvr.good=0.015 ⇒ bintang.
+    await sql`
+      insert into pdt_fact_sku_period
+        (sku_id, client_platform_id, platform_product_id, nama_produk, periode, basis, batch_id, parser_versi, gmv, klik, ctor)
+      values (null, ${cpId}, 'PRD-1', 'Kaos Bintang', '2026-07-01'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 500_000, 200, 0.02)`;
 
     const res = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01' }));
     expect(res.status).toBe(200);
@@ -172,7 +178,7 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.client_platform_id).toBe(cpId);
     expect(body.periode_awal_bulan).toBe('2026-07-01');
     expect(body.kpi).toEqual({ gmv: 950_000, pesanan: 40, pengunjung: 2_000, cvr: 0.02 });
-    expect(body.benchmark_versi).toBe(1);
+    expect(body.benchmark_versi).toBe(2); // versi 2 aktif tertinggi (G2-01-KUADRAN-SKU langkah 2, migrasi 20261104010000)
     expect(body.skor).toHaveProperty('total');
     expect(body.skor).toHaveProperty('dimensi');
     expect(body.kanal).toEqual({ gmv_total: 1_000_000, items: expect.any(Array), lengkap: true });
@@ -183,6 +189,11 @@ describeDb('GET /pdt/laporan — real DB', () => {
       total: 1, gmv: 300_000, vv: 5_000, likes: 200, dibagikan: 10, klik_produk: 40,
       gmv_per_video: 300_000, vv_per_video: 5_000,
     });
+    // TikTok produk — satu SKU bintang (klik+cvr tinggi vs bench aktif), wire snake_case (nama_produk/platform_product_id/top_aksi).
+    expect(body.produk.distribusi.bintang).toEqual({ jumlah: 1, gmv: 500_000 });
+    expect(body.produk.top_aksi).toEqual([
+      { nama_produk: 'Kaos Bintang', platform_product_id: 'PRD-1', gmv: 500_000, klik: 200, cvr: 0.02, kuadran: 'bintang' },
+    ]);
     // TikTok iklan SELALU lengkap:true — hanya tt_ads_product terisi, tt_ads_live jadi item null.
     expect(body.iklan).toEqual({
       biaya: 100_000, gmv: 400_000, roas: 4,
@@ -218,6 +229,17 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(metrikByKode('awareness').konten_n).toBe(1);
     expect(metrikByKode('awareness').konten_vv).toBe(5_000);
     expect(blokByKode.conversion.belanja).toBe(100_000);
+    // "insight" — nol query baru, dirangkai dari kpi/iklan/live/video/afiliasi di atas + skor.dimensi.
+    expect(body.insight.ringkasan).toContain('GMV Rp. 950.000,00 dari 40 pesanan');
+    expect(body.insight.poin).toContain('GMV Rp. 950.000,00 dari 40 pesanan (CVR 2,00%).');
+    expect(body.insight.poin).toContain('Iklan: belanja Rp. 100.000,00 → GMV Rp. 400.000,00 (ROAS 4,00x).');
+    expect(body.insight.poin).toContain('LIVE: 1 sesi/2,0 jam → Rp. 400.000,00 (Rp. 200.000,00/jam).');
+    expect(body.insight.poin).toContain('Video: 1 video → Rp. 300.000,00 dari 5.000 views (Rp. 300.000,00/video).');
+    expect(body.insight.poin).toContain('Afiliasi: 1 dari 1 kreator produktif, GMV Rp. 200.000,00.');
+    expect(Array.isArray(body.insight.rekomendasi_tinggi)).toBe(true);
+    expect(Array.isArray(body.insight.rekomendasi_sedang)).toBe(true);
+    const roasIndikator = body.insight.indikator.find((i: { nama: string }) => i.nama === 'Target ROAS Iklan (GMV Max)');
+    expect(roasIndikator?.target).toContain('kini 4,00x');
   });
 
   it('200 Shopee: KPI basis siap_dikirim TANPA net-refund, benchmark_versi null (kunci TETAP ada)', async () => {
@@ -257,6 +279,8 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.live).toEqual({ sesi: 1, gmv: 400_000, vv: 1_000, jam: null, gmv_per_sesi: 400_000, gmv_per_jam: null });
     // Shopee video SELALU null (shopee_video nol penulis fakta — tidak ada baris untuk dihitung).
     expect(body.video).toBeNull();
+    // Shopee produk SELALU null — methodology kuadran Shopee beda total, belum ada modul sumber data.
+    expect(body.produk).toBeNull();
     // Shopee iklan SELALU lengkap:false (ads_banner legacy tidak pernah punya modul PDT) — hanya cpc terisi.
     expect(body.iklan).toEqual({
       biaya: 100_000, gmv: 300_000, roas: 3,
@@ -273,5 +297,13 @@ describeDb('GET /pdt/laporan — real DB', () => {
     });
     // Shopee tahap SELALU null — mesin lama Shopee tidak punya konsep buyer-journey sama sekali.
     expect(body.tahap).toBeNull();
+    // "insight" Shopee — kanal DAN iklan belum lengkap ⇒ dua catatan; nol indikator ber-benchTiktok (asimetri asli).
+    expect(body.insight.ringkasan).toContain('GMV Rp. 800.000,00 dari 20 pesanan');
+    expect(body.insight.poin).toContain('Catatan: rincian kanal belum lengkap — sebagian sumber GMV belum punya penulis fakta PDT.');
+    expect(body.insight.poin).toContain('Iklan: belanja Rp. 100.000,00 → GMV Rp. 300.000,00 (ROAS 3,00x).');
+    expect(body.insight.poin).toContain('Catatan: rincian iklan belum lengkap — sebagian sumber iklan legacy belum punya modul PDT.');
+    expect(body.insight.poin).toContain('LIVE: 1 sesi → Rp. 400.000,00.');
+    expect(body.insight.poin).toContain('Afiliasi: 1 dari 1 kreator produktif, GMV Rp. 150.000,00.');
+    expect(body.insight.indikator.some((i: { nama: string }) => i.nama === 'Target ROAS Iklan (GMV Max)')).toBe(false);
   });
 });

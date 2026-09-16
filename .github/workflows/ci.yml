@@ -520,12 +520,14 @@ jobs:
       # px_sku_volume, px_sku_kategori, px_sku_eligibility, px_coverage_snapshot,
       # px_coverage_push. Nol prefix baru, nol mesin, nol event katalog (lihat
       # komentar scripts/db-rebuild.sh). View px_catalog_item_v bukan base table.
-      - name: Verify table count (expect 181)
+      # G2-01-SHOPEE-KESEHATAN-WRITER (20261106010000): 182 = 181 + 1 tabel
+      # `pdt_fact_kesehatan_penalti` (fakta murni, nol prefix/mesin/event baru).
+      - name: Verify table count (expect 182)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 181
+          test "$n" -eq 182
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

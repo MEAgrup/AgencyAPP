@@ -38,13 +38,20 @@
  * 2026-09-16: TikTok-ONLY, Shopee `null` PERMANEN karena mesin lama Shopee
  * tidak pernah punya konsep buyer-journey sama sekali — bukan gap data
  * seperti "video"; v1 SENGAJA menerima banyak `null` per field karena
- * `ttam`/TikTok Ads Manager belum punya modul PDT sama sekali) sudah bisa
- * dibangun dari `pdt_fact_*` — EMPAT bagian lain (produk, tokopedia,
- * ads_manager, insight) butuh fungsi agregasi fakta BARU per bagian (pola
- * sama `rakitInputSkorTiktok`/`rakitInputSkorShopee`) yang belum ada
- * satupun, pekerjaan multi-sesi. Empat bagian sisanya TETAP di luar
- * cakupan, ditambahkan satu-per-satu sesi berikutnya seperti pola G1-09
- * fact-writer, TIDAK ditebak/dibangun sekaligus di sini.
+ * `ttam`/TikTok Ads Manager belum punya modul PDT sama sekali), dan sekarang
+ * "insight" (lihat docblock `PdtLaporanInsight` di bawah — keputusan pemilik
+ * via `AskUserQuestion` KEDELAPAN dan KESEMBILAN, dua keputusan terpisah,
+ * 2026-09-16: KEDUA platform SATU bentuk, rekomendasi generik dari
+ * `skor.dimensi` BUKAN porting penuh aturan per-metrik mesin lama; dan
+ * penyuntingan teks oleh AM terjadi di layar pratinjau FE sebelum kirim,
+ * BUKAN lewat state machine draft/publikasi/revisi terpisah seperti mesin
+ * lama — PDT-21 "snapshot beku HANYA saat dikirim" tetap utuh) sudah bisa
+ * dibangun dari `pdt_fact_*` — TIGA bagian lain (produk, tokopedia,
+ * ads_manager) butuh fungsi agregasi fakta BARU per bagian (pola sama
+ * `rakitInputSkorTiktok`/`rakitInputSkorShopee`) yang belum ada satupun,
+ * pekerjaan multi-sesi. Tiga bagian sisanya TETAP di luar cakupan,
+ * ditambahkan satu-per-satu sesi berikutnya seperti pola G1-09 fact-writer,
+ * TIDAK ditebak/dibangun sekaligus di sini.
  *
  * **Basis KPI ringkas per platform diverifikasi dari PRD (bukan ditebak)**:
  * TikTok = GMV−refund, basis `'net'` (Rule 15); Shopee = basis
@@ -58,7 +65,10 @@
  * verifikasi sample nyata adalah menebak, bukan porting.
  */
 
-import type { PdtSkorHasilShopee, PdtSkorHasilTiktok } from './skor';
+import { dec, num, pct, rp } from '../baseline/angka';
+import type { PdtKuadranSku } from './kuadran';
+import type { PdtDimensiSkorHasil } from './parsestatus';
+import { SKOR_PERHATIAN_MIN, SKOR_SEHAT_MIN, type PdtBenchmarkTiktok, type PdtSkorHasilShopee, type PdtSkorHasilTiktok } from './skor';
 
 const bulat = (v: number | null | undefined): number | null =>
   v == null || !isFinite(v) ? null : Math.round(v);
@@ -420,6 +430,106 @@ export function bangunLaporanVideo(input: PdtLaporanVideoInput | null): PdtLapor
 }
 
 /**
+ * Bagian "produk" (Portfolio Produk/kuadran) — TikTok-ONLY, keputusan
+ * pemilik via `AskUserQuestion` (2026-09-16, "G2-01-KUADRAN-SKU (produk)"):
+ * Shopee methodology kuadran beda total dari TikTok (visitor/CR dari sheet
+ * "Bisnis — Produk"/`parentskudetail`, bukan klik/CVR "Analitik Produk") dan
+ * belum punya modul PDT sumber data terdaftar — sama gap "tahap", `null`
+ * PERMANEN untuk Shopee sampai modul itu ada (bukan tebakan/interpolasi).
+ *
+ * **Mode BENCHMARK SAJA** (lihat docblock `kuadran.ts` — keputusan desain
+ * SUDAH diambil sebelum bagian laporan ini dibangun, bukan keputusan baru di
+ * sini) — TIDAK ada panel "Mode Relatif" seperti mesin lama (`kuadranProduk`
+ * `relatif`, percentile per-periode); `pdt_fact_sku_period.kuadran` sudah
+ * ditulis benchmark-only oleh `klasifikasikanKuadranSkuTiktok`/
+ * `klasifikasiUlangKuadranSkuTiktok` (langkah 2, PR sebelumnya) SEBELUM
+ * fungsi ini dipanggil (pemanggil, `@cdps/domain` `pdt.ts`, menjamin
+ * urutan — lihat docblock `hitungSkorTiktok`).
+ *
+ * `distribusi` — jumlah SKU + Σgmv per KEENAM kuadran (`PdtKuadranSku`),
+ * cermin bar distribusi mesin lama (`report/render.ts` `seksiProduk` `dist`)
+ * tapi tanpa warna/persen (urusan tampilan FE, bukan payload). `topAksi` —
+ * HANYA tiga kuadran actionable (`bintang`/`bocor_traffic`/`hidden_gem`,
+ * `evaluasi`/`tidur`/`tidak_tayang` DIKELUARKAN — cermin PERSIS "Top Produk
+ * by GMV" mesin lama, `report/render.ts` `seksiProduk`: `Q.benchmark.bintang.
+ * produk.concat(bocor_traffic, hidden_gem)`), diurutkan GMV desc, dipotong
+ * `TOP_PRODUK_N = 12` (angka SAMA mesin lama — `slice(0, 12)` — bukan ambang
+ * baru yang ditebak).
+ *
+ * `namaProduk` bisa `null` untuk baris lama (sebelum `G2-01-KUADRAN-SKU`
+ * lanjutan memanen kolom `'Nama'`) — TAMPILAN UI SAJA, bukan filter (baris
+ * tanpa nama TETAP masuk `topAksi`, FE yang memutuskan fallback tampilan,
+ * mis. `platformProductId`).
+ *
+ * Whole-object `null` saat nol baris `pdt_fact_sku_period` (basis `'net'`,
+ * `sku_id is null`) periode ini — cermin Rule 12/`bangunLaporanLive`/
+ * `bangunLaporanVideo`.
+ */
+const TOP_PRODUK_N = 12;
+const KUADRAN_AKSI: readonly PdtKuadranSku[] = ['bintang', 'bocor_traffic', 'hidden_gem'];
+const SEMUA_KUADRAN: readonly PdtKuadranSku[] = ['bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi', 'tidur', 'tidak_tayang'];
+
+export interface PdtLaporanProdukItem {
+  namaProduk: string | null;
+  platformProductId: string | null;
+  gmv: number | null;
+  klik: number | null;
+  cvr: number | null;
+  kuadran: PdtKuadranSku;
+}
+
+export interface PdtLaporanProdukDistribusi {
+  jumlah: number;
+  gmv: number | null;
+}
+
+export interface PdtLaporanProduk {
+  distribusi: Record<PdtKuadranSku, PdtLaporanProdukDistribusi>;
+  topAksi: PdtLaporanProdukItem[];
+}
+
+/** Satu baris `pdt_fact_sku_period` (TikTok, `sku_id is null`, `basis='net'`) mentah untuk bagian laporan "produk". `kuadran` `null` = belum sempat diklasifikasi (struktural tidak seharusnya terjadi bila dipanggil SETELAH `klasifikasiUlangKuadranSkuTiktok` — dikeluarkan dari `distribusi`/`topAksi` bila terjadi, bukan dipaksa masuk salah satu bucket). */
+export interface PdtLaporanProdukInputBaris {
+  kuadran: PdtKuadranSku | null;
+  namaProduk: string | null;
+  platformProductId: string | null;
+  gmv: number | null;
+  klik: number | null;
+  cvr: number | null;
+}
+
+export type PdtLaporanProdukInput = readonly PdtLaporanProdukInputBaris[] | null;
+
+/** Rakit "produk". `null` (whole object) bila `input` `null` ATAU nol baris — lihat docblock tipe di atas. */
+export function bangunLaporanProduk(input: PdtLaporanProdukInput): PdtLaporanProduk | null {
+  if (input == null || input.length === 0) return null;
+  const berkuadran = input.filter((b): b is PdtLaporanProdukInputBaris & { kuadran: PdtKuadranSku } => b.kuadran != null);
+
+  const distribusi = Object.fromEntries(
+    SEMUA_KUADRAN.map((k) => {
+      const baris = berkuadran.filter((b) => b.kuadran === k);
+      const gmvDiketahui = baris.some((b) => b.gmv != null);
+      return [k, { jumlah: baris.length, gmv: gmvDiketahui ? bulat(baris.reduce((a, b) => a + (b.gmv ?? 0), 0)) : null }];
+    }),
+  ) as Record<PdtKuadranSku, PdtLaporanProdukDistribusi>;
+
+  const topAksi: PdtLaporanProdukItem[] = berkuadran
+    .filter((b) => KUADRAN_AKSI.includes(b.kuadran))
+    .sort((a, b) => (b.gmv ?? 0) - (a.gmv ?? 0))
+    .slice(0, TOP_PRODUK_N)
+    .map((b) => ({
+      namaProduk: b.namaProduk,
+      platformProductId: b.platformProductId,
+      gmv: bulat(b.gmv),
+      klik: b.klik,
+      cvr: persen5(b.cvr),
+      kuadran: b.kuadran,
+    }));
+
+  return { distribusi, topAksi };
+}
+
+/**
  * Bagian "afiliasi" (ringkasan) — bagian KEENAM, keputusan pemilik via
  * `AskUserQuestion` 2026-09-16: RINGKASAN saja untuk KEDUA platform sekaligus,
  * BUKAN daftar per-kreator (`top`/`nempelList` mesin lama, `report/metrik.ts`
@@ -730,6 +840,177 @@ export function bangunLaporanTahap(
   };
 }
 
+/**
+ * Bagian "insight" (narasi + rekomendasi) — bagian KEDELAPAN dari sebelas
+ * yang tadinya di luar cakupan v1 (lihat docblock berkas). Keputusan pemilik
+ * via `AskUserQuestion` KEDELAPAN, dua ronde, 2026-09-16: KEDUA platform,
+ * SATU bentuk (`PdtLaporanInsight`) — mesin lama (`report/insight.ts`
+ * `buildInsights`, `report/shopee/insight.ts` `buildInsights`) py PULUHAN
+ * aturan rekomendasi ber-ambang PER METRIK (mis. "ROI GMV Max < warn →
+ * rekomendasi tinggi", "burn rate > 30% → rekomendasi tinggi") yang ditulis
+ * ULANG per platform dan membaca bagian yang PDT belum punya sama sekali
+ * (`kuadran`, `meta_cpas`, `kesehatan_toko` khusus Shopee, dll) — memPORT
+ * seluruhnya tanpa verifikasi ambang per metrik untuk grain data PDT adalah
+ * MENEBAK, bukan porting (preseden `G1-09-2BII-ADS-CPC-SKU`).
+ *
+ * **v1 SENGAJA lebih tipis**, ambang tunggal yang SUDAH diverifikasi dipakai
+ * PRODUKSI untuk KEDUA platform simetris: `skor.dimensi` (`PdtDimensiSkorHasil[]`,
+ * `parsestatus.ts`, sudah dipakai `computeSkorTiktok`/`computeSkorShopee`) plus
+ * pita `SKOR_SEHAT_MIN`/`SKOR_PERHATIAN_MIN` (`skor.ts`, SUDAH dipakai
+ * `labelSkorPdt`) — dimensi ber-`nilai < SKOR_PERHATIAN_MIN` (6) jadi
+ * rekomendasi TINGGI, `< SKOR_SEHAT_MIN` (8) jadi SEDANG. Rekomendasi generik
+ * per-dimensi ("perbaiki dimensi X"), BUKAN rekomendasi kaya per-metrik mesin
+ * lama — v2 yang memperkaya per-metrik butuh verifikasi ambang terpisah per
+ * platform, dicatat `PDT_BACKLOG.md`.
+ *
+ * `poin` murni MERANGKUM bagian yang SUDAH dibangun (kpi/kanal/iklan/live/
+ * video/afiliasi/tahap) — nol pembacaan fakta baru, nol angka yang tidak
+ * sudah ada di payload yang sama. `indikator` TikTok memakai
+ * `PdtBenchmarkTiktok` yang SUDAH diverifikasi (dipakai `computeSkorTiktok`);
+ * Shopee TIDAK py bench serupa (ambang skornya hardcode di `skor.ts`, lihat
+ * docblock `computeSkorShopee`) jadi `indikator` Shopee HANYA skor total —
+ * asimetri asli, bukan kekurangan implementasi.
+ *
+ * **AM tidak bisa menyunting teks ini dari sini** — keputusan pemilik via
+ * `AskUserQuestion` KESEMBILAN, 2026-09-16: penyuntingan (kalau AM mau ganti
+ * kalimat sebelum kirim ke klien) terjadi di LAYAR PRATINJAU (FE) sebelum
+ * tombol "Kirim ke Klien" ditekan, BUKAN lewat tabel revisi/status seperti
+ * `client_report_insight`/`client_report_publikasi` mesin lama — PDT-21 ("
+ * snapshot beku HANYA saat dikirim") tetap utuh, `kirimLaporanPdt` tetap SATU
+ * aksi atomik, nol state machine baru. Wiring override teks AM ke
+ * `kirimLaporanPdt` adalah tiket TERPISAH (di luar cakupan PR ini),
+ * `PDT_BACKLOG.md`.
+ */
+export interface PdtLaporanRekomendasi {
+  judul: string;
+  target: string;
+  dampak: string;
+  timeline: string;
+}
+
+export interface PdtLaporanInsight {
+  ringkasan: string;
+  poin: string[];
+  rekomendasiTinggi: PdtLaporanRekomendasi[];
+  rekomendasiSedang: PdtLaporanRekomendasi[];
+  outlook: string;
+  indikator: { nama: string; target: string }[];
+}
+
+export interface PdtLaporanInsightInput {
+  platform: 'tiktok' | 'shopee';
+  kpi: PdtLaporanKpiRingkas;
+  kanal: PdtLaporanKanal;
+  iklan: PdtLaporanIklan | null;
+  live: PdtLaporanLive | null;
+  video: PdtLaporanVideo | null;
+  afiliasi: PdtLaporanAfiliasi | null;
+  tahap: PdtLaporanTahap | null;
+  skor: PdtSkorHasilTiktok | PdtSkorHasilShopee;
+  benchTiktok: PdtBenchmarkTiktok | null;
+}
+
+function rekomendasiDariDimensi(dimensi: readonly PdtDimensiSkorHasil[]): { tinggi: PdtLaporanRekomendasi[]; sedang: PdtLaporanRekomendasi[] } {
+  const tinggi: PdtLaporanRekomendasi[] = [];
+  const sedang: PdtLaporanRekomendasi[] = [];
+  for (const d of dimensi) {
+    if (!d.disertakan || d.nilai == null) continue;
+    if (d.nilai < SKOR_PERHATIAN_MIN) {
+      tinggi.push({
+        judul: `Benahi dimensi "${d.label}"`,
+        target: `Skor dimensi ≥${SKOR_PERHATIAN_MIN}/10 (kini ${dec(d.nilai, 1)}/10)`,
+        dampak: `Dimensi ini berbobot ${pct(d.bobotEfektif, 0)} dari skor performa total — perbaikan di sini paling terasa di skor akhir.`,
+        timeline: 'Mulai periode berikutnya',
+      });
+    } else if (d.nilai < SKOR_SEHAT_MIN) {
+      sedang.push({
+        judul: `Naikkan dimensi "${d.label}" ke SEHAT`,
+        target: `Skor dimensi ≥${SKOR_SEHAT_MIN}/10 (kini ${dec(d.nilai, 1)}/10)`,
+        dampak: `Dimensi ini berbobot ${pct(d.bobotEfektif, 0)} dari skor performa total.`,
+        timeline: 'Mulai periode berikutnya',
+      });
+    }
+  }
+  return { tinggi, sedang };
+}
+
+function poinLaporanInsight(input: PdtLaporanInsightInput): string[] {
+  const { kpi, kanal, iklan, live, video, afiliasi, tahap, platform } = input;
+  const poin: string[] = [];
+
+  if (kpi.gmv != null) {
+    poin.push(`GMV ${rp(kpi.gmv)}${kpi.pesanan != null ? ` dari ${num(kpi.pesanan)} pesanan` : ''}${kpi.cvr != null ? ` (CVR ${pct(kpi.cvr, 2)})` : ''}.`);
+  }
+
+  const kanalTerukur = kanal.items.filter((x) => x.gmv != null);
+  if (kanalTerukur.length) {
+    const top = [...kanalTerukur].sort((a, b) => (b.gmv as number) - (a.gmv as number))[0];
+    poin.push(`${top.label} jadi kanal terbesar: ${rp(top.gmv)}${top.persen != null ? ` (${pct(top.persen, 1)} dari GMV)` : ''}.`);
+  }
+  if (!kanal.lengkap) {
+    poin.push('Catatan: rincian kanal belum lengkap — sebagian sumber GMV belum punya penulis fakta PDT.');
+  }
+
+  if (iklan) {
+    poin.push(`Iklan: belanja ${rp(iklan.biaya)} → GMV ${rp(iklan.gmv)}${iklan.roas != null ? ` (ROAS ${dec(iklan.roas, 2)}x)` : ''}.`);
+    if (!iklan.lengkap) poin.push('Catatan: rincian iklan belum lengkap — sebagian sumber iklan legacy belum punya modul PDT.');
+  }
+
+  if (live) {
+    poin.push(`LIVE: ${live.sesi} sesi${live.jam != null ? `/${dec(live.jam, 1)} jam` : ''} → ${rp(live.gmv)}${live.gmvPerJam != null ? ` (${rp(live.gmvPerJam)}/jam)` : ''}.`);
+  }
+
+  if (video) {
+    poin.push(`Video: ${video.total} video → ${rp(video.gmv)}${video.vv != null ? ` dari ${num(video.vv)} views` : ''}${video.gmvPerVideo != null ? ` (${rp(video.gmvPerVideo)}/video)` : ''}.`);
+  }
+
+  if (afiliasi) {
+    poin.push(`Afiliasi: ${afiliasi.produktif} dari ${afiliasi.totalKreator} kreator produktif${afiliasi.gmv != null ? `, GMV ${rp(afiliasi.gmv)}` : ''}.`);
+  }
+
+  if (platform === 'tiktok' && tahap?.fokus) {
+    poin.push(`Fokus tahap buyer-journey periode ini: ${TAHAP_LABEL[tahap.fokus]}.`);
+  }
+
+  return poin;
+}
+
+function indikatorLaporanInsight(input: PdtLaporanInsightInput): { nama: string; target: string }[] {
+  const arr: { nama: string; target: string }[] = [];
+  if (input.skor.total != null) {
+    arr.push({ nama: 'Target Skor Performa', target: `≥${SKOR_SEHAT_MIN}/10 (kini ${dec(input.skor.total, 1)}/10)` });
+  }
+  if (input.platform === 'tiktok' && input.benchTiktok) {
+    const b = input.benchTiktok;
+    arr.push({ nama: 'Target ROAS Iklan (GMV Max)', target: `≥${b.roi_gmvmax.good}x (kini ${input.iklan?.roas != null ? `${dec(input.iklan.roas, 2)}x` : '—'})` });
+    arr.push({ nama: 'Target GMV/jam LIVE', target: `${rp(b.gmv_per_jam_live.warn)}+ (kini ${rp(input.live?.gmvPerJam ?? null)})` });
+  }
+  return arr;
+}
+
+/** Rakit "insight" v1 — nol query ulang, dirangkai dari bagian yang SUDAH dibangun (lihat docblock tipe). Tidak pernah `null` (beda dari `iklan`/`live`/`video`/`afiliasi`/`tahap`) karena `ringkasan`/`outlook` selalu punya sesuatu untuk dikatakan bahkan saat `kpi` seluruhnya `null`. */
+export function bangunLaporanInsight(input: PdtLaporanInsightInput): PdtLaporanInsight {
+  const { kpi, skor } = input;
+  const { tinggi, sedang } = rekomendasiDariDimensi(skor.dimensi);
+
+  const ringkasan = kpi.gmv == null
+    ? 'Belum ada data GMV untuk periode ini.'
+    : `GMV ${rp(kpi.gmv)}${kpi.pesanan != null ? ` dari ${num(kpi.pesanan)} pesanan` : ''}.${skor.total != null ? ` Skor performa ${dec(skor.total, 1)}/10 — ${skor.label}.` : ' Skor performa belum bisa dihitung — belum ada dimensi yang punya data periode ini.'}`;
+
+  const outlook = kpi.gmv == null
+    ? 'Target GMV bulan depan belum bisa ditentukan — GMV periode ini tidak diketahui.'
+    : `Target GMV bulan depan: ${rp(kpi.gmv * 1.15)}–${rp(kpi.gmv * 1.3)} (+15–30%). Fokus: tindak lanjuti rekomendasi prioritas tinggi di atas.`;
+
+  return {
+    ringkasan,
+    poin: poinLaporanInsight(input),
+    rekomendasiTinggi: tinggi,
+    rekomendasiSedang: sedang,
+    outlook,
+    indikator: indikatorLaporanInsight(input),
+  };
+}
+
 export interface PdtLaporanTiktok {
   schema: 'cdps.pdt.laporan.tiktok.v1';
   platform: 'tiktok';
@@ -741,10 +1022,12 @@ export interface PdtLaporanTiktok {
   iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
+  produk: PdtLaporanProduk | null;
   afiliasi: PdtLaporanAfiliasi | null;
   tahap: PdtLaporanTahap | null;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
+  insight: PdtLaporanInsight;
 }
 
 export interface PdtLaporanShopee {
@@ -758,10 +1041,13 @@ export interface PdtLaporanShopee {
   iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
+  /** SELALU `null` — methodology kuadran Shopee beda total dari TikTok, belum ada modul PDT sumber data, lihat docblock `bangunLaporanProduk`. */
+  produk: PdtLaporanProduk | null;
   afiliasi: PdtLaporanAfiliasi | null;
   /** SELALU `null` — mesin lama Shopee tidak punya konsep buyer-journey sama sekali, lihat docblock `PdtLaporanTahap`. */
   tahap: PdtLaporanTahap | null;
   skor: PdtSkorHasilShopee;
+  insight: PdtLaporanInsight;
 }
 
 export interface PdtLaporanTiktokOptions {
@@ -773,10 +1059,13 @@ export interface PdtLaporanTiktokOptions {
   iklan: PdtLaporanIklanInputTiktok | null;
   live: PdtLaporanLiveInput | null;
   video: PdtLaporanVideoInput | null;
+  produk: PdtLaporanProdukInput;
   afiliasi: PdtLaporanAfiliasiInput | null;
   tahap: PdtLaporanTahapInput;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
+  /** Bench aktif yang SAMA dipakai `computeSkorTiktok` — dipakai `indikator` bagian "insight", nol query ulang. */
+  benchTiktok: PdtBenchmarkTiktok;
 }
 
 export interface PdtLaporanShopeeOptions {
@@ -798,6 +1087,10 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
   const iklan = bangunIklanTiktok(opts.iklan);
   const afiliasi = bangunLaporanAfiliasi(opts.afiliasi);
   const video = bangunLaporanVideo(opts.video);
+  const produk = bangunLaporanProduk(opts.produk);
+  const kanal = bangunKanalTiktok(opts.kanal);
+  const live = bangunLaporanLive(opts.live);
+  const tahap = bangunLaporanTahap(opts.tahap, kpi, iklan, afiliasi, video);
   return {
     schema: 'cdps.pdt.laporan.tiktok.v1',
     platform: 'tiktok',
@@ -805,32 +1098,46 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
     periodeAwalBulan: opts.periodeAwalBulan,
     generatedAt: opts.generatedAt,
     kpi,
-    kanal: bangunKanalTiktok(opts.kanal),
+    kanal,
     iklan,
-    live: bangunLaporanLive(opts.live),
+    live,
     video,
+    produk,
     afiliasi,
-    tahap: bangunLaporanTahap(opts.tahap, kpi, iklan, afiliasi, video),
+    tahap,
     skor: opts.skor,
     benchmarkVersi: opts.benchmarkVersi,
+    insight: bangunLaporanInsight({
+      platform: 'tiktok', kpi, kanal, iklan, live, video, afiliasi, tahap, skor: opts.skor, benchTiktok: opts.benchTiktok,
+    }),
   };
 }
 
 /** Rakit payload laporan Shopee v1 — KPI basis `'siap_dikirim'` (Rule 16, "Basis default untuk laporan klien Shopee"). Nol `benchmarkVersi` (asimetri asli, `computeSkorShopee` tidak menerima benchmark). */
 export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanShopee {
+  const kpi = bangunKpiRingkas(opts.kpi);
+  const kanal = bangunKanalShopee(opts.kanal);
+  const iklan = bangunIklanShopee(opts.iklan);
+  const live = bangunLaporanLive(opts.live);
+  const video = bangunLaporanVideo(opts.video);
+  const afiliasi = bangunLaporanAfiliasi(opts.afiliasi);
   return {
     schema: 'cdps.pdt.laporan.shopee.v1',
     platform: 'shopee',
     clientPlatformId: opts.clientPlatformId,
     periodeAwalBulan: opts.periodeAwalBulan,
     generatedAt: opts.generatedAt,
-    kpi: bangunKpiRingkas(opts.kpi),
-    kanal: bangunKanalShopee(opts.kanal),
-    iklan: bangunIklanShopee(opts.iklan),
-    live: bangunLaporanLive(opts.live),
-    video: bangunLaporanVideo(opts.video),
-    afiliasi: bangunLaporanAfiliasi(opts.afiliasi),
+    kpi,
+    kanal,
+    iklan,
+    live,
+    video,
+    produk: null,
+    afiliasi,
     tahap: null,
     skor: opts.skor,
+    insight: bangunLaporanInsight({
+      platform: 'shopee', kpi, kanal, iklan, live, video, afiliasi, tahap: null, skor: opts.skor, benchTiktok: null,
+    }),
   };
 }

@@ -3,10 +3,11 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + kanal + iklan + live + video + afiliasi + tahap + skor per
- * toko klien, dibaca lewat `GET /account/pdt/laporan`. v1 SENGAJA sempit
- * (delapan dari dua belas seksi mesin laporan lama — lihat docblock
- * `packages/core/src/pdt/laporan.ts`): belum ada produk/tokopedia/dst.
+ * KPI ringkas + kanal + iklan + live + video + produk + afiliasi + tahap +
+ * skor + insight per toko klien, dibaca lewat `GET /account/pdt/laporan`. v1
+ * SENGAJA sempit (sepuluh dari dua belas seksi mesin laporan lama — lihat
+ * docblock `packages/core/src/pdt/laporan.ts`): belum ada tokopedia/
+ * ads_manager.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
  * via `AskUserQuestion`, 2026-09-16): TikTok lengkap (Live/Video/Kartu
@@ -41,6 +42,16 @@
  * `Σgmv÷Σbiaya`. Seksi disembunyikan seluruhnya saat `iklan` `null` (nol
  * baris iklan seluruh sumber platform ini di periode ini).
  *
+ * **Produk** (Portfolio Produk/kuadran, keputusan pemilik via
+ * `AskUserQuestion` "G2-01-KUADRAN-SKU (produk)"): TikTok-ONLY — Shopee
+ * SELALU `produk: null` (methodology kuadran beda total dari TikTok, belum
+ * ada modul PDT sumber data, sama gap "tahap"). Mode BENCHMARK SAJA (bukan
+ * "Mode Relatif" mesin lama — ambang tetap lintas bulan, `pdt_benchmark`
+ * versi TikTok). `distribusi` — jumlah SKU per kuadran; `top_aksi` — HANYA
+ * tiga kuadran actionable (Bintang/Bocor Traffic/Hidden Gem), diurutkan GMV
+ * desc, dipotong 12 (angka sama mesin lama). Seksi disembunyikan seluruhnya
+ * saat `produk` `null`.
+ *
  * **Afiliasi** (keputusan pemilik via `AskUserQuestion` KEENAM, 2026-09-16):
  * RINGKASAN saja untuk KEDUA platform, SATU bentuk (nol asimetri platform,
  * pola sama "live") — mesin lama membawa daftar per-kreator plus
@@ -62,6 +73,23 @@
  * punya modul PDT sama sekali — halaman menampilkan catatan/"—" eksplisit,
  * BUKAN 0 yang mengarang aktivitas. Seksi disembunyikan seluruhnya saat
  * `tahap` `null` (nol baris `pdt_fact_shop_daily` basis `net` periode ini).
+ *
+ * **Insight & Rekomendasi** (keputusan pemilik via `AskUserQuestion` KEDELAPAN
+ * dan KESEMBILAN, 2026-09-16): KEDUA platform SATU bentuk, TIDAK PERNAH
+ * `null` (ringkasan/outlook selalu punya sesuatu untuk dikatakan). Rekomendasi
+ * v1 GENERIK per dimensi skor (`skor.dimensi` ber-nilai rendah), BUKAN
+ * porting penuh aturan per-metrik mesin lama (lihat docblock
+ * `pdt.PdtLaporanInsight`, `@cdps/core`). **G2-01-INSIGHT-EDIT**: AM BISA
+ * menyunting enam field-nya di sini (state lokal `insightDraft`, disetel
+ * ulang dari insight mesin tiap ganti toko/periode, nol persistensi) —
+ * editor sama pola `InsightEditor.tsx` mesin lama (`web-internal/src/
+ * components/clients/`) MINUS narasi tahap (tahap PDT sudah data
+ * terstruktur). Suntingan dikirim APA ADANYA ke `POST .../laporan/kirim`
+ * saat "Kirim ke Klien" ditekan — `pdt.normalizePdtInsightDraft` (`@cdps/core`)
+ * yang memvalidasi (pesan BI `[...]` muncul di `kirimErr` kalau ditolak),
+ * BUKAN state machine draft/publikasi/revisi terpisah seperti
+ * `client_report_insight` mesin lama — PDT-21 "snapshot beku HANYA saat
+ * dikirim" tetap utuh, `kirimLaporanPdt` tetap satu aksi atomik.
  *
  * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
  * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
@@ -92,13 +120,26 @@ import {
   riwayatKirimanPdt,
   type PdtKirimanRingkas,
   type PdtLaporan,
+  type PdtLaporanInsight,
   type PdtLaporanKiriman,
+  type PdtLaporanRekomendasi,
   type PdtTahapSatuan,
 } from '@/lib/pdt';
 import { formatIDR } from '@/lib/money';
 
 /** Platform toko yang didukung PDT (PDT-22) — cermin `platformKeVokabPdt`. */
 const PDT_PLATFORMS = new Set(['Shopee', 'TikTok Shop']);
+
+/** Label kuadran produk — SAMA persis `report/render.ts` `KUADRAN_META` (mesin lama), bukan istilah baru. */
+const KUADRAN_LABEL: Record<string, string> = {
+  bintang: 'Produk Bintang',
+  hidden_gem: 'Hidden Gem',
+  bocor_traffic: 'Bocor Traffic',
+  evaluasi: 'Evaluasi',
+  tidur: 'Produk Tidur',
+  tidak_tayang: 'Tidak Tayang',
+};
+const KUADRAN_URUTAN = ['bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi', 'tidur', 'tidak_tayang'];
 
 function formatPercent(v: number | null): string {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -149,6 +190,108 @@ function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('id-ID');
 }
 
+/**
+ * Editor "insight" layar pratinjau (G2-01-INSIGHT-EDIT) — pola SAMA
+ * `InsightEditor.tsx` (mesin lama, `web-internal/src/components/clients/`)
+ * disalin & disederhanakan untuk PDT: enam field yang sama MINUS narasi
+ * tahap (tahap PDT sudah data terstruktur, bukan prosa). Nol persistensi di
+ * sini — state lokal murni, dikirim apa adanya saat "Kirim ke Klien"
+ * ditekan; server (`pdt.normalizePdtInsightDraft`) yang memvalidasi.
+ */
+const REK_KOSONG: PdtLaporanRekomendasi = { judul: '', target: '', dampak: '', timeline: '' };
+const IND_KOSONG = { nama: '', target: '' };
+
+function PoinEditor({ value, disabled, onChange }: { value: string[]; disabled: boolean; onChange: (v: string[]) => void }) {
+  const rows = [...value, ''];
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      {rows.map((t, i) => (
+        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+          <span className="muted" style={{ fontSize: 12, paddingTop: 8, minWidth: 18 }}>{i + 1}.</span>
+          <textarea
+            rows={2}
+            value={t}
+            disabled={disabled}
+            placeholder={i === value.length ? 'Tambah poin…' : ''}
+            style={{ flex: 1, fontSize: 13 }}
+            onChange={(e) => {
+              const next = [...value];
+              if (i === value.length) next.push(e.target.value);
+              else next[i] = e.target.value;
+              onChange(next.filter((x, idx) => x.trim() !== '' || idx < next.length - 1));
+            }}
+          />
+          {i < value.length && (
+            <button type="button" className="btn btnGhost btnSm" disabled={disabled}
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+            >hapus</button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RekEditor({ value, disabled, onChange }: { value: PdtLaporanRekomendasi[]; disabled: boolean; onChange: (v: PdtLaporanRekomendasi[]) => void }) {
+  const rows = [...value, REK_KOSONG];
+  const set = (i: number, patch: Partial<PdtLaporanRekomendasi>) => {
+    const next = [...value];
+    if (i === value.length) next.push({ ...REK_KOSONG, ...patch });
+    else next[i] = { ...next[i], ...patch };
+    onChange(next);
+  };
+  return (
+    <div className="stack" style={{ gap: 10 }}>
+      {rows.map((r, i) => (
+        <div key={i} style={{ border: '1px solid var(--line, #DAE2EA)', borderRadius: 4, padding: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            <input value={r.judul} disabled={disabled} placeholder="Judul"
+              onChange={(e) => set(i, { judul: e.target.value })} style={{ fontSize: 13 }} />
+            <input value={r.timeline} disabled={disabled} placeholder="Timeline (mis. 2 minggu)"
+              onChange={(e) => set(i, { timeline: e.target.value })} style={{ fontSize: 13 }} />
+            <input value={r.target} disabled={disabled} placeholder="Target"
+              onChange={(e) => set(i, { target: e.target.value })} style={{ fontSize: 13 }} />
+            <input value={r.dampak} disabled={disabled} placeholder="Dampak"
+              onChange={(e) => set(i, { dampak: e.target.value })} style={{ fontSize: 13 }} />
+          </div>
+          {i < value.length && (
+            <button type="button" className="btn btnGhost btnSm" disabled={disabled} style={{ marginTop: 6 }}
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+            >hapus rekomendasi</button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function IndEditor({ value, disabled, onChange }: { value: { nama: string; target: string }[]; disabled: boolean; onChange: (v: { nama: string; target: string }[]) => void }) {
+  const rows = [...value, IND_KOSONG];
+  const set = (i: number, patch: Partial<{ nama: string; target: string }>) => {
+    const next = [...value];
+    if (i === value.length) next.push({ ...IND_KOSONG, ...patch });
+    else next[i] = { ...next[i], ...patch };
+    onChange(next);
+  };
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      {rows.map((m, i) => (
+        <div key={i} style={{ display: 'flex', gap: 6 }}>
+          <input value={m.nama} disabled={disabled} placeholder="Nama indikator"
+            onChange={(e) => set(i, { nama: e.target.value })} style={{ flex: 1, fontSize: 13 }} />
+          <input value={m.target} disabled={disabled} placeholder="Target"
+            onChange={(e) => set(i, { target: e.target.value })} style={{ flex: 1, fontSize: 13 }} />
+          {i < value.length && (
+            <button type="button" className="btn btnGhost btnSm" disabled={disabled}
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+            >hapus</button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function LaporanPdtPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsLoading, setClientsLoading] = useState(true);
@@ -161,6 +304,10 @@ export default function LaporanPdtPage() {
   const [laporan, setLaporan] = useState<PdtLaporan | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // G2-01-INSIGHT-EDIT — draf AM, disetel ulang dari insight mesin setiap kali
+  // laporan (toko/periode) dimuat ulang. Nol persistensi — murni state layar.
+  const [insightDraft, setInsightDraft] = useState<PdtLaporanInsight | null>(null);
 
   const [kirimLoading, setKirimLoading] = useState(false);
   const [kirimErr, setKirimErr] = useState<string | null>(null);
@@ -206,8 +353,10 @@ export default function LaporanPdtPage() {
     try {
       const res = await getPdtLaporan(platformId, monthToPeriode(month));
       setLaporan(res);
+      setInsightDraft(res.insight);
     } catch (e) {
       setLaporan(null);
+      setInsightDraft(null);
       setErr(errorMessage(e));
     } finally {
       setLoading(false);
@@ -259,8 +408,9 @@ export default function LaporanPdtPage() {
     setKirimLoading(true);
     setKirimErr(null);
     try {
-      const hasil = await kirimLaporanPdt(platformId, monthToPeriode(month));
+      const hasil = await kirimLaporanPdt(platformId, monthToPeriode(month), insightDraft ?? undefined);
       setKirimHasil(hasil);
+      setInsightDraft(hasil.laporan.insight);
       await loadRiwayat();
     } catch (e) {
       setKirimErr(errorMessage(e));
@@ -575,6 +725,52 @@ export default function LaporanPdtPage() {
             </section>
           ) : null}
 
+          {laporan.produk && (
+            <section className="card">
+              <h2>Portfolio Produk</h2>
+              <p className="muted" style={{ fontSize: 12 }}>Mode Benchmark (vs target MEA) — klasifikasi kuadran SKU periode ini</p>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                {KUADRAN_URUTAN
+                  .filter((k) => laporan.produk!.distribusi[k]?.jumlah > 0 || (k !== 'tidur' && k !== 'tidak_tayang'))
+                  .map((k) => (
+                    <div key={k}>
+                      <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.produk!.distribusi[k]?.jumlah ?? 0)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                        {KUADRAN_LABEL[k] ?? k} · {formatIDR(laporan.produk!.distribusi[k]?.gmv ?? null)}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+              {laporan.produk.top_aksi.length > 0 && (
+                <>
+                  <h3 style={{ fontSize: 14, marginTop: 16 }}>Top Produk by GMV (Bintang/Bocor Traffic/Hidden Gem)</h3>
+                  <table style={{ marginTop: 8, width: '100%', fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left' }}>Produk</th>
+                        <th style={{ textAlign: 'left' }}>Kuadran</th>
+                        <th style={{ textAlign: 'right' }}>Klik</th>
+                        <th style={{ textAlign: 'right' }}>CVR</th>
+                        <th style={{ textAlign: 'right' }}>GMV</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {laporan.produk.top_aksi.map((x, i) => (
+                        <tr key={x.platform_product_id ?? i}>
+                          <td>{x.nama_produk ?? x.platform_product_id ?? '—'}</td>
+                          <td>{KUADRAN_LABEL[x.kuadran] ?? x.kuadran}</td>
+                          <td style={{ textAlign: 'right' }}>{formatCount(x.klik)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatPercent(x.cvr)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatIDR(x.gmv)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </section>
+          )}
+
           {laporan.afiliasi && (
             <section className="card">
               <h2>Afiliasi</h2>
@@ -669,6 +865,53 @@ export default function LaporanPdtPage() {
                   </table>
                 </div>
               ))}
+            </section>
+          )}
+
+          {insightDraft && (
+            <section className="card">
+              <h2>Insight & Rekomendasi</h2>
+              <p className="muted" style={{ fontSize: 11, marginTop: -4, marginBottom: 8 }}>
+                Draf mesin, bisa disunting di sini sebelum dikirim (G2-01-INSIGHT-EDIT) — angka laporan (GMV, ROAS,
+                skor, tabel funnel) TIDAK bisa diubah, hanya teks di bawah ini. Ganti toko/periode akan
+                menghapus suntingan yang belum dikirim.
+              </p>
+
+              <div className="field">
+                <label>Ringkasan Eksekutif</label>
+                <textarea rows={3} value={insightDraft.ringkasan} disabled={kirimLoading} style={{ fontSize: 13 }}
+                  onChange={(e) => setInsightDraft({ ...insightDraft, ringkasan: e.target.value })} />
+              </div>
+
+              <div className="field">
+                <label>Key Insights</label>
+                <PoinEditor value={insightDraft.poin} disabled={kirimLoading}
+                  onChange={(poin) => setInsightDraft({ ...insightDraft, poin })} />
+              </div>
+
+              <div className="field">
+                <label>Rekomendasi — Prioritas Tinggi</label>
+                <RekEditor value={insightDraft.rekomendasi_tinggi} disabled={kirimLoading}
+                  onChange={(v) => setInsightDraft({ ...insightDraft, rekomendasi_tinggi: v })} />
+              </div>
+
+              <div className="field">
+                <label>Rekomendasi — Prioritas Sedang</label>
+                <RekEditor value={insightDraft.rekomendasi_sedang} disabled={kirimLoading}
+                  onChange={(v) => setInsightDraft({ ...insightDraft, rekomendasi_sedang: v })} />
+              </div>
+
+              <div className="field">
+                <label>Outlook Periode Berikutnya</label>
+                <textarea rows={3} value={insightDraft.outlook} disabled={kirimLoading} style={{ fontSize: 13 }}
+                  onChange={(e) => setInsightDraft({ ...insightDraft, outlook: e.target.value })} />
+              </div>
+
+              <div className="field">
+                <label>Indikator</label>
+                <IndEditor value={insightDraft.indikator} disabled={kirimLoading}
+                  onChange={(v) => setInsightDraft({ ...insightDraft, indikator: v })} />
+              </div>
             </section>
           )}
 

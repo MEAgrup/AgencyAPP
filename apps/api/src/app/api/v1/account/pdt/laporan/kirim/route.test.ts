@@ -160,7 +160,7 @@ describeDb('POST /pdt/laporan/kirim — real DB', () => {
     expect(body.periode_mulai).toBe('2026-07-01');
     expect(body.periode_selesai).toBe('2026-07-31');
     expect(body.parser_versi).toBe(pdtCore.PDT_PARSER_VERSI);
-    expect(body.benchmark_versi).toBe(1);
+    expect(body.benchmark_versi).toBe(2); // versi 2 aktif tertinggi (G2-01-KUADRAN-SKU langkah 2, migrasi 20261104010000)
     expect(body.dikirim_oleh).toBe('ZZ-PDTKIR-AM');
     expect(body.menggantikan_kiriman_id).toBeNull();
     expect(body.laporan.schema).toBe('cdps.pdt.laporan.tiktok.v1');
@@ -168,6 +168,61 @@ describeDb('POST /pdt/laporan/kirim — real DB', () => {
 
     const rows = await sql`select id from pdt_laporan_kiriman where id = ${body.id}`;
     expect(rows).toHaveLength(1);
+  });
+
+  it('200 dengan insight override: draf AM menggantikan insight mesin pada payload beku (G2-01-INSIGHT-EDIT)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, 'ZZ-PDTKIR-AM');
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    const [{ id: batchId }] = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, 'ZZ-PDTKIR-AM')
+      returning id`;
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1_000_000, 50_000, 40, 2_000)`;
+
+    const res = await POST(req(owner, {
+      client_platform_id: cpId,
+      periode: '2026-07-01',
+      insight: {
+        ringkasan: 'Ringkasan AM.',
+        poin: ['Poin AM.'],
+        rekomendasi_tinggi: [],
+        rekomendasi_sedang: [],
+        outlook: 'Outlook AM.',
+        indikator: [],
+      },
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.laporan.insight).toEqual({
+      ringkasan: 'Ringkasan AM.',
+      poin: ['Poin AM.'],
+      rekomendasi_tinggi: [],
+      rekomendasi_sedang: [],
+      outlook: 'Outlook AM.',
+      indikator: [],
+    });
+  });
+
+  it('400 BI kalau insight override tidak lengkap (ringkasan kosong), nol baris ditulis', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, 'ZZ-PDTKIR-AM');
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+
+    const res = await POST(req(owner, {
+      client_platform_id: cpId,
+      periode: '2026-07-01',
+      insight: { ringkasan: '', poin: ['Poin.'], outlook: 'Outlook.' },
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('[ringkasan eksekutif wajib diisi]');
+
+    const rows = await sql`select id from pdt_laporan_kiriman where client_platform_id = ${cpId}`;
+    expect(rows).toHaveLength(0);
   });
 
   it('200 Shopee: benchmark_versi null (kunci TETAP ada)', async () => {
