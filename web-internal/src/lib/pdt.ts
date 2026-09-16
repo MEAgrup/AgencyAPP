@@ -132,6 +132,20 @@ export interface PdtLaporanKanal {
   lengkap: boolean;
 }
 
+// G2-01 lanjutan — bagian "live" (Live Streaming), 2026-09-16. SATU bentuk
+// untuk TikTok+Shopee (nol asimetri platform) — `null` (whole object) berarti
+// nol sesi live sama sekali di periode ini, BUKAN `sesi: 0`. `jam`/
+// `gmv_per_jam` SELALU `null` untuk Shopee (kolom sumbernya kosong permanen
+// di penulis `shopee_live`; TikTok `tt_live` mengisinya).
+export interface PdtLaporanLive {
+  sesi: number;
+  gmv: number | null;
+  vv: number | null;
+  jam: number | null;
+  gmv_per_sesi: number | null;
+  gmv_per_jam: number | null;
+}
+
 export interface PdtLaporan {
   schema: string;
   platform: string;
@@ -140,6 +154,7 @@ export interface PdtLaporan {
   generated_at: string;
   kpi: PdtLaporanKpi;
   kanal: PdtLaporanKanal;
+  live: PdtLaporanLive | null;
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;
 }

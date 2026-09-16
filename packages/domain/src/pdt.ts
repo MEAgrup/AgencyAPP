@@ -2288,7 +2288,43 @@ async function bacaKanalShopee(sql: Sql, clientPlatformId: number, periodeAwalBu
   };
 }
 
-/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + `hitungSkorTiktok`. */
+/**
+ * Bagian "live" — SATU query dipakai KEDUA platform (keputusan pemilik via
+ * `AskUserQuestion`, 2026-09-16 — lihat docblock `pdt.PdtLaporanLive`,
+ * `@cdps/core`): `pdt_fact_content` jenis `'live'` membawa kolom yang sama
+ * persis untuk `tt_live`/`shopee_live`, nol query terpisah per platform
+ * dibutuhkan (beda dari kanal/kpi yang basis-nya berbeda per platform).
+ * `count(kolom)` per kolom (bukan cuma `count(*)`) — null-aware: `durasi_
+ * detik` SELALU nol-terisi untuk Shopee (kolom sumbernya kosong permanen,
+ * lihat docblock core), `count(durasi_detik) = 0` menegakkan itu jadi
+ * `jam: null`, BUKAN 0 jam yang mengarang durasi.
+ */
+async function bacaLive(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanLiveInput | null> {
+  const [row] = await sql<{
+    sesi: number;
+    gmv_n: number; gmv: string;
+    vv_n: number; vv: string;
+    jam_n: number; durasi_detik: string;
+  }[]>`
+    select count(*)::int as sesi,
+           count(gmv)::int as gmv_n, coalesce(sum(gmv), 0) as gmv,
+           count(vv)::int as vv_n, coalesce(sum(vv), 0) as vv,
+           count(durasi_detik)::int as jam_n, coalesce(sum(durasi_detik), 0) as durasi_detik
+      from pdt_fact_content
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and jenis = 'live'`;
+  if (row.sesi === 0) return null;
+
+  return {
+    sesi: row.sesi,
+    gmv: row.gmv_n === 0 ? null : Number(row.gmv),
+    vv: row.vv_n === 0 ? null : Number(row.vv),
+    jam: row.jam_n === 0 ? null : Number(row.durasi_detik) / 3600,
+  };
+}
+
+/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + live + `hitungSkorTiktok`. */
 export async function rakitLaporanTiktok(
   sql: Sql,
   clientPlatformId: number,
@@ -2296,17 +2332,18 @@ export async function rakitLaporanTiktok(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanTiktok> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, kanal, { hasil: skor, benchmarkVersi }] = await Promise.all([
+  const [kpi, kanal, live, { hasil: skor, benchmarkVersi }] = await Promise.all([
     bacaKpiTiktokNet(sql, clientPlatformId, periodeAwalBulan),
     bacaKanalTiktok(sql, clientPlatformId, periodeAwalBulan),
+    bacaLive(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
   ]);
   return pdt.bangunLaporanTiktok({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, skor, benchmarkVersi,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, live, skor, benchmarkVersi,
   });
 }
 
-/** Rakit payload laporan Shopee v1: KPI ringkas basis `'siap_dikirim'` (Rule 16) + kanal + `hitungSkorShopee`. */
+/** Rakit payload laporan Shopee v1: KPI ringkas basis `'siap_dikirim'` (Rule 16) + kanal + live + `hitungSkorShopee`. */
 export async function rakitLaporanShopee(
   sql: Sql,
   clientPlatformId: number,
@@ -2314,13 +2351,14 @@ export async function rakitLaporanShopee(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanShopee> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, kanal, { hasil: skor }] = await Promise.all([
+  const [kpi, kanal, live, { hasil: skor }] = await Promise.all([
     bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim'),
     bacaKanalShopee(sql, clientPlatformId, periodeAwalBulan),
+    bacaLive(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorShopee(sql, clientPlatformId, periodeAwalBulan),
   ]);
   return pdt.bangunLaporanShopee({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, skor,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, live, skor,
   });
 }
 

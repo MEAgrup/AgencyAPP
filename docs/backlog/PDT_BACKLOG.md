@@ -1089,6 +1089,25 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > 107/107, `@cdps/api` 619/621 (2 skip); typecheck+lint bersih; `npm run build` `web-internal`
 > sukses. **Sisa: SEMBILAN bagian laporan lain** (iklan, live, video, produk, afiliasi, tokopedia,
 > ads_manager, tahap, insight) TETAP di luar cakupan.
+>
+> **Status 2026-09-16 (lanjutan) — bagian laporan "live" (Live Streaming) DIBANGUN, SATU bentuk
+> untuk KEDUA platform (nol asimetri platform kali ini — beda "kanal").** `docs/DECISIONS.md` (cari
+> "bagian laporan \"live\"") untuk perbandingan tractability lengkap empat kandidat (live/iklan/
+> video/afiliasi) dan alasan pemilihan. Ringkas: `pdt_fact_content` jenis `'live'` (`tt_live`/
+> `shopee_live`, keduanya sudah punya penulis fakta) — `pdt.bacaLive` (SATU query dipakai kedua
+> platform, beda dari "kanal" yang butuh dua fungsi). `vv`+`gmv` terisi kedua penulis; `durasi_detik`
+> (jam siaran) HANYA `tt_live` — `jam`/`gmv_per_jam` `null` PERMANEN untuk Shopee (kolom sumbernya
+> kosong, bukan kekurangan cakupan). `likes`/`komentar`/`produk_dilihat`/`pengikut_baru` ADA di
+> skema `pdt_fact_content` tapi TIDAK PERNAH diisi kedua penulis — SENGAJA tidak diikutkan (aturan
+> rumah #7: jangan mengarang 0 dari kolom genuinely kosong). Whole-object `null` saat nol sesi live
+> sama sekali (cermin dimensi skor LIVE, Rule 12) — BUKAN `sesi: 0`; halaman `web-internal`
+> menyembunyikan seksi "Live Streaming" seluruhnya saat `null` (bukan menampilkan nol). Diverifikasi
+> (DB lokal rebuild bersih, 251 migrasi — nol migrasi baru, murni kode): `@cdps/core` 1344/1344,
+> `@cdps/domain` 2729/2729 (1 skip, nol gagal), `@cdps/db` 107/107, `@cdps/api` 636/638 (2 skip);
+> typecheck+lint `api`/`web-internal` bersih; `npm run build` `web-internal` sukses. **Sisa: DELAPAN
+> bagian laporan lain** (iklan, video, produk, afiliasi, tokopedia, ads_manager, tahap, insight)
+> TETAP di luar cakupan — masing-masing punya keterbatasannya sendiri, dicatat di `DECISIONS.md`
+> untuk rujukan sesi berikutnya.
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah

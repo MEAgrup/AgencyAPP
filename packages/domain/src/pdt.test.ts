@@ -3498,6 +3498,78 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "kanal" (2026-09-16)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// rakitLaporanTiktok/Shopee — bagian "live" (G2-01 lanjutan, keputusan
+// pemilik via `AskUserQuestion` 2026-09-16). SATU query dipakai kedua
+// platform (`pdt.bacaLive` di domain) — nol asimetri platform, TAPI
+// `jam` SELALU null untuk Shopee (kolom `durasi_detik` kosong permanen di
+// penulis `shopee_live`, beda dari `tt_live` yang mengisinya).
+// ---------------------------------------------------------------------------
+describeDb('rakitLaporanTiktok/Shopee — bagian "live" (2026-09-16)', () => {
+  async function fixtureTiktok(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  async function fixtureShopee(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  it('TikTok: durasi_detik terisi (tt_live) ⇒ sesi/gmv/vv/jam semua terhitung', async () => {
+    const { cpId, batchId } = await fixtureTiktok();
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv, durasi_detik)
+      values (${cpId}, 'live-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 2_000_000, 5_000, 14_400),
+             (${cpId}, 'live-2', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 2_000_000, 5_000, 14_400)`;
+
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.live).toEqual({ sesi: 2, gmv: 4_000_000, vv: 10_000, jam: 8, gmvPerSesi: 2_000_000, gmvPerJam: 500_000 });
+  });
+
+  it('Shopee: durasi_detik kosong permanen (shopee_live) ⇒ jam/gmvPerJam null, sesi/gmv/vv/gmvPerSesi TETAP terhitung', async () => {
+    const { cpId, batchId } = await fixtureShopee();
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv)
+      values (${cpId}, 'live-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 2_000_000, 5_000),
+             (${cpId}, 'live-2', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 2_000_000, 5_000)`;
+
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.live).toEqual({ sesi: 2, gmv: 4_000_000, vv: 10_000, jam: null, gmvPerSesi: 2_000_000, gmvPerJam: null });
+  });
+
+  it('nol baris pdt_fact_content jenis live ⇒ live null (BUKAN sesi:0)', async () => {
+    const { cpId } = await fixtureTiktok();
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.live).toBeNull();
+  });
+
+  it('baris jenis video TIDAK ikut terhitung ke live', async () => {
+    const { cpId, batchId } = await fixtureTiktok();
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv)
+      values (${cpId}, 'video-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'video', true, 9_999_999, 9_999)`;
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.live).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // bacaLaporanPdt (sesi 34 lanjutan, Flow B langkah 1) — gerbang izin
 // `canKirimLaporan` + pemilihan platform dari `client_platforms.platform`
 // (bukan parameter caller), pola sama `previewUploadBatch`/`commitUploadBatch`.

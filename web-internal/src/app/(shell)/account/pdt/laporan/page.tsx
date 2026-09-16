@@ -3,10 +3,10 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + kanal + skor per toko klien, dibaca lewat `GET /account/pdt/
- * laporan`. v1 SENGAJA sempit (tiga dari dua belas seksi mesin laporan lama
- * — lihat docblock `packages/core/src/pdt/laporan.ts`): belum ada iklan/
- * live/video/produk/afiliasi/dst.
+ * KPI ringkas + kanal + live + skor per toko klien, dibaca lewat `GET
+ * /account/pdt/laporan`. v1 SENGAJA sempit (empat dari dua belas seksi mesin
+ * laporan lama — lihat docblock `packages/core/src/pdt/laporan.ts`): belum
+ * ada iklan/video/produk/afiliasi/dst.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
  * via `AskUserQuestion`, 2026-09-16): TikTok lengkap (Live/Video/Kartu
@@ -15,6 +15,13 @@
  * PDT sama sekali). Halaman menampilkan catatan eksplisit saat `lengkap`
  * `false`, supaya GMV kanal yang belum terproses tidak disalahartikan
  * sebagai GMV kanal yang memang nol.
+ *
+ * **Live** (Live Streaming, keputusan pemilik via `AskUserQuestion` KETIGA,
+ * 2026-09-16) SATU bentuk untuk kedua platform — nol asimetri platform kali
+ * ini, cuma `jam`/`gmv_per_jam` SELALU `null` untuk Shopee (kolom sumbernya
+ * kosong permanen di penulis `shopee_live`). Seksi ini disembunyikan
+ * seluruhnya (bukan ditampilkan nol) saat `live` `null` — nol sesi live
+ * sama sekali di periode ini.
  *
  * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
  * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
@@ -388,6 +395,44 @@ export default function LaporanPdtPage() {
               </div>
             )}
           </section>
+
+          {laporan.live && (
+            <section className="card">
+              <h2>Live Streaming</h2>
+              <p className="muted" style={{ fontSize: 12 }}>{laporan.live.sesi} sesi periode ini</p>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.live.gmv)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>GMV Live</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.live.vv)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Penonton (VV)</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.live.gmv_per_sesi)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>GMV / Sesi</p>
+                </div>
+                {laporan.live.jam !== null && (
+                  <>
+                    <div>
+                      <div style={{ fontSize: 20, fontWeight: 'bold' }}>{laporan.live.jam.toFixed(2)} jam</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Total Durasi</p>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.live.gmv_per_jam)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>GMV / Jam</p>
+                    </div>
+                  </>
+                )}
+              </div>
+              {laporan.platform !== 'tiktok' && (
+                <p className="muted" style={{ fontSize: 11, marginTop: 16 }}>
+                  Durasi siaran tidak tersedia dari data Shopee — GMV/Jam tidak bisa dihitung untuk toko ini.
+                </p>
+              )}
+            </section>
+          )}
 
           <section className="card">
             <div className="cardHeader">

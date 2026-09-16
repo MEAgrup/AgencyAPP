@@ -3,11 +3,13 @@ import {
   bangunKanalShopee,
   bangunKanalTiktok,
   bangunKpiRingkas,
+  bangunLaporanLive,
   bangunLaporanShopee,
   bangunLaporanTiktok,
   type PdtLaporanKanalInputShopee,
   type PdtLaporanKanalInputTiktok,
   type PdtLaporanKpiInput,
+  type PdtLaporanLiveInput,
 } from './laporan';
 import { computeSkorShopee, computeSkorTiktok, type PdtSkorInputShopee, type PdtSkorInputTiktok } from './skor';
 
@@ -50,6 +52,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000 },
       kanal: null,
+      live: null,
       skor,
       benchmarkVersi: 1,
     });
@@ -61,6 +64,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000, cvr: 0.02 },
       kanal: { gmvTotal: null, items: [], lengkap: true },
+      live: null,
       skor,
       benchmarkVersi: 1,
     });
@@ -70,7 +74,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
     const skor = computeSkorTiktok(INPUT_KOSONG_TIKTOK, BENCH_KOSONG);
     const hasil = bangunLaporanTiktok({
       clientPlatformId: 1, periodeAwalBulan: '2026-07-01', generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: null, kanal: null, skor, benchmarkVersi: 1,
+      kpi: null, kanal: null, live: null, skor, benchmarkVersi: 1,
     });
     expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
   });
@@ -85,6 +89,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500 },
       kanal: null,
+      live: null,
       skor,
     });
     expect(hasil).toEqual({
@@ -95,6 +100,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500, cvr: 0.02 },
       kanal: { gmvTotal: null, items: [], lengkap: false },
+      live: null,
       skor,
     });
     expect('benchmarkVersi' in hasil).toBe(false);
@@ -157,5 +163,43 @@ describe('bangunKanalShopee (G2-01 lanjutan — bagian "kanal", SELALU lengkap:f
     const hasil = bangunKanalShopee(input);
     expect(hasil.items.find((i) => i.kode === 'affiliate')).toEqual({ kode: 'affiliate', label: 'Affiliate', gmv: null, persen: null });
     expect(hasil.items.find((i) => i.kode === 'shopee_ads')).toEqual({ kode: 'shopee_ads', label: 'Shopee Ads', gmv: 1_600_000, persen: 0.2 });
+  });
+});
+
+describe('bangunLaporanLive (G2-01 lanjutan — bagian "live", 2026-09-16, SATU bentuk TikTok+Shopee)', () => {
+  it('input null ⇒ null (whole object, BUKAN objek ber-field null)', () => {
+    expect(bangunLaporanLive(null)).toBeNull();
+  });
+
+  it('sesi 0 ⇒ null (nol sesi live sama sekali di periode ini, cermin dimensi skor LIVE Rule 12)', () => {
+    const input: PdtLaporanLiveInput = { sesi: 0, gmv: 0, vv: 0, jam: 0 };
+    expect(bangunLaporanLive(input)).toBeNull();
+  });
+
+  it('TikTok: jam terisi (durasi_detik) ⇒ gmvPerSesi + gmvPerJam keduanya terhitung', () => {
+    const input: PdtLaporanLiveInput = { sesi: 4, gmv: 4_000_000, vv: 10_000, jam: 8 };
+    expect(bangunLaporanLive(input)).toEqual({
+      sesi: 4, gmv: 4_000_000, vv: 10_000, jam: 8, gmvPerSesi: 1_000_000, gmvPerJam: 500_000,
+    });
+  });
+
+  it('Shopee: jam null (durasi_detik kosong permanen di sumbernya) ⇒ gmvPerJam null, gmvPerSesi TETAP terhitung', () => {
+    const input: PdtLaporanLiveInput = { sesi: 4, gmv: 4_000_000, vv: 10_000, jam: null };
+    expect(bangunLaporanLive(input)).toEqual({
+      sesi: 4, gmv: 4_000_000, vv: 10_000, jam: null, gmvPerSesi: 1_000_000, gmvPerJam: null,
+    });
+  });
+
+  it('gmv null (nol baris dengan gmv terisi) ⇒ gmvPerSesi/gmvPerJam ikut null', () => {
+    const input: PdtLaporanLiveInput = { sesi: 4, gmv: null, vv: 10_000, jam: 8 };
+    const hasil = bangunLaporanLive(input);
+    expect(hasil?.gmvPerSesi).toBeNull();
+    expect(hasil?.gmvPerJam).toBeNull();
+    expect(hasil?.vv).toBe(10_000); // vv tetap terisi independen dari gmv.
+  });
+
+  it('jam dibulatkan 2 desimal', () => {
+    const input: PdtLaporanLiveInput = { sesi: 3, gmv: 1_000_000, vv: 100, jam: 7.12345 };
+    expect(bangunLaporanLive(input)?.jam).toBe(7.12);
   });
 });
