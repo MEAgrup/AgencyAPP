@@ -1163,3 +1163,98 @@ export function ekstrakBarisShopDailyShopee(aoa: readonly (readonly unknown[])[]
   }
   return hasil;
 }
+
+/**
+ * Satu baris `pdt_fact_sku_period` mentah dari `tt_product_analytics`,
+ * SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi`/`basis`
+ * (pemanggil yang melengkapi). `sku_id` SELALU `null` di pemanggil — `ID
+ * Produk` level PRODUK INDUK, sama keputusan pemilik `G1-09-2BII-ADS-CPC-SKU`
+ * ("kebutuhan hanya GMV per produk bukan sampai varian") yang sudah
+ * diterapkan `shopee_ams_produk`/`tt_ads_product` (lihat docblock kepala
+ * berkas untuk keduanya).
+ */
+export interface PdtBarisSkuPeriodTtProductAnalytics {
+  platformProductId: string;
+  gmv: number | null;
+  gmvDariKreator: number | null;
+  gmvVideoPenjual: number | null;
+  gmvLivePenjual: number | null;
+  pesananSku: number | null;
+  impresi: number | null;
+  klik: number | null;
+  ctr: number | null;
+  ctor: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `tt_product_analytics` — langkah pertama
+ * `G2-01-KUADRAN-SKU` (riset sesi 34, dicatat `docs/backlog/PDT_BACKLOG.md`:
+ * dimensi Portfolio Produk `computeSkorTiktok` butuh `pdt_fact_sku_period`
+ * TERISI per SKU, kolom sudah ada sejak G1-01 tapi belum ada penulisnya sama
+ * sekali untuk TikTok — beda dari Shopee yang sudah punya `shopee_ams_produk`).
+ *
+ * Bentuk berkas TERVERIFIKASI sample asli ("Tiktok - Avitaskin.zip",
+ * `product_list_20260701.xlsx`) via `G1-07-TIKTOK-REKONSILIASI` (lihat
+ * docblock kepala berkas `rekonsiliasi.ts`): laporan LEBAR dengan header
+ * BERULANG per kelompok kategori kolom (`'Semua'`/`'LIVE penjual'`/`'Video
+ * penjual'`/dst berulang per blok) — `header.findIndex` (kecocokan PERTAMA)
+ * mengambil kolom di bawah kelompok `'Semua'` (grand total), TERBUKTI benar
+ * secara aritmetika terhadap `sumTiktokProductAnalyticsGmv` (fungsi
+ * rekonsiliasi yang sama, sudah diverifikasi Σ = Σ shop-level). `barisHeader`
+ * mengikuti `PdtModuleDef.barisHeaderHint` (`modules.ts`: `4`, Rule 7
+ * "product_list baris 4"), sama kontrak pemanggil dengan fungsi lain di
+ * berkas ini.
+ *
+ * Rule 8 whitelist `modules.ts` (`tt_product_analytics.kolomDipanen`):
+ * `'Produk terjual'`/`'Status daftar produk'`/`'AOV'`/`'Nama'` TIDAK dipetakan
+ * ke kolom manapun di sini — `'Produk terjual'` TIDAK dipanen modul ini sama
+ * sekali (beda dari `shopee_ams_produk`, jadi `produk_terjual` TETAP `null`
+ * di `pdt_fact_sku_period` untuk baris TikTok, bukan celah — kolomnya memang
+ * tidak pernah masuk whitelist); `'Nama'`/`'Status daftar produk'` tampilan
+ * UI saja (Rule 20 melarangnya jadi kunci, dan `pdt_fact_sku_period` tidak
+ * punya kolom nama); `'AOV'` tidak punya kolom skema padanan (sama pola
+ * `Estimasi Komisi(Rp)`/`ROI` di `shopee_ams_produk`).
+ *
+ * `sku_id` SELALU `null` di pemanggil, `platformProductId` = `'ID Produk'`
+ * disalin LANGSUNG (bukan lookup `pdt_sku_master`). Baris ber-`ID Produk`
+ * kosong dilewati (bukan baris data sungguhan, sama pola modul lain di
+ * berkas ini). Angka: `parsePdtAngka(v)` TANPA flag Ads Manager — berkas ini
+ * dari Seller Center Analytics, keluarga yang sama dengan `tt_shop_analytics`/
+ * `ekstrakBarisShopDailyTiktok` (bukan dashboard Ads Manager).
+ */
+export function ekstrakBarisTtProductAnalytics(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisSkuPeriodTtProductAnalytics[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iIdProduk = idx('ID Produk');
+  const iGmv = idx('GMV');
+  const iGmvKreator = idx('GMV dari kreator');
+  const iGmvVideo = idx('GMV dari video penjual');
+  const iGmvLive = idx('GMV dari LIVE penjual');
+  const iPesananSku = idx('Pesanan SKU');
+  const iImpresi = idx('Impresi produk');
+  const iKlik = idx('Klik produk');
+  const iCtr = idx('CTR');
+  const iCtor = idx('CTOR');
+
+  const hasil: PdtBarisSkuPeriodTtProductAnalytics[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const platformProductId = iIdProduk === -1 ? '' : String(row?.[iIdProduk] ?? '').trim();
+    if (platformProductId === '') continue;
+    hasil.push({
+      platformProductId,
+      gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv]),
+      gmvDariKreator: iGmvKreator === -1 ? null : parsePdtAngka(row?.[iGmvKreator]),
+      gmvVideoPenjual: iGmvVideo === -1 ? null : parsePdtAngka(row?.[iGmvVideo]),
+      gmvLivePenjual: iGmvLive === -1 ? null : parsePdtAngka(row?.[iGmvLive]),
+      pesananSku: iPesananSku === -1 ? null : parsePdtAngka(row?.[iPesananSku]),
+      impresi: iImpresi === -1 ? null : parsePdtAngka(row?.[iImpresi]),
+      klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik]),
+      ctr: iCtr === -1 ? null : parsePdtAngka(row?.[iCtr]),
+      ctor: iCtor === -1 ? null : parsePdtAngka(row?.[iCtor]),
+    });
+  }
+  return hasil;
+}

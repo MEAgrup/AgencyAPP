@@ -1782,6 +1782,94 @@ describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_live → pdt_f
   });
 });
 
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G2-01-KUADRAN-SKU langkah 1) — tt_product_analytics →
+// pdt_fact_sku_period, sisi TikTok untuk tabel yang sebelumnya hanya diisi
+// Shopee (`shopee_ams_produk`, modul KEDELAPAN). `basis = 'net'` TERVERIFIKASI
+// lewat `G1-07-TIKTOK-REKONSILIASI` — lihat docblock penulis di `pdt.ts` untuk
+// bukti kesetaraan dengan `tt_shop_analytics` (yang sudah memakai basis 'net').
+// `ttProductAnalyticsBerkasBaris` BEDA dari `ttProductAnalyticsBerkas` di atas
+// (satu baris 'Ringkasan data' untuk tes rekonsiliasi) — di sini multi-baris,
+// kontrol penuh tiap kolom, untuk menguji penulis fakta per-SKU.
+// ---------------------------------------------------------------------------
+function ttProductAnalyticsBerkasBaris(
+  nama: string,
+  baris: readonly [
+    idProduk: string, gmv: string, gmvKreator: string, gmvVideo: string, gmvLive: string,
+    pesananSku: string, ctr: string, ctor: string, impresi: string, klik: string,
+  ][],
+): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TT_PRODUCT_ANALYTICS,
+    ...baris.map(([idProduk, gmv, gmvKreator, gmvVideo, gmvLive, pesananSku, ctr, ctor, impresi, klik]) =>
+      [idProduk, gmv, gmvKreator, gmvVideo, gmvLive, pesananSku, '0', ctr, ctor, impresi, 'Active', 'Produk', klik]),
+  ];
+  return {
+    nama, sha256: 'sha-tt-productanalytics-baris', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'tt_product_analytics', ambiguous: false, matches: ['tt_product_analytics'],
+  };
+}
+
+describeDb('commitUploadBatch (G2-01-KUADRAN-SKU langkah 1) — baris fakta tt_product_analytics → pdt_fact_sku_period', () => {
+  async function fixture(): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'TikTok Shop', null, null);
+  }
+
+  it('satu baris per ID Produk, sku_id NULL, platform_product_id terisi, basis="net" — "Produk terjual" TIDAK ditulis (bukan kolomDipanen modul ini)', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttProductAnalyticsBerkasBaris('product-analytics.xlsx', [
+        ['PRD-1', '1000000', '200000', '300000', '400000', '50', '0.05', '0.1', '10000', '500'],
+        ['PRD-2', '500000', '0', '0', '0', '5', '0', '0', '0', '0'],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactSkuPeriod(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      sku_id: null, client_platform_id: cpId, platform_product_id: 'PRD-1', basis: 'net',
+      batch_id: persiapan.batchId, parser_versi: 1, pesanan_sku: 50, impresi: 10000, klik: 500,
+      produk_terjual: null, pesanan: null,
+    });
+    expect(Number(rows[0].gmv)).toBe(1000000);
+    expect(Number(rows[0].gmv_dari_kreator)).toBe(200000);
+    expect(Number(rows[0].gmv_video_penjual)).toBe(300000);
+    expect(Number(rows[0].gmv_live_penjual)).toBe(400000);
+    expect(Number(rows[0].ctr)).toBe(0.05);
+    expect(Number(rows[0].ctor)).toBe(0.1);
+    expect(rows[1].platform_product_id).toBe('PRD-2');
+  });
+
+  it('commit ULANG periode yang sama ⇒ baris LAMA diganti (replace-on-recommit) — produk yang hilang dari batch baru IKUT terhapus', async () => {
+    const cpId = await fixture();
+    const pertama = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttProductAnalyticsBerkasBaris('product-analytics.xlsx', [
+        ['PRD-1', '1000000', '0', '0', '0', '5', '0', '0', '0', '0'],
+        ['PRD-2', '500000', '0', '0', '0', '3', '0', '0', '0', '0'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect(await loadFactSkuPeriod(cpId)).toHaveLength(2);
+
+    const kedua = [
+      ttVideoBerkasDenganPeriode('video-2.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttProductAnalyticsBerkasBaris('product-analytics-revisi.xlsx', [
+        ['PRD-1', '1500000', '0', '0', '0', '8', '0', '0', '0', '0'],
+      ]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = await loadFactSkuPeriod(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — PRD-2 hilang dari batch baru, ikut terhapus
+    expect(rows[0].platform_product_id).toBe('PRD-1');
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(Number(rows[0].gmv)).toBe(1500000);
+  });
+});
+
 describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul kedua) — baris fakta tt_video → pdt_fact_content', () => {
   async function fixture(akunKontenToko: readonly string[] | null): Promise<number> {
     const clientId = nextClientId();
@@ -2221,8 +2309,16 @@ interface FactSkuPeriodRow {
   batch_id: number;
   parser_versi: number;
   gmv: string | null;
+  gmv_dari_kreator: string | null;
+  gmv_video_penjual: string | null;
+  gmv_live_penjual: string | null;
   produk_terjual: number | null;
   pesanan: number | null;
+  pesanan_sku: number | null;
+  impresi: number | null;
+  klik: number | null;
+  ctr: string | null;
+  ctor: string | null;
 }
 
 async function loadFactSkuPeriod(clientPlatformId: number): Promise<FactSkuPeriodRow[]> {
