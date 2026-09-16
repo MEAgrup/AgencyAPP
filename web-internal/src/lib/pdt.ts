@@ -6,6 +6,8 @@
 // dibangun — ini kontrak datanya lebih dulu, sub-langkah UI menyusul di sesi
 // berikutnya (`docs/handoff/HANDOFF_PDT_SESI9.md` §3 G1-09).
 
+import { api } from '@/lib/api';
+
 export interface PdtPreviewBerkas {
   nama: string;
   modul_kode: string | null;
@@ -121,4 +123,14 @@ export interface PdtLaporan {
   kpi: PdtLaporanKpi;
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;
+}
+
+/**
+ * GET /account/pdt/laporan — Flow B langkah 1. `periode` wajib `YYYY-MM-01`
+ * (hari pertama bulan); halaman pemanggil mengonversi dari
+ * `<input type="month">` ("YYYY-MM") sebelum memanggil ini.
+ */
+export function getPdtLaporan(clientPlatformId: number, periode: string): Promise<PdtLaporan> {
+  const search = new URLSearchParams({ client_platform_id: String(clientPlatformId), periode });
+  return api.get<PdtLaporan>(`/account/pdt/laporan?${search.toString()}`);
 }
