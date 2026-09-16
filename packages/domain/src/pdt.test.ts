@@ -1674,6 +1674,114 @@ async function loadFactContent(clientPlatformId: number): Promise<FactContentRow
   return sql<FactContentRow[]>`select * from pdt_fact_content where client_platform_id = ${clientPlatformId} order by platform_content_id`;
 }
 
+// ---------------------------------------------------------------------------
+// commitUploadBatch (2026-09-16) — baris fakta `tt_ads_product`/`tt_ads_live`
+// → `pdt_fact_ads`. Dibangun KONSERVATIF tanpa sample asli (lihat docblock
+// `ekstrakBarisTtAdsProduct`/`ekstrakBarisTtAdsLive`, `@cdps/core`
+// `pdt/fakta.ts`) — `roas` DITURUNKAN gmv÷biaya, `sku_id`/`content_id`
+// SELALU null. Tidak membawa preamble/periode sendiri (sama pola `tt_live`),
+// dipasangkan dengan `ttVideoBerkasDenganPeriode` untuk identitas+periode.
+// ---------------------------------------------------------------------------
+const HEADER_TT_ADS_PRODUCT = ['ID Campaign', 'Nama kampanye', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor'];
+
+function ttAdsProductBerkas(nama: string, baris: readonly [string, string, string, string][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TT_ADS_PRODUCT,
+    ...baris.map(([kampanyeId, biaya, pesananSku, gmv]) => [kampanyeId, 'Kampanye A', 'PRD-1', 'VID-1', 'akun', biaya, pesananSku, '0', gmv]),
+  ];
+  return { nama, sha256: 'sha-tt-ads-product', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_ads_product', ambiguous: false, matches: ['tt_ads_product'] };
+}
+
+const HEADER_TT_ADS_LIVE = ['Nama LIVE', 'ID Campaign', 'Nama kampanye', 'Biaya', 'Pesanan SKU', 'ROI', 'Pendapatan kotor'];
+
+function ttAdsLiveBerkas(nama: string, baris: readonly [string, string, string, string][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TT_ADS_LIVE,
+    ...baris.map(([kampanyeId, biaya, pesananSku, gmv]) => ['LIVE A', kampanyeId, 'Kampanye Live A', biaya, pesananSku, '99', gmv]),
+  ];
+  return { nama, sha256: 'sha-tt-ads-live', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_ads_live', ambiguous: false, matches: ['tt_ads_live'] };
+}
+
+describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_product → pdt_fact_ads', () => {
+  it('satu baris per kampanye, sku_id/content_id NULL, roas DITURUNKAN gmv÷biaya', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttAdsProductBerkas('ads-product.xlsx', [['CAM-1', '100000', '5', '400000']]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      sumber: 'tt_ads_product', kampanye_id: 'CAM-1', platform_product_id: null, sku_id: null, content_id: null,
+      batch_id: persiapan.batchId, parser_versi: 1, tayangan: null, klik: null, pesanan_sku: 5,
+    });
+    expect(Number(rows[0].biaya)).toBe(100000);
+    expect(Number(rows[0].gmv)).toBe(400000);
+    expect(Number(rows[0].roas)).toBe(4);
+  });
+
+  it('commit ULANG periode yang sama ⇒ replace-on-recommit, bukan menumpuk duplikat', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const pertama = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttAdsProductBerkas('ads-product.xlsx', [['CAM-1', '100000', '5', '400000']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect((await loadFactAds(cpId)).filter((r) => r.sumber === 'tt_ads_product')).toHaveLength(1);
+
+    const kedua = [
+      ttVideoBerkasDenganPeriode('video-2.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttAdsProductBerkas('ads-product-revisi.xlsx', [['CAM-1', '150000', '8', '600000']]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = (await loadFactAds(cpId)).filter((r) => r.sumber === 'tt_ads_product');
+    expect(rows).toHaveLength(1); // BUKAN 2
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(Number(rows[0].biaya)).toBe(150000);
+  });
+});
+
+describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_live → pdt_fact_ads', () => {
+  it('satu baris per kampanye, sku_id/content_id NULL, roas DITURUNKAN gmv÷biaya (kolom ROI mentah diabaikan)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttAdsLiveBerkas('ads-live.xlsx', [['CAM-2', '1000000', '10', '3160000']]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      sumber: 'tt_ads_live', kampanye_id: 'CAM-2', sku_id: null, content_id: null,
+      batch_id: persiapan.batchId, tayangan: null, klik: null, pesanan_sku: 10,
+    });
+    expect(Number(rows[0].biaya)).toBe(1000000);
+    expect(Number(rows[0].gmv)).toBe(3160000);
+    expect(Number(rows[0].roas)).toBe(3.16); // BUKAN 99 (kolom ROI mentah fixture, sengaja diabaikan)
+  });
+
+  it('dua sumber TikTok ads (product+live) periode sama ⇒ dua baris terpisah, tidak saling menimpa', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttAdsProductBerkas('ads-product.xlsx', [['CAM-1', '100000', '5', '400000']]),
+      ttAdsLiveBerkas('ads-live.xlsx', [['CAM-2', '1000000', '10', '3160000']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactAds(cpId);
+    expect(rows.map((r) => r.sumber).sort()).toEqual(['tt_ads_live', 'tt_ads_product']);
+  });
+});
+
 describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul kedua) — baris fakta tt_video → pdt_fact_content', () => {
   async function fixture(akunKontenToko: readonly string[] | null): Promise<number> {
     const clientId = nextClientId();
