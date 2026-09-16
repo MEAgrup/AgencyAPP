@@ -877,6 +877,19 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > SKU, `quad_klik`/`quad_cvr` di benchmark) adalah pekerjaan TERSENDIRI sebelum dimensi ini bisa
 > hidup dari data sungguhan — dicatat `G2-01-KUADRAN-SKU` (Open), di luar cakupan sesi 34.
 >
+> **Status 2026-09-16 — `G2-01-KUADRAN-SKU` langkah 1 DITUTUP: `tt_product_analytics` →
+> `pdt_fact_sku_period` (`ekstrakBarisTtProductAnalytics`, `@cdps/core` `pdt/fakta.ts`), basis
+> `'net'`.** Re-verifikasi sesi ini menemukan sisi TikTok belum punya penulis SAMA SEKALI (beda
+> dari Shopee, yang sudah punya `shopee_ams_produk` sejak sesi 23) — modul deteksi sudah
+> terdaftar+`kolomDipanen` sudah lengkap, tinggal ekstraktor+writer. `basis='net'` diverifikasi
+> lewat kesetaraan `G1-07-TIKTOK-REKONSILIASI` (Σ GMV/Pesanan SKU per-SKU = shop-level
+> `tt_shop_analytics`, yang sudah memakai `basis='net'`), bukan ditebak. `sku_id` selalu `null`,
+> `platform_product_id` = `'ID Produk'` (pola sama `shopee_ams_produk`/`tt_ads_product`).
+> **Langkah 2 (klasifikasi kuadran benchmark `quad_klik`/`quad_cvr` + tulis kolom `kuadran` +
+> sambung `rakitInputSkorTiktok`'s Portfolio Produk) BELUM dikerjakan** — dicatat sebagai
+> lanjutan tiket ini, bukan tiket baru. Lihat `docs/DECISIONS.md` 2026-09-16 untuk rincian
+> verifikasi lengkap.
+>
 > **Status 2026-09-15 (sesi 34, lanjutan) — query agregasi SQL DITUTUP.**
 > `rakitInputSkorTiktok` (`packages/domain/src/pdt.ts`) membaca `pdt_fact_ads`/`pdt_fact_content`/
 > `pdt_fact_shop_daily`/`pdt_fact_creator_period` per `client_platform_id`+periode dan merakit
