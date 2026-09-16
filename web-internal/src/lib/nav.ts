@@ -492,6 +492,14 @@ const ADMIN: NavNode[] = [
     label: 'Kebijakan Kelayakan SKU',
     access: (role) => Boolean(role.director),
   },
+  // G2-02 — kalibrasi `pdt_benchmark` TikTok (PDT-21 Rule 25). Director-only,
+  // preseden HURUF PER HURUF baris di atas: kalibrasi ini menggerakkan skor
+  // performa klien yang dikirim ke klien, bukan bidang admin biasa.
+  {
+    href: '/pdt/benchmark',
+    label: 'Benchmark Skor PDT',
+    access: (role) => Boolean(role.director),
+  },
   // M3-B — halaman Kandidat PX. AM (divisi Account, staff maupun lead) melihat
   // kliennya sendiri; Director menembus lintas-divisi. Cermin scope
   // `productexchange.listKandidat` (AM=miliknya, Lead Account/Director=semua) —

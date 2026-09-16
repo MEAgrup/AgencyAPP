@@ -6351,6 +6351,35 @@ export function eligibilityPolicyToWire(p: productexchange.EligibilityPolicy): E
   };
 }
 
+/** G2-02 — satu ambang `{good, warn}` `pdt_benchmark.nilai` (PDT-21 Rule 25). */
+export interface PdtBenchBandWire {
+  good: number;
+  warn: number;
+}
+
+/** One versioned `pdt_benchmark` row (Director-only, `pdt.canKelolaBenchmark`). Preseden `EligibilityPolicyWire`. */
+export interface PdtBenchmarkVersiWire {
+  platform: string;
+  versi: number;
+  nilai: Record<string, PdtBenchBandWire>;
+  aktif: boolean;
+  catatan: string | null;
+  dibuat_pada: string;
+  dibuat_oleh: string;
+}
+
+export function pdtBenchmarkVersiToWire(v: pdt.PdtBenchmarkVersi): PdtBenchmarkVersiWire {
+  return {
+    platform: v.platform,
+    versi: v.versi,
+    nilai: v.nilai,
+    aktif: v.aktif,
+    catatan: v.catatan,
+    dibuat_pada: v.dibuatPada.toISOString(),
+    dibuat_oleh: v.dibuatOleh,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Product Exchange M3-B — Kandidat/Katalog/laporan kreator_kosong. Angka
 // mentah (BUKAN pra-format "Rp. …") — pola sama `EligibilityPolicyValueWire`

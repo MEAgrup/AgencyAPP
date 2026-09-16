@@ -2211,6 +2211,156 @@ export async function hitungSkorTiktok(
 }
 
 // ===========================================================================
+// G2-02 · admin tulis `pdt_benchmark` (Rule 25 — "mengubah ambang tidak boleh
+// lagi butuh migrasi+deploy"). Preseden HURUF PER HURUF
+// `productexchange.createEligibilityPolicy`/`listEligibilityPolicy`: append-
+// only (nol UPDATE — `trg_pdt_benchmark_frozen` menolaknya di DB), versi baru
+// = counter GLOBAL (`uq_pdt_benchmark_versi`, lintas platform — lihat migrasi
+// `20261030010000`), `aktif` TIDAK PERNAH dibalik (`bacaBenchmarkAktifTiktok`
+// selalu mengambil versi TERTINGGI ber-`aktif=true`, jadi versi baru yang
+// lahir aktif otomatis "menang" tanpa menyentuh baris lama).
+//
+// TikTok SAJA didukung di sini. `platform` punya CHECK DB
+// ('tiktok'/'shopee'/'meta') tapi `computeSkorShopee` TIDAK menerima
+// parameter benchmark sama sekali (asimetri sengaja, docblock `skor.ts`) —
+// menulis baris 'shopee'/'meta' hari ini hanya melahirkan baris yatim tanpa
+// pembaca. Ditolak eksplisit sampai ada konsumen sungguhan.
+// ===========================================================================
+
+const KUNCI_BENCHMARK_TIKTOK = [
+  'roi_gmvmax',
+  'cpa_ratio',
+  'gmv_per_jam_live',
+  'sesi_live',
+  'gpm_video',
+  'pct_video_sales',
+  'cvr_toko',
+  'pct_kreator_produktif',
+  'quad_klik',
+  'quad_cvr',
+] as const;
+
+export interface PdtBenchmarkVersi {
+  platform: string;
+  versi: number;
+  nilai: Record<string, { good: number; warn: number }>;
+  aktif: boolean;
+  catatan: string | null;
+  dibuatPada: Date;
+  dibuatOleh: string;
+}
+
+function rowToBenchmarkVersi(r: {
+  platform: string;
+  versi: number;
+  nilai: Record<string, unknown>;
+  aktif: boolean;
+  catatan: string | null;
+  dibuat_pada: Date;
+  dibuat_oleh: string;
+}): PdtBenchmarkVersi {
+  return {
+    platform: r.platform,
+    versi: r.versi,
+    nilai: r.nilai as Record<string, { good: number; warn: number }>,
+    aktif: r.aktif,
+    catatan: r.catatan,
+    dibuatPada: r.dibuat_pada,
+    dibuatOleh: r.dibuat_oleh,
+  };
+}
+
+/** listBenchmarkVersi — seluruh versi SATU platform, terbaru dulu. Director-only. */
+export async function listBenchmarkVersi(sql: Queryable, actor: Actor, platform: string): Promise<PdtBenchmarkVersi[]> {
+  if (!canKelolaBenchmark(actor)) throw new ForbiddenError();
+  const rows = await sql<
+    { platform: string; versi: number; nilai: Record<string, unknown>; aktif: boolean; catatan: string | null; dibuat_pada: Date; dibuat_oleh: string }[]
+  >`
+    select platform, versi, nilai, aktif, catatan, dibuat_pada, dibuat_oleh
+      from pdt_benchmark where platform = ${platform} order by versi desc`;
+  return rows.map(rowToBenchmarkVersi);
+}
+
+const MSG_PDT_BENCHMARK_NILAI_INVALID =
+  '[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]';
+
+function validasiNilaiBenchmarkTiktok(nilai: unknown): Record<string, { good: number; warn: number }> {
+  if (typeof nilai !== 'object' || nilai === null || Array.isArray(nilai)) {
+    throw new ValidationError(MSG_PDT_BENCHMARK_NILAI_INVALID);
+  }
+  const n = nilai as Record<string, unknown>;
+  const keys = Object.keys(n);
+  if (keys.length !== KUNCI_BENCHMARK_TIKTOK.length || !KUNCI_BENCHMARK_TIKTOK.every((k) => keys.includes(k))) {
+    throw new ValidationError(`[nilai benchmark harus memuat persis kunci: ${KUNCI_BENCHMARK_TIKTOK.join(', ')}]`);
+  }
+  const hasil: Record<string, { good: number; warn: number }> = {};
+  for (const kunci of KUNCI_BENCHMARK_TIKTOK) {
+    const band = n[kunci];
+    if (typeof band !== 'object' || band === null || Array.isArray(band)) {
+      throw new ValidationError(MSG_PDT_BENCHMARK_NILAI_INVALID);
+    }
+    const b = band as Record<string, unknown>;
+    if (typeof b.good !== 'number' || !Number.isFinite(b.good) || b.good < 0) {
+      throw new ValidationError(MSG_PDT_BENCHMARK_NILAI_INVALID);
+    }
+    if (typeof b.warn !== 'number' || !Number.isFinite(b.warn) || b.warn < 0) {
+      throw new ValidationError(MSG_PDT_BENCHMARK_NILAI_INVALID);
+    }
+    hasil[kunci] = { good: b.good, warn: b.warn };
+  }
+  return hasil;
+}
+
+/** Input for a new calibration version. `catatan` wajib (form FE), sama pola `EligibilityPolicyInput`. */
+export interface PdtBenchmarkVersiInput {
+  platform: string;
+  nilai: unknown;
+  catatan: string;
+  /** Lahir non-aktif (draft/rollback) bila eksplisit `false`. Default `true`. */
+  aktif?: boolean;
+}
+
+/**
+ * tambahVersiBenchmark — mint versi kalibrasi berikutnya. Director-only.
+ * Append-only: TIDAK PERNAH menyentuh baris yang sudah ada (nol langkah
+ * "matikan aktif versi lama" — `bacaBenchmarkAktifTiktok` sudah menangani ini
+ * lewat `order by versi desc limit 1`, persis `createEligibilityPolicy`).
+ */
+export async function tambahVersiBenchmark(sql: Sql, actor: Actor, input: PdtBenchmarkVersiInput): Promise<PdtBenchmarkVersi> {
+  if (!canKelolaBenchmark(actor)) throw new ForbiddenError();
+  if (input.platform !== 'tiktok') {
+    throw new ValidationError(
+      `[platform '${input.platform}' belum didukung kalibrasi benchmark — mesin skor Shopee tidak memakai pdt_benchmark]`,
+    );
+  }
+  const catatan = (input.catatan ?? '').trim();
+  if (catatan === '') throw new ValidationError(MSG_PDT_BENCHMARK_NILAI_INVALID);
+  const nilai = validasiNilaiBenchmarkTiktok(input.nilai);
+  const aktif = input.aktif ?? true;
+
+  return withTransaction(sql, async (tx) => {
+    const rows = await tx<{ versi: number }[]>`select coalesce(max(versi), 0) as versi from pdt_benchmark`;
+    const versiBaru = rows[0].versi + 1;
+    const inserted = await tx<
+      { platform: string; versi: number; nilai: Record<string, unknown>; aktif: boolean; catatan: string | null; dibuat_pada: Date; dibuat_oleh: string }[]
+    >`
+      insert into pdt_benchmark (platform, versi, nilai, aktif, catatan, dibuat_oleh)
+      values (${input.platform}, ${versiBaru}, ${tx.json(nilai as never)}, ${aktif}, ${catatan}, ${actor.employeeId})
+      returning platform, versi, nilai, aktif, catatan, dibuat_pada, dibuat_oleh`;
+    await executors(tx).audit.insertAudit({
+      entityType: 'pdt_benchmark',
+      entityId: String(versiBaru),
+      actorEmployeeId: actor.employeeId,
+      action: 'create',
+      beforeJson: null,
+      afterJson: { platform: input.platform, versi: versiBaru, nilai, aktif, catatan },
+      createdBy: actor.employeeId,
+    });
+    return rowToBenchmarkVersi(inserted[0]);
+  });
+}
+
+// ===========================================================================
 // G2-01 Shopee lanjutan — rakit `PdtSkorInputShopee` dari fakta tersimpan.
 // Query MURNI-BACA (nol tulis), pola sama `rakitInputSkorTiktok` di atas.
 //

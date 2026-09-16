@@ -38,7 +38,9 @@ import {
   platformKeVokabPdt,
   bacaLaporanPdt,
   kirimLaporanPdt,
+  listBenchmarkVersi,
   riwayatKirimanPdt,
+  tambahVersiBenchmark,
   previewUploadBatch,
   rakitInputSkorShopee,
   rakitInputSkorTiktok,
@@ -208,6 +210,21 @@ afterEach(async () => {
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
+  // pdt_benchmark (G2-02, tambahVersiBenchmark) — append-only/frozen
+  // (`trg_pdt_benchmark_frozen` menolak UPDATE/DELETE). Versi 1/2 adalah seed
+  // migrasi (`20261030010000`/`20261104010000`) yang HARUS bertahan setiap
+  // run; versi > 2 murni lahir dari tes `tambahVersiBenchmark` di berkas ini,
+  // jadi aman dibuang. Trigger dimatikan sebagai superuser dan dipulihkan di
+  // `finally` — pola sama `productexchange.test.ts` (`px_eligibility_policy`)
+  // — supaya kegagalan cleanup tidak pernah meninggalkan tabel bisa ditulis
+  // untuk tes berikutnya. Harus berjalan SETELAH `pdt_laporan_kiriman` di atas
+  // (baris itu FK ke `pdt_benchmark.versi`, jadi harus sudah kosong dulu).
+  await sql`alter table pdt_benchmark disable trigger trg_pdt_benchmark_frozen`;
+  try {
+    await sql`delete from pdt_benchmark where versi > 2`;
+  } finally {
+    await sql`alter table pdt_benchmark enable trigger trg_pdt_benchmark_frozen`;
+  }
 });
 
 const OWNER_AM = 'ZPDT-AM-DB';
@@ -3469,6 +3486,123 @@ describeDb('bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34) — benchmark 
     expect(row.kuadran).toBe('bintang');
     // Portfolio Produk sekarang TERISI (bukan null) — GMV PRD-1 masuk gmvBintangHiddenGem+gmvAktifTotal.
     expect(hasil.dimensi.find((d) => d.kode === 'produk')?.disertakan).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listBenchmarkVersi + tambahVersiBenchmark (G2-02 — admin kalibrasi
+// `pdt_benchmark`, Rule 25 "mengubah ambang tidak boleh lagi butuh
+// migrasi+deploy"). `versi` counter GLOBAL (`uq_pdt_benchmark_versi`, lintas
+// platform) — tes di sini membaca `bacaBenchmarkAktifTiktok().versi` sebagai
+// baseline, bukan hardcode angka, supaya independen dari berapa versi yang
+// sudah diseed/ditambah tes lain sebelumnya dalam run yang sama.
+// ---------------------------------------------------------------------------
+describeDb('listBenchmarkVersi + tambahVersiBenchmark (G2-02)', () => {
+  async function fixture(): Promise<{ cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', 'SHOP-ZPDT-BM');
+    return { cpId };
+  }
+
+  async function nilaiValidBerbasisAktif(): Promise<Record<string, { good: number; warn: number }>> {
+    const { bench } = await bacaBenchmarkAktifTiktok(sql);
+    return bench as unknown as Record<string, { good: number; warn: number }>;
+  }
+
+  it('listBenchmarkVersi/tambahVersiBenchmark: ForbiddenError untuk non-Director (OD/lead Account/AM)', async () => {
+    const nilai = await nilaiValidBerbasisAktif();
+    for (const actor of [od(), accountLead(), am()]) {
+      await expect(listBenchmarkVersi(sql, actor, 'tiktok')).rejects.toThrow(ForbiddenError);
+      await expect(tambahVersiBenchmark(sql, actor, { platform: 'tiktok', nilai, catatan: 'x' })).rejects.toThrow(ForbiddenError);
+    }
+  });
+
+  it('tambahVersiBenchmark: ValidationError untuk platform selain tiktok (Shopee tidak memakai pdt_benchmark)', async () => {
+    const nilai = await nilaiValidBerbasisAktif();
+    await expect(tambahVersiBenchmark(sql, director(), { platform: 'shopee', nilai, catatan: 'x' })).rejects.toThrow(ValidationError);
+  });
+
+  it('tambahVersiBenchmark: ValidationError untuk catatan kosong', async () => {
+    const nilai = await nilaiValidBerbasisAktif();
+    await expect(tambahVersiBenchmark(sql, director(), { platform: 'tiktok', nilai, catatan: '  ' })).rejects.toThrow(ValidationError);
+  });
+
+  it('tambahVersiBenchmark: ValidationError untuk nilai kurang/lebih kunci atau band bukan angka', async () => {
+    const nilai = await nilaiValidBerbasisAktif();
+    const { roi_gmvmax: _drop, ...kurang } = nilai;
+    await expect(tambahVersiBenchmark(sql, director(), { platform: 'tiktok', nilai: kurang, catatan: 'x' })).rejects.toThrow(ValidationError);
+    await expect(
+      tambahVersiBenchmark(sql, director(), { platform: 'tiktok', nilai: { ...nilai, ekstra: { good: 1, warn: 0 } }, catatan: 'x' }),
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      tambahVersiBenchmark(sql, director(), {
+        platform: 'tiktok',
+        nilai: { ...nilai, roi_gmvmax: { good: 'delapan', warn: 4 } },
+        catatan: 'x',
+      }),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('tambahVersiBenchmark: mint versi GLOBAL berikutnya (bukan per-platform), append-only — versi lama tidak tersentuh', async () => {
+    const sebelum = await bacaBenchmarkAktifTiktok(sql);
+    const nilai = await nilaiValidBerbasisAktif();
+    const dibuat = await tambahVersiBenchmark(sql, director(), { platform: 'tiktok', nilai, catatan: 'kalibrasi ulang tes G2-02', aktif: true });
+    expect(dibuat.versi).toBe(sebelum.versi + 1);
+    expect(dibuat.platform).toBe('tiktok');
+    expect(dibuat.aktif).toBe(true);
+    expect(dibuat.catatan).toBe('kalibrasi ulang tes G2-02');
+
+    const semua = await listBenchmarkVersi(sql, director(), 'tiktok');
+    expect(semua[0].versi).toBe(dibuat.versi);
+    // Versi lama tetap ada apa adanya (append-only, nol UPDATE).
+    expect(semua.some((v) => v.versi === sebelum.versi)).toBe(true);
+
+    // `aktif` versi baru = true ⇒ ia menjadi versi aktif TERTINGGI, tanpa membalik versi lama.
+    const setelah = await bacaBenchmarkAktifTiktok(sql);
+    expect(setelah.versi).toBe(dibuat.versi);
+  });
+
+  it('tambahVersiBenchmark: versi lahir aktif=false TIDAK menjadi versi aktif (aktif tidak pernah dibalik)', async () => {
+    const sebelum = await bacaBenchmarkAktifTiktok(sql);
+    const nilai = await nilaiValidBerbasisAktif();
+    const dibuat = await tambahVersiBenchmark(sql, director(), { platform: 'tiktok', nilai, catatan: 'draft rollback', aktif: false });
+    expect(dibuat.aktif).toBe(false);
+
+    const setelah = await bacaBenchmarkAktifTiktok(sql);
+    expect(setelah.versi).toBe(sebelum.versi); // TIDAK berubah — versi draft tidak dibaca sebagai aktif.
+  });
+
+  it('DoD G2-02: versi baru menggeser skor laporan BELUM terkirim, TIDAK menggeser yang SUDAH terkirim (Rule 23/25)', async () => {
+    const { cpId } = await fixture();
+    const sebelum = await bacaBenchmarkAktifTiktok(sql);
+
+    // Kirim laporan periode Juli SAAT benchmark masih versi `sebelum.versi`.
+    // `ownerActor()` (AM pemilik toko ini via `insertClient(..., OWNER_AM)`), BUKAN `director()` —
+    // `pdt_laporan_kiriman.dikirim_oleh` ber-FK `employees`, dan `OWNER_AM` (satu-satunya baris
+    // employees sungguhan di berkas ini) sudah cukup untuk gerbang `canKirimLaporan`.
+    const kirimanLama = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    expect(kirimanLama.benchmarkVersi).toBe(sebelum.versi);
+
+    // Director menaikkan kalibrasi (versi baru, aktif). `pdt_benchmark.dibuat_oleh` TANPA FK
+    // employees (beda dari `pdt_laporan_kiriman` di atas) — `director()` aman di sini.
+    const nilai = await nilaiValidBerbasisAktif();
+    const versiBaru = await tambahVersiBenchmark(sql, director(), {
+      platform: 'tiktok',
+      nilai,
+      catatan: 'kalibrasi ulang DoD G2-02',
+      aktif: true,
+    });
+
+    // Laporan periode BARU (BELUM dikirim) otomatis memakai versi baru.
+    const laporanAgustus = await bacaLaporanPdt(sql, ownerActor(), cpId, '2026-08-01');
+    expect(laporanAgustus.platform).toBe('tiktok');
+    expect((laporanAgustus as { benchmarkVersi: number }).benchmarkVersi).toBe(versiBaru.versi);
+
+    // Kiriman LAMA (sudah dibekukan sebelum kalibrasi berubah) tetap memakai versi lama.
+    const riwayat = await riwayatKirimanPdt(sql, ownerActor(), cpId);
+    const lama = riwayat.find((r) => r.id === kirimanLama.id);
+    expect(lama?.benchmarkVersi).toBe(sebelum.versi);
   });
 });
 
