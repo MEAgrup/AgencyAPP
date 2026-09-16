@@ -381,3 +381,37 @@ export async function riwayatKirimanPdt(clientPlatformId: number): Promise<PdtKi
   );
   return res.data;
 }
+
+// G2-02 — admin kalibrasi `pdt_benchmark` (GET/POST /account/pdt/benchmark,
+// Director-only, `pdt.canKelolaBenchmark`). Preseden HURUF PER HURUF
+// `PxEligibilityPolicy`/`listEligibilityPolicy`/`createEligibilityPolicy`
+// (`web-internal/src/lib/px.ts`) — append-only, `aktif` tidak pernah dibalik.
+export interface PdtBenchBand {
+  good: number;
+  warn: number;
+}
+
+export interface PdtBenchmarkVersi {
+  platform: string;
+  versi: number;
+  nilai: Record<string, PdtBenchBand>;
+  aktif: boolean;
+  catatan: string | null;
+  dibuat_pada: string;
+  dibuat_oleh: string;
+}
+
+export function listBenchmarkVersi(platform = 'tiktok'): Promise<{ data: PdtBenchmarkVersi[] }> {
+  return api.get<{ data: PdtBenchmarkVersi[] }>(`/account/pdt/benchmark?platform=${platform}`);
+}
+
+export interface TambahVersiBenchmarkInput {
+  platform?: string;
+  nilai: Record<string, PdtBenchBand>;
+  catatan: string;
+  aktif?: boolean;
+}
+
+export function tambahVersiBenchmark(input: TambahVersiBenchmarkInput): Promise<PdtBenchmarkVersi> {
+  return api.post<PdtBenchmarkVersi>('/account/pdt/benchmark', input);
+}

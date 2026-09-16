@@ -1402,8 +1402,23 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > migrasi SQL (sama seperti seed versi 1), belum ada route/UI Director untuk INSERT baris baru
 > langsung. Itu pekerjaan tersisa G2-02.
 
+> **Status 2026-09-16 — G2-02 DITUTUP: UI admin kalibrasi `pdt_benchmark` dibangun, Rule 25
+> TERPENUHI.** `docs/DECISIONS.md` (cari "G2-02 DITUTUP") untuk rincian lengkap. Ringkas: preseden
+> HURUF PER HURUF `productexchange.createEligibilityPolicy`/`listEligibilityPolicy` +
+> `/px/eligibility-policy` (append-only, `aktif` tidak pernah dibalik, versi = counter GLOBAL).
+> `pdt.listBenchmarkVersi`/`pdt.tambahVersiBenchmark` (`packages/domain/src/pdt.ts`) — TikTok SAJA
+> (platform lain ditolak eksplisit, Shopee tidak memakai `pdt_benchmark`), memvalidasi PERSIS
+> sepuluh kunci `PdtBenchmarkTiktok`+`PdtBenchmarkKuadranTiktok`. Route baru
+> `GET/POST /api/v1/account/pdt/benchmark` + halaman Director-only `/pdt/benchmark`
+> (`web-internal`, prefill dari versi aktif). Uji DoD eksplisit (kirim laporan versi lama → naikkan
+> kalibrasi → laporan belum-terkirim ikut versi baru, kiriman lama tetap versi lama) — Rule 23+25
+> dibuktikan bersama satu tes. Diverifikasi: `@cdps/core` 1442/1442, `@cdps/domain` 2784/2785
+> (1 skip, nol gagal), `@cdps/db` 107/107, `@cdps/api` 638/640 (2 skip); typecheck+lint bersih,
+> `next build` `web-internal` sukses. **Sisa tersisa G2-02:** revoke mechanism `pdt_laporan_kiriman`
+> (Rule 24) — dicatat terpisah, di luar cakupan DoD "UI admin kalibrasi" di atas.
+
 **DoD:** mengubah ambang lewat UI menggeser skor laporan belum-terkirim dan **tidak** menggeser
-yang sudah terkirim, dibuktikan satu tes.
+yang sudah terkirim, dibuktikan satu tes. **✅ TERPENUHI** (lihat status 2026-09-16 di atas).
 
 ---
 

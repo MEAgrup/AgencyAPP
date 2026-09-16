@@ -829,6 +829,9 @@ const WIRE_TO_FE: Record<string, string> = {
   PdtLaporanKirimanWire: 'pdt.ts::PdtLaporanKiriman',
   // PDT G2-01 — riwayat kiriman (GET /account/pdt/laporan/kiriman, Flow B langkah 5).
   PdtKirimanRingkasWire: 'pdt.ts::PdtKirimanRingkas',
+  // PDT G2-02 — admin kalibrasi `pdt_benchmark` (GET/POST /account/pdt/benchmark, Director-only).
+  PdtBenchmarkVersiWire: 'pdt.ts::PdtBenchmarkVersi',
+  PdtBenchBandWire: 'pdt.ts::PdtBenchBand',
 };
 
 /**
