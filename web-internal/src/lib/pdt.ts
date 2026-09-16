@@ -116,6 +116,24 @@ export function commitBatchPdt(
   });
 }
 
+// G1-09-KONFIRMASI-IDENTITAS — Rule 2 (Shopee)/Rule 4 (TikTok), konfirmasi
+// SEKALI usulan identitas batch `identitas_belum_terikat` (POST
+// /account/pdt/batches/konfirmasi-identitas). `status_setelah_reparse`
+// `null` berarti reparse langsung belum/tidak jalan (paket sudah dipurge,
+// atau gagal) — identitas TETAP terikat, batch menunggu tick reparse harian
+// atau unggah ulang.
+export interface PdtKonfirmasiIdentitas {
+  batch_id: number;
+  client_platform_id: number;
+  platform: string;
+  nilai_diikat: string;
+  status_setelah_reparse: string | null;
+}
+
+export function konfirmasiIdentitasBatchPdt(batchId: number): Promise<PdtKonfirmasiIdentitas> {
+  return api.post<PdtKonfirmasiIdentitas>('/account/pdt/batches/konfirmasi-identitas', { batch_id: batchId });
+}
+
 // G1-09 sub-langkah 3, bullet 4 — riwayat batch toko ini (GET
 // /account/pdt/batches), TERMASUK batch `ditolak`/`digantikan` (Rule 10:
 // diagnosis tanpa upload ulang). `paket_status` turunan server dari

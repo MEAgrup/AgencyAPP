@@ -737,6 +737,46 @@ punya `null` eksplisit.
 > muncul di daftar route statis; `nav.test.ts` (regresi href + visibilitas per-divisi)
 > diperbarui dan lolos; `route-parity`/`shape-parity` hijau (`WIRE_TO_FE` terdaftar).
 
+> **Status 2026-09-16 (lanjutan) — `G1-09-KONFIRMASI-IDENTITAS` DITUTUP: AM sekarang bisa
+> mengonfirmasi identitas satu-kali (Rule 2 Shopee/Rule 4 TikTok) langsung dari halaman
+> upload.** `docs/DECISIONS.md` (cari "G1-09-KONFIRMASI-IDENTITAS") untuk rincian lengkap.
+> Ringkas: `pdt.konfirmasiIdentitasBatch` (BARU, `packages/domain/src/pdt.ts`) mengikat nilai
+> yang SUDAH diusulkan sistem (`pdt_upload_batch.identitas_sumber`, ditulis
+> `commitUploadBatch`/`reparsePdtBatch` untuk verdict `usulkan_ikat`) ke
+> `client_platforms.shop_id` (Shopee) atau APPEND ke `akun_konten_toko` (TikTok, array) —
+> PERMANEN, dengan `for update` row-lock + guard "tidak pernah menimpa" (mencerminkan
+> `validasiIdentitasShopee`/`validasiIdentitasTiktok` yang HANYA mengusulkan saat kolom
+> tujuan kosong) + baris `audit_log` (`pdt_identitas_dikonfirmasi`). Domain TIDAK menyentuh
+> Storage sendiri (arah dependensi tetap) — route baru
+> `POST /account/pdt/batches/konfirmasi-identitas` yang, SEGERA setelah pengikatan sukses,
+> menjalankan ULANG pipeline reparse (G1-11, pola SAMA `internal/pdt/reparse/tick`) untuk
+> batch yang SAMA, supaya AM melihat batch pindah dari `identitas_belum_terikat` ke
+> `verified`/`parsing`/`ditolak` tanpa menunggu tick harian besok. Paket sudah dipurge atau
+> reparse gagal ⇒ identitas TETAP terikat (langkah itu sudah commit lebih dulu),
+> `status_setelah_reparse` dibalas `null`. Halaman upload: tombol "Konfirmasi Identitas" di
+> hasil commit yang baru terjadi DAN di setiap baris riwayat berstatus
+> `identitas_belum_terikat` (batch lama yang tertunda, bukan hanya yang baru saja diunggah).
+>
+> **Bug lain ditemukan+diperbaiki sekalian (SATU baris, wire boundary)**:
+> `pdtCommitBatchToWire`'s `batch_id` — diketik `number` tapi mengalirkan
+> `PdtCommitPersiapan.batchId` (bigint dari `insert ... returning id`) APA ADANYA, jadi
+> respons JSON `POST /account/pdt/batches` sebenarnya mengirim `batch_id` sebagai STRING,
+> bukan number — ditemukan lewat tes route `konfirmasi-identitas` yang mengirim `batch_id`
+> balik ke server (validasi `typeof === 'number'` menolaknya). Ini bug LAMA (sejak sub-langkah
+> 2a) yang baru kelihatan sekarang karena baru sesi ini ada pemanggil FE yang membaca
+> `batch_id` balik dari respons commit. Diperbaiki `Number(h.batchId)` di titik wire — satu
+> baris, nol pemanggil lain tersentuh (tidak ada test lama yang menegaskan tipe field itu).
+>
+> Diverifikasi (DB lokal rebuild bersih, 259 migrasi — **nol migrasi baru**): `@cdps/core`
+> 1442/1442, `@cdps/db` 107/107, `@cdps/domain` 2807/2808 (1 skip pra-ada + 15 tes baru
+> `konfirmasiIdentitasBatch`), `@cdps/api` 651/653 (2 skip pra-ada + 6 tes baru
+> `POST .../konfirmasi-identitas`, termasuk skenario sukses end-to-end: commit →
+> identitas_belum_terikat → konfirmasi → reparse → parsing); typecheck bersih 4 paket +
+> `web-internal` + `web-client-portal` (satu perbaikan tipe: `loadClientPlatformUntukPdt`
+> diperluas menerima `Queryable`, bukan hanya `Sql`, supaya bisa dipanggil di dalam transaksi
+> `konfirmasiIdentitasBatch` sendiri); lint `@cdps/api --max-warnings 0` bersih; `next build`
+> + `vitest run` `web-internal` sukses.
+
 ### G1-09-2BII-SHOPDAILY-SHOPEE (DITUTUP, sesi 34 lanjutan)
 `shopee_shop_stats` (sheet terisolasi `'Pesanan Siap Dikirim'`, sudah dipakai G1-07 rekonsiliasi
 lewat `parseShopeeShopStatsBasisTerisolasi`) belum dipetakan ke `pdt_fact_shop_daily`. Sheet ini

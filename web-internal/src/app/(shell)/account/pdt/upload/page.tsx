@@ -29,14 +29,15 @@
  * hold, `pdt.listRiwayatBatchPdt`), supaya batch gagal bisa didiagnosis tanpa
  * upload ulang (Rule 10 error path).
  *
- * **Keterbatasan yang diketahui, dicatat sengaja (bukan terlewat):** batch
- * yang identitasnya belum terikat (`identitas_belum_terikat` — toko belum
- * punya `shop_id`/`akun_konten_toko` tersimpan) menampilkan nilai yang
- * diusulkan sistem, tapi endpoint konfirmasi satu-kali AM (Rule 2/4) BELUM
- * dibangun di sesi ini — dicatat sebagai tiket terpisah
- * (`G1-09-KONFIRMASI-IDENTITAS`, `docs/backlog/PDT_BACKLOG.md`). Batch
- * semacam itu tetap tersimpan (`pdt_upload_batch` sungguhan, bisa direparse
- * nanti) — bukan hilang, hanya menunggu langkah konfirmasi yang menyusul.
+ * **Konfirmasi identitas satu-kali AM** (`G1-09-KONFIRMASI-IDENTITAS`, Rule
+ * 2 Shopee/Rule 4 TikTok): batch `identitas_belum_terikat` (toko belum
+ * punya `shop_id`/`akun_konten_toko` tersimpan) menampilkan tombol
+ * "Konfirmasi Identitas" — baik di hasil commit yang baru saja terjadi
+ * maupun di baris riwayat manapun berstatus itu (batch lama yang tertunda).
+ * Menekannya mengikat nilai yang diusulkan sistem PERMANEN ke
+ * `client_platforms`, lalu SEGERA menjalankan ulang pipeline reparse (G1-11)
+ * untuk batch yang sama — AM melihat batch pindah status tanpa menunggu tick
+ * harian besok (`konfirmasiIdentitasBatchPdt`).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -44,12 +45,14 @@ import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { listClients, type Client } from '@/lib/clients';
 import {
   commitBatchPdt,
+  konfirmasiIdentitasBatchPdt,
   previewBatchPdt,
   riwayatBatchPdt,
   siapkanUploadBatchPdt,
   type PdtBatchRingkas,
   type PdtCommitBatch,
   type PdtCommitOverrideInput,
+  type PdtKonfirmasiIdentitas,
   type PdtPreviewBatch,
 } from '@/lib/pdt';
 
@@ -144,6 +147,13 @@ export default function UploadPdtPage() {
   const [riwayat, setRiwayat] = useState<PdtBatchRingkas[]>([]);
   const [riwayatErr, setRiwayatErr] = useState<string | null>(null);
   const [riwayatLoading, setRiwayatLoading] = useState(false);
+
+  // G1-09-KONFIRMASI-IDENTITAS — per-batch (bisa dipicu dari hasil commit yang
+  // baru saja terjadi MAUPUN dari baris riwayat manapun berstatus
+  // identitas_belum_terikat), jadi loading state di-keyed per batch_id.
+  const [konfirmasiLoading, setKonfirmasiLoading] = useState<Record<number, boolean>>({});
+  const [konfirmasiErr, setKonfirmasiErr] = useState<string | null>(null);
+  const [konfirmasiHasil, setKonfirmasiHasil] = useState<PdtKonfirmasiIdentitas | null>(null);
 
   const loadClients = useCallback(async () => {
     setClientsLoading(true);
@@ -249,6 +259,24 @@ export default function UploadPdtPage() {
       setCommitErr(errorMessage(e));
     } finally {
       setCommitLoading(false);
+    }
+  }
+
+  async function handleKonfirmasiIdentitas(batchId: number, usulan: string | null) {
+    const konfirmasi = usulan
+      ? `Konfirmasi identitas batch #${batchId}? Nilai "${usulan}" akan terikat PERMANEN ke toko ini — hanya bisa dilakukan sekali.`
+      : `Konfirmasi identitas batch #${batchId}? Nilai yang diusulkan sistem akan terikat PERMANEN ke toko ini — hanya bisa dilakukan sekali.`;
+    if (!window.confirm(konfirmasi)) return;
+    setKonfirmasiLoading((prev) => ({ ...prev, [batchId]: true }));
+    setKonfirmasiErr(null);
+    try {
+      const hasil = await konfirmasiIdentitasBatchPdt(batchId);
+      setKonfirmasiHasil(hasil);
+      await loadRiwayat();
+    } catch (e) {
+      setKonfirmasiErr(errorMessage(e));
+    } finally {
+      setKonfirmasiLoading((prev) => ({ ...prev, [batchId]: false }));
     }
   }
 
@@ -476,12 +504,37 @@ export default function UploadPdtPage() {
                       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>{commitResult.alasan_ditolak}</p>
                     )}
                     {commitResult.status === 'identitas_belum_terikat' && (
-                      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-                        Identitas toko ini belum pernah terikat — usulan sistem: <strong>{commitResult.identitas.usulan ?? '—'}</strong>.
-                        Konfirmasi satu-kali oleh AM belum tersedia di halaman ini; hubungi tim teknis untuk mengikat
-                        nilai ini secara manual sebelum batch berikutnya bisa lanjut ke rekonsiliasi.
-                      </p>
+                      <div style={{ marginTop: 8 }}>
+                        <p className="muted" style={{ fontSize: 12 }}>
+                          Identitas toko ini belum pernah terikat — usulan sistem: <strong>{commitResult.identitas.usulan ?? '—'}</strong>.
+                          Konfirmasi sekali untuk mengikatnya permanen dan melanjutkan batch ini ke rekonsiliasi.
+                        </p>
+                        <button
+                          type="button"
+                          className="btn btnPrimary btnSm"
+                          disabled={Boolean(konfirmasiLoading[commitResult.batch_id])}
+                          style={{ marginTop: 6 }}
+                          onClick={() => void handleKonfirmasiIdentitas(commitResult.batch_id, commitResult.identitas.usulan)}
+                        >
+                          {konfirmasiLoading[commitResult.batch_id] ? 'Mengonfirmasi...' : 'Konfirmasi Identitas'}
+                        </button>
+                      </div>
                     )}
+                  </div>
+                )}
+                {konfirmasiErr && (
+                  <div className="alert alertError" role="alert" style={{ marginTop: 12 }}>{konfirmasiErr}</div>
+                )}
+                {konfirmasiHasil && (
+                  <div className="alert alertInfo" role="status" style={{ marginTop: 12 }}>
+                    Identitas batch #{konfirmasiHasil.batch_id} terikat: <strong>{konfirmasiHasil.nilai_diikat}</strong>.
+                    {konfirmasiHasil.status_setelah_reparse
+                      ? <> Batch diproses ulang — status sekarang{' '}
+                          <span className={`badge ${statusBadgeClass(konfirmasiHasil.status_setelah_reparse)}`}>
+                            {STATUS_LABEL[konfirmasiHasil.status_setelah_reparse] ?? konfirmasiHasil.status_setelah_reparse}
+                          </span>.
+                        </>
+                      : ' Batch belum bisa diproses ulang sekarang (lihat riwayat di bawah) — akan diambil proses harian, atau unggah ulang untuk toko ini.'}
                   </div>
                 )}
               </section>
@@ -513,6 +566,7 @@ export default function UploadPdtPage() {
                       <th>Status Paket</th>
                       <th>Retensi s/d</th>
                       <th>Diunggah</th>
+                      <th>Aksi</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -534,6 +588,18 @@ export default function UploadPdtPage() {
                         </td>
                         <td>{b.retensi_sampai ? formatDate(b.retensi_sampai) : '—'}</td>
                         <td>{formatDateTime(b.dibuat_pada)} · {b.dibuat_oleh}</td>
+                        <td>
+                          {b.status === 'identitas_belum_terikat' && (
+                            <button
+                              type="button"
+                              className="btn btnGhost btnSm"
+                              disabled={Boolean(konfirmasiLoading[b.id])}
+                              onClick={() => void handleKonfirmasiIdentitas(b.id, null)}
+                            >
+                              {konfirmasiLoading[b.id] ? 'Mengonfirmasi...' : 'Konfirmasi Identitas'}
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
