@@ -69,12 +69,17 @@
  * `null` (ringkasan/outlook selalu punya sesuatu untuk dikatakan). Rekomendasi
  * v1 GENERIK per dimensi skor (`skor.dimensi` ber-nilai rendah), BUKAN
  * porting penuh aturan per-metrik mesin lama (lihat docblock
- * `pdt.PdtLaporanInsight`, `@cdps/core`). Halaman ini HANYA menampilkan —
- * AM tidak bisa menyunting teks dari sini. Penyuntingan sebelum kirim ke
- * klien (kalau AM mau ganti kalimat) adalah tiket TERPISAH yang mewiring
- * override teks ke tombol "Kirim ke Klien" di bawah, BUKAN state machine
- * draft/publikasi/revisi terpisah seperti `client_report_insight` mesin
- * lama — PDT-21 "snapshot beku HANYA saat dikirim" tetap utuh.
+ * `pdt.PdtLaporanInsight`, `@cdps/core`). **G2-01-INSIGHT-EDIT**: AM BISA
+ * menyunting enam field-nya di sini (state lokal `insightDraft`, disetel
+ * ulang dari insight mesin tiap ganti toko/periode, nol persistensi) —
+ * editor sama pola `InsightEditor.tsx` mesin lama (`web-internal/src/
+ * components/clients/`) MINUS narasi tahap (tahap PDT sudah data
+ * terstruktur). Suntingan dikirim APA ADANYA ke `POST .../laporan/kirim`
+ * saat "Kirim ke Klien" ditekan — `pdt.normalizePdtInsightDraft` (`@cdps/core`)
+ * yang memvalidasi (pesan BI `[...]` muncul di `kirimErr` kalau ditolak),
+ * BUKAN state machine draft/publikasi/revisi terpisah seperti
+ * `client_report_insight` mesin lama — PDT-21 "snapshot beku HANYA saat
+ * dikirim" tetap utuh, `kirimLaporanPdt` tetap satu aksi atomik.
  *
  * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
  * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
@@ -105,7 +110,9 @@ import {
   riwayatKirimanPdt,
   type PdtKirimanRingkas,
   type PdtLaporan,
+  type PdtLaporanInsight,
   type PdtLaporanKiriman,
+  type PdtLaporanRekomendasi,
   type PdtTahapSatuan,
 } from '@/lib/pdt';
 import { formatIDR } from '@/lib/money';
@@ -162,6 +169,108 @@ function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('id-ID');
 }
 
+/**
+ * Editor "insight" layar pratinjau (G2-01-INSIGHT-EDIT) — pola SAMA
+ * `InsightEditor.tsx` (mesin lama, `web-internal/src/components/clients/`)
+ * disalin & disederhanakan untuk PDT: enam field yang sama MINUS narasi
+ * tahap (tahap PDT sudah data terstruktur, bukan prosa). Nol persistensi di
+ * sini — state lokal murni, dikirim apa adanya saat "Kirim ke Klien"
+ * ditekan; server (`pdt.normalizePdtInsightDraft`) yang memvalidasi.
+ */
+const REK_KOSONG: PdtLaporanRekomendasi = { judul: '', target: '', dampak: '', timeline: '' };
+const IND_KOSONG = { nama: '', target: '' };
+
+function PoinEditor({ value, disabled, onChange }: { value: string[]; disabled: boolean; onChange: (v: string[]) => void }) {
+  const rows = [...value, ''];
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      {rows.map((t, i) => (
+        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+          <span className="muted" style={{ fontSize: 12, paddingTop: 8, minWidth: 18 }}>{i + 1}.</span>
+          <textarea
+            rows={2}
+            value={t}
+            disabled={disabled}
+            placeholder={i === value.length ? 'Tambah poin…' : ''}
+            style={{ flex: 1, fontSize: 13 }}
+            onChange={(e) => {
+              const next = [...value];
+              if (i === value.length) next.push(e.target.value);
+              else next[i] = e.target.value;
+              onChange(next.filter((x, idx) => x.trim() !== '' || idx < next.length - 1));
+            }}
+          />
+          {i < value.length && (
+            <button type="button" className="btn btnGhost btnSm" disabled={disabled}
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+            >hapus</button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RekEditor({ value, disabled, onChange }: { value: PdtLaporanRekomendasi[]; disabled: boolean; onChange: (v: PdtLaporanRekomendasi[]) => void }) {
+  const rows = [...value, REK_KOSONG];
+  const set = (i: number, patch: Partial<PdtLaporanRekomendasi>) => {
+    const next = [...value];
+    if (i === value.length) next.push({ ...REK_KOSONG, ...patch });
+    else next[i] = { ...next[i], ...patch };
+    onChange(next);
+  };
+  return (
+    <div className="stack" style={{ gap: 10 }}>
+      {rows.map((r, i) => (
+        <div key={i} style={{ border: '1px solid var(--line, #DAE2EA)', borderRadius: 4, padding: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            <input value={r.judul} disabled={disabled} placeholder="Judul"
+              onChange={(e) => set(i, { judul: e.target.value })} style={{ fontSize: 13 }} />
+            <input value={r.timeline} disabled={disabled} placeholder="Timeline (mis. 2 minggu)"
+              onChange={(e) => set(i, { timeline: e.target.value })} style={{ fontSize: 13 }} />
+            <input value={r.target} disabled={disabled} placeholder="Target"
+              onChange={(e) => set(i, { target: e.target.value })} style={{ fontSize: 13 }} />
+            <input value={r.dampak} disabled={disabled} placeholder="Dampak"
+              onChange={(e) => set(i, { dampak: e.target.value })} style={{ fontSize: 13 }} />
+          </div>
+          {i < value.length && (
+            <button type="button" className="btn btnGhost btnSm" disabled={disabled} style={{ marginTop: 6 }}
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+            >hapus rekomendasi</button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function IndEditor({ value, disabled, onChange }: { value: { nama: string; target: string }[]; disabled: boolean; onChange: (v: { nama: string; target: string }[]) => void }) {
+  const rows = [...value, IND_KOSONG];
+  const set = (i: number, patch: Partial<{ nama: string; target: string }>) => {
+    const next = [...value];
+    if (i === value.length) next.push({ ...IND_KOSONG, ...patch });
+    else next[i] = { ...next[i], ...patch };
+    onChange(next);
+  };
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      {rows.map((m, i) => (
+        <div key={i} style={{ display: 'flex', gap: 6 }}>
+          <input value={m.nama} disabled={disabled} placeholder="Nama indikator"
+            onChange={(e) => set(i, { nama: e.target.value })} style={{ flex: 1, fontSize: 13 }} />
+          <input value={m.target} disabled={disabled} placeholder="Target"
+            onChange={(e) => set(i, { target: e.target.value })} style={{ flex: 1, fontSize: 13 }} />
+          {i < value.length && (
+            <button type="button" className="btn btnGhost btnSm" disabled={disabled}
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+            >hapus</button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function LaporanPdtPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsLoading, setClientsLoading] = useState(true);
@@ -174,6 +283,10 @@ export default function LaporanPdtPage() {
   const [laporan, setLaporan] = useState<PdtLaporan | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // G2-01-INSIGHT-EDIT — draf AM, disetel ulang dari insight mesin setiap kali
+  // laporan (toko/periode) dimuat ulang. Nol persistensi — murni state layar.
+  const [insightDraft, setInsightDraft] = useState<PdtLaporanInsight | null>(null);
 
   const [kirimLoading, setKirimLoading] = useState(false);
   const [kirimErr, setKirimErr] = useState<string | null>(null);
@@ -219,8 +332,10 @@ export default function LaporanPdtPage() {
     try {
       const res = await getPdtLaporan(platformId, monthToPeriode(month));
       setLaporan(res);
+      setInsightDraft(res.insight);
     } catch (e) {
       setLaporan(null);
+      setInsightDraft(null);
       setErr(errorMessage(e));
     } finally {
       setLoading(false);
@@ -272,8 +387,9 @@ export default function LaporanPdtPage() {
     setKirimLoading(true);
     setKirimErr(null);
     try {
-      const hasil = await kirimLaporanPdt(platformId, monthToPeriode(month));
+      const hasil = await kirimLaporanPdt(platformId, monthToPeriode(month), insightDraft ?? undefined);
       setKirimHasil(hasil);
+      setInsightDraft(hasil.laporan.insight);
       await loadRiwayat();
     } catch (e) {
       setKirimErr(errorMessage(e));
@@ -685,57 +801,52 @@ export default function LaporanPdtPage() {
             </section>
           )}
 
-          <section className="card">
-            <h2>Insight & Rekomendasi</h2>
-            <p className="muted" style={{ fontSize: 11, marginTop: -4, marginBottom: 8 }}>
-              Draf otomatis dari mesin — belum bisa disunting di halaman ini. Salin ke pesan pengiriman kalau perlu diedit dulu.
-            </p>
-            <p style={{ fontSize: 13 }}>{laporan.insight.ringkasan}</p>
-            {laporan.insight.poin.length > 0 && (
-              <ul style={{ fontSize: 13, marginTop: 8, paddingLeft: 20 }}>
-                {laporan.insight.poin.map((p) => (
-                  <li key={p}>{p}</li>
-                ))}
-              </ul>
-            )}
-            {laporan.insight.rekomendasi_tinggi.length > 0 && (
-              <>
-                <h3 style={{ fontSize: 14, marginTop: 16 }}>Rekomendasi Prioritas Tinggi</h3>
-                <ul style={{ fontSize: 13, paddingLeft: 20 }}>
-                  {laporan.insight.rekomendasi_tinggi.map((r) => (
-                    <li key={r.judul}>
-                      <strong>{r.judul}</strong> — {r.target}. {r.dampak} ({r.timeline})
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-            {laporan.insight.rekomendasi_sedang.length > 0 && (
-              <>
-                <h3 style={{ fontSize: 14, marginTop: 16 }}>Rekomendasi Prioritas Sedang</h3>
-                <ul style={{ fontSize: 13, paddingLeft: 20 }}>
-                  {laporan.insight.rekomendasi_sedang.map((r) => (
-                    <li key={r.judul}>
-                      <strong>{r.judul}</strong> — {r.target}. {r.dampak} ({r.timeline})
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-            <p style={{ fontSize: 13, marginTop: 16 }}>{laporan.insight.outlook}</p>
-            {laporan.insight.indikator.length > 0 && (
-              <table style={{ width: '100%', fontSize: 13, marginTop: 8 }}>
-                <tbody>
-                  {laporan.insight.indikator.map((ind) => (
-                    <tr key={ind.nama}>
-                      <td>{ind.nama}</td>
-                      <td style={{ textAlign: 'right' }}>{ind.target}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </section>
+          {insightDraft && (
+            <section className="card">
+              <h2>Insight & Rekomendasi</h2>
+              <p className="muted" style={{ fontSize: 11, marginTop: -4, marginBottom: 8 }}>
+                Draf mesin, bisa disunting di sini sebelum dikirim (G2-01-INSIGHT-EDIT) — angka laporan (GMV, ROAS,
+                skor, tabel funnel) TIDAK bisa diubah, hanya teks di bawah ini. Ganti toko/periode akan
+                menghapus suntingan yang belum dikirim.
+              </p>
+
+              <div className="field">
+                <label>Ringkasan Eksekutif</label>
+                <textarea rows={3} value={insightDraft.ringkasan} disabled={kirimLoading} style={{ fontSize: 13 }}
+                  onChange={(e) => setInsightDraft({ ...insightDraft, ringkasan: e.target.value })} />
+              </div>
+
+              <div className="field">
+                <label>Key Insights</label>
+                <PoinEditor value={insightDraft.poin} disabled={kirimLoading}
+                  onChange={(poin) => setInsightDraft({ ...insightDraft, poin })} />
+              </div>
+
+              <div className="field">
+                <label>Rekomendasi — Prioritas Tinggi</label>
+                <RekEditor value={insightDraft.rekomendasi_tinggi} disabled={kirimLoading}
+                  onChange={(v) => setInsightDraft({ ...insightDraft, rekomendasi_tinggi: v })} />
+              </div>
+
+              <div className="field">
+                <label>Rekomendasi — Prioritas Sedang</label>
+                <RekEditor value={insightDraft.rekomendasi_sedang} disabled={kirimLoading}
+                  onChange={(v) => setInsightDraft({ ...insightDraft, rekomendasi_sedang: v })} />
+              </div>
+
+              <div className="field">
+                <label>Outlook Periode Berikutnya</label>
+                <textarea rows={3} value={insightDraft.outlook} disabled={kirimLoading} style={{ fontSize: 13 }}
+                  onChange={(e) => setInsightDraft({ ...insightDraft, outlook: e.target.value })} />
+              </div>
+
+              <div className="field">
+                <label>Indikator</label>
+                <IndEditor value={insightDraft.indikator} disabled={kirimLoading}
+                  onChange={(v) => setInsightDraft({ ...insightDraft, indikator: v })} />
+              </div>
+            </section>
+          )}
 
           <section className="card">
             <div className="cardHeader">

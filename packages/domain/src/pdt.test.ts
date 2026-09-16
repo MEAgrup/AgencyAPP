@@ -4167,6 +4167,62 @@ describeDb('kirimLaporanPdt (Flow B langkah 4) — bekukan snapshot ke pdt_lapor
     const { cpId } = await fixture('TikTok Shop');
     await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-15')).rejects.toThrow(ValidationError);
   });
+
+  // -------------------------------------------------------------------------
+  // insightDraft (G2-01-INSIGHT-EDIT) — AM menyunting narasi di layar
+  // pratinjau sebelum Kirim. `pdt.normalizePdtInsightDraft` (@cdps/core)
+  // memvalidasi; gagal ⇒ ValidationError SEBELUM baris apa pun ditulis.
+  // -------------------------------------------------------------------------
+  const DRAFT_VALID: pdtCore.PdtInsightDraft = {
+    ringkasan: 'Ringkasan versi AM.',
+    poin: ['Poin AM pertama.', 'Poin AM kedua.'],
+    rekomendasi_tinggi: [{ judul: 'Judul AM', target: 'Target AM', dampak: 'Dampak AM', timeline: '1 minggu' }],
+    rekomendasi_sedang: [],
+    outlook: 'Outlook versi AM.',
+    indikator: [{ nama: 'Indikator AM', target: 'Target indikator AM' }],
+  };
+
+  it('insightDraft valid ⇒ menggantikan insight mesin pada hasil DAN payload yang dibekukan', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const hasil = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date(), DRAFT_VALID);
+    expect(hasil.laporan.insight).toEqual({
+      ringkasan: 'Ringkasan versi AM.',
+      poin: ['Poin AM pertama.', 'Poin AM kedua.'],
+      rekomendasiTinggi: [{ judul: 'Judul AM', target: 'Target AM', dampak: 'Dampak AM', timeline: '1 minggu' }],
+      rekomendasiSedang: [],
+      outlook: 'Outlook versi AM.',
+      indikator: [{ nama: 'Indikator AM', target: 'Target indikator AM' }],
+    });
+
+    const [row] = await sql<{ payload: { insight: { ringkasan: string } } }[]>`
+      select payload from pdt_laporan_kiriman where id = ${hasil.id}`;
+    expect(row.payload.insight.ringkasan).toBe('Ringkasan versi AM.');
+  });
+
+  it('insightDraft tidak diisi (undefined) ⇒ insight mesin apa adanya, perilaku sama sebelum parameter ini ada', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const dilihat = await bacaLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    const hasil = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    expect(hasil.laporan.insight).toEqual(dilihat.insight);
+  });
+
+  it('insightDraft ringkasan kosong ⇒ ValidationError pesan BI, nol baris pdt_laporan_kiriman ditulis', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date(), { ...DRAFT_VALID, ringkasan: '  ' }))
+      .rejects.toThrow('[ringkasan eksekutif wajib diisi]');
+    const rows = await sql`select id from pdt_laporan_kiriman where client_platform_id = ${cpId}`;
+    expect(rows).toHaveLength(0);
+  });
+
+  it('insightDraft rekomendasi terisi sebagian ⇒ ValidationError, nol baris ditulis', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date(), {
+      ...DRAFT_VALID,
+      rekomendasi_tinggi: [{ judul: 'Judul saja', target: '', dampak: '', timeline: '' }],
+    })).rejects.toThrow('[setiap rekomendasi wajib punya judul, target, dampak, dan timeline]');
+    const rows = await sql`select id from pdt_laporan_kiriman where client_platform_id = ${cpId}`;
+    expect(rows).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
