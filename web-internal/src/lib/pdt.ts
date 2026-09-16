@@ -146,6 +146,21 @@ export interface PdtLaporanLive {
   gmv_per_jam: number | null;
 }
 
+// G2-01 lanjutan — bagian "video" (Video/Konten), 2026-09-16, TikTok-only.
+// `null` (whole object) SELALU untuk Shopee hari ini (`shopee_video` nol
+// penulis fakta — belum didukung, BUKAN "nol video bulan ini"), dan untuk
+// TikTok tanpa video sama sekali di periode ini.
+export interface PdtLaporanVideo {
+  total: number;
+  gmv: number | null;
+  vv: number | null;
+  likes: number | null;
+  dibagikan: number | null;
+  klik_produk: number | null;
+  gmv_per_video: number | null;
+  vv_per_video: number | null;
+}
+
 export interface PdtLaporan {
   schema: string;
   platform: string;
@@ -155,6 +170,7 @@ export interface PdtLaporan {
   kpi: PdtLaporanKpi;
   kanal: PdtLaporanKanal;
   live: PdtLaporanLive | null;
+  video: PdtLaporanVideo | null;
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;
 }

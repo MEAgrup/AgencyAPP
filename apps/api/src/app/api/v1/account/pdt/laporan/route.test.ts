@@ -151,6 +151,9 @@ describeDb('GET /pdt/laporan — real DB', () => {
     await sql`
       insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv, durasi_detik)
       values (${cpId}, 'live-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 400_000, 1_000, 7_200)`;
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv, likes, dibagikan, klik_produk)
+      values (${cpId}, 'video-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'video', true, 300_000, 5_000, 200, 10, 40)`;
 
     const res = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01' }));
     expect(res.status).toBe(200);
@@ -166,6 +169,11 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.kanal).toEqual({ gmv_total: 1_000_000, items: expect.any(Array), lengkap: true });
     // TikTok durasi_detik terisi ⇒ jam/gmv_per_jam keduanya terhitung (beda Shopee di bawah).
     expect(body.live).toEqual({ sesi: 1, gmv: 400_000, vv: 1_000, jam: 2, gmv_per_sesi: 400_000, gmv_per_jam: 200_000 });
+    // TikTok punya penulis fakta tt_video ⇒ video terhitung penuh.
+    expect(body.video).toEqual({
+      total: 1, gmv: 300_000, vv: 5_000, likes: 200, dibagikan: 10, klik_produk: 40,
+      gmv_per_video: 300_000, vv_per_video: 5_000,
+    });
   });
 
   it('200 Shopee: KPI basis siap_dikirim TANPA net-refund, benchmark_versi null (kunci TETAP ada)', async () => {
@@ -197,5 +205,7 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.kanal).toEqual({ gmv_total: null, items: [], lengkap: false });
     // Shopee durasi_detik kosong permanen di sumbernya ⇒ jam/gmv_per_jam null, sisanya tetap terhitung.
     expect(body.live).toEqual({ sesi: 1, gmv: 400_000, vv: 1_000, jam: null, gmv_per_sesi: 400_000, gmv_per_jam: null });
+    // Shopee video SELALU null (shopee_video nol penulis fakta — tidak ada baris untuk dihitung).
+    expect(body.video).toBeNull();
   });
 });

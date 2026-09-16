@@ -2324,7 +2324,51 @@ async function bacaLive(sql: Sql, clientPlatformId: number, periodeAwalBulan: st
   };
 }
 
-/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + live + `hitungSkorTiktok`. */
+/**
+ * Bagian "video" — SATU query dipakai KEDUA platform (keputusan pemilik via
+ * `AskUserQuestion`, 2026-09-16 — lihat docblock `pdt.PdtLaporanVideo`,
+ * `@cdps/core`): platform-agnostic di sini, `client_platform_id` Shopee
+ * SELALU dapat `total: 0` (⇒ `bangunLaporanVideo` mengembalikan `null`)
+ * karena `shopee_video` nol penulis fakta ke `pdt_fact_content` — BUKAN
+ * filter platform eksplisit di query ini. SELURUH baris (toko+afiliasi)
+ * diikutkan, TANPA filter `is_akun_toko` (cermin dimensi skor Video,
+ * `rakitInputSkorTiktok`). `count(kolom)` per kolom — null-aware: `likes`/
+ * `dibagikan`/`klik_produk` TERISI untuk `tt_video`, `komentar`/
+ * `pengikut_baru`/`produk_dilihat` TIDAK PERNAH (sengaja tidak diikutkan,
+ * lihat docblock core).
+ */
+async function bacaVideo(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanVideoInput | null> {
+  const [row] = await sql<{
+    total: number;
+    gmv_n: number; gmv: string;
+    vv_n: number; vv: string;
+    likes_n: number; likes: string;
+    dibagikan_n: number; dibagikan: string;
+    klik_produk_n: number; klik_produk: string;
+  }[]>`
+    select count(*)::int as total,
+           count(gmv)::int as gmv_n, coalesce(sum(gmv), 0) as gmv,
+           count(vv)::int as vv_n, coalesce(sum(vv), 0) as vv,
+           count(likes)::int as likes_n, coalesce(sum(likes), 0) as likes,
+           count(dibagikan)::int as dibagikan_n, coalesce(sum(dibagikan), 0) as dibagikan,
+           count(klik_produk)::int as klik_produk_n, coalesce(sum(klik_produk), 0) as klik_produk
+      from pdt_fact_content
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and jenis = 'video'`;
+  if (row.total === 0) return null;
+
+  return {
+    total: row.total,
+    gmv: row.gmv_n === 0 ? null : Number(row.gmv),
+    vv: row.vv_n === 0 ? null : Number(row.vv),
+    likes: row.likes_n === 0 ? null : Number(row.likes),
+    dibagikan: row.dibagikan_n === 0 ? null : Number(row.dibagikan),
+    klikProduk: row.klik_produk_n === 0 ? null : Number(row.klik_produk),
+  };
+}
+
+/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + live + video + `hitungSkorTiktok`. */
 export async function rakitLaporanTiktok(
   sql: Sql,
   clientPlatformId: number,
@@ -2332,18 +2376,19 @@ export async function rakitLaporanTiktok(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanTiktok> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, kanal, live, { hasil: skor, benchmarkVersi }] = await Promise.all([
+  const [kpi, kanal, live, video, { hasil: skor, benchmarkVersi }] = await Promise.all([
     bacaKpiTiktokNet(sql, clientPlatformId, periodeAwalBulan),
     bacaKanalTiktok(sql, clientPlatformId, periodeAwalBulan),
     bacaLive(sql, clientPlatformId, periodeAwalBulan),
+    bacaVideo(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
   ]);
   return pdt.bangunLaporanTiktok({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, live, skor, benchmarkVersi,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, live, video, skor, benchmarkVersi,
   });
 }
 
-/** Rakit payload laporan Shopee v1: KPI ringkas basis `'siap_dikirim'` (Rule 16) + kanal + live + `hitungSkorShopee`. */
+/** Rakit payload laporan Shopee v1: KPI ringkas basis `'siap_dikirim'` (Rule 16) + kanal + live + video + `hitungSkorShopee`. */
 export async function rakitLaporanShopee(
   sql: Sql,
   clientPlatformId: number,
@@ -2351,14 +2396,15 @@ export async function rakitLaporanShopee(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanShopee> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, kanal, live, { hasil: skor }] = await Promise.all([
+  const [kpi, kanal, live, video, { hasil: skor }] = await Promise.all([
     bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim'),
     bacaKanalShopee(sql, clientPlatformId, periodeAwalBulan),
     bacaLive(sql, clientPlatformId, periodeAwalBulan),
+    bacaVideo(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorShopee(sql, clientPlatformId, periodeAwalBulan),
   ]);
   return pdt.bangunLaporanShopee({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, live, skor,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, live, video, skor,
   });
 }
 
