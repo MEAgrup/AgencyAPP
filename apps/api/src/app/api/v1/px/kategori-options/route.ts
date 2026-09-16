@@ -4,9 +4,11 @@
  * `level2_category` dari snapshot coverage MCN TERBARU — AM hanya bisa
  * memilih kategori yang MEA punya kreatornya.
  *
- * `kategori_platform` diterima tapi BELUM menyaring cabang (M3-03, Open —
- * pemetaan `Product category` TikTok → cabang `level2_category` MCN belum
- * ada). `tersaring: false` di respons agar UI menulis catatan Rule 11 apa
+ * `kategori_platform` diterima tapi TIDAK menyaring cabang — bukan sementara,
+ * PERMANEN (M3-03-KATEGORI-MAPPING ditutup `docs/DECISIONS.md` 2026-09-16,
+ * pemilik pilih opsi (c): pemetaan `Product category` TikTok → cabang
+ * `level2_category` MCN dibiarkan terbuka ke Hans, tidak akan ditebak di
+ * sini). `tersaring: false` di respons agar UI menulis catatan Rule 11 apa
  * adanya ("kategori yang MEA belum punya kreatornya tidak muncul di daftar").
  */
 import { productexchange } from '@cdps/domain';

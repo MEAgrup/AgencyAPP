@@ -6474,7 +6474,7 @@ export function pxKreatorKosongToWire(k: productexchange.PxKreatorKosong): PxKre
   };
 }
 
-/** `GET /px/kategori-options` respons — Rule 10/11: `tersaring:false` sampai pemeta kategori (M3-03) ada, agar UI menulis catatan Rule 11 apa adanya. */
+/** `GET /px/kategori-options` respons — Rule 10/11: `tersaring:false` PERMANEN (M3-03 ditutup 2026-09-16, opsi (c)), agar UI menulis catatan Rule 11 apa adanya. */
 export interface PxKategoriOptionWire {
   options: string[];
   tersaring: boolean;
