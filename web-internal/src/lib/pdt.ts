@@ -134,3 +134,24 @@ export function getPdtLaporan(clientPlatformId: number, periode: string): Promis
   const search = new URLSearchParams({ client_platform_id: String(clientPlatformId), periode });
   return api.get<PdtLaporan>(`/account/pdt/laporan?${search.toString()}`);
 }
+
+// G2-01 — "Kirim ke klien" (POST /account/pdt/laporan/kirim, Flow B langkah
+// 4, Rule 22). Kirim kedua untuk toko+periode yang sama BUKAN error — itu
+// kirim-ulang/revisi (Flow B langkah 5, Rule 23): `menggantikan_kiriman_id`
+// menunjuk kiriman sebelumnya, nol upload ulang berkas diminta.
+export interface PdtLaporanKiriman {
+  id: number;
+  client_platform_id: number;
+  periode_mulai: string;
+  periode_selesai: string;
+  parser_versi: number;
+  benchmark_versi: number | null;
+  dikirim_pada: string;
+  dikirim_oleh: string;
+  menggantikan_kiriman_id: number | null;
+  laporan: PdtLaporan;
+}
+
+export function kirimLaporanPdt(clientPlatformId: number, periode: string): Promise<PdtLaporanKiriman> {
+  return api.post<PdtLaporanKiriman>('/account/pdt/laporan/kirim', { client_platform_id: clientPlatformId, periode });
+}

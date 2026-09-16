@@ -6,8 +6,16 @@
  * KPI ringkas + skor per toko klien, dibaca lewat `GET /account/pdt/laporan`.
  * v1 SENGAJA sempit (dua dari dua belas seksi mesin laporan lama — lihat
  * docblock `packages/core/src/pdt/laporan.ts`): belum ada kanal/iklan/live/
- * video/produk/afiliasi/dst, dan belum ada tombol "Kirim ke Klien" (itu
- * membekukan snapshot ke `pdt_laporan_kiriman`, langkah 4, belum dibangun).
+ * video/produk/afiliasi/dst.
+ *
+ * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
+ * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
+ * untuk toko+periode yang sama BUKAN error — itu kirim-ulang/revisi (Flow B
+ * langkah 5, Rule 23), jadi tombolnya selalu aktif selama laporan termuat;
+ * halaman ini TIDAK membaca riwayat kiriman sebelumnya (nol endpoint daftar
+ * kiriman — di luar cakupan "tombol kirim", dicatat PDT_BACKLOG.md §2)
+ * sehingga label tombol sengaja netral ("Kirim ke Klien", bukan "Kirim
+ * Ulang") dan hasil kirim hanya tampil untuk sesi saat ini.
  *
  * Klien+platform dipilih dari daftar (bukan kolom teks bebas): `GET /clients`
  * sudah terbuka untuk Account (RLS `clients_select`), jadi tak ada alasan
@@ -20,7 +28,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { listClients, type Client } from '@/lib/clients';
-import { getPdtLaporan, type PdtLaporan } from '@/lib/pdt';
+import { getPdtLaporan, kirimLaporanPdt, type PdtLaporan, type PdtLaporanKiriman } from '@/lib/pdt';
 import { formatIDR } from '@/lib/money';
 
 /** Platform toko yang didukung PDT (PDT-22) — cermin `platformKeVokabPdt`. */
@@ -57,6 +65,10 @@ function skorBadgeClass(label: string | null): string {
   return 'badge-gray';
 }
 
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('id-ID');
+}
+
 export default function LaporanPdtPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsLoading, setClientsLoading] = useState(true);
@@ -69,6 +81,10 @@ export default function LaporanPdtPage() {
   const [laporan, setLaporan] = useState<PdtLaporan | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const [kirimLoading, setKirimLoading] = useState(false);
+  const [kirimErr, setKirimErr] = useState<string | null>(null);
+  const [kirimHasil, setKirimHasil] = useState<PdtLaporanKiriman | null>(null);
 
   const loadClients = useCallback(async () => {
     setClientsLoading(true);
@@ -98,6 +114,9 @@ export default function LaporanPdtPage() {
   );
 
   const loadLaporan = useCallback(async () => {
+    // Ganti toko/periode -> hasil kirim sebelumnya (kalau ada) sudah tidak relevan.
+    setKirimErr(null);
+    setKirimHasil(null);
     if (platformId === '') return;
     setLoading(true);
     setErr(null);
@@ -115,6 +134,27 @@ export default function LaporanPdtPage() {
   useEffect(() => {
     void loadLaporan();
   }, [loadLaporan]);
+
+  async function handleKirim() {
+    if (platformId === '' || !laporan) return;
+    const platformLabel = laporan.platform === 'tiktok' ? 'TikTok Shop' : 'Shopee';
+    if (!window.confirm(
+      `Kirim laporan ${platformLabel} periode ${laporan.periode_awal_bulan} ke klien? ` +
+      'Snapshot akan dibekukan (tidak bisa diubah) — kirim ulang nanti membuat revisi baru, bukan menimpa.',
+    )) {
+      return;
+    }
+    setKirimLoading(true);
+    setKirimErr(null);
+    try {
+      const hasil = await kirimLaporanPdt(platformId, monthToPeriode(month));
+      setKirimHasil(hasil);
+    } catch (e) {
+      setKirimErr(errorMessage(e));
+    } finally {
+      setKirimLoading(false);
+    }
+  }
 
   return (
     <div className="stack">
@@ -220,7 +260,21 @@ export default function LaporanPdtPage() {
                   {laporan.platform === 'tiktok' ? 'TikTok Shop' : 'Shopee'} · {laporan.periode_awal_bulan}
                 </p>
               </div>
+              <button type="button" className="btn btnPrimary btnSm" disabled={kirimLoading} onClick={() => void handleKirim()}>
+                {kirimLoading ? 'Mengirim...' : 'Kirim ke Klien'}
+              </button>
             </div>
+            {kirimErr && (
+              <div className="alert alertError" role="alert" style={{ marginBottom: 16 }}>{kirimErr}</div>
+            )}
+            {kirimHasil && (
+              <div className="alert alertInfo" role="status" style={{ marginBottom: 16 }}>
+                Terkirim ke klien pada {formatDateTime(kirimHasil.dikirim_pada)} oleh {kirimHasil.dikirim_oleh}.
+                {kirimHasil.menggantikan_kiriman_id !== null && (
+                  <> Revisi — menggantikan kiriman #{kirimHasil.menggantikan_kiriman_id}.</>
+                )}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
               <div>
                 <div style={{ fontSize: 24, fontWeight: 'bold' }}>{formatIDR(laporan.kpi.gmv)}</div>
