@@ -9202,6 +9202,20 @@ export interface PdtLaporanSkorWire {
   dimensi: PdtLaporanDimensiWire[];
 }
 
+export interface PdtLaporanKanalItemWire {
+  kode: string;
+  label: string;
+  gmv: number | null;
+  persen: number | null;
+}
+
+/** `lengkap: false` = ADA sumber kanal legacy yang belum tercakup (SELALU false untuk Shopee — lihat docblock `pdt.PdtLaporanKanal`, `@cdps/core`) — FE wajib menampilkan catatan, bukan diam-diam menganggap lengkap. */
+export interface PdtLaporanKanalWire {
+  gmv_total: number | null;
+  items: PdtLaporanKanalItemWire[];
+  lengkap: boolean;
+}
+
 export interface PdtLaporanWire {
   schema: string;
   platform: string;
@@ -9209,6 +9223,7 @@ export interface PdtLaporanWire {
   periode_awal_bulan: string;
   generated_at: string;
   kpi: PdtLaporanKpiWire;
+  kanal: PdtLaporanKanalWire;
   skor: PdtLaporanSkorWire;
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
@@ -9230,6 +9245,14 @@ function pdtLaporanSkorToWire(s: pdtCore.PdtSkorHasilTiktok | pdtCore.PdtSkorHas
   };
 }
 
+function pdtLaporanKanalToWire(k: pdtCore.PdtLaporanKanal): PdtLaporanKanalWire {
+  return {
+    gmv_total: k.gmvTotal,
+    items: k.items.map((i) => ({ kode: i.kode, label: i.label, gmv: i.gmv, persen: i.persen })),
+    lengkap: k.lengkap,
+  };
+}
+
 export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanWire {
   return {
     schema: l.schema,
@@ -9238,6 +9261,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     periode_awal_bulan: l.periodeAwalBulan,
     generated_at: l.generatedAt,
     kpi: { ...l.kpi },
+    kanal: pdtLaporanKanalToWire(l.kanal),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: l.benchmarkVersi,
   };
@@ -9251,6 +9275,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     periode_awal_bulan: l.periodeAwalBulan,
     generated_at: l.generatedAt,
     kpi: { ...l.kpi },
+    kanal: pdtLaporanKanalToWire(l.kanal),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: null,
   };

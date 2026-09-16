@@ -14,14 +14,18 @@
  * laporan LAMA (`report/payload.ts` `buildReportPayload`) py DUA BELAS
  * bagian jauh lebih kaya — kpi, kanal, iklan, live, video, produk (kuadran),
  * afiliasi, tokopedia, ads_manager, skor, tahap (buyer-journey), insight
- * (narasi+rekomendasi). Di PDT hari ini HANYA "skor" (`hitungSkorTiktok`/
- * `hitungSkorShopee`, G2-01) yang bisa dibangun dari `pdt_fact_*` — sebelas
- * bagian lain butuh fungsi agregasi fakta BARU per bagian (pola sama
- * `rakitInputSkorTiktok`/`rakitInputSkorShopee`) yang belum ada satupun,
- * pekerjaan multi-sesi. v1 di sini menambah SATU bagian lagi: KPI ringkas
- * (GMV/pesanan/pengunjung/CVR) — sebelas bagian sisanya TETAP di luar
- * cakupan, ditambahkan satu-per-satu sesi berikutnya seperti pola G1-09
- * fact-writer, TIDAK ditebak/dibangun sekaligus di sini.
+ * (narasi+rekomendasi). Di PDT hari ini "skor" (`hitungSkorTiktok`/
+ * `hitungSkorShopee`, G2-01), "kpi ringkas", dan sekarang "kanal" (lihat
+ * docblock `PdtLaporanKanal` di bawah — keputusan pemilik via
+ * `AskUserQuestion` KEDUA, 2026-09-16: TikTok+Shopee dibangun BERSAMAAN
+ * meski Shopee sengaja tidak simetris, ditandai `lengkap: false`) sudah bisa
+ * dibangun dari `pdt_fact_*` — SEMBILAN bagian lain (iklan, live, video,
+ * produk, afiliasi, tokopedia, ads_manager, tahap, insight) butuh fungsi
+ * agregasi fakta BARU per bagian (pola sama `rakitInputSkorTiktok`/
+ * `rakitInputSkorShopee`) yang belum ada satupun, pekerjaan multi-sesi.
+ * Sembilan bagian sisanya TETAP di luar cakupan, ditambahkan satu-per-satu
+ * sesi berikutnya seperti pola G1-09 fact-writer, TIDAK ditebak/dibangun
+ * sekaligus di sini.
  *
  * **Basis KPI ringkas per platform diverifikasi dari PRD (bukan ditebak)**:
  * TikTok = GMV−refund, basis `'net'` (Rule 15); Shopee = basis
@@ -69,6 +73,104 @@ export function bangunKpiRingkas(input: PdtLaporanKpiInput | null): PdtLaporanKp
   };
 }
 
+/**
+ * Bagian "kanal" (sumber GMV) — bagian KEDUA dari sebelas yang tadinya di
+ * luar cakupan v1 (lihat docblock berkas). Keputusan pemilik via
+ * `AskUserQuestion`: TikTok DAN Shopee dibangun SEKALIGUS, meski TIDAK
+ * SIMETRIS — `lengkap` membedakan keduanya secara eksplisit (bukan
+ * disembunyikan di balik angka yang terlihat lengkap).
+ *
+ * **TikTok (`lengkap: true`)** — cermin `report/metrik.ts` `kanal()`: GMV
+ * dipecah live (toko+afiliasi) / video (toko+afiliasi) / kartu produk & shop
+ * tab (sisa). Live+video di sini SUDAH tersedia lewat `pdt_fact_content`
+ * (`jenis='live'|'video'`, pola SAMA `rakitInputSkorTiktok` dimensi
+ * LIVE/Video — tapi TANPA filter `is_akun_toko` untuk `live`, karena "kanal"
+ * menjumlah toko+afiliasi jadi SATU bucket, beda dari dimensi skor LIVE yang
+ * sengaja memisah keduanya, lihat docblock `rakitInputSkorTiktok`).
+ *
+ * **Shopee (`lengkap: false`, SELALU)** — cermin `report/shopee/metrik.ts`
+ * `computeChannels()`, yang aslinya py ENAM sumber (shopee_ads, affiliate,
+ * voucher, chat, meta_cpas, shopee_video). PDT hari ini baru punya penulis
+ * fakta untuk DUA (modul shopee_ads_cpc/search/live ke `pdt_fact_ads`, dan
+ * `pdt_fact_creator_period`) — empat sisanya (voucher, chat, meta_cpas,
+ * shopee_video) terdaftar sebagai modul parser (`PDT_MODULES`) tapi NOL
+ * penulis fakta (pekerjaan terpisah, di luar cakupan "kanal"). `lengkap:
+ * false` PERMANEN sampai keempatnya dibangun — FE WAJIB menampilkan catatan
+ * eksplisit (`docs/DECISIONS.md` 2026-09-16 "kanal"), supaya GMV kanal yang
+ * belum terproses tidak disalahartikan sebagai GMV kanal yang memang nol.
+ *
+ * GMV total penyebut persentase: TikTok = `pdt_fact_shop_daily` basis
+ * `'net'` (GROSS, SAMA penyebut `report/metrik.ts` — "shares diambil
+ * terhadap GMV KOTOR"); Shopee = basis `'dibuat'` (Pesanan Dibuat, cermin
+ * `computeChannels`'s `bisnis_home.pesanan_dibuat.summary.penjualan`) — BEDA
+ * dari basis `'siap_dikirim'` yang dipakai KPI ringkas laporan (Rule 16),
+ * pola sama asimetri basis yang sudah ada di `rakitInputSkorShopee`
+ * (Conversion & Retention basis `'dibuat'` juga, tujuan berbeda dari KPI).
+ */
+export interface PdtLaporanKanalItem {
+  kode: string;
+  label: string;
+  gmv: number | null;
+  /** `null` bila `gmv` `null` (sumber tidak diketahui, BUKAN nol) ATAU `gmvTotal` 0. */
+  persen: number | null;
+}
+
+export interface PdtLaporanKanal {
+  gmvTotal: number | null;
+  items: PdtLaporanKanalItem[];
+  /** `false` = ADA sumber kanal legacy yang belum tercakup di sini (lihat docblock di atas) — FE wajib menampilkan catatan, bukan diam-diam menganggap kanal itu lengkap. */
+  lengkap: boolean;
+}
+
+const kanalItem = (kode: string, label: string, gmv: number | null, gmvTotal: number): PdtLaporanKanalItem => ({
+  kode,
+  label,
+  gmv: bulat(gmv),
+  persen: gmv == null || gmvTotal === 0 ? null : persen5(gmv / gmvTotal),
+});
+
+/** Agregat `pdt_fact_shop_daily`(basis `'net'`) + `pdt_fact_content` untuk satu periode. `live`/`video` `null` = nol baris `pdt_fact_content` jenis terkait (tidak diketahui, BUKAN nol GMV — cermin null-aware mix `baseline/metrik.ts`). */
+export interface PdtLaporanKanalInputTiktok {
+  gmvTotal: number;
+  live: number | null;
+  video: number | null;
+}
+
+/** Rakit "kanal" TikTok. `kartu` (sisa) hanya dihitung bila `live` DAN `video` KEDUANYA diketahui — mengurangkan komponen yang tidak diketahui akan membesar-kecilkan sisa secara palsu (cermin `other` null-aware `baseline/metrik.ts`). */
+export function bangunKanalTiktok(input: PdtLaporanKanalInputTiktok | null): PdtLaporanKanal {
+  if (input == null) return { gmvTotal: null, items: [], lengkap: true };
+  const kartu = input.live == null || input.video == null ? null : Math.max(0, input.gmvTotal - input.live - input.video);
+  return {
+    gmvTotal: bulat(input.gmvTotal),
+    items: [
+      kanalItem('live', 'LIVE', input.live, input.gmvTotal),
+      kanalItem('video', 'Video', input.video, input.gmvTotal),
+      kanalItem('kartu', 'Kartu Produk / Shop Tab', kartu, input.gmvTotal),
+    ],
+    lengkap: true,
+  };
+}
+
+/** Agregat `pdt_fact_shop_daily`(basis `'dibuat'`) + `pdt_fact_ads` + `pdt_fact_creator_period`. `shopeeAds`/`affiliate` `null` = nol baris sumber terkait di periode ini (tidak diketahui, BUKAN nol). */
+export interface PdtLaporanKanalInputShopee {
+  gmvTotal: number;
+  shopeeAds: number | null;
+  affiliate: number | null;
+}
+
+/** Rakit "kanal" Shopee — SELALU `lengkap: false` (lihat docblock tipe `PdtLaporanKanal` di atas untuk empat sumber legacy yang belum tercakup). */
+export function bangunKanalShopee(input: PdtLaporanKanalInputShopee | null): PdtLaporanKanal {
+  if (input == null) return { gmvTotal: null, items: [], lengkap: false };
+  return {
+    gmvTotal: bulat(input.gmvTotal),
+    items: [
+      kanalItem('shopee_ads', 'Shopee Ads', input.shopeeAds, input.gmvTotal),
+      kanalItem('affiliate', 'Affiliate', input.affiliate, input.gmvTotal),
+    ],
+    lengkap: false,
+  };
+}
+
 export interface PdtLaporanTiktok {
   schema: 'cdps.pdt.laporan.tiktok.v1';
   platform: 'tiktok';
@@ -76,6 +178,7 @@ export interface PdtLaporanTiktok {
   periodeAwalBulan: string;
   generatedAt: string;
   kpi: PdtLaporanKpiRingkas;
+  kanal: PdtLaporanKanal;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
 }
@@ -87,6 +190,7 @@ export interface PdtLaporanShopee {
   periodeAwalBulan: string;
   generatedAt: string;
   kpi: PdtLaporanKpiRingkas;
+  kanal: PdtLaporanKanal;
   skor: PdtSkorHasilShopee;
 }
 
@@ -95,6 +199,7 @@ export interface PdtLaporanTiktokOptions {
   periodeAwalBulan: string;
   generatedAt: string;
   kpi: PdtLaporanKpiInput | null;
+  kanal: PdtLaporanKanalInputTiktok | null;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
 }
@@ -104,6 +209,7 @@ export interface PdtLaporanShopeeOptions {
   periodeAwalBulan: string;
   generatedAt: string;
   kpi: PdtLaporanKpiInput | null;
+  kanal: PdtLaporanKanalInputShopee | null;
   skor: PdtSkorHasilShopee;
 }
 
@@ -116,6 +222,7 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
     periodeAwalBulan: opts.periodeAwalBulan,
     generatedAt: opts.generatedAt,
     kpi: bangunKpiRingkas(opts.kpi),
+    kanal: bangunKanalTiktok(opts.kanal),
     skor: opts.skor,
     benchmarkVersi: opts.benchmarkVersi,
   };
@@ -130,6 +237,7 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
     periodeAwalBulan: opts.periodeAwalBulan,
     generatedAt: opts.generatedAt,
     kpi: bangunKpiRingkas(opts.kpi),
+    kanal: bangunKanalShopee(opts.kanal),
     skor: opts.skor,
   };
 }

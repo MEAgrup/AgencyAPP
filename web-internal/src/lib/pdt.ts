@@ -114,6 +114,24 @@ export interface PdtLaporanSkor {
   dimensi: PdtLaporanDimensi[];
 }
 
+// G2-01 lanjutan — bagian "kanal" (sumber GMV), 2026-09-16. TikTok penuh
+// (Live/Video/Kartu Produk & Shop Tab); Shopee SELALU `lengkap: false`
+// (shopee_ads + affiliate saja — voucher/chat/meta_cpas/shopee_video belum
+// ada penulis fakta PDT). `lengkap: false` berarti ADA sumber kanal legacy
+// yang belum tercakup di sini — bukan "GMV kanal itu memang nol".
+export interface PdtLaporanKanalItem {
+  kode: string;
+  label: string;
+  gmv: number | null;
+  persen: number | null;
+}
+
+export interface PdtLaporanKanal {
+  gmv_total: number | null;
+  items: PdtLaporanKanalItem[];
+  lengkap: boolean;
+}
+
 export interface PdtLaporan {
   schema: string;
   platform: string;
@@ -121,6 +139,7 @@ export interface PdtLaporan {
   periode_awal_bulan: string;
   generated_at: string;
   kpi: PdtLaporanKpi;
+  kanal: PdtLaporanKanal;
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;
 }

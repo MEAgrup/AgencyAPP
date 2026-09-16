@@ -2206,7 +2206,89 @@ async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, periodeAwalB
   return { gmv: Number(row.gmv) - Number(row.refund), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung) };
 }
 
-/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + `hitungSkorTiktok`. */
+/**
+ * Bagian "kanal" TikTok (keputusan pemilik via `AskUserQuestion`, 2026-09-16
+ * — lihat docblock `pdt.PdtLaporanKanal`, `@cdps/core`, untuk penjelasan
+ * lengkap). GMV total dari `pdt_fact_shop_daily` basis `'net'` (SAMA query
+ * `bacaKpiTiktokNet`, tapi GROSS — penyebut persen "kanal" adalah GMV kotor,
+ * bukan net-refund). `live`/`video` dari `pdt_fact_content` — `live` TANPA
+ * filter `is_akun_toko` (beda dimensi skor LIVE yang sengaja memisah toko
+ * vs afiliasi, "kanal" menjumlah keduanya jadi satu bucket, cermin
+ * `T.liveToko + T.liveAff` mesin lama). `null` = nol baris jenis terkait
+ * (tidak diketahui, BUKAN nol GMV) — `bangunKanalTiktok` yang menegakkan
+ * null-aware `kartu`.
+ */
+async function bacaKanalTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKanalInputTiktok | null> {
+  const [shopRow] = await sql<{ n: number; gmv: string }[]>`
+    select count(*)::int as n, coalesce(sum(gmv), 0) as gmv
+      from pdt_fact_shop_daily
+     where client_platform_id = ${clientPlatformId}
+       and basis = 'net'
+       and tanggal >= ${periodeAwalBulan}::date
+       and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
+  if (shopRow.n === 0) return null;
+
+  const [liveRow] = await sql<{ n: number; gmv: string }[]>`
+    select count(*)::int as n, coalesce(sum(gmv), 0) as gmv
+      from pdt_fact_content
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and jenis = 'live'`;
+  const [videoRow] = await sql<{ n: number; gmv: string }[]>`
+    select count(*)::int as n, coalesce(sum(gmv), 0) as gmv
+      from pdt_fact_content
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and jenis = 'video'`;
+
+  return {
+    gmvTotal: Number(shopRow.gmv),
+    live: liveRow.n === 0 ? null : Number(liveRow.gmv),
+    video: videoRow.n === 0 ? null : Number(videoRow.gmv),
+  };
+}
+
+/**
+ * Bagian "kanal" Shopee (lihat docblock `pdt.PdtLaporanKanal`/
+ * `bangunKanalShopee`, `@cdps/core` — SELALU `lengkap: false`, dua dari enam
+ * sumber legacy). GMV total dari `pdt_fact_shop_daily` basis `'dibuat'`
+ * (cermin `computeChannels`'s Pesanan Dibuat — BEDA dari basis
+ * `'siap_dikirim'` yang dipakai KPI ringkas laporan, Rule 16; pola sama
+ * asimetri basis `rakitInputSkorShopee` Conversion & Retention). `shopeeAds`
+ * dari `pdt_fact_ads` (sumber sama `rakitInputSkorShopee`: shopee_ads_cpc/
+ * search/live), `affiliate` dari `pdt_fact_creator_period` — `null` = nol
+ * baris sumber terkait (tidak diketahui, BUKAN nol).
+ */
+async function bacaKanalShopee(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKanalInputShopee | null> {
+  const [shopRow] = await sql<{ n: number; gmv: string }[]>`
+    select count(*)::int as n, coalesce(sum(gmv), 0) as gmv
+      from pdt_fact_shop_daily
+     where client_platform_id = ${clientPlatformId}
+       and basis = 'dibuat'
+       and tanggal >= ${periodeAwalBulan}::date
+       and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
+  if (shopRow.n === 0) return null;
+
+  const [adsRow] = await sql<{ n: number; gmv: string }[]>`
+    select count(*)::int as n, coalesce(sum(gmv), 0) as gmv
+      from pdt_fact_ads
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+       and sumber in ('shopee_ads_cpc', 'shopee_ads_search', 'shopee_ads_live')`;
+  const [affRow] = await sql<{ n: number; gmv: string }[]>`
+    select count(*)::int as n, coalesce(sum(gmv), 0) as gmv
+      from pdt_fact_creator_period
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date`;
+
+  return {
+    gmvTotal: Number(shopRow.gmv),
+    shopeeAds: adsRow.n === 0 ? null : Number(adsRow.gmv),
+    affiliate: affRow.n === 0 ? null : Number(affRow.gmv),
+  };
+}
+
+/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + `hitungSkorTiktok`. */
 export async function rakitLaporanTiktok(
   sql: Sql,
   clientPlatformId: number,
@@ -2214,16 +2296,17 @@ export async function rakitLaporanTiktok(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanTiktok> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, { hasil: skor, benchmarkVersi }] = await Promise.all([
+  const [kpi, kanal, { hasil: skor, benchmarkVersi }] = await Promise.all([
     bacaKpiTiktokNet(sql, clientPlatformId, periodeAwalBulan),
+    bacaKanalTiktok(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
   ]);
   return pdt.bangunLaporanTiktok({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, skor, benchmarkVersi,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, skor, benchmarkVersi,
   });
 }
 
-/** Rakit payload laporan Shopee v1: KPI ringkas basis `'siap_dikirim'` (Rule 16) + `hitungSkorShopee`. */
+/** Rakit payload laporan Shopee v1: KPI ringkas basis `'siap_dikirim'` (Rule 16) + kanal + `hitungSkorShopee`. */
 export async function rakitLaporanShopee(
   sql: Sql,
   clientPlatformId: number,
@@ -2231,12 +2314,13 @@ export async function rakitLaporanShopee(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanShopee> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, { hasil: skor }] = await Promise.all([
+  const [kpi, kanal, { hasil: skor }] = await Promise.all([
     bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim'),
+    bacaKanalShopee(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorShopee(sql, clientPlatformId, periodeAwalBulan),
   ]);
   return pdt.bangunLaporanShopee({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, skor,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, skor,
   });
 }
 
