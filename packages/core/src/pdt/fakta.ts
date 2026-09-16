@@ -254,24 +254,44 @@ export function ekstrakBarisShopeeAdsLive(
 const roasTurunan = (gmv: number | null, biaya: number): number | null =>
   gmv == null || biaya === 0 ? null : gmv / biaya;
 
-/** Satu baris `pdt_fact_ads` mentah dari `tt_ads_product`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi`. `roas` DITURUNKAN (lihat docblock berkas) — modul ini TIDAK PUNYA kolom ROI/efektivitas mentah sama sekali. */
+/**
+ * Satu baris `pdt_fact_ads` mentah dari `tt_ads_product`, SEBELUM
+ * `client_platform_id`/`batch_id`/`periode`/`parser_versi`. `roas` DITURUNKAN
+ * (lihat docblock berkas) — modul ini TIDAK PUNYA kolom ROI/efektivitas mentah
+ * sama sekali. `tayangan`/`klik` ditambahkan 2026-09-16 (`G1-09-2BII-TTADS-
+ * SAMPLE`, sample asli Avitaskin Juli 2026) — sama pola `shopee_ads_cpc`.
+ */
 export interface PdtBarisAdsTtProduct {
   kampanyeId: string;
   biaya: number;
   pesananSku: number | null;
   gmv: number | null;
   roas: number | null;
+  tayangan: number | null;
+  klik: number | null;
 }
 
 /**
- * Ekstrak seluruh baris data `tt_ads_product` (Rule 8 whitelist `modules.ts`:
- * `['ID Campaign', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan
- * SKU', 'Biaya per pesanan', 'Pendapatan kotor']`). Hanya `ID Campaign`
- * (kampanye_id), `Biaya`, `Pesanan SKU`, `Pendapatan kotor` (gmv) yang punya
- * kolom skema `pdt_fact_ads` — `ID produk`/`ID video`/`Akun TikTok`/`Biaya
- * per pesanan` TIDAK diekstrak (lihat docblock berkas untuk alasan lengkap
- * per kolom). Baris ber-`ID Campaign` kosong dilewati (bukan baris data
- * sungguhan).
+ * Ekstrak seluruh baris data `tt_ads_product` (Rule 8 whitelist `modules.ts`
+ * — HANYA kolom yang diekstrak di sini yang boleh masuk `kolomDipanen`, lihat
+ * komentar di sana untuk kenapa). File asli 26 kolom A–Z (diverifikasi, lihat
+ * di bawah); `ID Campaign` (kampanye_id), `Biaya`, `Pesanan SKU`, `Pendapatan
+ * kotor` (gmv), `Impresi iklan produk` (tayangan), `Jumlah klik iklan produk`
+ * (klik) yang punya kolom skema `pdt_fact_ads` — sisanya (`ID produk`/`ID
+ * video`/`Akun TikTok`/`Biaya per pesanan`/dst.) TIDAK diekstrak (harvested-
+ * not-mapped, TIDAK didaftar di `kolomDipanen` — tercatat sebagai `kolomBaru`
+ * informational, bukan gagal parse). Baris ber-`ID Campaign` kosong dilewati
+ * (bukan baris data sungguhan).
+ *
+ * **Diverifikasi 2026-09-16 (`G1-09-2BII-TTADS-SAMPLE`, DITUTUP)** terhadap
+ * sample ekspor asli klien (Avitaskin, "creative data for product campaigns",
+ * Juli 2026, 2093 baris data) — konvensi `parsePdtAngka(v, true)` (Ads
+ * Manager: titik desimal, TANPA pemisah ribuan) TERBUKTI BENAR: `Biaya`/
+ * `Pendapatan kotor` di file asli adalah STRING literal 3 desimal titik
+ * tanpa pemisah ribuan (mis. `"1407834.000"`), bukan sel numerik. Nama kolom
+ * `ID Campaign` (bukan `ID kampanye`/varian lain) juga TERKONFIRMASI persis.
+ * `ID produk`/`ID video` bernilai `"N/A"` (string literal) untuk baris
+ * "Kartu produk" tanpa video — bukan sel kosong.
  */
 export function ekstrakBarisTtAdsProduct(
   aoa: readonly (readonly unknown[])[],
@@ -283,6 +303,8 @@ export function ekstrakBarisTtAdsProduct(
   const iPesanan = idx('Pesanan SKU');
   const iGmv = idx('Pendapatan kotor');
   const iBiaya = idx('Biaya');
+  const iTayangan = idx('Impresi iklan produk');
+  const iKlik = idx('Jumlah klik iklan produk');
 
   const hasil: PdtBarisAdsTtProduct[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -296,28 +318,51 @@ export function ekstrakBarisTtAdsProduct(
       pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
       gmv,
       roas: roasTurunan(gmv, biaya),
+      tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
+      klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik], true),
     });
   }
   return hasil;
 }
 
-/** Satu baris `pdt_fact_ads` mentah dari `tt_ads_live`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi`. `roas` DITURUNKAN (lihat docblock berkas) — kolom `ROI` mentah SENGAJA diabaikan, cermin `report/metrik.ts` legacy. */
+/**
+ * Satu baris `pdt_fact_ads` mentah dari `tt_ads_live`, SEBELUM
+ * `client_platform_id`/`batch_id`/`periode`/`parser_versi`. `roas` DITURUNKAN
+ * (lihat docblock berkas) — kolom `ROI (Toko saat ini)` mentah SENGAJA
+ * diabaikan, cermin `report/metrik.ts` legacy. `tayangan` ditambahkan
+ * 2026-09-16 (`G1-09-2BII-TTADS-SAMPLE`) dari `Tayangan LIVE` — modul ini
+ * tidak punya kolom klik (sama pola `shopee_ads_live`, bukan `shopee_ads_cpc`).
+ */
 export interface PdtBarisAdsTtLive {
   kampanyeId: string;
   biaya: number;
   pesananSku: number | null;
   gmv: number | null;
   roas: number | null;
+  tayangan: number | null;
 }
 
 /**
- * Ekstrak seluruh baris data `tt_ads_live` (Rule 8 whitelist `modules.ts`:
- * `['Nama LIVE', 'ID Campaign', 'Biaya', 'Pesanan SKU', 'ROI', 'Pendapatan
- * kotor']`). Hanya `ID Campaign` (kampanye_id), `Biaya`, `Pesanan SKU`,
- * `Pendapatan kotor` (gmv) yang punya kolom skema `pdt_fact_ads` — `Nama
- * LIVE` TIDAK diekstrak (label, bukan kolom skema), `ROI` mentah TIDAK
- * dipakai (lihat docblock berkas — `roas` diturunkan `gmv÷biaya`, bukan
- * dibaca langsung). Baris ber-`ID Campaign` kosong dilewati.
+ * Ekstrak seluruh baris data `tt_ads_live` (Rule 8 whitelist `modules.ts` —
+ * HANYA kolom yang diekstrak di sini yang boleh masuk `kolomDipanen`, lihat
+ * komentar di sana). File asli 19 kolom A–S (diverifikasi, lihat di bawah);
+ * `ID Campaign` (kampanye_id), `Biaya`, `Pesanan SKU`, `Pendapatan kotor`
+ * (gmv), `Tayangan LIVE` (tayangan) yang punya kolom skema `pdt_fact_ads` —
+ * `Nama LIVE` TIDAK diekstrak (label, bukan kolom skema), `ROI (Toko saat
+ * ini)` mentah TIDAK dipakai (lihat docblock berkas — `roas` diturunkan
+ * `gmv÷biaya`, bukan dibaca langsung) DAN sengaja TIDAK didaftar di
+ * `kolomDipanen` (nama kolom asli beda dari dugaan awal `'ROI'` — lihat
+ * `modules.ts`). Baris ber-`ID Campaign` kosong dilewati.
+ *
+ * **Diverifikasi SEBAGIAN 2026-09-16 (`G1-09-2BII-TTADS-SAMPLE`, DITUTUP)**:
+ * sample ekspor asli klien (Avitaskin, "livestream data for live campaigns",
+ * Juli 2026) mengonfirmasi HEADER (nama kolom persis, termasuk `ID Campaign`
+ * — sama seperti `tt_ads_product`, BUKAN nama lain — dan `ROI (Toko saat
+ * ini)`, BUKAN `ROI` polos seperti dugaan awal `modules.ts`) tapi NOL baris
+ * data (toko ini nol kampanye LIVE aktif periode itu) — format desimal
+ * `Biaya`/`Pendapatan kotor`/`ROI (Toko saat ini)` untuk `tt_ads_live` BELUM
+ * punya bukti empiris baris nyata, hanya kesamaan struktural dengan
+ * `tt_ads_product` (exporter sama, konvensi Ads Manager `raw=true` sama).
  */
 export function ekstrakBarisTtAdsLive(
   aoa: readonly (readonly unknown[])[],
@@ -329,6 +374,7 @@ export function ekstrakBarisTtAdsLive(
   const iPesanan = idx('Pesanan SKU');
   const iGmv = idx('Pendapatan kotor');
   const iBiaya = idx('Biaya');
+  const iTayangan = idx('Tayangan LIVE');
 
   const hasil: PdtBarisAdsTtLive[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -342,6 +388,7 @@ export function ekstrakBarisTtAdsLive(
       pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
       gmv,
       roas: roasTurunan(gmv, biaya),
+      tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
     });
   }
   return hasil;

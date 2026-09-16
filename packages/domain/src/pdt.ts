@@ -1357,10 +1357,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
 
   // 2026-09-16 — `tt_ads_product` → `pdt_fact_ads` (lihat docblock
   // `ekstrakBarisTtAdsProduct`, `@cdps/core` `pdt/fakta.ts`, untuk kenapa `roas`
-  // DITURUNKAN dan `sku_id`/`content_id` SELALU null — dibangun tanpa sample asli,
-  // keputusan pemilik via `AskUserQuestion`, docs/DECISIONS.md). Replace-on-recommit,
+  // DITURUNKAN dan `sku_id`/`content_id` SELALU null). Replace-on-recommit,
   // sama alasan `shopee_ads_live` di atas (`sku_id`/`content_id` NULL ⇒ `ON CONFLICT`
-  // tidak aman dipakai lewat `uq_pdt_fact_ads`).
+  // tidak aman dipakai lewat `uq_pdt_fact_ads`). `tayangan`/`klik` diisi 2026-09-16
+  // (`G1-09-2BII-TTADS-SAMPLE` DITUTUP — sample asli mengonfirmasi `Impresi iklan
+  // produk`/`Jumlah klik iklan produk` sebagai kolom nyata).
   if (berkasTtAdsProduct.length > 0) {
     await tx`
       delete from pdt_fact_ads
@@ -1373,14 +1374,16 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
              parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
           values
             (${clientPlatformId}, 'tt_ads_product', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, null, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
       }
     }
   }
 
   // 2026-09-16 — `tt_ads_live` → `pdt_fact_ads` (lihat docblock `ekstrakBarisTtAdsLive`,
   // `@cdps/core` `pdt/fakta.ts` — sama alasan `tt_ads_product` di atas untuk `roas`
-  // diturunkan/`sku_id`/`content_id` null/replace-on-recommit).
+  // diturunkan/`sku_id`/`content_id` null/replace-on-recommit). `tayangan` diisi
+  // 2026-09-16 (`G1-09-2BII-TTADS-SAMPLE` DITUTUP, dari `Tayangan LIVE`) — `klik`
+  // TETAP null, modul ini tidak punya kolom klik (sama pola `shopee_ads_live`).
   if (berkasTtAdsLive.length > 0) {
     await tx`
       delete from pdt_fact_ads
@@ -1393,7 +1396,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
              parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
           values
             (${clientPlatformId}, 'tt_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, null, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
       }
     }
   }

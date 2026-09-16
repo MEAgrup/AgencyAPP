@@ -1314,6 +1314,44 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > (produk, tokopedia, ads_manager) TETAP di luar cakupan — semuanya hard-blocked (butuh fact-writer
 > baru sekelas G1-09). `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
 
+> **Status 2026-09-16 (lanjutan) — `G1-09-2BII-TTADS-SAMPLE` DITUTUP: sample ekspor asli TikTok Ads
+> Manager (Avitaskin, Juli 2026) diterima dari pemilik, `tt_ads_product`/`tt_ads_live` diverifikasi.**
+> `docs/DECISIONS.md` (cari "G1-09-2BII-TTADS-SAMPLE") untuk rincian lengkap. Ringkas: sample
+> "creative data for product campaigns" (2093 baris) MEMBUKTIKAN seluruh asumsi konservatif sesi
+> sebelumnya BENAR — nama kolom `ID Campaign` persis, `Biaya`/`Pendapatan kotor` STRING desimal-titik
+> tanpa pemisah ribuan (konvensi `parsePdtAngka(v, true)` sudah tepat) — DAN menemukan dua kolom
+> funnel yang selalu terisi (`Impresi iklan produk`/`Jumlah klik iklan produk`, 100% baris), sekarang
+> diekstrak jadi `pdt_fact_ads.tayangan`/`klik` (sama pola `shopee_ads_cpc`). Sample "livestream data
+> for live campaigns" (HEADER saja, nol baris — toko ini nol kampanye LIVE Juli 2026) menemukan
+> **bug laten nyata**: `tt_ads_live.kolomDipanen` mendaftar `'ROI'` sebagai kolom WAJIB
+> (`validasiKolomWajib` memeriksa SELURUH `kolomDipanen`, bukan cuma `tandaTanganKolom.must` —
+> ditemukan lewat kegagalan tes domain saat kolom itu diperluas), padahal nama kolom asli adalah
+> `'ROI (Toko saat ini)'` — file live-campaign nyata APA PUN akan gagal parse total begitu ada baris
+> data (kolom itu toh tidak pernah dibaca, `roas` diturunkan gmv÷biaya). `ROI` DIHAPUS dari
+> `kolomDipanen`, `Tayangan LIVE` (kolom nyata, funnel) ditambahkan sebagai `tayangan`. `kolomDipanen`
+> **BUKAN** dokumentasi "semua kolom nyata" (godaan awal sesi ini, keliru — sempat menambah SELURUH
+> 26/19 kolom asli lalu ditolak `validasiKolomWajib` untuk fixture manapun yang tidak membawa semua)
+> — HANYA kolom yang benar-benar diekstrak yang boleh masuk, sisanya tetap `kolomBaru` informational
+> (Rule 8), persis preseden `shopee_ads_cpc` (`docs/DECISIONS.md` 2026-09-14 modul KEENAM). Migrasi
+> BARU (`20261107010000`, HANYA `UPDATE pdt_parser_modul.kolom_dipanen`, nol tabel/kolom) menjaga
+> registry TS≡DB sinkron (`pdt.registry.test.ts`), sama pola migrasi `shopee_ads_cpc`
+> (`20261019010000`). **Bukan `ads_manager`** — sample ini mengonfirmasi/melengkapi `tt_ads_product`/
+> `tt_ads_live` (bagian laporan "iklan", SUDAH `lengkap: true`), BUKAN bagian laporan `ads_manager`
+> yang masih di luar cakupan: `report/metrik.ts`/`report/detect.ts` legacy mengonfirmasi `ads_manager`
+> ("TikTok Ads Manager — Brand & Upper Funnel") adalah EMPAT jenis ekspor TERPISAH
+> (`ttam_consideration`/`ttam_follows`/`ttam_showcase`/`ttam_videoviews` — kolom `New consideration
+> size`/`Paid follows`/kolom funnel shop/`Video views`+`CPM`), NOL modul PDT untuk keempatnya sampai
+> hari ini (dikonfirmasi eksplisit docblock `PdtLaporanTahap`: "`ttam`/TikTok Ads Manager belum
+> punya modul PDT sama sekali"). Diverifikasi (DB lokal rebuild bersih, 257 migrasi — SATU migrasi
+> baru, seed-only): `@cdps/core` 1433/1433, `@cdps/domain` 2774/2775 (1 skip, nol gagal — satu
+> kegagalan `client.test.ts` yang sempat muncul di SATU full-suite run adalah flake test-isolation
+> pra-ada tak terkait, lolos bersih saat dijalankan sendiri MAUPUN di full-suite run berikutnya),
+> `@cdps/db` 107/107 (`pdt.registry.test.ts` TS≡DB kembali sinkron),
+> `@cdps/api` 638/640 (2 skip); typecheck bersih `core`/`domain`/`api`. **Sisa: TIGA bagian laporan
+> lain** (produk, tokopedia, ads_manager) TETAP di luar cakupan — `ads_manager` sekarang punya
+> deskripsi CONCRETE (4 jenis ekspor di atas) tapi NOL sample, ditanyakan ke pemilik terpisah dari
+> status ini (lihat `docs/DECISIONS.md`).
+
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**

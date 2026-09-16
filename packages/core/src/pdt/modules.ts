@@ -172,7 +172,19 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // Sama persis `adsscanner/tiktok/detect.ts` FILE_SIGS.ads.
     tandaTanganKolom: { must: ['Nama kampanye', 'ID produk', 'Biaya'] },
     barisHeaderHint: 1, // adsscanner headerRow 0 (0-based) => baris 1
-    kolomDipanen: ['ID Campaign', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor'],
+    // PENTING (lihat komentar `shopee_ads_cpc` di bawah): `kolomDipanen` di
+    // sini adalah kolom WAJIB (`validasiKolomWajib` — `@cdps/domain` `pdt.ts`
+    // memeriksa SELURUH daftar ini terhadap SATU baris header, gagal satu ⇒
+    // seluruh berkas `status: 'gagal'`), BUKAN daftar dokumentasi "semua
+    // kolom nyata". Karena itu HANYA kolom yang benar-benar diekstrak
+    // (`ekstrakBarisTtAdsProduct`, `@cdps/core` `pdt/fakta.ts`) yang didaftar
+    // — kolom lain di file asli (26 kolom A–Z, diverifikasi 2026-09-16
+    // terhadap sample Avitaskin "creative data for product campaigns" Juli
+    // 2026, `G1-09-2BII-TTADS-SAMPLE` DITUTUP) SENGAJA TIDAK didaftar supaya
+    // tetap muncul sebagai `kolomBaru` (informational, Rule 8) bukan
+    // memblokir parse. `Impresi iklan produk`/`Jumlah klik iklan produk`
+    // ditambahkan sesi ini (baru diekstrak jadi tayangan/klik).
+    kolomDipanen: ['ID Campaign', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor', 'Impresi iklan produk', 'Jumlah klik iklan produk'],
     wajib: false, // opsional — sisi ads, bukan sisi rekonsiliasi GMV toko
   },
   {
@@ -182,7 +194,18 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // Sama persis `adsscanner/tiktok/detect.ts` FILE_SIGS.adslive.
     tandaTanganKolom: { must: ['Nama LIVE', 'Nama kampanye', 'Biaya'] },
     barisHeaderHint: 1, // adsscanner headerRow 0
-    kolomDipanen: ['Nama LIVE', 'ID Campaign', 'Biaya', 'Pesanan SKU', 'ROI', 'Pendapatan kotor'],
+    // Sama alasan `tt_ads_product` di atas — HANYA kolom yang diekstrak
+    // (`ekstrakBarisTtAdsLive`) didaftar. **`ROI` DIHAPUS sesi ini
+    // (`G1-09-2BII-TTADS-SAMPLE` DITUTUP)** — sample asli (Avitaskin
+    // "livestream data for live campaigns" Juli 2026, HEADER saja, nol baris
+    // data) membuktikan nama kolom asli adalah `ROI (Toko saat ini)`, BUKAN
+    // `ROI` polos; membiarkannya di sini akan membuat `validasiKolomWajib`
+    // GAGAL untuk setiap file live-campaign nyata begitu ada baris data
+    // (bug laten sejak modul ini dibangun tanpa sample — sama kelas bug
+    // `ID Toko`/`Periode` `shopee_ads_cpc`, lihat komentarnya). Kolom itu
+    // toh tidak pernah dibaca (`roas` diturunkan gmv÷biaya). `Tayangan LIVE`
+    // ditambahkan (baru diekstrak jadi tayangan).
+    kolomDipanen: ['Nama LIVE', 'ID Campaign', 'Biaya', 'Pesanan SKU', 'Pendapatan kotor', 'Tayangan LIVE'],
     wajib: false,
   },
 
