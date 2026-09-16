@@ -836,6 +836,7 @@ describe('ekstrakBarisShopDailyShopee (sesi 34 lanjutan — G1-09-2BII-SHOPDAILY
     expect(baris.pembeli).toBe(393);
     expect(baris.pembeliBaru).toBe(347);
     expect(baris.refund).toBe(1648328);
+    expect(baris.pesananDibatalkan).toBe(56);
   });
 
   it('tanpa header harian berulang (hanya ringkasan) ⇒ array kosong', () => {
@@ -863,7 +864,7 @@ describe('ekstrakBarisShopDailyShopee (sesi 34 lanjutan — G1-09-2BII-SHOPDAILY
       ['01-07-2026', '100', '1'],
     ];
     expect(ekstrakBarisShopDailyShopee(aoa)).toEqual([
-      { tanggal: '2026-07-01', gmv: 100, pesanan: 1, produkDiklik: null, pengunjung: null, cr: null, pembeli: null, pembeliBaru: null, refund: null },
+      { tanggal: '2026-07-01', gmv: 100, pesanan: 1, produkDiklik: null, pengunjung: null, cr: null, pembeli: null, pembeliBaru: null, refund: null, pesananDibatalkan: null },
     ]);
   });
 
