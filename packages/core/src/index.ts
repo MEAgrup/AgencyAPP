@@ -92,3 +92,7 @@ export * as docassets from './docassets';
 // modul baru) + pencocok generik `detectPdtModule` (Rule 6/7). Cermin
 // `pdt_parser_modul`/`pdt_kolom_alias`, dijaga `packages/db/src/pdt.registry.test.ts`.
 export * as pdt from './pdt';
+// Product Exchange M3-B — gerbang admisi empat lapis (mesin murni, nol I/O).
+// Lihat packages/domain/src/productexchange-m3.ts untuk pembaca DB + penulis
+// px_sku_volume/px_sku_eligibility yang memanggil mesin ini.
+export * as px from './px';

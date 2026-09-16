@@ -602,6 +602,13 @@ const WIRE_TO_FE: Record<string, string> = {
   HariLiburWire: 'types.ts::HariLibur',
   EligibilityPolicyWire: 'px.ts::PxEligibilityPolicy',
   EligibilityPolicyValueWire: 'px.ts::PxEligibilityPolicyValue',
+  // Product Exchange M3-B — Kandidat/Katalog/laporan kreator_kosong.
+  PxKandidatWire: 'px.ts::PxKandidat',
+  PxKandidatVerdictWire: 'px.ts::PxKandidatVerdict',
+  PxKatalogItemWire: 'px.ts::PxKatalogItem',
+  PxCoverageMetaWire: 'px.ts::PxCoverageMeta',
+  PxKreatorKosongWire: 'px.ts::PxKreatorKosong',
+  PxKategoriOptionWire: 'px.ts::PxKategoriOption',
   InterviewJadwalWire: 'interview.ts::InterviewJadwal',
   InterviewKualifikasiWire: 'interview.ts::InterviewKualifikasi',
   InterviewAnswerWire: 'interview.ts::InterviewAnswer',

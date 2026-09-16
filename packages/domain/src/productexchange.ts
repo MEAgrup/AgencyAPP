@@ -94,6 +94,19 @@ export class ConflictError extends Error {
   }
 }
 
+/**
+ * Payload bridge tidak sesuai kontrak (→ 422, PX-M3-04) — kolom asing, bentuk
+ * salah, atau baris melampaui batas. Deviasi SADAR dari konvensi HTTP repo
+ * (validasi lain → 400): PRD M3 §4 Flow C langkah 4 eksplisit meminta 422
+ * untuk kontrak bridge coverage. Lihat `apps/api/src/lib/http.ts`.
+ */
+export class ContractError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProductExchangeContractError';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Permissions
 // ---------------------------------------------------------------------------
@@ -123,6 +136,31 @@ export function canKelolaPolicy(actor: Actor): boolean {
 export function canIsiShopId(actor: Actor, ownerAm: string | null): boolean {
   if (permission.isLead(actor, ACCOUNT_DIVISION)) return true;
   return ownerAm !== null && ownerAm === actor.employeeId;
+}
+
+/**
+ * canKonfirmasiKategoriSku — PX-M3-B: siapa yang boleh mengonfirmasi
+ * `level2_category` sebuah produk (D-24, satu kali per SKU kandidat).
+ * Lingkupnya SALINAN `canIsiShopId` — mengonfirmasi kategori adalah
+ * pernyataan operasional yang sama kelasnya dengan mengisi Shop ID (AM
+ * pemilik klien atau lead/Director Account), bukan koreksi identitas SKU.
+ * Nama sendiri (bukan alias `canIsiShopId`) supaya pelebaran gerbang salah
+ * satu tidak diam-diam melebarkan yang lain — pola sama `productexchange.ts`
+ * module header (jangan menumpang predikat lain).
+ */
+export function canKonfirmasiKategoriSku(actor: Actor, ownerAm: string | null): boolean {
+  return canIsiShopId(actor, ownerAm);
+}
+
+/**
+ * canLihatKatalogPx — Katalog PX + laporan `kreator_kosong` (§6.1 PRD:
+ * "Lead Account + Director"). OD ikut baca lewat `permission.canReadAll`
+ * (matriks Phase 0 §6: OD read-only EVERYWHERE) — PRD tidak menyebut OD
+ * secara eksplisit, tapi mengeluarkannya akan melanggar aturan rumah #6
+ * tanpa alasan yang PRD ini berikan.
+ */
+export function canLihatKatalogPx(actor: Actor): boolean {
+  return permission.isLead(actor, ACCOUNT_DIVISION) || permission.canReadAll(actor);
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +222,17 @@ export async function isiShopId(
 // pernah dibalik — lihat komentar migrasi 20261008010000).
 // ---------------------------------------------------------------------------
 
-/** Bentuk `nilai` versi 1 — PRD §4.5 / D-01 (ambang) / D-02 (tanpa commission floor Phase 1). */
+/** Satu band `price_segment_bands` (PX-M3-06) — cermin `px.PriceSegmentBand` (`@cdps/core`). */
+export interface PriceSegmentBandValue {
+  segment: string;
+  maxIdr: number | null;
+}
+
+/**
+ * Bentuk `nilai` — PRD §4.5 / D-01 (ambang) / D-02 (tanpa commission floor
+ * Phase 1). `priceSegmentBands` OPSIONAL — lahir di versi 2 (PX-M3-06, TBC
+ * Hans/M3-02), absen di versi 1 (riwayat, tidak diubah — append-only).
+ */
 export interface EligibilityPolicyValue {
   salesThresholdIdr: number;
   thresholdBasis: string;
@@ -192,6 +240,7 @@ export interface EligibilityPolicyValue {
   commissionFloorPct: number | null;
   requireStockIn: boolean;
   platforms: string[];
+  priceSegmentBands?: PriceSegmentBandValue[];
 }
 
 export interface EligibilityPolicy {
@@ -212,6 +261,13 @@ function rowToPolicy(r: {
   dibuat_oleh: string;
 }): EligibilityPolicy {
   const n = r.nilai;
+  const bandsRaw = n.price_segment_bands;
+  const priceSegmentBands = Array.isArray(bandsRaw)
+    ? bandsRaw.map((b) => {
+        const bb = b as Record<string, unknown>;
+        return { segment: String(bb.segment), maxIdr: bb.max_idr == null ? null : Number(bb.max_idr) };
+      })
+    : undefined;
   return {
     versi: r.versi,
     nilai: {
@@ -221,6 +277,7 @@ function rowToPolicy(r: {
       commissionFloorPct: n.commission_floor_pct == null ? null : Number(n.commission_floor_pct),
       requireStockIn: Boolean(n.require_stock_in),
       platforms: Array.isArray(n.platforms) ? n.platforms.map(String) : [],
+      ...(priceSegmentBands ? { priceSegmentBands } : {}),
     },
     aktif: r.aktif,
     catatan: r.catatan,
@@ -295,6 +352,31 @@ function validasiNilai(nilai: unknown): EligibilityPolicyValue {
   if (commissionFloorPctRaw !== null && commissionFloorPctRaw !== undefined && typeof commissionFloorPctRaw !== 'number') {
     throw new ValidationError();
   }
+  // price_segment_bands (PX-M3-06) — OPSIONAL (absen di versi 1). Bila hadir:
+  // urut ascending by max_idr, band TERAKHIR harus max_idr null (tak terbatas)
+  // — kalau tidak, hitungPriceSegment (@cdps/core px) bisa kembali null untuk
+  // harga yang seharusnya masuk band tertinggi.
+  const bandsRaw = n.price_segment_bands;
+  let priceSegmentBands: PriceSegmentBandValue[] | undefined;
+  if (bandsRaw !== undefined) {
+    if (!Array.isArray(bandsRaw) || bandsRaw.length === 0) throw new ValidationError();
+    priceSegmentBands = bandsRaw.map((b) => {
+      if (typeof b !== 'object' || b === null) throw new ValidationError();
+      const bb = b as Record<string, unknown>;
+      if (typeof bb.segment !== 'string' || bb.segment.trim() === '') throw new ValidationError();
+      if (bb.max_idr !== null && (typeof bb.max_idr !== 'number' || !Number.isFinite(bb.max_idr) || bb.max_idr < 0)) {
+        throw new ValidationError();
+      }
+      return { segment: bb.segment.trim(), maxIdr: bb.max_idr === null ? null : (bb.max_idr as number) };
+    });
+    const last = priceSegmentBands[priceSegmentBands.length - 1];
+    if (last.maxIdr !== null) throw new ValidationError();
+    for (let i = 1; i < priceSegmentBands.length; i += 1) {
+      const prev = priceSegmentBands[i - 1].maxIdr;
+      const cur = priceSegmentBands[i].maxIdr;
+      if (prev !== null && cur !== null && cur <= prev) throw new ValidationError();
+    }
+  }
   return {
     salesThresholdIdr,
     thresholdBasis: thresholdBasis.trim(),
@@ -303,6 +385,7 @@ function validasiNilai(nilai: unknown): EligibilityPolicyValue {
       commissionFloorPctRaw === null || commissionFloorPctRaw === undefined ? null : (commissionFloorPctRaw as number),
     requireStockIn,
     platforms: platforms.map((p) => String(p).trim()),
+    ...(priceSegmentBands ? { priceSegmentBands } : {}),
   };
 }
 
@@ -337,6 +420,9 @@ export async function createEligibilityPolicy(
       commission_floor_pct: nilai.commissionFloorPct,
       require_stock_in: nilai.requireStockIn,
       platforms: nilai.platforms,
+      ...(nilai.priceSegmentBands
+        ? { price_segment_bands: nilai.priceSegmentBands.map((b) => ({ segment: b.segment, max_idr: b.maxIdr })) }
+        : {}),
     };
     const inserted = await tx<
       { versi: number; nilai: Record<string, unknown>; aktif: boolean; catatan: string | null; dibuat_pada: Date; dibuat_oleh: string }[]
@@ -353,5 +439,23 @@ export async function createEligibilityPolicy(
       createdBy: actor.employeeId,
     });
     return rowToPolicy(inserted[0]);
+  }).then(async (policy) => {
+    // Rule 8 PRD M3 §3.2: "mengubah ambang = versi baru, dan SELURUH verdict
+    // direcompute dengan versi_policy baru". Hanya untuk versi yang lahir
+    // AKTIF — sebuah draft/rollback (aktif=false) belum jadi versi aktif,
+    // jadi belum ada yang perlu direcompute atasnya. Import dinamis (bukan
+    // di puncak berkas) supaya dependensi silang dengan `productexchange-m3.ts`
+    // (yang mengimpor `ForbiddenError`/`ACCOUNT_DIVISION` dkk dari berkas ini)
+    // tidak bergantung pada urutan inisialisasi modul.
+    if (policy.aktif) {
+      const m3 = await import('./productexchange-m3');
+      await m3.evaluateTick(sql);
+    }
+    return policy;
   });
 }
+
+// M3-B — px_sku_volume/px_sku_kategori/px_sku_eligibility/px_coverage_*, empat
+// lapis gerbang, katalog. Berkas TERPISAH (module header di sana menjelaskan
+// kenapa) tapi satu namespace domain (`productexchange`) lewat re-export ini.
+export * from './productexchange-m3';
