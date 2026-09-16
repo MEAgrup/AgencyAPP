@@ -1063,49 +1063,56 @@ RESET ROLE;
 --     visibility yang butuh entri Decided — bukan sesuatu yang boleh mendarat
 --     karena tesnya diperbarui agar cocok.
 --
---     Deteksinya sintaktik (`jwt_is_lead`/`jwt_division` di predikat), sama
---     seperti survei O48. Itu bisa memberi false-negative kalau seseorang
---     menulis arm divisi tanpa memakai kedua helper — dan itu justru alasan
---     tambahan untuk memakai helper yang ada.
+--     Deteksinya sintaktik (`jwt_is_lead`/`jwt_division` di predikat langsung),
+--     sama seperti survei O48, PLUS (sejak O60, 2026-09-16) satu tingkat
+--     indireksi: kalau predikat memanggil helper `private.*` dan SUMBER helper
+--     itu (`pg_proc.prosrc` — bukan `pg_get_functiondef`, lihat catatan di
+--     bawah) memuat KEDUA `jwt_is_lead` dan `jwt_division`, policy itu dihitung
+--     sudah punya arm. Itu masih bisa memberi false-negative kalau seseorang
+--     menulis arm divisi tanpa memakai kedua helper LANGSUNG DI PREDIKAT, atau
+--     lewat helper yang badannya cuma memuat SATU dari keduanya (mis.
+--     `jwt_division_owns_client`/`jwt_same_division` — dicek, TIDAK lolos
+--     syarat "kedua helper" O60 dan karena itu tetap dianggap tanpa arm kalau
+--     predikat luarnya juga kosong) — dan itu justru alasan tambahan untuk
+--     memakai helper yang ada.
+--
+--     ⚠️ **`pg_get_functiondef(oid)` TIDAK dipakai untuk membaca badan helper.**
+--     Diverifikasi langsung (2026-09-16): memanggilnya berulang dalam SATU query
+--     atas seluruh fungsi skema `private` (41 baris) membuat Postgres gagal
+--     dengan `ERROR: "array_agg" is an aggregate function`
+--     (`LOCATION: pg_get_functiondef, ruleutils.c:2889`) — deparse SQL-body
+--     function yang dipanggil berulang dalam satu statement, bukan sesuatu yang
+--     kita tulis salah (setiap fungsi lolos SATU-SATU atau dalam subset kecil,
+--     hanya gagal pada himpunan penuh). `pg_proc.prosrc` (kolom teks sumber
+--     mentah, bukan hasil deparse) menghindarinya sama sekali dan cukup untuk
+--     regex tekstual yang kita butuhkan di sini.
 --
 --     Sebagian besar isi daftar ini adalah TABEL ANAK yang visibilitasnya
---     mengalir dari induknya lewat `jwt_owns_*`/`EXISTS`. Mereka BUKAN 39 gap
+--     mengalir dari induknya lewat `jwt_owns_*`/`EXISTS`. Mereka BUKAN gap
 --     independen — memperbaiki induknya memperbaiki mereka. Daftar ini
 --     mengukur permukaan, bukan jumlah bug.
 --
---     ⚠️ **Sebelas baris `strategi_*` di bawah adalah FALSE-NEGATIVE yang sudah
---     diverifikasi, bukan gap.** Predikatnya `private.jwt_can_read_strategi()`,
---     dan badan fungsi itu adalah cermin persis `strategi_select` — TERMASUK
---     arm `jwt_is_lead() AND jwt_division() = 'Account'`. Jadi arm-nya ADA; ia
---     hanya satu tingkat di balik SECURITY DEFINER, yang tidak bisa dilihat
---     detektor sintaktik di atas (persis false-negative yang paragraf
---     sebelumnya sudah antisipasi). Lima di antaranya ditambahkan oleh A-09b
---     (DECISIONS 2026-08-08 "A-09b — lima tabel anak Strategi masuk ledger
---     O48") dan satu oleh A-10 bagian 2 (DECISIONS 2026-08-09
---     "strategi_field_visibility masuk ledger O48"); mereka mengikuti kelas
---     siblingnya, bukan membuka kelas baru.
---     Empat baris `plan_*` (target/actual/review/flag) adalah kelas yang SAMA:
---     predikatnya `private.jwt_can_read_plan()`, cermin persis `plan_select` —
---     termasuk arm `jwt_is_lead() AND jwt_division() = 'Account'` (DECISIONS
---     2026-08-10 "B-01 — empat tabel anak Plan masuk ledger O48"). `plan_row`
---     TIDAK di sini: policy-nya membawa arm divisi PIC-nya sendiri, dan
---     `plan_row_week` mewarisinya lewat EXISTS, jadi keduanya lolos detektor.
---     O60 (jika dikerjakan) akan menghapus keempatnya bersama kesebelas
---     `strategi_*` sekaligus.
---     Empat baris `wrr_*` (divisi/metrik/catatan/catatan_divisi) adalah kelas
---     yang SAMA: predikatnya `private.jwt_can_read_recap()`, cermin persis
---     `weekly_result_recap_select` — termasuk arm `jwt_is_lead() AND
---     jwt_division() = 'Account'` (DECISIONS 2026-08-13 "M6D D-01 — empat tabel
---     anak Rekap Mingguan masuk ledger O48"). Induk `weekly_result_recap_select`
---     membawa arm-nya inline jadi TIDAK di sini. Lead DIVISI (non-Account)
---     sengaja belum punya arm di D-01 — baca rekap divisi menyusul bersama jalur
---     tulis RM-D6 (D-09), tak dilebarkan spekulatif (O48).
---     Baris `ads_weekly_reports_select` (20260819020000, follow-up PR #172) adalah
---     kelas yang SAMA: predikatnya `private.jwt_can_read_brief()`, cermin persis
---     `briefs_select` — termasuk arm `jwt_is_lead() AND assigned_division =
---     jwt_division()`. Induk `briefs_select` membawa arm-nya inline jadi TIDAK di
---     sini; lingkupnya tak melebar sedikit pun dari induknya (siapa boleh melihat
---     brief-nya, boleh melihat laporan mingguannya).
+--     ✅ **O60 SELESAI 2026-09-16 — dua puluh enam baris di bawah ini DIHAPUS
+--     dari `expected` (bukan gap, false-negative yang sudah terverifikasi
+--     sekarang benar-benar terlihat lolos):** sebelas `strategi_*`, empat
+--     `plan_*` (target/actual/review/flag), empat `wrr_*`
+--     (divisi/metrik/catatan/catatan_divisi), dan `ads_weekly_reports_select`.
+--     Keempat kelas memanggil helper SECURITY DEFINER yang badannya cermin
+--     persis policy induknya — `private.jwt_can_read_strategi()` (cermin
+--     `strategi_select`), `private.jwt_can_read_plan()` (cermin `plan_select`),
+--     `private.jwt_can_read_recap()` (cermin `weekly_result_recap_select`), dan
+--     `private.jwt_can_read_brief()` (cermin `briefs_select`) — masing-masing
+--     TERMASUK arm `jwt_is_lead() AND jwt_division() = 'Account'` (atau
+--     `assigned_division = jwt_division()` untuk brief). Arm-nya SELALU sudah
+--     ada; O48 hanya tidak bisa melihatnya karena satu tingkat di balik
+--     SECURITY DEFINER. Riwayat kemunculan (untuk audit, bukan lagi status
+--     terkini): lima `strategi_*` dari A-09b (DECISIONS 2026-08-08), satu dari
+--     A-10 bagian 2 (DECISIONS 2026-08-09), empat `plan_*` dari B-01 (DECISIONS
+--     2026-08-10), empat `wrr_*` dari M6D D-01 (DECISIONS 2026-08-13),
+--     `ads_weekly_reports_select` dari follow-up PR #172 (20260819020000).
+--     `plan_row`/`plan_row_week`/`weekly_result_recap_select`/`briefs_select`
+--     itu sendiri TIDAK pernah di sini — masing-masing membawa arm-nya inline,
+--     jadi sudah lolos detektor level nol sejak awal.
 --     Baris `stage_pipeline_select`/`stage_definition_select` (M16 Akun A Fase 2,
 --     20260830010000) BUKAN false-negative dan bukan tabel anak — keduanya
 --     genuinely `USING (true)`, kelas yang sama dengan `master_services_select`/
@@ -1152,7 +1159,7 @@ DO $$
 DECLARE
   actual text[];
   expected text[] := ARRAY[
-    'ad_campaign_assets_select','ad_campaigns_select','ads_weekly_reports_select','campaigns_select',
+    'ad_campaign_assets_select','ad_campaigns_select','campaigns_select',
     'client_platforms_select','client_report_insight_sel_portal',
     'client_report_publikasi_sel_portal','client_reports_sel_portal',
     -- `client_sales_allocations_select` DIKELUARKAN dari daftar ini 2026-09-10
@@ -1222,8 +1229,7 @@ DECLARE
     -- KERJA-nya (`pdt_upload_batch`, `pdt_fact_*`, dst.) TETAP ber-lengan
     -- AM-pemilik/lead-Account dan karena itu tidak ada di daftar ini.
     'pdt_kolom_alias_sel','pdt_parser_modul_sel',
-    'plan_actual_select','plan_flag_select',
-    'plan_gate_config_select','plan_review_select','plan_target_select',
+    'plan_gate_config_select',
     'prospect_attempt_nq_reasons_select',
     -- `px_coverage_snapshot_sel` (Product Exchange M3-B, migrasi 20261101010000)
     -- masuk daftar ini DENGAN SENGAJA, dicatat `docs/DECISIONS.md` 2026-09-15
@@ -1250,14 +1256,13 @@ DECLARE
     -- lead/divisi dan karena itu tidak ada di daftar ini.
     'scs_kategori_select',
     'stage_definition_select','stage_pipeline_select',
-    'strategi_akses_select','strategi_assumption_select','strategi_baseline_bulan_select',
-    'strategi_channel_select','strategi_diagnosa_select','strategi_dispatch_select',
-    'strategi_fase_select','strategi_field_visibility_select',
-    'strategi_ketergantungan_klien_select',
-    'strategi_prasyarat_klien_select','strategi_quick_win_select',
-    'strategi_risiko_struktural_select','strategi_risk_select',
-    'strategi_tanggal_besar_select','strategi_target_select',
-    'strategi_trigger_revisi_select','strategi_version_select',
+    -- Sebelas `strategi_*`, empat `plan_*`, empat `wrr_*`, dan
+    -- `ads_weekly_reports_select` DIHAPUS dari daftar ini 2026-09-16 (O60,
+    -- `docs/DECISIONS.md`) — detektor sekarang menembus satu tingkat
+    -- indireksi (helper `private.*` SECURITY DEFINER) dan melihat arm yang
+    -- SELALU sudah ada di sana. Bukan gap yang baru ditutup, false-negative
+    -- yang akhirnya terlihat lolos. Rincian riwayat kelas ini ada di catatan
+    -- §42 di atas.
     -- `studios_select` (M19, migrasi 20260927010000) masuk daftar ini DENGAN
     -- SENGAJA, dan keputusannya dicatat di `docs/DECISIONS.md` 2026-09-09 —
     -- bukan ditambahkan agar tes hijau. Ia cermin
@@ -1271,8 +1276,7 @@ DECLARE
     -- melihatnya. Baris KERJA-nya (`prod_slots`, `pic_unavailability`) TETAP
     -- ber-lengan lead/divisi dan karena itu tidak ada di daftar ini.
     'studios_select',
-    'vendors_select',
-    'wrr_catatan_divisi_select','wrr_catatan_select','wrr_divisi_select','wrr_metrik_select'
+    'vendors_select'
   ];
   gained text[];
   lost   text[];
@@ -1284,7 +1288,21 @@ BEGIN
     JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname = 'public'
      AND p.polcmd IN ('r','*')
-     AND coalesce(pg_get_expr(p.polqual, p.polrelid), '') !~ 'jwt_is_lead|jwt_division';
+     AND coalesce(pg_get_expr(p.polqual, p.polrelid), '') !~ 'jwt_is_lead|jwt_division'
+     -- O60: satu tingkat indireksi — predikat yang memanggil helper `private.*`
+     -- yang SUMBERNYA (prosrc, bukan pg_get_functiondef — lihat catatan di
+     -- atas §42) memuat KEDUA `jwt_is_lead` dan `jwt_division` dihitung sudah
+     -- punya arm, walau helper-nya SECURITY DEFINER dan predikat luar tidak
+     -- menyebut kedua nama itu langsung.
+     AND NOT EXISTS (
+       SELECT 1
+         FROM pg_proc helper
+         JOIN pg_namespace hn ON hn.oid = helper.pronamespace
+        WHERE hn.nspname = 'private'
+          AND pg_get_expr(p.polqual, p.polrelid) ~ ('\m' || helper.proname || '\(')
+          AND helper.prosrc ~ 'jwt_is_lead'
+          AND helper.prosrc ~ 'jwt_division'
+     );
 
   SELECT coalesce(array_agg(x ORDER BY x), '{}') INTO gained
     FROM unnest(actual) x WHERE x <> ALL (expected);
