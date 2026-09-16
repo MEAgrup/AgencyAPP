@@ -786,6 +786,12 @@ export async function commitUploadBatch(
   // Sesi 34 lanjutan (G1-09-2BII-SHOPDAILY-SHOPEE) — `shopee_shop_stats` → `pdt_fact_shop_daily`,
   // TIGA basis sekaligus lewat `b.sheets` (lihat docblock `ekstrakBarisShopDailyShopee`).
   const berkasShopStatsShopee = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_shop_stats');
+  // 2026-09-16 — `tt_ads_product`/`tt_ads_live` → `pdt_fact_ads` (lihat docblock
+  // `ekstrakBarisTtAdsProduct`/`ekstrakBarisTtAdsLive`, `@cdps/core` `pdt/fakta.ts`,
+  // untuk kenapa dibangun KONSERVATIF tanpa sample asli — keputusan pemilik via
+  // `AskUserQuestion`, docs/DECISIONS.md).
+  const berkasTtAdsProduct = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_product');
+  const berkasTtAdsLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_live');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -834,7 +840,7 @@ export async function commitUploadBatch(
         id, clientPlatformId, periodeAwalBulan, akunKontenToko: row.akun_konten_toko, now,
         berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
         berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
-        berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk,
+        berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive,
       });
 
       await executors(tx).audit.insertAudit({
@@ -904,6 +910,8 @@ interface TulisFaktaModulTerparseInput {
   berkasTtTransactionCreator: readonly BerkasTerparse[];
   berkasShopeeAmsAfiliasi: readonly BerkasTerparse[];
   berkasShopeeAmsProduk: readonly BerkasTerparse[];
+  berkasTtAdsProduct: readonly BerkasTerparse[];
+  berkasTtAdsLive: readonly BerkasTerparse[];
 }
 
 /**
@@ -936,7 +944,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     id, clientPlatformId, periodeAwalBulan, akunKontenToko, now,
     berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
     berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
-    berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk,
+    berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive,
   } = input;
 
   // G1-09 sub-langkah 2b-ii — baris fakta tertipe, `shopee_ads_live` → `pdt_fact_ads`
@@ -1278,6 +1286,49 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
           values
             (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'dibayar', ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.produkTerjual}, ${baris.pesanan})`;
+      }
+    }
+  }
+
+  // 2026-09-16 — `tt_ads_product` → `pdt_fact_ads` (lihat docblock
+  // `ekstrakBarisTtAdsProduct`, `@cdps/core` `pdt/fakta.ts`, untuk kenapa `roas`
+  // DITURUNKAN dan `sku_id`/`content_id` SELALU null — dibangun tanpa sample asli,
+  // keputusan pemilik via `AskUserQuestion`, docs/DECISIONS.md). Replace-on-recommit,
+  // sama alasan `shopee_ads_live` di atas (`sku_id`/`content_id` NULL ⇒ `ON CONFLICT`
+  // tidak aman dipakai lewat `uq_pdt_fact_ads`).
+  if (berkasTtAdsProduct.length > 0) {
+    await tx`
+      delete from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_product' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasTtAdsProduct) {
+      for (const baris of pdt.ekstrakBarisTtAdsProduct(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_ads
+            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+          values
+            (${clientPlatformId}, 'tt_ads_product', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, null, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+      }
+    }
+  }
+
+  // 2026-09-16 — `tt_ads_live` → `pdt_fact_ads` (lihat docblock `ekstrakBarisTtAdsLive`,
+  // `@cdps/core` `pdt/fakta.ts` — sama alasan `tt_ads_product` di atas untuk `roas`
+  // diturunkan/`sku_id`/`content_id` null/replace-on-recommit).
+  if (berkasTtAdsLive.length > 0) {
+    await tx`
+      delete from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_live' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasTtAdsLive) {
+      for (const baris of pdt.ekstrakBarisTtAdsLive(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_ads
+            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+          values
+            (${clientPlatformId}, 'tt_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, null, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
       }
     }
   }
@@ -1795,6 +1846,8 @@ export async function reparsePdtBatch(
       berkasTtTransactionCreator: terparse.filter((b) => b.modul.kode === 'tt_transaction_creator'),
       berkasShopeeAmsAfiliasi: terparse.filter((b) => b.modul.kode === 'shopee_ams_afiliasi'),
       berkasShopeeAmsProduk: terparse.filter((b) => b.modul.kode === 'shopee_ams_produk'),
+      berkasTtAdsProduct: terparse.filter((b) => b.modul.kode === 'tt_ads_product'),
+      berkasTtAdsLive: terparse.filter((b) => b.modul.kode === 'tt_ads_live'),
     });
 
     await tx`update pdt_upload_batch set parser_versi = ${pdt.PDT_PARSER_VERSI} where id = ${batchId}`;
