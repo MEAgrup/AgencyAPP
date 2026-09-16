@@ -8,21 +8,28 @@ import {
   bangunLaporanAfiliasi,
   bangunLaporanLive,
   bangunLaporanShopee,
+  bangunLaporanTahap,
   bangunLaporanTiktok,
   bangunLaporanVideo,
+  type PdtLaporanAfiliasi,
   type PdtLaporanAfiliasiInput,
+  type PdtLaporanIklan,
   type PdtLaporanIklanInputShopee,
   type PdtLaporanIklanInputTiktok,
   type PdtLaporanKanalInputShopee,
   type PdtLaporanKanalInputTiktok,
   type PdtLaporanKpiInput,
+  type PdtLaporanKpiRingkas,
   type PdtLaporanLiveInput,
+  type PdtLaporanTahapInput,
+  type PdtLaporanVideo,
   type PdtLaporanVideoInput,
 } from './laporan';
 import { computeSkorShopee, computeSkorTiktok, type PdtSkorInputShopee, type PdtSkorInputTiktok } from './skor';
 
 const INPUT_KOSONG_TIKTOK: PdtSkorInputTiktok = { ads: null, live: null, video: null, kartu: null, affiliate: null, produk: null };
 const INPUT_KOSONG_SHOPEE: PdtSkorInputShopee = { ads: null, dibuat: null, produk: null, live: null, kesehatan: null };
+const TAHAP_INPUT_KOSONG: PdtLaporanTahapInput = { tahapFokus: null, klik: null, cpaInput: null, affPosting: null };
 
 const BENCH_KOSONG = {
   roi_gmvmax: { good: 8, warn: 4 },
@@ -64,6 +71,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       live: null,
       video: null,
       afiliasi: null,
+      tahap: TAHAP_INPUT_KOSONG,
       skor,
       benchmarkVersi: 1,
     });
@@ -79,6 +87,61 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       live: null,
       video: null,
       afiliasi: null,
+      tahap: {
+        fokus: null,
+        funnel: [
+          { kode: 'impresi', label: 'Impresi produk', nilai: null, lolos: null, lolosDari: null, catatan: 'kolom impresi toko belum ada di skema PDT saat ini' },
+          { kode: 'klik', label: 'Klik ke halaman produk', nilai: null, lolos: null, lolosDari: null, catatan: 'tidak ada di export Analitik Toko periode ini' },
+          { kode: 'pengunjung', label: 'Pengunjung toko', nilai: 5_000, lolos: null, lolosDari: null, catatan: null },
+          { kode: 'atc', label: 'Add to Cart', nilai: null, lolos: null, lolosDari: null, catatan: 'hanya terbaca dari export Ads Manager Showcase — belum dibangun' },
+          { kode: 'pesanan', label: 'Pesanan', nilai: 100, lolos: 0.02, lolosDari: 'Pengunjung toko', catatan: null },
+        ],
+        konversiTotal: { nilai: 0.02 },
+        belanjaTotal: null,
+        blok: [
+          {
+            kode: 'awareness', label: 'Awareness', fokus: false, belanja: null, belanjaPersen: null,
+            metrik: [
+              { kode: 'vv_impresi', label: 'Impresi iklan awareness', nilai: null, satuan: 'angka' },
+              { kode: 'vv_views', label: 'Video views (iklan)', nilai: null, satuan: 'angka' },
+              { kode: 'vv_cpm', label: 'CPM', nilai: null, satuan: 'rupiah' },
+              { kode: 'vv_per1k', label: 'Biaya per 1.000 views', nilai: null, satuan: 'rupiah' },
+              { kode: 'fol_follows', label: 'Follower dari campaign', nilai: null, satuan: 'angka' },
+              { kode: 'fol_cost', label: 'Biaya per follower', nilai: null, satuan: 'rupiah' },
+              { kode: 'konten_n', label: 'Konten diproduksi & tayang', nilai: null, satuan: 'angka' },
+              { kode: 'konten_vv', label: 'Total views konten', nilai: null, satuan: 'angka' },
+              { kode: 'konten_follower', label: 'Follower baru dari konten', nilai: null, satuan: 'angka' },
+            ],
+          },
+          {
+            kode: 'consideration', label: 'Consideration', fokus: false, belanja: null, belanjaPersen: null,
+            metrik: [
+              { kode: 'sc_impresi', label: 'Impresi iklan showcase', nilai: null, satuan: 'angka' },
+              { kode: 'sc_klik', label: 'Klik ke halaman produk (iklan)', nilai: null, satuan: 'angka' },
+              { kode: 'sc_ctr', label: 'CTR showcase', nilai: null, satuan: 'persen' },
+              { kode: 'sc_atc', label: 'Add to cart (iklan showcase)', nilai: null, satuan: 'angka' },
+              { kode: 'sc_cost_atc', label: 'Biaya per add to cart', nilai: null, satuan: 'rupiah' },
+              { kode: 'toko_impresi', label: 'Impresi produk (toko)', nilai: null, satuan: 'angka' },
+              { kode: 'toko_klik', label: 'Klik produk (toko)', nilai: null, satuan: 'angka' },
+              { kode: 'aff_total', label: 'Kreator afiliasi terdaftar', nilai: null, satuan: 'angka' },
+              { kode: 'aff_posting', label: 'Kreator memposting konten', nilai: null, satuan: 'angka' },
+            ],
+          },
+          {
+            kode: 'conversion', label: 'Conversion', fokus: false, belanja: null, belanjaPersen: null,
+            metrik: [
+              { kode: 'gmv', label: 'GMV', nilai: 10_000_000, satuan: 'rupiah' },
+              { kode: 'pesanan', label: 'Pesanan', nilai: 100, satuan: 'angka' },
+              { kode: 'cvr', label: 'Conversion rate toko', nilai: 0.02, satuan: 'persen' },
+              { kode: 'aov', label: 'Nilai rata-rata per pesanan', nilai: 100_000, satuan: 'rupiah' },
+              { kode: 'roi', label: 'ROI iklan konversi (GMV Max)', nilai: null, satuan: 'kali' },
+              { kode: 'cpa', label: 'Biaya per pesanan (GMV Max)', nilai: null, satuan: 'rupiah' },
+              { kode: 'aff_produktif', label: 'Kreator menghasilkan penjualan', nilai: null, satuan: 'angka' },
+              { kode: 'tp_gmv', label: 'GMV ShopTokopedia', nilai: null, satuan: 'rupiah' },
+            ],
+          },
+        ],
+      },
       skor,
       benchmarkVersi: 1,
     });
@@ -88,9 +151,11 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
     const skor = computeSkorTiktok(INPUT_KOSONG_TIKTOK, BENCH_KOSONG);
     const hasil = bangunLaporanTiktok({
       clientPlatformId: 1, periodeAwalBulan: '2026-07-01', generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: null, kanal: null, iklan: null, live: null, video: null, afiliasi: null, skor, benchmarkVersi: 1,
+      kpi: null, kanal: null, iklan: null, live: null, video: null, afiliasi: null, tahap: TAHAP_INPUT_KOSONG, skor, benchmarkVersi: 1,
     });
     expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+    // kpi seluruhnya null ⇒ tahap ikut null (whole object) — nol apa pun untuk direproyeksikan.
+    expect(hasil.tahap).toBeNull();
   });
 });
 
@@ -121,6 +186,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       live: null,
       video: null,
       afiliasi: null,
+      tahap: null,
       skor,
     });
     expect('benchmarkVersi' in hasil).toBe(false);
@@ -317,6 +383,98 @@ describe('bangunLaporanAfiliasi (G2-01 lanjutan — bagian "afiliasi" ringkasan,
     expect(hasil?.gmv).toBeNull();
     expect(hasil?.aov).toBeNull();
     expect(hasil?.pesanan).toBe(3);
+  });
+});
+
+describe('bangunLaporanTahap (G2-01 lanjutan — bagian "tahap", 2026-09-16, TikTok-only)', () => {
+  const KPI_KOSONG: PdtLaporanKpiRingkas = { gmv: null, pesanan: null, pengunjung: null, cvr: null };
+  const KPI_ISI: PdtLaporanKpiRingkas = { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000, cvr: 0.02 };
+
+  it('kpi seluruhnya null (nol baris basis net) ⇒ null (whole object, BUKAN objek ber-field null)', () => {
+    expect(bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_KOSONG, null, null, null)).toBeNull();
+  });
+
+  it('tahapFokus tidak valid (kolom rusak/di luar tiga nilai) ⇒ fokus null, ketiga blok fokus:false', () => {
+    const input: PdtLaporanTahapInput = { ...TAHAP_INPUT_KOSONG, tahapFokus: 'bukan-tahap' };
+    const hasil = bangunLaporanTahap(input, KPI_ISI, null, null, null);
+    expect(hasil?.fokus).toBeNull();
+    expect(hasil?.blok.every((b) => !b.fokus)).toBe(true);
+  });
+
+  it('tahapFokus valid ⇒ blok yang cocok fokus:true, sisanya false', () => {
+    const input: PdtLaporanTahapInput = { ...TAHAP_INPUT_KOSONG, tahapFokus: 'consideration' };
+    const hasil = bangunLaporanTahap(input, KPI_ISI, null, null, null);
+    expect(hasil?.fokus).toBe('consideration');
+    expect(hasil?.blok.find((b) => b.kode === 'consideration')?.fokus).toBe(true);
+    expect(hasil?.blok.find((b) => b.kode === 'awareness')?.fokus).toBe(false);
+    expect(hasil?.blok.find((b) => b.kode === 'conversion')?.fokus).toBe(false);
+  });
+
+  it('funnel: rung tanpa nilai (impresi/atc) tidak pernah jadi pembanding lolos — lolos dihitung terhadap rung terakhir yang PUNYA nilai', () => {
+    const input: PdtLaporanTahapInput = { ...TAHAP_INPUT_KOSONG, klik: 2_500 };
+    const hasil = bangunLaporanTahap(input, KPI_ISI, null, null, null);
+    const klik = hasil?.funnel.find((f) => f.kode === 'klik');
+    const pengunjung = hasil?.funnel.find((f) => f.kode === 'pengunjung');
+    const pesanan = hasil?.funnel.find((f) => f.kode === 'pesanan');
+    // klik (2.500) adalah rung PERTAMA berisi nilai ⇒ lolosDari null (nol pembanding sebelumnya).
+    expect(klik).toEqual({ kode: 'klik', label: 'Klik ke halaman produk', nilai: 2_500, lolos: null, lolosDari: null, catatan: null });
+    // pengunjung (5.000) dibanding klik (2.500) — TERBALIK dari urutan tampil, tapi itu memang lolos > 1 (funnel corong tidak selalu menyempit di sini karena klik toko ≠ definisi klik funnel iklan).
+    expect(pengunjung?.lolos).toBe(2);
+    expect(pengunjung?.lolosDari).toBe('Klik ke halaman produk');
+    // pesanan (100) dibanding pengunjung (5.000) — atc di antaranya null, dilewati sebagai pembanding.
+    expect(pesanan?.lolos).toBe(0.02);
+    expect(pesanan?.lolosDari).toBe('Pengunjung toko');
+  });
+
+  it('impresi/atc SELALU null dengan catatan eksplisit (kolom genuinely tidak ada / butuh ads_manager)', () => {
+    const hasil = bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_ISI, null, null, null);
+    const impresi = hasil?.funnel.find((f) => f.kode === 'impresi');
+    const atc = hasil?.funnel.find((f) => f.kode === 'atc');
+    expect(impresi).toEqual({ kode: 'impresi', label: 'Impresi produk', nilai: null, lolos: null, lolosDari: null, catatan: 'kolom impresi toko belum ada di skema PDT saat ini' });
+    expect(atc).toEqual({ kode: 'atc', label: 'Add to Cart', nilai: null, lolos: null, lolosDari: null, catatan: 'hanya terbaca dari export Ads Manager Showcase — belum dibangun' });
+  });
+
+  it('aov diturunkan Σgmv÷Σpesanan (bukan kolom mentah), null saat pesanan 0', () => {
+    const hasilIsi = bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_ISI, null, null, null);
+    expect(hasilIsi?.blok.find((b) => b.kode === 'conversion')?.metrik.find((m) => m.kode === 'aov')?.nilai).toBe(100_000);
+    const kpiNol: PdtLaporanKpiRingkas = { gmv: 0, pesanan: 0, pengunjung: 0, cvr: null };
+    const hasilNol = bangunLaporanTahap(TAHAP_INPUT_KOSONG, kpiNol, null, null, null);
+    expect(hasilNol?.blok.find((b) => b.kode === 'conversion')?.metrik.find((m) => m.kode === 'aov')?.nilai).toBeNull();
+  });
+
+  it('cpa diturunkan Σbiaya÷Σpesanan_sku dari cpaInput, null saat pesanan_sku null/0', () => {
+    const hasil = bangunLaporanTahap({ ...TAHAP_INPUT_KOSONG, cpaInput: { biaya: 300_000, pesanan: 15 } }, KPI_ISI, null, null, null);
+    expect(hasil?.blok.find((b) => b.kode === 'conversion')?.metrik.find((m) => m.kode === 'cpa')?.nilai).toBe(20_000);
+    const hasilPesananNull = bangunLaporanTahap({ ...TAHAP_INPUT_KOSONG, cpaInput: { biaya: 300_000, pesanan: null } }, KPI_ISI, null, null, null);
+    expect(hasilPesananNull?.blok.find((b) => b.kode === 'conversion')?.metrik.find((m) => m.kode === 'cpa')?.nilai).toBeNull();
+  });
+
+  it('roi/aff_total/aff_produktif/konten_n/konten_vv reuse LANGSUNG dari iklan/afiliasi/video yang sudah dibangun (nol query ulang)', () => {
+    const iklan: PdtLaporanIklan = { biaya: 300_000, gmv: 1_500_000, roas: 5, items: [], lengkap: true };
+    const afiliasi: PdtLaporanAfiliasi = { totalKreator: 10, produktif: 4, gmv: 500_000, pesanan: 12, aov: 41_667, jumlahLive: 2, jumlahVideo: 6 };
+    const video: PdtLaporanVideo = { total: 20, gmv: 400_000, vv: 50_000, likes: 1_000, dibagikan: 100, klikProduk: 200, gmvPerVideo: 20_000, vvPerVideo: 2_500 };
+    const hasil = bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_ISI, iklan, afiliasi, video);
+    const conv = hasil?.blok.find((b) => b.kode === 'conversion')?.metrik ?? [];
+    const cons = hasil?.blok.find((b) => b.kode === 'consideration')?.metrik ?? [];
+    const aware = hasil?.blok.find((b) => b.kode === 'awareness')?.metrik ?? [];
+    expect(conv.find((m) => m.kode === 'roi')?.nilai).toBe(5);
+    expect(conv.find((m) => m.kode === 'aff_produktif')?.nilai).toBe(4);
+    expect(cons.find((m) => m.kode === 'aff_total')?.nilai).toBe(10);
+    expect(aware.find((m) => m.kode === 'konten_n')?.nilai).toBe(20);
+    expect(aware.find((m) => m.kode === 'konten_vv')?.nilai).toBe(50_000);
+    // belanja conversion = iklan.biaya (spend GMV Max) — awareness/consideration selalu null (ttam belum dibangun).
+    expect(hasil?.blok.find((b) => b.kode === 'conversion')?.belanja).toBe(300_000);
+    expect(hasil?.blok.find((b) => b.kode === 'conversion')?.belanjaPersen).toBe(1);
+    expect(hasil?.belanjaTotal).toBe(300_000);
+    expect(hasil?.blok.find((b) => b.kode === 'awareness')?.belanja).toBeNull();
+  });
+
+  it('konten_follower/awareness sc_*/tp_gmv SELALU null (pengikut_baru tidak pernah diisi writer, ttam/Tokopedia di luar cakupan)', () => {
+    const hasil = bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_ISI, null, null, null);
+    const aware = hasil?.blok.find((b) => b.kode === 'awareness')?.metrik ?? [];
+    const conv = hasil?.blok.find((b) => b.kode === 'conversion')?.metrik ?? [];
+    expect(aware.find((m) => m.kode === 'konten_follower')?.nilai).toBeNull();
+    expect(conv.find((m) => m.kode === 'tp_gmv')?.nilai).toBeNull();
   });
 });
 

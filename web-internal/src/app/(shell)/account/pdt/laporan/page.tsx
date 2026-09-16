@@ -3,9 +3,9 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + kanal + iklan + live + video + afiliasi + skor per toko
- * klien, dibaca lewat `GET /account/pdt/laporan`. v1 SENGAJA sempit (tujuh
- * dari dua belas seksi mesin laporan lama — lihat docblock
+ * KPI ringkas + kanal + iklan + live + video + afiliasi + tahap + skor per
+ * toko klien, dibaca lewat `GET /account/pdt/laporan`. v1 SENGAJA sempit
+ * (delapan dari dua belas seksi mesin laporan lama — lihat docblock
  * `packages/core/src/pdt/laporan.ts`): belum ada produk/tokopedia/dst.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
@@ -52,6 +52,17 @@
  * disembunyikan seluruhnya saat `afiliasi` `null` (nol baris kreator sama
  * sekali di periode ini).
  *
+ * **Tahap** (buyer-journey Awareness→Consideration→Conversion, keputusan
+ * pemilik via `AskUserQuestion` KETUJUH, dua ronde, 2026-09-16): TikTok-ONLY
+ * — Shopee SELALU `tahap: null` karena mesin lama Shopee tidak pernah punya
+ * konsep buyer-journey sama sekali (bukan gap data seperti "video"), jadi
+ * seksi ini disembunyikan TOTAL untuk Shopee, bukan ditampilkan kosong.
+ * v1 SENGAJA menerima banyak `null` per metrik (funnel Impresi/ATC, hampir
+ * seluruh blok Awareness/Consideration) karena TikTok Ads Manager belum
+ * punya modul PDT sama sekali — halaman menampilkan catatan/"—" eksplisit,
+ * BUKAN 0 yang mengarang aktivitas. Seksi disembunyikan seluruhnya saat
+ * `tahap` `null` (nol baris `pdt_fact_shop_daily` basis `net` periode ini).
+ *
  * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
  * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
  * untuk toko+periode yang sama BUKAN error — itu kirim-ulang/revisi (Flow B
@@ -82,6 +93,7 @@ import {
   type PdtKirimanRingkas,
   type PdtLaporan,
   type PdtLaporanKiriman,
+  type PdtTahapSatuan,
 } from '@/lib/pdt';
 import { formatIDR } from '@/lib/money';
 
@@ -105,6 +117,15 @@ function formatBobot(v: number): string {
 function formatRoas(v: number | null): string {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';
   return `${v.toFixed(2)}x`;
+}
+
+/** Format nilai metrik "tahap" sesuai `satuan` — `null` SELALU "—" (BUKAN 0, banyak bergantung modul yang belum dibangun). */
+function formatTahapNilai(v: number | null, satuan: PdtTahapSatuan): string {
+  if (v === null) return '—';
+  if (satuan === 'rupiah') return formatIDR(v);
+  if (satuan === 'persen') return formatPercent(v);
+  if (satuan === 'kali') return formatRoas(v);
+  return formatCount(v);
 }
 
 function currentMonth(): string {
@@ -591,6 +612,63 @@ export default function LaporanPdtPage() {
                   Sesi Live/Video per kreator tidak tersedia dari data Shopee — hanya ringkasan GMV/pesanan yang bisa dihitung untuk toko ini.
                 </p>
               )}
+            </section>
+          )}
+
+          {laporan.tahap && (
+            <section className="card">
+              <h2>Tahap (Buyer Journey)</h2>
+              <div className="alert alertWarning" role="status" style={{ marginTop: 8, marginBottom: 8 }}>
+                Belum lengkap — banyak angka Awareness/Consideration bergantung modul TikTok Ads Manager yang
+                belum dibangun (ditandai "—" di bawah, BUKAN nol aktivitas).
+              </div>
+              <table style={{ marginTop: 8, width: '100%', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left' }}>Funnel</th>
+                    <th style={{ textAlign: 'right' }}>Nilai</th>
+                    <th style={{ textAlign: 'right' }}>Lolos dari sebelumnya</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {laporan.tahap.funnel.map((f) => (
+                    <tr key={f.kode}>
+                      <td>{f.label}</td>
+                      <td style={{ textAlign: 'right' }}>{f.nilai === null ? '—' : formatCount(f.nilai)}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {f.lolos === null ? (f.catatan ?? '—') : `${formatPercent(f.lolos)} dari ${f.lolos_dari}`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>
+                Conversion rate toko (Σpesanan÷Σpengunjung): {formatPercent(laporan.tahap.konversi_total.nilai)}
+                {laporan.tahap.belanja_total !== null && ` — Total belanja iklan: ${formatIDR(laporan.tahap.belanja_total)}`}
+              </p>
+              {laporan.tahap.blok.map((b) => (
+                <div key={b.kode} style={{ marginTop: 16 }}>
+                  <h3 style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {b.label}
+                    {b.fokus && <span className="badge badge-green">Fokus</span>}
+                    {b.belanja !== null && (
+                      <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>
+                        {formatIDR(b.belanja)} ({formatPercent(b.belanja_persen)} dari total belanja)
+                      </span>
+                    )}
+                  </h3>
+                  <table style={{ width: '100%', fontSize: 13 }}>
+                    <tbody>
+                      {b.metrik.map((m) => (
+                        <tr key={m.kode}>
+                          <td>{m.label}</td>
+                          <td style={{ textAlign: 'right' }}>{formatTahapNilai(m.nilai, m.satuan)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
             </section>
           )}
 
