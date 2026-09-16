@@ -1150,9 +1150,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // Sesi 34 lanjutan (G1-09-2BII-SHOPDAILY-SHOPEE) — `shopee_shop_stats` → `pdt_fact_shop_daily`,
   // TIGA basis Rule 16 sekaligus dari SATU berkas (lihat docblock `ekstrakBarisShopDailyShopee`,
   // `@cdps/core` `pdt/fakta.ts`, untuk kenapa `b.sheets` bukan `b.aoa` yang terkunci ke satu
-  // basis). `produk_terjual`/`pembeli_baru` dipetakan sama seperti TikTok; `cancel rate`/
-  // `repeat rate` BELUM ada kolomnya di `pdt_fact_shop_daily` — dicatat Open baru
-  // `G2-01-SHOPEE-CANCEL-REPEAT-RATE`, tidak memblokir gap mendasar ini.
+  // basis). `produk_terjual`/`pembeli_baru` dipetakan sama seperti TikTok. `pesanan_dibatalkan`
+  // (G2-01-SHOPEE-CANCEL-REPEAT-RATE, separuh — cancelRate saja, migrasi `20261105010000`)
+  // ditulis untuk KETIGA basis (fungsi generik, sama pola kolom lain) — konsumen sesungguhnya
+  // (`rakitInputSkorShopee`) hanya membaca basis 'dibuat'. `repeat rate` TETAP tidak ada
+  // kolomnya (ditunda sengaja, lihat docblock migrasi yang sama).
   const BASIS_SHEET_SHOPEE: ReadonlyMap<string, string> = new Map([
     ['Pesanan Dibuat', 'dibuat'],
     ['Pesanan Siap Dikirim', 'siap_dikirim'],
@@ -1167,16 +1169,17 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
           await tx`
             insert into pdt_fact_shop_daily
               (client_platform_id, tanggal, basis, batch_id, parser_versi,
-               gmv, pesanan, pengunjung, produk_diklik, cr, pembeli, pembeli_baru, refund)
+               gmv, pesanan, pengunjung, produk_diklik, cr, pembeli, pembeli_baru, refund, pesanan_dibatalkan)
             values
               (${clientPlatformId}, ${baris.tanggal}::date, ${basis}, ${id}, ${pdt.PDT_PARSER_VERSI},
                ${baris.gmv}, ${baris.pesanan}, ${baris.pengunjung}, ${baris.produkDiklik},
-               ${baris.cr}, ${baris.pembeli}, ${baris.pembeliBaru}, ${baris.refund})
+               ${baris.cr}, ${baris.pembeli}, ${baris.pembeliBaru}, ${baris.refund}, ${baris.pesananDibatalkan})
             on conflict (client_platform_id, tanggal, basis) do update set
               batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
               gmv = excluded.gmv, pesanan = excluded.pesanan,
               pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
-              pembeli = excluded.pembeli, pembeli_baru = excluded.pembeli_baru, refund = excluded.refund`;
+              pembeli = excluded.pembeli, pembeli_baru = excluded.pembeli_baru, refund = excluded.refund,
+              pesanan_dibatalkan = excluded.pesanan_dibatalkan`;
         }
       }
     }
@@ -2246,10 +2249,12 @@ export async function rakitInputSkorShopee(
     ctr: klik == null || tayangan == null || tayangan <= 0 ? null : klik / tayangan,
   };
 
-  const [dibuatRow] = await sql<{ n: number; pesanan: string; pengunjung: string }[]>`
+  const [dibuatRow] = await sql<{ n: number; pesanan: string; pengunjung: string; pesanan_dibatalkan: number | null; n_batal: number }[]>`
     select count(*)::int as n,
            coalesce(sum(pesanan), 0) as pesanan,
-           coalesce(sum(pengunjung), 0) as pengunjung
+           coalesce(sum(pengunjung), 0) as pengunjung,
+           sum(pesanan_dibatalkan) as pesanan_dibatalkan,
+           count(*) filter (where pesanan_dibatalkan is not null)::int as n_batal
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = 'dibuat'
@@ -2259,10 +2264,12 @@ export async function rakitInputSkorShopee(
   const pesananTotal = Number(dibuatRow.pesanan);
   const dibuat: pdt.PdtSkorInputPesananDibuatShopee | null = dibuatRow.n === 0 ? null : {
     cr: pengunjungTotal === 0 ? 0 : pesananTotal / pengunjungTotal,
-    // G2-01-SHOPEE-CANCEL-REPEAT-RATE — kolom sumber ada, `pdt_fact_shop_daily`
-    // belum punya kolomnya. TIDAK ditebak di sini.
-    repeatRate: null,
-    cancelRate: null,
+    // G2-01-SHOPEE-CANCEL-REPEAT-RATE (separuh, langkah lanjutan) — cancelRate =
+    // Σ pesanan_dibatalkan / Σ pesanan (ratio-of-sums, sama pola `cr`). `null`
+    // bila NOL baris basis ini membawa kolom sumbernya (`n_batal=0` — berkas lama
+    // sebelum kolom ini dipanen, BUKAN nol pembatalan sungguhan, G1-03).
+    repeatRate: null, // TETAP null — ditunda sengaja, lihat migrasi 20261105010000/docs/DECISIONS.md
+    cancelRate: dibuatRow.n_batal === 0 ? null : pesananTotal === 0 ? 0 : Number(dibuatRow.pesanan_dibatalkan) / pesananTotal,
   };
 
   // Product Performance: SELALU null sampai G2-01-KUADRAN-SKU membangun

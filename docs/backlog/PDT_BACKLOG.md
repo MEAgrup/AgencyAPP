@@ -947,6 +947,21 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > (§G1-09-2BII-SHOPDAILY-SHOPEE di atas), tapi tiga dimensi lain masih terblokir data:
 > - **Conversion & Retention** — sebagian terblokir: `G2-01-SHOPEE-CANCEL-REPEAT-RATE` (kolom
 >   cancel-rate/repeat-rate belum ada di `pdt_fact_shop_daily`, lihat catatan G1-09-2BII di atas).
+>
+> **Status 2026-09-16 — `G2-01-SHOPEE-CANCEL-REPEAT-RATE` SEPARUH DITUTUP: cancelRate hidup,
+> repeatRate SENGAJA ditunda (keputusan pemilik via `AskUserQuestion`).** `pdt_fact_shop_daily.
+> pesanan_dibatalkan` (migrasi `20261105010000`) diisi `ekstrakBarisShopDailyShopee` dari kolom
+> `'Pesanan Dibatalkan'` (sudah terverifikasi sejak sesi 27); `rakitInputSkorShopee` menghitung
+> `cancelRate = Σpesanan_dibatalkan/Σpesanan` (ratio-of-sums basis `'dibuat'` saja, pola sama
+> `cr`). **repeatRate DITUNDA**: berbeda kelas metrik dari `cr`/`cancelRate` — "pembeli unik beli
+> >1x SATU PERIODE PENUH" tidak bisa direkonstruksi dari Σ/rata-rata baris HARIAN (`pdt_fact_
+> shop_daily` berskema per-hari), Shopee sendiri hanya menyediakan SATU angka per periode.
+> Pemilik memilih tunda sampai pola penyimpanan metrik per-periode (bukan per-hari) matang —
+> kemungkinan dipakai bersama `G2-01-SHOPEE-KESEHATAN-WRITER` (skor Kesehatan Toko kemungkinan
+> juga per-periode) supaya satu solusi menutup dua Open sekaligus. `PdtSkorInputPesananDibuatShopee.
+> repeatRate` TETAP `null` — dicatat, bukan tiket baru terpisah, lanjutan `G2-01-SHOPEE-CANCEL-
+> REPEAT-RATE` yang SAMA. Diverifikasi: `@cdps/core` 1425/1425, `@cdps/domain` 2767/2768 (1 skip
+> tak terkait), `@cdps/db` 107/107, `@cdps/api` 638/640 (2 skip); DB rebuild 255 migrasi.
 > - **Product Performance** — terblokir gap YANG SAMA dengan TikTok, `G2-01-KUADRAN-SKU`
 >   (`pdt_fact_sku_period.kuadran` belum pernah ditulis modul manapun).
 > - **Kesehatan Toko** — terblokir TOTAL: modul parser `shopee_kesehatan` sudah terdaftar dan bisa

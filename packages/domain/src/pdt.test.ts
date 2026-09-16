@@ -1102,6 +1102,7 @@ interface FactShopDailyRow {
   pembeli: number | null;
   pembeli_baru: number | null;
   refund: string | null;
+  pesanan_dibatalkan: number | null;
 }
 
 async function loadFactShopDaily(clientPlatformId: number): Promise<FactShopDailyRow[]> {
@@ -1266,6 +1267,7 @@ describeDb('commitUploadBatch (sesi 34 lanjutan, G1-09-2BII-SHOPDAILY-SHOPEE) �
     expect(byBasis.get('siap_dikirim')?.pembeli).toBe(393);
     expect(byBasis.get('siap_dikirim')?.pembeli_baru).toBe(347);
     expect(Number(byBasis.get('siap_dikirim')?.refund)).toBe(1648328);
+    expect(byBasis.get('dibuat')?.pesanan_dibatalkan).toBe(75); // G2-01-SHOPEE-CANCEL-REPEAT-RATE, konsumen basis 'dibuat'
   });
 
   it('commit ULANG (tanggal+basis sama) ⇒ ON CONFLICT DO UPDATE per basis — baris diperbarui, bukan digandakan', async () => {
@@ -3458,10 +3460,13 @@ describeDb('rakitInputSkorShopee (sesi 34 lanjutan) — agregasi pdt_fact_* → 
       values (${cpId}, ${sumber}, ${kampanyeId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${biaya}, ${gmv}, ${klik}, ${tayangan})`;
   }
 
-  async function insertDibuat(batchId: number, cpId: number, tanggal: string, pesanan: number, pengunjung: number | null): Promise<void> {
+  async function insertDibuat(
+    batchId: number, cpId: number, tanggal: string, pesanan: number, pengunjung: number | null,
+    pesananDibatalkan: number | null = null,
+  ): Promise<void> {
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
-      values (${cpId}, ${tanggal}::date, 'dibuat', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 0, ${pesanan}, ${pengunjung})`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung, pesanan_dibatalkan)
+      values (${cpId}, ${tanggal}::date, 'dibuat', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 0, ${pesanan}, ${pengunjung}, ${pesananDibatalkan})`;
   }
 
   async function insertLiveContent(batchId: number, cpId: number, contentId: string): Promise<void> {
@@ -3531,6 +3536,37 @@ describeDb('rakitInputSkorShopee (sesi 34 lanjutan) — agregasi pdt_fact_* → 
 
     const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
     expect(hasil.dibuat?.cr).toBe(0);
+  });
+
+  it('dibuat: cancelRate = Σpesanan_dibatalkan/Σpesanan (ratio-of-sums, G2-01-SHOPEE-CANCEL-REPEAT-RATE), repeatRate TETAP null (ditunda sengaja)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertDibuat(batchId, cpId, '2026-07-05', 40, 2_000, 4);
+    await insertDibuat(batchId, cpId, '2026-07-20', 20, 1_000, 2);
+    // di luar periode Juli — TIDAK boleh ikut terhitung
+    await insertDibuat(batchId, cpId, '2026-08-01', 999, 999, 999);
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.dibuat?.cancelRate).toBe(6 / 60);
+    expect(hasil.dibuat?.repeatRate).toBeNull();
+  });
+
+  it('dibuat: cancelRate null bila NOL baris membawa kolom sumbernya (berkas lama sebelum kolom dipanen — bukan nol pembatalan sungguhan)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertDibuat(batchId, cpId, '2026-07-05', 40, 2_000); // pesananDibatalkan default null
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.dibuat?.cancelRate).toBeNull();
+  });
+
+  it('dibuat: basis SIAP DIKIRIM/DIBAYAR (pesanan_dibatalkan mungkin terisi juga) TIDAK ikut cancelRate — hanya basis dibuat', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertDibuat(batchId, cpId, '2026-07-05', 40, 2_000, 4);
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pesanan_dibatalkan)
+      values (${cpId}, '2026-07-05'::date, 'siap_dikirim', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 0, 999, 999)`;
+
+    const hasil = await rakitInputSkorShopee(sql, cpId, '2026-07-01');
+    expect(hasil.dibuat?.cancelRate).toBe(4 / 40); // BUKAN tercampur dengan baris siap_dikirim
   });
 
   it('produk: SELALU null (kuadran belum punya penulis, Open G2-01-KUADRAN-SKU)', async () => {

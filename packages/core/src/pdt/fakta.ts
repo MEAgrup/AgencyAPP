@@ -1088,6 +1088,7 @@ export interface PdtBarisShopDailyShopee {
   pembeli: number | null;
   pembeliBaru: number | null;
   refund: number | null;
+  pesananDibatalkan: number | null;
 }
 
 /**
@@ -1118,15 +1119,19 @@ export interface PdtBarisShopDailyShopee {
  * Shopee lain) — `parseTanggalIdStrip` (`identitas.ts`, baru sesi ini),
  * diverifikasi langsung dari sample ("01-07-2026").
  *
- * **Kolom yang TIDAK dipanen di sini, meski ADA di `kolomDipanen` modul**:
- * `Pesanan Dibatalkan`/`Penjualan Dibatalkan` (cancel rate) dan `Tingkat
- * Pembelian Berulang` (repeat rate) — `pdt_fact_shop_daily` BELUM punya
- * kolom untuk keduanya (skema G1-01 dirancang sebelum kolom-kolom ini
- * terverifikasi ada). Dicatat sebagai Open baru
- * `G2-01-SHOPEE-CANCEL-REPEAT-RATE`, TIDAK memblokir gap shop_daily
- * mendasar ini (GMV/pesanan/CR/pengunjung harian) — mengikuti pola yang sama
- * dengan `G2-01-KUADRAN-SKU` (kolom terverifikasi ada di sumber, tapi
- * penulisnya/skemanya belum, dicatat eksplisit alih-alih ditebak/diselundupkan).
+ * **`pesananDibatalkan`** (G2-01-SHOPEE-CANCEL-REPEAT-RATE, separuh — cancelRate
+ * SAJA, repeatRate ditunda sengaja keputusan pemilik) — konsumen
+ * `PdtSkorInputPesananDibuatShopee.cancelRate` (pemanggil menghitung rasio
+ * Σ/Σ terhadap `pesanan`, sama pola `cr`). `'Penjualan Dibatalkan'` (nilai
+ * Rupiah, BUKAN hitungan) SENGAJA TIDAK dipetakan — nol konsumen hari ini
+ * (`scoreConv` mesin lama hanya memakai hitungan pesanan, lihat migrasi
+ * `20261105010000`). **`'Tingkat Pembelian Berulang'` (repeat rate) SENGAJA
+ * TIDAK dipetakan di sini** — metrik "pembeli unik beli >1x SATU PERIODE
+ * PENUH" tidak bisa direkonstruksi dari Σ/rata-rata baris HARIAN (beda kelas
+ * dari `cr`/`cancelRate` yang aditif); `pdt_fact_shop_daily` yang berskema
+ * PER HARI bukan "rumah" yang tepat — ditunda sampai pola penyimpanan
+ * metrik per-periode diputuskan (lihat migrasi `20261105010000` untuk
+ * rincian lengkap, `docs/DECISIONS.md`).
  */
 export function ekstrakBarisShopDailyShopee(aoa: readonly (readonly unknown[])[]): PdtBarisShopDailyShopee[] {
   const idxHeaderHarian = aoa.findIndex((row, i) => i > 0 && norm(row?.[0]) === 'tanggal');
@@ -1142,6 +1147,7 @@ export function ekstrakBarisShopDailyShopee(aoa: readonly (readonly unknown[])[]
   const iPembeli = idx('Pembeli');
   const iPembeliBaru = idx('Total Pembeli Baru');
   const iRefund = idx('Penjualan Dikembalikan');
+  const iPesananDibatalkan = idx('Pesanan Dibatalkan');
 
   const hasil: PdtBarisShopDailyShopee[] = [];
   for (const row of aoa.slice(idxHeaderHarian + 1)) {
@@ -1159,6 +1165,7 @@ export function ekstrakBarisShopDailyShopee(aoa: readonly (readonly unknown[])[]
       pembeli: iPembeli === -1 ? null : parsePdtAngka(row?.[iPembeli]),
       pembeliBaru: iPembeliBaru === -1 ? null : parsePdtAngka(row?.[iPembeliBaru]),
       refund: iRefund === -1 ? null : parsePdtAngka(row?.[iRefund]),
+      pesananDibatalkan: iPesananDibatalkan === -1 ? null : parsePdtAngka(row?.[iPesananDibatalkan]),
     });
   }
   return hasil;
