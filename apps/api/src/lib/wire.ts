@@ -9266,6 +9266,40 @@ export interface PdtLaporanAfiliasiWire {
   jumlah_video: number | null;
 }
 
+export interface PdtLaporanFunnelLangkahWire {
+  kode: string;
+  label: string;
+  nilai: number | null;
+  lolos: number | null;
+  lolos_dari: string | null;
+  catatan: string | null;
+}
+
+export interface PdtLaporanTahapMetrikWire {
+  kode: string;
+  label: string;
+  nilai: number | null;
+  satuan: pdtCore.PdtTahapSatuan;
+}
+
+export interface PdtLaporanTahapBlokWire {
+  kode: pdtCore.PdtTahapKey;
+  label: string;
+  fokus: boolean;
+  belanja: number | null;
+  belanja_persen: number | null;
+  metrik: PdtLaporanTahapMetrikWire[];
+}
+
+/** `null` = TikTok tanpa baris `pdt_fact_shop_daily` basis `net` periode ini, ATAU platform Shopee (mesin lama Shopee tidak punya konsep buyer-journey sama sekali — lihat docblock `pdt.PdtLaporanTahap`, `@cdps/core`). Banyak `metrik[].nilai`/`funnel[].nilai` `null` PERMANEN sampai modul TikTok Ads Manager dibangun — bukan bug. */
+export interface PdtLaporanTahapWire {
+  fokus: pdtCore.PdtTahapKey | null;
+  funnel: PdtLaporanFunnelLangkahWire[];
+  konversi_total: { nilai: number | null };
+  belanja_total: number | null;
+  blok: PdtLaporanTahapBlokWire[];
+}
+
 export interface PdtLaporanWire {
   schema: string;
   platform: string;
@@ -9278,6 +9312,7 @@ export interface PdtLaporanWire {
   live: PdtLaporanLiveWire | null;
   video: PdtLaporanVideoWire | null;
   afiliasi: PdtLaporanAfiliasiWire | null;
+  tahap: PdtLaporanTahapWire | null;
   skor: PdtLaporanSkorWire;
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
@@ -9337,6 +9372,20 @@ function pdtLaporanAfiliasiToWire(a: pdtCore.PdtLaporanAfiliasi | null): PdtLapo
   };
 }
 
+function pdtLaporanTahapToWire(t: pdtCore.PdtLaporanTahap | null): PdtLaporanTahapWire | null {
+  if (t == null) return null;
+  return {
+    fokus: t.fokus,
+    funnel: t.funnel.map((f) => ({ kode: f.kode, label: f.label, nilai: f.nilai, lolos: f.lolos, lolos_dari: f.lolosDari, catatan: f.catatan })),
+    konversi_total: { nilai: t.konversiTotal.nilai },
+    belanja_total: t.belanjaTotal,
+    blok: t.blok.map((b) => ({
+      kode: b.kode, label: b.label, fokus: b.fokus, belanja: b.belanja, belanja_persen: b.belanjaPersen,
+      metrik: b.metrik.map((m) => ({ kode: m.kode, label: m.label, nilai: m.nilai, satuan: m.satuan })),
+    })),
+  };
+}
+
 export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanWire {
   return {
     schema: l.schema,
@@ -9350,6 +9399,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
     afiliasi: pdtLaporanAfiliasiToWire(l.afiliasi),
+    tahap: pdtLaporanTahapToWire(l.tahap),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: l.benchmarkVersi,
   };
@@ -9368,6 +9418,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
     afiliasi: pdtLaporanAfiliasiToWire(l.afiliasi),
+    tahap: null,
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: null,
   };

@@ -33,13 +33,18 @@
  * keputusan pemilik via `AskUserQuestion` KEENAM, 2026-09-16: RINGKASAN saja
  * untuk KEDUA platform, BUKAN daftar per-kreator, karena `pdt_fact_creator_
  * period` tidak pernah punya kolom `refund`/`komisi`/`roiKomisi` yang
- * dibawa mesin lama) sudah bisa dibangun dari `pdt_fact_*` — LIMA bagian
- * lain (produk, tokopedia, ads_manager, tahap, insight) butuh fungsi
- * agregasi fakta BARU per bagian (pola sama `rakitInputSkorTiktok`/
- * `rakitInputSkorShopee`) yang belum ada satupun, pekerjaan multi-sesi.
- * Lima bagian sisanya TETAP di luar cakupan, ditambahkan satu-per-satu sesi
- * berikutnya seperti pola G1-09 fact-writer, TIDAK ditebak/dibangun
- * sekaligus di sini.
+ * dibawa mesin lama), dan sekarang "tahap" (lihat docblock `PdtLaporanTahap`
+ * di bawah — keputusan pemilik via `AskUserQuestion` KETUJUH, dua ronde,
+ * 2026-09-16: TikTok-ONLY, Shopee `null` PERMANEN karena mesin lama Shopee
+ * tidak pernah punya konsep buyer-journey sama sekali — bukan gap data
+ * seperti "video"; v1 SENGAJA menerima banyak `null` per field karena
+ * `ttam`/TikTok Ads Manager belum punya modul PDT sama sekali) sudah bisa
+ * dibangun dari `pdt_fact_*` — EMPAT bagian lain (produk, tokopedia,
+ * ads_manager, insight) butuh fungsi agregasi fakta BARU per bagian (pola
+ * sama `rakitInputSkorTiktok`/`rakitInputSkorShopee`) yang belum ada
+ * satupun, pekerjaan multi-sesi. Empat bagian sisanya TETAP di luar
+ * cakupan, ditambahkan satu-per-satu sesi berikutnya seperti pola G1-09
+ * fact-writer, TIDAK ditebak/dibangun sekaligus di sini.
  *
  * **Basis KPI ringkas per platform diverifikasi dari PRD (bukan ditebak)**:
  * TikTok = GMV−refund, basis `'net'` (Rule 15); Shopee = basis
@@ -487,6 +492,244 @@ export function bangunLaporanAfiliasi(input: PdtLaporanAfiliasiInput | null): Pd
   };
 }
 
+/**
+ * Bagian "tahap" (buyer-journey Awareness→Consideration→Conversion) — bagian
+ * KETUJUH, keputusan pemilik via `AskUserQuestion` KETUJUH (dua ronde,
+ * 2026-09-16): TikTok-ONLY, Shopee `null` PERMANEN — BUKAN gap data seperti
+ * "video" (Shopee `shopee_video` sekadar belum punya writer), tapi mesin
+ * lama Shopee (`report/shopee/`) TIDAK PERNAH punya konsep buyer-journey
+ * SAMA SEKALI: `report/shopee/insight.ts` eksplisit "Shopee has no
+ * buyer-journey layer yet (that engine's exports carry a different
+ * funnel)... the day Shopee gets its own stages, only this line moves."
+ * `funnel`/`blok`/`tahapFokus` adalah konsep TikTok-only di produksi —
+ * membangun bentuk Shopee di sini berarti MENGARANG section yang tidak
+ * pernah dirancang di sistem manapun, bukan porting.
+ *
+ * **v1 SENGAJA menerima banyak `null`** (ronde pertama `AskUserQuestion`):
+ * mesin lama (`report/tahap.ts`) adalah reprojection MURNI atas
+ * `ReportMetrics` — tapi field-nya banyak bersumber dari `M.ttam`
+ * (TikTok Ads Manager 4-tipe export: consideration/follows/showcase/
+ * videoviews), yang SAMA SEKALI belum punya modul PDT (sekelas "produk"
+ * kuadran — tabel+parser+writer baru, bukan sekadar agregasi). Setiap
+ * field yang bergantung `ttam` PERMANEN `null` di sini sampai modul itu
+ * dibangun (pekerjaan terpisah, TIDAK ditebak).
+ *
+ * **`flag`/`band` (pewarnaan hijau/kuning/merah per metrik) SENGAJA TIDAK
+ * diikutkan v1 ini** — keputusan desain, bukan gap data: mesin lama
+ * mengambil band dari `pdt_benchmark`/ambang hardcode yang SUDAH dipakai
+ * `skor` (dimensi `Conversion & Retention`/`ROAS & Channel` di
+ * `laporan.skor.dimensi`), jadi AM tetap bisa menilai warna dari situ.
+ * Menduplikasi pipa `pdt_benchmark` ke konsumen KEDUA sebelum ada
+ * kebutuhan nyata menambah kompleksitas tanpa fakta baru. Bisa ditambah
+ * sesi lain kalau AM benar-benar butuh warna di level tahap.
+ *
+ * **Empat sumber data BARU (bukan reuse murni bagian lain)**, diverifikasi
+ * satu-per-satu terhadap skema (bukan ditebak):
+ *  - **Impresi produk** (rung funnel pertama) — mesin lama membacanya dari
+ *    kolom `Impresi produk` sheet ringkasan toko (`baseline/metrik.ts`
+ *    `toko()`). Kolom itu TIDAK ADA di `pdt_fact_shop_daily` sama sekali
+ *    (hanya `produk_diklik`, bukan `impresi`) — `pdt_fact_sku_period.impresi`
+ *    ADA tapi grain-nya PER SKU untuk tujuan kuadran, menjumlahkannya jadi
+ *    "impresi toko" adalah asumsi FK-lookup kelas sama `G1-09-2BII-ADS-CPC-
+ *    SKU` yang sudah terbukti salah sekali — TIDAK dicoba di sini. Rung ini
+ *    PERMANEN `null` dengan `catatan` eksplisit, sama pola rung "Add to
+ *    Cart" mesin lama sendiri (kolom genuinely tidak ada, bukan 0).
+ *  - **Klik ke halaman produk** — `pdt_fact_shop_daily.produk_diklik`
+ *    (basis `'net'`, SAMA basis dengan KPI ringkas TikTok) SUDAH ditulis
+ *    writer sejak G1-09, tapi belum pernah dibaca laporan manapun — query
+ *    baru `bacaTahapTiktok`.
+ *  - **CPA (Biaya per pesanan, GMV Max)** — `pdt_fact_ads.pesanan_sku`
+ *    SUDAH ditulis KELIMA modul ads (termasuk `tt_ads_product`/
+ *    `tt_ads_live`) tapi bagian "iklan" tidak pernah membacanya (cuma
+ *    biaya/gmv). Query baru menjumlah `biaya`/`pesanan_sku` sumber
+ *    `tt_ads_*` — TERPISAH dari `bacaIklanTiktok` (tidak mengubah bentuk
+ *    "iklan" yang sudah merge, blast radius minimal).
+ *  - **Kreator memposting konten** (`aff_posting`) — hitungan BARU: baris
+ *    `pdt_fact_creator_period` ber-`jumlah_live>0 OR jumlah_video>0`.
+ *    `null` bila nol baris kreator sama sekali (cermin konvensi
+ *    `bacaAfiliasi`), BUKAN 0 kreator posting.
+ *
+ * Sisanya REUSE LANGSUNG bagian lain yang sudah dibangun (nol query baru):
+ * `gmv`/`pesanan`/`cvr` dari `kpi`, `aov` diturunkan `gmv÷pesanan` (konvensi
+ * `roas`/`aov` afiliasi — SETELAH dijumlah, bukan dibaca mentah), `roi` dari
+ * `iklan.roas`, `aff_total`/`aff_produktif` dari `afiliasi.totalKreator`/
+ * `.produktif`, `konten_n`/`konten_vv` dari `video.total`/`.vv`.
+ * `konten_follower`/semua field awareness selain `konten_n`/`konten_vv`
+ * PERMANEN `null` — `pengikut_baru` (`pdt_fact_content`) TIDAK PERNAH diisi
+ * `tt_video`/`shopee_live` (literal `null` di setiap INSERT, diverifikasi
+ * baris kode, sama alasan "video" mengecualikannya). `tp_gmv` (Tokopedia)
+ * PERMANEN `null` (PDT-22, di luar cakupan PDT).
+ *
+ * `belanjaTotal`/`belanjaPersen` per blok: pola SAMA mesin lama (spend
+ * dikelompokkan per TUJUAN campaign, bukan per hasil) — tapi karena
+ * awareness/consideration spend SELURUHNYA dari `ttam` (permanen null),
+ * `belanjaTotal` PRAKTIKNYA = `iklan.biaya` (spend conversion/GMV Max saja)
+ * sampai `ttam` dibangun — `belanjaPersen` conversion akan selalu 100% untuk
+ * sementara, itu JUJUR terhadap data yang ada, bukan bug.
+ *
+ * Whole-object `null` saat `kpi` seluruhnya `null` (nol baris
+ * `pdt_fact_shop_daily` basis `'net'` periode ini) — cermin Rule 12/pola
+ * bagian lain, tidak ada apa pun untuk direproyeksikan.
+ */
+export type PdtTahapKey = 'awareness' | 'consideration' | 'conversion';
+
+/** Satu rung funnel. `lolos` = share dari rung SEBELUMNYA yang punya nilai (bukan rung persis di atasnya) — `null` bila salah satu sisi tidak diketahui, TIDAK PERNAH 0 (aturan rumah #7: "tidak terukur" ≠ "nol"). */
+export interface PdtLaporanFunnelLangkah {
+  kode: string;
+  label: string;
+  nilai: number | null;
+  lolos: number | null;
+  /** Label rung yang jadi pembanding `lolos`; `null` untuk rung pertama yang punya nilai. */
+  lolosDari: string | null;
+  /** Kenapa rung ini `null` — `null` bila rung ini punya nilai. */
+  catatan: string | null;
+}
+
+export type PdtTahapSatuan = 'rupiah' | 'angka' | 'persen' | 'kali';
+
+export interface PdtLaporanTahapMetrik {
+  kode: string;
+  label: string;
+  nilai: number | null;
+  satuan: PdtTahapSatuan;
+}
+
+export interface PdtLaporanTahapBlok {
+  kode: PdtTahapKey;
+  label: string;
+  /** `true` untuk blok yang jadi fokus AM (`client_platforms.tahap_fokus`). Seluruhnya `false` bila belum diset. */
+  fokus: boolean;
+  belanja: number | null;
+  belanjaPersen: number | null;
+  metrik: PdtLaporanTahapMetrik[];
+}
+
+export interface PdtLaporanTahap {
+  fokus: PdtTahapKey | null;
+  funnel: PdtLaporanFunnelLangkah[];
+  /** Σpesanan÷Σpengunjung — SATU rate di layer ini yang jadi acuan (rung funnel sendiri tidak dinilai, lihat docblock tipe di atas). */
+  konversiTotal: { nilai: number | null };
+  belanjaTotal: number | null;
+  blok: PdtLaporanTahapBlok[];
+}
+
+const TAHAP_LABEL: Record<PdtTahapKey, string> = { awareness: 'Awareness', consideration: 'Consideration', conversion: 'Conversion' };
+const ALL_TAHAP: readonly PdtTahapKey[] = ['awareness', 'consideration', 'conversion'];
+
+function isPdtTahapKey(v: string | null): v is PdtTahapKey {
+  return v === 'awareness' || v === 'consideration' || v === 'conversion';
+}
+
+const tm = (kode: string, label: string, nilai: number | null, satuan: PdtTahapSatuan): PdtLaporanTahapMetrik =>
+  ({ kode, label, nilai, satuan });
+
+function buildFunnelTiktok(kpi: PdtLaporanKpiRingkas, klik: number | null): PdtLaporanFunnelLangkah[] {
+  const rows: Omit<PdtLaporanFunnelLangkah, 'lolos' | 'lolosDari'>[] = [
+    { kode: 'impresi', label: 'Impresi produk', nilai: null, catatan: 'kolom impresi toko belum ada di skema PDT saat ini' },
+    { kode: 'klik', label: 'Klik ke halaman produk', nilai: klik, catatan: klik == null ? 'tidak ada di export Analitik Toko periode ini' : null },
+    { kode: 'pengunjung', label: 'Pengunjung toko', nilai: kpi.pengunjung, catatan: null },
+    { kode: 'atc', label: 'Add to Cart', nilai: null, catatan: 'hanya terbaca dari export Ads Manager Showcase — belum dibangun' },
+    { kode: 'pesanan', label: 'Pesanan', nilai: kpi.pesanan, catatan: null },
+  ];
+
+  const out: PdtLaporanFunnelLangkah[] = [];
+  let prev: { label: string; nilai: number } | null = null;
+  for (const r of rows) {
+    const lolos = prev && r.nilai != null ? r.nilai / prev.nilai : null;
+    out.push({ ...r, lolos: lolos == null ? null : persen5(lolos), lolosDari: lolos == null ? null : prev!.label });
+    if (r.nilai != null) prev = { label: r.label, nilai: r.nilai };
+  }
+  return out;
+}
+
+/** Agregat BARU khusus "tahap" TikTok — lihat docblock `PdtLaporanTahap` untuk sumber tiap field. */
+export interface PdtLaporanTahapInput {
+  tahapFokus: string | null;
+  klik: number | null;
+  cpaInput: { biaya: number; pesanan: number | null } | null;
+  affPosting: number | null;
+}
+
+/**
+ * Rakit "tahap" TikTok dari input BARU + bagian lain yang sudah dibangun
+ * (kpi/iklan/afiliasi/video — nol query ulang, lihat docblock tipe
+ * `PdtLaporanTahap`). `null` (whole object) bila `kpi` seluruhnya `null`
+ * (nol baris `pdt_fact_shop_daily` basis `'net'` periode ini).
+ */
+export function bangunLaporanTahap(
+  input: PdtLaporanTahapInput,
+  kpi: PdtLaporanKpiRingkas,
+  iklan: PdtLaporanIklan | null,
+  afiliasi: PdtLaporanAfiliasi | null,
+  video: PdtLaporanVideo | null,
+): PdtLaporanTahap | null {
+  if (kpi.gmv == null && kpi.pesanan == null && kpi.pengunjung == null) return null;
+
+  const fokus = isPdtTahapKey(input.tahapFokus) ? input.tahapFokus : null;
+  const aov = kpi.gmv == null || kpi.pesanan == null || kpi.pesanan === 0 ? null : bulat(kpi.gmv / kpi.pesanan);
+  const cpa = input.cpaInput == null || input.cpaInput.pesanan == null || input.cpaInput.pesanan === 0
+    ? null : bulat(input.cpaInput.biaya / input.cpaInput.pesanan);
+
+  const belanja: Record<PdtTahapKey, number | null> = {
+    awareness: null,
+    consideration: null,
+    conversion: iklan == null ? null : iklan.biaya,
+  };
+  const belanjaTotal = ALL_TAHAP.some((k) => belanja[k] != null)
+    ? ALL_TAHAP.reduce((a, k) => a + (belanja[k] ?? 0), 0)
+    : null;
+
+  const metrik: Record<PdtTahapKey, PdtLaporanTahapMetrik[]> = {
+    awareness: [
+      tm('vv_impresi', 'Impresi iklan awareness', null, 'angka'),
+      tm('vv_views', 'Video views (iklan)', null, 'angka'),
+      tm('vv_cpm', 'CPM', null, 'rupiah'),
+      tm('vv_per1k', 'Biaya per 1.000 views', null, 'rupiah'),
+      tm('fol_follows', 'Follower dari campaign', null, 'angka'),
+      tm('fol_cost', 'Biaya per follower', null, 'rupiah'),
+      tm('konten_n', 'Konten diproduksi & tayang', video?.total ?? null, 'angka'),
+      tm('konten_vv', 'Total views konten', video?.vv ?? null, 'angka'),
+      tm('konten_follower', 'Follower baru dari konten', null, 'angka'),
+    ],
+    consideration: [
+      tm('sc_impresi', 'Impresi iklan showcase', null, 'angka'),
+      tm('sc_klik', 'Klik ke halaman produk (iklan)', null, 'angka'),
+      tm('sc_ctr', 'CTR showcase', null, 'persen'),
+      tm('sc_atc', 'Add to cart (iklan showcase)', null, 'angka'),
+      tm('sc_cost_atc', 'Biaya per add to cart', null, 'rupiah'),
+      tm('toko_impresi', 'Impresi produk (toko)', null, 'angka'),
+      tm('toko_klik', 'Klik produk (toko)', input.klik, 'angka'),
+      tm('aff_total', 'Kreator afiliasi terdaftar', afiliasi?.totalKreator ?? null, 'angka'),
+      tm('aff_posting', 'Kreator memposting konten', input.affPosting, 'angka'),
+    ],
+    conversion: [
+      tm('gmv', 'GMV', kpi.gmv, 'rupiah'),
+      tm('pesanan', 'Pesanan', kpi.pesanan, 'angka'),
+      tm('cvr', 'Conversion rate toko', kpi.cvr, 'persen'),
+      tm('aov', 'Nilai rata-rata per pesanan', aov, 'rupiah'),
+      tm('roi', 'ROI iklan konversi (GMV Max)', iklan?.roas ?? null, 'kali'),
+      tm('cpa', 'Biaya per pesanan (GMV Max)', cpa, 'rupiah'),
+      tm('aff_produktif', 'Kreator menghasilkan penjualan', afiliasi?.produktif ?? null, 'angka'),
+      tm('tp_gmv', 'GMV ShopTokopedia', null, 'rupiah'),
+    ],
+  };
+
+  return {
+    fokus,
+    funnel: buildFunnelTiktok(kpi, input.klik),
+    konversiTotal: { nilai: kpi.cvr },
+    belanjaTotal: belanjaTotal == null ? null : bulat(belanjaTotal),
+    blok: ALL_TAHAP.map((kode) => ({
+      kode,
+      label: TAHAP_LABEL[kode],
+      fokus: fokus === kode,
+      belanja: belanja[kode] == null ? null : bulat(belanja[kode] as number),
+      belanjaPersen: belanja[kode] == null || !belanjaTotal ? null : persen5((belanja[kode] as number) / belanjaTotal),
+      metrik: metrik[kode],
+    })),
+  };
+}
+
 export interface PdtLaporanTiktok {
   schema: 'cdps.pdt.laporan.tiktok.v1';
   platform: 'tiktok';
@@ -499,6 +742,7 @@ export interface PdtLaporanTiktok {
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
   afiliasi: PdtLaporanAfiliasi | null;
+  tahap: PdtLaporanTahap | null;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
 }
@@ -515,6 +759,8 @@ export interface PdtLaporanShopee {
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
   afiliasi: PdtLaporanAfiliasi | null;
+  /** SELALU `null` — mesin lama Shopee tidak punya konsep buyer-journey sama sekali, lihat docblock `PdtLaporanTahap`. */
+  tahap: PdtLaporanTahap | null;
   skor: PdtSkorHasilShopee;
 }
 
@@ -528,6 +774,7 @@ export interface PdtLaporanTiktokOptions {
   live: PdtLaporanLiveInput | null;
   video: PdtLaporanVideoInput | null;
   afiliasi: PdtLaporanAfiliasiInput | null;
+  tahap: PdtLaporanTahapInput;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
 }
@@ -547,18 +794,23 @@ export interface PdtLaporanShopeeOptions {
 
 /** Rakit payload laporan TikTok v1 — KPI basis `'net'` (Rule 15, GMV−refund; pemanggil sudah menyerahkan gmv yang SUDAH di-net-kan). */
 export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTiktok {
+  const kpi = bangunKpiRingkas(opts.kpi);
+  const iklan = bangunIklanTiktok(opts.iklan);
+  const afiliasi = bangunLaporanAfiliasi(opts.afiliasi);
+  const video = bangunLaporanVideo(opts.video);
   return {
     schema: 'cdps.pdt.laporan.tiktok.v1',
     platform: 'tiktok',
     clientPlatformId: opts.clientPlatformId,
     periodeAwalBulan: opts.periodeAwalBulan,
     generatedAt: opts.generatedAt,
-    kpi: bangunKpiRingkas(opts.kpi),
+    kpi,
     kanal: bangunKanalTiktok(opts.kanal),
-    iklan: bangunIklanTiktok(opts.iklan),
+    iklan,
     live: bangunLaporanLive(opts.live),
-    video: bangunLaporanVideo(opts.video),
-    afiliasi: bangunLaporanAfiliasi(opts.afiliasi),
+    video,
+    afiliasi,
+    tahap: bangunLaporanTahap(opts.tahap, kpi, iklan, afiliasi, video),
     skor: opts.skor,
     benchmarkVersi: opts.benchmarkVersi,
   };
@@ -578,6 +830,7 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
     live: bangunLaporanLive(opts.live),
     video: bangunLaporanVideo(opts.video),
     afiliasi: bangunLaporanAfiliasi(opts.afiliasi),
+    tahap: null,
     skor: opts.skor,
   };
 }

@@ -2519,7 +2519,58 @@ async function bacaAfiliasi(sql: Sql, clientPlatformId: number, periodeAwalBulan
   };
 }
 
-/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + iklan + live + video + afiliasi + `hitungSkorTiktok`. */
+/**
+ * Bagian "tahap" TikTok (keputusan pemilik via `AskUserQuestion`, 2026-09-16,
+ * KETUJUH — lihat docblock `pdt.PdtLaporanTahap`, `@cdps/core`). EMPAT
+ * sub-query BARU (bukan reuse murni bagian lain — `pdt.bangunLaporanTahap`
+ * yang menerima kpi/iklan/afiliasi/video yang SUDAH dibangun untuk sisanya):
+ *  - `tahap_fokus` dari `client_platforms` — kolom SAMA yang sudah dipakai
+ *    mesin lama (`report.ts`), nol migrasi baru.
+ *  - `klik` — `pdt_fact_shop_daily.produk_diklik` basis `'net'` (SAMA basis
+ *    KPI TikTok, Rule 15) — sudah ditulis writer sejak G1-09, belum pernah
+ *    dibaca laporan manapun.
+ *  - `cpaInput` — `pdt_fact_ads.pesanan_sku` sumber `tt_ads_product`/
+ *    `tt_ads_live`, TERPISAH dari `bacaIklanTiktok` (kolom itu tidak
+ *    pernah dibaca "iklan", menambahkannya di sini menghindari mengubah
+ *    bentuk "iklan" yang sudah merge).
+ *  - `affPosting` — hitungan BARU `pdt_fact_creator_period` ber-`jumlah_
+ *    live>0 OR jumlah_video>0`, `null` bila nol baris kreator sama sekali
+ *    (cermin konvensi `bacaAfiliasi`).
+ */
+async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanTahapInput> {
+  const [[cp], [klikRow], [adsRow], [affRow]] = await Promise.all([
+    sql<{ tahap_fokus: string | null }[]>`select tahap_fokus from client_platforms where id = ${clientPlatformId}`,
+    sql<{ n: number; klik: string }[]>`
+      select count(produk_diklik)::int as n, coalesce(sum(produk_diklik), 0) as klik
+        from pdt_fact_shop_daily
+       where client_platform_id = ${clientPlatformId}
+         and basis = 'net'
+         and tanggal >= ${periodeAwalBulan}::date
+         and tanggal < (${periodeAwalBulan}::date + interval '1 month')`,
+    sql<{ n: number; biaya: string; pesanan_n: number; pesanan: string }[]>`
+      select count(*)::int as n, coalesce(sum(biaya), 0) as biaya,
+             count(pesanan_sku)::int as pesanan_n, coalesce(sum(pesanan_sku), 0) as pesanan
+        from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId}
+         and periode = ${periodeAwalBulan}::date
+         and sumber in ('tt_ads_product', 'tt_ads_live')`,
+    sql<{ total: number; posting: number }[]>`
+      select count(*)::int as total,
+             coalesce(sum(case when coalesce(jumlah_live, 0) > 0 or coalesce(jumlah_video, 0) > 0 then 1 else 0 end), 0)::int as posting
+        from pdt_fact_creator_period
+       where client_platform_id = ${clientPlatformId}
+         and periode = ${periodeAwalBulan}::date`,
+  ]);
+
+  return {
+    tahapFokus: cp?.tahap_fokus ?? null,
+    klik: klikRow.n === 0 ? null : Number(klikRow.klik),
+    cpaInput: adsRow.n === 0 ? null : { biaya: Number(adsRow.biaya), pesanan: adsRow.pesanan_n === 0 ? null : Number(adsRow.pesanan) },
+    affPosting: affRow.total === 0 ? null : affRow.posting,
+  };
+}
+
+/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + iklan + live + video + afiliasi + tahap + `hitungSkorTiktok`. */
 export async function rakitLaporanTiktok(
   sql: Sql,
   clientPlatformId: number,
@@ -2527,17 +2578,18 @@ export async function rakitLaporanTiktok(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanTiktok> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, kanal, iklan, live, video, afiliasi, { hasil: skor, benchmarkVersi }] = await Promise.all([
+  const [kpi, kanal, iklan, live, video, afiliasi, tahap, { hasil: skor, benchmarkVersi }] = await Promise.all([
     bacaKpiTiktokNet(sql, clientPlatformId, periodeAwalBulan),
     bacaKanalTiktok(sql, clientPlatformId, periodeAwalBulan),
     bacaIklanTiktok(sql, clientPlatformId, periodeAwalBulan),
     bacaLive(sql, clientPlatformId, periodeAwalBulan),
     bacaVideo(sql, clientPlatformId, periodeAwalBulan),
     bacaAfiliasi(sql, clientPlatformId, periodeAwalBulan),
+    bacaTahapTiktok(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
   ]);
   return pdt.bangunLaporanTiktok({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, iklan, live, video, afiliasi, skor, benchmarkVersi,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, iklan, live, video, afiliasi, tahap, skor, benchmarkVersi,
   });
 }
 

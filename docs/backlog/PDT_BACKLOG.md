@@ -1189,6 +1189,29 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > sukses. **Sisa: LIMA bagian laporan lain** (produk, tokopedia, ads_manager, tahap, insight) TETAP
 > di luar cakupan — `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
 
+> **Status 2026-09-16 (lanjutan) — bagian laporan "tahap" (buyer-journey) DIBANGUN TikTok-ONLY, Shopee
+> `tahap: null` PERMANEN.** `docs/DECISIONS.md` (cari "bagian laporan \"tahap\" (buyer-journey)
+> dibangun TikTok-ONLY") untuk alasan lengkap (dua ronde `AskUserQuestion`). Ringkas: riset awal
+> menemukan section ini BUKAN reprojection murni — rung "Impresi" butuh `pdt_fact_sku_period.impresi`
+> (grain PER SKU, bukan shop-level, TIDAK dijumlah — kelas kesalahan sama `G1-09-2BII-ADS-CPC-SKU`),
+> blok Consideration/Conversion butuh hitungan baru ("kreator posting", "cpa"). Temuan KEDUA (sebelum
+> kode ditulis): `report/shopee/insight.ts:146-151` eksplisit Shopee TIDAK PERNAH punya konsep
+> buyer-journey sama sekali (beda root cause dari "video" — bukan sekadar writer belum dibangun).
+> `PdtLaporanTahap`/`bangunLaporanTahap` (`@cdps/core` `pdt/laporan.ts`) menerima kpi/iklan/afiliasi/
+> video yang SUDAH dibangun (nol query ulang) plus EMPAT input baru dari `pdt.bacaTahapTiktok`:
+> `tahap_fokus` (`client_platforms`, kolom sama mesin lama, nol migrasi), `klik`
+> (`pdt_fact_shop_daily.produk_diklik` basis `net`), `cpaInput` (`pdt_fact_ads.pesanan_sku` sumber
+> `tt_ads_*`, query terpisah dari `bacaIklanTiktok`), `affPosting` (hitungan baru `pdt_fact_creator_
+> period` ber-`jumlah_live>0 OR jumlah_video>0`). `flag`/`band` pewarnaan SENGAJA tidak diikutkan v1
+> (keputusan desain, AM tetap bisa lihat warna dari `skor.dimensi`). Rung "Impresi"/"Add to Cart"
+> PERMANEN `null` dengan `catatan` eksplisit (kolom genuinely tidak ada / butuh `ads_manager`).
+> Whole-object `null` saat `kpi` seluruhnya `null`. Diverifikasi (DB lokal rebuild bersih, 252 migrasi
+> — nol migrasi PDT baru): `@cdps/core` 1386/1386, `@cdps/domain` 2750/2751 (1 skip, nol gagal),
+> `@cdps/db` 107/107, `@cdps/api` 636/638 (2 skip); typecheck bersih `core`/`domain`/`api`/
+> `web-internal`, lint `@cdps/api` bersih; `npm run build`+test `web-internal` sukses. **Sisa: EMPAT
+> bagian laporan lain** (produk, tokopedia, ads_manager, insight) TETAP di luar cakupan —
+> `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
+
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**

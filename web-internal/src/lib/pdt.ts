@@ -202,6 +202,49 @@ export interface PdtLaporanAfiliasi {
   jumlah_video: number | null;
 }
 
+// G2-01 lanjutan — bagian "tahap" (buyer-journey Awareness→Consideration→
+// Conversion), 2026-09-16. TikTok-ONLY — `null` (whole object) untuk Shopee
+// SELALU (mesin lama Shopee tidak punya konsep buyer-journey sama sekali,
+// bukan gap data seperti "video"), dan untuk TikTok saat nol baris
+// `pdt_fact_shop_daily` basis `net` periode ini. Banyak `metrik[].nilai`/
+// `funnel[].nilai` `null` PERMANEN sampai modul TikTok Ads Manager dibangun
+// (scope terpisah, belum ada) — itu jujur terhadap data yang ada, bukan bug.
+export type PdtTahapKey = 'awareness' | 'consideration' | 'conversion';
+export type PdtTahapSatuan = 'rupiah' | 'angka' | 'persen' | 'kali';
+
+export interface PdtLaporanFunnelLangkah {
+  kode: string;
+  label: string;
+  nilai: number | null;
+  lolos: number | null;
+  lolos_dari: string | null;
+  catatan: string | null;
+}
+
+export interface PdtLaporanTahapMetrik {
+  kode: string;
+  label: string;
+  nilai: number | null;
+  satuan: PdtTahapSatuan;
+}
+
+export interface PdtLaporanTahapBlok {
+  kode: PdtTahapKey;
+  label: string;
+  fokus: boolean;
+  belanja: number | null;
+  belanja_persen: number | null;
+  metrik: PdtLaporanTahapMetrik[];
+}
+
+export interface PdtLaporanTahap {
+  fokus: PdtTahapKey | null;
+  funnel: PdtLaporanFunnelLangkah[];
+  konversi_total: { nilai: number | null };
+  belanja_total: number | null;
+  blok: PdtLaporanTahapBlok[];
+}
+
 export interface PdtLaporan {
   schema: string;
   platform: string;
@@ -214,6 +257,7 @@ export interface PdtLaporan {
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
   afiliasi: PdtLaporanAfiliasi | null;
+  tahap: PdtLaporanTahap | null;
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;
 }
