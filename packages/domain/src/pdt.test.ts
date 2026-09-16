@@ -26,6 +26,7 @@ import {
   canKirimLaporan,
   canUploadBatch,
   commitUploadBatch,
+  konfirmasiIdentitasBatch,
   finalizePdtOrphanPurgeTick,
   finalizePdtPurgeTick,
   hitungSkorShopee,
@@ -5306,4 +5307,112 @@ describeDb('listRiwayatBatchPdt (G1-09 sub-langkah 3) — riwayat batch + status
     expect(riwayatB).toHaveLength(1);
     expect(riwayatB[0].platform).toBe('shopee');
   });
+});
+
+// ---------------------------------------------------------------------------
+// konfirmasiIdentitasBatch (G1-09-KONFIRMASI-IDENTITAS, Rule 2 Shopee/Rule 4
+// TikTok) — AM mengonfirmasi SEKALI usulan identitas yang `commitUploadBatch`
+// sudah menulis ke `identitas_sumber` untuk batch `identitas_belum_terikat`.
+// Fixture batch dibangun lewat `commitUploadBatch` SUNGGUHAN (bukan insert SQL
+// langsung) — pola sama describe "status batch dari identitas (Rule 2-4)" di
+// atas — supaya `identitas_sumber` persis bentuk yang sungguhan ditulis.
+// ---------------------------------------------------------------------------
+describeDb('konfirmasiIdentitasBatch (G1-09-KONFIRMASI-IDENTITAS) — Rule 2/4, satu kali', () => {
+  it('batch_id tidak ada ⇒ NotFoundError', async () => {
+    await expect(konfirmasiIdentitasBatch(sql, ownerActor(), 999_999_999)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('AM bukan pemilik ⇒ ForbiddenError, shop_id TIDAK berubah', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', null);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], []);
+    expect(persiapan.status).toBe('identitas_belum_terikat');
+
+    await expect(konfirmasiIdentitasBatch(sql, otherAm(), persiapan.batchId)).rejects.toBeInstanceOf(ForbiddenError);
+    const cp = await sql`select shop_id from client_platforms where id = ${cpId}`;
+    expect(cp[0].shop_id).toBeNull();
+  });
+
+  it('batch bukan identitas_belum_terikat (mis. sudah ditolak) ⇒ ValidationError', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', 'SHOP-LAMA');
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], []);
+    expect(persiapan.status).toBe('ditolak');
+
+    await expect(konfirmasiIdentitasBatch(sql, ownerActor(), persiapan.batchId))
+      .rejects.toThrow('[batch ini tidak sedang menunggu konfirmasi identitas]');
+  });
+
+  it('Shopee: mengikat client_platforms.shop_id dari identitas_sumber, mencatat audit, TIDAK mengubah status pdt_upload_batch (tugas reparse pemanggil)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', null);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], []);
+    expect(persiapan.status).toBe('identitas_belum_terikat');
+    // markRawStored — dipanggil route SEGERA setelah commitUploadBatch (unggah ke path final);
+    // dipanggil manual di sini karena tes ini memanggil commitUploadBatch domain langsung,
+    // bukan lewat route (yang juga meng-upload byte ke Storage) — supaya rawPath TERISI,
+    // sama seperti kondisi nyata konfirmasiIdentitasBatch selalu menemuinya.
+    const rawPath = `${clientId}/${cpId}/2026-07-31/${persiapan.batchId}.zip`;
+    await markRawStored(sql, persiapan.batchId, rawPath, { sha256: 'x', bytes: 100, entri: 1, entriDilewati: 0 });
+
+    const hasil = await konfirmasiIdentitasBatch(sql, ownerActor(), persiapan.batchId);
+    expect(hasil).toEqual({
+      batchId: persiapan.batchId,
+      clientPlatformId: Number(cpId), // client_platforms.id bigint — driver mengembalikan string, domain mengonversi (lihat komentar `listRiwayatBatchPdt`).
+      platform: 'shopee',
+      nilaiDiikat: '938284780',
+      rawPath,
+      rawDihapusPada: null,
+    });
+
+    const cp = await sql`select shop_id from client_platforms where id = ${cpId}`;
+    expect(cp[0].shop_id).toBe('938284780');
+
+    const batchRow = await loadBatch(persiapan.batchId);
+    expect(batchRow.status).toBe('identitas_belum_terikat'); // reparse belum dijalankan domain — itu tugas route
+
+    const audit = await sql<{ n: string }[]>`
+      select count(*) as n from audit_log
+       where entity_type = 'client_platforms' and entity_id = ${String(cpId)}
+         and action = 'pdt_identitas_dikonfirmasi'`;
+    expect(Number(audit[0].n)).toBe(1);
+  });
+
+  it('Shopee: konfirmasi kedua untuk shop_id yang sama ⇒ ValidationError, tidak menimpa', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', null);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], []);
+    await konfirmasiIdentitasBatch(sql, ownerActor(), persiapan.batchId);
+
+    await expect(konfirmasiIdentitasBatch(sql, ownerActor(), persiapan.batchId))
+      .rejects.toThrow('[shop_id toko ini sudah terikat sebelumnya — konfirmasi ini tidak berlaku lagi]');
+    const cp = await sql`select shop_id from client_platforms where id = ${cpId}`;
+    expect(cp[0].shop_id).toBe('938284780');
+  });
+
+  it('TikTok: mengikat APPEND ke client_platforms.akun_konten_toko (array), mencatat audit', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [ttVideoBerkasDenganPeriode('v.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026')], []);
+    expect(persiapan.status).toBe('identitas_belum_terikat');
+
+    const hasil = await konfirmasiIdentitasBatch(sql, ownerActor(), persiapan.batchId);
+    expect(hasil.nilaiDiikat).toBe('kreator-a');
+    expect(hasil.platform).toBe('tiktok');
+
+    const cp = await sql<{ akun_konten_toko: string[] }[]>`select akun_konten_toko from client_platforms where id = ${cpId}`;
+    expect(cp[0].akun_konten_toko).toEqual(['kreator-a']);
+
+    const audit = await sql<{ n: string }[]>`
+      select count(*) as n from audit_log
+       where entity_type = 'client_platforms' and entity_id = ${String(cpId)}
+         and action = 'pdt_identitas_dikonfirmasi'`;
+    expect(Number(audit[0].n)).toBe(1);
+  });
+
 });

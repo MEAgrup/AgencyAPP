@@ -343,8 +343,13 @@ interface ClientPlatformRow {
   assigned_am_id: string | null;
 }
 
-/** Dipakai bersama oleh `previewUploadBatch`/`siapkanUploadBatch` — satu-satunya lookup+gerbang izin baris `client_platforms`. */
-async function loadClientPlatformUntukPdt(sql: Sql, clientPlatformId: number): Promise<ClientPlatformRow> {
+/**
+ * Dipakai bersama oleh `previewUploadBatch`/`siapkanUploadBatch`/`konfirmasiIdentitasBatch`
+ * — satu-satunya lookup+gerbang izin baris `client_platforms`. `Queryable` (bukan `Sql`
+ * saja) supaya `konfirmasiIdentitasBatch` bisa memanggilnya DI DALAM transaksinya sendiri
+ * (baris `client_platforms` dibaca konsisten dengan baris batch yang sudah dikunci `for update`).
+ */
+async function loadClientPlatformUntukPdt(sql: Queryable, clientPlatformId: number): Promise<ClientPlatformRow> {
   const rows = await sql<ClientPlatformRow[]>`
     select cp.id, cp.client_id, cp.platform, cp.shop_id, cp.akun_konten_toko, c.assigned_am_id
       from client_platforms cp
@@ -1455,6 +1460,111 @@ export async function markRawStored(sql: Sql, batchId: number, rawPath: string, 
        set raw_path = ${rawPath}, raw_sha256 = ${raw.sha256}, raw_bytes = ${raw.bytes},
            raw_entri = ${raw.entri}, raw_entri_dilewati = ${raw.entriDilewati}
      where id = ${batchId}`;
+}
+
+/** Hasil `konfirmasiIdentitasBatch` — `rawPath`/`rawDihapusPada` dibawa balik supaya pemanggil (route) tahu apakah reparse langsung mungkin (domain tidak pernah menyentuh Storage sendiri). */
+export interface PdtKonfirmasiIdentitasHasil {
+  batchId: number;
+  clientPlatformId: number;
+  platform: pdt.PdtPlatform;
+  /** `shop_id` (Shopee) atau satu nilai `akun_konten_toko` (TikTok) yang baru terikat. */
+  nilaiDiikat: string;
+  rawPath: string | null;
+  rawDihapusPada: string | null;
+}
+
+/**
+ * konfirmasiIdentitasBatch — Rule 2 (Shopee)/Rule 4 (TikTok): AM mengonfirmasi
+ * SEKALI usulan identitas yang sistem baca dari berkas
+ * (`pdt_upload_batch.identitas_sumber`, ditulis `commitUploadBatch`/`reparsePdtBatch`
+ * untuk verdict `usulkan_ikat`) — nilainya terikat PERMANEN ke
+ * `client_platforms.shop_id` (Shopee) atau di-APPEND ke `akun_konten_toko` (TikTok,
+ * array — toko yang sama boleh punya lebih dari satu akun konten yang sah).
+ * `G1-09-KONFIRMASI-IDENTITAS` (`docs/backlog/PDT_BACKLOG.md`) — terbuka sejak
+ * sub-langkah 2a, ditutup sesi ini.
+ *
+ * TIDAK PERNAH menimpa nilai yang sudah terikat (guard eksplisit — cermin
+ * `validasiIdentitasShopee`/`validasiIdentitasTiktok`, `@cdps/core`: keduanya HANYA
+ * mengembalikan `usulkan_ikat` saat kolom tujuan kosong, jadi guard ini seharusnya
+ * tidak pernah tersentuh di jalur normal; tetap ditulis untuk race dua klik/dua batch
+ * bersamaan — `for update` mengunci baris batch sepanjang transaksi).
+ *
+ * Domain TIDAK memicu reparse batch ini sendiri (arah dependensi tetap: domain tidak
+ * pernah menyentuh Storage/ZIP, pola sama `commitUploadBatch`) — pemanggil (route)
+ * yang menjalankan ulang pipeline reparse (G1-11) SEGERA setelah ini sukses, supaya
+ * batch pindah dari `identitas_belum_terikat` tanpa menunggu tick harian.
+ */
+export async function konfirmasiIdentitasBatch(sql: Sql, actor: Actor, batchId: number): Promise<PdtKonfirmasiIdentitasHasil> {
+  return withTransaction(sql, async (tx) => {
+    const rows = await tx<{
+      id: number;
+      client_platform_id: number;
+      platform: string;
+      status: PdtCommitStatus;
+      identitas_sumber: Record<string, unknown> | null;
+      raw_path: string | null;
+      raw_dihapus_pada: string | null;
+    }[]>`
+      select id, client_platform_id, platform, status, identitas_sumber, raw_path, raw_dihapus_pada
+        from pdt_upload_batch
+       where id = ${batchId}
+       for update`;
+    const batch = rows[0];
+    if (!batch) throw new NotFoundError('[batch PDT tidak ditemukan]');
+
+    const cpRow = await loadClientPlatformUntukPdt(tx, batch.client_platform_id);
+    if (!canUploadBatch(actor, cpRow.assigned_am_id)) throw new ForbiddenError();
+
+    if (batch.status !== 'identitas_belum_terikat') {
+      throw new ValidationError('[batch ini tidak sedang menunggu konfirmasi identitas]');
+    }
+    if (!batch.identitas_sumber) {
+      throw new ValidationError('[batch ini tidak membawa usulan identitas untuk dikonfirmasi]');
+    }
+
+    const platform = batch.platform as pdt.PdtPlatform;
+    let nilai: string;
+    let beforeJson: Record<string, unknown>;
+    let afterJson: Record<string, unknown>;
+    if (platform === 'shopee') {
+      if (cpRow.shop_id != null) {
+        throw new ValidationError('[shop_id toko ini sudah terikat sebelumnya — konfirmasi ini tidak berlaku lagi]');
+      }
+      nilai = String(batch.identitas_sumber.shop_id);
+      await tx`update client_platforms set shop_id = ${nilai} where id = ${cpRow.id}`;
+      beforeJson = { shop_id: null };
+      afterJson = { shop_id: nilai };
+    } else {
+      const existing = cpRow.akun_konten_toko ?? [];
+      nilai = String(batch.identitas_sumber.id_kreator);
+      if (existing.includes(nilai)) {
+        throw new ValidationError('[akun konten ini sudah terikat sebelumnya — konfirmasi ini tidak berlaku lagi]');
+      }
+      const setelah = [...existing, nilai];
+      await tx`update client_platforms set akun_konten_toko = ${tx.json(setelah as never)} where id = ${cpRow.id}`;
+      beforeJson = { akun_konten_toko: existing };
+      afterJson = { akun_konten_toko: setelah };
+    }
+
+    await executors(tx).audit.insertAudit({
+      entityType: 'client_platforms',
+      entityId: String(cpRow.id),
+      actorEmployeeId: actor.employeeId,
+      action: 'pdt_identitas_dikonfirmasi',
+      beforeJson,
+      afterJson,
+      createdBy: actor.employeeId,
+    });
+
+    return {
+      batchId,
+      clientPlatformId: Number(batch.client_platform_id),
+      platform,
+      nilaiDiikat: nilai,
+      rawPath: batch.raw_path,
+      rawDihapusPada: batch.raw_dihapus_pada,
+    };
+  });
 }
 
 /** Status paket TAMPILAN (G1-09 bullet 4) — turunan dari tiga kolom DB, bukan kolom baru. */

@@ -9171,7 +9171,14 @@ export interface PdtCommitBatchWire {
 
 export function pdtCommitBatchToWire(h: pdt.PdtCommitPersiapan): PdtCommitBatchWire {
   return {
-    batch_id: h.batchId,
+    // `PdtCommitPersiapan.batchId` bawaannya bigint DARI `insert ... returning id` — driver
+    // mengembalikannya sebagai STRING (pencegahan presisi, pola sama `listRiwayatBatchPdt`,
+    // `docs/DECISIONS.md` "G1-09 sub-langkah 3"). Nol konversi di sini berarti klien menerima
+    // JSON STRING pada kunci yang tipenya `number` — ditemukan lewat tes route
+    // `konfirmasi-identitas` (G1-09-KONFIRMASI-IDENTITAS) yang mengirim `batch_id` balik ke
+    // server: `typeof === 'number'` di sana menolaknya. `Number(...)` di sini adalah tempat
+    // yang benar untuk menutupnya — wire.ts satu-satunya penerjemah (aturan rumah).
+    batch_id: Number(h.batchId),
     client_platform_id: h.clientPlatformId,
     platform: h.platform,
     status: h.status,
@@ -9195,6 +9202,30 @@ export function pdtCommitBatchToWire(h: pdt.PdtCommitPersiapan): PdtCommitBatchW
       deteksi_oleh: b.deteksiOleh,
     })),
     identitas: pdtPreviewIdentitasToWire(h.identitas),
+  };
+}
+
+// G1-09-KONFIRMASI-IDENTITAS — POST /account/pdt/batches/konfirmasi-identitas
+// (Rule 2/4, AM mengonfirmasi SEKALI usulan identitas). `status_setelah_reparse`
+// `null` berarti reparse langsung belum/tidak berhasil dijalankan (paket sudah
+// dipurge, atau gagal server-side) — identitas TETAP terikat baik pun (langkah
+// itu sudah commit sebelum reparse dicoba); batch akan diambil tick reparse
+// harian berikutnya.
+export interface PdtKonfirmasiIdentitasWire {
+  batch_id: number;
+  client_platform_id: number;
+  platform: string;
+  nilai_diikat: string;
+  status_setelah_reparse: string | null;
+}
+
+export function pdtKonfirmasiIdentitasToWire(h: pdt.PdtKonfirmasiIdentitasHasil, statusSetelahReparse: string | null): PdtKonfirmasiIdentitasWire {
+  return {
+    batch_id: h.batchId,
+    client_platform_id: h.clientPlatformId,
+    platform: h.platform,
+    nilai_diikat: h.nilaiDiikat,
+    status_setelah_reparse: statusSetelahReparse,
   };
 }
 
