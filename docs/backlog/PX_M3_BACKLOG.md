@@ -88,7 +88,10 @@ existing, `px_eligibility_policy` versi 3 migrasi `20261102010000`). ~~`M3-05-PU
 tertutup (M3-A `mcnapp` merge). ~~`M3-03-KATEGORI-MAPPING`~~ **JUGA TERTUTUP** (2026-09-16 —
 pemilik pilih opsi (c): dropdown `level2_category` tetap tidak tersaring PERMANEN per fallback
 Rule 10, pemetaan cabang `kategori_platform→level2_category` dibiarkan terbuka ke Hans, nol kode
-diubah). Masih terbuka: `M3-08-SENGKETA-90-HARI` (Nerissa). `M3-04`
+diubah). ~~`M3-08-SENGKETA-90-HARI`~~ **JUGA TERTUTUP** (2026-09-16 — pemilik pilih opsi (b):
+snapshot volume permanen di `px_sku_eligibility` [`gmv_30d`/`jendela_mulai`/`jendela_selesai`/
+`batch_ids`, migrasi `20261103010000`], terpisah dari retensi file ZIP mentah yang tetap 90 hari).
+**Seluruh Open Assumptions PRD M3 sekarang tertutup.** `M3-04`
 (`optimization_tracker` sebagai basis master SKU) dan `M3-06`/`M3-07` dari PRD §8 tidak dibawa ke
 Open terpisah — M3-06 (`require_stock_in`) sudah diputuskan tidak dibaca Phase 1 (PX-M3-05, lihat
 `docs/DECISIONS.md`), M3-07 (`kolom_dipanen` lengkap) menyatu dengan tiket

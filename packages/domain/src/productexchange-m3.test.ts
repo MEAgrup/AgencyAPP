@@ -268,10 +268,19 @@ describeDb('recomputeDanEvaluasi — Flow A (volume) + Flow B (verdict)', () => 
     await pushCoverage('zpxm3-batch-sepatu', 'Sepatu Wanita', 'entry', 'covered'); // Rp185rb -> 'entry' (versi 3, band asli)
 
     await recomputeDanEvaluasi(sql, platformId);
-    const [row1] = await sql<{ verdict: string }[]>`
-      select verdict from px_sku_eligibility where client_platform_id = ${platformId} and platform_product_id = 'ZPXM3-SEPATU'
+    const [row1] = await sql<{
+      verdict: string; gmv_30d: string; jendela_mulai: string; jendela_selesai: string; batch_ids: number[];
+    }[]>`
+      select verdict, gmv_30d::text, jendela_mulai::text, jendela_selesai::text, batch_ids
+        from px_sku_eligibility where client_platform_id = ${platformId} and platform_product_id = 'ZPXM3-SEPATU'
        order by dihitung_pada desc limit 1`;
     expect(row1.verdict).toBe('lolos');
+    // PX-M3-08 opsi B: snapshot volume yang mendasari verdict ini disalin permanen
+    // ke px_sku_eligibility saat ditulis — bertahan meski file ZIP mentahnya nanti dipurge.
+    expect(Number(row1.gmv_30d)).toBe(340_000_000);
+    expect(row1.jendela_mulai).toBe('2026-07-01');
+    expect(row1.jendela_selesai).toBe('2026-07-31');
+    expect(row1.batch_ids).toEqual([batch]);
 
     // retensi TIDAK diperpendek — sudah +400 hari, jauh lebih jauh dari +90.
     const after1 = await sql<{ retensi_sampai: Date }[]>`select retensi_sampai from pdt_upload_batch where id = ${batch}`;
