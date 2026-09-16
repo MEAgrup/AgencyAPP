@@ -1212,6 +1212,35 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > bagian laporan lain** (produk, tokopedia, ads_manager, insight) TETAP di luar cakupan —
 > `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
 
+> **Status 2026-09-16 (lanjutan) — bagian laporan "insight" (narasi+rekomendasi) DIBANGUN KEDUA
+> platform SATU bentuk, AM menyunting di layar pratinjau (BUKAN state machine draft/publikasi baru).**
+> `docs/DECISIONS.md` (cari "bagian laporan \"insight\" (narasi+rekomendasi) dibangun KEDUA platform")
+> untuk alasan lengkap (DUA keputusan `AskUserQuestion` terpisah). Ringkas: riset (subagent Explore)
+> menemukan mesin lama punya PULUHAN aturan rekomendasi ber-ambang PER METRIK yang membaca bagian PDT
+> belum punya (`kuadran`, `meta_cpas`, dll) — port penuh tanpa verifikasi adalah menebak; dan
+> penyimpanannya (`client_report_insight`/`client_report_publikasi`, append-only revisi + status
+> draft/terbit dipaku) ada KARENA client portal terus membaca `client_reports` — PDT tidak punya
+> client portal sama sekali, jadi replika penuh berarti mengubah Rule 22 (PDT-21 "beku HANYA saat
+> dikirim") jadi dua tahap, deviasi PRD baru. Keputusan final: `PdtLaporanInsight`/
+> `bangunLaporanInsight` (`@cdps/core` `pdt/laporan.ts`) NOL query fakta baru — dirangkai dari
+> kpi/kanal/iklan/live/video/afiliasi/tahap yang SUDAH dibangun, plus `skor.dimensi` untuk rekomendasi
+> (`nilai < SKOR_PERHATIAN_MIN` → tinggi, `< SKOR_SEHAT_MIN` → sedang — ambang yang SUDAH dipakai
+> produksi, bukan ambang baru per metrik). TikTok `indikator` memakai `PdtBenchmarkTiktok` yang SAMA
+> dipakai `computeSkorTiktok` (`hitungSkorTiktok` sekarang juga mengembalikan `bench`, additive); Shopee
+> tidak punya bench serupa (ambang skornya hardcode) jadi `indikator` Shopee HANYA skor total. `insight`
+> TIDAK PERNAH `null`. Penyuntingan teks AM (kalau ada) adalah tiket TERPISAH di layar pratinjau
+> sebelum kirim — wiring override ke `kirimLaporanPdt` BELUM dibangun, dicatat di sini sebagai tiket
+> baru. Nol tabel/kolom/migrasi baru. Diverifikasi (DB lokal rebuild bersih, 253 migrasi — nol migrasi
+> PDT baru): `@cdps/core` 1394/1394 (naik dari 1386), `@cdps/domain` 2750/2751 (1 skip, nol gagal),
+> `@cdps/db` 107/107, `@cdps/api` 636/638 (2 skip); typecheck bersih `core`/`domain`/`api`/
+> `web-internal`, lint `@cdps/api` bersih; `next build`+test `web-internal` sukses. **Sisa: TIGA
+> bagian laporan lain** (produk, tokopedia, ads_manager) TETAP di luar cakupan — semuanya hard-blocked
+> (butuh fact-writer baru sekelas G1-09), bukan keputusan scope. **Tiket baru: `G2-01-INSIGHT-EDIT`** —
+> wiring override teks insight AM ke `kirimLaporanPdt` (Flow B langkah 4) + kotak edit di layar
+> pratinjau FE sebelum tombol "Kirim ke Klien", supaya AM bisa memperbaiki kalimat sebelum klien
+> membacanya via WA/export, TANPA mengubah Rule 22 (`kirimLaporanPdt` tetap satu aksi atomik).
+> `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
+
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**

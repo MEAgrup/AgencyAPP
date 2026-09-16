@@ -3,10 +3,11 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + kanal + iklan + live + video + afiliasi + tahap + skor per
- * toko klien, dibaca lewat `GET /account/pdt/laporan`. v1 SENGAJA sempit
- * (delapan dari dua belas seksi mesin laporan lama — lihat docblock
- * `packages/core/src/pdt/laporan.ts`): belum ada produk/tokopedia/dst.
+ * KPI ringkas + kanal + iklan + live + video + afiliasi + tahap + skor +
+ * insight per toko klien, dibaca lewat `GET /account/pdt/laporan`. v1
+ * SENGAJA sempit (sembilan dari dua belas seksi mesin laporan lama — lihat
+ * docblock `packages/core/src/pdt/laporan.ts`): belum ada produk/tokopedia/
+ * ads_manager.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
  * via `AskUserQuestion`, 2026-09-16): TikTok lengkap (Live/Video/Kartu
@@ -62,6 +63,18 @@
  * punya modul PDT sama sekali — halaman menampilkan catatan/"—" eksplisit,
  * BUKAN 0 yang mengarang aktivitas. Seksi disembunyikan seluruhnya saat
  * `tahap` `null` (nol baris `pdt_fact_shop_daily` basis `net` periode ini).
+ *
+ * **Insight & Rekomendasi** (keputusan pemilik via `AskUserQuestion` KEDELAPAN
+ * dan KESEMBILAN, 2026-09-16): KEDUA platform SATU bentuk, TIDAK PERNAH
+ * `null` (ringkasan/outlook selalu punya sesuatu untuk dikatakan). Rekomendasi
+ * v1 GENERIK per dimensi skor (`skor.dimensi` ber-nilai rendah), BUKAN
+ * porting penuh aturan per-metrik mesin lama (lihat docblock
+ * `pdt.PdtLaporanInsight`, `@cdps/core`). Halaman ini HANYA menampilkan —
+ * AM tidak bisa menyunting teks dari sini. Penyuntingan sebelum kirim ke
+ * klien (kalau AM mau ganti kalimat) adalah tiket TERPISAH yang mewiring
+ * override teks ke tombol "Kirim ke Klien" di bawah, BUKAN state machine
+ * draft/publikasi/revisi terpisah seperti `client_report_insight` mesin
+ * lama — PDT-21 "snapshot beku HANYA saat dikirim" tetap utuh.
  *
  * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
  * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
@@ -671,6 +684,58 @@ export default function LaporanPdtPage() {
               ))}
             </section>
           )}
+
+          <section className="card">
+            <h2>Insight & Rekomendasi</h2>
+            <p className="muted" style={{ fontSize: 11, marginTop: -4, marginBottom: 8 }}>
+              Draf otomatis dari mesin — belum bisa disunting di halaman ini. Salin ke pesan pengiriman kalau perlu diedit dulu.
+            </p>
+            <p style={{ fontSize: 13 }}>{laporan.insight.ringkasan}</p>
+            {laporan.insight.poin.length > 0 && (
+              <ul style={{ fontSize: 13, marginTop: 8, paddingLeft: 20 }}>
+                {laporan.insight.poin.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            )}
+            {laporan.insight.rekomendasi_tinggi.length > 0 && (
+              <>
+                <h3 style={{ fontSize: 14, marginTop: 16 }}>Rekomendasi Prioritas Tinggi</h3>
+                <ul style={{ fontSize: 13, paddingLeft: 20 }}>
+                  {laporan.insight.rekomendasi_tinggi.map((r) => (
+                    <li key={r.judul}>
+                      <strong>{r.judul}</strong> — {r.target}. {r.dampak} ({r.timeline})
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {laporan.insight.rekomendasi_sedang.length > 0 && (
+              <>
+                <h3 style={{ fontSize: 14, marginTop: 16 }}>Rekomendasi Prioritas Sedang</h3>
+                <ul style={{ fontSize: 13, paddingLeft: 20 }}>
+                  {laporan.insight.rekomendasi_sedang.map((r) => (
+                    <li key={r.judul}>
+                      <strong>{r.judul}</strong> — {r.target}. {r.dampak} ({r.timeline})
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <p style={{ fontSize: 13, marginTop: 16 }}>{laporan.insight.outlook}</p>
+            {laporan.insight.indikator.length > 0 && (
+              <table style={{ width: '100%', fontSize: 13, marginTop: 8 }}>
+                <tbody>
+                  {laporan.insight.indikator.map((ind) => (
+                    <tr key={ind.nama}>
+                      <td>{ind.nama}</td>
+                      <td style={{ textAlign: 'right' }}>{ind.target}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
 
           <section className="card">
             <div className="cardHeader">

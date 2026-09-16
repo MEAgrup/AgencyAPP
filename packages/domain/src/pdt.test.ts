@@ -3420,12 +3420,17 @@ describeDb('rakitLaporanTiktok (sesi 34 lanjutan) — KPI basis net (Rule 15, GM
 
     const skorLangsung = await hitungSkorTiktok(sql, cpId, '2026-07-01');
     expect(hasil.skor).toEqual(skorLangsung.hasil);
+    // "insight" (nol query baru — dirangkai dari bagian yang sudah dibangun di atas + benchTiktok yang SAMA dipakai hitungSkorTiktok).
+    expect(hasil.insight.ringkasan).toContain('GMV Rp. 950.000,00 dari 40 pesanan');
+    expect(hasil.insight.indikator.some((i) => i.nama === 'Target ROAS Iklan (GMV Max)')).toBe(true);
   });
 
-  it('nol baris basis net ⇒ kpi seluruhnya null (BUKAN 0)', async () => {
+  it('nol baris basis net ⇒ kpi seluruhnya null (BUKAN 0), insight tetap terisi (ringkasan generik, poin kosong)', async () => {
     const { cpId } = await fixture();
     const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
     expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+    expect(hasil.insight.ringkasan).toBe('Belum ada data GMV untuk periode ini.');
+    expect(hasil.insight.poin).toEqual([]);
   });
 
   it('periode selain awal bulan ⇒ ValidationError', async () => {
@@ -3468,12 +3473,16 @@ describeDb('rakitLaporanShopee (sesi 34 lanjutan) — KPI basis siap_dikirim (Ru
 
     const skorLangsung = await hitungSkorShopee(sql, cpId, '2026-07-01');
     expect(hasil.skor).toEqual(skorLangsung.hasil);
+    // "insight" Shopee: nol benchTiktok (asimetri asli) ⇒ nol indikator ber-bench, ringkasan tetap terisi.
+    expect(hasil.insight.ringkasan).toContain('GMV Rp. 800.000,00 dari 20 pesanan');
+    expect(hasil.insight.indikator.some((i) => i.nama === 'Target ROAS Iklan (GMV Max)')).toBe(false);
   });
 
-  it('nol baris basis siap_dikirim ⇒ kpi seluruhnya null (BUKAN 0)', async () => {
+  it('nol baris basis siap_dikirim ⇒ kpi seluruhnya null (BUKAN 0), insight tetap terisi', async () => {
     const { cpId } = await fixture();
     const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
     expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+    expect(hasil.insight.ringkasan).toBe('Belum ada data GMV untuk periode ini.');
   });
 
   it('periode selain awal bulan ⇒ ValidationError', async () => {

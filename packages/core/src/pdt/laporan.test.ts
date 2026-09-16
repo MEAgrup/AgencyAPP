@@ -6,6 +6,7 @@ import {
   bangunKanalTiktok,
   bangunKpiRingkas,
   bangunLaporanAfiliasi,
+  bangunLaporanInsight,
   bangunLaporanLive,
   bangunLaporanShopee,
   bangunLaporanTahap,
@@ -16,11 +17,14 @@ import {
   type PdtLaporanIklan,
   type PdtLaporanIklanInputShopee,
   type PdtLaporanIklanInputTiktok,
+  type PdtLaporanInsightInput,
+  type PdtLaporanKanal,
   type PdtLaporanKanalInputShopee,
   type PdtLaporanKanalInputTiktok,
   type PdtLaporanKpiInput,
   type PdtLaporanKpiRingkas,
   type PdtLaporanLiveInput,
+  type PdtLaporanTahap,
   type PdtLaporanTahapInput,
   type PdtLaporanVideo,
   type PdtLaporanVideoInput,
@@ -74,6 +78,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       tahap: TAHAP_INPUT_KOSONG,
       skor,
       benchmarkVersi: 1,
+      benchTiktok: BENCH_KOSONG,
     });
     expect(hasil).toEqual({
       schema: 'cdps.pdt.laporan.tiktok.v1',
@@ -144,6 +149,17 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       },
       skor,
       benchmarkVersi: 1,
+      insight: {
+        ringkasan: 'GMV Rp. 10.000.000,00 dari 100 pesanan. Skor performa belum bisa dihitung — belum ada dimensi yang punya data periode ini.',
+        poin: ['GMV Rp. 10.000.000,00 dari 100 pesanan (CVR 2,00%).'],
+        rekomendasiTinggi: [],
+        rekomendasiSedang: [],
+        outlook: 'Target GMV bulan depan: Rp. 11.500.000,00–Rp. 13.000.000,00 (+15–30%). Fokus: tindak lanjuti rekomendasi prioritas tinggi di atas.',
+        indikator: [
+          { nama: 'Target ROAS Iklan (GMV Max)', target: '≥8x (kini —)' },
+          { nama: 'Target GMV/jam LIVE', target: 'Rp. 150.000,00+ (kini —)' },
+        ],
+      },
     });
   });
 
@@ -152,10 +168,15 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
     const hasil = bangunLaporanTiktok({
       clientPlatformId: 1, periodeAwalBulan: '2026-07-01', generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: null, kanal: null, iklan: null, live: null, video: null, afiliasi: null, tahap: TAHAP_INPUT_KOSONG, skor, benchmarkVersi: 1,
+      benchTiktok: BENCH_KOSONG,
     });
     expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
     // kpi seluruhnya null ⇒ tahap ikut null (whole object) — nol apa pun untuk direproyeksikan.
     expect(hasil.tahap).toBeNull();
+    // insight TIDAK PERNAH null — ringkasan/outlook selalu punya sesuatu untuk dikatakan.
+    expect(hasil.insight.ringkasan).toBe('Belum ada data GMV untuk periode ini.');
+    expect(hasil.insight.outlook).toBe('Target GMV bulan depan belum bisa ditentukan — GMV periode ini tidak diketahui.');
+    expect(hasil.insight.poin).toEqual([]);
   });
 });
 
@@ -188,6 +209,17 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       afiliasi: null,
       tahap: null,
       skor,
+      insight: {
+        ringkasan: 'GMV Rp. 5.000.000,00 dari 50 pesanan. Skor performa belum bisa dihitung — belum ada dimensi yang punya data periode ini.',
+        poin: [
+          'GMV Rp. 5.000.000,00 dari 50 pesanan (CVR 2,00%).',
+          'Catatan: rincian kanal belum lengkap — sebagian sumber GMV belum punya penulis fakta PDT.',
+        ],
+        rekomendasiTinggi: [],
+        rekomendasiSedang: [],
+        outlook: 'Target GMV bulan depan: Rp. 5.750.000,00–Rp. 6.500.000,00 (+15–30%). Fokus: tindak lanjuti rekomendasi prioritas tinggi di atas.',
+        indikator: [],
+      },
     });
     expect('benchmarkVersi' in hasil).toBe(false);
   });
@@ -549,5 +581,113 @@ describe('bangunLaporanVideo (G2-01 lanjutan — bagian "video", 2026-09-16, Tik
     const hasil = bangunLaporanVideo(input);
     expect(hasil?.vvPerVideo).toBeNull();
     expect(hasil?.gmvPerVideo).toBe(500_000);
+  });
+});
+
+describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16, SATU bentuk TikTok+Shopee)', () => {
+  const KANAL_KOSONG: PdtLaporanKanal = { gmvTotal: null, items: [], lengkap: true };
+  const KPI_KOSONG: PdtLaporanKpiRingkas = { gmv: null, pesanan: null, pengunjung: null, cvr: null };
+
+  const dasar = (over: Partial<PdtLaporanInsightInput> = {}): PdtLaporanInsightInput => ({
+    platform: 'tiktok',
+    kpi: KPI_KOSONG,
+    kanal: KANAL_KOSONG,
+    iklan: null,
+    live: null,
+    video: null,
+    afiliasi: null,
+    tahap: null,
+    skor: { total: null, label: null, dimensi: [] },
+    benchTiktok: null,
+    ...over,
+  });
+
+  it('kpi.gmv null ⇒ ringkasan/outlook bilang belum ada data, poin kosong (BUKAN null — insight selalu punya sesuatu untuk dikatakan)', () => {
+    const hasil = bangunLaporanInsight(dasar());
+    expect(hasil.ringkasan).toBe('Belum ada data GMV untuk periode ini.');
+    expect(hasil.outlook).toBe('Target GMV bulan depan belum bisa ditentukan — GMV periode ini tidak diketahui.');
+    expect(hasil.poin).toEqual([]);
+  });
+
+  it('dimensi skor nilai < SKOR_PERHATIAN_MIN (6) ⇒ rekomendasi TINGGI', () => {
+    const hasil = bangunLaporanInsight(dasar({
+      skor: { total: 4, label: 'KRITIS', dimensi: [{ kode: 'live', label: 'LIVE Streaming', bobotDasar: 0.22, nilai: 3, disertakan: true, bobotEfektif: 0.22, labelTampil: '' }] },
+    }));
+    expect(hasil.rekomendasiTinggi).toHaveLength(1);
+    expect(hasil.rekomendasiTinggi[0].judul).toBe('Benahi dimensi "LIVE Streaming"');
+    expect(hasil.rekomendasiSedang).toEqual([]);
+  });
+
+  it('dimensi skor nilai antara SKOR_PERHATIAN_MIN dan SKOR_SEHAT_MIN (8) ⇒ rekomendasi SEDANG', () => {
+    const hasil = bangunLaporanInsight(dasar({
+      skor: { total: 7, label: 'PERLU PERHATIAN', dimensi: [{ kode: 'video', label: 'Video / Konten', bobotDasar: 0.18, nilai: 7, disertakan: true, bobotEfektif: 0.18, labelTampil: '' }] },
+    }));
+    expect(hasil.rekomendasiSedang).toHaveLength(1);
+    expect(hasil.rekomendasiTinggi).toEqual([]);
+  });
+
+  it('dimensi nilai >= SKOR_SEHAT_MIN ATAU disertakan:false ⇒ nol rekomendasi untuk dimensi itu', () => {
+    const hasil = bangunLaporanInsight(dasar({
+      skor: {
+        total: 9, label: 'SEHAT',
+        dimensi: [
+          { kode: 'gmvmax', label: 'GMV Max Ads', bobotDasar: 0.22, nilai: 9, disertakan: true, bobotEfektif: 0.22, labelTampil: '' },
+          { kode: 'live', label: 'LIVE Streaming', bobotDasar: 0.22, nilai: null, disertakan: false, bobotEfektif: 0, labelTampil: 'data tidak tersedia' },
+        ],
+      },
+    }));
+    expect(hasil.rekomendasiTinggi).toEqual([]);
+    expect(hasil.rekomendasiSedang).toEqual([]);
+  });
+
+  it('poin merangkum kanal (channel terbesar) + catatan kalau kanal belum lengkap', () => {
+    const hasil = bangunLaporanInsight(dasar({
+      kpi: { gmv: 1_000_000, pesanan: 10, pengunjung: 500, cvr: 0.02 },
+      kanal: {
+        gmvTotal: 1_000_000, lengkap: false,
+        items: [
+          { kode: 'live', label: 'LIVE', gmv: 300_000, persen: 0.3 },
+          { kode: 'kartu', label: 'Kartu Produk & Shop Tab', gmv: 700_000, persen: 0.7 },
+        ],
+      },
+    }));
+    expect(hasil.poin).toContain('Kartu Produk & Shop Tab jadi kanal terbesar: Rp. 700.000,00 (70,0% dari GMV).');
+    expect(hasil.poin).toContain('Catatan: rincian kanal belum lengkap — sebagian sumber GMV belum punya penulis fakta PDT.');
+  });
+
+  it('poin merangkum iklan/live/video/afiliasi HANYA saat bagiannya ada (bukan null)', () => {
+    const hasil = bangunLaporanInsight(dasar({
+      kpi: { gmv: 2_000_000, pesanan: 20, pengunjung: 1_000, cvr: 0.02 },
+      iklan: { biaya: 500_000, gmv: 2_000_000, roas: 4, items: [], lengkap: true },
+      live: { sesi: 5, gmv: 1_000_000, vv: 10_000, jam: 10, gmvPerSesi: 200_000, gmvPerJam: 100_000 },
+      video: { total: 8, gmv: 400_000, vv: 20_000, likes: 100, dibagikan: 10, klikProduk: 50, gmvPerVideo: 50_000, vvPerVideo: 2_500 },
+      afiliasi: { totalKreator: 10, produktif: 4, gmv: 300_000, pesanan: 3, aov: 100_000, jumlahLive: 1, jumlahVideo: 2 },
+    }));
+    expect(hasil.poin).toContain('Iklan: belanja Rp. 500.000,00 → GMV Rp. 2.000.000,00 (ROAS 4,00x).');
+    expect(hasil.poin).toContain('LIVE: 5 sesi/10,0 jam → Rp. 1.000.000,00 (Rp. 100.000,00/jam).');
+    expect(hasil.poin).toContain('Video: 8 video → Rp. 400.000,00 dari 20.000 views (Rp. 50.000,00/video).');
+    expect(hasil.poin).toContain('Afiliasi: 4 dari 10 kreator produktif, GMV Rp. 300.000,00.');
+  });
+
+  it('tahap.fokus hanya dirangkum untuk platform tiktok (Shopee selalu tahap:null, tapi guard platform tetap eksplisit)', () => {
+    const tahap: PdtLaporanTahap = { fokus: 'consideration', funnel: [], konversiTotal: { nilai: null }, belanjaTotal: null, blok: [] };
+    const tiktok = bangunLaporanInsight(dasar({ platform: 'tiktok', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1 }, tahap }));
+    expect(tiktok.poin).toContain('Fokus tahap buyer-journey periode ini: Consideration.');
+
+    const shopee = bangunLaporanInsight(dasar({ platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1 }, tahap }));
+    expect(shopee.poin.some((p) => p.includes('Fokus tahap'))).toBe(false);
+  });
+
+  it('indikator TikTok memakai benchTiktok (ROAS + GMV/jam LIVE); Shopee nol bench ⇒ hanya skor total', () => {
+    const skor = { total: 7, label: 'PERLU PERHATIAN' as const, dimensi: [] };
+    const tiktok = bangunLaporanInsight(dasar({ kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1 }, benchTiktok: BENCH_KOSONG, skor }));
+    expect(tiktok.indikator).toEqual([
+      { nama: 'Target Skor Performa', target: '≥8/10 (kini 7,0/10)' },
+      { nama: 'Target ROAS Iklan (GMV Max)', target: '≥8x (kini —)' },
+      { nama: 'Target GMV/jam LIVE', target: 'Rp. 150.000,00+ (kini —)' },
+    ]);
+
+    const shopee = bangunLaporanInsight(dasar({ platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1 }, benchTiktok: null, skor }));
+    expect(shopee.indikator).toEqual([{ nama: 'Target Skor Performa', target: '≥8/10 (kini 7,0/10)' }]);
   });
 });
