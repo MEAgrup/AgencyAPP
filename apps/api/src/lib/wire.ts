@@ -9198,6 +9198,42 @@ export function pdtCommitBatchToWire(h: pdt.PdtCommitPersiapan): PdtCommitBatchW
   };
 }
 
+// G1-09 sub-langkah 3 — GET /account/pdt/batches (riwayat, bullet 4: status
+// paket). Bentuk RINGKAS (bukan `PdtCommitBatchWire` — nol `berkas`/`identitas`
+// per baris, daftar ini untuk "toko ini punya batch apa saja", bukan detail
+// per berkas satu batch).
+export interface PdtBatchRingkasWire {
+  id: number;
+  client_platform_id: number;
+  platform: string;
+  status: string; // 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak' | 'digantikan'
+  alasan_ditolak: string | null;
+  reconcile_delta_pct: number | null;
+  periode_mulai: string;
+  periode_selesai: string;
+  dibuat_pada: string;
+  dibuat_oleh: string;
+  paket_status: string; // 'tersedia' | 'kedaluwarsa' | 'legal_hold'
+  retensi_sampai: string | null;
+}
+
+export function pdtBatchRingkasToWire(b: pdt.PdtBatchRingkas): PdtBatchRingkasWire {
+  return {
+    id: b.id,
+    client_platform_id: b.clientPlatformId,
+    platform: b.platform,
+    status: b.status,
+    alasan_ditolak: b.alasanDitolak,
+    reconcile_delta_pct: b.reconcileDeltaPct,
+    periode_mulai: b.periodeMulai,
+    periode_selesai: b.periodeSelesai,
+    dibuat_pada: b.dibuatPada,
+    dibuat_oleh: b.dibuatOleh,
+    paket_status: b.paketStatus,
+    retensi_sampai: b.retensiSampai,
+  };
+}
+
 // ===========================================================================
 // G2-01 lanjutan — payload "laporan" v1 (PDT-21 Rule 21). `rakitLaporanTiktok`/
 // `rakitLaporanShopee` (`@cdps/domain`) sudah camelCase; satu bentuk wire

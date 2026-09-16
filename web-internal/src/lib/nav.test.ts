@@ -267,6 +267,15 @@ describe('visibleNav — Account', () => {
     }
   });
 
+  it('Account staff (AM) and lead see Upload Data Toko PDT (G1-09 sub-langkah 3); other divisions do not', () => {
+    expect(hrefs(role('Account', 'staff'))).toContain('/account/pdt/upload');
+    expect(hrefs(role('Account', 'lead'))).toContain('/account/pdt/upload');
+    for (const division of ['Sales', 'Marketing', 'Finance', 'Creative', 'Ads', 'KOL', 'Live Stream']) {
+      expect(hrefs(role(division, 'staff')), `${division} must not see /account/pdt/upload`)
+        .not.toContain('/account/pdt/upload');
+    }
+  });
+
   it('Account STAFF does not see the division Brief queues (listDivisionQueue denies an AM)', () => {
     const seen = hrefs(role('Account', 'staff'));
     for (const href of ['/creative', '/ads', '/kol', '/livestream']) {
@@ -743,7 +752,7 @@ describe('Sidebar IA v3 — struktur 9 grup', () => {
       '/', '/portal', '/board/my-tasks', '/persetujuan',
       '/leads', '/sales', '/marketing', '/sales/kinerja', '/marketing/performance',
       '/master-services', '/sales/kalkulator',
-      '/clients', '/portal/management', '/health', '/account/pdt/laporan', '/showcase',
+      '/clients', '/portal/management', '/health', '/account/pdt/laporan', '/account/pdt/upload', '/showcase',
       '/tasks', '/account/rekap', '/account', '/ads', '/creative', '/kol', '/livestream',
       '/tasks?division=AI+Optimizer', '/store-ops',
       '/ads/screening', '/ads/scanner',

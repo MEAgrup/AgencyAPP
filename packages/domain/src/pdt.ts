@@ -1457,6 +1457,90 @@ export async function markRawStored(sql: Sql, batchId: number, rawPath: string, 
      where id = ${batchId}`;
 }
 
+/** Status paket TAMPILAN (G1-09 bullet 4) — turunan dari tiga kolom DB, bukan kolom baru. */
+export type PdtPaketStatus = 'tersedia' | 'kedaluwarsa' | 'legal_hold';
+
+/** Satu baris riwayat batch — dipakai halaman upload untuk daftar "batch toko ini", termasuk yang `ditolak` (Rule 10: diagnosis tanpa upload ulang). */
+export interface PdtBatchRingkas {
+  id: number;
+  clientPlatformId: number;
+  platform: pdt.PdtPlatform;
+  status: PdtCommitStatus;
+  alasanDitolak: string | null;
+  reconcileDeltaPct: number | null;
+  periodeMulai: string;
+  periodeSelesai: string;
+  dibuatPada: string;
+  dibuatOleh: string;
+  paketStatus: PdtPaketStatus;
+  /** `null` hanya bila `paketStatus==='kedaluwarsa'` (paket sudah dipurge, Rule 45) — selain itu selalu tanggal, termasuk `legal_hold`. */
+  retensiSampai: string | null;
+}
+
+/**
+ * listRiwayatBatchPdt — G1-09 bullet 4 ("UI batch wajib menampilkan status
+ * paket: tersedia/kedaluwarsa/legal hold"), sub-langkah 3. Seluruh baris
+ * `pdt_upload_batch` satu toko klien, terbaru dulu — TERMASUK batch
+ * `ditolak`/`digantikan` (Rule 10 error path: batch gagal tetap tersimpan
+ * beserta alasannya, "agar bisa didiagnosis tanpa upload ulang" — daftar ini
+ * adalah permukaan diagnosis itu, sebelum ini hanya bisa dibaca lewat SQL
+ * langsung). `paketStatus` diturunkan dari tiga kolom yang SUDAH ada
+ * (`legal_hold`/`raw_dihapus_pada`/`retensi_sampai`, migrasi G1-01) — bukan
+ * kolom/state machine baru (pagar #5 PDT_BACKLOG.md §0, PDT tetap nol
+ * lifecycle). Gerbang izin sama dengan unggah (`canUploadBatch`) — siapa yang
+ * boleh mengunggah data toko itu juga siapa yang boleh melihat riwayatnya,
+ * pola sama `riwayatKirimanPdt`/`canKirimLaporan`.
+ */
+export async function listRiwayatBatchPdt(sql: Sql, actor: Actor, clientPlatformId: number): Promise<PdtBatchRingkas[]> {
+  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
+  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+
+  const rows = await sql<{
+    // `bigint` (int8, OID 20) — driver mengembalikan STRING (pencegahan
+    // presisi, sama pola px/produkexchange `Number(r.gmv_30d)`), BUKAN JS
+    // number apa adanya. Nol konversi di sini pernah menghasilkan wire
+    // `client_platform_id: "626"` (string) alih-alih `626` (number) — ditemukan
+    // lewat tes route (JSON round-trip mengungkap yang test domain langsung
+    // tidak, karena `toEqual` di sana membandingkan objek TS, bukan JSON).
+    id: string;
+    client_platform_id: string;
+    platform: string;
+    status: PdtCommitStatus;
+    alasan_ditolak: string | null;
+    reconcile_delta_pct: string | null;
+    periode_mulai: string;
+    periode_selesai: string;
+    dibuat_pada: string;
+    dibuat_oleh: string;
+    legal_hold: boolean;
+    raw_dihapus_pada: string | null;
+    retensi_sampai: string | null;
+  }[]>`
+    select id, client_platform_id, platform, status, alasan_ditolak, reconcile_delta_pct,
+           to_char(periode_mulai, 'YYYY-MM-DD') as periode_mulai,
+           to_char(periode_selesai, 'YYYY-MM-DD') as periode_selesai,
+           dibuat_pada::text as dibuat_pada, dibuat_oleh, legal_hold, raw_dihapus_pada,
+           to_char(retensi_sampai, 'YYYY-MM-DD') as retensi_sampai
+      from pdt_upload_batch
+     where client_platform_id = ${clientPlatformId}
+     order by id desc`;
+
+  return rows.map((r) => ({
+    id: Number(r.id),
+    clientPlatformId: Number(r.client_platform_id),
+    platform: r.platform as pdt.PdtPlatform,
+    status: r.status,
+    alasanDitolak: r.alasan_ditolak,
+    reconcileDeltaPct: r.reconcile_delta_pct == null ? null : Number(r.reconcile_delta_pct),
+    periodeMulai: r.periode_mulai,
+    periodeSelesai: r.periode_selesai,
+    dibuatPada: r.dibuat_pada,
+    dibuatOleh: r.dibuat_oleh,
+    paketStatus: r.legal_hold ? 'legal_hold' : r.raw_dihapus_pada != null ? 'kedaluwarsa' : 'tersedia',
+    retensiSampai: r.raw_dihapus_pada != null ? null : r.retensi_sampai,
+  }));
+}
+
 // ===========================================================================
 // G1-10 — Job purge harian (Flow E, Rule 45-49; `docs/backlog/PDT_BACKLOG.md`
 // G1-10, `docs/prd/CDPS_PDT_Pusat_Data_Toko.md` §3/§4).
