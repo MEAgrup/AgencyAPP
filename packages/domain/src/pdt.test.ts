@@ -4811,6 +4811,123 @@ describeDb('kirimLaporanPdt (Flow B langkah 4) — bekukan snapshot ke pdt_lapor
     expect(a.id).not.toBe(bBedaToko.id);
   });
 
+  // -------------------------------------------------------------------------
+  // G1-10-RETENSI-RECOMPUTE — Rule 45 baris ketiga ("menopang laporan yang
+  // sudah dikirim" ⇒ retensi +12 bulan sejak kirim, tidak pernah diperpendek).
+  // Batch yang overlap rentang periode KIRIMAN (bukan `status`-nya) yang
+  // dijadikan kandidat — lihat komentar `kirimLaporanPdt`.
+  // -------------------------------------------------------------------------
+  describe('perpanjangan retensi batch (G1-10-RETENSI-RECOMPUTE)', () => {
+    async function insertBatch(
+      cpId: number,
+      clientId: string,
+      opts: {
+        periodeMulai: string;
+        periodeSelesai: string;
+        status?: 'verified' | 'ditolak' | 'parsing';
+        retensiSampai: string;
+        retensiAlasan?: string;
+        legalHold?: boolean;
+      },
+    ): Promise<number> {
+      const rows = await sql<{ id: number }[]>`
+        insert into pdt_upload_batch
+          (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
+           alasan_ditolak, parser_versi, retensi_sampai, retensi_alasan, legal_hold, dibuat_oleh)
+        values
+          (${clientId}, ${cpId}, 'tiktok', ${opts.periodeMulai}::date, ${opts.periodeSelesai}::date,
+           ${opts.status ?? 'verified'}, ${opts.status === 'ditolak' ? '[rekonsiliasi gagal, uji G1-10-RETENSI-RECOMPUTE]' : null},
+           ${pdtCore.PDT_PARSER_VERSI}, ${opts.retensiSampai}::date,
+           ${opts.retensiAlasan ?? 'default'}, ${opts.legalHold ?? false}, ${OWNER_AM})
+        returning id`;
+      return rows[0].id;
+    }
+
+    async function bacaRetensi(batchId: number): Promise<{ retensi_sampai: string; retensi_alasan: string | null }> {
+      const [row] = await sql<{ retensi_sampai: string; retensi_alasan: string | null }[]>`
+        select retensi_sampai::text, retensi_alasan from pdt_upload_batch where id = ${batchId}`;
+      return row;
+    }
+
+    it('batch overlap periode laporan ⇒ retensi diperpanjang +12 bulan sejak kirim, alasan berubah', async () => {
+      const clientId = nextClientId();
+      await insertClient(clientId, OWNER_AM);
+      const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+      const batchId = await insertBatch(cpId, clientId, {
+        periodeMulai: '2026-07-01', periodeSelesai: '2026-07-31', retensiSampai: '2026-08-01',
+      });
+
+      await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date('2026-08-05T00:00:00.000Z'));
+
+      const setelah = await bacaRetensi(batchId);
+      expect(setelah.retensi_sampai).toBe('2027-08-05');
+      expect(setelah.retensi_alasan).toBe('laporan_terkirim');
+    });
+
+    it('GREATEST — retensi yang sudah lebih panjang TIDAK diperpendek', async () => {
+      const clientId = nextClientId();
+      await insertClient(clientId, OWNER_AM);
+      const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+      const batchId = await insertBatch(cpId, clientId, {
+        periodeMulai: '2026-07-01', periodeSelesai: '2026-07-31', retensiSampai: '2030-01-01', retensiAlasan: 'katalog_px',
+      });
+
+      await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date('2026-08-05T00:00:00.000Z'));
+
+      const setelah = await bacaRetensi(batchId);
+      expect(setelah.retensi_sampai).toBe('2030-01-01'); // TIDAK diperpendek ke 2027-08-05
+    });
+
+    it('legal_hold ⇒ TIDAK disentuh sama sekali', async () => {
+      const clientId = nextClientId();
+      await insertClient(clientId, OWNER_AM);
+      const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+      const batchId = await insertBatch(cpId, clientId, {
+        periodeMulai: '2026-07-01', periodeSelesai: '2026-07-31', retensiSampai: '2026-08-01', legalHold: true,
+      });
+
+      await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date('2026-08-05T00:00:00.000Z'));
+
+      const setelah = await bacaRetensi(batchId);
+      expect(setelah.retensi_sampai).toBe('2026-08-01');
+      expect(setelah.retensi_alasan).toBe('default');
+    });
+
+    it('batch periode TIDAK overlap laporan ⇒ TIDAK disentuh; batch toko LAIN ⇒ TIDAK disentuh', async () => {
+      const clientId = nextClientId();
+      await insertClient(clientId, OWNER_AM);
+      const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+      const batchJuni = await insertBatch(cpId, clientId, {
+        periodeMulai: '2026-06-01', periodeSelesai: '2026-06-30', retensiSampai: '2026-08-01',
+      });
+      const { cpId: cpLain } = await fixture('TikTok Shop');
+      const batchTokoLain = await insertBatch(cpLain, clientId, {
+        periodeMulai: '2026-07-01', periodeSelesai: '2026-07-31', retensiSampai: '2026-08-01',
+      });
+
+      await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date('2026-08-05T00:00:00.000Z'));
+
+      expect((await bacaRetensi(batchJuni)).retensi_sampai).toBe('2026-08-01');
+      expect((await bacaRetensi(batchTokoLain)).retensi_sampai).toBe('2026-08-01');
+    });
+
+    it('batch berstatus ditolak yang overlap TETAP diperpanjang (fakta bisa sudah tertulis sebelum ditolak rekonsiliasi — tidak bisa membuktikan sebaliknya)', async () => {
+      const clientId = nextClientId();
+      await insertClient(clientId, OWNER_AM);
+      const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+      const batchId = await insertBatch(cpId, clientId, {
+        periodeMulai: '2026-07-01', periodeSelesai: '2026-07-31', retensiSampai: '2026-08-01',
+        status: 'ditolak', retensiAlasan: 'ditolak',
+      });
+
+      await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date('2026-08-05T00:00:00.000Z'));
+
+      const setelah = await bacaRetensi(batchId);
+      expect(setelah.retensi_sampai).toBe('2027-08-05');
+      expect(setelah.retensi_alasan).toBe('laporan_terkirim');
+    });
+  });
+
   it('baris tertulis immutable — UPDATE mentah ditolak trigger (Rule 22, aturan rumah #3)', async () => {
     const { cpId } = await fixture('TikTok Shop');
     const hasil = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');

@@ -3098,6 +3098,29 @@ export async function kirimLaporanPdt(
       returning id, periode_mulai::text, periode_selesai::text, parser_versi, benchmark_versi,
                 dikirim_pada::text, dikirim_oleh, menggantikan_kiriman_id`;
 
+    // G1-10-RETENSI-RECOMPUTE — Rule 45 baris ketiga: paket ZIP yang menopang laporan yang
+    // SUDAH DIKIRIM ke klien diperpanjang retensinya +12 bulan sejak pengiriman, tidak pernah
+    // diperpendek. Pola SAMA `productexchange-m3.ts` PX-M3-08 ("SKU di katalog PX" — pemicu
+    // KEEMPAT Rule 45, sudah tertutup): perpanjangan ditulis LANGSUNG oleh domain yang memicunya
+    // (di sini) saat kejadian terjadi, BUKAN oleh `planPdtPurgeTick` (yang hanya membaca kolom
+    // ini apa adanya). Beda dari PX-M3-08 (yang punya `batch_ids` eksplisit dari `px_sku_volume`):
+    // `pdt_fact_*` tidak menyimpan daftar batch sumber per laporan, jadi batch yang "menopang"
+    // dipilih lewat overlap rentang tanggal `client_platform_id` yang sama dengan periode laporan
+    // (`periode_mulai`/`periode_selesai` KIRIMAN, bukan batch) — TANPA memfilter `status`: baris
+    // fakta ditulis `tulisFaktaModulTerparse` bahkan untuk batch yang akhirnya `ditolak` karena
+    // rekonsiliasi (identitas tetap dicek lebih dulu), jadi status batch TIDAK bisa dipakai untuk
+    // menyingkirkan kandidat — semangat sama Rule 48 ("tidak bisa membuktikan ⇒ tidak boleh
+    // menghapus"). `legal_hold` dikecualikan (sudah tidak pernah dipurge, memperpanjang kolomnya
+    // tidak berguna).
+    await tx`
+      update pdt_upload_batch
+         set retensi_sampai = greatest(retensi_sampai, ${tz.addMonthsToDate(tz.dateString(now), 12)}::date),
+             retensi_alasan = 'laporan_terkirim'
+       where client_platform_id = ${clientPlatformId}
+         and legal_hold = false
+         and periode_mulai <= ${row.periode_selesai}::date
+         and periode_selesai >= ${row.periode_mulai}::date`;
+
     await executors(tx).audit.insertAudit({
       entityType: 'pdt_laporan_kiriman',
       entityId: String(row.id),
