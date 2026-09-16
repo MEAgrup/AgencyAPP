@@ -9255,6 +9255,17 @@ export interface PdtLaporanVideoWire {
   vv_per_video: number | null;
 }
 
+/** `null` = nol baris kreator sama sekali di periode ini (bukan objek kosong) — lihat docblock `pdt.PdtLaporanAfiliasi`, `@cdps/core`. `jumlah_live`/`jumlah_video` SELALU `null` untuk Shopee (`shopee_ams_afiliasi` tidak pernah menulisnya). RINGKASAN saja — bukan daftar per-kreator. */
+export interface PdtLaporanAfiliasiWire {
+  total_kreator: number;
+  produktif: number;
+  gmv: number | null;
+  pesanan: number | null;
+  aov: number | null;
+  jumlah_live: number | null;
+  jumlah_video: number | null;
+}
+
 export interface PdtLaporanWire {
   schema: string;
   platform: string;
@@ -9266,6 +9277,7 @@ export interface PdtLaporanWire {
   iklan: PdtLaporanIklanWire | null;
   live: PdtLaporanLiveWire | null;
   video: PdtLaporanVideoWire | null;
+  afiliasi: PdtLaporanAfiliasiWire | null;
   skor: PdtLaporanSkorWire;
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
@@ -9317,6 +9329,14 @@ function pdtLaporanVideoToWire(v: pdtCore.PdtLaporanVideo | null): PdtLaporanVid
   };
 }
 
+function pdtLaporanAfiliasiToWire(a: pdtCore.PdtLaporanAfiliasi | null): PdtLaporanAfiliasiWire | null {
+  if (a == null) return null;
+  return {
+    total_kreator: a.totalKreator, produktif: a.produktif, gmv: a.gmv, pesanan: a.pesanan, aov: a.aov,
+    jumlah_live: a.jumlahLive, jumlah_video: a.jumlahVideo,
+  };
+}
+
 export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanWire {
   return {
     schema: l.schema,
@@ -9329,6 +9349,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
+    afiliasi: pdtLaporanAfiliasiToWire(l.afiliasi),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: l.benchmarkVersi,
   };
@@ -9346,6 +9367,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
+    afiliasi: pdtLaporanAfiliasiToWire(l.afiliasi),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: null,
   };

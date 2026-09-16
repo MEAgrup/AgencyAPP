@@ -28,13 +28,18 @@
  * `AskUserQuestion` KELIMA, 2026-09-16, setelah `tt_ads_product`/
  * `tt_ads_live` akhirnya punya penulis fakta di PR #413: KEDUA platform
  * dibangun sekaligus, TikTok `lengkap: true`, Shopee `lengkap: false`
- * PERMANEN karena `ads_banner` legacy tidak pernah punya modul PDT) sudah
- * bisa dibangun dari `pdt_fact_*` — ENAM bagian lain (produk, afiliasi,
- * tokopedia, ads_manager, tahap, insight) butuh fungsi agregasi fakta BARU
- * per bagian (pola sama `rakitInputSkorTiktok`/`rakitInputSkorShopee`)
- * yang belum ada satupun, pekerjaan multi-sesi. Enam bagian sisanya TETAP
- * di luar cakupan, ditambahkan satu-per-satu sesi berikutnya seperti pola
- * G1-09 fact-writer, TIDAK ditebak/dibangun sekaligus di sini.
+ * PERMANEN karena `ads_banner` legacy tidak pernah punya modul PDT), dan
+ * sekarang "afiliasi" (lihat docblock `PdtLaporanAfiliasi` di bawah —
+ * keputusan pemilik via `AskUserQuestion` KEENAM, 2026-09-16: RINGKASAN saja
+ * untuk KEDUA platform, BUKAN daftar per-kreator, karena `pdt_fact_creator_
+ * period` tidak pernah punya kolom `refund`/`komisi`/`roiKomisi` yang
+ * dibawa mesin lama) sudah bisa dibangun dari `pdt_fact_*` — LIMA bagian
+ * lain (produk, tokopedia, ads_manager, tahap, insight) butuh fungsi
+ * agregasi fakta BARU per bagian (pola sama `rakitInputSkorTiktok`/
+ * `rakitInputSkorShopee`) yang belum ada satupun, pekerjaan multi-sesi.
+ * Lima bagian sisanya TETAP di luar cakupan, ditambahkan satu-per-satu sesi
+ * berikutnya seperti pola G1-09 fact-writer, TIDAK ditebak/dibangun
+ * sekaligus di sini.
  *
  * **Basis KPI ringkas per platform diverifikasi dari PRD (bukan ditebak)**:
  * TikTok = GMV−refund, basis `'net'` (Rule 15); Shopee = basis
@@ -409,6 +414,79 @@ export function bangunLaporanVideo(input: PdtLaporanVideoInput | null): PdtLapor
   };
 }
 
+/**
+ * Bagian "afiliasi" (ringkasan) — bagian KEENAM, keputusan pemilik via
+ * `AskUserQuestion` 2026-09-16: RINGKASAN saja untuk KEDUA platform sekaligus,
+ * BUKAN daftar per-kreator (`top`/`nempelList` mesin lama, `report/metrik.ts`
+ * `affiliateReport`). Mesin lama juga membawa `refund`/`komisi`/`roiKomisi`
+ * per kreator (`KreatorRec`) — `pdt_fact_creator_period` TIDAK PERNAH punya
+ * kolom itu sama sekali (bukan kekurangan writer, skema migrasi
+ * `20261011010000` §5e memang tidak menyediakannya; `komisi`/`ROI` Shopee
+ * sengaja tidak dipetakan ke tabel ini sejak awal — lihat docblock
+ * `ekstrakBarisKreatorShopeeAmsAfiliasi`, `PDT_KOLOM_DIPANEN.md` §2.10, milik
+ * PX Flow D, konsumen domain lain yang belum dibangun) — jadi `refund`/
+ * `netGmv`/`refundRate`/`komisi`/`roiKomisi` TIDAK bisa direplikasi di PDT
+ * hari ini, TIDAK ditebak di sini.
+ *
+ * Query di sini TETAP platform-agnostic (SATU fungsi baca, SATU bentuk —
+ * pola sama "live"): `pdt_fact_creator_period` punya kolom yang SAMA PERSIS
+ * untuk kedua platform, TikTok (`tt_transaction_creator`) mengisi
+ * `pesananTeratribusi`/`jumlahLive`/`jumlahVideo`, Shopee (`shopee_ams_
+ * afiliasi`) HANYA `gmv`/`pesananTeratribusi` — Shopee otomatis dapat
+ * `jumlahLive`/`jumlahVideo` `null` karena nol baris berkolom itu, BUKAN
+ * filter platform eksplisit (nol `lengkap` flag dibutuhkan, sama alasan
+ * "live"/"video": null-aware per-field sudah cukup mengomunikasikan celah).
+ *
+ * `produktif` = jumlah baris ber-`gmv > 0` — cermin PERSIS
+ * `rakitInputSkorTiktok`'s dimensi Affiliate (`coalesce(gmv, 0) > 0`,
+ * `KreatorRec.produktif` mesin lama) dan `affiliateReport`'s
+ * `produktif: gmv > 0`. `aov` (rata-rata nilai pesanan) SELALU DITURUNKAN
+ * `Σgmv ÷ Σpesanan` SETELAH dijumlah (konvensi `roas`/`cvr` yang sama,
+ * BUKAN dibaca dari kolom mentah `aov` per-baris yang TikTok bawa — rata-
+ * rata dari rata-rata membiaskan kreator kecil). `ctor` (per-kreator, tidak
+ * pernah punya agregat toko-level di mesin lama sekalipun) SENGAJA TIDAK
+ * diikutkan — nol preseden cara menjumlahkannya secara bermakna.
+ *
+ * Whole-object `null` saat nol baris kreator sama sekali di periode ini —
+ * cermin Rule 12/`bangunLaporanLive`/`bangunLaporanVideo`.
+ */
+export interface PdtLaporanAfiliasi {
+  totalKreator: number;
+  produktif: number;
+  gmv: number | null;
+  pesanan: number | null;
+  /** Σgmv ÷ Σpesanan — `null` bila `gmv`/`pesanan` `null` ATAU `pesanan` 0. */
+  aov: number | null;
+  jumlahLive: number | null;
+  jumlahVideo: number | null;
+}
+
+/** Agregat `pdt_fact_creator_period` untuk satu periode. `gmv`/`pesanan`/`jumlahLive`/`jumlahVideo` `null` = nol baris berkolom itu (tidak diketahui, BUKAN nol) — lihat docblock tipe di atas. */
+export interface PdtLaporanAfiliasiInput {
+  totalKreator: number;
+  produktif: number;
+  gmv: number | null;
+  pesanan: number | null;
+  jumlahLive: number | null;
+  jumlahVideo: number | null;
+}
+
+/** Rakit "afiliasi". `null` (whole object) bila `input` `null` ATAU `totalKreator` 0 — lihat docblock tipe di atas. */
+export function bangunLaporanAfiliasi(input: PdtLaporanAfiliasiInput | null): PdtLaporanAfiliasi | null {
+  if (input == null || input.totalKreator === 0) return null;
+  const gmv = bulat(input.gmv);
+  const pesanan = bulat(input.pesanan);
+  return {
+    totalKreator: input.totalKreator,
+    produktif: input.produktif,
+    gmv,
+    pesanan,
+    aov: gmv == null || pesanan == null || pesanan === 0 ? null : bulat(gmv / pesanan),
+    jumlahLive: bulat(input.jumlahLive),
+    jumlahVideo: bulat(input.jumlahVideo),
+  };
+}
+
 export interface PdtLaporanTiktok {
   schema: 'cdps.pdt.laporan.tiktok.v1';
   platform: 'tiktok';
@@ -420,6 +498,7 @@ export interface PdtLaporanTiktok {
   iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
+  afiliasi: PdtLaporanAfiliasi | null;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
 }
@@ -435,6 +514,7 @@ export interface PdtLaporanShopee {
   iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
+  afiliasi: PdtLaporanAfiliasi | null;
   skor: PdtSkorHasilShopee;
 }
 
@@ -447,6 +527,7 @@ export interface PdtLaporanTiktokOptions {
   iklan: PdtLaporanIklanInputTiktok | null;
   live: PdtLaporanLiveInput | null;
   video: PdtLaporanVideoInput | null;
+  afiliasi: PdtLaporanAfiliasiInput | null;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
 }
@@ -460,6 +541,7 @@ export interface PdtLaporanShopeeOptions {
   iklan: PdtLaporanIklanInputShopee | null;
   live: PdtLaporanLiveInput | null;
   video: PdtLaporanVideoInput | null;
+  afiliasi: PdtLaporanAfiliasiInput | null;
   skor: PdtSkorHasilShopee;
 }
 
@@ -476,6 +558,7 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
     iklan: bangunIklanTiktok(opts.iklan),
     live: bangunLaporanLive(opts.live),
     video: bangunLaporanVideo(opts.video),
+    afiliasi: bangunLaporanAfiliasi(opts.afiliasi),
     skor: opts.skor,
     benchmarkVersi: opts.benchmarkVersi,
   };
@@ -494,6 +577,7 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
     iklan: bangunIklanShopee(opts.iklan),
     live: bangunLaporanLive(opts.live),
     video: bangunLaporanVideo(opts.video),
+    afiliasi: bangunLaporanAfiliasi(opts.afiliasi),
     skor: opts.skor,
   };
 }

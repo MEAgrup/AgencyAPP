@@ -185,6 +185,23 @@ export interface PdtLaporanIklan {
   lengkap: boolean;
 }
 
+// G2-01 lanjutan — bagian "afiliasi" ringkasan, 2026-09-16. KEDUA platform,
+// SATU bentuk (beda dari "kanal"/"iklan" — nol `lengkap` flag, pola sama
+// "live"/"video"): `jumlah_live`/`jumlah_video` SELALU `null` untuk Shopee
+// (`shopee_ams_afiliasi` tidak pernah menulis kolom itu). RINGKASAN saja —
+// BUKAN daftar per-kreator (mesin lama membawa `refund`/`komisi`/`roiKomisi`
+// per kreator, `pdt_fact_creator_period` tidak pernah punya kolom itu).
+// `null` (whole object) berarti nol baris kreator sama sekali di periode ini.
+export interface PdtLaporanAfiliasi {
+  total_kreator: number;
+  produktif: number;
+  gmv: number | null;
+  pesanan: number | null;
+  aov: number | null;
+  jumlah_live: number | null;
+  jumlah_video: number | null;
+}
+
 export interface PdtLaporan {
   schema: string;
   platform: string;
@@ -196,6 +213,7 @@ export interface PdtLaporan {
   iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
+  afiliasi: PdtLaporanAfiliasi | null;
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;
 }

@@ -5,10 +5,12 @@ import {
   bangunKanalShopee,
   bangunKanalTiktok,
   bangunKpiRingkas,
+  bangunLaporanAfiliasi,
   bangunLaporanLive,
   bangunLaporanShopee,
   bangunLaporanTiktok,
   bangunLaporanVideo,
+  type PdtLaporanAfiliasiInput,
   type PdtLaporanIklanInputShopee,
   type PdtLaporanIklanInputTiktok,
   type PdtLaporanKanalInputShopee,
@@ -61,6 +63,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       iklan: null,
       live: null,
       video: null,
+      afiliasi: null,
       skor,
       benchmarkVersi: 1,
     });
@@ -75,6 +78,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       iklan: null,
       live: null,
       video: null,
+      afiliasi: null,
       skor,
       benchmarkVersi: 1,
     });
@@ -84,7 +88,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
     const skor = computeSkorTiktok(INPUT_KOSONG_TIKTOK, BENCH_KOSONG);
     const hasil = bangunLaporanTiktok({
       clientPlatformId: 1, periodeAwalBulan: '2026-07-01', generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: null, kanal: null, iklan: null, live: null, video: null, skor, benchmarkVersi: 1,
+      kpi: null, kanal: null, iklan: null, live: null, video: null, afiliasi: null, skor, benchmarkVersi: 1,
     });
     expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
   });
@@ -102,6 +106,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       iklan: null,
       live: null,
       video: null,
+      afiliasi: null,
       skor,
     });
     expect(hasil).toEqual({
@@ -115,6 +120,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       iklan: null,
       live: null,
       video: null,
+      afiliasi: null,
       skor,
     });
     expect('benchmarkVersi' in hasil).toBe(false);
@@ -273,6 +279,44 @@ describe('bangunIklanShopee (2026-09-16, SELALU lengkap:false — ads_banner leg
     expect(hasil?.items.find((i) => i.kode === 'shopee_ads_search')).toEqual({ kode: 'shopee_ads_search', label: 'Iklan Pencarian', biaya: null, gmv: null, roas: null });
     expect(hasil?.biaya).toBe(100_000);
     expect(hasil?.roas).toBe(3);
+  });
+});
+
+describe('bangunLaporanAfiliasi (G2-01 lanjutan — bagian "afiliasi" ringkasan, 2026-09-16, SATU bentuk TikTok+Shopee)', () => {
+  it('input null ⇒ null (whole object, BUKAN objek ber-field null)', () => {
+    expect(bangunLaporanAfiliasi(null)).toBeNull();
+  });
+
+  it('totalKreator 0 ⇒ null (nol baris kreator sama sekali di periode ini)', () => {
+    const input: PdtLaporanAfiliasiInput = { totalKreator: 0, produktif: 0, gmv: null, pesanan: null, jumlahLive: null, jumlahVideo: null };
+    expect(bangunLaporanAfiliasi(input)).toBeNull();
+  });
+
+  it('TikTok — gmv/pesanan/jumlahLive/jumlahVideo semua terisi, aov diturunkan Σgmv÷Σpesanan', () => {
+    const input: PdtLaporanAfiliasiInput = { totalKreator: 5, produktif: 3, gmv: 1_000_000, pesanan: 25, jumlahLive: 8, jumlahVideo: 12 };
+    expect(bangunLaporanAfiliasi(input)).toEqual({
+      totalKreator: 5, produktif: 3, gmv: 1_000_000, pesanan: 25, aov: 40_000, jumlahLive: 8, jumlahVideo: 12,
+    });
+  });
+
+  it('Shopee — jumlahLive/jumlahVideo tidak pernah diisi penulis fakta ⇒ null, aov tetap diturunkan dari gmv/pesanan', () => {
+    const input: PdtLaporanAfiliasiInput = { totalKreator: 2, produktif: 1, gmv: 150_000, pesanan: 3, jumlahLive: null, jumlahVideo: null };
+    expect(bangunLaporanAfiliasi(input)).toEqual({
+      totalKreator: 2, produktif: 1, gmv: 150_000, pesanan: 3, aov: 50_000, jumlahLive: null, jumlahVideo: null,
+    });
+  });
+
+  it('pesanan 0 ⇒ aov null (bukan pembagian oleh nol)', () => {
+    const input: PdtLaporanAfiliasiInput = { totalKreator: 1, produktif: 0, gmv: 0, pesanan: 0, jumlahLive: null, jumlahVideo: null };
+    expect(bangunLaporanAfiliasi(input)?.aov).toBeNull();
+  });
+
+  it('gmv null (nol baris berkolom gmv) ⇒ aov null, gmv tetap null (bukan 0 yang mengarang)', () => {
+    const input: PdtLaporanAfiliasiInput = { totalKreator: 1, produktif: 0, gmv: null, pesanan: 3, jumlahLive: null, jumlahVideo: null };
+    const hasil = bangunLaporanAfiliasi(input);
+    expect(hasil?.gmv).toBeNull();
+    expect(hasil?.aov).toBeNull();
+    expect(hasil?.pesanan).toBe(3);
   });
 });
 

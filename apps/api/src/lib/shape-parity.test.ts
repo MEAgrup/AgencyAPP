@@ -809,6 +809,8 @@ const WIRE_TO_FE: Record<string, string> = {
   // PDT G2-01 lanjutan — bagian "iklan" (2026-09-16, kedua platform, Shopee lengkap:false permanen).
   PdtLaporanIklanWire: 'pdt.ts::PdtLaporanIklan',
   PdtLaporanIklanItemWire: 'pdt.ts::PdtLaporanIklanItem',
+  // PDT G2-01 lanjutan — bagian "afiliasi" ringkasan (2026-09-16, kedua platform, satu bentuk).
+  PdtLaporanAfiliasiWire: 'pdt.ts::PdtLaporanAfiliasi',
   // PDT G2-01 — "Kirim ke klien" (POST /account/pdt/laporan/kirim, Flow B langkah 4).
   PdtLaporanKirimanWire: 'pdt.ts::PdtLaporanKiriman',
   // PDT G2-01 — riwayat kiriman (GET /account/pdt/laporan/kiriman, Flow B langkah 5).

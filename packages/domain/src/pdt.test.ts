@@ -3851,6 +3851,81 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "iklan" (2026-09-16)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// rakitLaporanTiktok/Shopee — bagian "afiliasi" ringkasan (G2-01 lanjutan,
+// keputusan pemilik via `AskUserQuestion` 2026-09-16, KEENAM). SATU query
+// platform-agnostic (pola sama "live"/"video") — `jumlahLive`/`jumlahVideo`
+// otomatis `null` untuk Shopee karena `shopee_ams_afiliasi` tidak pernah
+// menulis kolom itu, BUKAN filter platform eksplisit.
+// ---------------------------------------------------------------------------
+describeDb('rakitLaporanTiktok/Shopee — bagian "afiliasi" (2026-09-16)', () => {
+  async function fixtureTiktok(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  async function fixtureShopee(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  it('TikTok: dua kreator (satu produktif, satu nol gmv) ⇒ agregat penuh termasuk jumlahLive/jumlahVideo, aov diturunkan', async () => {
+    const { cpId, batchId } = await fixtureTiktok();
+    await sql`
+      insert into pdt_fact_creator_period
+        (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv, pesanan_teratribusi, aov, ctor, jumlah_live, jumlah_video)
+      values
+        (${cpId}, 'creator-a', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1_000_000, 25, 999_999, 0.5, 5, 8),
+        (${cpId}, 'creator-b', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 0, 0, 0, 0, 1, 2)`;
+
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.afiliasi).toEqual({
+      totalKreator: 2, produktif: 1, gmv: 1_000_000, pesanan: 25, aov: 40_000, jumlahLive: 6, jumlahVideo: 10,
+    });
+  });
+
+  it('TikTok: nol baris pdt_fact_creator_period ⇒ afiliasi null (BUKAN objek kosong)', async () => {
+    const { cpId } = await fixtureTiktok();
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.afiliasi).toBeNull();
+  });
+
+  it('Shopee: satu kreator produktif, jumlahLive/jumlahVideo null (shopee_ams_afiliasi tidak pernah menulisnya)', async () => {
+    const { cpId, batchId } = await fixtureShopee();
+    await sql`
+      insert into pdt_fact_creator_period
+        (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv, pesanan_teratribusi)
+      values (${cpId}, 'creator-shp', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 150_000, 3)`;
+
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.afiliasi).toEqual({
+      totalKreator: 1, produktif: 1, gmv: 150_000, pesanan: 3, aov: 50_000, jumlahLive: null, jumlahVideo: null,
+    });
+  });
+
+  it('Shopee: nol baris pdt_fact_creator_period ⇒ afiliasi null', async () => {
+    const { cpId } = await fixtureShopee();
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.afiliasi).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // bacaLaporanPdt (sesi 34 lanjutan, Flow B langkah 1) — gerbang izin
 // `canKirimLaporan` + pemilihan platform dari `client_platforms.platform`
 // (bukan parameter caller), pola sama `previewUploadBatch`/`commitUploadBatch`.
