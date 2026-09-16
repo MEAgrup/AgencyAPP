@@ -1,6 +1,6 @@
 {
   "autoCompactEnabled": true,
-  "autoCompactWindow": 120000,
+  "autoCompactWindow": 600000,
   "permissions": {
     "allow": [
       "Bash(git status*)",
