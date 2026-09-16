@@ -1,278 +1,355 @@
-# RUNBOOK — Bridge MSDPS→CDPS Fase 1: status live & tutorial operasional
+# Tutorial — Bridge MSDPS→CDPS: dari Deal sampai Dikerjakan Tim
 
-> **Dibuat 2026-09-16.** Kode di **kedua** repo (`MEAgrup/AgencyAPP` Bagian A,
-> `MEAgrup/MEAGO_MSDPS` Bagian B) sudah ✅ **SELESAI dan LIVE** — bukan lagi
-> "belum selesai". Angka di bawah **diverifikasi langsung ke database produksi**
-> (`CDPS SG` = `egddxfcnrtecheiykhlf`, `MSDPS` = `mvcckptntrvzujqaoxxh`) hari ini,
-> bukan dikutip dari dokumen lama. `docs/backlog/BRIDGE_MSDPS_BACKLOG.md` §"Prasyarat
-> go-live" ditulis 2026-09-10/11 dan **sudah usang** di beberapa baris — lihat
-> catatan tambahan di bagian bawah berkas itu.
+> **Dibuat 2026-09-16, direstruktur 2026-09-16.** Kode di **kedua** repo
+> (`MEAgrup/AgencyAPP` Bagian A, `MEAgrup/MEAGO_MSDPS` Bagian B) sudah ✅
+> **SELESAI dan LIVE**, terbukti bekerja untuk deal nyata. Berkas ini
+> menjawab tiga pertanyaan tim secara berurutan — **siapa boleh bikin deal
+> & caranya**, **apa syarat deal bisa diteruskan ke CDPS**, dan **apa yang
+> harus dikerjakan tim CDPS sampai pekerjaannya benar-benar berjalan** —
+> masing-masing dengan contoh kasus yang mengalir dari bagian ke bagian.
 >
-> **Untuk siapa berkas ini:** tim MSDPS (BD/CM/Finance MEAGO!) yang mengirim deal,
-> dan tim CDPS (Account/Director MEA Agency) yang menerima & mengeksekusinya.
-> Bukan berkas developer — untuk detail kontrak payload/kode, lihat
-> `docs/BRIDGE_MSDPS_CONTRACT.md` dan `docs/backlog/BRIDGE_MSDPS_BACKLOG.md`.
+> Status verifikasi live (angka & bukti query) dipindah ke **Lampiran** di
+> bagian bawah supaya bagian tutorial tidak terpotong-potong.
 
 ---
 
-## 1. Ringkasan 60 detik
+## Ringkasan alur (peta sebelum masuk detail)
 
-**Apa ini.** MEAGO! (MSDPS) menutup deal dengan merchant POI (Dining, Hotel,
-dst). Pekerjaan operasionalnya — Account, Ads, Creative, Store Operation,
-Live Stream, KOL-Non-Roster — dikerjakan oleh tim MEA Agency di CDPS, bukan
-di MEAGO. Bridge ini yang memindahkan deal dari MSDPS ke inbox CDPS, satu
-arah, tanpa ketik ulang manual.
+```
+MSDPS (MEAGO!)                                    CDPS (MEA Agency)
+──────────────────                                ──────────────────
+1. Lead → Dealing/Renewal
+2. BD/CM daftarkan DEAL- (Bagian 1)
+3. Bentuk Kerjasama = Berbayar
+   + Transaksi Finance diverifikasi   (Bagian 2)
+4. "Teruskan ke CDPS" → ORD- terkirim
+                                       5. /bridge/inbox → Accept   (Bagian 3)
+                                          → CLI-/SVC-/CTR- terbentuk
+                                       6. Intake Queue → assign AM
+                                       7. Onboarding (Strategy kalau
+                                          plan-gated) → Brief → Eksekusi
+```
 
-**Status per hari ini (2026-09-16), diverifikasi ke DB live:**
-
-| Prasyarat go-live | Status | Bukti |
-|---|---|---|
-| Kode Bagian A (CDPS) | ✅ selesai | `docs/backlog/BRIDGE_MSDPS_BACKLOG.md` A1–A7 |
-| Kode Bagian B (MSDPS) | ✅ selesai | `MEAGO_MSDPS/docs/BUILD_PLAN.md` baris Bridge |
-| Paket MEAGO di Master Service List | ✅ **5 dari 6 jenis** dipetakan | lihat §2 |
-| `external_service_map` terisi | ✅ 5 baris aktif | lihat §2 |
-| Employee layanan "MEAGO Bridge" + env | ✅ `SVC-MEAGO-BRIDGE` aktif | lihat §2 |
-| Transaksi Finance MSDPS pilot diverifikasi | ✅ `TRX-202609-0001` | lihat §3 |
-| **Live Stream** dipetakan ke MSL | ⬜ **BELUM** | lihat §2, ini yang paling mendesak |
-| Deal nyata mengalir ujung-ke-ujung | ✅ **1 deal** (`DEAL-202609-0078`) | lihat §3 |
-| Exit criteria Fase 1 (5–10 deal) | ⬜ **1 dari 5–10**, belum tercapai | lihat §4 |
-| UAT browser 3 aktor | ⬜ belum dijalankan | lihat §4 |
-
-**Kesimpulan:** bridge-nya **sudah hidup dan sudah terbukti bekerja** untuk
-satu deal nyata — ini bukan lagi status "belum selesai" dalam artian kode atau
-konfigurasi. Yang tersisa adalah **operasional**: memetakan "Live Stream" (satu
-baris data), dan menjalankan lebih banyak deal nyata sampai exit criteria Fase 1
-(5–10 deal) terpenuhi, plus UAT browser yang belum sempat dijalankan manusia.
-Bagian §5–§7 di bawah adalah tutorial detail untuk tim kedua sisi menjalankan
-ini sehari-hari.
+Tiga bagian di bawah mengikuti nomor ini. Contoh kasusnya satu cerita yang
+sama dari awal sampai akhir: **"Kopi Kenangan Merdeka"**, merchant Dining
+yang closing lewat MEAGO! dan pekerjaannya dieksekusi tim MEA Agency.
 
 ---
 
-## 2. Detail verifikasi live — Master Service List & pemetaan
+## Bagian 1 — Siapa yang bisa membuat deal, dan bagaimana caranya (MSDPS)
 
-Query terhadap `CDPS SG` (project `egddxfcnrtecheiykhlf`) hari ini:
+### 1.1 Siapa
 
-```sql
-select external_service_type, master_service_id, aktif
-from external_service_map order by id;
-```
-
-| `external_service_type` | `master_service_id` | aktif |
-|---|---|---|
-| Account | `MSV-202609-0002` | ✅ |
-| Ads | `MSV-202609-0003` | ✅ |
-| Creative | `MSV-202609-0004` | ✅ |
-| Store Operation | `MSV-202609-0005` | ✅ |
-| KOL-Non-Roster | `MSV-202609-0006` | ✅ |
-| **Live Stream** | — | ⬜ **tidak ada baris** |
-
-`jenis` bridge punya ENAM nilai sah sejak D2 dibalik 2026-09-12 (lihat
-`docs/DECISIONS.md`), tapi baru **lima** yang punya paket MSL + pemetaan.
-Selama baris "Live Stream" belum ada di `external_service_map`, **setiap**
-order yang punya baris `jenis='Live Stream'` akan gagal di-Accept dengan pesan:
-
-```
-[layanan MEAGO belum dipetakan ke Master Service List]
-```
-
-Cara menutup celah ini ada di §7 di bawah — ini pekerjaan satu paket MSL +
-satu pemetaan, nol kode.
-
-Employee layanan (D5 opsi b — satu employee bersama, bukan sync per-BD):
-
-```sql
-select employee_id, nama, email, divisi, jabatan, status_aktif
-from employees where employee_id = 'SVC-MEAGO-BRIDGE';
--- SVC-MEAGO-BRIDGE · "MEAGO Bridge (layanan)" · mcnmeadigital@gmail.com
--- · divisi Account · status_aktif = true
-```
-
-Ini sudah cocok dengan yang env `MEAGO_BRIDGE_EMPLOYEE_ID` (dibaca
-`apps/api/src/app/api/v1/bridge/orders/[id]/accept/route.ts`) rujuk — kalau
-tidak cocok, `accept()` akan gagal karena employee tidak ditemukan, dan deal
-pilot §3 di bawah tidak akan pernah berhasil. Jadi env ini **sudah terbukti
-benar di produksi**, tidak perlu diutak-atik lagi kecuali karyawan itu diganti.
-
----
-
-## 3. Bukti deal pilot yang sudah berhasil
-
-```sql
-select id, external_deal_code, status, client_id, diterima_pada, diputus_pada
-from external_orders;
-```
-
-| Field | Nilai |
+| Peran | Bisa daftarkan deal? |
 |---|---|
-| `id` (kode order) | `ORD-202609-0001` |
-| `external_deal_code` | `DEAL-202609-0078` |
-| merchant | "Salad Hut" (Dining) |
-| baris (`jenis`) | 2× Account, 1× Creative, 1× Store Operation |
-| `attestation.external_trx_ref` | `TRX-202609-0001` |
-| `attestation.diverifikasi_pada` | 2026-09-12 06:14 UTC (Finance MSDPS) |
-| `status` | `[Diterima]` |
-| `client_id` hasil | `CLI-202609-0017` |
-| diputuskan oleh | `200000001` (Director) pada 2026-09-12 06:29 UTC |
+| BD (divisi `BizDev`) | ✅ |
+| CM (divisi `CreatorManagement`) | ✅ |
+| OD / Director | ✅ (akses penuh, `mgmt`) |
+| Divisi lain (Ads, Creative, Finance, dst.) | ❌ |
 
-Ini deal **nyata**, bukan data uji — mengonfirmasi seluruh rantai: gerbang
-D4+D13 di sisi MSDPS (trigger `deal_bridge_lines_gate`) → payload terkirim →
-`bridge.accept()` di CDPS (resolusi MSL, buat/attach `CLI-`, `client_external_ref`,
-`client_external_billing`, kontrak + `SVC-` per baris) → status `[Diterima]`.
+Gerbangnya persis di kode (`app/(app)/deals/page.tsx`):
+```
+canRegister = mgmt (OD/Director) || division === 'BizDev' || division === 'CreatorManagement'
+```
+Kalau Anda login dan tombol "Daftarkan Transaksi" tidak muncul di `/deals`,
+itu berarti divisi Anda memang bukan salah satu dari tiga di atas — bukan
+bug.
 
-`cdps_outbox` di sisi MSDPS mengonfirmasi angka yang sama: **1 baris,
-`status='sent'`** — belum ada deal kedua yang dikirim.
+### 1.2 Prasyarat: harus ada Lead berstatus Dealing/Renewal dulu
 
----
+Deal **tidak bisa** didaftarkan dari nol. Ia harus dipilih dari pool Lead
+yang sudah berstatus `Dealing` atau `Renewal` (query `page.tsx` memfilter
+persis dua status ini). Kalau merchant belum ada di pool itu:
 
-## 4. Yang benar-benar tersisa (bukan kode)
+1. Buat Lead-nya dulu di `/leads` (bisa dibuat oleh BD, Marketing, atau
+   Director).
+2. Jalankan pipeline lead sampai negosiasi selesai, lalu klik **"Update
+   Status Leads"** dan pilih status `Dealing` (atau `Renewal` untuk
+   perpanjangan klien lama).
 
-1. **Paket "Live Stream" di MSL + pemetaan** (§2) — kalau ada deal berisi
-   pekerjaan live-stream merchant MEAGO yang mau dibridge, ini blocker
-   langsungnya. Lihat langkah di §7.
-2. **Exit criteria Fase 1 belum tercapai**: rencana aslinya minta 5–10 deal
-   nyata mengalir `DEAL-` → `ORD-` → `CLI-`/`SVC-`/`BRF-` dengan nol
-   perbaikan DB manual dan idempotency terbukti (kirim-ganda sengaja). Baru 1.
-   Ini murni soal **volume pemakaian nyata** oleh tim BD MEAGO (§5) dan tim
-   Account CDPS (§6) — bukan sesuatu yang bisa "dikerjakan" lewat kode.
-3. **UAT browser 3 aktor** (`scripts/browser-tour.mjs` sisi CDPS) belum
-   dijalankan — sesi sandbox sebelumnya (baik di CDPS maupun MSDPS,
-   `MEAGO_MSDPS/docs/UAT_PENSIUN_BROWSER_RUNBOOK.md`) diblokir kebijakan
-   jaringan egress terhadap `*.supabase.co`. Perlu dijalankan manusia dari
-   jaringan normal, bukan dari sesi Claude Code sandboxed.
-4. **Latensi accept** — rencana asli minta ini diinstrumentasi sejak deal
-   pertama untuk mengukur kapan gerbang D10 (lead Account + Director) perlu
-   dilebarkan ke semua AM. Belum ada bukti dashboard/metrik untuk ini di kode
-   yang diperiksa — kalau dibutuhkan, ini tiket kecil terpisah, bukan bagian
-   dari "menyelesaikan bridge".
+Baru sesudah itu merchant tersebut muncul di dropdown "Nama POI / Merchant
+(Dealing/Renewal)" saat mendaftarkan deal.
 
-Item 2 dan 4 bukan pekerjaan yang bisa "diselesaikan sekali duduk" — itu
-tercapai dengan cara tim kedua sisi memakainya untuk deal nyata berikutnya.
-Karena itulah runbook ini juga berisi tutorial pemakaian di §5–§7: supaya
-volume itu bisa mulai naik.
+### 1.3 Langkah mendaftarkan deal
 
----
+Buka `/deals` → klik **"Daftarkan Transaksi"**. Isi:
 
-## 5. Tutorial — sisi MSDPS (BD/CM/Finance MEAGO!)
+| Field | Wajib? | Contoh kasus "Kopi Kenangan Merdeka" |
+|---|---|---|
+| Nama POI/Merchant | ✅ (pilih dari pool Dealing/Renewal) | Kopi Kenangan Merdeka |
+| Nama BD | ✅ | Ajeng (auto-terisi dari Lead yang dipilih) |
+| Nama OPS | ✅ | — |
+| Kategori POI | ✅ | `Dining` |
+| Bentuk Kerja Sama | ✅ | `Berbayar` |
+| Nama PIC POI | ✅ | Budi (owner) |
+| Nomor WhatsApp PIC | ✅ | 628123456789 |
+| Tanggal Awal/Akhir Kerjasama | ✅ untuk kategori `Dining` | 2026-09-16 s/d 2027-09-15 |
+| Nominal Deals | ✅ | Rp 15.000.000 |
+| Benefit | opsional | — |
 
-**Prasyarat sebelum sebuah deal bisa diteruskan:**
-- Deal harus `bentuk_kerjasama = 'Berbayar'` (Free/Barter tidak pernah bisa
-  dibridge — ini gerbang D4, dipaksa di level trigger, bukan pilihan UI).
-- Deal harus sudah punya transaksi Finance yang **terverifikasi**
-  (`transactions.released_to_account_at` terisi) — gerbang D13. Kalau deal
-  belum punya transaksi sama sekali, tombol **"Buat Transaksi Finance"**
-  muncul dulu di baris deal itu (B0, `create_poi_finance()`); sekali dibuat,
-  tombol itu hilang (tidak bisa dobel).
-- Selama salah satu syarat di atas belum terpenuhi, tombol "Teruskan ke CDPS"
-  di baris deal itu **tidak akan pernah muncul/berhasil** — ini gerbang di
-  sumber, bukan sesuatu yang bisa dilewati dari UI.
+Klik submit. Sistem membuat baris `brand_deals` baru dengan kode otomatis
+**`DEAL-202609-0099`** (format `DEAL-YYYYMM-NNNN`, immutable) —
+`sourced_by_role` terisi `bd` atau `cm` otomatis sesuai divisi Anda, bukan
+dipilih manual.
 
-**Langkah:**
-1. Buka `/deals`, cari deal yang sudah Berbayar + terverifikasi.
-2. Klik **"Teruskan ke CDPS"**.
-3. Di modal: pilih satu atau lebih baris **jenis** pekerjaan — `Account`,
-   `Ads`, `Creative`, `Store Operation`, `KOL-Non-Roster`, atau `Live Stream`.
-   Satu deal bisa punya beberapa baris jenis berbeda (mis. Account + Creative)
-   kalau paketnya membundel beberapa pekerjaan.
-4. Isi per baris: `qty`, `catatan` (opsional), `nilai_cross_charge` (opsional
-   — panel referensi harga di modal membantu mengetik ini, tidak mengisi
-   otomatis). Untuk `KOL-Non-Roster`, **`alasan_non_roster` wajib** — modal
-   akan menolak submit tanpa itu.
-5. Submit. Baris tersimpan sebagai `deal_bridge_lines`. **Satu order per deal
-   seumur Fase 1** — kalau nanti perlu menambah baris jenis lain untuk deal
-   yang sama, itu belum didukung Fase 1 (`cdps_outbox_deal_id_uniq`); hubungi
-   tim CDPS dulu sebelum mengulang submit untuk deal yang sama.
-6. Pengiriman ke CDPS **tidak instan** — job pengiriman jalan tiap **10
-   menit** (`vercel.json` cron `*/10 * * * *`). Badge status di baris deal
-   berubah begitu terkirim.
-7. Kalau gagal terkirim: retry otomatis dengan backoff eksponensial, sampai
-   5 percobaan; sesudah itu masuk `platform_alerts` sebagai dead-letter dan
-   perlu diperiksa manual (hubungi tim teknis, bawa kode deal-nya).
-
-**Yang TIDAK pernah dikirim lewat bridge ini** (supaya tidak salah ekspektasi):
-kebutuhan kreator/konten (`kreator_needed`/`konten_needed`), jadwal visit,
-laporan VT — semua itu tetap di MEAGO/MCN MEA, tidak ada jalur callback balik
-dari CDPS di Fase 1.
+**Sampai titik ini, deal HANYA ada di MSDPS.** Belum ada apa pun yang
+terkirim ke CDPS — itu Bagian 2.
 
 ---
 
-## 6. Tutorial — sisi CDPS (Account/Director MEA Agency)
+## Bagian 2 — Apa syarat agar deal bisa diteruskan ke CDPS (MSDPS)
 
-**Ke mana:** menu **Keuangan → "Bridge MSDPS (MEAGO!)"** di web-internal
-(`/bridge/inbox`). Terlihat untuk lead Account, Director, dan OD (OD hanya
-baca).
+Tombol **"Teruskan ke CDPS"** di baris deal `DEAL-202609-0099` **tidak akan
+muncul/berfungsi** sampai dua gerbang berikut lolos — ini gerbang di level
+trigger database (D4 + D13), bukan pilihan UI yang bisa dilewati:
 
-**Langkah:**
-1. Buka `/bridge/inbox` — daftar order berstatus `[Masuk]` (toggle untuk
-   lihat riwayat yang sudah diputus).
-2. Klik satu order untuk buka detail: payload asli terbaca apa adanya
-   (merchant, atestasi pembayaran, baris jenis pekerjaan), plus **kandidat
-   client** yang mungkin cocok (dedup otomatis 3-tingkat — sistem **tidak
-   pernah** auto-pilih, keputusan tetap manual).
-3. Isi **empat field manual** yang memang tidak dikirim MSDPS (D7 — datanya
-   beda definisi di kedua sistem, sengaja tidak diwariskan mentah):
-   `link toko`, `kategori`, `GMV baseline`, `target GMV`.
-4. Pilih **Accept** atau **Reject**.
-   - **Accept**: sistem otomatis — attach ke client lama (kalau kandidat
-     dipilih) atau buat `CLI-` baru, catat `client_external_ref` +
-     `client_external_billing` (atestasi pembayaran, append-only, tidak
-     bisa diedit/dihapus siapa pun), buat/perpanjang kontrak, buat `SVC-`
-     per baris jenis (bertanda `sumber='meago'` supaya tidak ikut hitung
-     GMV/komisi/tutup-buku milik AM CDPS biasa — house rule anti-drift).
-     Order jadi `[Diterima]`.
-   - **Reject**: order jadi `[Ditolak]`, nol perubahan data client.
-5. Kalau Accept gagal dengan pesan
-   `[layanan MEAGO belum dipetakan ke Master Service List]`: itu bukan bug —
-   artinya salah satu `jenis` di baris order itu belum punya padanan di
-   `external_service_map` (lihat status "Live Stream" di §2). Eskalasi ke
-   Director/Sales Head untuk melengkapi paket MSL-nya (§7), baru coba Accept
-   lagi — order tetap tersimpan menunggu, tidak hilang.
+### 2.1 Gerbang 1 — Bentuk Kerjasama harus `Berbayar`
 
-**Siapa boleh apa:** Accept/Reject hanya lead Account atau Director (D10).
-OD melihat semuanya tapi tombolnya tidak aktif untuknya. Ini digerbang di
-server, bukan cuma disembunyikan di UI.
+Deal `Free/Barter` tidak pernah bisa dibridge. Untuk "Kopi Kenangan
+Merdeka", ini sudah terpenuhi sejak Bagian 1 (dipilih `Berbayar`).
+
+### 2.2 Gerbang 2 — Transaksi Finance harus dibuat DAN diverifikasi
+
+1. Selama deal belum punya transaksi sama sekali, baris deal menampilkan
+   tombol **"Buat Transaksi Finance"** (memanggil `create_poi_finance()`).
+   Klik itu — sistem membuat transaksi `TRX-202609-00xx` untuk deal ini.
+   Tombolnya lalu hilang (tidak bisa membuat dua kali untuk deal yang
+   sama — fungsi SQL-nya sendiri menolak dengan pesan
+   `[transaksi untuk deal ini sudah dibuat]`).
+2. Tim **Finance** memverifikasi transaksi itu di halaman Finance seperti
+   transaksi biasa (bukti pembayaran, dsb). Begitu terverifikasi,
+   `transactions.released_to_account_at` terisi — inilah yang dibaca
+   gerbang D13.
+
+**Baru sesudah kedua gerbang ini lolos**, tombol "Teruskan ke CDPS" aktif.
+
+### 2.3 Langkah mengirim ke CDPS
+
+1. Klik **"Teruskan ke CDPS"** di baris `DEAL-202609-0099`.
+2. Di modal, tambahkan satu baris per **jenis pekerjaan** yang perlu
+   dikerjakan tim MEA Agency. Untuk contoh kita, "Kopi Kenangan Merdeka"
+   butuh dua jenis:
+   - `Account` (qty 1, catatan "Account management bulanan")
+   - `Ads` (qty 1, catatan "Ads TikTok + GoFood/GrabFood")
+
+   Jenis yang tersedia: `Account`, `Ads`, `Creative`, `Store Operation`,
+   `KOL-Non-Roster` (wajib isi `alasan_non_roster`), `Live Stream`.
+3. Submit. Baris tersimpan sebagai `deal_bridge_lines`.
+4. Job pengiriman otomatis jalan **tiap 10 menit** (`vercel.json` cron
+   `*/10 * * * *`) — mengirim ke CDPS sebagai satu **order** `ORD-`. Gagal
+   kirim → retry otomatis (backoff), sampai 5 kali → dead-letter di
+   `platform_alerts`.
+5. **Satu order per deal seumur Fase 1.** Kalau nanti "Kopi Kenangan
+   Merdeka" butuh jenis pekerjaan tambahan (mis. `Creative` menyusul),
+   Fase 1 belum punya cara menambah baris ke order yang sudah terkirim —
+   hubungi tim CDPS dulu.
+
+**Sampai titik ini, tugas tim MSDPS selesai.** Order `ORD-202609-00xx`
+sekarang duduk di inbox CDPS, menunggu manusia di sana — itu Bagian 3.
 
 ---
 
-## 7. Tutorial — melengkapi paket MSL & pemetaan (Director / Sales Head / Head Account)
+## Bagian 3 — Apa yang harus dikerjakan tim CDPS sampai pekerjaannya selesai
 
-Ini kerja **data**, bukan kode, dan **tidak ada layar admin khusus** untuk
-langkah kedua di bawah ini hari ini — dicatat sebagai catatan, bukan
-dikerjakan diam-diam:
+Ini bagian terpanjang karena mencakup **seluruh rantai eksekusi**, bukan
+cuma "terima order". Empat langkah, berurutan, tidak bisa dilompat.
 
-1. **Buat paket di Master Service List** — `/master-services`, seperti
-   membuat paket layanan biasa (nama, harga, dsb). Tidak ada flag khusus
-   "ini paket MEAGO" — `sumber='meago'` ditulis otomatis oleh `accept()` ke
-   `services`, bukan dipilih di layar MSL.
-2. **Petakan `external_service_type` ke paket itu.** **Belum ada halaman UI**
-   untuk ini — hanya API, Director-only:
+### 3.1 Langkah 1 — Terima order di Bridge Inbox
+
+**Siapa:** lead Account (SPV/Head Account) atau Director. OD bisa lihat
+tapi tombolnya tidak aktif untuknya.
+
+**Di mana:** menu **Keuangan → "Bridge MSDPS (MEAGO!)"** (`/bridge/inbox`).
+
+1. Buka order `ORD-202609-00xx` (status `[Masuk]`).
+2. Baca payload: merchant "Kopi Kenangan Merdeka", atestasi pembayaran
+   (`TRX-202609-00xx`, diverifikasi kapan), dua baris jenis (`Account`,
+   `Ads`), plus kandidat client yang mungkin cocok (dedup otomatis —
+   sistem **tidak pernah** auto-pilih).
+3. Isi **empat field manual** yang memang tidak dikirim MSDPS (datanya
+   beda definisi di kedua sistem): `link toko`, `kategori`, `GMV
+   baseline`, `target GMV`.
+4. Klik **Accept**.
+
+**Yang terjadi otomatis sesudah Accept** (satu transaksi, tidak bisa
+setengah jalan):
+- `CLI-202609-00xx` dibuat (atau di-attach ke client lama kalau kandidat
+  dipilih).
+- `client_external_ref` + `client_external_billing` (atestasi pembayaran,
+  append-only, tidak bisa diedit siapa pun) dicatat.
+- Satu `CTR-` (kontrak) dibuat dari jendela tanggal di payload
+  (2026-09-16 s/d 2027-09-15).
+- **Dua** `SVC-` dibuat — satu untuk `Account`, satu untuk `Ads` — masing-
+  masing berstatus awal **`[Awaiting Onboarding]`**, ditandai
+  `sumber='meago'` (supaya tidak ikut GMV/komisi AM CDPS biasa).
+- Client ditandai `released_to_account_at` — **ini SATU-SATUNYA yang
+  membuka jalur eksekusi normal.** Bridge **tidak** menunjuk AM — client
+  masuk ke antrean umum, sama seperti client hasil closing sales biasa.
+
+⚠️ **Kalau Accept gagal** dengan pesan
+`[layanan MEAGO belum dipetakan ke Master Service List]`: salah satu jenis
+di baris order itu (mis. `Live Stream`) belum punya padanan paket MSL —
+lihat Lampiran §A untuk cara melengkapinya. Order tidak hilang, tetap bisa
+dicoba lagi sesudah pemetaannya dilengkapi.
+
+### 3.2 Langkah 2 — Assign Account Manager (AM)
+
+Client `CLI-202609-00xx` sekarang **ada**, tapi **belum ada yang
+memegangnya**. Ia duduk di **Unassigned Intake Queue**.
+
+**Siapa yang menugaskan:** SPV/Head Account atau Director
+(`canManageAssignment`) — **bukan** AM sendiri, dan **bukan** otomatis dari
+bridge.
+
+**Di mana:** halaman **`/account`**, bagian antrean intake (terlihat untuk
+SPV/Head Account & OD/Director; diurutkan dari yang paling lama menunggu).
+
+1. Buka `/account`, lihat "Kopi Kenangan Merdeka" muncul di antrean
+   (bersama jumlah service-nya: 2).
+2. Klik baris itu → pilih AM dari panel Assign — hanya karyawan **aktif**,
+   **divisi Account**, **level staff** yang muncul sebagai kandidat (Lead/
+   SPV bukan kandidat, mereka yang menugaskan).
+3. Konfirmasi. AM terpilih (misal "Rani") sekarang jadi pemegang client
+   ini — dashboard workload SPV juga naik satu untuk Rani.
+
+**Tanpa langkah ini, dua `SVC-` tadi tidak akan pernah bergerak** —
+`[Awaiting Onboarding]` tidak jalan sendiri, ia menunggu AM.
+
+### 3.3 Langkah 3 — Onboarding: Strategy & Plan (kalau diwajibkan)
+
+Setiap `SVC-` mewarisi flag `Requires Strategy Plan` dari paket MSL-nya
+saat dibuat (`Yes` = plan-gated, `No` = Direct). Untuk contoh kita:
+
+- **`SVC-` Account** → misal paketnya `Yes` (plan-gated).
+- **`SVC-` Ads** → misal paketnya `No` (Direct).
+
+**Untuk service plan-gated (Account):**
+1. Rani (AM) membuka service itu, membuat **Strategy & Plan** (`STR-`) —
+   status awal `[Strategy Drafting]`.
+2. Rani submit untuk approval → `[Strategy Submitted for Approval]`.
+3. **SPV/Head Account** (bukan Rani) me-review:
+   - Setuju → `[Strategy Approved]`. Service induk (`SVC-` Account) ikut
+     naik ke **`[Strategy Approved]`** di transaksi yang sama.
+   - Minta revisi → `[Strategy Drafting]` lagi, wajib isi catatan revisi;
+     Rani perbaiki dan submit ulang (revision count naik, terhitung dari
+     audit log).
+
+**Untuk service Direct (Ads):** tidak ada `STR-` sama sekali (§4 Rule 6) —
+Rani bisa langsung lompat ke Langkah 4 untuk service ini begitu ditugaskan.
+
+⚠️ **Gerbang yang sering salah paham:** service plan-gated **tidak bisa**
+dibuatkan Brief sebelum `[Strategy Approved]` — mencoba langsung akan
+ditolak dengan pesan
+`[layanan ini wajib memiliki Strategy & Plan yang disetujui sebelum dibuatkan Brief]`.
+
+### 3.4 Langkah 4 — Brief & eksekusi pekerjaan sehari-hari
+
+Ini yang benar-benar disebut "dikerjakan sampai selesai" — siklusnya
+berulang setiap periode (mis. bulanan), bukan sekali jalan.
+
+1. Rani (atau tim pelaksana divisinya) membuat **Brief** (`BRF-`) untuk
+   service yang sudah boleh (Direct langsung, plan-gated sesudah Strategy
+   Approved). Service naik ke **`[Briefed]`**, lalu ke **`[In Execution]`**
+   begitu Brief pertamanya keluar dari `[To Do]`.
+2. Brief berjalan lewat mesin tugas standar CDPS:
+   `[To Do]` → **PIC divisi pelaksana** mulai kerja → `[In Progress]` →
+   PIC submit hasil → `[Submitted]` → **lead divisi pelaksana** melakukan
+   QC internal:
+   - Lolos → teruskan ke AM → `[In Review]`.
+   - Tidak lolos → `[Revision Requested]` (feedback wajib) → kembali ke
+     PIC di `[In Progress]` — **belum pernah sampai ke AM**, jadi tidak
+     ikut terhitung sebagai revisi dari klien.
+3. **Rani (AM pemilik client) yang punya keputusan akhir**: `[In Review]`
+   → `[Approved]` (terminal untuk Brief itu). Kalau Rani sendiri yang
+   minta revisi di titik ini, itu baru terhitung sebagai revisi klien
+   (§6 Rule 4 — flag di revisi ke-3).
+4. Untuk "Kopi Kenangan Merdeka": Brief bulan pertama untuk `Account`
+   (mis. laporan onboarding) dan `Ads` (mis. campaign TikTok bulan
+   berjalan) masing-masing berjalan lewat siklus di atas. Begitu
+   ke-`[Approved]`, pekerjaan bulan itu **selesai** — bulan berikutnya
+   Brief baru dibuat lagi untuk periode berikutnya (service tetap
+   `[In Execution]` selama kontrak berjalan; ini bukan status sekali-jadi
+   yang "tamat", melainkan kondisi normal client aktif).
+
+**Kalau ada masalah di tengah jalan** (klien komplain, mau jeda sementara):
+- **Hold** (dua langkah): Rani mengajukan `[In Execution] → [Hold
+  Requested]` (wajib isi alasan) → Head of Account menyetujui →
+  `[On Hold]`, atau menolak → balik `[In Execution]`. Resume juga lewat
+  Head of Account.
+- **Void** (batal total, mis. salah petakan MSL): SPV/Account Lead
+  menyetujui → service + Brief yang belum `[Approved]` jadi
+  `[Cancelled — Service Voided]`, terminal.
+
+---
+
+## Ringkasan siapa-mengerjakan-apa
+
+| Tahap | Siapa | Sistem |
+|---|---|---|
+| Buat Lead | BD / Marketing / Director | MSDPS |
+| Update status Lead → Dealing/Renewal | BD (pemilik lead) | MSDPS |
+| Daftarkan Deal | BD / CM / Director | MSDPS |
+| Buat Transaksi Finance | BD / CM / Director | MSDPS |
+| Verifikasi Transaksi Finance | Finance | MSDPS |
+| Teruskan ke CDPS | BD / CM / Director | MSDPS |
+| Accept/Reject order | Lead Account / Director | CDPS |
+| Assign AM | SPV/Head Account / Director | CDPS |
+| Strategy & Plan (kalau plan-gated) | AM (draft) → SPV/Head Account (approve) | CDPS |
+| Buat & kerjakan Brief | PIC divisi pelaksana | CDPS |
+| QC internal Brief | Lead divisi pelaksana | CDPS |
+| Approval akhir Brief | AM pemilik client | CDPS |
+
+---
+
+## Lampiran A — Melengkapi pemetaan Master Service List (Director/Sales Head/Head Account)
+
+Kerja **data**, bukan kode, dan **belum ada layar admin** untuk langkah 2:
+
+1. Buat/pilih paket di `/master-services` seperti paket layanan biasa —
+   tidak ada flag khusus "paket MEAGO".
+2. Petakan jenisnya lewat API (Director-only, belum ada UI):
    ```
    POST /api/v1/admin/external-service-map
    Authorization: Bearer <JWT Director>
-   Content-Type: application/json
-
    { "external_service_type": "Live Stream", "master_service_id": "MSV-...", "aktif": true }
    ```
-   Isi `master_service_id` dengan ID paket yang baru dibuat di langkah 1
-   (lihat responsnya, atau `GET /api/v1/admin/external-service-map` untuk
-   lihat baris yang sudah ada sebagai contoh bentuk). Kalau tidak ada akses
-   memanggil API langsung (Postman/curl), minta tim teknis membantu sekali
-   jalan — dan pertimbangkan menambah tiket UI admin kecil untuk layar ini
-   supaya langkah ini tidak terus bergantung API mentah.
-3. Nonaktifkan pemetaan lama (tanpa menghapus) lewat
+   Gunakan `GET /api/v1/admin/external-service-map` untuk lihat baris yang
+   sudah ada sebagai contoh bentuk. Kalau tidak bisa memanggil API langsung,
+   minta bantuan tim teknis sekali jalan.
+3. Nonaktifkan pemetaan lama (bukan hapus) lewat
    `POST /api/v1/admin/external-service-map/{id}/deactivate` kalau paketnya
-   diganti — baris lama tidak pernah dihapus (house rule imutabilitas).
+   diganti.
 
----
+## Lampiran B — Status terverifikasi live (2026-09-16)
 
-## 8. Referensi
+Diverifikasi langsung ke `CDPS SG` (`egddxfcnrtecheiykhlf`) dan MSDPS
+(`mvcckptntrvzujqaoxxh`) via SQL, bukan dikutip dari dokumen lama —
+`docs/backlog/BRIDGE_MSDPS_BACKLOG.md` §"Prasyarat go-live" sempat menulis
+klaim yang sudah usang, sudah dikoreksi di sana juga.
+
+| Prasyarat go-live | Status | Bukti |
+|---|---|---|
+| Kode Bagian A (CDPS) & Bagian B (MSDPS) | ✅ selesai | `docs/backlog/BRIDGE_MSDPS_BACKLOG.md` |
+| Paket MEAGO di MSL + `external_service_map` | ✅ **5 dari 6 jenis** (`Account`→`MSV-202609-0002`, `Ads`→`0003`, `Creative`→`0004`, `Store Operation`→`0005`, `KOL-Non-Roster`→`0006`) | query `external_service_map` |
+| **`Live Stream`** dipetakan | ⬜ **BELUM** — order berjenis ini akan gagal Accept sampai dilengkapi (Lampiran A) | idem |
+| Employee layanan bridge | ✅ `SVC-MEAGO-BRIDGE` ("MEAGO Bridge (layanan)", `mcnmeadigital@gmail.com`), aktif | query `employees` |
+| Deal nyata mengalir ujung-ke-ujung | ✅ **1 deal**: `DEAL-202609-0078` (merchant "Salad Hut") → `ORD-202609-0001` → `CLI-202609-0017`, `[Diterima]` 2026-09-12 06:29 UTC oleh Director. Transaksi `TRX-202609-0001`. | query `external_orders` |
+| Exit criteria Fase 1 (5–10 deal nyata) | ⬜ **1 dari 5–10** — `cdps_outbox` sisi MSDPS baru 1 baris `status='sent'` | query `cdps_outbox` |
+| UAT browser 3 aktor | ⬜ belum dijalankan — sempat diblokir kebijakan jaringan sandbox, perlu dijalankan manusia dari jaringan normal | `MEAGO_MSDPS/docs/UAT_PENSIUN_BROWSER_RUNBOOK.md`, `scripts/browser-tour.mjs` |
+
+**Kesimpulan:** bridge-nya sudah hidup dan terbukti bekerja untuk satu deal
+nyata. Yang tersisa murni operasional — lengkapi pemetaan `Live Stream`, dan
+pakai alur di Bagian 1–3 di atas untuk menambah volume deal nyata sampai
+exit criteria Fase 1 terpenuhi.
+
+## Referensi
 
 - Kontrak payload lengkap: `docs/BRIDGE_MSDPS_CONTRACT.md` + fixture
   `docs/fixtures/bridge_order_v1.json` (identik di kedua repo).
 - Rincian teknis per ticket (A1–A7, B0–B6): `docs/backlog/BRIDGE_MSDPS_BACKLOG.md`.
 - Keputusan pemilik terkunci (D1–D16 + amandemen): `docs/DECISIONS.md` entri
   2026-09-10, amandemen D2 2026-09-12.
+- Mesin status lengkap (Service, Strategy, Brief, dst.): `docs/STATE_MACHINES.md` §6–7.
 - Sisi MSDPS — pensiun modul eksekusi lama & OKR baru:
   `MEAGO_MSDPS/docs/HANDOFF_PENSIUN_ACCOUNT_SERVICE_20260912.md`.
-- UAT browser yang masih tertunda: `MEAGO_MSDPS/docs/UAT_PENSIUN_BROWSER_RUNBOOK.md`
-  (8 halaman nisan + jalur "Teruskan ke CDPS") dan `scripts/browser-tour.mjs`
-  sisi CDPS (3 aktor: BD MSDPS, Account CDPS, Director).
+- Tutorial ringkas khusus tim MSDPS: `MEAGO_MSDPS/docs/TUTORIAL_BRIDGE_KE_CDPS.md`.
