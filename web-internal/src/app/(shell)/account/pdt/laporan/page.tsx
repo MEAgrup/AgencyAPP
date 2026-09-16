@@ -3,10 +3,18 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + skor per toko klien, dibaca lewat `GET /account/pdt/laporan`.
- * v1 SENGAJA sempit (dua dari dua belas seksi mesin laporan lama — lihat
- * docblock `packages/core/src/pdt/laporan.ts`): belum ada kanal/iklan/live/
- * video/produk/afiliasi/dst.
+ * KPI ringkas + kanal + skor per toko klien, dibaca lewat `GET /account/pdt/
+ * laporan`. v1 SENGAJA sempit (tiga dari dua belas seksi mesin laporan lama
+ * — lihat docblock `packages/core/src/pdt/laporan.ts`): belum ada iklan/
+ * live/video/produk/afiliasi/dst.
+ *
+ * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
+ * via `AskUserQuestion`, 2026-09-16): TikTok lengkap (Live/Video/Kartu
+ * Produk & Shop Tab); Shopee SELALU `lengkap: false` (hanya Shopee Ads +
+ * Affiliate — voucher/chat/meta_cpas/shopee_video belum ada penulis fakta
+ * PDT sama sekali). Halaman menampilkan catatan eksplisit saat `lengkap`
+ * `false`, supaya GMV kanal yang belum terproses tidak disalahartikan
+ * sebagai GMV kanal yang memang nol.
  *
  * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
  * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
@@ -348,6 +356,36 @@ export default function LaporanPdtPage() {
                 TikTok Shop di atas, yang sudah bersih dari refund (Rule 15). Keduanya tidak boleh dibandingkan
                 apa adanya.
               </p>
+            )}
+          </section>
+
+          <section className="card">
+            <h2>Kanal (Sumber GMV)</h2>
+            <p className="muted" style={{ fontSize: 12 }}>
+              GMV Kotor: {formatIDR(laporan.kanal.gmv_total)}
+            </p>
+            {!laporan.kanal.lengkap && (
+              <div className="alert alertWarning" role="status" style={{ marginTop: 8, marginBottom: 8 }}>
+                Belum lengkap — {laporan.platform === 'tiktok' ? 'sumber ini' : 'Shopee Ads dan Affiliate saja'}.
+                {laporan.platform !== 'tiktok' && (
+                  <> Voucher, Chat, Meta Ads, dan Video belum diproses PDT — GMV dari sumber itu TIDAK berarti nol,
+                  hanya belum terhitung di sini.</>
+                )}
+              </div>
+            )}
+            {laporan.kanal.gmv_total === null ? (
+              <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Belum ada data untuk periode ini.</p>
+            ) : (
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                {laporan.kanal.items.map((item) => (
+                  <div key={item.kode}>
+                    <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(item.gmv)}</div>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      {item.label} ({formatPercent(item.persen)})
+                    </p>
+                  </div>
+                ))}
+              </div>
             )}
           </section>
 

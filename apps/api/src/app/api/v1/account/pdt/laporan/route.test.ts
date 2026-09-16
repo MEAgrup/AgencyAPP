@@ -159,6 +159,7 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.benchmark_versi).toBe(1);
     expect(body.skor).toHaveProperty('total');
     expect(body.skor).toHaveProperty('dimensi');
+    expect(body.kanal).toEqual({ gmv_total: 1_000_000, items: expect.any(Array), lengkap: true });
   });
 
   it('200 Shopee: KPI basis siap_dikirim TANPA net-refund, benchmark_versi null (kunci TETAP ada)', async () => {
@@ -182,5 +183,8 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.kpi).toEqual({ gmv: 800_000, pesanan: 20, pengunjung: 1_000, cvr: 0.02 });
     expect('benchmark_versi' in body).toBe(true);
     expect(body.benchmark_versi).toBeNull();
+    // Kanal Shopee SELALU lengkap:false (dua dari enam sumber legacy) — nol baris basis 'dibuat'
+    // di fixture ini, jadi gmv_total kanal null (BEDA dari kpi.gmv basis 'siap_dikirim' di atas).
+    expect(body.kanal).toEqual({ gmv_total: null, items: [], lengkap: false });
   });
 });

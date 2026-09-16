@@ -3375,6 +3375,129 @@ describeDb('rakitLaporanShopee (sesi 34 lanjutan) — KPI basis siap_dikirim (Ru
 });
 
 // ---------------------------------------------------------------------------
+// rakitLaporanTiktok/Shopee — bagian "kanal" (G2-01 lanjutan, keputusan
+// pemilik via `AskUserQuestion` 2026-09-16). TikTok penuh (Live/Video/Kartu
+// dari pdt_fact_content + pdt_fact_shop_daily basis 'net'); Shopee SELALU
+// `lengkap: false` (shopee_ads + affiliate saja, empat sumber legacy lain
+// nol penulis fakta).
+// ---------------------------------------------------------------------------
+describeDb('rakitLaporanTiktok/Shopee — bagian "kanal" (2026-09-16)', () => {
+  async function fixtureTiktok(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  async function fixtureShopee(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  it('TikTok: live+video dari pdt_fact_content (toko+afiliasi digabung), kartu = sisa dari gmv gross basis net', async () => {
+    const { cpId, batchId } = await fixtureTiktok();
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 10_000_000, 100, 5_000)`;
+    // live: satu baris toko (is_akun_toko=true) + satu baris afiliasi (is_akun_toko=false) — kanal menjumlah KEDUANYA.
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv)
+      values (${cpId}, 'live-toko-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 3_000_000),
+             (${cpId}, 'live-aff-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', false, 1_000_000),
+             (${cpId}, 'video-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'video', true, 3_500_000)`;
+
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.kanal).toEqual({
+      gmvTotal: 10_000_000,
+      items: [
+        { kode: 'live', label: 'LIVE', gmv: 4_000_000, persen: 0.4 },
+        { kode: 'video', label: 'Video', gmv: 3_500_000, persen: 0.35 },
+        { kode: 'kartu', label: 'Kartu Produk / Shop Tab', gmv: 2_500_000, persen: 0.25 },
+      ],
+      lengkap: true,
+    });
+  });
+
+  it('TikTok: nol baris pdt_fact_content ⇒ live/video/kartu semua null (tidak diketahui, BUKAN nol), gmvTotal tetap terisi', async () => {
+    const { cpId, batchId } = await fixtureTiktok();
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 10_000_000, 100, 5_000)`;
+
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.kanal.gmvTotal).toBe(10_000_000);
+    expect(hasil.kanal.items.every((i) => i.gmv === null && i.persen === null)).toBe(true);
+    expect(hasil.kanal.lengkap).toBe(true);
+  });
+
+  it('TikTok: nol baris basis net ⇒ kanal seluruhnya kosong (sama pola kpi null)', async () => {
+    const { cpId } = await fixtureTiktok();
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.kanal).toEqual({ gmvTotal: null, items: [], lengkap: true });
+  });
+
+  it('Shopee: shopee_ads (pdt_fact_ads) + affiliate (pdt_fact_creator_period), gmvTotal dari basis DIBUAT (bukan siap_dikirim), SELALU lengkap:false', async () => {
+    const { cpId, batchId } = await fixtureShopee();
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'dibuat', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 8_000_000, 80, 4_000)`;
+    // basis 'siap_dikirim' (dipakai KPI laporan, BUKAN kanal) angka BEDA — membuktikan kanal tidak ikut membaca basis ini.
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'siap_dikirim', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 999_999, 999, 999)`;
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
+      values (${cpId}, 'shopee_ads_cpc', 'kmp-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 1_000_000),
+             (${cpId}, 'shopee_ads_search', 'kmp-2', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 50_000, 600_000)`;
+    await sql`
+      insert into pdt_fact_creator_period (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv)
+      values (${cpId}, 'kreator-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 800_000)`;
+
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.kanal).toEqual({
+      gmvTotal: 8_000_000,
+      items: [
+        { kode: 'shopee_ads', label: 'Shopee Ads', gmv: 1_600_000, persen: 0.2 },
+        { kode: 'affiliate', label: 'Affiliate', gmv: 800_000, persen: 0.1 },
+      ],
+      lengkap: false,
+    });
+  });
+
+  it('Shopee: nol baris pdt_fact_ads/pdt_fact_creator_period ⇒ kedua item null, lengkap TETAP false', async () => {
+    const { cpId, batchId } = await fixtureShopee();
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'dibuat', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 8_000_000, 80, 4_000)`;
+
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.kanal.gmvTotal).toBe(8_000_000);
+    expect(hasil.kanal.items.every((i) => i.gmv === null && i.persen === null)).toBe(true);
+    expect(hasil.kanal.lengkap).toBe(false);
+  });
+
+  it('Shopee: nol baris basis dibuat ⇒ kanal seluruhnya kosong, lengkap TETAP false', async () => {
+    const { cpId } = await fixtureShopee();
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.kanal).toEqual({ gmvTotal: null, items: [], lengkap: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // bacaLaporanPdt (sesi 34 lanjutan, Flow B langkah 1) — gerbang izin
 // `canKirimLaporan` + pemilihan platform dari `client_platforms.platform`
 // (bukan parameter caller), pola sama `previewUploadBatch`/`commitUploadBatch`.

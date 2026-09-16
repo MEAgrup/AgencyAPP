@@ -1071,6 +1071,24 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > (2 skip); typecheck `core`/`domain`/`api`/`web-internal` + lint `api`/`web-internal` bersih;
 > `npm run build` `web-internal` sukses. **Rule 24 (pencabutan) TETAP di luar cakupan** — dicatat
 > terpisah di bawah G2-02.
+>
+> **Status 2026-09-16 (lanjutan) — bagian laporan "kanal" (sumber GMV) DIBANGUN untuk KEDUA
+> platform, TIDAK simetris (keputusan pemilik via `AskUserQuestion` — cari "kanal" di
+> `docs/DECISIONS.md` untuk penjelasan lengkap).** TikTok penuh (`PdtLaporanKanal.lengkap: true`):
+> Live+Video dari `pdt_fact_content` (toko+afiliasi digabung, TANPA filter `is_akun_toko` — beda
+> dimensi skor LIVE), Kartu Produk & Shop Tab = sisa, penyebut persen = GMV gross basis `'net'`.
+> Shopee SELALU `lengkap: false`: hanya Shopee Ads (`pdt_fact_ads`) + Affiliate
+> (`pdt_fact_creator_period`) — dua dari enam sumber legacy (`report/shopee/metrik.ts`
+> `computeChannels()`); voucher/chat/meta_cpas/shopee_video terdaftar sebagai modul parser
+> (`PDT_MODULES`) tapi NOL penulis fakta, pekerjaan TERPISAH dari "kanal". Penyebut persen Shopee =
+> GMV basis `'dibuat'` (Pesanan Dibuat, BEDA dari basis `'siap_dikirim'` KPI ringkas Rule 16). Nol
+> migrasi baru (murni agregasi fakta yang sudah ada, `pdt_fact_content`/`pdt_fact_ads`/`pdt_fact_
+> creator_period` semuanya sudah terisi sejak G1-09). Halaman `web-internal` menampilkan catatan
+> peringatan eksplisit saat `lengkap: false`. Diverifikasi (DB lokal rebuild bersih, 250 migrasi —
+> nol baru): `@cdps/core` 1318/1318, `@cdps/domain` 2697/2697 (1 skip, nol gagal), `@cdps/db`
+> 107/107, `@cdps/api` 619/621 (2 skip); typecheck+lint bersih; `npm run build` `web-internal`
+> sukses. **Sisa: SEMBILAN bagian laporan lain** (iklan, live, video, produk, afiliasi, tokopedia,
+> ads_manager, tahap, insight) TETAP di luar cakupan.
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
