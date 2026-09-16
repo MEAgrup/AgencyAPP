@@ -37,6 +37,7 @@ import {
   platformKeVokabPdt,
   bacaLaporanPdt,
   kirimLaporanPdt,
+  riwayatKirimanPdt,
   previewUploadBatch,
   rakitInputSkorShopee,
   rakitInputSkorTiktok,
@@ -3524,5 +3525,85 @@ describeDb('kirimLaporanPdt (Flow B langkah 4) — bekukan snapshot ke pdt_lapor
   it('periode selain awal bulan ⇒ ValidationError (delegasi ke rakitLaporanTiktok/Shopee)', async () => {
     const { cpId } = await fixture('TikTok Shop');
     await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-15')).rejects.toThrow(ValidationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// riwayatKirimanPdt (Flow B langkah 5) — daftar pdt_laporan_kiriman satu
+// toko, terbaru dulu. Gerbang izin sama persis `canKirimLaporan`
+// (loadClientPlatformUntukPdt langsung, BUKAN delegasi lewat bacaLaporanPdt/
+// kirimLaporanPdt) — pola pengujian sama seperti describe di atas: satu
+// Forbidden, satu NotFound, sisanya membuktikan bentuk+urutan daftar.
+// ---------------------------------------------------------------------------
+describeDb('riwayatKirimanPdt (Flow B langkah 5) — daftar kiriman satu toko, terbaru dulu', () => {
+  async function fixture(platform: 'TikTok Shop' | 'Shopee'): Promise<{ cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, platform);
+    return { cpId };
+  }
+
+  it('client_platform_id tidak ada ⇒ NotFoundError', async () => {
+    await expect(riwayatKirimanPdt(sql, ownerActor(), 999_999_999)).rejects.toThrow(NotFoundError);
+  });
+
+  it('AM bukan pemilik ⇒ ForbiddenError', async () => {
+    const { cpId } = await fixture('Shopee');
+    await expect(riwayatKirimanPdt(sql, otherAm(), cpId)).rejects.toThrow(ForbiddenError);
+  });
+
+  it('toko yang belum pernah dikirimi laporan ⇒ daftar kosong (BUKAN error)', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    await expect(riwayatKirimanPdt(sql, ownerActor(), cpId)).resolves.toEqual([]);
+  });
+
+  it('satu kiriman ⇒ satu baris, bentuk sama PdtLaporanKirimanHasil MINUS payload/laporan', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const dikirim = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+
+    const riwayat = await riwayatKirimanPdt(sql, ownerActor(), cpId);
+    expect(riwayat).toHaveLength(1);
+    const [r] = riwayat;
+    expect(r).toEqual({
+      id: dikirim.id,
+      clientPlatformId: cpId,
+      periodeMulai: '2026-07-01',
+      periodeSelesai: '2026-07-31',
+      parserVersi: dikirim.parserVersi,
+      benchmarkVersi: 1,
+      dikirimPada: dikirim.dikirimPada,
+      dikirimOleh: OWNER_AM,
+      menggantikanKirimanId: null,
+    });
+    expect('laporan' in r).toBe(false);
+  });
+
+  it('kirim ulang periode yang sama ⇒ terbaru dulu, menggantikan_kiriman_id menunjuk yang lama', async () => {
+    const { cpId } = await fixture('Shopee');
+    const pertama = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    const kedua = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+
+    const riwayat = await riwayatKirimanPdt(sql, ownerActor(), cpId);
+    expect(riwayat).toHaveLength(2);
+    expect(riwayat[0].id).toBe(kedua.id);
+    expect(riwayat[0].menggantikanKirimanId).toBe(pertama.id);
+    expect(riwayat[0].benchmarkVersi).toBeNull(); // Shopee — migrasi 20261031010000.
+    expect(riwayat[1].id).toBe(pertama.id);
+    expect(riwayat[1].menggantikanKirimanId).toBeNull();
+  });
+
+  it('kiriman toko LAIN tidak ikut tercampur (isolasi per client_platform_id)', async () => {
+    const { cpId: cpA } = await fixture('TikTok Shop');
+    const { cpId: cpB } = await fixture('TikTok Shop');
+    await kirimLaporanPdt(sql, ownerActor(), cpA, '2026-07-01');
+    await kirimLaporanPdt(sql, ownerActor(), cpB, '2026-07-01');
+    await kirimLaporanPdt(sql, ownerActor(), cpB, '2026-08-01');
+
+    const riwayatA = await riwayatKirimanPdt(sql, ownerActor(), cpA);
+    const riwayatB = await riwayatKirimanPdt(sql, ownerActor(), cpB);
+    expect(riwayatA).toHaveLength(1);
+    expect(riwayatB).toHaveLength(2);
+    expect(riwayatA.every((r) => r.clientPlatformId === cpA)).toBe(true);
+    expect(riwayatB.every((r) => r.clientPlatformId === cpB)).toBe(true);
   });
 });

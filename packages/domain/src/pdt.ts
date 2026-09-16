@@ -2383,3 +2383,54 @@ export async function kirimLaporanPdt(
     };
   });
 }
+
+/** Satu baris riwayat kiriman — bentuk sama `PdtLaporanKirimanHasil` MINUS `laporan` (payload beku, sengaja tidak diikutkan daftar — lihat docblock `riwayatKirimanPdt`). */
+export type PdtKirimanRingkas = Omit<PdtLaporanKirimanHasil, 'laporan'>;
+
+/**
+ * riwayatKirimanPdt — seluruh baris `pdt_laporan_kiriman` satu toko klien,
+ * terbaru dulu (preseden `showcase.riwayatIzin`: ledger append-only, scope
+ * baca sama dengan gerbang tulisnya). Dipakai halaman laporan untuk tahu
+ * toko+periode yang sedang dilihat SUDAH pernah dikirim (label tombol
+ * "Kirim Ulang" vs "Kirim ke Klien", Flow B langkah 5) — dicatat sebagai
+ * kekurangan sengaja di sesi "Kirim ke klien" (`PDT_BACKLOG.md` §2,
+ * `docs/DECISIONS.md` 2026-09-16), sekarang ditutup.
+ *
+ * `payload` (snapshot laporan beku) SENGAJA TIDAK diikutkan di sini — daftar
+ * ini menjawab "kapan/oleh siapa/revisi dari yang mana", bukan "seperti apa
+ * isinya persis" (JSONB itu bisa besar dan tidak dibutuhkan tampilan daftar).
+ * Melihat isi snapshot yang sudah dibekukan adalah kebutuhan TERPISAH — belum
+ * ada endpoint/fungsi untuk itu, di luar cakupan di sini.
+ */
+export async function riwayatKirimanPdt(sql: Sql, actor: Actor, clientPlatformId: number): Promise<PdtKirimanRingkas[]> {
+  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
+  if (!canKirimLaporan(actor, row.assigned_am_id)) throw new ForbiddenError();
+
+  const rows = await sql<{
+    id: number;
+    periode_mulai: string;
+    periode_selesai: string;
+    parser_versi: number;
+    benchmark_versi: number | null;
+    dikirim_pada: string;
+    dikirim_oleh: string;
+    menggantikan_kiriman_id: number | null;
+  }[]>`
+    select id, periode_mulai::text, periode_selesai::text, parser_versi, benchmark_versi,
+           dikirim_pada::text, dikirim_oleh, menggantikan_kiriman_id
+      from pdt_laporan_kiriman
+     where client_platform_id = ${clientPlatformId}
+     order by dikirim_pada desc, id desc`;
+
+  return rows.map((r) => ({
+    id: r.id,
+    clientPlatformId,
+    periodeMulai: r.periode_mulai,
+    periodeSelesai: r.periode_selesai,
+    parserVersi: r.parser_versi,
+    benchmarkVersi: r.benchmark_versi,
+    dikirimPada: r.dikirim_pada,
+    dikirimOleh: r.dikirim_oleh,
+    menggantikanKirimanId: r.menggantikan_kiriman_id,
+  }));
+}

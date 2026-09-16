@@ -1050,6 +1050,27 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > label tombol netral "Kirim ke Klien", bukan "Kirim Ulang"), dan Rule 24 (pencabutan ⇒ hitung ulang
 > `total_sales`/Health Score/baseline Ads — mekanismenya sendiri BELUM ada sama sekali, `pdt_laporan_
 > kiriman` nol kolom status, dicatat terpisah di bawah G2-02).
+>
+> **Status 2026-09-16 (lanjutan) — endpoint riwayat/daftar kiriman DIBANGUN, catatan di atas
+> DITUTUP.** `pdt.riwayatKirimanPdt` (preseden `showcase.riwayatIzin`): seluruh baris
+> `pdt_laporan_kiriman` satu toko, terbaru dulu, gerbang izin `canKirimLaporan` sama seperti
+> `bacaLaporanPdt`/`kirimLaporanPdt`. **`payload` (snapshot beku) SENGAJA TIDAK diikutkan** — daftar
+> ini menjawab "kapan/oleh siapa/revisi dari yang mana", bukan "seperti apa isinya persis" (melihat
+> isi snapshot yang sudah dibekukan adalah kebutuhan terpisah, belum ada endpoint untuk itu).
+> `GET /api/v1/account/pdt/laporan/kiriman?client_platform_id=` (wire `PdtKirimanRingkasWire`,
+> dibungkus `{ data: [...] }` pola sama `intake`/`workload`). Halaman laporan sekarang memuat riwayat
+> sekali per toko (bukan per-periode) dan: (1) label tombol jadi "Kirim Ulang" (bukan "Kirim ke
+> Klien") kalau periode yang sedang dilihat sudah pernah dikirim, (2) menampilkan tabel "Riwayat
+> Pengiriman" (seluruh periode toko ini, terbaru dulu, revisi menunjuk kiriman yang digantikannya).
+> Diverifikasi (DB lokal rebuild bersih, 250 migrasi — nol migrasi baru, murni kode): `@cdps/domain`
+> 2696/2697 (1 skip, nol gagal berkaitan — satu flake pre-existing tidak terkait `admin.test.ts`
+> "hari libur" HANYA muncul saat SELURUH suite dijalankan dua kali berturut-turut tanpa rebuild DB di
+> antaranya, `audit_log` append-only mengakumulasi baris `entity_id` tetap lintas run; hilang total
+> begitu DB dibangun ulang, dan lolos bersih dijalankan sendirian/bersama `pdt.test.ts` — nol
+> keterkaitan dengan modul PDT), `@cdps/core` 1311/1311, `@cdps/db` 107/107, `@cdps/api` 619/621
+> (2 skip); typecheck `core`/`domain`/`api`/`web-internal` + lint `api`/`web-internal` bersih;
+> `npm run build` `web-internal` sukses. **Rule 24 (pencabutan) TETAP di luar cakupan** — dicatat
+> terpisah di bawah G2-02.
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
