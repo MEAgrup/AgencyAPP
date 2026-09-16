@@ -1171,6 +1171,24 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > (produk, afiliasi, tokopedia, ads_manager, tahap, insight) TETAP di luar cakupan — `G1-09-2BII-
 > TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
 
+> **Status 2026-09-16 (lanjutan) — bagian laporan "afiliasi" DIBANGUN sebagai RINGKASAN saja untuk
+> KEDUA platform, BUKAN daftar per-kreator.** `docs/DECISIONS.md` (cari "bagian laporan \"afiliasi\"
+> dibangun sebagai RINGKASAN") untuk alasan lengkap. Ringkas: `pdt_fact_creator_period` (migrasi
+> `20261011010000` §5e, dibaca lengkap) TIDAK PERNAH punya kolom `refund`/`komisi`/`roi_komisi` yang
+> dibawa `KreatorRec`/`AffiliateReport` mesin lama, dan mesin lama juga menampilkan daftar top-15
+> kreator per nama — di luar cakupan RINGKASAN yang dipilih pemilik. `PdtLaporanAfiliasi`/
+> `bangunLaporanAfiliasi` (`@cdps/core` `pdt/laporan.ts`) — SATU fungsi/bentuk untuk kedua platform
+> (pola "live"/"video", nol `lengkap` flag), `bacaAfiliasi` (`@cdps/domain` `pdt.ts`) SATU query
+> platform-agnostic: `totalKreator`/`produktif` (cermin `coalesce(gmv,0)>0`)/`gmv`/`pesanan`/`aov`
+> (DITURUNKAN Σgmv÷Σpesanan, bukan kolom mentah)/`jumlahLive`/`jumlahVideo` — dua field terakhir
+> SELALU `null` untuk Shopee (`shopee_ams_afiliasi` tidak pernah menulisnya). `ctor` SENGAJA tidak
+> diagregasi (nol preseden). Whole-object `null` saat nol baris kreator (cermin Rule 12). Diverifikasi
+> (DB lokal rebuild bersih, 251 migrasi — nol migrasi baru): `@cdps/core` 1377/1377, `@cdps/domain`
+> 2746/2747 (1 skip, nol gagal), `@cdps/db` 107/107, `@cdps/api` 636/638 (2 skip); typecheck bersih
+> `core`/`domain`/`api`/`web-internal`, lint `@cdps/api` bersih; `npm run build`+test `web-internal`
+> sukses. **Sisa: LIMA bagian laporan lain** (produk, tokopedia, ads_manager, tahap, insight) TETAP
+> di luar cakupan — `G1-09-2BII-TTADS-SAMPLE` (di atas) TETAP terbuka, tidak tersentuh sesi ini.
+
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**

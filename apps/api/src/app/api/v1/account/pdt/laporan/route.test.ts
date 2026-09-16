@@ -110,6 +110,7 @@ afterEach(async () => {
   await sql`delete from pdt_fact_shop_daily where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_fact_content where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_fact_ads where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
+  await sql`delete from pdt_fact_creator_period where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-PDTLAP-%'`;
   await sql`delete from client_platforms where client_id like 'CLI-PDTLAP-%'`;
   await sql`delete from clients where id like 'CLI-PDTLAP-%'`;
@@ -158,6 +159,10 @@ describeDb('GET /pdt/laporan — real DB', () => {
     await sql`
       insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
       values (${cpId}, 'tt_ads_product', 'CAM-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 400_000)`;
+    await sql`
+      insert into pdt_fact_creator_period
+        (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv, pesanan_teratribusi, jumlah_live, jumlah_video)
+      values (${cpId}, 'creator-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 200_000, 5, 2, 3)`;
 
     const res = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01' }));
     expect(res.status).toBe(200);
@@ -187,6 +192,10 @@ describeDb('GET /pdt/laporan — real DB', () => {
       ],
       lengkap: true,
     });
+    // TikTok afiliasi — satu kreator, jumlah_live/jumlah_video terisi (tt_transaction_creator menulisnya).
+    expect(body.afiliasi).toEqual({
+      total_kreator: 1, produktif: 1, gmv: 200_000, pesanan: 5, aov: 40_000, jumlah_live: 2, jumlah_video: 3,
+    });
   });
 
   it('200 Shopee: KPI basis siap_dikirim TANPA net-refund, benchmark_versi null (kunci TETAP ada)', async () => {
@@ -207,6 +216,9 @@ describeDb('GET /pdt/laporan — real DB', () => {
     await sql`
       insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
       values (${cpId}, 'shopee_ads_cpc', 'kmp-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 300_000)`;
+    await sql`
+      insert into pdt_fact_creator_period (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv, pesanan_teratribusi)
+      values (${cpId}, 'creator-shp', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 150_000, 3)`;
 
     const res = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01' }));
     expect(res.status).toBe(200);
@@ -232,6 +244,10 @@ describeDb('GET /pdt/laporan — real DB', () => {
         { kode: 'shopee_ads_live', label: 'Iklan Live', biaya: null, gmv: null, roas: null },
       ],
       lengkap: false,
+    });
+    // Shopee afiliasi — jumlah_live/jumlah_video SELALU null (shopee_ams_afiliasi tidak pernah menulisnya).
+    expect(body.afiliasi).toEqual({
+      total_kreator: 1, produktif: 1, gmv: 150_000, pesanan: 3, aov: 50_000, jumlah_live: null, jumlah_video: null,
     });
   });
 });

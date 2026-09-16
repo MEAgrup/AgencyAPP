@@ -3,10 +3,10 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + kanal + iklan + live + video + skor per toko klien, dibaca
- * lewat `GET /account/pdt/laporan`. v1 SENGAJA sempit (enam dari dua belas
- * seksi mesin laporan lama — lihat docblock `packages/core/src/pdt/laporan.ts`):
- * belum ada produk/afiliasi/dst.
+ * KPI ringkas + kanal + iklan + live + video + afiliasi + skor per toko
+ * klien, dibaca lewat `GET /account/pdt/laporan`. v1 SENGAJA sempit (tujuh
+ * dari dua belas seksi mesin laporan lama — lihat docblock
+ * `packages/core/src/pdt/laporan.ts`): belum ada produk/tokopedia/dst.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
  * via `AskUserQuestion`, 2026-09-16): TikTok lengkap (Live/Video/Kartu
@@ -40,6 +40,17 @@
  * asli, keduanya sudah lengkap). `roas` per item DAN total DITURUNKAN
  * `Σgmv÷Σbiaya`. Seksi disembunyikan seluruhnya saat `iklan` `null` (nol
  * baris iklan seluruh sumber platform ini di periode ini).
+ *
+ * **Afiliasi** (keputusan pemilik via `AskUserQuestion` KEENAM, 2026-09-16):
+ * RINGKASAN saja untuk KEDUA platform, SATU bentuk (nol asimetri platform,
+ * pola sama "live") — mesin lama membawa daftar per-kreator plus
+ * `refund`/`komisi`/`roiKomisi`, `pdt_fact_creator_period` tidak pernah
+ * punya kolom itu sama sekali jadi tidak bisa direplikasi. `aov` DITURUNKAN
+ * `Σgmv÷Σpesanan`. Sesi Live/Video kreator (`jumlah_live`/`jumlah_video`)
+ * SELALU `null` untuk Shopee (`shopee_ams_afiliasi` tidak pernah
+ * menulisnya) — halaman menyembunyikan tile itu, bukan menampilkan 0. Seksi
+ * disembunyikan seluruhnya saat `afiliasi` `null` (nol baris kreator sama
+ * sekali di periode ini).
  *
  * Tombol "Kirim ke Klien" (Flow B langkah 4, Rule 22) membekukan snapshot ke
  * `pdt_laporan_kiriman` lewat `POST /account/pdt/laporan/kirim`. Kirim kedua
@@ -542,6 +553,46 @@ export default function LaporanPdtPage() {
               </p>
             </section>
           ) : null}
+
+          {laporan.afiliasi && (
+            <section className="card">
+              <h2>Afiliasi</h2>
+              <p className="muted" style={{ fontSize: 12 }}>
+                {laporan.afiliasi.total_kreator} kreator periode ini ({laporan.afiliasi.produktif} produktif)
+              </p>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.afiliasi.gmv)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>GMV Afiliasi</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.afiliasi.pesanan)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Pesanan Teratribusi</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.afiliasi.aov)}</div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>AOV</p>
+                </div>
+                {laporan.afiliasi.jumlah_live !== null && (
+                  <div>
+                    <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.afiliasi.jumlah_live)}</div>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Sesi Live Kreator</p>
+                  </div>
+                )}
+                {laporan.afiliasi.jumlah_video !== null && (
+                  <div>
+                    <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.afiliasi.jumlah_video)}</div>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Video Kreator</p>
+                  </div>
+                )}
+              </div>
+              {laporan.platform !== 'tiktok' && (
+                <p className="muted" style={{ fontSize: 11, marginTop: 16 }}>
+                  Sesi Live/Video per kreator tidak tersedia dari data Shopee — hanya ringkasan GMV/pesanan yang bisa dihitung untuk toko ini.
+                </p>
+              )}
+            </section>
+          )}
 
           <section className="card">
             <div className="cardHeader">
