@@ -9216,6 +9216,16 @@ export interface PdtLaporanKanalWire {
   lengkap: boolean;
 }
 
+/** `null` = nol sesi live sama sekali di periode ini (bukan `sesi: 0`) — lihat docblock `pdt.PdtLaporanLive`, `@cdps/core`. `jam`/`gmv_per_jam` SELALU `null` untuk Shopee (kolom sumbernya kosong permanen). */
+export interface PdtLaporanLiveWire {
+  sesi: number;
+  gmv: number | null;
+  vv: number | null;
+  jam: number | null;
+  gmv_per_sesi: number | null;
+  gmv_per_jam: number | null;
+}
+
 export interface PdtLaporanWire {
   schema: string;
   platform: string;
@@ -9224,6 +9234,7 @@ export interface PdtLaporanWire {
   generated_at: string;
   kpi: PdtLaporanKpiWire;
   kanal: PdtLaporanKanalWire;
+  live: PdtLaporanLiveWire | null;
   skor: PdtLaporanSkorWire;
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
@@ -9253,6 +9264,11 @@ function pdtLaporanKanalToWire(k: pdtCore.PdtLaporanKanal): PdtLaporanKanalWire 
   };
 }
 
+function pdtLaporanLiveToWire(l: pdtCore.PdtLaporanLive | null): PdtLaporanLiveWire | null {
+  if (l == null) return null;
+  return { sesi: l.sesi, gmv: l.gmv, vv: l.vv, jam: l.jam, gmv_per_sesi: l.gmvPerSesi, gmv_per_jam: l.gmvPerJam };
+}
+
 export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanWire {
   return {
     schema: l.schema,
@@ -9262,6 +9278,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     generated_at: l.generatedAt,
     kpi: { ...l.kpi },
     kanal: pdtLaporanKanalToWire(l.kanal),
+    live: pdtLaporanLiveToWire(l.live),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: l.benchmarkVersi,
   };
@@ -9276,6 +9293,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     generated_at: l.generatedAt,
     kpi: { ...l.kpi },
     kanal: pdtLaporanKanalToWire(l.kanal),
+    live: pdtLaporanLiveToWire(l.live),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: null,
   };

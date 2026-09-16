@@ -15,15 +15,18 @@
  * bagian jauh lebih kaya — kpi, kanal, iklan, live, video, produk (kuadran),
  * afiliasi, tokopedia, ads_manager, skor, tahap (buyer-journey), insight
  * (narasi+rekomendasi). Di PDT hari ini "skor" (`hitungSkorTiktok`/
- * `hitungSkorShopee`, G2-01), "kpi ringkas", dan sekarang "kanal" (lihat
- * docblock `PdtLaporanKanal` di bawah — keputusan pemilik via
- * `AskUserQuestion` KEDUA, 2026-09-16: TikTok+Shopee dibangun BERSAMAAN
- * meski Shopee sengaja tidak simetris, ditandai `lengkap: false`) sudah bisa
- * dibangun dari `pdt_fact_*` — SEMBILAN bagian lain (iklan, live, video,
- * produk, afiliasi, tokopedia, ads_manager, tahap, insight) butuh fungsi
- * agregasi fakta BARU per bagian (pola sama `rakitInputSkorTiktok`/
- * `rakitInputSkorShopee`) yang belum ada satupun, pekerjaan multi-sesi.
- * Sembilan bagian sisanya TETAP di luar cakupan, ditambahkan satu-per-satu
+ * `hitungSkorShopee`, G2-01), "kpi ringkas", "kanal" (lihat docblock
+ * `PdtLaporanKanal` di bawah — keputusan pemilik via `AskUserQuestion`
+ * KEDUA, 2026-09-16: TikTok+Shopee dibangun BERSAMAAN meski Shopee sengaja
+ * tidak simetris, ditandai `lengkap: false`), dan sekarang "live" (lihat
+ * docblock `PdtLaporanLive` di bawah — keputusan pemilik via
+ * `AskUserQuestion` KETIGA, 2026-09-16: SATU bentuk bersama, nol asimetri
+ * platform kali ini) sudah bisa dibangun dari `pdt_fact_*` — DELAPAN bagian
+ * lain (iklan, video, produk, afiliasi, tokopedia, ads_manager, tahap,
+ * insight) butuh fungsi agregasi fakta BARU per bagian (pola sama
+ * `rakitInputSkorTiktok`/`rakitInputSkorShopee`) yang belum ada satupun,
+ * pekerjaan multi-sesi. Delapan bagian sisanya TETAP di luar cakupan,
+ * ditambahkan satu-per-satu
  * sesi berikutnya seperti pola G1-09 fact-writer, TIDAK ditebak/dibangun
  * sekaligus di sini.
  *
@@ -171,6 +174,64 @@ export function bangunKanalShopee(input: PdtLaporanKanalInputShopee | null): Pdt
   };
 }
 
+const desimal2 = (v: number | null | undefined): number | null =>
+  v == null || !isFinite(v) ? null : Math.round(v * 100) / 100;
+
+/**
+ * Bagian "live" (Live Streaming) — keputusan pemilik via `AskUserQuestion`
+ * 2026-09-16 (bagian keempat, setelah kpi/kanal/skor): SATU bentuk BERSAMA
+ * untuk TikTok+Shopee (beda dari "kanal", yang butuh dua bentuk berbeda) —
+ * investigasi menemukan `pdt_fact_content` jenis `'live'` (`tt_live`/
+ * `shopee_live`, keduanya sudah punya penulis fakta sejak G1-09) membawa
+ * KOLOM YANG SAMA PERSIS untuk kedua platform, dan SAMA-SAMA tipis: hanya
+ * `vv`+`gmv` yang pernah diisi kedua penulis; `durasi_detik` (jam siaran)
+ * HANYA diisi `tt_live`, `shopee_live` menulis `null` literal (nol kolom
+ * durasi di sumbernya) — `likes`/`komentar`/`produk_dilihat`/`pengikut_baru`
+ * ada di skema tapi TIDAK PERNAH diisi kedua penulis, jadi TIDAK diikutkan
+ * di sini (mengarang 0 dari kolom yang genuinely kosong melanggar aturan
+ * rumah #7). Nol asimetri PLATFORM (beda dari "kanal"/nanti "iklan") —
+ * `lengkap` TIDAK dibutuhkan, TikTok dan Shopee mendapat bentuk yang SAMA,
+ * cuma `jam`/`gmvPerJam` akan `null` untuk Shopee (kolom sumbernya memang
+ * kosong permanen, bukan kekurangan cakupan platform).
+ *
+ * Whole-object `null` saat nol sesi live sama sekali di periode ini — cermin
+ * `rakitInputSkorTiktok`'s dimensi LIVE (`liveRow.sesi === 0 ? null : {...}`,
+ * Rule 12), BUKAN "sesi: 0" yang mengarang aktivitas yang tidak diketahui.
+ */
+export interface PdtLaporanLive {
+  sesi: number;
+  gmv: number | null;
+  vv: number | null;
+  /** Jam siaran (durasi_detik / 3600) — `null` untuk SELURUH baris Shopee (kolom sumbernya kosong permanen), terisi untuk TikTok. */
+  jam: number | null;
+  gmvPerSesi: number | null;
+  /** `null` bila `gmv`/`jam` `null` ATAU `jam` 0. */
+  gmvPerJam: number | null;
+}
+
+/** Agregat `pdt_fact_content` jenis `'live'` untuk satu periode. `gmv`/`vv`/`jam` `null` = nol baris dengan kolom itu terisi (tidak diketahui, BUKAN nol). */
+export interface PdtLaporanLiveInput {
+  sesi: number;
+  gmv: number | null;
+  vv: number | null;
+  jam: number | null;
+}
+
+/** Rakit "live". `null` (whole object) bila `input` `null` ATAU `sesi` 0 — lihat docblock tipe di atas. */
+export function bangunLaporanLive(input: PdtLaporanLiveInput | null): PdtLaporanLive | null {
+  if (input == null || input.sesi === 0) return null;
+  const gmv = bulat(input.gmv);
+  const jam = desimal2(input.jam);
+  return {
+    sesi: input.sesi,
+    gmv,
+    vv: bulat(input.vv),
+    jam,
+    gmvPerSesi: gmv == null ? null : bulat(gmv / input.sesi),
+    gmvPerJam: gmv == null || jam == null || jam === 0 ? null : bulat(gmv / jam),
+  };
+}
+
 export interface PdtLaporanTiktok {
   schema: 'cdps.pdt.laporan.tiktok.v1';
   platform: 'tiktok';
@@ -179,6 +240,7 @@ export interface PdtLaporanTiktok {
   generatedAt: string;
   kpi: PdtLaporanKpiRingkas;
   kanal: PdtLaporanKanal;
+  live: PdtLaporanLive | null;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
 }
@@ -191,6 +253,7 @@ export interface PdtLaporanShopee {
   generatedAt: string;
   kpi: PdtLaporanKpiRingkas;
   kanal: PdtLaporanKanal;
+  live: PdtLaporanLive | null;
   skor: PdtSkorHasilShopee;
 }
 
@@ -200,6 +263,7 @@ export interface PdtLaporanTiktokOptions {
   generatedAt: string;
   kpi: PdtLaporanKpiInput | null;
   kanal: PdtLaporanKanalInputTiktok | null;
+  live: PdtLaporanLiveInput | null;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
 }
@@ -210,6 +274,7 @@ export interface PdtLaporanShopeeOptions {
   generatedAt: string;
   kpi: PdtLaporanKpiInput | null;
   kanal: PdtLaporanKanalInputShopee | null;
+  live: PdtLaporanLiveInput | null;
   skor: PdtSkorHasilShopee;
 }
 
@@ -223,6 +288,7 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
     generatedAt: opts.generatedAt,
     kpi: bangunKpiRingkas(opts.kpi),
     kanal: bangunKanalTiktok(opts.kanal),
+    live: bangunLaporanLive(opts.live),
     skor: opts.skor,
     benchmarkVersi: opts.benchmarkVersi,
   };
@@ -238,6 +304,7 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
     generatedAt: opts.generatedAt,
     kpi: bangunKpiRingkas(opts.kpi),
     kanal: bangunKanalShopee(opts.kanal),
+    live: bangunLaporanLive(opts.live),
     skor: opts.skor,
   };
 }

@@ -108,6 +108,7 @@ afterAll(async () => {
 afterEach(async () => {
   if (!sql) return;
   await sql`delete from pdt_fact_shop_daily where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
+  await sql`delete from pdt_fact_content where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-PDTLAP-%'`;
   await sql`delete from client_platforms where client_id like 'CLI-PDTLAP-%'`;
   await sql`delete from clients where id like 'CLI-PDTLAP-%'`;
@@ -147,6 +148,9 @@ describeDb('GET /pdt/laporan — real DB', () => {
     await sql`
       insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
       values (${cpId}, '2026-07-05'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1_000_000, 50_000, 40, 2_000)`;
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv, durasi_detik)
+      values (${cpId}, 'live-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 400_000, 1_000, 7_200)`;
 
     const res = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01' }));
     expect(res.status).toBe(200);
@@ -160,6 +164,8 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.skor).toHaveProperty('total');
     expect(body.skor).toHaveProperty('dimensi');
     expect(body.kanal).toEqual({ gmv_total: 1_000_000, items: expect.any(Array), lengkap: true });
+    // TikTok durasi_detik terisi ⇒ jam/gmv_per_jam keduanya terhitung (beda Shopee di bawah).
+    expect(body.live).toEqual({ sesi: 1, gmv: 400_000, vv: 1_000, jam: 2, gmv_per_sesi: 400_000, gmv_per_jam: 200_000 });
   });
 
   it('200 Shopee: KPI basis siap_dikirim TANPA net-refund, benchmark_versi null (kunci TETAP ada)', async () => {
@@ -174,6 +180,9 @@ describeDb('GET /pdt/laporan — real DB', () => {
     await sql`
       insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
       values (${cpId}, '2026-07-05'::date, 'siap_dikirim', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 800_000, 50_000, 20, 1_000)`;
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv)
+      values (${cpId}, 'live-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 400_000, 1_000)`;
 
     const res = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01' }));
     expect(res.status).toBe(200);
@@ -186,5 +195,7 @@ describeDb('GET /pdt/laporan — real DB', () => {
     // Kanal Shopee SELALU lengkap:false (dua dari enam sumber legacy) — nol baris basis 'dibuat'
     // di fixture ini, jadi gmv_total kanal null (BEDA dari kpi.gmv basis 'siap_dikirim' di atas).
     expect(body.kanal).toEqual({ gmv_total: null, items: [], lengkap: false });
+    // Shopee durasi_detik kosong permanen di sumbernya ⇒ jam/gmv_per_jam null, sisanya tetap terhitung.
+    expect(body.live).toEqual({ sesi: 1, gmv: 400_000, vv: 1_000, jam: null, gmv_per_sesi: 400_000, gmv_per_jam: null });
   });
 });
