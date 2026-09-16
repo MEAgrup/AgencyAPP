@@ -187,7 +187,7 @@ afterEach(async () => {
   }
   await sql`alter table px_eligibility_policy disable trigger trg_px_eligibility_policy_frozen`;
   try {
-    await sql`delete from px_eligibility_policy where versi > 2`;
+    await sql`delete from px_eligibility_policy where versi > 3`;
   } finally {
     await sql`alter table px_eligibility_policy enable trigger trg_px_eligibility_policy_frozen`;
   }
@@ -265,7 +265,7 @@ describeDb('recomputeDanEvaluasi — Flow A (volume) + Flow B (verdict)', () => 
     await seedHarga(platformId, 'ZPXM3-SEPATU', 185_000);
     await sql`insert into px_sku_kategori (client_platform_id, platform_product_id, level2_category, dikonfirmasi_oleh)
                values (${platformId}, 'ZPXM3-SEPATU', 'Sepatu Wanita', ${AM_OWNER})`;
-    await pushCoverage('zpxm3-batch-sepatu', 'Sepatu Wanita', 'mid', 'covered');
+    await pushCoverage('zpxm3-batch-sepatu', 'Sepatu Wanita', 'entry', 'covered'); // Rp185rb -> 'entry' (versi 3, band asli)
 
     await recomputeDanEvaluasi(sql, platformId);
     const [row1] = await sql<{ verdict: string }[]>`
@@ -301,7 +301,7 @@ describeDb('konfirmasiKategori — D-24, Rule 9-11', () => {
     const batch = await seedVerifiedBatch(clientId, platformId, '2026-07-01', '2026-07-31');
     await seedFact(platformId, batch, 'ZPXM3-TAS', '2026-07-01', 260_000_000, 30); // PRD §5 Tas Wanita
     await seedHarga(platformId, 'ZPXM3-TAS', 300_000);
-    await pushCoverage('zpxm3-batch-tas-kosong', 'Tas Wanita', 'mid', 'kosong'); // beri opsi dropdown, meski nol kreator
+    await pushCoverage('zpxm3-batch-tas-kosong', 'Tas Wanita', 'entry', 'kosong'); // Rp300rb -> 'entry' (versi 3); beri opsi dropdown, meski nol kreator
 
     await recomputeDanEvaluasi(sql, platformId);
     const kandidatSebelum = await listKandidat(sql, am());
@@ -313,7 +313,7 @@ describeDb('konfirmasiKategori — D-24, Rule 9-11', () => {
     const hasil = await konfirmasiKategori(sql, am(), platformId, 'ZPXM3-TAS', 'Tas Wanita');
     expect(hasil.verdict).toBe('kreator_kosong'); // snapshot kosong ⇒ L4 gagal, TAPI kategori sudah tercatat
     expect(hasil.lapisGagal).toBe(4);
-    expect(hasil.priceSegment).toBe('mid');
+    expect(hasil.priceSegment).toBe('entry'); // Rp300rb -> 'entry' (versi 3, band asli)
   });
 
   it('kategori di luar opsi snapshot terbaru ditolak (ValidationError)', async () => {
@@ -398,7 +398,7 @@ describeDb('intakeCoverage — Flow C, kontrak bridge (PX-M3-04)', () => {
     const batch = await seedVerifiedBatch(clientId, platformId, '2026-07-01', '2026-07-31');
     await seedFact(platformId, batch, 'ZPXM3-FLIP', '2026-07-01', 260_000_000, 30);
     await seedHarga(platformId, 'ZPXM3-FLIP', 300_000);
-    await pushCoverage('zpxm3-flip-1', 'Kategori Flip', 'mid', 'kosong');
+    await pushCoverage('zpxm3-flip-1', 'Kategori Flip', 'entry', 'kosong'); // Rp300rb -> 'entry' (versi 3)
     await sql`insert into px_sku_kategori (client_platform_id, platform_product_id, level2_category, dikonfirmasi_oleh)
                values (${platformId}, 'ZPXM3-FLIP', 'Kategori Flip', ${AM_OWNER})`;
     await recomputeDanEvaluasi(sql, platformId);
@@ -407,7 +407,7 @@ describeDb('intakeCoverage — Flow C, kontrak bridge (PX-M3-04)', () => {
        order by dihitung_pada desc limit 1`;
     expect(before.verdict).toBe('kreator_kosong');
 
-    await pushCoverage('zpxm3-flip-2', 'Kategori Flip', 'mid', 'covered'); // MCN push baru — intakeCoverage memicu reevaluateAfterCoverage sendiri
+    await pushCoverage('zpxm3-flip-2', 'Kategori Flip', 'entry', 'covered'); // Rp300rb -> 'entry' (versi 3); MCN push baru — intakeCoverage memicu reevaluateAfterCoverage sendiri
 
     const [after] = await sql<{ verdict: string }[]>`
       select verdict from px_sku_eligibility where client_platform_id = ${platformId} and platform_product_id = 'ZPXM3-FLIP'
@@ -436,11 +436,11 @@ describeDb('createEligibilityPolicy → evaluateTick penuh (Rule 8) — verdict 
     await seedHarga(platformId, 'ZPXM3-POLICY', 50_000);
 
     await evaluateTick(sql, platformId);
-    const [v2Row] = await sql<{ verdict: string; versi_policy: number }[]>`
+    const [v3Row] = await sql<{ verdict: string; versi_policy: number }[]>`
       select verdict, versi_policy from px_sku_eligibility
        where client_platform_id = ${platformId} and platform_product_id = 'ZPXM3-POLICY' order by dihitung_pada desc limit 1`;
-    expect(v2Row.versi_policy).toBe(2);
-    expect(v2Row.verdict).toBe('kategori_belum_dikonfirmasi'); // lolos L2 (250jt ≥ 200jt), nol kategori dikonfirmasi
+    expect(v3Row.versi_policy).toBe(3); // versi 3 = band asli (migrasi 20261102010000), aktif sejak seed
+    expect(v3Row.verdict).toBe('kategori_belum_dikonfirmasi'); // lolos L2 (250jt ≥ 200jt), nol kategori dikonfirmasi
 
     const versiBaru = await createEligibilityPolicy(sql, director(), {
       catatan: 'tes ambang lebih tinggi',
@@ -454,11 +454,11 @@ describeDb('createEligibilityPolicy → evaluateTick penuh (Rule 8) — verdict 
         price_segment_bands: [{ segment: 'low', max_idr: 100_000 }, { segment: 'mid', max_idr: 500_000 }, { segment: 'high', max_idr: null }],
       },
     });
-    expect(versiBaru.versi).toBeGreaterThanOrEqual(3);
+    expect(versiBaru.versi).toBeGreaterThanOrEqual(4); // versi 1 (M2a) + versi 2 (M3-B) + versi 3 (band asli) sudah ada
 
-    // baris versi LAMA (versi 2) tetap ada, tidak berubah (append-only + trigger frozen).
+    // baris versi LAMA (versi 3) tetap ada, tidak berubah (append-only + trigger frozen).
     const oldRows = await sql<{ verdict: string }[]>`
-      select verdict from px_sku_eligibility where client_platform_id = ${platformId} and platform_product_id = 'ZPXM3-POLICY' and versi_policy = 2`;
+      select verdict from px_sku_eligibility where client_platform_id = ${platformId} and platform_product_id = 'ZPXM3-POLICY' and versi_policy = 3`;
     expect(oldRows).toHaveLength(1);
 
     // baris versi BARU muncul, verdict volume_kurang (ambang naik).
@@ -467,7 +467,7 @@ describeDb('createEligibilityPolicy → evaluateTick penuh (Rule 8) — verdict 
     expect(newRows[0]?.verdict).toBe('volume_kurang');
 
     // trigger frozen — UPDATE/DELETE pada baris manapun ditolak.
-    await expect(sql`update px_sku_eligibility set verdict = 'lolos' where versi_policy = 2`).rejects.toThrow();
+    await expect(sql`update px_sku_eligibility set verdict = 'lolos' where versi_policy = 3`).rejects.toThrow();
   });
 });
 
