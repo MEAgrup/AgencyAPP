@@ -111,6 +111,7 @@ afterEach(async () => {
   await sql`delete from pdt_fact_content where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_fact_ads where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_fact_creator_period where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
+  await sql`delete from pdt_fact_sku_period where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTLAP-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-PDTLAP-%'`;
   await sql`delete from client_platforms where client_id like 'CLI-PDTLAP-%'`;
   await sql`delete from clients where id like 'CLI-PDTLAP-%'`;
@@ -163,6 +164,11 @@ describeDb('GET /pdt/laporan — real DB', () => {
       insert into pdt_fact_creator_period
         (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv, pesanan_teratribusi, jumlah_live, jumlah_video)
       values (${cpId}, 'creator-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 200_000, 5, 2, 3)`;
+    // Bench aktif versi 2 seed (20261104010000): quad_klik.good=150, quad_cvr.good=0.015 ⇒ bintang.
+    await sql`
+      insert into pdt_fact_sku_period
+        (sku_id, client_platform_id, platform_product_id, nama_produk, periode, basis, batch_id, parser_versi, gmv, klik, ctor)
+      values (null, ${cpId}, 'PRD-1', 'Kaos Bintang', '2026-07-01'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 500_000, 200, 0.02)`;
 
     const res = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01' }));
     expect(res.status).toBe(200);
@@ -183,6 +189,11 @@ describeDb('GET /pdt/laporan — real DB', () => {
       total: 1, gmv: 300_000, vv: 5_000, likes: 200, dibagikan: 10, klik_produk: 40,
       gmv_per_video: 300_000, vv_per_video: 5_000,
     });
+    // TikTok produk — satu SKU bintang (klik+cvr tinggi vs bench aktif), wire snake_case (nama_produk/platform_product_id/top_aksi).
+    expect(body.produk.distribusi.bintang).toEqual({ jumlah: 1, gmv: 500_000 });
+    expect(body.produk.top_aksi).toEqual([
+      { nama_produk: 'Kaos Bintang', platform_product_id: 'PRD-1', gmv: 500_000, klik: 200, cvr: 0.02, kuadran: 'bintang' },
+    ]);
     // TikTok iklan SELALU lengkap:true — hanya tt_ads_product terisi, tt_ads_live jadi item null.
     expect(body.iklan).toEqual({
       biaya: 100_000, gmv: 400_000, roas: 4,
@@ -268,6 +279,8 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.live).toEqual({ sesi: 1, gmv: 400_000, vv: 1_000, jam: null, gmv_per_sesi: 400_000, gmv_per_jam: null });
     // Shopee video SELALU null (shopee_video nol penulis fakta — tidak ada baris untuk dihitung).
     expect(body.video).toBeNull();
+    // Shopee produk SELALU null — methodology kuadran Shopee beda total, belum ada modul sumber data.
+    expect(body.produk).toBeNull();
     // Shopee iklan SELALU lengkap:false (ads_banner legacy tidak pernah punya modul PDT) — hanya cpc terisi.
     expect(body.iklan).toEqual({
       biaya: 100_000, gmv: 300_000, roas: 3,

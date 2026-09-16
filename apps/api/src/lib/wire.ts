@@ -9317,6 +9317,26 @@ export interface PdtLaporanInsightWire {
   indikator: { nama: string; target: string }[];
 }
 
+export interface PdtLaporanProdukItemWire {
+  nama_produk: string | null;
+  platform_product_id: string | null;
+  gmv: number | null;
+  klik: number | null;
+  cvr: number | null;
+  kuadran: string;
+}
+
+export interface PdtLaporanProdukDistribusiWire {
+  jumlah: number;
+  gmv: number | null;
+}
+
+/** `null` (whole object) untuk Shopee SELALU — methodology kuadran beda total dari TikTok, belum ada modul PDT sumber data (lihat docblock `pdt.bangunLaporanProduk`, `@cdps/core`). */
+export interface PdtLaporanProdukWire {
+  distribusi: Record<string, PdtLaporanProdukDistribusiWire>;
+  top_aksi: PdtLaporanProdukItemWire[];
+}
+
 export interface PdtLaporanWire {
   schema: string;
   platform: string;
@@ -9328,6 +9348,7 @@ export interface PdtLaporanWire {
   iklan: PdtLaporanIklanWire | null;
   live: PdtLaporanLiveWire | null;
   video: PdtLaporanVideoWire | null;
+  produk: PdtLaporanProdukWire | null;
   afiliasi: PdtLaporanAfiliasiWire | null;
   tahap: PdtLaporanTahapWire | null;
   skor: PdtLaporanSkorWire;
@@ -9379,6 +9400,16 @@ function pdtLaporanVideoToWire(v: pdtCore.PdtLaporanVideo | null): PdtLaporanVid
   return {
     total: v.total, gmv: v.gmv, vv: v.vv, likes: v.likes, dibagikan: v.dibagikan, klik_produk: v.klikProduk,
     gmv_per_video: v.gmvPerVideo, vv_per_video: v.vvPerVideo,
+  };
+}
+
+function pdtLaporanProdukToWire(p: pdtCore.PdtLaporanProduk | null): PdtLaporanProdukWire | null {
+  if (p == null) return null;
+  return {
+    distribusi: p.distribusi,
+    top_aksi: p.topAksi.map((x) => ({
+      nama_produk: x.namaProduk, platform_product_id: x.platformProductId, gmv: x.gmv, klik: x.klik, cvr: x.cvr, kuadran: x.kuadran,
+    })),
   };
 }
 
@@ -9459,6 +9490,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
+    produk: pdtLaporanProdukToWire(l.produk),
     afiliasi: pdtLaporanAfiliasiToWire(l.afiliasi),
     tahap: pdtLaporanTahapToWire(l.tahap),
     skor: pdtLaporanSkorToWire(l.skor),
@@ -9479,6 +9511,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
+    produk: null,
     afiliasi: pdtLaporanAfiliasiToWire(l.afiliasi),
     tahap: null,
     skor: pdtLaporanSkorToWire(l.skor),

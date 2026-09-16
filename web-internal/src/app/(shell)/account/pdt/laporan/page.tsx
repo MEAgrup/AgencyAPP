@@ -3,10 +3,10 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + kanal + iklan + live + video + afiliasi + tahap + skor +
- * insight per toko klien, dibaca lewat `GET /account/pdt/laporan`. v1
- * SENGAJA sempit (sembilan dari dua belas seksi mesin laporan lama — lihat
- * docblock `packages/core/src/pdt/laporan.ts`): belum ada produk/tokopedia/
+ * KPI ringkas + kanal + iklan + live + video + produk + afiliasi + tahap +
+ * skor + insight per toko klien, dibaca lewat `GET /account/pdt/laporan`. v1
+ * SENGAJA sempit (sepuluh dari dua belas seksi mesin laporan lama — lihat
+ * docblock `packages/core/src/pdt/laporan.ts`): belum ada tokopedia/
  * ads_manager.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
@@ -41,6 +41,16 @@
  * asli, keduanya sudah lengkap). `roas` per item DAN total DITURUNKAN
  * `Σgmv÷Σbiaya`. Seksi disembunyikan seluruhnya saat `iklan` `null` (nol
  * baris iklan seluruh sumber platform ini di periode ini).
+ *
+ * **Produk** (Portfolio Produk/kuadran, keputusan pemilik via
+ * `AskUserQuestion` "G2-01-KUADRAN-SKU (produk)"): TikTok-ONLY — Shopee
+ * SELALU `produk: null` (methodology kuadran beda total dari TikTok, belum
+ * ada modul PDT sumber data, sama gap "tahap"). Mode BENCHMARK SAJA (bukan
+ * "Mode Relatif" mesin lama — ambang tetap lintas bulan, `pdt_benchmark`
+ * versi TikTok). `distribusi` — jumlah SKU per kuadran; `top_aksi` — HANYA
+ * tiga kuadran actionable (Bintang/Bocor Traffic/Hidden Gem), diurutkan GMV
+ * desc, dipotong 12 (angka sama mesin lama). Seksi disembunyikan seluruhnya
+ * saat `produk` `null`.
  *
  * **Afiliasi** (keputusan pemilik via `AskUserQuestion` KEENAM, 2026-09-16):
  * RINGKASAN saja untuk KEDUA platform, SATU bentuk (nol asimetri platform,
@@ -119,6 +129,17 @@ import { formatIDR } from '@/lib/money';
 
 /** Platform toko yang didukung PDT (PDT-22) — cermin `platformKeVokabPdt`. */
 const PDT_PLATFORMS = new Set(['Shopee', 'TikTok Shop']);
+
+/** Label kuadran produk — SAMA persis `report/render.ts` `KUADRAN_META` (mesin lama), bukan istilah baru. */
+const KUADRAN_LABEL: Record<string, string> = {
+  bintang: 'Produk Bintang',
+  hidden_gem: 'Hidden Gem',
+  bocor_traffic: 'Bocor Traffic',
+  evaluasi: 'Evaluasi',
+  tidur: 'Produk Tidur',
+  tidak_tayang: 'Tidak Tayang',
+};
+const KUADRAN_URUTAN = ['bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi', 'tidur', 'tidak_tayang'];
 
 function formatPercent(v: number | null): string {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -703,6 +724,52 @@ export default function LaporanPdtPage() {
               </p>
             </section>
           ) : null}
+
+          {laporan.produk && (
+            <section className="card">
+              <h2>Portfolio Produk</h2>
+              <p className="muted" style={{ fontSize: 12 }}>Mode Benchmark (vs target MEA) — klasifikasi kuadran SKU periode ini</p>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                {KUADRAN_URUTAN
+                  .filter((k) => laporan.produk!.distribusi[k]?.jumlah > 0 || (k !== 'tidur' && k !== 'tidak_tayang'))
+                  .map((k) => (
+                    <div key={k}>
+                      <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.produk!.distribusi[k]?.jumlah ?? 0)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                        {KUADRAN_LABEL[k] ?? k} · {formatIDR(laporan.produk!.distribusi[k]?.gmv ?? null)}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+              {laporan.produk.top_aksi.length > 0 && (
+                <>
+                  <h3 style={{ fontSize: 14, marginTop: 16 }}>Top Produk by GMV (Bintang/Bocor Traffic/Hidden Gem)</h3>
+                  <table style={{ marginTop: 8, width: '100%', fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left' }}>Produk</th>
+                        <th style={{ textAlign: 'left' }}>Kuadran</th>
+                        <th style={{ textAlign: 'right' }}>Klik</th>
+                        <th style={{ textAlign: 'right' }}>CVR</th>
+                        <th style={{ textAlign: 'right' }}>GMV</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {laporan.produk.top_aksi.map((x, i) => (
+                        <tr key={x.platform_product_id ?? i}>
+                          <td>{x.nama_produk ?? x.platform_product_id ?? '—'}</td>
+                          <td>{KUADRAN_LABEL[x.kuadran] ?? x.kuadran}</td>
+                          <td style={{ textAlign: 'right' }}>{formatCount(x.klik)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatPercent(x.cvr)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatIDR(x.gmv)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </section>
+          )}
 
           {laporan.afiliasi && (
             <section className="card">

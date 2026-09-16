@@ -1352,6 +1352,43 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > deskripsi CONCRETE (4 jenis ekspor di atas) tapi NOL sample, ditanyakan ke pemilik terpisah dari
 > status ini (lihat `docs/DECISIONS.md`).
 
+> **Status 2026-09-16 (lanjutan) — bagian laporan "produk" (Portfolio Produk/kuadran) DIBANGUN,
+> TikTok-ONLY, keputusan pemilik via `AskUserQuestion`.** `docs/DECISIONS.md` (cari
+> "G2-01-KUADRAN-SKU (produk)") untuk rincian lengkap. Ringkas: setelah `ads_manager` (backlog)
+> di-skip pemilik (nol sample 4-jenis-ekspor, dicatat gap di atas) dan tokopedia PERMANEN manual,
+> "produk" adalah SATU-SATUNYA sisa bagian laporan yang tidak hard-blocked sample — datanya
+> (`pdt_fact_sku_period` + kolom `kuadran`, `G2-01-KUADRAN-SKU` langkah 2) sudah ada, TAPI tabel itu
+> tidak pernah menyimpan nama produk (`sku_id` selalu `null` untuk TikTok, nol join ke
+> `pdt_sku_master`) — tanpa itu v1 cuma bisa RINGKASAN jumlah per kuadran, AM tidak tahu SKU MANA
+> yang perlu ditindak. Ditanyakan ke pemilik: tambah capture `nama_produk` (disalin LANGSUNG dari
+> kolom `'Nama'` `tt_product_analytics`, sudah terverifikasi ada di whitelist sejak G1-01, BUKAN
+> lookup FK — sama pola `pdt_fact_ads.platform_product_id`) vs ringkasan-agregat-saja vs tunda.
+> Pemilik memilih tambah capture (rekomendasi). Implementasi: migrasi `20261108010000` menambah
+> `pdt_fact_sku_period.nama_produk varchar(255) NULL` (TAMPILAN UI SAJA, Rule 20, nol tabel baru);
+> `ekstrakBarisTtProductAnalytics` (`@cdps/core` `pdt/fakta.ts`) sekarang memetakan `'Nama'` (trimmed,
+> kosong ⇒ `null`); writer `tt_product_analytics` → `pdt_fact_sku_period` (`@cdps/domain` `pdt.ts`)
+> menulis kolom baru. `PdtLaporanProduk`/`bangunLaporanProduk` (`@cdps/core` `pdt/laporan.ts`) —
+> mode BENCHMARK SAJA (keputusan desain sudah diambil sebelumnya, bukan baru di sini): `distribusi`
+> (jumlah+Σgmv per KEENAM kuadran) + `topAksi` (HANYA bintang/bocor_traffic/hidden_gem, diurutkan
+> GMV desc, dipotong 12 — angka SAMA mesin lama `report/render.ts` `seksiProduk`, bukan ambang baru).
+> `bacaProdukTiktok` (`@cdps/domain` `pdt.ts`, fungsi privat sama pola `bacaTahapTiktok`) HARUS
+> dipanggil SETELAH `hitungSkorTiktok` (yang menulis kolom `kuadran` via
+> `klasifikasiUlangKuadranSkuTiktok`) — `rakitLaporanTiktok` membacanya SEBAGAI langkah SEQUENTIAL
+> setelah `Promise.all`, bukan di dalamnya (race kalau paralel). Shopee `produk: null` PERMANEN —
+> methodology kuadran Shopee beda total dari TikTok, belum ada modul PDT sumber data (sama gap
+> "tahap"). Wire: `PdtLaporanProdukWire`/`PdtLaporanProdukItemWire`/`PdtLaporanProdukDistribusiWire`
+> (`apps/api/src/lib/wire.ts`) + FE `PdtLaporanProduk`/`PdtLaporanProdukItem`/
+> `PdtLaporanProdukDistribusi` (`web-internal/src/lib/pdt.ts`, `shape-parity.test.ts` diperbarui) +
+> seksi "Portfolio Produk" baru di halaman laporan (`web-internal`, tabel Top Produk by GMV + tile
+> distribusi kuadran, label BI SAMA `report/render.ts` `KUADRAN_META`). Diverifikasi (DB lokal
+> rebuild bersih, 258 migrasi — SATU migrasi baru, satu kolom NULLABLE): `@cdps/core` 1442/1442
+> (naik dari 1433), `@cdps/domain` 2777/2778 (1 skip, nol gagal — satu kegagalan `client.test.ts`
+> yang sempat muncul di SATU full-suite run adalah flake test-isolation pra-ada tak terkait, lolos
+> bersih saat dijalankan sendiri), `@cdps/db` 107/107, `@cdps/api` 638/640 (2 skip); typecheck bersih
+> `core`/`domain`/`api`/`web-internal`, lint `@cdps/api` bersih, `next build` `web-internal` sukses.
+> **Sisa: DUA bagian laporan lain** (tokopedia, ads_manager) TETAP di luar cakupan — tokopedia
+> PERMANEN manual (PDT-22), ads_manager menunggu sample 4-jenis-ekspor dari pemilik.
+
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
   dikirim** tetap memakai versi saat pengiriman (Rule 23). **Nol permintaan upload ulang ke AM.**
