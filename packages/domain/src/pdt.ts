@@ -607,59 +607,33 @@ export interface PdtCommitPersiapan {
  * ini menerjemahkan pelanggaran itu jadi `ValidationError` BI, bukan 500
  * mentah (lihat `catch` di bawah).
  */
-export async function commitUploadBatch(
-  sql: Sql,
-  actor: Actor,
-  clientPlatformId: number,
-  berkasInput: readonly PdtPreviewBerkasInput[],
-  overrides: readonly PdtCommitOverride[],
-  now: Date = new Date(),
-): Promise<PdtCommitPersiapan> {
-  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
-  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+interface PdtStatusRekonsiliasiHasil {
+  status: PdtCommitStatus;
+  alasanDitolak: string | null;
+  reconcileDeltaPct: number | null;
+  identitas: PdtPreviewIdentitas;
+  identitasSumber: Record<string, unknown> | null;
+}
 
-  const platform = platformKeVokabPdt(row.platform);
-  if (!platform) {
-    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
-  }
-
-  const modulValidUntukPlatform = new Set(pdt.PDT_MODULES.filter((m) => m.platform === platform).map((m) => m.kode));
-  const overrideByNama = new Map<string, string>();
-  for (const o of overrides) {
-    if (!modulValidUntukPlatform.has(o.modulKode)) {
-      throw new ValidationError(`[modul '${o.modulKode}' bukan modul platform toko ini, pilih dari daftar modul yang tersedia]`);
-    }
-    overrideByNama.set(o.nama, o.modulKode);
-  }
-
-  const hasilBerkas: PdtCommitBerkasHasil[] = [];
-  const terparse: BerkasTerparse[] = [];
-  for (const b of berkasInput) {
-    const overrideKode = overrideByNama.get(b.nama);
-    // Override hanya berlaku untuk berkas yang benar-benar terekstrak (b.aoa != null) — berkas
-    // ditolakPagar/decodeGagal tidak punya sheet untuk diparse ulang dengan modul apa pun.
-    const berlakuOverride = overrideKode != null && b.aoa != null;
-    // `aoa` DIKOREKSI ke sheet `namaSheet` modul override (G1-09-SHEET-BUKAN-PERTAMA) —
-    // tanpa ini, AM yang meng-override ke modul ber-sheet-spesifik (mis. `shopee_live`)
-    // akan tetap membaca sheet yang deteksi OTOMATIS pilih (biasanya sheet pertama),
-    // BUKAN sheet yang modul override itu sungguhan minta.
-    const efektif: PdtPreviewBerkasInput = berlakuOverride
-      ? { ...b, aoa: aoaUntukModulEfektif(b, overrideKode), modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] }
-      : b;
-    const { hasil, terparse: t } = bangunSatuPreviewBerkas(efektif);
-    hasilBerkas.push({ ...hasil, deteksiOleh: berlakuOverride ? 'override_am' : 'tanda_tangan' });
-    if (t) terparse.push(t);
-  }
-
-  const { verdict: identitas, sumber: identitasSumber } = resolveIdentitasDanSumber(platform, terparse, row.shop_id, row.akun_konten_toko);
-  const periode = resolvePeriodePreview(platform, terparse);
-
-  if (periode == null) {
-    throw new ValidationError('[tidak ada satu pun berkas dalam paket yang berhasil diproses — periksa kembali paket ZIP sebelum mengunggah ulang]');
-  }
-  if (periode.status === 'tolak') {
-    throw new ValidationError(periode.pesan);
-  }
+/**
+ * Identitas (Rule 2-4) + rekonsiliasi (Rule 13-16/PDT-16, "D-16") — diekstrak
+ * dari `commitUploadBatch` (keputusan pemilik G1-11-REPARSE-RECOMPUTE-STATUS,
+ * `docs/DECISIONS.md`: "reparse WAJIB ulang rekonsiliasi (D-16) + validasi
+ * identity, status batch di-recompute dari hasil parse baru") supaya
+ * `reparsePdtBatch` (Flow D) di bawah bisa memakai PERSIS logika yang sama
+ * TANPA duplikasi — pola sama `tulisFaktaModulTerparse` (sesi 29, baris fakta).
+ * Murni fungsi keputusan (nol tulis DB, nol pembacaan periode — periode
+ * BUKAN bagian dari keputusan status/identitas/rekonsiliasi ini, lihat
+ * `periode` terpisah di `commitUploadBatch`/docblock seksi G1-11).
+ */
+function resolveStatusIdentitasRekonsiliasi(
+  platform: pdt.PdtPlatform,
+  terparse: readonly BerkasTerparse[],
+  hasilBerkas: readonly PdtPreviewBerkasHasil[],
+  shopId: string | null,
+  akunKontenToko: readonly string[] | null,
+): PdtStatusRekonsiliasiHasil {
+  const { verdict: identitas, sumber: identitasSumber } = resolveIdentitasDanSumber(platform, terparse, shopId, akunKontenToko);
 
   let status: PdtCommitStatus = 'parsing';
   let alasanDitolak: string | null = null;
@@ -735,6 +709,65 @@ export async function commitUploadBatch(
       // 'parsing' menunggu batch berikutnya yang membawa keduanya lengkap.
     }
   }
+
+  return { status, alasanDitolak, reconcileDeltaPct, identitas, identitasSumber };
+}
+
+export async function commitUploadBatch(
+  sql: Sql,
+  actor: Actor,
+  clientPlatformId: number,
+  berkasInput: readonly PdtPreviewBerkasInput[],
+  overrides: readonly PdtCommitOverride[],
+  now: Date = new Date(),
+): Promise<PdtCommitPersiapan> {
+  const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
+  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+
+  const platform = platformKeVokabPdt(row.platform);
+  if (!platform) {
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+  }
+
+  const modulValidUntukPlatform = new Set(pdt.PDT_MODULES.filter((m) => m.platform === platform).map((m) => m.kode));
+  const overrideByNama = new Map<string, string>();
+  for (const o of overrides) {
+    if (!modulValidUntukPlatform.has(o.modulKode)) {
+      throw new ValidationError(`[modul '${o.modulKode}' bukan modul platform toko ini, pilih dari daftar modul yang tersedia]`);
+    }
+    overrideByNama.set(o.nama, o.modulKode);
+  }
+
+  const hasilBerkas: PdtCommitBerkasHasil[] = [];
+  const terparse: BerkasTerparse[] = [];
+  for (const b of berkasInput) {
+    const overrideKode = overrideByNama.get(b.nama);
+    // Override hanya berlaku untuk berkas yang benar-benar terekstrak (b.aoa != null) — berkas
+    // ditolakPagar/decodeGagal tidak punya sheet untuk diparse ulang dengan modul apa pun.
+    const berlakuOverride = overrideKode != null && b.aoa != null;
+    // `aoa` DIKOREKSI ke sheet `namaSheet` modul override (G1-09-SHEET-BUKAN-PERTAMA) —
+    // tanpa ini, AM yang meng-override ke modul ber-sheet-spesifik (mis. `shopee_live`)
+    // akan tetap membaca sheet yang deteksi OTOMATIS pilih (biasanya sheet pertama),
+    // BUKAN sheet yang modul override itu sungguhan minta.
+    const efektif: PdtPreviewBerkasInput = berlakuOverride
+      ? { ...b, aoa: aoaUntukModulEfektif(b, overrideKode), modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] }
+      : b;
+    const { hasil, terparse: t } = bangunSatuPreviewBerkas(efektif);
+    hasilBerkas.push({ ...hasil, deteksiOleh: berlakuOverride ? 'override_am' : 'tanda_tangan' });
+    if (t) terparse.push(t);
+  }
+
+  const periode = resolvePeriodePreview(platform, terparse);
+
+  if (periode == null) {
+    throw new ValidationError('[tidak ada satu pun berkas dalam paket yang berhasil diproses — periksa kembali paket ZIP sebelum mengunggah ulang]');
+  }
+  if (periode.status === 'tolak') {
+    throw new ValidationError(periode.pesan);
+  }
+
+  const { status, alasanDitolak, reconcileDeltaPct, identitas, identitasSumber } =
+    resolveStatusIdentitasRekonsiliasi(platform, terparse, hasilBerkas, row.shop_id, row.akun_konten_toko);
 
   // Q-3 (docs/DECISIONS.md 2026-09-13): pdt_fact_ads.periode adalah AWAL BULAN, bukan
   // periode.mulai apa adanya (yang bisa jatuh di tengah bulan bila berkas tidak membawa
@@ -1722,27 +1755,77 @@ export async function finalizePdtOrphanPurgeTick(
 // G1-11 — Job reparse dari paket ZIP (Flow D; `docs/backlog/PDT_BACKLOG.md`
 // G1-11, `docs/prd/CDPS_PDT_Pusat_Data_Toko.md` §3/§4).
 //
-// **Cakupan SENGAJA dipersempit ke bacaan literal Flow D** (dicatat
-// `docs/DECISIONS.md` sesi 28): Flow D menyebut TIGA hal — "memparse ulang",
-// "menaikkan parser_versi baris fakta", "mencatat audit_logs" — nol
-// penyebutan status batch (`verified`/`ditolak`/dst.), identitas, periode,
-// atau `reconcile_delta_pct`. `reparsePdtBatch` di bawah karena itu HANYA
-// menulis ulang baris fakta (lewat `tulisFaktaModulTerparse`, SAMA fungsi
-// yang dipakai `commitUploadBatch`) untuk (client_platform_id, periode)
-// batch yang SUDAH ADA, memakai `id` batch itu APA ADANYA — TIDAK pernah
-// membuat baris `pdt_upload_batch` baru, TIDAK menyentuh
-// `status`/`alasan_ditolak`/`reconcile_delta_pct`/`identitas_sumber`/
-// `retensi_sampai`, dan TIDAK menulis ulang `pdt_file` (metadata deteksi
-// batch ASLI tetap sebagai riwayat apa adanya). Ini BUKAN kelalaian:
-// `commitUploadBatch`'s error message sendiri (`isUniqueViolation` di atas)
-// SUDAH mengarahkan AM ke "reparse batch lama (Flow D) alih-alih mengunggah
-// batch verified baru untuk periode yang sama" — status batch yang
-// dipertahankan apa adanya adalah PRASYARAT supaya saran itu tidak
-// menciptakan konflik `uq_pdt_upload_batch_verified` baru terhadap dirinya
-// sendiri. Kalau kelak reparse ternyata JUGA harus boleh mengubah status
-// (mis. bug parser yang diperbaiki mengubah hasil rekonsiliasi Rule 13-16),
-// itu keputusan arsitektur terpisah yang BELUM diminta PRD — dicatat sebagai
-// Open baru (`G1-11-REPARSE-RECOMPUTE-STATUS`), bukan ditebak di sini.
+// **G1-11-REPARSE-RECOMPUTE-STATUS DITUTUP (keputusan pemilik, `docs/DECISIONS.md`
+// 2026-09-16): "reparse WAJIB ulang rekonsiliasi (D-16/PDT-16) + validasi
+// identity. Status batch di-recompute dari hasil parse baru; snapshot laporan
+// terkirim tidak berubah (Flow D)."** Ini MELEBARKAN cakupan sesi 28/29 (yang
+// sengaja dipersempit ke bacaan literal Flow D langkah 2 — "memparse ulang",
+// "menaikkan parser_versi", "mencatat audit_logs" saja — karena PRD sendiri
+// diam soal status/identitas/rekonsiliasi) — pemilik sekarang menjawab
+// pertanyaan yang sengaja dibiarkan terbuka sesi itu: YA, reparse harus
+// menjalankan ULANG `resolveStatusIdentitasRekonsiliasi` (fungsi yang SAMA
+// dipakai `commitUploadBatch`, diekstrak justru supaya ini bisa dipakai
+// ulang tanpa duplikasi) atas hasil parse BARU, dan menulis ulang
+// `status`/`alasan_ditolak`/`reconcile_delta_pct`/`identitas_sumber` batch
+// bila hasilnya berbeda dari sebelumnya (mis. bug parser yang diperbaiki
+// mengubah hasil rekonsiliasi Rule 13-16 — batch yang tadinya `ditolak`
+// karena selisih GMV, dengan parser baru sebenarnya `verified`).
+//
+// **`retensi_sampai`/`retensi_alasan` TETAP TIDAK disentuh** — keputusan
+// pemilik hanya menyebut "status batch", bukan retensi; Rule 45 (baseline
+// 120/30 hari) berjalan HANYA saat batch dibuat (`commitUploadBatch`), dan
+// perpanjangan (G1-10-RETENSI-RECOMPUTE/G1-10-ORPHAN-PASS) sudah dipicu jalur
+// lain (kirim laporan/katalog PX) — menebak aturan retensi tambahan di sini
+// berarti mengarang scope yang tidak diminta.
+//
+// **`uq_pdt_upload_batch_verified` (Rule 36)** — kasus yang membuat sesi 28
+// awalnya ragu: bila reparse membuat batch INI jadi `verified` padahal SUDAH
+// ADA batch verified LAIN untuk `(client_platform_id, periode_mulai,
+// periode_selesai)` yang sama (mis. batch pengganti yang diunggah manual
+// SETELAH batch lama gagal rekonsiliasi), UPDATE-nya akan membentur unique
+// index itu. Ditangkap sama seperti `commitUploadBatch` (`isUniqueViolation`)
+// dan diterjemahkan jadi `ValidationError` BI — AM diberi tahu ada konflik
+// verified ganda untuk didiagnosis manual, bukan 500 mentah atau silently
+// overwrite salah satu batch.
+//
+// **Snapshot laporan terkirim TIDAK berubah** (Flow D langkah 3, PRD §4) —
+// invarian ini SUDAH terjamin struktural tanpa kode tambahan: `kirimLaporanPdt`
+// menulis `pdt_laporan_kiriman` sebagai salinan BEKU sekali saat kirim
+// (`trg_pdt_laporan_kiriman_frozen`), reparse tidak pernah menyentuh tabel
+// itu — hanya laporan yang BELUM dikirim (dibaca `bacaLaporanPdt` langsung
+// dari `pdt_fact_*`/`pdt_upload_batch` TERKINI) yang otomatis ikut status
+// baru.
+//
+// `reparsePdtBatch` di bawah menulis ulang baris fakta (lewat
+// `tulisFaktaModulTerparse`, SAMA fungsi yang dipakai `commitUploadBatch`)
+// untuk (client_platform_id, periode) batch yang SUDAH ADA, memakai `id`
+// batch itu APA ADANYA — TIDAK PERNAH membuat baris `pdt_upload_batch` baru
+// (Rule 5, periode batch tidak di-re-derive dari berkas yang diparse ulang),
+// dan TIDAK menulis ulang `pdt_file` (metadata deteksi batch ASLI tetap
+// sebagai riwayat apa adanya, override AM dibaca ulang dari sana — lihat di
+// bawah).
+//
+// **Identitas `tolak` pada reparse** mengosongkan seluruh array berkas
+// sebelum ditulis ke `tulisFaktaModulTerparse` — pola SAMA `commitUploadBatch`
+// (Rule 2-4: batch yang identitasnya tidak valid tidak boleh menyumbang baris
+// fakta BARU). **Baris fakta LAMA batch ini (ditulis sebelum reparse, saat
+// identitas masih valid) TIDAK ikut terhapus** — tiap blok
+// `tulisFaktaModulTerparse` membungkus delete-then-insert-nya dengan
+// `if (berkasXxx.length > 0)` (dicek langsung ke kode, bukan diasumsikan):
+// array kosong ⇒ delete-nya TIDAK PERNAH dijalankan sama sekali. Ini
+// batasan yang SUDAH ada, bukan yang reparse ciptakan — `commitUploadBatch`
+// sendiri punya batasan yang SAMA untuk batch baru yang lahir `tolak` (delete
+// itu berkunci `client_platform_id`+`sumber`+`periode`, BUKAN `batch_id`,
+// justru supaya upload baru yang gagal identitas tidak menghapus fakta batch
+// LAIN yang sedang menopang periode yang sama). Konsekuensinya: bila reparse
+// menemukan identitas yang TERNYATA salah, batch ditandai `ditolak` (Rule
+// 2-4, laporan berhenti memakai batch ini lewat status), tapi baris fakta
+// lama tetap ada di `pdt_fact_*` sampai batch PENGGANTI (baru, identitas
+// benar) commit ke periode yang sama dan menimpanya lewat replace-on-recommit
+// — sengaja TIDAK diperluas menjadi delete ber-`batch_id` di sini karena itu
+// mengubah kontrak `tulisFaktaModulTerparse` yang dipakai BERSAMA
+// `commitUploadBatch`, di luar cakupan keputusan pemilik ("status batch
+// di-recompute").
 //
 // AM override (`pdt_file.deteksi_oleh = 'override_am'`) dari commit ASLI
 // dipertahankan otomatis (dibaca ulang dari `pdt_file`, bukan parameter
@@ -1819,6 +1902,10 @@ export interface PdtReparseHasil {
   /** `'paket_terpurge'` bila `raw_dihapus_pada` sudah terisi — nol tulis terjadi. */
   alasanDilewati: 'paket_terpurge' | null;
   rawDihapusPada: string | null;
+  /** Status batch SETELAH reparse (recompute identitas+rekonsiliasi) — `null` bila `direparse=false`. */
+  status: PdtCommitStatus | null;
+  /** `true` bila status hasil recompute BERBEDA dari status sebelum reparse (mis. `ditolak` → `verified`). */
+  statusBerubah: boolean;
 }
 
 /**
@@ -1836,11 +1923,20 @@ export interface PdtReparseHasil {
  * SALAH PEMANGGILAN, bukan kondisi normal Flow D).
  *
  * `id`/`clientPlatformId`/`periodeAwalBulan` dipakai APA ADANYA dari batch
- * yang SUDAH ADA (lihat docblock seksi G1-11 di atas untuk kenapa TIDAK
- * di-re-derive dari isi berkas yang diparse ulang) — `tulisFaktaModulTerparse`
- * yang SAMA dipakai `commitUploadBatch` menulis ulang baris fakta, lalu
- * `pdt_upload_batch.parser_versi` dinaikkan ke `PDT_PARSER_VERSI` dan SATU
- * `audit_log` (`action = 'pdt_reparse'`) mencatat versi lama→baru.
+ * yang SUDAH ADA (Rule 5 — periode TIDAK di-re-derive dari isi berkas yang
+ * diparse ulang) — `tulisFaktaModulTerparse` yang SAMA dipakai
+ * `commitUploadBatch` menulis ulang baris fakta (dikosongkan bila identitas
+ * hasil recompute `tolak`, lihat docblock seksi G1-11 di atas), lalu
+ * `resolveStatusIdentitasRekonsiliasi` (SAMA dipakai `commitUploadBatch`)
+ * menjalankan ULANG Rule 2-4 (identitas) + Rule 13-16/PDT-16 (rekonsiliasi)
+ * atas hasil parse baru — keputusan pemilik G1-11-REPARSE-RECOMPUTE-STATUS.
+ * `pdt_upload_batch.status`/`alasan_ditolak`/`reconcile_delta_pct`/
+ * `identitas_sumber`/`parser_versi` ditulis ulang ke hasil TERBARU, dan SATU
+ * `audit_log` (`action = 'pdt_reparse'`) mencatat status+parser_versi
+ * lama→baru. `uq_pdt_upload_batch_verified` (Rule 36) yang terbentur oleh
+ * UPDATE ini (batch verified LAIN sudah berdiri untuk periode yang sama)
+ * diterjemahkan jadi `ValidationError` BI, bukan 500 mentah — pola sama
+ * `commitUploadBatch`.
  */
 export async function reparsePdtBatch(
   sql: Sql,
@@ -1852,11 +1948,16 @@ export async function reparsePdtBatch(
     id: number;
     client_platform_id: number;
     platform: string;
+    status: PdtCommitStatus;
     raw_dihapus_pada: Date | string | null;
+    periode_mulai: string;
+    periode_selesai: string;
     periode_awal_bulan: string;
     parser_versi: number;
   }[]>`
-    select id, client_platform_id, platform, raw_dihapus_pada, parser_versi,
+    select id, client_platform_id, platform, status, raw_dihapus_pada, parser_versi,
+           to_char(periode_mulai, 'YYYY-MM-DD') as periode_mulai,
+           to_char(periode_selesai, 'YYYY-MM-DD') as periode_selesai,
            to_char(date_trunc('month', periode_mulai), 'YYYY-MM-DD') as periode_awal_bulan
       from pdt_upload_batch
      where id = ${batchId}`;
@@ -1869,10 +1970,13 @@ export async function reparsePdtBatch(
       direparse: false,
       alasanDilewati: 'paket_terpurge',
       rawDihapusPada: new Date(batch.raw_dihapus_pada).toISOString(),
+      status: null,
+      statusBerubah: false,
     };
   }
 
   const clientPlatformId = batch.client_platform_id;
+  const platform = batch.platform as pdt.PdtPlatform;
   const cpRow = await loadClientPlatformUntukPdt(sql, clientPlatformId);
 
   const overrideRows = await sql<{ nama_entri: string; modul_kode: string | null }[]>`
@@ -1881,6 +1985,7 @@ export async function reparsePdtBatch(
   const overrideByNama = new Map(overrideRows.map((r) => [r.nama_entri, r.modul_kode as string]));
 
   const terparse: BerkasTerparse[] = [];
+  const hasilBerkas: PdtPreviewBerkasHasil[] = [];
   for (const b of berkasInput) {
     const overrideKode = overrideByNama.get(b.nama);
     const berlakuOverride = overrideKode != null && b.aoa != null;
@@ -1890,50 +1995,84 @@ export async function reparsePdtBatch(
     const efektif: PdtPreviewBerkasInput = berlakuOverride
       ? { ...b, aoa: aoaUntukModulEfektif(b, overrideKode), modulTerdeteksi: overrideKode, ambiguous: false, matches: [overrideKode] }
       : b;
-    const { terparse: t } = bangunSatuPreviewBerkas(efektif);
+    const { hasil, terparse: t } = bangunSatuPreviewBerkas(efektif);
+    hasilBerkas.push(hasil);
     if (t) terparse.push(t);
   }
 
-  await withTransaction(sql, async (tx) => {
-    await tulisFaktaModulTerparse(tx, {
-      id: batchId,
-      clientPlatformId,
-      periodeAwalBulan: batch.periode_awal_bulan,
-      akunKontenToko: cpRow.akun_konten_toko,
-      now,
-      berkasAdsLive: terparse.filter((b) => b.modul.kode === 'shopee_ads_live'),
-      berkasAdsCpc: terparse.filter((b) => b.modul.kode === 'shopee_ads_cpc'),
-      berkasAdsSearch: terparse.filter((b) => b.modul.kode === 'shopee_ads_search'),
-      berkasTtVideo: terparse.filter((b) => b.modul.kode === 'tt_video'),
-      berkasShopeeLive: terparse.filter((b) => b.modul.kode === 'shopee_live'),
-      berkasTtLive: terparse.filter((b) => b.modul.kode === 'tt_live'),
-      berkasShopStatsTiktok: terparse.filter((b) => b.modul.kode === 'tt_shop_analytics'),
-      berkasShopStatsShopee: terparse.filter((b) => b.modul.kode === 'shopee_shop_stats'),
-      berkasParentSkuUntukMaster: terparse.filter((b) => b.modul.kode === 'shopee_parent_sku'),
-      berkasTtOrders: terparse.filter((b) => b.modul.kode === 'tt_orders'),
-      berkasTtTransactionCreator: terparse.filter((b) => b.modul.kode === 'tt_transaction_creator'),
-      berkasShopeeAmsAfiliasi: terparse.filter((b) => b.modul.kode === 'shopee_ams_afiliasi'),
-      berkasShopeeAmsProduk: terparse.filter((b) => b.modul.kode === 'shopee_ams_produk'),
-      berkasTtAdsProduct: terparse.filter((b) => b.modul.kode === 'tt_ads_product'),
-      berkasTtAdsLive: terparse.filter((b) => b.modul.kode === 'tt_ads_live'),
-      berkasTtProductAnalytics: terparse.filter((b) => b.modul.kode === 'tt_product_analytics'),
-      berkasShopeeKesehatan: terparse.filter((b) => b.modul.kode === 'shopee_kesehatan'),
+  const { status, alasanDitolak, reconcileDeltaPct, identitas, identitasSumber } =
+    resolveStatusIdentitasRekonsiliasi(platform, terparse, hasilBerkas, cpRow.shop_id, cpRow.akun_konten_toko);
+
+  // Identitas `tolak` ⇒ nol berkas menyumbang baris fakta BARU (Rule 2-4, pola
+  // sama `commitUploadBatch`) — baris fakta LAMA batch ini (ditulis sebelum
+  // reparse) TIDAK ikut terhapus, lihat docblock seksi G1-11 di atas untuk
+  // kenapa (delete `tulisFaktaModulTerparse` dijaga `if (arr.length > 0)`,
+  // jadi array kosong = delete-nya tidak pernah berjalan).
+  const terparseUntukFakta = identitas.status === 'tolak' ? [] : terparse;
+
+  let hasilUpdate: { statusBerubah: boolean };
+  try {
+    hasilUpdate = await withTransaction(sql, async (tx) => {
+      await tulisFaktaModulTerparse(tx, {
+        id: batchId,
+        clientPlatformId,
+        periodeAwalBulan: batch.periode_awal_bulan,
+        akunKontenToko: cpRow.akun_konten_toko,
+        now,
+        berkasAdsLive: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ads_live'),
+        berkasAdsCpc: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ads_cpc'),
+        berkasAdsSearch: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ads_search'),
+        berkasTtVideo: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_video'),
+        berkasShopeeLive: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_live'),
+        berkasTtLive: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_live'),
+        berkasShopStatsTiktok: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_shop_analytics'),
+        berkasShopStatsShopee: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_shop_stats'),
+        berkasParentSkuUntukMaster: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_parent_sku'),
+        berkasTtOrders: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_orders'),
+        berkasTtTransactionCreator: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_transaction_creator'),
+        berkasShopeeAmsAfiliasi: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ams_afiliasi'),
+        berkasShopeeAmsProduk: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ams_produk'),
+        berkasTtAdsProduct: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_product'),
+        berkasTtAdsLive: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_live'),
+        berkasTtProductAnalytics: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_product_analytics'),
+        berkasShopeeKesehatan: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_kesehatan'),
+      });
+
+      await tx`
+        update pdt_upload_batch
+           set parser_versi = ${pdt.PDT_PARSER_VERSI}, status = ${status}, alasan_ditolak = ${alasanDitolak},
+               reconcile_delta_pct = ${reconcileDeltaPct}, identitas_sumber = ${tx.json(identitasSumber as never)}
+         where id = ${batchId}`;
+
+      const statusBerubah = status !== batch.status;
+      await executors(tx).audit.insertAudit({
+        entityType: 'pdt_upload_batch',
+        entityId: String(batchId),
+        actorEmployeeId: PDT_REPARSE_ACTOR,
+        action: 'pdt_reparse',
+        beforeJson: { parser_versi: batch.parser_versi, status: batch.status },
+        afterJson: {
+          parser_versi: pdt.PDT_PARSER_VERSI, jumlah_berkas_terparse: terparseUntukFakta.length,
+          status, identitas_status: identitas.status, reconcile_delta_pct: reconcileDeltaPct,
+        },
+        createdBy: PDT_REPARSE_ACTOR,
+      });
+
+      return { statusBerubah };
     });
+  } catch (e) {
+    // uq_pdt_upload_batch_verified (Rule 36) — lihat docblock seksi G1-11 di atas: reparse bisa
+    // menaikkan batch ini jadi 'verified' sementara batch verified LAIN sudah berdiri untuk
+    // periode yang sama. BI, bukan 500 mentah — pola sama `commitUploadBatch`.
+    if (isUniqueViolation(e)) {
+      throw new ValidationError(
+        `[reparse menghasilkan batch verified untuk toko dan periode ${batch.periode_mulai} s.d. ${batch.periode_selesai} ini, tapi batch verified lain untuk periode yang sama sudah ada — periksa batch lain sebelum reparse ulang]`,
+      );
+    }
+    throw e;
+  }
 
-    await tx`update pdt_upload_batch set parser_versi = ${pdt.PDT_PARSER_VERSI} where id = ${batchId}`;
-
-    await executors(tx).audit.insertAudit({
-      entityType: 'pdt_upload_batch',
-      entityId: String(batchId),
-      actorEmployeeId: PDT_REPARSE_ACTOR,
-      action: 'pdt_reparse',
-      beforeJson: { parser_versi: batch.parser_versi },
-      afterJson: { parser_versi: pdt.PDT_PARSER_VERSI, jumlah_berkas_terparse: terparse.length },
-      createdBy: PDT_REPARSE_ACTOR,
-    });
-  });
-
-  return { batchId, direparse: true, alasanDilewati: null, rawDihapusPada: null };
+  return { batchId, direparse: true, alasanDilewati: null, rawDihapusPada: null, status, statusBerubah: hasilUpdate.statusBerubah };
 }
 
 // ===========================================================================

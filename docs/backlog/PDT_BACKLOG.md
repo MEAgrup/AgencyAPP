@@ -842,6 +842,18 @@ ber-paket-terpurge muncul di daftar laporan, bukan hilang.
 > `perlu_upload_ulang` (Flow D langkah 4) TIDAK butuh kolom/migrasi baru — status ini derived
 > sejak migrasi G1-01 (dicatat di sana: "dihitung job G1-10/pembaca G1-11"), tick ini melaporkannya
 > di respons JSON, bukan menulis kolom.
+>
+> **Status 2026-09-16 — `G1-11-REPARSE-RECOMPUTE-STATUS` DITUTUP: pemilik menjawab "WAJIB".**
+> `docs/DECISIONS.md` (cari "G1-11-REPARSE-RECOMPUTE-STATUS DITUTUP") untuk rincian lengkap.
+> Ringkas: `reparsePdtBatch` sekarang menjalankan ULANG `resolveStatusIdentitasRekonsiliasi`
+> (fungsi yang SAMA dipakai `commitUploadBatch`, diekstrak dari sana supaya nol duplikasi) atas
+> hasil parse baru, dan menulis ulang `status`/`alasan_ditolak`/`reconcile_delta_pct`/
+> `identitas_sumber` batch bila hasilnya berubah. `uq_pdt_upload_batch_verified` yang terbentur
+> (batch verified LAIN sudah berdiri untuk periode sama) diterjemahkan `ValidationError` BI, pola
+> sama `commitUploadBatch`. `retensi_sampai`/`retensi_alasan` TETAP tidak disentuh (di luar
+> keputusan pemilik). Snapshot laporan terkirim (`pdt_laporan_kiriman`) tetap tidak berubah — sudah
+> terjamin struktural (`reparsePdtBatch` tidak pernah menyentuh tabel itu). **G1 SEKARANG TERTUTUP
+> PENUH — nol item tersisa.**
 
 ---
 

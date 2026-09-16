@@ -3119,6 +3119,13 @@ describeDb('planPdtOrphanPurgeTick / finalizePdtOrphanPurgeTick (G1-10 pass kedu
 // dari berkas ASLI yang sama), memverifikasi baris fakta BERUBAH dan
 // `parser_versi` batch naik kembali ke `PDT_PARSER_VERSI` (setelah sengaja
 // diturunkan manual — mensimulasikan batch "ketinggalan versi").
+//
+// G1-11-REPARSE-RECOMPUTE-STATUS (keputusan pemilik, `docs/DECISIONS.md`
+// 2026-09-16): reparse SEKARANG juga menjalankan ulang identitas (Rule 2-4)
+// + rekonsiliasi (Rule 13-16/PDT-16) atas hasil parse baru, dan menulis ulang
+// `status`/`alasan_ditolak`/`reconcile_delta_pct`/`identitas_sumber` bila
+// hasilnya berbeda — blok kedua di bawah menguji recompute ini secara
+// eksplisit (ditolak→verified, cocok→tolak, konflik `uq_pdt_upload_batch_verified`).
 // ---------------------------------------------------------------------------
 describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
   async function fixture(shopId: string | null = '938284780'): Promise<{ clientId: string; cpId: number }> {
@@ -3128,12 +3135,13 @@ describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
     return { clientId, cpId };
   }
 
-  it('reparse menulis ULANG baris fakta dengan angka BARU dan menaikkan parser_versi batch + baris fakta — batch id, status TIDAK berubah', async () => {
+  it('reparse menulis ULANG baris fakta dengan angka BARU dan menaikkan parser_versi batch + baris fakta — status TIDAK berubah karena identitas/rekonsiliasi recompute menghasilkan hasil yang SAMA (nol pasangan shop_stats+parent_sku di fixture ini, tetap parsing)', async () => {
     const { cpId } = await fixture();
     const lama = shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [
       ['Iklan A', 'PRD-1', '100', '10', '2', '2000000', '150000'],
     ]);
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [lama], []);
+    expect(persiapan.status).toBe('parsing');
 
     // Simulasikan batch "ketinggalan versi" — parser_versi batch DAN baris fakta diturunkan
     // manual (di dunia nyata ini terjadi karena batch dikomit SEBELUM PDT_PARSER_VERSI naik).
@@ -3144,7 +3152,7 @@ describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
       ['Iklan A', 'PRD-1', '100', '10', '2', '2500000', '175000'], // angka "diperbaiki"
     ]);
     const hasil = await reparsePdtBatch(sql, persiapan.batchId, [baru]);
-    expect(hasil).toMatchObject({ batchId: persiapan.batchId, direparse: true, alasanDilewati: null });
+    expect(hasil).toMatchObject({ batchId: persiapan.batchId, direparse: true, alasanDilewati: null, status: 'parsing', statusBerubah: false });
 
     const rows = await loadFactAds(cpId);
     expect(rows).toHaveLength(1); // BUKAN 2 — replace-on-recommit, bukan duplikat
@@ -3156,14 +3164,14 @@ describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
     const batchRow = await sql<{ parser_versi: number; status: string }[]>`
       select parser_versi, status from pdt_upload_batch where id = ${persiapan.batchId}`;
     expect(batchRow[0].parser_versi).toBe(1);
-    expect(batchRow[0].status).toBe(persiapan.status); // status TIDAK disentuh reparse
+    expect(batchRow[0].status).toBe(persiapan.status); // hasil recompute SAMA (pasangan shop_stats+parent_sku tetap tidak ada)
 
-    const audit = await sql<{ before_json: { parser_versi: number }; after_json: { parser_versi: number; jumlah_berkas_terparse: number } }[]>`
+    const audit = await sql<{ before_json: { parser_versi: number; status: string }; after_json: { parser_versi: number; jumlah_berkas_terparse: number; status: string } }[]>`
       select before_json, after_json from audit_log
        where entity_type = 'pdt_upload_batch' and entity_id = ${String(persiapan.batchId)} and action = 'pdt_reparse'
        order by id desc limit 1`;
-    expect(audit[0]?.before_json).toMatchObject({ parser_versi: 0 });
-    expect(audit[0]?.after_json).toMatchObject({ parser_versi: 1, jumlah_berkas_terparse: 1 });
+    expect(audit[0]?.before_json).toMatchObject({ parser_versi: 0, status: 'parsing' });
+    expect(audit[0]?.after_json).toMatchObject({ parser_versi: 1, jumlah_berkas_terparse: 1, status: 'parsing' });
   });
 
   it('AM override dari commit ASLI dipertahankan otomatis pada reparse (dibaca dari pdt_file, bukan parameter)', async () => {
@@ -3237,6 +3245,85 @@ describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
     expect(rencana.kandidat.map((k) => k.batchId)).not.toContain(takBerpaket);
     expect(rencana.perluUploadUlang.map((s) => s.batchId)).toContain(purgedBatch);
     expect(rencana.perluUploadUlang.map((s) => s.batchId)).not.toContain(kandidatBatch);
+  });
+
+  describe('G1-11-REPARSE-RECOMPUTE-STATUS — identitas+rekonsiliasi DI-RECOMPUTE (keputusan pemilik, docs/DECISIONS.md 2026-09-16)', () => {
+    it('rekonsiliasi ditolak → verified sesudah reparse (bug parser diperbaiki) — status DI-RECOMPUTE, bukan dipertahankan apa adanya', async () => {
+      const { cpId } = await fixture();
+      const lama = [
+        shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+        shopeeShopStatsBerkas('shop-stats.xlsx', 1_000_000, 100),
+        shopeeParentSkuBerkas('parent-sku.xlsx', 500_000), // separuh — jauh > 0,5%, DITOLAK
+      ];
+      const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, lama, []);
+      expect(persiapan.status).toBe('ditolak');
+
+      const baru = [
+        shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+        shopeeShopStatsBerkas('shop-stats.xlsx', 1_000_000, 100),
+        shopeeParentSkuBerkas('parent-sku.xlsx', 1_000_000), // parser diperbaiki — sekarang cocok
+      ];
+      const hasil = await reparsePdtBatch(sql, persiapan.batchId, baru);
+      expect(hasil).toMatchObject({ direparse: true, status: 'verified', statusBerubah: true });
+
+      const row = await loadBatch(persiapan.batchId);
+      expect(row.status).toBe('verified');
+      expect(row.alasan_ditolak).toBeNull();
+      expect(Number(row.reconcile_delta_pct)).toBe(0);
+    });
+
+    it('identitas cocok → tolak sesudah reparse (mis. ID Toko di preamble berbeda) — reparse TIDAK menulis baris fakta baru; baris fakta LAMA (ditulis saat masih cocok) TIDAK ikut dihapus (delete `tulisFaktaModulTerparse` berkunci store+periode+modul, BUKAN batch_id — sama batas yang sudah berlaku di `commitUploadBatch` untuk batch baru yang lahir tolak)', async () => {
+      const { cpId } = await fixture(); // shop_id tersimpan '938284780'
+      const lama = shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [
+        ['Iklan A', 'PRD-1', '100', '10', '2', '2000000', '150000'],
+      ]);
+      const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [lama], []);
+      expect(persiapan.identitas.status).toBe('cocok');
+      expect(await loadFactAds(cpId)).toHaveLength(1);
+
+      const baru = shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '999999999', '01/07/2026 - 31/07/2026', [
+        ['Iklan A', 'PRD-1', '100', '10', '2', '2500000', '175000'],
+      ]);
+      const hasil = await reparsePdtBatch(sql, persiapan.batchId, [baru]);
+      expect(hasil).toMatchObject({ direparse: true, status: 'ditolak', statusBerubah: true });
+
+      const row = await loadBatch(persiapan.batchId);
+      expect(row.status).toBe('ditolak');
+      expect(row.alasan_ditolak).toContain('ID Toko');
+      const rows = await loadFactAds(cpId);
+      expect(rows).toHaveLength(1); // baris LAMA (angka 2000000) tetap ada — reparse tidak menimpa/menghapusnya
+      expect(Number(rows[0].gmv)).toBe(2000000);
+    });
+
+    it('reparse yang menghasilkan verified tapi bentrok batch verified LAIN pada periode sama ⇒ ValidationError BI (uq_pdt_upload_batch_verified, Rule 36), bukan 500 mentah — batch TIDAK berubah (rollback)', async () => {
+      const { cpId } = await fixture();
+      const batchA = await commitUploadBatch(sql, ownerActor(), cpId, [
+        shopeeAdsCpcBerkas('ads-a.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+        shopeeShopStatsBerkas('shop-stats-a.xlsx', 1_000_000, 100),
+        shopeeParentSkuBerkas('parent-sku-a.xlsx', 1_000_000),
+      ], []);
+      expect(batchA.status).toBe('verified');
+
+      // Batch B: periode SAMA, rekonsiliasi awalnya GAGAL — ditolak/verified boleh berdampingan
+      // (Rule 36 hanya membatasi verified KEDUA).
+      const batchB = await commitUploadBatch(sql, ownerActor(), cpId, [
+        shopeeAdsCpcBerkas('ads-b.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+        shopeeShopStatsBerkas('shop-stats-b.xlsx', 1_000_000, 100),
+        shopeeParentSkuBerkas('parent-sku-b.xlsx', 500_000),
+      ], []);
+      expect(batchB.status).toBe('ditolak');
+
+      // Reparse batch B dengan angka yang sekarang cocok ⇒ mencoba jadi verified KEDUA untuk
+      // periode yang sama — harus dibentur uq_pdt_upload_batch_verified.
+      await expect(reparsePdtBatch(sql, batchB.batchId, [
+        shopeeAdsCpcBerkas('ads-b.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+        shopeeShopStatsBerkas('shop-stats-b.xlsx', 1_000_000, 100),
+        shopeeParentSkuBerkas('parent-sku-b.xlsx', 1_000_000),
+      ])).rejects.toBeInstanceOf(ValidationError);
+
+      const rowB = await loadBatch(batchB.batchId);
+      expect(rowB.status).toBe('ditolak'); // transaksi digagalkan seluruhnya — batch B TIDAK berubah
+    });
   });
 });
 
