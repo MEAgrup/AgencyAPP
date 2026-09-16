@@ -30,6 +30,7 @@ import {
   finalizePdtPurgeTick,
   hitungSkorShopee,
   hitungSkorTiktok,
+  klasifikasiUlangKuadranSkuTiktok,
   markRawStored,
   planPdtOrphanPurgeTick,
   planPdtPurgeTick,
@@ -3194,12 +3195,34 @@ describeDb('rakitInputSkorTiktok (sesi 34) — agregasi pdt_fact_* → PdtSkorIn
     expect(hasil.affiliate).toEqual({ produktif: 1, total: 3, gmv: 100_000, gmvKotorToko: 2_000_000 });
   });
 
-  it('Portfolio Produk: SELALU null (kuadran belum punya penulis, Open G2-01-KUADRAN-SKU) — meski dimensi lain terisi penuh', async () => {
+  it('Portfolio Produk: null bila nol baris pdt_fact_sku_period berkuadran periode ini — meski dimensi lain terisi penuh', async () => {
     const { cpId, batchId } = await fixture();
     await insertAds(batchId, cpId, 'tt_ads_product', 'K1', 10_000, 20_000, 1);
 
     const hasil = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
     expect(hasil.produk).toBeNull();
+  });
+
+  it('Portfolio Produk (G2-01-KUADRAN-SKU langkah 2): GMV dikelompokkan per kuadran — bintang+hidden_gem dijumlah, bocor_traffic terpisah, aktif MENGECUALIKAN tidur/tidak_tayang', async () => {
+    const { cpId, batchId } = await fixture();
+    async function insertSkuPeriod(platformProductId: string, kuadran: string, gmv: number): Promise<void> {
+      await sql`
+        insert into pdt_fact_sku_period (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id, parser_versi, gmv, kuadran)
+        values (null, ${cpId}, ${platformProductId}, '2026-07-01'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${gmv}, ${kuadran})`;
+    }
+    await insertSkuPeriod('PRD-1', 'bintang', 1_000_000);
+    await insertSkuPeriod('PRD-2', 'hidden_gem', 500_000);
+    await insertSkuPeriod('PRD-3', 'bocor_traffic', 300_000);
+    await insertSkuPeriod('PRD-4', 'evaluasi', 100_000);
+    await insertSkuPeriod('PRD-5', 'tidur', 999_999); // TIDAK ikut gmvAktifTotal
+    await insertSkuPeriod('PRD-6', 'tidak_tayang', 999_999); // TIDAK ikut gmvAktifTotal
+
+    const hasil = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.produk).toEqual({
+      gmvBintangHiddenGem: 1_500_000, // 1.000.000 + 500.000
+      gmvBocorTraffic: 300_000,
+      gmvAktifTotal: 1_900_000, // bintang+hidden_gem+bocor_traffic+evaluasi, BUKAN tidur/tidak_tayang
+    });
   });
 
   it('periode selain awal bulan (bukan YYYY-MM-01) ⇒ ValidationError', async () => {
@@ -3211,11 +3234,14 @@ describeDb('rakitInputSkorTiktok (sesi 34) — agregasi pdt_fact_* → PdtSkorIn
 // ---------------------------------------------------------------------------
 // bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34, G2-02 lanjutan) —
 // `pdt_benchmark` diseed migrasi `20261030010000` (versi 1 TikTok, PORT
-// REPORT_BENCH_V1 apa adanya) DAN append-only (trigger blokir UPDATE/DELETE)
-// — tes di sini SENGAJA tidak menyisipkan/menghapus baris `pdt_benchmark`
-// sendiri, mengandalkan seed migrasi persis seperti test suite `report.ts`
-// mengandalkan seed `report_benchmark` (nol tes untuk "benchmark kosong",
-// tidak bisa direproduksi tanpa menghapus seed yang di-frozen trigger).
+// REPORT_BENCH_V1 apa adanya) + `20261104010000` (versi 2, delapan kunci
+// versi 1 + `quad_klik`/`quad_cvr`, G2-01-KUADRAN-SKU langkah 2 — versi 2
+// SEKARANG "aktif TERTINGGI", dibaca `bacaBenchmarkAktifTiktok`) DAN
+// append-only (trigger blokir UPDATE/DELETE) — tes di sini SENGAJA tidak
+// menyisipkan/menghapus baris `pdt_benchmark` sendiri, mengandalkan seed
+// migrasi persis seperti test suite `report.ts` mengandalkan seed
+// `report_benchmark` (nol tes untuk "benchmark kosong", tidak bisa
+// direproduksi tanpa menghapus seed yang di-frozen trigger).
 // ---------------------------------------------------------------------------
 describeDb('bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34) — benchmark aktif + jalur lengkap fakta→skor', () => {
   async function fixture(): Promise<{ cpId: number; batchId: number }> {
@@ -3231,10 +3257,10 @@ describeDb('bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34) — benchmark 
     return { cpId, batchId: rows[0].id };
   }
 
-  it('bacaBenchmarkAktifTiktok: mengembalikan versi 1 TikTok — PORT REPORT_BENCH_V1 apa adanya (delapan kunci)', async () => {
+  it('bacaBenchmarkAktifTiktok: mengembalikan versi 2 TikTok (versi TERTINGGI) — `bench` (baca APA ADANYA, "nol validasi bentuk" per docblock berkas) TETAP membawa quad_klik/quad_cvr mentah (tidak dipakai computeSkorTiktok, harmless), `kuadran` slice terpisah untuk konsumen klasifikasi', async () => {
     const hasil = await bacaBenchmarkAktifTiktok(sql);
     expect(hasil).toEqual({
-      versi: 1,
+      versi: 2,
       bench: {
         roi_gmvmax: { good: 8, warn: 4 },
         cpa_ratio: { good: 0.1, warn: 0.2 },
@@ -3244,6 +3270,12 @@ describeDb('bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34) — benchmark 
         pct_video_sales: { good: 0.05, warn: 0.02 },
         cvr_toko: { good: 0.015, warn: 0.008 },
         pct_kreator_produktif: { good: 0.2, warn: 0.1 },
+        quad_klik: { good: 150, warn: 25 },
+        quad_cvr: { good: 0.015, warn: 0.005 },
+      },
+      kuadran: {
+        quad_klik: { good: 150, warn: 25 },
+        quad_cvr: { good: 0.015, warn: 0.005 },
       },
     });
   });
@@ -3256,7 +3288,7 @@ describeDb('bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34) — benchmark 
       values (${cpId}, 'tt_ads_product', 'K1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100000, 500000, 10)`;
 
     const { hasil, benchmarkVersi } = await hitungSkorTiktok(sql, cpId, '2026-07-01');
-    expect(benchmarkVersi).toBe(1);
+    expect(benchmarkVersi).toBe(2);
 
     const inputLangsung = await rakitInputSkorTiktok(sql, cpId, '2026-07-01');
     const { bench } = await bacaBenchmarkAktifTiktok(sql);
@@ -3272,6 +3304,127 @@ describeDb('bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34) — benchmark 
     const { hasil } = await hitungSkorTiktok(sql, cpId, '2026-07-01');
     expect(hasil.total).toBeNull();
     expect(hasil.label).toBeNull();
+  });
+
+  it('hitungSkorTiktok: mengklasifikasi kuadran DULU (dari klik/ctor mentah, kuadran belum terisi) baru merakit Portfolio Produk — jalur LENGKAP end-to-end', async () => {
+    const { cpId, batchId } = await fixture();
+    await sql`
+      insert into pdt_fact_sku_period (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id, parser_versi, gmv, klik, ctor)
+      values (null, ${cpId}, 'PRD-1', '2026-07-01'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1000000, 200, 0.02)`; // bintang (klik≥150, cvr≥0.015)
+
+    const { hasil } = await hitungSkorTiktok(sql, cpId, '2026-07-01');
+    // Klasifikasi ditulis (bisa dibaca ulang independen dari sisi query ini).
+    const [row] = await sql<{ kuadran: string | null }[]>`select kuadran from pdt_fact_sku_period where client_platform_id = ${cpId}`;
+    expect(row.kuadran).toBe('bintang');
+    // Portfolio Produk sekarang TERISI (bukan null) — GMV PRD-1 masuk gmvBintangHiddenGem+gmvAktifTotal.
+    expect(hasil.dimensi.find((d) => d.kode === 'produk')?.disertakan).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// klasifikasiUlangKuadranSkuTiktok (G2-01-KUADRAN-SKU langkah 2) — klasifikasi
+// ULANG + tulis kolom `kuadran` untuk baris `pdt_fact_sku_period` (`sku_id is
+// null`, `basis='net'`) satu client_platform_id+periode. Bench `quad_klik`/
+// `quad_cvr` (`{good:150,warn:25}`/`{good:0.015,warn:0.005}`) sama nilai versi
+// 2 seed (`20261104010000`) — tes di sini memakai literal konstan, BUKAN
+// `bacaBenchmarkAktifTiktok`, supaya independen dari isi migrasi seed.
+// ---------------------------------------------------------------------------
+describeDb('klasifikasiUlangKuadranSkuTiktok (G2-01-KUADRAN-SKU langkah 2)', () => {
+  const BENCH_KUADRAN = { quad_klik: { good: 150, warn: 25 }, quad_cvr: { good: 0.015, warn: 0.005 } };
+
+  async function fixture(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', 'SHOP-ZPDT-3');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  async function insertSkuPeriod(
+    cpId: number, batchId: number, platformProductId: string,
+    klik: number | null, ctor: number | null, pesananSku: number | null,
+  ): Promise<void> {
+    await sql`
+      insert into pdt_fact_sku_period
+        (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id, parser_versi, gmv, klik, ctor, pesanan_sku)
+      values (null, ${cpId}, ${platformProductId}, '2026-07-01'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 0, ${klik}, ${ctor}, ${pesananSku})`;
+  }
+
+  async function bacaKuadran(cpId: number): Promise<Record<string, string | null>> {
+    const rows = await sql<{ platform_product_id: string; kuadran: string | null }[]>`
+      select platform_product_id, kuadran from pdt_fact_sku_period
+       where client_platform_id = ${cpId} order by platform_product_id`;
+    return Object.fromEntries(rows.map((r) => [r.platform_product_id, r.kuadran]));
+  }
+
+  it('mengklasifikasi seluruh baris periode ini sekaligus dan menulis kuadran', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertSkuPeriod(cpId, batchId, 'PRD-BINTANG', 200, 0.02, null);
+    await insertSkuPeriod(cpId, batchId, 'PRD-TIDUR', 5, 0.9, null);
+    await insertSkuPeriod(cpId, batchId, 'PRD-TIDAK-TAYANG', 0, null, null);
+
+    await klasifikasiUlangKuadranSkuTiktok(sql, cpId, '2026-07-01', BENCH_KUADRAN);
+
+    expect(await bacaKuadran(cpId)).toEqual({
+      'PRD-BINTANG': 'bintang', 'PRD-TIDUR': 'tidur', 'PRD-TIDAK-TAYANG': 'tidak_tayang',
+    });
+  });
+
+  it('ctor null ⇒ fallback pesananSku/klik (cermin ekstraktor lama)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertSkuPeriod(cpId, batchId, 'PRD-1', 200, null, 20); // 20/200=0.1 ≥ 0.015 ⇒ cvr tinggi
+
+    await klasifikasiUlangKuadranSkuTiktok(sql, cpId, '2026-07-01', BENCH_KUADRAN);
+    expect(await bacaKuadran(cpId)).toEqual({ 'PRD-1': 'bintang' });
+  });
+
+  it('idempotent — panggil ulang dengan bench sama menghasilkan kuadran yang sama', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertSkuPeriod(cpId, batchId, 'PRD-1', 200, 0.02, null);
+
+    await klasifikasiUlangKuadranSkuTiktok(sql, cpId, '2026-07-01', BENCH_KUADRAN);
+    await klasifikasiUlangKuadranSkuTiktok(sql, cpId, '2026-07-01', BENCH_KUADRAN);
+    expect(await bacaKuadran(cpId)).toEqual({ 'PRD-1': 'bintang' });
+  });
+
+  it('hasil BERUBAH bila bench berubah (recomputable, bukan disimpan dari klasifikasi sebelumnya)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertSkuPeriod(cpId, batchId, 'PRD-1', 200, 0.02, null); // bintang di bench normal
+
+    await klasifikasiUlangKuadranSkuTiktok(sql, cpId, '2026-07-01', BENCH_KUADRAN);
+    expect(await bacaKuadran(cpId)).toEqual({ 'PRD-1': 'bintang' });
+
+    // Bench baru jauh lebih ketat — klik 200 sekarang di bawah ambang "tinggi" (300).
+    await klasifikasiUlangKuadranSkuTiktok(sql, cpId, '2026-07-01', { quad_klik: { good: 300, warn: 25 }, quad_cvr: { good: 0.015, warn: 0.005 } });
+    expect(await bacaKuadran(cpId)).toEqual({ 'PRD-1': 'hidden_gem' });
+  });
+
+  it('nol baris periode ini ⇒ no-op (bukan error)', async () => {
+    const { cpId } = await fixture();
+    await expect(klasifikasiUlangKuadranSkuTiktok(sql, cpId, '2026-07-01', BENCH_KUADRAN)).resolves.toBeUndefined();
+  });
+
+  it('baris di LUAR periode/basis/sku_id target TIDAK tersentuh', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertSkuPeriod(cpId, batchId, 'PRD-JULI', 200, 0.02, null);
+    // basis lain (dibayar, seharusnya tidak ada untuk TikTok tapi tes ini memastikan filter basis dihormati)
+    await sql`
+      insert into pdt_fact_sku_period (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id, parser_versi, gmv)
+      values (null, ${cpId}, 'PRD-DIBAYAR', '2026-07-01'::date, 'dibayar', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 0)`;
+    await sql`
+      insert into pdt_fact_sku_period (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id, parser_versi, gmv, klik)
+      values (null, ${cpId}, 'PRD-AGUSTUS', '2026-08-01'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 0, 200)`;
+
+    await klasifikasiUlangKuadranSkuTiktok(sql, cpId, '2026-07-01', BENCH_KUADRAN);
+    const semua = await bacaKuadran(cpId);
+    expect(semua['PRD-JULI']).toBe('bintang');
+    expect(semua['PRD-DIBAYAR']).toBeNull();
+    expect(semua['PRD-AGUSTUS']).toBeNull();
   });
 });
 
@@ -3512,7 +3665,7 @@ describeDb('rakitLaporanTiktok (sesi 34 lanjutan) — KPI basis net (Rule 15, GM
     expect(hasil.clientPlatformId).toBe(cpId);
     expect(hasil.periodeAwalBulan).toBe('2026-07-01');
     expect(hasil.kpi).toEqual({ gmv: 950_000, pesanan: 40, pengunjung: 2_000, cvr: 0.02 });
-    expect(hasil.benchmarkVersi).toBe(1);
+    expect(hasil.benchmarkVersi).toBe(2); // versi 2 (G2-01-KUADRAN-SKU langkah 2, migrasi 20261104010000) sekarang aktif tertinggi
 
     const skorLangsung = await hitungSkorTiktok(sql, cpId, '2026-07-01');
     expect(hasil.skor).toEqual(skorLangsung.hasil);
@@ -4144,7 +4297,7 @@ describeDb('bacaLaporanPdt (sesi 34 lanjutan) — gerbang izin + pemilihan platf
     const { cpId } = await fixture('TikTok Shop');
     const hasil = await bacaLaporanPdt(sql, am(), cpId, '2026-07-01');
     expect(hasil.schema).toBe('cdps.pdt.laporan.tiktok.v1');
-    expect((hasil as { benchmarkVersi: number }).benchmarkVersi).toBe(1);
+    expect((hasil as { benchmarkVersi: number }).benchmarkVersi).toBe(2); // versi 2 aktif tertinggi (G2-01-KUADRAN-SKU langkah 2)
   });
 
   it('platform Shopee ⇒ merakit via rakitLaporanShopee (nol field benchmarkVersi)', async () => {
@@ -4195,14 +4348,14 @@ describeDb('kirimLaporanPdt (Flow B langkah 4) — bekukan snapshot ke pdt_lapor
     expect(hasil.periodeMulai).toBe('2026-07-01');
     expect(hasil.periodeSelesai).toBe('2026-07-31');
     expect(hasil.parserVersi).toBe(pdtCore.PDT_PARSER_VERSI);
-    expect(hasil.benchmarkVersi).toBe(1);
+    expect(hasil.benchmarkVersi).toBe(2); // versi 2 aktif tertinggi (G2-01-KUADRAN-SKU langkah 2)
     expect(hasil.dikirimOleh).toBe(OWNER_AM);
     expect(hasil.menggantikanKirimanId).toBeNull();
     expect(hasil.laporan).toEqual(dilihat);
 
     const [row] = await sql<{ payload: unknown; benchmark_versi: number | null }[]>`
       select payload, benchmark_versi from pdt_laporan_kiriman where id = ${hasil.id}`;
-    expect(row.benchmark_versi).toBe(1);
+    expect(row.benchmark_versi).toBe(2);
     expect(row.payload).toEqual(JSON.parse(JSON.stringify(dilihat)));
   });
 
@@ -4363,7 +4516,7 @@ describeDb('riwayatKirimanPdt (Flow B langkah 5) — daftar kiriman satu toko, t
       periodeMulai: '2026-07-01',
       periodeSelesai: '2026-07-31',
       parserVersi: dikirim.parserVersi,
-      benchmarkVersi: 1,
+      benchmarkVersi: 2, // versi 2 aktif tertinggi (G2-01-KUADRAN-SKU langkah 2)
       dikirimPada: dikirim.dikirimPada,
       dikirimOleh: OWNER_AM,
       menggantikanKirimanId: null,

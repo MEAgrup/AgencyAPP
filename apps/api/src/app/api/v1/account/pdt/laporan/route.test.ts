@@ -172,7 +172,7 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.client_platform_id).toBe(cpId);
     expect(body.periode_awal_bulan).toBe('2026-07-01');
     expect(body.kpi).toEqual({ gmv: 950_000, pesanan: 40, pengunjung: 2_000, cvr: 0.02 });
-    expect(body.benchmark_versi).toBe(1);
+    expect(body.benchmark_versi).toBe(2); // versi 2 aktif tertinggi (G2-01-KUADRAN-SKU langkah 2, migrasi 20261104010000)
     expect(body.skor).toHaveProperty('total');
     expect(body.skor).toHaveProperty('dimensi');
     expect(body.kanal).toEqual({ gmv_total: 1_000_000, items: expect.any(Array), lengkap: true });

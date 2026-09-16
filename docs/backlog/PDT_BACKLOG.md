@@ -885,10 +885,24 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > lewat kesetaraan `G1-07-TIKTOK-REKONSILIASI` (Σ GMV/Pesanan SKU per-SKU = shop-level
 > `tt_shop_analytics`, yang sudah memakai `basis='net'`), bukan ditebak. `sku_id` selalu `null`,
 > `platform_product_id` = `'ID Produk'` (pola sama `shopee_ams_produk`/`tt_ads_product`).
-> **Langkah 2 (klasifikasi kuadran benchmark `quad_klik`/`quad_cvr` + tulis kolom `kuadran` +
-> sambung `rakitInputSkorTiktok`'s Portfolio Produk) BELUM dikerjakan** — dicatat sebagai
-> lanjutan tiket ini, bukan tiket baru. Lihat `docs/DECISIONS.md` 2026-09-16 untuk rincian
-> verifikasi lengkap.
+> **Status 2026-09-16 — `G2-01-KUADRAN-SKU` langkah 2 DITUTUP: klasifikasi kuadran
+> ditulis+disambung ke skor.** `pdt_benchmark` TikTok versi 2 (migrasi `20261104010000`,
+> versi 1 immutable — `trg_pdt_benchmark_frozen` menolak UPDATE — jadi dua kunci baru
+> HARUS versi baru, bukan menyisipkan ke baris lama) menambah `quad_klik`/`quad_cvr` (PORT
+> `REPORT_BENCH_V1` apa adanya). `packages/core/src/pdt/kuadran.ts` — `klasifikasikanKuadranSkuTiktok`
+> (fungsi murni, disalin dari `report/metrik.ts` `kuadranProduk`, MODE BENCHMARK SAJA —
+> bukan percentile relatif mesin lama, supaya kuadran sebanding lintas bulan per Rule 19).
+> `packages/domain/src/pdt.ts` — `klasifikasiUlangKuadranSkuTiktok` membaca baris
+> `pdt_fact_sku_period` (`sku_id is null`, `basis='net'`) + benchmark aktif, menulis kolom
+> `kuadran`; dipanggil `hitungSkorTiktok` SEBELUM `rakitInputSkorTiktok` (yang sekarang
+> membaca `kuadran` sungguhan via `GROUP BY`, bukan hardcode `null`). `cvr` per SKU pakai
+> `ctor` kalau ada, fallback `pesananSku/klik` — cermin persis mesin lama. Shopee TETAP
+> `null` (methodology KUADRAN Shopee beda total — visitor/CR dari "Bisnis — Produk", modul
+> yang belum terdaftar PDT sama sekali — di luar cakupan langkah ini). Diverifikasi:
+> `@cdps/core` 1425/1425, `@cdps/domain` 2764/2765 (1 skip tak terkait), `@cdps/db` 107/107,
+> `@cdps/api` 638/640 (2 skip); DB rebuild 254 migrasi. **`G2-01-KUADRAN-SKU` SEKARANG
+> TERTUTUP PENUH untuk TikTok** — Shopee tetap Open (methodology berbeda, belum ada modul
+> sumber data).
 >
 > **Status 2026-09-15 (sesi 34, lanjutan) — query agregasi SQL DITUTUP.**
 > `rakitInputSkorTiktok` (`packages/domain/src/pdt.ts`) membaca `pdt_fact_ads`/`pdt_fact_content`/

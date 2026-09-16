@@ -160,7 +160,7 @@ describeDb('POST /pdt/laporan/kirim — real DB', () => {
     expect(body.periode_mulai).toBe('2026-07-01');
     expect(body.periode_selesai).toBe('2026-07-31');
     expect(body.parser_versi).toBe(pdtCore.PDT_PARSER_VERSI);
-    expect(body.benchmark_versi).toBe(1);
+    expect(body.benchmark_versi).toBe(2); // versi 2 aktif tertinggi (G2-01-KUADRAN-SKU langkah 2, migrasi 20261104010000)
     expect(body.dikirim_oleh).toBe('ZZ-PDTKIR-AM');
     expect(body.menggantikan_kiriman_id).toBeNull();
     expect(body.laporan.schema).toBe('cdps.pdt.laporan.tiktok.v1');
