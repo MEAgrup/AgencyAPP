@@ -2063,12 +2063,12 @@ export async function hitungSkorTiktok(
   sql: Sql,
   clientPlatformId: number,
   periodeAwalBulan: string,
-): Promise<{ hasil: pdt.PdtSkorHasilTiktok; benchmarkVersi: number }> {
+): Promise<{ hasil: pdt.PdtSkorHasilTiktok; benchmarkVersi: number; bench: pdt.PdtBenchmarkTiktok }> {
   const [input, { versi: benchmarkVersi, bench }] = await Promise.all([
     rakitInputSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
     bacaBenchmarkAktifTiktok(sql),
   ]);
-  return { hasil: pdt.computeSkorTiktok(input, bench), benchmarkVersi };
+  return { hasil: pdt.computeSkorTiktok(input, bench), benchmarkVersi, bench };
 }
 
 // ===========================================================================
@@ -2578,7 +2578,7 @@ export async function rakitLaporanTiktok(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanTiktok> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, kanal, iklan, live, video, afiliasi, tahap, { hasil: skor, benchmarkVersi }] = await Promise.all([
+  const [kpi, kanal, iklan, live, video, afiliasi, tahap, { hasil: skor, benchmarkVersi, bench }] = await Promise.all([
     bacaKpiTiktokNet(sql, clientPlatformId, periodeAwalBulan),
     bacaKanalTiktok(sql, clientPlatformId, periodeAwalBulan),
     bacaIklanTiktok(sql, clientPlatformId, periodeAwalBulan),
@@ -2590,6 +2590,7 @@ export async function rakitLaporanTiktok(
   ]);
   return pdt.bangunLaporanTiktok({
     clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, iklan, live, video, afiliasi, tahap, skor, benchmarkVersi,
+    benchTiktok: bench,
   });
 }
 

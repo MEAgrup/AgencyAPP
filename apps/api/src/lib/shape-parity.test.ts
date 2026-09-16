@@ -816,6 +816,9 @@ const WIRE_TO_FE: Record<string, string> = {
   PdtLaporanFunnelLangkahWire: 'pdt.ts::PdtLaporanFunnelLangkah',
   PdtLaporanTahapBlokWire: 'pdt.ts::PdtLaporanTahapBlok',
   PdtLaporanTahapMetrikWire: 'pdt.ts::PdtLaporanTahapMetrik',
+  // PDT G2-01 lanjutan — bagian "insight" (2026-09-16, kedua platform, satu bentuk).
+  PdtLaporanInsightWire: 'pdt.ts::PdtLaporanInsight',
+  PdtLaporanRekomendasiWire: 'pdt.ts::PdtLaporanRekomendasi',
   // PDT G2-01 — "Kirim ke klien" (POST /account/pdt/laporan/kirim, Flow B langkah 4).
   PdtLaporanKirimanWire: 'pdt.ts::PdtLaporanKiriman',
   // PDT G2-01 — riwayat kiriman (GET /account/pdt/laporan/kiriman, Flow B langkah 5).

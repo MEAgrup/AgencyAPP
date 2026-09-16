@@ -245,6 +245,31 @@ export interface PdtLaporanTahap {
   blok: PdtLaporanTahapBlok[];
 }
 
+// G2-01 lanjutan — bagian "insight" (narasi + rekomendasi), 2026-09-16, KEDUA
+// platform SATU bentuk. Tidak pernah `null` (beda `iklan`/`live`/`video`/
+// `afiliasi`/`tahap`) — `ringkasan`/`outlook` selalu punya sesuatu untuk
+// dikatakan bahkan saat `kpi` seluruhnya `null`. Rekomendasi v1 GENERIK per
+// dimensi skor (`skor.dimensi` ber-nilai rendah), BUKAN porting penuh aturan
+// per-metrik mesin lama (lihat docblock `pdt.PdtLaporanInsight`, `@cdps/core`,
+// untuk kenapa). AM TIDAK menyunting field ini di halaman ini — penyuntingan
+// (tiket terpisah) terjadi di layar pratinjau sebelum tombol "Kirim ke
+// Klien" ditekan, PDT-21 tetap utuh (nol state machine draft/publikasi baru).
+export interface PdtLaporanRekomendasi {
+  judul: string;
+  target: string;
+  dampak: string;
+  timeline: string;
+}
+
+export interface PdtLaporanInsight {
+  ringkasan: string;
+  poin: string[];
+  rekomendasi_tinggi: PdtLaporanRekomendasi[];
+  rekomendasi_sedang: PdtLaporanRekomendasi[];
+  outlook: string;
+  indikator: { nama: string; target: string }[];
+}
+
 export interface PdtLaporan {
   schema: string;
   platform: string;
@@ -260,6 +285,7 @@ export interface PdtLaporan {
   tahap: PdtLaporanTahap | null;
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;
+  insight: PdtLaporanInsight;
 }
 
 /**

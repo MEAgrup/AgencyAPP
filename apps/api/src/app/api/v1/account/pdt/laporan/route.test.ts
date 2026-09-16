@@ -218,6 +218,17 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(metrikByKode('awareness').konten_n).toBe(1);
     expect(metrikByKode('awareness').konten_vv).toBe(5_000);
     expect(blokByKode.conversion.belanja).toBe(100_000);
+    // "insight" — nol query baru, dirangkai dari kpi/iklan/live/video/afiliasi di atas + skor.dimensi.
+    expect(body.insight.ringkasan).toContain('GMV Rp. 950.000,00 dari 40 pesanan');
+    expect(body.insight.poin).toContain('GMV Rp. 950.000,00 dari 40 pesanan (CVR 2,00%).');
+    expect(body.insight.poin).toContain('Iklan: belanja Rp. 100.000,00 → GMV Rp. 400.000,00 (ROAS 4,00x).');
+    expect(body.insight.poin).toContain('LIVE: 1 sesi/2,0 jam → Rp. 400.000,00 (Rp. 200.000,00/jam).');
+    expect(body.insight.poin).toContain('Video: 1 video → Rp. 300.000,00 dari 5.000 views (Rp. 300.000,00/video).');
+    expect(body.insight.poin).toContain('Afiliasi: 1 dari 1 kreator produktif, GMV Rp. 200.000,00.');
+    expect(Array.isArray(body.insight.rekomendasi_tinggi)).toBe(true);
+    expect(Array.isArray(body.insight.rekomendasi_sedang)).toBe(true);
+    const roasIndikator = body.insight.indikator.find((i: { nama: string }) => i.nama === 'Target ROAS Iklan (GMV Max)');
+    expect(roasIndikator?.target).toContain('kini 4,00x');
   });
 
   it('200 Shopee: KPI basis siap_dikirim TANPA net-refund, benchmark_versi null (kunci TETAP ada)', async () => {
@@ -273,5 +284,13 @@ describeDb('GET /pdt/laporan — real DB', () => {
     });
     // Shopee tahap SELALU null — mesin lama Shopee tidak punya konsep buyer-journey sama sekali.
     expect(body.tahap).toBeNull();
+    // "insight" Shopee — kanal DAN iklan belum lengkap ⇒ dua catatan; nol indikator ber-benchTiktok (asimetri asli).
+    expect(body.insight.ringkasan).toContain('GMV Rp. 800.000,00 dari 20 pesanan');
+    expect(body.insight.poin).toContain('Catatan: rincian kanal belum lengkap — sebagian sumber GMV belum punya penulis fakta PDT.');
+    expect(body.insight.poin).toContain('Iklan: belanja Rp. 100.000,00 → GMV Rp. 300.000,00 (ROAS 3,00x).');
+    expect(body.insight.poin).toContain('Catatan: rincian iklan belum lengkap — sebagian sumber iklan legacy belum punya modul PDT.');
+    expect(body.insight.poin).toContain('LIVE: 1 sesi → Rp. 400.000,00.');
+    expect(body.insight.poin).toContain('Afiliasi: 1 dari 1 kreator produktif, GMV Rp. 150.000,00.');
+    expect(body.insight.indikator.some((i: { nama: string }) => i.nama === 'Target ROAS Iklan (GMV Max)')).toBe(false);
   });
 });

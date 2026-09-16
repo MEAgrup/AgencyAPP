@@ -9300,6 +9300,23 @@ export interface PdtLaporanTahapWire {
   blok: PdtLaporanTahapBlokWire[];
 }
 
+export interface PdtLaporanRekomendasiWire {
+  judul: string;
+  target: string;
+  dampak: string;
+  timeline: string;
+}
+
+/** Tidak pernah `null` — lihat docblock `pdt.PdtLaporanInsight`, `@cdps/core`: `ringkasan`/`outlook` selalu punya sesuatu untuk dikatakan bahkan saat `kpi` seluruhnya `null`. AM TIDAK menyunting field ini lewat wire — penyuntingan (kalau ada) terjadi di layar pratinjau FE sebelum kirim, lihat docblock core. */
+export interface PdtLaporanInsightWire {
+  ringkasan: string;
+  poin: string[];
+  rekomendasi_tinggi: PdtLaporanRekomendasiWire[];
+  rekomendasi_sedang: PdtLaporanRekomendasiWire[];
+  outlook: string;
+  indikator: { nama: string; target: string }[];
+}
+
 export interface PdtLaporanWire {
   schema: string;
   platform: string;
@@ -9316,6 +9333,7 @@ export interface PdtLaporanWire {
   skor: PdtLaporanSkorWire;
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
+  insight: PdtLaporanInsightWire;
 }
 
 function pdtLaporanSkorToWire(s: pdtCore.PdtSkorHasilTiktok | pdtCore.PdtSkorHasilShopee): PdtLaporanSkorWire {
@@ -9386,6 +9404,19 @@ function pdtLaporanTahapToWire(t: pdtCore.PdtLaporanTahap | null): PdtLaporanTah
   };
 }
 
+function pdtLaporanInsightToWire(i: pdtCore.PdtLaporanInsight): PdtLaporanInsightWire {
+  const rekomendasi = (r: pdtCore.PdtLaporanRekomendasi): PdtLaporanRekomendasiWire =>
+    ({ judul: r.judul, target: r.target, dampak: r.dampak, timeline: r.timeline });
+  return {
+    ringkasan: i.ringkasan,
+    poin: i.poin,
+    rekomendasi_tinggi: i.rekomendasiTinggi.map(rekomendasi),
+    rekomendasi_sedang: i.rekomendasiSedang.map(rekomendasi),
+    outlook: i.outlook,
+    indikator: i.indikator,
+  };
+}
+
 export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanWire {
   return {
     schema: l.schema,
@@ -9402,6 +9433,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     tahap: pdtLaporanTahapToWire(l.tahap),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: l.benchmarkVersi,
+    insight: pdtLaporanInsightToWire(l.insight),
   };
 }
 
@@ -9421,6 +9453,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     tahap: null,
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: null,
+    insight: pdtLaporanInsightToWire(l.insight),
   };
 }
 
