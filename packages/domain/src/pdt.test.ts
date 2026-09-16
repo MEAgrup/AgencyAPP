@@ -39,6 +39,7 @@ import {
   bacaLaporanPdt,
   kirimLaporanPdt,
   listBenchmarkVersi,
+  listRiwayatBatchPdt,
   riwayatKirimanPdt,
   tambahVersiBenchmark,
   previewUploadBatch,
@@ -5172,5 +5173,137 @@ describeDb('riwayatKirimanPdt (Flow B langkah 5) — daftar kiriman satu toko, t
     expect(riwayatB).toHaveLength(2);
     expect(riwayatA.every((r) => r.clientPlatformId === cpA)).toBe(true);
     expect(riwayatB.every((r) => r.clientPlatformId === cpB)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listRiwayatBatchPdt (G1-09 sub-langkah 3, bullet 4) — riwayat SELURUH batch
+// satu toko (termasuk `ditolak`, Rule 10 diagnosis-tanpa-upload-ulang),
+// terbaru dulu, dengan `paketStatus` turunan (tersedia/kedaluwarsa/legal_hold).
+// Gerbang izin sama persis `canUploadBatch` (`loadClientPlatformUntukPdt`
+// langsung, BUKAN delegasi lewat commit/preview) — pola pengujian sama dengan
+// describe `riwayatKirimanPdt` di atas: satu Forbidden, satu NotFound, sisanya
+// membuktikan bentuk+urutan+turunan `paketStatus`.
+// ---------------------------------------------------------------------------
+describeDb('listRiwayatBatchPdt (G1-09 sub-langkah 3) — riwayat batch + status paket, terbaru dulu', () => {
+  async function fixture(platform: 'TikTok Shop' | 'Shopee' = 'TikTok Shop'): Promise<{ clientId: string; cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, platform);
+    return { clientId, cpId };
+  }
+
+  let riwayatPeriodeSeq = 0;
+  async function insertBatchRow(
+    clientId: string,
+    cpId: number,
+    opts: {
+      platform?: 'tiktok' | 'shopee';
+      status?: string;
+      alasanDitolak?: string | null;
+      reconcileDeltaPct?: number | null;
+      legalHold?: boolean;
+      rawDihapusPada?: Date | null;
+      retensiSampai?: string;
+    } = {},
+  ): Promise<number> {
+    const bulan = 1 + (riwayatPeriodeSeq++ % 12);
+    const periodeMulai = `2021-${String(bulan).padStart(2, '0')}-01`;
+    const status = opts.status ?? 'verified';
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
+         alasan_ditolak, reconcile_delta_pct, parser_versi, retensi_sampai, retensi_alasan,
+         raw_path, raw_bytes, legal_hold, raw_dihapus_pada, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, ${opts.platform ?? 'tiktok'}, ${periodeMulai}::date,
+         (${periodeMulai}::date + interval '1 month' - interval '1 day')::date, ${status},
+         ${status === 'ditolak' ? (opts.alasanDitolak ?? '[ditolak uji]') : null},
+         ${opts.reconcileDeltaPct ?? null}, 1, ${opts.retensiSampai ?? '2999-01-01'}::date, 'default',
+         ${`ZPDT-RIWAYAT/${cpId}/${riwayatPeriodeSeq}.zip`}, 1000, ${opts.legalHold ?? false},
+         ${opts.rawDihapusPada ?? null}, ${OWNER_AM})
+      returning id`;
+    return Number(rows[0].id); // bigint — driver mengembalikan string (lihat komentar `listRiwayatBatchPdt`).
+  }
+
+  it('client_platform_id tidak ada ⇒ NotFoundError', async () => {
+    await expect(listRiwayatBatchPdt(sql, ownerActor(), 999_999_999)).rejects.toThrow(NotFoundError);
+  });
+
+  it('AM bukan pemilik ⇒ ForbiddenError', async () => {
+    const { cpId } = await fixture();
+    await expect(listRiwayatBatchPdt(sql, otherAm(), cpId)).rejects.toThrow(ForbiddenError);
+  });
+
+  it('lead Account boleh membaca (lingkup sama canUploadBatch, bukan hanya pemilik)', async () => {
+    const { clientId, cpId } = await fixture();
+    await insertBatchRow(clientId, cpId);
+    await expect(listRiwayatBatchPdt(sql, leadActor(), cpId)).resolves.toHaveLength(1);
+  });
+
+  it('toko yang belum pernah diunggahi batch ⇒ daftar kosong (BUKAN error)', async () => {
+    const { cpId } = await fixture();
+    await expect(listRiwayatBatchPdt(sql, ownerActor(), cpId)).resolves.toEqual([]);
+  });
+
+  it('batch verified biasa ⇒ paketStatus tersedia, retensiSampai terisi', async () => {
+    const { clientId, cpId } = await fixture();
+    const id = await insertBatchRow(clientId, cpId, { retensiSampai: '2030-06-15', reconcileDeltaPct: 0.42 });
+    const riwayat = await listRiwayatBatchPdt(sql, ownerActor(), cpId);
+    expect(riwayat).toEqual([{
+      id,
+      clientPlatformId: Number(cpId), // `insertClientPlatform` mengembalikan bigint sebagai string (lihat komentar `listRiwayatBatchPdt`).
+      platform: 'tiktok',
+      status: 'verified',
+      alasanDitolak: null,
+      reconcileDeltaPct: 0.42,
+      periodeMulai: riwayat[0].periodeMulai,
+      periodeSelesai: riwayat[0].periodeSelesai,
+      dibuatPada: riwayat[0].dibuatPada,
+      dibuatOleh: OWNER_AM,
+      paketStatus: 'tersedia',
+      retensiSampai: '2030-06-15',
+    }]);
+  });
+
+  it('batch ditolak ⇒ status+alasanDitolak tampil, TETAP masuk daftar (Rule 10: diagnosis tanpa upload ulang)', async () => {
+    const { clientId, cpId } = await fixture();
+    await insertBatchRow(clientId, cpId, { status: 'ditolak', alasanDitolak: '[selisih rekonsiliasi GMV 3.10% melebihi ambang 0.5%]' });
+    const [r] = await listRiwayatBatchPdt(sql, ownerActor(), cpId);
+    expect(r.status).toBe('ditolak');
+    expect(r.alasanDitolak).toBe('[selisih rekonsiliasi GMV 3.10% melebihi ambang 0.5%]');
+    expect(r.paketStatus).toBe('tersedia'); // paket ZIP-nya sendiri belum dipurge — beda dari status batch
+  });
+
+  it('legal_hold=true ⇒ paketStatus legal_hold, mengalahkan raw_dihapus_pada (tidak pernah dipurge)', async () => {
+    const { clientId, cpId } = await fixture();
+    await insertBatchRow(clientId, cpId, { legalHold: true, retensiSampai: '2020-01-01' });
+    const [r] = await listRiwayatBatchPdt(sql, ownerActor(), cpId);
+    expect(r.paketStatus).toBe('legal_hold');
+    expect(r.retensiSampai).toBe('2020-01-01');
+  });
+
+  it('raw_dihapus_pada terisi ⇒ paketStatus kedaluwarsa, retensiSampai null (paket sudah tidak ada untuk ditampilkan)', async () => {
+    const { clientId, cpId } = await fixture();
+    await insertBatchRow(clientId, cpId, { rawDihapusPada: new Date('2024-01-01T00:00:00Z') });
+    const [r] = await listRiwayatBatchPdt(sql, ownerActor(), cpId);
+    expect(r.paketStatus).toBe('kedaluwarsa');
+    expect(r.retensiSampai).toBeNull();
+  });
+
+  it('banyak batch ⇒ terbaru dulu (id desc), isolasi per client_platform_id', async () => {
+    const { clientId: clientA, cpId: cpA } = await fixture('TikTok Shop');
+    const { clientId: clientB, cpId: cpB } = await fixture('Shopee');
+    const a1 = await insertBatchRow(clientA, cpA);
+    const a2 = await insertBatchRow(clientA, cpA);
+    await insertBatchRow(clientB, cpB, { platform: 'shopee' });
+
+    const riwayatA = await listRiwayatBatchPdt(sql, ownerActor(), cpA);
+    expect(riwayatA.map((r) => r.id)).toEqual([a2, a1]);
+    expect(riwayatA.every((r) => r.clientPlatformId === Number(cpA))).toBe(true);
+
+    const riwayatB = await listRiwayatBatchPdt(sql, ownerActor(), cpB);
+    expect(riwayatB).toHaveLength(1);
+    expect(riwayatB[0].platform).toBe('shopee');
   });
 });

@@ -684,6 +684,59 @@ punya `null` eksplisit.
 > 2635/2635 (1 skip), `@cdps/db` 107/107, `@cdps/api` 595/595 (2 skip); typecheck 4 paket + lint
 > bersih.
 
+> **Status 2026-09-16 — sub-langkah 3 DITUTUP: halaman upload AM (`/account/pdt/upload`)
+> dibangun, gerbang keluar G1 sekarang genuinely bisa diuji dengan klien nyata.** Verifikasi
+> ulang ke kode (bukan percaya ringkasan lama) menemukan bullet 1-3+5 (satu ZIP, tabel deteksi,
+> dropdown override, error path) sudah punya kontrak API sejak sub-langkah 2a/2b (`preview`/
+> `batches` POST) TAPI **nol pemanggil FE** — `web-internal/src/lib/pdt.ts` hanya membawa tipe,
+> `find web-internal/src/app -ipath "*pdt*"` hanya menemukan `account/pdt/laporan` +
+> `pdt/benchmark`. AM tidak bisa mengunggah SATU batch pun lewat PDT nyata; gerbang keluar G1
+> (≥10 klien nyata `verified`) tidak bisa mulai diukur. Dibangun: `web-internal/src/lib/pdt.ts`
+> tiga fungsi baru (`siapkanUploadBatchPdt`/`previewBatchPdt`/`commitBatchPdt`) memanggil TIGA
+> endpoint yang sudah ada apa adanya (nol perubahan API); halaman baru
+> `web-internal/src/app/(shell)/account/pdt/upload/page.tsx` (pola pemilihan klien/platform SAMA
+> `account/pdt/laporan/page.tsx`) — unggah ZIP lewat signed upload URL (`fetch` PUT langsung ke
+> Storage, BUKAN lewat `api` wrapper — beda content-type/base URL), tabel deteksi + dropdown
+> override per berkas dari `module_options`, tombol Simpan Batch memanggil commit, hasil
+> menampilkan status/rekonsiliasi; nav `/account/pdt/upload` (`ownedBy(ACCOUNT)`, pola sama
+> Laporan PDT).
+>
+> **Bullet 4 (status paket) BELUM punya endpoint sama sekali sebelum sesi ini** — ditutup
+> sekalian, satu-satunya penambahan API baru di ticket ini: `GET /account/pdt/batches`
+> (`pdt.listRiwayatBatchPdt`, gerbang `canUploadBatch` — lingkup baca SAMA lingkup unggah, pola
+> `riwayatKirimanPdt`/`canKirimLaporan`) — SELURUH batch toko ini TERMASUK `ditolak` (Rule 10:
+> diagnosis tanpa upload ulang, sebelumnya cuma bisa dibaca lewat SQL langsung), `paket_status`
+> (`tersedia`/`kedaluwarsa`/`legal_hold`) diturunkan dari tiga kolom yang SUDAH ada
+> (`legal_hold`/`raw_dihapus_pada`/`retensi_sampai`, migrasi G1-01) — **nol kolom/migrasi baru**.
+> Wire `PdtBatchRingkasWire`/`pdtBatchRingkasToWire` terdaftar `WIRE_TO_FE`. Halaman menampilkan
+> riwayat ini di bawah form upload, disegarkan setelah commit.
+>
+> **Bug ditemukan+diperbaiki lewat tes route (bukan tes domain)**: `pdt_upload_batch.id`/
+> `client_platform_id` (`bigint`) dikembalikan driver sebagai STRING (pencegahan presisi
+> postgres.js, pola SAMA `Number(r.gmv_30d)` px/productexchange) — nol konversi awal menghasilkan
+> wire `client_platform_id: "626"` (string) bukan `626` (number). Tes `listRiwayatBatchPdt`
+> langsung (`packages/domain/src/pdt.test.ts`) SEMPAT lolos palsu karena kedua sisi perbandingan
+> (`insertBatchRow`/`insertClientPlatform` fixture DAN kolom yang dibaca) sama-sama string tak
+> terkonversi — JSON round-trip di tes route (`apps/api`) yang membongkarnya. Diperbaiki:
+> `Number(r.id)`/`Number(r.client_platform_id)` di `listRiwayatBatchPdt`, fixture tes disamakan.
+>
+> **Sengaja BELUM dibangun (dicatat, bukan terlewat)**: endpoint konfirmasi identitas satu-kali AM
+> (Rule 2/4, `usulkan_ikat` → `client_platforms.shop_id`/`akun_konten_toko` terikat permanen) TETAP
+> tidak ada — dicatat sejak sub-langkah 2a, MASIH terbuka. Batch `identitas_belum_terikat` tetap
+> tersimpan (bisa direparse nanti), halaman menampilkan usulan sistem + catatan eksplisit bahwa
+> konfirmasi belum tersedia di UI. **Tiket baru: `G1-09-KONFIRMASI-IDENTITAS`** — kemungkinan
+> jarang tersentuh di praktik (klien lama sudah punya `shop_id`/`akun_konten_toko` dari alur
+> Report Engine lama, `createReport` sudah menolak 400 tanpa itu sejak sebelum PDT), tapi wajib
+> ditutup sebelum toko BARU pertama kali di-PDT-kan.
+>
+> Diverifikasi (DB lokal rebuild bersih, 259 migrasi — **nol migrasi baru**, ticket ini murni
+> baca): `@cdps/core` 1442/1442, `@cdps/db` 107/107, `@cdps/domain` 2801/2802 (1 skip pra-ada +
+> 9 tes baru `listRiwayatBatchPdt`), `@cdps/api` 645/647 (2 skip pra-ada + tes baru
+> `GET /pdt/batches`); typecheck bersih 4 paket + `web-internal` + `web-client-portal`; lint
+> `@cdps/api` bersih (gerbang CI); `next build` `web-internal` sukses, `/account/pdt/upload`
+> muncul di daftar route statis; `nav.test.ts` (regresi href + visibilitas per-divisi)
+> diperbarui dan lolos; `route-parity`/`shape-parity` hijau (`WIRE_TO_FE` terdaftar).
+
 ### G1-09-2BII-SHOPDAILY-SHOPEE (DITUTUP, sesi 34 lanjutan)
 `shopee_shop_stats` (sheet terisolasi `'Pesanan Siap Dikirim'`, sudah dipakai G1-07 rekonsiliasi
 lewat `parseShopeeShopStatsBasisTerisolasi`) belum dipetakan ke `pdt_fact_shop_daily`. Sheet ini

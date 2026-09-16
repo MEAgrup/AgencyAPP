@@ -18,7 +18,7 @@ import { createHmac } from 'node:crypto';
 import { ZipFile } from 'yazl';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createClient, type Sql } from '@cdps/db';
-import { POST } from './route';
+import { GET, POST } from './route';
 
 const SECRET = 'test-jwt-secret-pdt-commit';
 const prevSecret = process.env.SUPABASE_JWT_SECRET;
@@ -47,6 +47,12 @@ function req(token: string, body: Record<string, unknown>): Request {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
+  });
+}
+
+function reqGet(token: string, qs: string): Request {
+  return new Request(`http://localhost/api/v1/account/pdt/batches?${qs}`, {
+    headers: { authorization: `Bearer ${token}` },
   });
 }
 
@@ -104,6 +110,18 @@ describe('POST /pdt/batches — gagal sebelum Storage/DB tersentuh', () => {
 
   it('overrides bukan { nama, modul_kode } ⇒ 400', async () => {
     const res = await POST(req(owner, { client_platform_id: 1, storage_path: STORAGE_PATH, overrides: [{ nama: 'a.xlsx' }] }));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /pdt/batches — gagal sebelum DB tersentuh', () => {
+  it('client_platform_id hilang ⇒ 400', async () => {
+    const res = await GET(reqGet(owner, ''));
+    expect(res.status).toBe(400);
+  });
+
+  it('client_platform_id bukan integer positif ⇒ 400', async () => {
+    const res = await GET(reqGet(owner, 'client_platform_id=-1'));
     expect(res.status).toBe(400);
   });
 });
@@ -239,5 +257,107 @@ describeDb('POST /pdt/batches — real DB', () => {
     expect(rows[0].raw_path).toBe(`${clientId}/${cpId}/2026-07-31/${body.batch_id}.zip`);
     const files = await sql`select nama_entri from pdt_file where batch_id = ${body.batch_id}`;
     expect(files).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /pdt/batches (G1-09 sub-langkah 3, riwayat+status paket) — insert
+// `pdt_upload_batch` LANGSUNG via SQL (bukan lewat POST/ZIP): cakupan
+// per-baris/turunan `paket_status` yang lebih dalam ada di
+// `packages/domain/src/pdt.test.ts` (`listRiwayatBatchPdt` langsung), di sini
+// cukup bukti route SUNGGUHAN menyambungkan wire snake_case, pola sama
+// `laporan/kiriman/route.test.ts`.
+// ---------------------------------------------------------------------------
+describeDb('GET /pdt/batches — real DB', () => {
+  it('404 pada client_platform_id yang tidak ada', async () => {
+    const res = await GET(reqGet(owner, 'client_platform_id=999999999'));
+    expect(res.status).toBe(404);
+  });
+
+  it('403 untuk AM yang bukan pemilik klien', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, 'ZZ-PDTCM-AM');
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const res = await GET(reqGet(otherAm, `client_platform_id=${cpId}`));
+    expect(res.status).toBe(403);
+  });
+
+  it('toko belum pernah diunggahi batch ⇒ 200 { data: [] }', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, 'ZZ-PDTCM-AM');
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const res = await GET(reqGet(owner, `client_platform_id=${cpId}`));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: [] });
+  });
+
+  it('satu batch verified ⇒ 200 satu baris wire snake_case, paket_status tersedia', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, 'ZZ-PDTCM-AM');
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    const rowsInsert = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
+         reconcile_delta_pct, parser_versi, retensi_sampai, retensi_alasan, raw_path, raw_bytes,
+         dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified',
+         0.180, 1, '2030-01-01'::date, 'default', ${`${clientId}/${cpId}/2026-07-31/1.zip`}, 1000,
+         'ZZ-PDTCM-AM')
+      returning id`;
+    const batchId = Number(rowsInsert[0].id); // bigint — driver mengembalikan string (lihat komentar `listRiwayatBatchPdt`).
+
+    const res = await GET(reqGet(owner, `client_platform_id=${cpId}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toHaveLength(1);
+    const [r] = body.data;
+    expect(r.id).toBe(batchId);
+    expect(r.client_platform_id).toBe(cpId);
+    expect(r.platform).toBe('tiktok');
+    expect(r.status).toBe('verified');
+    expect(r.alasan_ditolak).toBeNull();
+    expect(r.reconcile_delta_pct).toBe(0.18);
+    expect(r.periode_mulai).toBe('2026-07-01');
+    expect(r.periode_selesai).toBe('2026-07-31');
+    expect(r.dibuat_oleh).toBe('ZZ-PDTCM-AM');
+    expect(r.paket_status).toBe('tersedia');
+    expect(r.retensi_sampai).toBe('2030-01-01');
+  });
+
+  it('batch legal_hold ⇒ paket_status legal_hold; batch raw_dihapus_pada ⇒ kedaluwarsa + retensi_sampai null', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, 'ZZ-PDTCM-AM');
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    await sql`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
+         parser_versi, retensi_sampai, retensi_alasan, raw_path, raw_bytes, legal_hold, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-06-01'::date, '2026-06-30'::date, 'verified',
+         1, '2020-01-01'::date, 'default', ${`${clientId}/${cpId}/2026-06-30/2.zip`}, 1000, true,
+         'ZZ-PDTCM-AM')`;
+    await sql`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
+         alasan_ditolak, parser_versi, retensi_sampai, retensi_alasan, raw_path, raw_bytes,
+         raw_dihapus_pada, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-05-01'::date, '2026-05-31'::date, 'ditolak',
+         '[selisih rekonsiliasi GMV 3.00% melebihi ambang 0.5%]', 1, '2020-01-01'::date, 'default',
+         ${`${clientId}/${cpId}/2026-05-31/3.zip`}, 1000, now(), 'ZZ-PDTCM-AM')`;
+
+    const res = await GET(reqGet(owner, `client_platform_id=${cpId}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toHaveLength(2);
+    // terbaru dulu (id desc) — batch Mei (ditolak/kedaluwarsa) di-insert kedua, id lebih besar.
+    const [ditolak, legalHold] = body.data;
+    expect(ditolak.status).toBe('ditolak');
+    expect(ditolak.alasan_ditolak).toBe('[selisih rekonsiliasi GMV 3.00% melebihi ambang 0.5%]');
+    expect(ditolak.paket_status).toBe('kedaluwarsa');
+    expect(ditolak.retensi_sampai).toBeNull();
+    expect(legalHold.paket_status).toBe('legal_hold');
+    expect(legalHold.retensi_sampai).toBe('2020-01-01');
   });
 });

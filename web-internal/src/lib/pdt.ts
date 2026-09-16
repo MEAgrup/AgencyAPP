@@ -2,9 +2,8 @@
 // SEBELUM disimpan). Mirrors apps/api's `pdtPreviewBatchToWire` exactly
 // (snake_case, keys identical); registered in shape-parity.test.ts.
 //
-// Halaman upload (tabel hasil deteksi + dropdown override AM + commit) BELUM
-// dibangun — ini kontrak datanya lebih dulu, sub-langkah UI menyusul di sesi
-// berikutnya (`docs/handoff/HANDOFF_PDT_SESI9.md` §3 G1-09).
+// Halaman upload (`/account/pdt/upload`, G1-09 sub-langkah 3): tabel hasil
+// deteksi + dropdown override AM + commit + riwayat batch/status paket.
 
 import { api } from '@/lib/api';
 
@@ -65,8 +64,7 @@ export interface PdtUploadUrl {
 // respons ini dibentuk, dan rekonsiliasi Shopee (Rule 13-16) sudah bisa
 // menghasilkan `status: 'verified'`/'ditolak' (basis Siap Dikirim, GMV saja
 // — lihat docs/DECISIONS.md G1-07-PERSKU-PESANAN). TikTok + baris fakta
-// tertipe masih sub-langkah 2b-ii. Belum ada halaman yang memanggilnya —
-// sama seperti PdtPreviewBatch, kontrak datanya lebih dulu.
+// tertipe sudah sub-langkah 2b-ii (lihat G1-09-2BII-* di `PDT_BACKLOG.md`).
 export interface PdtCommitBerkas extends PdtPreviewBerkas {
   deteksi_oleh: string; // 'tanda_tangan' | 'override_am'
 }
@@ -82,6 +80,66 @@ export interface PdtCommitBatch {
   periode_selesai: string;
   berkas: PdtCommitBerkas[];
   identitas: PdtPreviewIdentitas;
+}
+
+// G1-09 sub-langkah 3 — halaman upload. Tiga panggilan berurutan (Flow A
+// langkah 2-6): `siapkanUploadBatchPdt` (signed upload URL) → browser PUT
+// langsung ke `upload_url` (BUKAN lewat `api`, lihat halaman) → `previewBatchPdt`
+// (tabel deteksi, nol tulis DB) → AM menyunting override bila perlu →
+// `commitBatchPdt` (storage_path SAMA, pipeline dijalankan ULANG server —
+// lihat docblock route `POST /account/pdt/batches`).
+export function siapkanUploadBatchPdt(clientPlatformId: number): Promise<PdtUploadUrl> {
+  return api.post<PdtUploadUrl>('/account/pdt/batches/upload-url', { client_platform_id: clientPlatformId });
+}
+
+export function previewBatchPdt(clientPlatformId: number, storagePath: string): Promise<PdtPreviewBatch> {
+  return api.post<PdtPreviewBatch>('/account/pdt/batches/preview', {
+    client_platform_id: clientPlatformId,
+    storage_path: storagePath,
+  });
+}
+
+export interface PdtCommitOverrideInput {
+  nama: string;
+  modul_kode: string;
+}
+
+export function commitBatchPdt(
+  clientPlatformId: number,
+  storagePath: string,
+  overrides: PdtCommitOverrideInput[],
+): Promise<PdtCommitBatch> {
+  return api.post<PdtCommitBatch>('/account/pdt/batches', {
+    client_platform_id: clientPlatformId,
+    storage_path: storagePath,
+    overrides,
+  });
+}
+
+// G1-09 sub-langkah 3, bullet 4 — riwayat batch toko ini (GET
+// /account/pdt/batches), TERMASUK batch `ditolak`/`digantikan` (Rule 10:
+// diagnosis tanpa upload ulang). `paket_status` turunan server dari
+// legal_hold/raw_dihapus_pada/retensi_sampai — halaman tidak menghitung ulang.
+export interface PdtBatchRingkas {
+  id: number;
+  client_platform_id: number;
+  platform: string;
+  status: string; // 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak' | 'digantikan'
+  alasan_ditolak: string | null;
+  reconcile_delta_pct: number | null;
+  periode_mulai: string;
+  periode_selesai: string;
+  dibuat_pada: string;
+  dibuat_oleh: string;
+  paket_status: string; // 'tersedia' | 'kedaluwarsa' | 'legal_hold'
+  retensi_sampai: string | null;
+}
+
+export async function riwayatBatchPdt(clientPlatformId: number): Promise<PdtBatchRingkas[]> {
+  const res = await api.get<{ data: PdtBatchRingkas[] }>(
+    `/account/pdt/batches?client_platform_id=${clientPlatformId}`,
+  );
+  return res.data;
 }
 
 // G2-01 lanjutan — payload "laporan" v1 (GET /account/pdt/laporan, PDT-21

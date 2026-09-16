@@ -40,13 +40,35 @@ import { bangunPreviewBerkasInputs } from '@/lib/pdt-preview';
 import { unduhPdtRawObjek, unggahPdtRawObjek } from '@/lib/pdt-storage';
 import { bacaDanEkstrakPdtZip, bersihkanDirektoriSementaraPdt } from '@/lib/pdt-zip';
 import { parsePdtZipEntries } from '@/lib/pdt-parse';
-import { pdtCommitBatchToWire } from '@/lib/wire';
+import { pdtBatchRingkasToWire, pdtCommitBatchToWire } from '@/lib/wire';
 
 const { PDT_MODULES, formatAlasanTolakPaket } = pdt;
 
 interface OverrideBody {
   nama?: unknown;
   modul_kode?: unknown;
+}
+
+/**
+ * GET /api/v1/account/pdt/batches — riwayat batch satu toko klien (G1-09
+ * sub-langkah 3, bullet 4: status paket). Query: `client_platform_id`
+ * (positive integer). `pdt.listRiwayatBatchPdt` menegakkan gerbang izin
+ * sendiri (`canUploadBatch`, sama dengan endpoint unggah lain di berkas ini).
+ */
+export async function GET(request: Request): Promise<Response> {
+  return handle(async () => {
+    const actor = requireActor(request);
+    const params = new URL(request.url).searchParams;
+
+    const clientPlatformIdRaw = params.get('client_platform_id');
+    const clientPlatformId = clientPlatformIdRaw === null ? NaN : Number(clientPlatformIdRaw);
+    if (!Number.isInteger(clientPlatformId) || clientPlatformId <= 0) {
+      throw new BadRequestError('client_platform_id is required (positive integer)');
+    }
+
+    const rows = await pdtDomain.listRiwayatBatchPdt(db(), actor, clientPlatformId);
+    return json({ data: rows.map(pdtBatchRingkasToWire) });
+  });
 }
 
 export async function POST(request: Request): Promise<Response> {

@@ -226,6 +226,11 @@ const KLIEN: NavNode[] = [
   // sempit akan menyembunyikan halaman dari AM yang justru pemiliknya
   // (kepala berkas ini: "hiding something reachable = a silent regression").
   { href: '/account/pdt/laporan', label: 'Laporan PDT', access: ownedBy(ACCOUNT) },
+  // G1-09 sub-langkah 3 — halaman upload batch PDT (Flow A langkah 2-6).
+  // Gerbang baris sesungguhnya (`canUploadBatch`: AM pemilik toko, atau
+  // lead/Director Account) ada di server; menu memakai `ownedBy(ACCOUNT)`,
+  // pola SAMA "Laporan PDT" di atas (AM pemilik adalah pemakai utama).
+  { href: '/account/pdt/upload', label: 'Upload Data Toko (PDT)', access: ownedBy(ACCOUNT) },
   // Gelombang C — Showcase Klien Terbaik. Gerbangnya mencerminkan
   // `domain/showcase.canReadShowcase`, dan ia adalah **satu-satunya baris di
   // seluruh tabel ini yang memberi divisi Sales akses ke data klien**
