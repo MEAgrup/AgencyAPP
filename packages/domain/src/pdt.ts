@@ -13,7 +13,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { notification, pdt, permission, tz } from '@cdps/core';
-import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
 
 /**
@@ -2266,4 +2266,120 @@ export async function bacaLaporanPdt(
   return platform === 'tiktok'
     ? rakitLaporanTiktok(sql, clientPlatformId, periodeAwalBulan, now)
     : rakitLaporanShopee(sql, clientPlatformId, periodeAwalBulan, now);
+}
+
+type PdtJsonParam = Parameters<TransactionSql['json']>[0];
+
+/** Baris `pdt_laporan_kiriman` yang baru ditulis, plus laporan yang dibekukan ke dalamnya. */
+export interface PdtLaporanKirimanHasil {
+  id: number;
+  clientPlatformId: number;
+  periodeMulai: string;
+  periodeSelesai: string;
+  parserVersi: number;
+  /** Rule 23 — versi `pdt_benchmark` dipakai saat pengiriman. `null` untuk Shopee: mesin skornya memakai ambang hardcode, nol `pdt_benchmark` dibaca (lihat migrasi `20261031010000`). */
+  benchmarkVersi: number | null;
+  dikirimPada: string;
+  dikirimOleh: string;
+  /** Flow B langkah 5 — id kiriman SEBELUMNYA untuk toko+periode yang sama, kalau ini kiriman ulang/revisi. `null` = kiriman pertama. */
+  menggantikanKirimanId: number | null;
+  laporan: pdt.PdtLaporanTiktok | pdt.PdtLaporanShopee;
+}
+
+/**
+ * Flow B langkah 4: "AM menekan Kirim ke klien ⇒ snapshot beku ditulis ke
+ * `pdt_laporan_kiriman`" (Rule 22). Menghitung ULANG laporan lewat
+ * `bacaLaporanPdt` (gerbang `canKirimLaporan` + pemilihan platform sudah
+ * ditegakkan di sana — nol duplikasi) lalu membekukan HASIL PERSIS itu ke
+ * `payload` (bentuk domain camelCase — konversi ke wire adalah tugas
+ * pembaca, `packages/domain` tidak boleh bergantung pada `apps/api`).
+ *
+ * Setiap panggilan menulis baris BARU (tabel append-only, `_frozen()`
+ * memblokir UPDATE) — memanggil ini dua kali untuk toko+periode yang sama
+ * adalah kirim-ulang/revisi (Flow B langkah 5, Rule 23 "nol permintaan
+ * upload ulang ke AM"), BUKAN idempotensi: baris kedua `menggantikan_kiriman_id`
+ * menunjuk baris pertama secara otomatis (kiriman TERAKHIR untuk toko+periode
+ * yang sama, urut `dikirim_pada`).
+ *
+ * `benchmarkVersi` NULL untuk Shopee (keputusan pemilik via `AskUserQuestion`,
+ * migrasi `20261031010000` — lihat docblock migrasi untuk penjelasan lengkap
+ * + opsi yang ditolak): `pdt.PdtLaporanShopee` tidak punya field itu sama
+ * sekali, cermin `rakitLaporanShopee`/`hitungSkorShopee` yang tidak pernah
+ * membaca `pdt_benchmark` untuk Shopee.
+ *
+ * Rule 24 (pencabutan ⇒ hitung ulang `total_sales`/Health Score/baseline Ads)
+ * SENGAJA di luar cakupan fungsi ini — itu operasi TERPISAH ("cabut", bukan
+ * "kirim"), belum ada mekanismenya sama sekali (`pdt_laporan_kiriman` nol
+ * kolom status, Flow B tidak menyebutnya), dicatat di `PDT_BACKLOG.md` §2
+ * sebagai tiket sendiri.
+ */
+export async function kirimLaporanPdt(
+  sql: Sql,
+  actor: Actor,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+  now: Date = new Date(),
+): Promise<PdtLaporanKirimanHasil> {
+  const laporan = await bacaLaporanPdt(sql, actor, clientPlatformId, periodeAwalBulan, now);
+  const benchmarkVersi = laporan.platform === 'tiktok' ? laporan.benchmarkVersi : null;
+
+  return withTransaction(sql, async (tx) => {
+    const [prev] = await tx<{ id: number }[]>`
+      select id from pdt_laporan_kiriman
+       where client_platform_id = ${clientPlatformId}
+         and periode_mulai = ${periodeAwalBulan}::date
+       order by dikirim_pada desc
+       limit 1`;
+
+    const [row] = await tx<{
+      id: number;
+      periode_mulai: string;
+      periode_selesai: string;
+      parser_versi: number;
+      benchmark_versi: number | null;
+      dikirim_pada: string;
+      dikirim_oleh: string;
+      menggantikan_kiriman_id: number | null;
+    }[]>`
+      insert into pdt_laporan_kiriman
+        (client_platform_id, periode_mulai, periode_selesai, payload, parser_versi, benchmark_versi,
+         dikirim_pada, dikirim_oleh, menggantikan_kiriman_id)
+      values
+        (${clientPlatformId}, ${periodeAwalBulan}::date,
+         (${periodeAwalBulan}::date + interval '1 month' - interval '1 day')::date,
+         ${tx.json(laporan as unknown as PdtJsonParam)}, ${pdt.PDT_PARSER_VERSI}, ${benchmarkVersi},
+         ${now.toISOString()}, ${actor.employeeId}, ${prev?.id ?? null})
+      returning id, periode_mulai::text, periode_selesai::text, parser_versi, benchmark_versi,
+                dikirim_pada::text, dikirim_oleh, menggantikan_kiriman_id`;
+
+    await executors(tx).audit.insertAudit({
+      entityType: 'pdt_laporan_kiriman',
+      entityId: String(row.id),
+      actorEmployeeId: actor.employeeId,
+      action: 'pdt_laporan_dikirim',
+      beforeJson: null,
+      afterJson: {
+        client_platform_id: clientPlatformId,
+        periode_mulai: row.periode_mulai,
+        periode_selesai: row.periode_selesai,
+        parser_versi: row.parser_versi,
+        benchmark_versi: row.benchmark_versi,
+        menggantikan_kiriman_id: row.menggantikan_kiriman_id,
+      },
+      createdBy: actor.employeeId,
+    });
+
+    return {
+      id: row.id,
+      clientPlatformId,
+      periodeMulai: row.periode_mulai,
+      periodeSelesai: row.periode_selesai,
+      parserVersi: row.parser_versi,
+      benchmarkVersi: row.benchmark_versi,
+      dikirimPada: row.dikirim_pada,
+      dikirimOleh: row.dikirim_oleh,
+      menggantikanKirimanId: row.menggantikan_kiriman_id,
+      laporan,
+    };
+  });
 }

@@ -792,6 +792,8 @@ const WIRE_TO_FE: Record<string, string> = {
   PdtLaporanKpiWire: 'pdt.ts::PdtLaporanKpi',
   PdtLaporanSkorWire: 'pdt.ts::PdtLaporanSkor',
   PdtLaporanDimensiWire: 'pdt.ts::PdtLaporanDimensi',
+  // PDT G2-01 — "Kirim ke klien" (POST /account/pdt/laporan/kirim, Flow B langkah 4).
+  PdtLaporanKirimanWire: 'pdt.ts::PdtLaporanKiriman',
 };
 
 /**

@@ -9122,3 +9122,37 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     benchmark_versi: null,
   };
 }
+
+// G2-01 — POST /account/pdt/laporan/kirim (Flow B langkah 4, "Kirim ke
+// klien"). `laporan` di dalam bertipe SAMA (`PdtLaporanWire`) dengan
+// `GET /account/pdt/laporan` — bentuk beku yang dikirim persis bentuk yang
+// dilihat AM sebelum menekan tombol (Rule 21-22).
+export interface PdtLaporanKirimanWire {
+  id: number;
+  client_platform_id: number;
+  periode_mulai: string;
+  periode_selesai: string;
+  parser_versi: number;
+  /** Rule 23 — `null` untuk Shopee (nol benchmark bernomor, migrasi `20261031010000`). */
+  benchmark_versi: number | null;
+  dikirim_pada: string;
+  dikirim_oleh: string;
+  /** Flow B langkah 5 — id kiriman sebelumnya bila ini kirim-ulang/revisi. `null` = kiriman pertama. */
+  menggantikan_kiriman_id: number | null;
+  laporan: PdtLaporanWire;
+}
+
+export function pdtLaporanKirimanToWire(k: pdt.PdtLaporanKirimanHasil): PdtLaporanKirimanWire {
+  return {
+    id: k.id,
+    client_platform_id: k.clientPlatformId,
+    periode_mulai: k.periodeMulai,
+    periode_selesai: k.periodeSelesai,
+    parser_versi: k.parserVersi,
+    benchmark_versi: k.benchmarkVersi,
+    dikirim_pada: k.dikirimPada,
+    dikirim_oleh: k.dikirimOleh,
+    menggantikan_kiriman_id: k.menggantikanKirimanId,
+    laporan: k.laporan.platform === 'tiktok' ? pdtLaporanTiktokToWire(k.laporan) : pdtLaporanShopeeToWire(k.laporan),
+  };
+}

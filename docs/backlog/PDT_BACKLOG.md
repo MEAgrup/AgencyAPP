@@ -1032,6 +1032,24 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > langkah 4, termasuk menyelesaikan catatan skema `benchmark_versi` NOT NULL di atas), dan G2-02
 > (UI admin benchmark TikTok, revoke mechanism `pdt_laporan_kiriman`) yang sudah tercatat
 > sebelumnya.
+>
+> **Status 2026-09-16 — halaman `web-internal` DIBANGUN** (`/account/pdt/laporan`): pilih klien →
+> toko Shopee/TikTok Shop aktif → periode, render KPI+skor dari route di atas. Sepuluh bagian
+> payload lainnya TETAP belum tercakup (tidak berubah).
+>
+> **Status 2026-09-16 — "Kirim ke klien" (Flow B langkah 4) DIBANGUN, catatan skema
+> `benchmark_versi` NOT NULL DITUTUP.** `docs/DECISIONS.md` (cari "Tombol \"Kirim ke Klien\"") untuk
+> penjelasan lengkap + opsi yang ditolak; ringkas: migrasi `20261031010000` men-drop NOT NULL kolom
+> itu (keputusan pemilik via `AskUserQuestion`) — NULL untuk Shopee (nol benchmark bernomor), TETAP
+> terisi untuk TikTok. `pdt.kirimLaporanPdt` (domain) menghitung ulang lewat `bacaLaporanPdt` lalu
+> membekukan hasilnya; kirim kedua untuk toko+periode yang sama otomatis jadi revisi
+> (`menggantikan_kiriman_id` menunjuk kiriman terakhir, Flow B langkah 5/Rule 23) — BUKAN error,
+> BUKAN upsert. `POST /api/v1/account/pdt/laporan/kirim` + tombol di halaman laporan (konfirmasi,
+> banner sukses/gagal). **Sengaja TIDAK dibangun di sini** (di luar cakupan "tombol kirim"): endpoint
+> daftar/riwayat kiriman (halaman tidak tahu toko+periode ini sudah pernah dikirim sebelumnya —
+> label tombol netral "Kirim ke Klien", bukan "Kirim Ulang"), dan Rule 24 (pencabutan ⇒ hitung ulang
+> `total_sales`/Health Score/baseline Ads — mekanismenya sendiri BELUM ada sama sekali, `pdt_laporan_
+> kiriman` nol kolom status, dicatat terpisah di bawah G2-02).
 
 ### G2-02 · Benchmark UI admin (Director)
 - Ganti versi ⇒ seluruh laporan **yang belum dikirim** otomatis ikut versi baru; yang **sudah
