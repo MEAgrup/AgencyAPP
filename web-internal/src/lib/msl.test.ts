@@ -140,6 +140,54 @@ describe('serviceToForm → formToPayload', () => {
   });
 });
 
+/**
+ * QA pemilik 2026-09-17 — "angka harga harus diketikan melalui panah ^ atau yg
+ * bawah. ini tidak jadi masalah kalau hitungan bulan tapi kalau di angka 1 juta
+ * lebih akan sangat bermasalah".
+ *
+ * Kolom uang sekarang memegang bentuk TAMPIL ("8.000.000"), bukan DECIMAL
+ * mentah, jadi perjalanan pulang-pergi melewati satu pembalik tambahan. Kalau
+ * pembalik itu meleset walau satu digit, form akan menyimpan harga yang BUKAN
+ * harga yang ditampilkan — kelas cacat yang paling mahal di layar ini.
+ */
+describe('uang: bentuk tampil di form, DECIMAL di kawat', () => {
+  it('menampilkan harga dengan pemisah ribuan saat form dibuka', () => {
+    const form = serviceToForm(fixture({ standard_price: '21000000.00' }));
+    expect(form.standard_price).toBe('21.000.000,00');
+  });
+
+  it('mengirim kembali DECIMAL yang sama persis — bukan 21 ribu, bukan 2,1 miliar', () => {
+    const payload = formToPayload(serviceToForm(fixture({ standard_price: '21000000.00' })));
+    expect(payload.standard_price).toBe('21000000.00');
+  });
+
+  it('memformat juga harga per tenor — di situlah angka juta bertumpuk', () => {
+    const form = serviceToForm(fixture({
+      durasi_options: [
+        { durasi_bulan: 3, harga: '21000000.00' },
+        { durasi_bulan: 6, harga: '18000000.00' },
+      ],
+    }));
+    expect(form.durasi_options).toEqual([
+      { durasi_bulan: '3', harga: '21.000.000,00' },
+      { durasi_bulan: '6', harga: '18.000.000,00' },
+    ]);
+    expect(formToPayload(form).durasi_options).toEqual([
+      { durasi_bulan: 3, harga: '21000000.00' },
+      { durasi_bulan: 6, harga: '18000000.00' },
+    ]);
+  });
+
+  it('menerima yang diketik orang dengan titik ribuan, tanpa membacanya jadi miliaran', () => {
+    const form = { ...EMPTY_MSL_FORM, standard_price: '8.000.000' };
+    expect(formToPayload(form).standard_price).toBe('8000000');
+  });
+
+  it('kolom harga yang KOSONG tetap kosong — server yang menolak, bukan form yang mengirim 0', () => {
+    expect(formToPayload({ ...EMPTY_MSL_FORM, standard_price: '' }).standard_price).toBe('');
+  });
+});
+
 describe('parseDurasiBulan', () => {
   it('treats empty and whitespace as "tidak berlaku"', () => {
     expect(parseDurasiBulan('')).toBeNull();

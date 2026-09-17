@@ -17,9 +17,16 @@
  */
 import { api } from './api';
 import type { MasterService, Pengakuan, PlanTier, QtyMenambah, ServiceRefs } from './types';
+import { formatUangInput, normalisasiUang } from './uang-input';
 
 export interface MslFormState {
   name: string;
+  /**
+   * Bentuk TAMPIL ("8.000.000"), bukan bentuk kawat — titik ribuan ikut
+   * disimpan di state karena itulah yang ada di kotaknya. `formToPayload`
+   * yang mengubahnya jadi DECIMAL. Lihat `uang-input.ts` (QA pemilik
+   * 2026-09-17: angka juta tanpa pemisah ribuan tidak terbaca).
+   */
   standard_price: string;
   commission_rule: string;
   category: string;
@@ -135,7 +142,10 @@ export const EMPTY_MSL_FORM: MslFormState = {
 export function serviceToForm(service: MasterService): MslFormState {
   return {
     name: service.name,
-    standard_price: String(service.standard_price),
+    // Bentuk tampil, bukan "8000000.00" mentah: kolom ini yang dibaca ulang
+    // orang sebelum menekan Simpan, dan tujuh digit tanpa pemisah adalah
+    // persis yang membuat 21 juta terbaca 2,1 juta.
+    standard_price: formatUangInput(String(service.standard_price)),
     commission_rule: service.commission_rule,
     category: service.category,
     unit: service.unit,
@@ -152,7 +162,7 @@ export function serviceToForm(service: MasterService): MslFormState {
     pengakuan: service.pengakuan,
     durasi_options: (service.durasi_options ?? []).map((o) => ({
       durasi_bulan: String(o.durasi_bulan),
-      harga: String(o.harga),
+      harga: formatUangInput(String(o.harga)),
     })),
     effective_from: todayISO(),
   };
@@ -182,7 +192,10 @@ export function formToPayload(form: MslFormState): MslPayload {
   const needsMinQty = form.pricing_mode === 'min_floor' || form.pricing_mode === 'batch_ceiling';
   return {
     name: form.name,
-    standard_price: isPassthrough ? '0' : form.standard_price,
+    // Kembali ke DECIMAL yang dimengerti `money.parse`. Kosong tetap kosong:
+    // gerbang wajib di server yang berhak menolaknya dengan pesan BI, bukan
+    // form ini yang diam-diam mengirim 0.
+    standard_price: isPassthrough ? '0' : normalisasiUang(form.standard_price),
     commission_rule: form.commission_rule,
     category: form.category,
     unit: form.unit,
@@ -204,7 +217,7 @@ export function formToPayload(form: MslFormState): MslPayload {
     // membuangnya dan admin mengira tenornya tersimpan.
     durasi_options: form.durasi_options
       .filter((o) => o.durasi_bulan.trim() !== '' || o.harga.trim() !== '')
-      .map((o) => ({ durasi_bulan: Number(o.durasi_bulan), harga: o.harga })),
+      .map((o) => ({ durasi_bulan: Number(o.durasi_bulan), harga: normalisasiUang(o.harga) })),
     effective_from: form.effective_from,
   };
 }
