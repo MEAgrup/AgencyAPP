@@ -147,6 +147,14 @@ jobs:
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO anon, authenticated, service_role;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
           SQL
+      # Gerbang nomor migrasi SEBELUM apply: langkah di bawah memakai `sort` atas
+      # NAMA PENUH, jadi ia tetap hijau walau dua berkas berbagi prefix versi —
+      # dan justru itu yang membuat sebelas tabrakan lama tak pernah ketahuan di
+      # sini sampai seseorang menjalankan `supabase db push` (yang memakai 14
+      # digit pertama sebagai PRIMARY KEY dan mati dengan SQLSTATE 23505).
+      # Skrip ini yang melihat apa yang `sort` tidak bisa lihat.
+      - name: Nomor migrasi tidak bertabrakan (gerbang)
+        run: scripts/check-migration-versions.sh
       - name: Apply all migrations in order
         run: |
           for f in $(ls supabase/migrations/*.sql | sort); do
