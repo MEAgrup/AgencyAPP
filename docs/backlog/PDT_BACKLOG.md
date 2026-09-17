@@ -1629,6 +1629,28 @@ Jadi `pdt_satuan_t` (`rupiah`, `persen`, `hitungan`, `jam`, `hari`, `views`) **b
   `packages/core/src/report/render.ts` dan `adsscanner/tiktok/render.ts`; dan
   `toLocaleString('id-ID')` mentah di `brief-inherit.ts:182` + `ads.ts:1766`.
 
+> **Status 2026-09-17 (sesi 35) — DITUTUP.** `plan_row.satuan_kategori` dan
+> `strategi_resource.jumlah_satuan_kategori`, keduanya `pdt_satuan_t` — **dipakai ulang** enum
+> G1-01 (`pdt_usulan_katalog.satuan`), bukan enum baru untuk konsep yang sama. Kategori diturunkan
+> dari label `satuan` bebas yang sudah ada lewat **satu** mapper (`packages/core/src/satuan.ts`
+> `kategoriDariSatuanLabel`), dan **satu** formatter (`formatNilaiSatuan`, sama berkas + mirrornya
+> di `web-internal/src/lib/money.ts` untuk sisi FE) menutup Rule 28 — ini yang menutup kedua bug
+> historis yang disebut ticket ("20 sesi live dicetak Rp 20,00" pada `account/plan/[id]`, dan CTOR
+> persen `copilot.ts` L3 yang sebelumnya `unit: 'Rp'`). Label `satuan`/`jumlah` sendiri **TIDAK
+> berubah peran** — tetap teks bebas untuk tampilan dan (untuk divisi ber-katalog) kunci identitas
+> `jenisBySatuan`; kolom kategori murni sidecar tertulis-ulang di SETIAP jalur tulis
+> (`seedRowFromPillar`/`createPlanRow`/`seedRowsFromPillars`/`copyRowToPeriod`/`saveResources`),
+> bukan cuma migrasi satu kali. `strategi_resource.jumlah_satuan_kategori` nullable dengan
+> `CHECK (satuan IS NULL) = (jumlah_satuan_kategori IS NULL)` — NULL tidak pernah diam-diam jadi
+> `hitungan`. Backfill live diverifikasi terhadap data nyata (`plan_row` 10 baris, `strategi_resource`
+> 0 baris) sebelum ditulis — nol risiko backfill salah kategori. Migrasi `20261110010000` diterapkan
+> ke live `CDPS SG`; gate tidak bergerak (182/45/35/76). **Belum disentuh sesi ini** (di luar
+> cakupan G4-02): konsolidasi tiga-gaya-IDR yang disebut di atas (`report/render.ts`,
+> `adsscanner/tiktok/render.ts`, `brief-inherit.ts:182`, `ads.ts:1766`) — itu bukan bug G4-02
+> menutup, formatter BARU ini hanya dipakai jalur `plan_row`/`strategi_resource` yang memang
+> ticket ini sebut; dan bug `copilot.ts` L3/liveCtor unit-mislabeling (ditemukan sesi ini,
+> sengaja dibiarkan untuk G4-03 yang memang menyentuh ulang katalog Shopee).
+
 ### G4-03 · Minimal **6 aksi khusus Shopee** + loop verdict
 - Tiap aksi menyatakan `platform_berlaku` **eksplisit**. Aksi yang hanya berlaku TikTok
   **tidak boleh** membuat klien Shopee menerima nol usulan **tanpa pesan**; bila nol aksi memenuhi
