@@ -32,10 +32,10 @@
 | **C-03** | ~~UAT paritas end-to-end~~ ✅ **SELESAI 2026-07-31 — dijalankan terhadap deployment produksi, FAIL 0** | — | — | — |
 | **C-04** | ~~Cutover data + aktor produksi~~ ✅ **DIKETOK 2026-09-04 — memformalkan cutover yang secara de facto SUDAH terjadi sejak ±28 Agustus** (lihat §C-04 + `DECISIONS.md`) | — | — | — |
 | **C-05** | ~~Retire Go: arsip `backend/`, bersihkan CI & config Railway~~ ✅ **SELESAI 2026-09-04** — `backend/` → `archive/backend-go/`, job CI `backend` dicabut, 5 config Railway ditandai deprecated, `CLAUDE.md` diperbarui. Butir 5 (matikan service Railway) ✅ **selesai 2026-09-05 oleh pemilik — C-05 5/5** | — | — | — |
-| **C-06** | `web-client-portal` (M15-C2) | ⚪ belum dimulai (O4/O5 RESOLVED 2026-08-31) | — | **TIDAK** (by design) |
+| **C-06** | ~~`web-client-portal` (M15-C2)~~ ✅ **SELESAI 2026-09-17** — build (CR-09) + audit ulang M15-G3..G7 (lihat §C-06 di bawah) | — | — | **TIDAK** (by design) |
 
 **Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → ~~C-03~~ ✅ → ~~C-04~~ ✅ → ~~(gate go/no-go manusia)~~ ✅ **GO 2026-09-04 (Nerissa, COO)** → ~~C-05~~ ✅. **Jalur cutover SELESAI.**
-C-06 di luar jalur cutover.
+C-06 di luar jalur cutover — juga SELESAI (2026-09-17).
 
 **Total realistis: ~1,5–2 minggu kerja Claude** + gate keputusan manusia (Yohan & Nerissa, OQ-1).
 
