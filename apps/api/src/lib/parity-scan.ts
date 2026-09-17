@@ -25,6 +25,15 @@ export const API_V1 = join(REPO_ROOT, 'apps/api/src/app/api/v1');
  * against the served routes — which hid six dead admin endpoints.
  */
 export const FE_SRC = join(REPO_ROOT, 'web-internal/src');
+/**
+ * The second frontend app (M15-C2). Same `api.<method>(...)` calling convention
+ * (`web-client-portal/src/lib/api.ts` mirrors `web-internal`'s), so the same
+ * scanner works unchanged — it just needs to be pointed at a different root.
+ * `shape-parity.test.ts` already watches this app's response SHAPES; route- and
+ * body-parity never got the equivalent PATH/BODY guard, which is a real gap
+ * (found during the C-06 re-audit) rather than a deliberate scoping choice.
+ */
+export const FE_SRC_PORTAL = join(REPO_ROOT, 'web-client-portal/src');
 
 /** HTTP methods a Next route handler may export. */
 export const METHODS = ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'] as const;
@@ -266,14 +275,15 @@ export interface FeCall {
 const CALL_RE = /\bapi\.(get|post|patch|put|del|delete)\s*(?:<[\s\S]*?>)?\s*\(\s*/g;
 
 /**
- * Every `api.<method>(<path>)` call in the FE data layer, as `METHOD /path`.
- * Calls whose path is fully computed at runtime (a variable base rather than a
- * literal) cannot be checked statically and are skipped — the count assertion in
- * the tests keeps this from silently checking nothing.
+ * Every `api.<method>(<path>)` call under `root` (default `FE_SRC`,
+ * `web-internal`; pass `FE_SRC_PORTAL` for `web-client-portal`), as
+ * `METHOD /path`. Calls whose path is fully computed at runtime (a variable
+ * base rather than a literal) cannot be checked statically and are skipped —
+ * the count assertion in the tests keeps this from silently checking nothing.
  */
-export function feCalls(): FeCall[] {
+export function feCalls(root: string = FE_SRC): FeCall[] {
   const out: FeCall[] = [];
-  for (const file of walkFe(FE_SRC)) {
+  for (const file of walkFe(root)) {
     // Comments stripped for the same reason as the route side: a commented-out
     // call is not a call, and a key named in prose is not a key that is sent.
     const src = stripComments(readFileSync(file, 'utf8'));

@@ -463,6 +463,42 @@ Baru dikerjakan **setelah** gate go/no-go GO. Sesuai OQ-8: Go+MySQL **diarsip re
 > invoice/pembayaran (OQ-6: nol di v1) dan riwayat komplain untuk klien (M15 Rule 6
 > submit-only).
 
+> ### ✅ C-06 audit ulang DITUTUP 2026-09-17
+> Setiap butir M15-G3..G7 (`WAVE3_GAP_AUDIT.md`) diverifikasi terhadap kode sungguhan,
+> bukan ditebak dari deskripsi tiket:
+> - **Realm auth terpisah** — `client-portal-auth.ts` + rute `auth/login`,
+>   `auth/logout`, `auth/client-portal/{forgot,reset}-password`, `auth/change-password`;
+>   `contactScope(actor)` di `client-portal.ts` menolak SETIAP employee Actor (bahkan
+>   Director) — realm ini bukan "internal view yang di-trim izin" (CLAUDE.md), sesuai desain.
+> - **Allow-list data layer** — `client-portal.ts` TIDAK PERNAH memanggil
+>   `board.clientBoard()`/`health.portfolio()`/`report.listReports()` (jalur employee);
+>   tiap query miliknya sendiri, sempit, hanya kolom yang diizinkan §4.2 (mis.
+>   `healthSummary` cuma `select band, period_end` — `final_health_score`/
+>   `components_json` di baris yang SAMA sengaja tidak pernah masuk SELECT list).
+> - **Relabel service-progress (Rule 2)** — `labelKlien` satu fixed lookup
+>   (`Queued`/`In Production`/`Finalizing`/`In Review`/`Completed`), dipanggil SEKALI,
+>   cocok persis tabel PRD; `gabungLabel` roll-up "yang paling belum selesai menang".
+> - **Health Summary band-only (Rule 4)** — `labelBand` fixed lookup ke tiga label PRD;
+>   nol angka, nol breakdown pernah keluar dari `healthSummary`.
+> - **Komplain `source = Client Portal` (Rule 5)** — `submitComplaint` menulis persis
+>   string itu lewat `insertComplaint` yang SAMA dengan pintu WhatsApp/internal (satu
+>   set aturan, satu jalur notifikasi), plus rate limit (§5.2) dan auto-ack (Rule 5).
+> - **Submit-only (Rule 6)** — nol `listComplaints` di `client-portal.ts`; rute
+>   `complaints/route.ts` sengaja tidak punya `GET`.
+> - **Exclusion list (Rule 7)** — nol staff name/PIC, nol Brief/Task id, nol M14 team
+>   performance ditemukan di seluruh `client-portal.ts` atau halaman `web-client-portal`.
+>
+> **Satu gap NYATA ditemukan (bukan ambiguitas PRD — celah cakupan test) dan DITUTUP sesi
+> ini**: `route-parity.test.ts`/`body-parity.test.ts` HANYA pernah men-scan `web-internal`
+> (`parity-scan.ts`'s `FE_SRC` di-hardcode) — `web-client-portal` tidak pernah punya guard
+> path/body yang setara, walau `shape-parity.test.ts` sudah mengawasi bentuk responsnya
+> sejak M15-C2 mendarat. Diverifikasi manual dulu (seluruh 10 pemanggilan `api.*` di
+> `web-client-portal/src` cocok ke rute `apps/api` yang ada — nol drift hari ini), lalu
+> ditutup dengan pola yang SAMA persis seperti `shape-parity.test.ts` sendiri menutupnya:
+> `feCalls()` digeneralisasi menerima `root` (default tetap `web-internal`, `FE_SRC_PORTAL`
+> baru untuk portal), dua `describe` block baru ditambah ke kedua test file. PR
+> [#446](https://github.com/MEAgrup/AgencyAPP/pull/446).
+
 _Paragraf asli 2026-07-28:_ Masih hanya `README.md` — belum ada kode/migrasi ditulis. Prasyarat **O4/O5 RESOLVED 2026-08-31** (`docs/DECISIONS.md`; spec final `docs/M15C2_CLIENT_PORTAL_SECURITY_SPEC.md`, kesepuluh Open Question dijawab pemilik). M15-C2 boleh dijadwalkan sebagai klaster kerja normal (Rules → Flow → Example → System Requirements → PR kecil per klaster, pola M15-C1) — auth realm mengikuti pola LT-61 vendor (`supabase/migrations/20260903010000_lt61_vendor_auth.sql`), bukan `local.go` Go yang sudah pensiun. **Realm auth terpisah + data layer allow-list** — bukan view internal yang di-trim izin (`CLAUDE.md`). Tidak memblokir cutover.
 
 ---

@@ -17,7 +17,7 @@
  * it is a page that does not work.
  */
 import { describe, expect, it } from 'vitest';
-import { apiRoutes, feCalls, servedBy } from './parity-scan';
+import { apiRoutes, FE_SRC_PORTAL, feCalls, servedBy } from './parity-scan';
 
 /**
  * Endpoints the FE calls that `apps/api` does not serve — the unported remainder
@@ -104,5 +104,51 @@ describe('FE↔API route parity', () => {
     expect(routes).toContain('POST /internal/bridge/px-coverage');
     expect(routes).toContain('POST /internal/px/evaluate/tick');
     expect(routes).toContain('GET /internal/px/evaluate/tick');
+  });
+});
+
+/**
+ * The same guard for the SECOND frontend app (M15-C2, `web-client-portal`).
+ *
+ * `shape-parity.test.ts` has watched this app's response shapes since the
+ * Client Portal read-model shipped; this half — whether the path it calls
+ * exists at all — never got the equivalent guard. Found during the C-06
+ * re-audit (`docs/backlog/CUTOVER_BACKLOG.md`): every call the app makes was
+ * manually verified served, but nothing stopped a future one from silently
+ * drifting the way `route-parity.test.ts` above stops it for `web-internal`.
+ */
+describe('FE↔API route parity — web-client-portal', () => {
+  const routes = apiRoutes();
+  const calls = feCalls(FE_SRC_PORTAL);
+
+  it('finds the portal app FE calls (guards against the extraction silently breaking)', () => {
+    // The portal is a small, deliberately narrow app (§4.2 allow-list) — the
+    // count floor is far lower than web-internal's, but a scanner regression
+    // (wrong root, `CALL_RE` stopped matching) must still fail loudly.
+    expect(calls.length).toBeGreaterThan(5);
+  });
+
+  const isServed = (call: string) => [...routes].some((route) => servedBy(call, route));
+
+  it('serves every endpoint web-client-portal calls', () => {
+    // No KNOWN_GAPS here (unlike the web-internal block above): this app was
+    // built whole in one wave (CR-09), not ported endpoint-by-endpoint from Go,
+    // so there is no expected backlog of unported calls to carry.
+    const missing = calls
+      .filter(({ call }) => !isServed(call))
+      .map(({ call, file }) => `${call}  (called from ${file})`);
+    expect(missing, `unported endpoints — the portal page would 404:\n${missing.join('\n')}`).toEqual([]);
+  });
+
+  it('serves the four allow-listed data surfaces + auth (M15 §4.2/§6.1)', () => {
+    // Positive assertions: the exact set this app's own `portal-data.ts`
+    // docblock calls out, plus the auth realm it depends on.
+    expect(routes).toContain('GET /client-portal/reports');
+    expect(routes).toContain('GET /client-portal/service-progress');
+    expect(routes).toContain('GET /client-portal/health');
+    expect(routes).toContain('POST /client-portal/complaints');
+    expect(routes).toContain('GET /client-portal/me');
+    expect(routes).toContain('POST /auth/client-portal/forgot-password');
+    expect(routes).toContain('POST /auth/client-portal/reset-password');
   });
 });

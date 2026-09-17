@@ -34,7 +34,7 @@
  * walks next.
  */
 import { describe, expect, it } from 'vitest';
-import { feCalls, routeFiles, routeFor } from './parity-scan';
+import { FE_SRC_PORTAL, feCalls, routeFiles, routeFor } from './parity-scan';
 
 /** Keys that are not wire fields at all and never reach a route handler. */
 const NOT_WIRE_KEYS = new Set<string>([
@@ -116,5 +116,54 @@ describe('FE↔API request-body parity', () => {
     const route = files.find((f) => f.path === '/transactions/{}/scheme');
     expect(route).toBeDefined();
     expect(route?.code).toMatch(/\bpayment_intent_scheme\b/);
+  });
+});
+
+/**
+ * The same guard for `web-client-portal` (M15-C2) — found missing during the
+ * C-06 re-audit alongside the route-parity gap in `route-parity.test.ts`. The
+ * portal's only write bodies are the complaint form and the auth flows; small
+ * surface, but the same O43 class of bug (route answers 200, page still
+ * broken) applies just as much to a public-facing client complaint form.
+ */
+describe('FE↔API request-body parity — web-client-portal', () => {
+  const files = routeFiles();
+  const calls = feCalls(FE_SRC_PORTAL);
+  const writes = calls.filter((c) => c.method !== 'GET' && c.bodyKeys.length > 0);
+
+  it('finds bodies to check (guards against the extraction silently breaking)', () => {
+    expect(writes.length).toBeGreaterThan(0);
+    const paths = writes.map((w) => w.call);
+    expect(paths).toContain('POST /client-portal/complaints');
+    expect(paths).toContain('POST /auth/login');
+  });
+
+  it('resolves every body it finds (an unresolved body checks nothing)', () => {
+    const unresolved = calls
+      .filter((c) => c.method !== 'GET' && c.bodySource === 'unresolved')
+      .map((c) => `${c.call}  body=${c.bodyObject ?? '?'}  (${c.file})`);
+    expect(unresolved, `unresolvable request bodies:\n${unresolved.join('\n')}`).toEqual([]);
+  });
+
+  it('reads every body key web-client-portal sends', () => {
+    const drift: string[] = [];
+    for (const call of writes) {
+      const route = routeFor(call, files);
+      if (!route) {
+        continue; // an unserved path is route-parity.test.ts's business, not ours
+      }
+      for (const key of call.bodyKeys) {
+        if (!new RegExp(`\\b${key}\\b`).test(route.readsFrom)) {
+          drift.push(
+            `${call.call} sends body.${key}, which ${route.file} never reads` +
+              `  (called from ${call.file}, keys via ${call.bodySource})`,
+          );
+        }
+      }
+    }
+    expect(
+      drift,
+      `request-body key drift — the route answers but the page is broken:\n${drift.join('\n')}`,
+    ).toEqual([]);
   });
 });
