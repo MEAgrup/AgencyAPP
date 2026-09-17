@@ -4487,6 +4487,136 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     }
   });
 
+  it('G3-04: jumlahVideoPerBulan/totalViews/gmvVideo sum toko+afiliasi video, jamLivePerBulan/gmvLive count TOKO live only — both from pdt_fact_content for the resolved reference period', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+
+    // B-7.1 (video): TOKO + AFILIASI digabung (section-b.ts: "B-7.1 menghitung
+    // SELURUH video yang tayang di periode itu"). VID-3 punya vv=null (belum
+    // terpanen) — dikeluarkan dari totalViews, TAPI tetap dihitung ke
+    // jumlahVideoPerBulan (jumlah video selalu diketahui begitu barisnya ada).
+    // B-7.2 (live): TOKO SAJA — LIVE-2 (afiliasi) harus DIABAIKAN sepenuhnya;
+    // gmv-nya sengaja dibuat sangat besar supaya tes gagal keras kalau bug
+    // ikut menjumlahkannya.
+    await sql`
+      insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi,
+        jenis, is_akun_toko, vv, gmv, durasi_detik)
+      values (${tiktokId}, 'VID-1', '2026-07-01', ${batchJul[0].id}, 1, 'video', true, 1000, '500000.00', null),
+             (${tiktokId}, 'VID-2', '2026-07-01', ${batchJul[0].id}, 1, 'video', false, 2000, '300000.00', null),
+             (${tiktokId}, 'VID-3', '2026-07-01', ${batchJul[0].id}, 1, 'video', true, null, '100000.00', null),
+             (${tiktokId}, 'LIVE-1', '2026-07-01', ${batchJul[0].id}, 1, 'live', true, null, '1000000.00', 7200),
+             (${tiktokId}, 'LIVE-2', '2026-07-01', ${batchJul[0].id}, 1, 'live', false, null, '99999999.00', 3600)`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+      expect(tt.jumlahVideoPerBulan).toBe(3);
+      expect(tt.totalViews).toBe(3000);
+      expect(tt.gmvVideo).toBe('900000');
+      expect(tt.jamLivePerBulan).toBe(2);
+      expect(tt.gmvLive).toBe('1000000');
+    } finally {
+      await sql`delete from pdt_fact_content where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
+
+  it('G3-05: affiliateAktif30Hari/gmvAffiliate/gmvAffiliatePersen/topKreator/sampelTerkirim come from pdt_fact_creator_period, gmvAffiliatePersen against the SAME period\'s shop GMV', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+
+    // Toko GMV Juli = 10jt (basis 'net') — penyebut gmvAffiliatePersen.
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan)
+      values (${tiktokId}, '2026-07-15', 'net', ${batchJul[0].id}, 1, '10000000.00', 100)`;
+
+    // 3 kreator: A=3jt/10 sampel, B=1jt/5 sampel, C=gmv belum terpanen (null) —
+    // C tetap dihitung ke affiliateAktif30Hari (barisnya ADA) tapi dikeluarkan
+    // dari gmvAffiliate/topKreator/sampelTerkirim (absen ≠ nol).
+    await sql`
+      insert into pdt_fact_creator_period (client_platform_id, creator_handle, periode, batch_id, parser_versi,
+        gmv, sampel_terkirim)
+      values (${tiktokId}, 'Kreator A', '2026-07-01', ${batchJul[0].id}, 1, '3000000.00', 10),
+             (${tiktokId}, 'Kreator B', '2026-07-01', ${batchJul[0].id}, 1, '1000000.00', 5),
+             (${tiktokId}, 'Kreator C', '2026-07-01', ${batchJul[0].id}, 1, null, null)`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+      expect(tt.affiliateAktif30Hari).toBe(3);
+      expect(tt.gmvAffiliate).toBe('4000000');
+      expect(tt.gmvAffiliatePersen).toBe(40);
+      expect(tt.topKreator).toEqual([
+        { nama: 'Kreator A', gmv: '3000000' },
+        { nama: 'Kreator B', gmv: '1000000' },
+      ]);
+      expect(tt.sampelTerkirim).toBe(15);
+    } finally {
+      await sql`delete from pdt_fact_creator_period where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
+
+  it('G3-06: adSpend/roas/jumlahKampanyeAktif come from pdt_fact_ads, roas as Σgmv÷Σbiaya (not a plain average of the raw roas column)', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+
+    // 3 kampanye lintas sumber. CAMP-3 punya gmv=null (belum terpanen) —
+    // dikeluarkan dari Σgmv (dan karenanya dari pembilang roas), TAPI biaya-nya
+    // (kolom NOT NULL) tetap masuk Σbiaya, dan kampanyenya tetap dihitung ke
+    // jumlahKampanyeAktif. roas per baris kolom mentah ('4.0'/'2.0') SENGAJA
+    // TIDAK dipakai — roas HARUS Σgmv÷Σbiaya (5jt/1,7jt≈2.94), bukan rata-rata
+    // polos kolom roas (yang akan memberi (4+2)/2=3, angka berbeda).
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi,
+        biaya, gmv, roas)
+      values (${tiktokId}, 'shopee_ads_cpc', 'CAMP-1', '2026-07-01', ${batchJul[0].id}, 1, '1000000.00', '4000000.00', '4.0'),
+             (${tiktokId}, 'shopee_ads_live', 'CAMP-2', '2026-07-01', ${batchJul[0].id}, 1, '500000.00', '1000000.00', '2.0'),
+             (${tiktokId}, 'shopee_ads_search', 'CAMP-3', '2026-07-01', ${batchJul[0].id}, 1, '200000.00', null, null)`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+      expect(tt.adSpend).toBe('1700000');
+      expect(tt.roas).toBe(2.94);
+      expect(tt.jumlahKampanyeAktif).toBe(3);
+    } finally {
+      await sql`delete from pdt_fact_ads where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
+
   it('returns null when the client has no riset awal analysis', async () => {
     const serviceId = await seedService();
     const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
