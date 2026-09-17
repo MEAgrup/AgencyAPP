@@ -1632,17 +1632,14 @@ tabel (bukan dipaksa satu bentuk):
 
 ### G3-02 · Autofill B-0.6/B-0.7/B-1 + kesehatan toko
 
-> ⚠️ **STOP 2026-09-17 (sesi 36)** — sebelum menulis kode, ditemukan: `refundRatePersen`/
-> `pengunjungPerBulan`/`conversionRatePersen`/`poinPenalti` (dan sebelas field B3 lain) adalah
-> angka SATU-SNAPSHOT diikat ke `periodeReferensi` tunggal (hari ini: bulan yang payload Riset
-> Awal-nya sendiri jelaskan — cuma ada satu payload, jadi "bulan mana" otomatis tunggal). PDT
-> sebaliknya punya BANYAK periode/batch valid per `client_platform_id` (upload bulanan
-> berkelanjutan) — begitu sumbernya diganti ke `pdt_fact_*`, TIDAK ada aturan PDT atau Strategi
-> yang bilang periode PDT MANA yang jadi `periodeReferensi`. Detail lengkap + tiga opsi bercabang:
-> `docs/DECISIONS.md` §Open baris `G3-REFERENCE-PERIODE`. **Sama berlaku untuk G3-03…G3-06**
-> (seluruhnya field snapshot-satu-periode) — **G3-01 (sudah tutup) dan G3-07 (definisinya sendiri
-> "6 batch PDT terbaru", tidak butuh `periodeReferensi`) TIDAK terpengaruh**, boleh dikerjakan
-> tanpa menunggu. **Jangan mulai coding G3-02…G3-06 sebelum baris itu tertutup.**
+> ✅ **RESOLVED 2026-09-17 (sesi 39)** — pemilik memilih opsi (B): periode PDT yang diikat Section B
+> DIDEKLARASIKAN AM SENDIRI lewat field baru, cermin `periode_baseline_bulan` (bukan otomatis
+> "batch verified terbaru" [opsi A], bukan "periode skor interview" [opsi C]). Butuh kolom baru +
+> UI pemilih periode di layar Strategi Section B (deklarasi kebijakan AM, bukan sekadar ganti
+> sumber baca). Rincian lengkap `docs/DECISIONS.md` 2026-09-17 ("G3-REFERENCE-PERIODE DIKETOK").
+> **Sama berlaku untuk G3-03…G3-06** (seluruhnya field snapshot-satu-periode) — **G3-01 (sudah
+> tutup) dan G3-07 (definisinya sendiri "6 batch PDT terbaru", tidak butuh `periodeReferensi`)
+> TIDAK terpengaruh**. **Boleh mulai coding G3-02…G3-06** atas dasar opsi (B).
 
 - B-0.6 (provenance)/B-0.7 (periode)/B-1 (GMV+pesanan per bulan) — **sudah** terwarisi hari ini
   dari `riset_awal_analisa.payload` (`DECISIONS.md` 2026-08-20); tiket ini mengganti SUMBERNYA ke
@@ -1656,10 +1653,39 @@ tabel (bukan dipaksa satu bentuk):
   (`G3-02a`, pola sama `20261106010000_g2_01_shopee_kesehatan_writer.sql`) sebelum kedua field
   ini bisa autofill; jangan ditebak dari kolom yang tidak ada.
 
+**Status 2026-09-17 (sesi 39) — DITUTUP.** Migrasi `20261112010000_g3_02_periode_referensi_pdt.sql`
+menambah `strategi_channel.periode_referensi_pdt` (date, awal bulan, nullable — CHECK
+`ck_strch_periode_referensi_pdt_awal_bulan`), dieksekusi ke live `CDPS SG` via `apply_migration`.
+`ChannelInput`/`StrategiChannel`/`ChannelBaselineSuggestion` (`strategi.ts`) dan `wire.ts` dapat
+field ini penuh (write + read + suggestion), thread lewat `saveChannels` (insert + validasi shape
+`validateChannel`, awal-bulan-saja) dan `copyChildren` (revisi mewarisi deklarasi lama).
+`getBaselinePrefill` menghitung `periodeReferensiPdtSaran` (deklarasi tersimpan di
+`strategi_channel` MENANG mutlak bila ada; jatuh ke batch `verified` PALING BARU sebagai saran
+default hanya bila belum pernah dideklarasikan — opsi (B) persis, BUKAN opsi (A)) +
+`periodeReferensiPdtOpsi` (seluruh periode verified tersedia, untuk dropdown AM, bukan tebakan
+bebas). `refundRatePersen` = `refund/gmv×100`, `pengunjungPerBulan` = `pengunjung` mentah,
+`conversionRatePersen` = `pesanan/pengunjung×100` (BUKAN kolom `cr` — itu rasio harian yang tidak
+bisa dijumlah, Rule 7) — ketiganya berlaku KEDUA platform (basis `net` TikTok/`siap_dikirim`
+Shopee, sama seperti G3-07). `poinPenalti` = Σ `pdt_fact_kesehatan_penalti.poin` periode itu,
+Shopee-only (nol writer TikTok, sama batasan `chatResponseRatePersen`/`chatResponseMenit` yang
+TETAP payload-only). Setiap field jatuh ke payload Riset Awal lama bila PDT mengembalikan `null`
+(nol data periode itu) — strangler coexistence persis G3-07, nol angka yang diam-diam salah.
+UI: `web-internal/src/components/strategi/SectionB.tsx` dapat dropdown "Periode acuan PDT
+(B-0.7a)" (opsi dari `periode_referensi_pdt_opsi`, placeholder dari saran) di bawah blok B-0.7 —
+TIDAK auto-terapkan seperti `periode_baseline_bulan` (AM boleh sengaja pilih bulan lampau). Dua
+test DB nyata baru di `strategi.test.ts` (default-ke-terbaru + deklarasi-menang-atas-terbaru,
+termasuk poinPenalti Shopee) — full suite domain 2830/2831 (1 skip, bukan regresi; dua kegagalan
+`admin.test.ts`/`client.test.ts` yang sempat muncul terbukti flakiness lintas-run tanpa
+`db-rebuild` di antaranya, bukan regresi — hilang total setelah DB dibangun ulang bersih), api/
+core/db package suites, dan `web-internal` (test + build) semuanya hijau. **G3-03..G3-06 sekarang
+punya jalur `periodeReferensiPdtSaran` siap pakai — sub-tiket berikutnya tinggal memanggil
+`pdt-prefill.ts` dengan periode itu, pola identik ticket ini.**
+
 ### G3-03 · Dimensi SKU (B-2 portofolio SKU)
 
-> ⚠️ Sama blokir seperti G3-02 — "periode yang mana" untuk distribusi kuadran/Pareto belum
-> punya jawaban. Lihat `DECISIONS.md` §Open `G3-REFERENCE-PERIODE`. Jangan mulai coding.
+> ✅ **RESOLVED 2026-09-17 (sesi 39)** — sama seperti G3-02: opsi (B), periode dideklarasikan AM
+> sendiri (field baru cermin `periode_baseline_bulan`). Lihat `DECISIONS.md` 2026-09-17
+> ("G3-REFERENCE-PERIODE DIKETOK"). Boleh mulai coding.
 
 `skuListed`/`skuAktif` ← hitungan `pdt_sku_master.status_listing` (Rule 19, SKU tidak pernah
 dihapus). `skuPareto80`/`skuSlowMoving`/`topSku` ← distribusi `gmv` `pdt_fact_sku_period` per
@@ -1668,8 +1694,9 @@ ambang yang berbeda tanpa alasan).
 
 ### G3-04 · Dimensi konten (video/live, bagian B-7)
 
-> ⚠️ Sama blokir seperti G3-02 — "bulan yang mana" belum punya jawaban. Lihat `DECISIONS.md`
-> §Open `G3-REFERENCE-PERIODE`. Jangan mulai coding.
+> ✅ **RESOLVED 2026-09-17 (sesi 39)** — sama seperti G3-02: opsi (B), periode dideklarasikan AM
+> sendiri (field baru cermin `periode_baseline_bulan`). Lihat `DECISIONS.md` 2026-09-17
+> ("G3-REFERENCE-PERIODE DIKETOK"). Boleh mulai coding.
 
 `jumlahVideoPerBulan`/`totalViews`/`gmvVideo` ← `pdt_fact_content` `jenis='video'` (vv/gmv, filter
 `is_akun_toko` sesuai kebutuhan toko-vs-afiliasi). `jamLivePerBulan`/`gmvLive` ← `jenis='live'`
@@ -1677,8 +1704,9 @@ ambang yang berbeda tanpa alasan).
 
 ### G3-05 · Dimensi afiliasi/kreator (B-6)
 
-> ⚠️ Sama blokir seperti G3-02 — "periode yang mana" belum punya jawaban. Lihat `DECISIONS.md`
-> §Open `G3-REFERENCE-PERIODE`. Jangan mulai coding.
+> ✅ **RESOLVED 2026-09-17 (sesi 39)** — sama seperti G3-02: opsi (B), periode dideklarasikan AM
+> sendiri (field baru cermin `periode_baseline_bulan`). Lihat `DECISIONS.md` 2026-09-17
+> ("G3-REFERENCE-PERIODE DIKETOK"). Boleh mulai coding.
 
 `affiliateAktif30Hari`/`gmvAffiliate`/`gmvAffiliatePersen`/`topKreator`/`sampelTerkirim` ←
 `pdt_fact_creator_period` (join `pdt_fact_content.creator_handle` bila hitungan "aktif 30 hari"
@@ -1686,8 +1714,9 @@ butuh tanggal posting, bukan cuma agregat bulanan).
 
 ### G3-06 · Dimensi iklan (B-4/B-5 belanja+ROAS+kampanye)
 
-> ⚠️ Sama blokir seperti G3-02 — "periode yang mana" belum punya jawaban. Lihat `DECISIONS.md`
-> §Open `G3-REFERENCE-PERIODE`. Jangan mulai coding.
+> ✅ **RESOLVED 2026-09-17 (sesi 39)** — sama seperti G3-02: opsi (B), periode dideklarasikan AM
+> sendiri (field baru cermin `periode_baseline_bulan`). Lihat `DECISIONS.md` 2026-09-17
+> ("G3-REFERENCE-PERIODE DIKETOK"). Boleh mulai coding.
 
 `adSpend`/`roas` ← `pdt_fact_ads` (Σ `biaya`, `roas` rata-rata tertimbang — **bukan** rata-rata
 polos, lihat catatan `report/dimensi_roas` yang sudah ada). `jumlahKampanyeAktif`/`tipeKampanye` ←
@@ -1869,19 +1898,17 @@ Jadi `pdt_satuan_t` (`rupiah`, `persen`, `hitungan`, `jam`, `hari`, `views`) **b
 jalur yang benar dari hasil parse adalah membuat **Metric Entry (`MTR-`, `entry_method='File Export'`)**.
 GMV bulanan otoritatif tetap entri manual AM (M6B P-E / M6D §3 Rule 11).
 
-> ⚠️ **STOP 2026-09-17 (sesi 35) — belum dimulai, menunggu keputusan pemilik.** Verifikasi ke kode
-> (bukan asumsi) menemukan mesin usulan yang BENAR-BENAR berjalan hari ini (`copilot.susunUsulan` +
-> `strategi.susunPilarUsulan`) membaca `riset_awal_analisa.payload` (baseline lama) dan menulis
-> HANYA ke Strategi Section E — **nol baris TS pernah menyentuh tabel `pdt_usulan`** (grep kosong
-> di luar `_katalog`). PRD Flow C eksplisit minta mesin membaca **`pdt_fact_*`** (bukan payload
-> Riset Awal) dan mengevaluasi ulang dari **fakta batch berikutnya** (bukan Riset Awal berikutnya).
-> Ini bukan gap kosmetik: "6 aksi khusus Shopee" yang genuinely Shopee-eksklusif kemungkinan besar
-> butuh field yang cuma ada di `pdt_fact_shop_daily`/`pdt_fact_ads`/`pdt_fact_kesehatan_penalti`
-> (cancel rate, chat/response penalti, AMS/CPC, flash sale/diskon) — field yang TIDAK ADA di
-> kosakata `MetrikKunci` yang dipakai katalog hari ini. Detail lengkap + dua opsi bercabang
-> (mesin fakta baru vs snapshot Section E) dicatat `docs/DECISIONS.md` **G4-03-VERDICT-ENGINE**
-> (Open, belum diputuskan). **Jangan mulai coding G4-03 sebelum baris itu tertutup** — mengarang
-> salah satu opsi tanpa konfirmasi berisiko dua mesin evaluasi yang tidak sinkron.
+> ✅ **RESOLVED 2026-09-17 (sesi 39)** — pemilik memilih opsi (A): mesin BARU membaca `pdt_fact_*`
+> langsung per `client_platform_id`+periode, dipicu saat batch mencapai `status='verified'`, menulis
+> `pdt_usulan` (`batch_id` FK), dievaluasi ulang saat batch periode berikutnya tiba — PRD-literal,
+> TIDAK memakai ulang `copilot.susunUsulan`/Section E. Katalog kerja delapan aksi dikonfirmasi (dua
+> ronde `AskUserQuestion`): (1) cancel rate `pesanan_dibatalkan`, (2) chat response rate/menit
+> `pdt_fact_kesehatan_penalti`, (3) efisiensi CPC/AMS `pdt_fact_ads`, (4) diskon/flash sale modul
+> `diskon_flashsale_video`, (5) GMV/jam live Shopee vs benchmark, (6) affiliate/KOL Shopee aktif,
+> (7) **GMV (pesanan selesai)** — basis `'dibayar'` `pdt_fact_shop_daily` (dikonfirmasi eksplisit
+> bukan sheet baru), (8) **ROAS** — `pdt_fact_ads.roas` (rata-rata tertimbang, pola sama
+> `report.ts` `dimensi_roas`). Rincian lengkap `docs/DECISIONS.md` 2026-09-17
+> ("G4-03-VERDICT-ENGINE DIKETOK"). **Boleh mulai coding G4-03** (mesin + migrasi + 8 aksi katalog).
 
 ---
 

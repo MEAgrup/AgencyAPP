@@ -4309,6 +4309,117 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     }
   });
 
+  it('G3-02 (G3-REFERENCE-PERIODE opsi B): refund/pengunjung/CR are sourced from pdt_fact_shop_daily for the LATEST verified period when the AM has not declared one yet', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJun = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-06-01', '2026-06-30', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+    // June: 10jt GMV, 500rb refund, 1000 pengunjung, 80 pesanan (CR 8%).
+    // July (the LATEST verified period — must win over June by default): 20jt
+    // GMV, 1jt refund (5%), 2000 pengunjung, 200 pesanan (CR 10%).
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung, refund)
+      values (${tiktokId}, '2026-06-15', 'net', ${batchJun[0].id}, 1, '10000000.00', 80, 1000, '500000.00'),
+             (${tiktokId}, '2026-07-15', 'net', ${batchJul[0].id}, 1, '20000000.00', 200, 2000, '1000000.00')`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+      expect(tt.periodeReferensiPdtSaran).toBe('2026-07-01');
+      expect(tt.periodeReferensiPdtOpsi).toEqual(['2026-06-01', '2026-07-01']);
+      expect(tt.periodeReferensi).toBe('Jul 2026');
+      expect(tt.refundRatePersen).toBe(5);
+      expect(tt.pengunjungPerBulan).toBe(2000);
+      expect(tt.conversionRatePersen).toBe(10);
+      // poinPenalti is Shopee-only (nol writer TikTok) — stays payload-derived (null here).
+      expect(tt.poinPenalti).toBeNull();
+    } finally {
+      await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
+
+  it('G3-02 (G3-REFERENCE-PERIODE opsi B): a DECLARED periode_referensi_pdt wins over the latest verified batch — an AM who deliberately points at an older month gets THAT month, not "today\'s latest"', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId, shopeeId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJun = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-06-01', '2026-06-30', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung, refund)
+      values (${tiktokId}, '2026-06-15', 'net', ${batchJun[0].id}, 1, '10000000.00', 80, 1000, '500000.00'),
+             (${tiktokId}, '2026-07-15', 'net', ${batchJul[0].id}, 1, '20000000.00', 200, 2000, '1000000.00')`;
+
+    // Shopee: one verified batch with a Kesehatan Toko penalty — poinPenalti IS
+    // Shopee-sourced (unlike TikTok, which has no penalty writer at all).
+    const batchShopee = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${shopeeId}, 'shopee', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+    await sql`
+      insert into pdt_fact_kesehatan_penalti (client_platform_id, periode, batch_id, parser_versi, poin, deskripsi, durasi)
+      values (${shopeeId}, '2026-07-01', ${batchShopee[0].id}, 1, '3.50', 'Chat response lambat', '30 hari')`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      // AM deliberately declares June — the OLDER month — even though July is
+      // the latest verified batch. saveChannels persists it on strategi_channel.
+      await saveChannels(sql, am(), s.id, [
+        {
+          channel: 'TikTok Shop',
+          statusChannel: 'Eksisting',
+          namaToko: 'Toko Uji',
+          urlToko: 'https://tt.example',
+          periodeReferensiPdt: '2026-06-01',
+        },
+        { channel: 'Shopee', statusChannel: 'Eksisting', namaToko: 'Toko Uji', urlToko: 'https://sh.example' },
+      ]);
+
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+      // June's numbers, NOT July's, despite July being verified and more recent.
+      expect(tt.periodeReferensiPdtSaran).toBe('2026-06-01');
+      expect(tt.periodeReferensi).toBe('Jun 2026');
+      expect(tt.refundRatePersen).toBe(5); // 500rb / 10jt
+      expect(tt.pengunjungPerBulan).toBe(1000);
+      expect(tt.conversionRatePersen).toBe(8); // 80 / 1000
+
+      const sh = prefill!.channels.find((c) => c.clientPlatformId === shopeeId)!;
+      // Shopee never declared a period, so it defaults to its own latest verified (July).
+      expect(sh.periodeReferensiPdtSaran).toBe('2026-07-01');
+      expect(sh.poinPenalti).toBe(3.5);
+    } finally {
+      await sql`delete from pdt_fact_kesehatan_penalti where client_platform_id = ${shopeeId}`;
+      await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id in (${tiktokId}, ${shopeeId})`;
+    }
+  });
+
   it('returns null when the client has no riset awal analysis', async () => {
     const serviceId = await seedService();
     const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`

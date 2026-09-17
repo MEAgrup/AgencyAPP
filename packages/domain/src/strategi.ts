@@ -1009,6 +1009,11 @@ export interface StrategiChannel {
   periodeAkhir: string | null;
   alasanPeriodePendek: string | null;
   catatanPeriodePendek: string | null;
+  /** G3-REFERENCE-PERIODE opsi (B) — periode PDT (awal bulan) yang AM
+   *  deklarasikan sebagai acuan Section B3 (refund rate, pengunjung/bulan,
+   *  conversion rate, poin penalti, dst.), cermin `periodeBaselineBulan`.
+   *  `null` = belum dideklarasikan, jatuh ke payload Riset Awal. */
+  periodeReferensiPdt: string | null;
 
   // --- E-2 (A-09b). Section E, but stored per channel, because that is the
   // grain of the question ("which channel is the engine"). It lives on this row
@@ -2027,8 +2032,23 @@ export interface ChannelBaselineSuggestion {
   /** false ⇒ old payload (or a manual baseline): only the four legacy fields can
    *  be inherited, and the page must say so instead of showing empty columns. */
   payloadTerbaca: boolean;
-  /** The month the period figures describe, e.g. "Agu 2026". */
+  /** The month the period figures describe, e.g. "Agu 2026". PDT-sourced
+   *  fields (below) derive this from `periodeReferensiPdtSaran` instead of
+   *  the payload once that period resolves to real `pdt_fact_*` rows. */
   periodeReferensi: string | null;
+  /** G3-REFERENCE-PERIODE opsi (B) — periode PDT (awal bulan) yang dipakai
+   *  untuk sumber field B3 di bawah: nilai yang AM SUDAH deklarasikan
+   *  (`strategi_channel.periode_referensi_pdt`) bila ada, jatuh ke batch
+   *  `verified` PALING BARU untuk channel ini sebagai saran default bila
+   *  belum pernah dideklarasikan. `null` ⇒ channel ini belum pernah punya
+   *  batch PDT terverifikasi sama sekali — field B3 di bawah tetap sumber
+   *  payload lama (strangler coexistence, pola sama G3-07). */
+  periodeReferensiPdtSaran: string | null;
+  /** Seluruh periode `verified` yang tersedia untuk channel ini, kronologis
+   *  naik — dipakai UI sebagai pilihan AM saat mendeklarasikan/mengganti
+   *  `periodeReferensiPdt` (bukan tebakan bebas yang bisa menunjuk periode
+   *  tanpa data terverifikasi). */
+  periodeReferensiPdtOpsi: readonly string[];
   /** B-1.4 — period aggregate, matched to a single baseline month by label.
    *  TikTok calls it `refund_rate`, Shopee `batal_retur_rate`; the core mapper
    *  reads both, so this is one field, not two. */
@@ -2158,6 +2178,19 @@ export async function getBaselinePrefill(
     berkasByPlatform.set(key, g);
   }
 
+  // G3-REFERENCE-PERIODE opsi (B) — deklarasi AM yang SUDAH tersimpan (bila
+  // channel-nya sudah pernah disave sekali) menang atas saran default di
+  // bawah. Dibaca SEKALI untuk seluruh Strategi ini, dikunci sama seperti
+  // `uq_strch_channel` (channel + channel_lain), bukan per client_platform_id.
+  const declaredRows = await sql<{ channel: string; channel_lain: string | null; periode_referensi_pdt: string | null }[]>`
+    select channel, channel_lain, periode_referensi_pdt
+      from strategi_channel
+     where strategi_id = ${id}`;
+  const declaredByChannel = new Map<string, string | null>();
+  for (const r of declaredRows) {
+    declaredByChannel.set(`${r.channel}|${r.channel_lain ?? ''}`, dateOrNull(r.periode_referensi_pdt));
+  }
+
   const channels: ChannelBaselineSuggestion[] = await Promise.all(analisa.map(async (a) => {
     const payload = (a.payload ?? {}) as {
       gmv_baseline?: { bulan_terisi?: unknown; cakupan_riwayat?: unknown; riwayat?: unknown[] } | null;
@@ -2188,6 +2221,43 @@ export async function getBaselinePrefill(
     // (`pdt.ts`, Rule 16) — angka penjualan headline, bukan kanal/ads.
     const basisShopDaily = channel === 'TikTok Shop' ? 'net' : 'siap_dikirim';
     const periodeVerified = await pdtPrefill.bacaPeriodeTerverifikasiTerbaru(sql, clientPlatformIdNum, 6);
+
+    // G3-02..G3-06 (G3-REFERENCE-PERIODE opsi (B)) — periode acuan Section B3
+    // adalah deklarasi AM (`strategi_channel.periode_referensi_pdt`), BUKAN
+    // otomatis "batch verified terbaru": begitu AM sudah pernah menyimpan
+    // channel ini, nilai tersimpannya menang mutlak, walau lebih lama dari
+    // batch PDT terbaru yang ada hari ini. Baru saat BELUM PERNAH
+    // dideklarasikan (channel belum pernah disave, atau field ini kosong),
+    // saran default jatuh ke batch `verified` PALING BARU — semata sebagai
+    // titik awal yang AM bisa timpa sebelum menyimpan.
+    const periodeReferensiOpsi = await pdtPrefill.bacaPeriodeTerverifikasiTerbaru(sql, clientPlatformIdNum, 24);
+    const declared = declaredByChannel.get(`${channel}|${channelLain ?? ''}`) ?? null;
+    const periodeReferensiPdtSaran =
+      declared ?? (periodeReferensiOpsi.length > 0 ? periodeReferensiOpsi[periodeReferensiOpsi.length - 1].periodeAwalBulan : null);
+
+    let pdtRefundRatePersen: number | null = null;
+    let pdtPengunjungPerBulan: number | null = null;
+    let pdtConversionRatePersen: number | null = null;
+    let pdtPoinPenalti: number | null = null;
+    let pdtPeriodeReferensi: string | null = null;
+    if (periodeReferensiPdtSaran !== null) {
+      const fakta = await pdtPrefill.bacaFaktaShopDaily(sql, clientPlatformIdNum, periodeReferensiPdtSaran, basisShopDaily);
+      if (fakta !== null) {
+        const d = new Date(`${periodeReferensiPdtSaran}T00:00:00Z`);
+        pdtPeriodeReferensi = `${bl.MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+        pdtRefundRatePersen = fakta.refund !== null && fakta.gmv > 0 ? (fakta.refund / fakta.gmv) * 100 : null;
+        pdtPengunjungPerBulan = fakta.pengunjung;
+        pdtConversionRatePersen =
+          fakta.pengunjung !== null && fakta.pengunjung > 0 ? (fakta.pesanan / fakta.pengunjung) * 100 : null;
+      }
+      // B-4 — poin penalti Shopee-only (nol writer TikTok, `pdt_fact_kesehatan_penalti`
+      // pola sama `chatResponseRatePersen`/`chatResponseMenit`, keduanya TETAP
+      // payload-only sampai G3-02a membangun tabel faktanya — lihat backlog).
+      if (channel === 'Shopee') {
+        const penalti = await pdtPrefill.bacaFaktaKesehatanPenalti(sql, clientPlatformIdNum, periodeReferensiPdtSaran);
+        if (penalti.length > 0) pdtPoinPenalti = penalti.reduce((sum, p) => sum + p.poin, 0);
+      }
+    }
 
     const riwayat = Array.isArray(gb?.riwayat) ? (gb!.riwayat as Record<string, unknown>[]) : [];
     const baselineBulan: BaselineMonthSuggestion[] =
@@ -2255,13 +2325,19 @@ export async function getBaselinePrefill(
       gmvMix,
       payloadSchema: b.schema,
       payloadTerbaca: b.adaIsi,
-      periodeReferensi: b.periodeReferensi,
-      refundRatePersen: b.refundRatePersen,
+      // G3-02 — sumber pdt_fact_* menang bila periode acuan resolve ke batch
+      // verified sungguhan; null (channel ini belum PDT sama sekali, ATAU
+      // periode acuan belum punya batch verified) jatuh ke payload lama apa
+      // adanya, persis perilaku sebelum tiket ini.
+      periodeReferensi: pdtPeriodeReferensi ?? b.periodeReferensi,
+      periodeReferensiPdtSaran,
+      periodeReferensiPdtOpsi: periodeReferensiOpsi.map((p) => p.periodeAwalBulan),
+      refundRatePersen: pdtRefundRatePersen ?? b.refundRatePersen,
       chatResponseRatePersen: b.chatResponseRatePersen,
       chatResponseMenit: b.chatResponseMenit,
-      poinPenalti: b.poinPenalti,
-      pengunjungPerBulan: b.pengunjungPerBulan,
-      conversionRatePersen: b.conversionRatePersen,
+      poinPenalti: pdtPoinPenalti ?? b.poinPenalti,
+      pengunjungPerBulan: pdtPengunjungPerBulan ?? b.pengunjungPerBulan,
+      conversionRatePersen: pdtConversionRatePersen ?? b.conversionRatePersen,
       trafikOrganikPersen: b.trafikOrganikPersen,
       trafikIklanPersen: b.trafikIklanPersen,
       trafikAffiliatePersen: b.trafikAffiliatePersen,
@@ -2456,6 +2532,7 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
         periode_baseline_bulan: number | null;
         periode_mulai: string | Date | null;
         periode_akhir: string | Date | null;
+        periode_referensi_pdt: string | Date | null;
         alasan_periode_pendek: string | null;
         prioritas: string | null;
         prioritas_alasan: string | null;
@@ -2752,6 +2829,7 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       periodeBaselineBulan: c.periode_baseline_bulan,
       periodeMulai: dateOrNull(c.periode_mulai),
       periodeAkhir: dateOrNull(c.periode_akhir),
+      periodeReferensiPdt: dateOrNull(c.periode_referensi_pdt),
       alasanPeriodePendek: c.alasan_periode_pendek,
       catatanPeriodePendek: c.catatan_periode_pendek,
       prioritas: c.prioritas as ChannelPrioritas | null,
@@ -3702,6 +3780,10 @@ export interface ChannelInput {
   periodeAkhir?: string | null;
   alasanPeriodePendek?: string | null;
   catatanPeriodePendek?: string | null;
+  /** G3-REFERENCE-PERIODE opsi (B) — periode PDT (awal bulan, `YYYY-MM-01`)
+   *  yang AM deklarasikan sebagai acuan Section B3. `null`/tidak dikirim ⇒
+   *  tetap sumber payload Riset Awal (strangler coexistence, pola G3-07). */
+  periodeReferensiPdt?: string | null;
 
   // E-2 (A-09b). Optional on the wire like every other half-filled-form field;
   // required per channel at submit (`checkCompleteness`).
@@ -4009,7 +4091,8 @@ export async function saveChannels(
           (strategi_id, channel, channel_lain, status_channel, nama_toko, url_toko,
            umur_toko_bulan, badge, target_tanggal_live, prasyarat_pembukaan,
            sumber_data, tanggal_ambil_data, lampiran, periode_baseline_bulan,
-           periode_mulai, periode_akhir, alasan_periode_pendek, catatan_periode_pendek,
+           periode_mulai, periode_akhir, periode_referensi_pdt,
+           alasan_periode_pendek, catatan_periode_pendek,
            prioritas, prioritas_alasan,
            pengunjung_per_bulan, conversion_rate_persen,
            trafik_organik_persen, trafik_iklan_persen, trafik_affiliate_persen,
@@ -4038,6 +4121,7 @@ export async function saveChannels(
            ${nullIfBlank(c.sumberData)}, ${nullIfBlank(c.tanggalAmbilData)},
            ${lampiran}, ${c.periodeBaselineBulan ?? null},
            ${nullIfBlank(c.periodeMulai)}, ${nullIfBlank(c.periodeAkhir)},
+           ${nullIfBlank(c.periodeReferensiPdt)},
            ${nullIfBlank(c.alasanPeriodePendek)}, ${nullIfBlank(c.catatanPeriodePendek)},
            ${c.prioritas ?? null}, ${nullIfBlank(c.prioritasAlasan)},
            ${c.pengunjungPerBulan ?? null}, ${c.conversionRatePersen ?? null},
@@ -4133,11 +4217,18 @@ function validateChannel(c: ChannelInput): void {
     [c.periodeMulai, 'Bulan mulai baseline (B-0.7)'],
     [c.periodeAkhir, 'Bulan akhir baseline (B-0.7)'],
     [c.tanggalAmbilData, 'Tanggal ambil data (B-0.6)'],
+    [c.periodeReferensiPdt, 'Periode referensi PDT (B-0.7a)'],
   ] as const) {
     const s = (d ?? '').trim();
     if (s !== '' && !RE_DATE.test(s)) {
       throw new ValidationError(msgFieldInvalid(label));
     }
+  }
+  // B-0.7a shape: awal bulan saja (pola sama CHECK `ck_strch_periode_referensi_pdt_awal_bulan`)
+  // — TS memberi pesan BI, CHECK di DB adalah dinding terakhir.
+  const periodeReferensiPdtTrim = (c.periodeReferensiPdt ?? '').trim();
+  if (periodeReferensiPdtTrim !== '' && RE_DATE.test(periodeReferensiPdtTrim) && !periodeReferensiPdtTrim.endsWith('-01')) {
+    throw new ValidationError(msgFieldInvalid('Periode referensi PDT (B-0.7a)'));
   }
 }
 
@@ -7613,6 +7704,7 @@ async function copyChildren(
       (strategi_id, channel, channel_lain, status_channel, nama_toko, url_toko,
        umur_toko_bulan, badge, target_tanggal_live, prasyarat_pembukaan, sumber_data,
        tanggal_ambil_data, lampiran, periode_baseline_bulan, periode_mulai, periode_akhir,
+       periode_referensi_pdt,
        alasan_periode_pendek, catatan_periode_pendek, prioritas, prioritas_alasan,
        pengunjung_per_bulan, conversion_rate_persen, trafik_organik_persen,
        trafik_iklan_persen, trafik_affiliate_persen, trafik_live_persen,
@@ -7633,6 +7725,7 @@ async function copyChildren(
     select ${toId}, channel, channel_lain, status_channel, nama_toko, url_toko,
            umur_toko_bulan, badge, target_tanggal_live, prasyarat_pembukaan, sumber_data,
            tanggal_ambil_data, lampiran, periode_baseline_bulan, periode_mulai, periode_akhir,
+           periode_referensi_pdt,
            alasan_periode_pendek, catatan_periode_pendek, prioritas, prioritas_alasan,
            pengunjung_per_bulan, conversion_rate_persen, trafik_organik_persen,
            trafik_iklan_persen, trafik_affiliate_persen, trafik_live_persen,
