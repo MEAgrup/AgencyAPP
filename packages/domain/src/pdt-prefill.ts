@@ -483,3 +483,32 @@ export async function bacaPeriodeTerverifikasiTerbaru(
     .map((r) => ({ periodeAwalBulan: r.periode_awal_bulan, batchId: r.batch_id, parserVersi: r.parser_versi }))
     .reverse();
 }
+
+export interface PdtJumlahSkuMaster {
+  /** `count(*)` seluruh baris `pdt_sku_master` — kumulatif lintas periode (Rule 19: SKU tidak pernah dihapus), bukan hitungan "bulan ini". */
+  skuListed: number;
+  /** `count(*) where status_listing = 'aktif'`. */
+  skuAktif: number;
+}
+
+/**
+ * Hitungan `pdt_sku_master` per `client_platform_id` (B-3.1) — dipakai G3-03.
+ * TIDAK berbutir periode: `pdt_sku_master` adalah master lintas periode
+ * (Rule 17-20, `status_listing`/`last_seen_at` mencerminkan keadaan TERKINI,
+ * bukan snapshot bulan tertentu), jadi hitungannya sama untuk periode acuan
+ * PDT mana pun yang dipilih pemanggil. `{ skuListed: 0, skuAktif: 0 }` (bukan
+ * `null`) ketika `client_platform_id` ini belum pernah punya baris SKU sama
+ * sekali — pemanggil yang memutuskan jatuh ke payload lama (mis. saat channel
+ * ini belum onboarding PDT sama sekali), bukan modul ini.
+ */
+export async function bacaJumlahSkuMaster(
+  sql: Queryable,
+  clientPlatformId: number,
+): Promise<PdtJumlahSkuMaster> {
+  const rows = await sql<{ sku_listed: string; sku_aktif: string }[]>`
+    select count(*) as sku_listed,
+           count(*) filter (where status_listing = 'aktif') as sku_aktif
+      from pdt_sku_master
+     where client_platform_id = ${clientPlatformId}`;
+  return { skuListed: Number(rows[0].sku_listed), skuAktif: Number(rows[0].sku_aktif) };
+}
