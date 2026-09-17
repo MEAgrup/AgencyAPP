@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useCallback, useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { api, errorMessage } from '@/lib/api';
 import { FREQUENCIES, PRICING_MODES, type MasterService, type Pengakuan, type PlanTier, type QtyMenambah } from '@/lib/types';
 import { TIER_LABELS } from '@/lib/account';
@@ -21,6 +21,12 @@ import {
   type MslFormState,
   type ServiceRefs,
 } from '@/lib/msl';
+import {
+  enterHarusDitahan,
+  formatUangInput,
+  jumlahDigit,
+  posisiKaretUang,
+} from '@/lib/uang-input';
 import { useAuth } from '@/lib/auth-context';
 
 // "Batas Minimal" is stored as a DECIMAL string ("5.00") but is always a whole
@@ -30,6 +36,62 @@ function formatQty(value: string | undefined): string {
   const n = Number(value);
   if (Number.isNaN(n) || n <= 0) return '—';
   return String(Math.trunc(n));
+}
+
+/**
+ * QA pemilik 2026-09-17 — "ketika memasukan harga dan tertekan enter. muncul
+ * warning data tidak lengkap".
+ *
+ * Enter di dalam sebuah field mengirim form: itu perilaku bawaan HTML pada
+ * form yang punya tombol submit, bukan kode kami, dan hasilnya form yang baru
+ * terisi separuh dijawab gerbang wajib. Di sini Enter TIDAK PERNAH menyimpan —
+ * hanya tombol Simpan yang menyimpan. Aturan pastinya (tombol, textarea,
+ * Ctrl+Enter) diuji di `uang-input.test.ts`.
+ */
+function tahanEnter(e: KeyboardEvent<HTMLFormElement>) {
+  const el = e.target as HTMLInputElement;
+  if (enterHarusDitahan({
+    key: e.key,
+    tagName: el.tagName,
+    type: el.type,
+    shiftKey: e.shiftKey,
+    ctrlKey: e.ctrlKey,
+    metaKey: e.metaKey,
+    altKey: e.altKey,
+  })) {
+    e.preventDefault();
+  }
+}
+
+/**
+ * ubahUang memasang pemisah ribuan sambil diketik, lalu MENGEMBALIKAN karet ke
+ * digit yang sama.
+ *
+ * Tanpa pengembalian karet itu, setiap ketukan melempar kursor ke ujung dan
+ * menyunting di tengah angka jadi mustahil — cacat baru, bukan perbaikan.
+ */
+function ubahUang(el: HTMLInputElement, set: (tampil: string) => void) {
+  const digitSebelumnya = jumlahDigit(el.value.slice(0, el.selectionStart ?? el.value.length));
+  const tampil = formatUangInput(el.value);
+  set(tampil);
+  requestAnimationFrame(() => {
+    const pos = posisiKaretUang(tampil, digitSebelumnya);
+    try {
+      el.setSelectionRange(pos, pos);
+    } catch {
+      // Kotaknya sudah lepas dari DOM (form ditutup di tengah pengetikan).
+    }
+  });
+}
+
+/**
+ * Roda mouse di atas `<input type="number">` yang sedang fokus MENGUBAH
+ * nilainya — diam-diam, hanya karena halamannya digulir. Untuk "6 bulan" itu
+ * mengesalkan; untuk rupiah itu mengganti angka yang sudah benar tanpa ada
+ * yang mengetik apa pun. Lepaskan fokusnya, biar halaman yang tergulir.
+ */
+function janganUbahSaatGulir(e: { currentTarget: HTMLInputElement }) {
+  e.currentTarget.blur();
 }
 
 export default function MasterServicesPage() {
@@ -220,7 +282,7 @@ export default function MasterServicesPage() {
           <div className="cardHeader">
             <h2>{editingId ? 'Ubah Layanan' : 'Tambah Layanan'}</h2>
           </div>
-          <form className="form" onSubmit={handleSubmit}>
+          <form className="form" onSubmit={handleSubmit} onKeyDown={tahanEnter}>
             {formError && <div className="alert alertError" role="alert">{formError}</div>}
             <div className="formRow">
               <div className="field">
@@ -236,13 +298,22 @@ export default function MasterServicesPage() {
                 <label htmlFor="standard_price">Harga Standar (Rp)</label>
                 <input
                   id="standard_price"
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="8.000.000"
                   required={!isPassthrough}
                   disabled={isPassthrough}
                   value={isPassthrough ? '0' : form.standard_price}
-                  onChange={(e) => setForm((f) => ({ ...f, standard_price: e.target.value }))}
+                  onChange={(e) => ubahUang(e.target, (tampil) =>
+                    setForm((f) => ({ ...f, standard_price: tampil })))}
                 />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Ketik angkanya langsung — <code>8000000</code> menjadi{' '}
+                  <strong>8.000.000</strong>. Titik memisahkan ribuan, koma untuk
+                  sen. <strong>Enter tidak menyimpan</strong>; tombol Simpan di
+                  bawah yang menyimpan.
+                </span>
               </div>
             </div>
             <div className="formRow">
@@ -284,6 +355,7 @@ export default function MasterServicesPage() {
                     type="number"
                     min="1"
                     required
+                    onWheel={janganUbahSaatGulir}
                     value={form.min_qty}
                     onChange={(e) => setForm((f) => ({ ...f, min_qty: e.target.value }))}
                   />
@@ -381,6 +453,7 @@ export default function MasterServicesPage() {
                 type="number"
                 min="1"
                 step="1"
+                onWheel={janganUbahSaatGulir}
                 placeholder="kosongkan bila sekali jadi"
                 value={form.durasi_bulan}
                 onChange={(e) => setForm((f) => ({ ...f, durasi_bulan: e.target.value }))}
@@ -425,6 +498,7 @@ export default function MasterServicesPage() {
                           <input
                             aria-label={`Durasi baris ${idx + 1}`}
                             type="number" min="1" step="1" style={{ width: 120 }}
+                            onWheel={janganUbahSaatGulir}
                             value={o.durasi_bulan}
                             onChange={(e) => setForm((f) => ({
                               ...f,
@@ -436,13 +510,14 @@ export default function MasterServicesPage() {
                         <td>
                           <input
                             aria-label={`Harga paket baris ${idx + 1}`}
-                            type="number" min="0" step="0.01" style={{ width: 180 }}
+                            type="text" inputMode="numeric" autoComplete="off"
+                            placeholder="21.000.000" style={{ width: 180 }}
                             value={o.harga}
-                            onChange={(e) => setForm((f) => ({
+                            onChange={(e) => ubahUang(e.target, (tampil) => setForm((f) => ({
                               ...f,
                               durasi_options: f.durasi_options.map((r, i) =>
-                                i === idx ? { ...r, harga: e.target.value } : r),
-                            }))}
+                                i === idx ? { ...r, harga: tampil } : r),
+                            })))}
                           />
                         </td>
                         <td>
