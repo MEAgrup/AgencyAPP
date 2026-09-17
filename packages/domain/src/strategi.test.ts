@@ -4262,6 +4262,53 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     }
   });
 
+  it('G3-07: baselineBulan comes from pdt_fact_shop_daily once a channel has verified PDT batches — payload riwayat is IGNORED for that channel, but a channel with zero PDT batches still falls back to it', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    // Two verified PDT batches for TikTok Shop (basis 'net', Rule 15) — DELIBERATELY
+    // a different window (Jun/Jul) and different GMV than the payload's riwayat
+    // (Jul/Agu, gmv 90jt/100jt) so a pass-through bug (still reading the payload)
+    // would be caught by the assertions below, not silently coincide.
+    const batchJun = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-06-01', '2026-06-30', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan)
+      values (${tiktokId}, '2026-06-15', 'net', ${batchJun[0].id}, 1, '40000000.00', 400),
+             (${tiktokId}, '2026-07-15', 'net', ${batchJul[0].id}, 1, '50000000.00', 500)`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+      expect(tt.baselineBulan).toEqual([
+        { monthIndex: 1, label: 'Jun 2026', gmv: '40000000', jumlahPesanan: 400 },
+        { monthIndex: 2, label: 'Jul 2026', gmv: '50000000', jumlahPesanan: 500 },
+      ]);
+
+      // Shopee has zero PDT batches — untouched, still falls back to its own
+      // payload-derived history (empty here: the manual Shopee fixture carries no
+      // gmv_baseline.riwayat at all).
+      const sh = prefill!.channels.find((c) => c.channel === 'Shopee')!;
+      expect(sh.baselineBulan).toEqual([]);
+    } finally {
+      // Clean up before the shared afterEach deletes client_platforms (FK, no cascade).
+      await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
+
   it('returns null when the client has no riset awal analysis', async () => {
     const serviceId = await seedService();
     const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`

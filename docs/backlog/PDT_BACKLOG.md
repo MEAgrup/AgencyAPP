@@ -1703,6 +1703,28 @@ distinct `kampanye_id`/`sumber` periode berjalan.
 sebelumnya per `client_platform_id`, disusun `monthIndex` 1..6 sama seperti `getBaselinePrefill`
 hari ini — **bentuk keluaran TIDAK berubah**, hanya sumbernya.
 
+**Status 2026-09-17 (sesi 36) — DITUTUP.** `pdt-prefill.ts` mendapat `bacaPeriodeTerverifikasiTerbaru`
+(N batch `status='verified'` TERBARU per `client_platform_id`, urut kronologis naik — `status='verified'`
+saja sudah cukup menegakkan G3-08: batch `digantikan`/`ditolak`/`parsing` tidak pernah masuk). `getBaselinePrefill`
+(`strategi.ts`) memakainya: **strangler coexistence** (bukan hard-swap) — `client_platform_id` dengan
+≥1 batch verified membangun `baselineBulan` dari `pdt_fact_shop_daily` (`bacaFaktaShopDaily`, basis
+`'net'` TikTok/`'siap_dikirim'` Shopee — basis yang SAMA dipakai `bacaKpiShopDaily` untuk "KPI ringkas
+laporan", Rule 16, bukan basis baru ditebak); channel yang belum pernah PDT (nol batch verified) tetap
+jatuh ke `riwayat` payload Riset Awal PERSIS seperti sebelum tiket ini — mengganti sumber TANPA syarat
+ini akan mengosongkan riwayat setiap toko yang belum onboarding PDT (G1 belum lulus gerbang ≥10 klien
+nyata). `monthIndex` 1..N kronologis naik (1=bulan tertua, N=terbaru — diverifikasi cocok urutan
+`riwayat` payload yang ada, `strategi.test.ts` baris `Agu 2026`/index 1), `label` diformat via
+`@cdps/core` `baseline.MON` (array yang SAMA dipakai payload sendiri, "Agu 2026") supaya bentuknya
+identik. Field LAIN (`periodeBaselineBulan`/`cakupanRiwayat`/`alasanPeriodePendekWajib`) **tidak
+disentuh** — tetap payload-derived (field deklarasi kebijakan AM, Rule 5a, bukan field fakta — G3-02
+STOP salah mencatatnya sebagai "in scope", dikoreksi di sesi ini: field itu memang tidak pernah
+seharusnya bersumber PDT). Test baru: `pdt-prefill.test.ts` (3 kasus `bacaPeriodeTerverifikasiTerbaru`)
++ `strategi.test.ts` (1 kasus G3-07 — TikTok dengan 2 batch verified membaca PDT dengan GMV/bulan
+BERBEDA dari payload, Shopee tanpa batch tetap fallback payload). Full suite domain 2821/2822 (1 skip,
+2 flake audit-count di bawah beban paralel yang SUDAH terdokumentasi — bersih pada `db-rebuild.sh`
+segar + re-run terisolasi) + `@cdps/api` 559/653 (94 skip) + typecheck seluruh paket + `web-internal`
+bersih.
+
 ### G3-08 · Jalur koreksi (Rule 36)
 Prefill selalu membaca `pdt_upload_batch` yang **belum digantikan** (`menggantikan_batch_id`
 chain, sama pola G1 D-16/reparse) — batch `digantikan` tidak pernah dibaca sebagai sumber baru,

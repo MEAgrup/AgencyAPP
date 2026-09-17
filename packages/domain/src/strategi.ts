@@ -91,6 +91,7 @@ import {
 import * as contract from './contract';
 import { getInterview, listInterviewsByClient, type Answer, type InterviewListRow } from './interview';
 import * as pdt from './pdt';
+import * as pdtPrefill from './pdt-prefill';
 import { generatePlanPeriods } from './plan';
 import { effectiveGate, type PlanTier } from './plangate_rules';
 import { createHash, randomBytes } from 'node:crypto';
@@ -2157,7 +2158,7 @@ export async function getBaselinePrefill(
     berkasByPlatform.set(key, g);
   }
 
-  const channels: ChannelBaselineSuggestion[] = analisa.map((a) => {
+  const channels: ChannelBaselineSuggestion[] = await Promise.all(analisa.map(async (a) => {
     const payload = (a.payload ?? {}) as {
       gmv_baseline?: { bulan_terisi?: unknown; cakupan_riwayat?: unknown; riwayat?: unknown[] } | null;
       gmv_mix?: Record<string, unknown> | null;
@@ -2173,13 +2174,42 @@ export async function getBaselinePrefill(
     const alasanPeriodePendekWajib =
       a.cakupan_riwayat === 'kurang' || (periodeBaselineBulan !== null && periodeBaselineBulan < 3);
 
+    const clientPlatformIdNum = Number(a.client_platform_id);
+    const { channel, channelLain } = platformToChannel(a.platform);
+
+    // G3-07 — riwayat GMV 6 bulan dari `pdt_fact_shop_daily` (Rule 35), BUKAN lagi
+    // diketik/dibaca dari payload Riset Awal, begitu toko ini punya batch PDT
+    // terverifikasi. Strangler coexistence (pola sama G3-10): `client_platform_id`
+    // yang BELUM pernah upload PDT (nol batch verified) jatuh kembali ke riwayat
+    // payload lama persis seperti sebelum G3-07 — mengganti sumber TANPA syarat
+    // ini akan mengosongkan riwayat setiap toko yang belum onboarding ke PDT.
+    // Basis: TikTok satu-satunya ('net', Rule 15); Shopee 'siap_dikirim', pola
+    // SAMA yang sudah dipakai `bacaKpiShopDaily` untuk "KPI ringkas laporan"
+    // (`pdt.ts`, Rule 16) — angka penjualan headline, bukan kanal/ads.
+    const basisShopDaily = channel === 'TikTok Shop' ? 'net' : 'siap_dikirim';
+    const periodeVerified = await pdtPrefill.bacaPeriodeTerverifikasiTerbaru(sql, clientPlatformIdNum, 6);
+
     const riwayat = Array.isArray(gb?.riwayat) ? (gb!.riwayat as Record<string, unknown>[]) : [];
-    const baselineBulan: BaselineMonthSuggestion[] = riwayat.slice(0, 6).map((h, i) => ({
-      monthIndex: i + 1,
-      label: (h.label as string | null) ?? null,
-      gmv: numOrNullLoose(h.gmv) === null ? null : String(numOrNullLoose(h.gmv)),
-      jumlahPesanan: numOrNullLoose(h.order),
-    }));
+    const baselineBulan: BaselineMonthSuggestion[] =
+      periodeVerified.length > 0
+        ? await Promise.all(
+            periodeVerified.map(async (p, i) => {
+              const fakta = await pdtPrefill.bacaFaktaShopDaily(sql, clientPlatformIdNum, p.periodeAwalBulan, basisShopDaily);
+              const d = new Date(`${p.periodeAwalBulan}T00:00:00Z`);
+              return {
+                monthIndex: i + 1,
+                label: `${bl.MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
+                gmv: fakta === null ? null : String(fakta.gmv),
+                jumlahPesanan: fakta === null ? null : fakta.pesanan,
+              };
+            }),
+          )
+        : riwayat.slice(0, 6).map((h, i) => ({
+            monthIndex: i + 1,
+            label: (h.label as string | null) ?? null,
+            gmv: numOrNullLoose(h.gmv) === null ? null : String(numOrNullLoose(h.gmv)),
+            jumlahPesanan: numOrNullLoose(h.order),
+          }));
 
     const mix = payload.gmv_mix ?? null;
     const gmvMix: GmvMixRincian | null =
@@ -2196,7 +2226,6 @@ export async function getBaselinePrefill(
     const prov = berkasByPlatform.get(a.platform) ?? null;
     const aovNum = numOrNullLoose(payload.toko?.aov);
     const adSpendNum = numOrNullLoose(payload.iklan?.belanja);
-    const { channel, channelLain } = platformToChannel(a.platform);
 
     // B3 — one mapper, every schema. It reads only key paths the baseline
     // payloads share, so it needs no `metode_baseline` branch and no platform
@@ -2206,7 +2235,7 @@ export async function getBaselinePrefill(
     const b = bl.mapPayloadToSectionB(a.payload);
 
     return {
-      clientPlatformId: Number(a.client_platform_id),
+      clientPlatformId: clientPlatformIdNum,
       platform: a.platform,
       channel,
       channelLain,
@@ -2262,7 +2291,7 @@ export async function getBaselinePrefill(
       jamLivePerBulan: b.jamLivePerBulan,
       gmvLive: b.gmvLive,
     };
-  });
+  }));
 
   return { interviewId: chosen.id, channels };
 }
