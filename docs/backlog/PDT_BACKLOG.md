@@ -1730,10 +1730,52 @@ Prefill selalu membaca `pdt_upload_batch` yang **belum digantikan** (`menggantik
 chain, sama pola G1 D-16/reparse) — batch `digantikan` tidak pernah dibaca sebagai sumber baru,
 persis prinsip yang sudah ditegakkan di jalur upload sendiri.
 
+**Status 2026-09-17 (sesi 37) — DITUTUP, dengan temuan.** Diverifikasi: SETIAP pembaca G3-01/G3-07
+(`bacaFaktaShopDaily`, `bacaFaktaSkuPeriode`, `bacaFaktaContent`, `bacaFaktaCreatorPeriode`,
+`bacaFaktaAds`, `bacaFaktaKesehatanPenalti`, `bacaPeriodeTerverifikasiTerbaru`) menyaring
+`status = 'verified'` secara eksplisit di query-nya masing-masing — jadi klaim tiket ini ("batch
+`digantikan` tidak pernah dibaca sebagai sumber baru") **terpenuhi**.
+
+**Temuan sampingan (bukan blocker G3, dicatat untuk penjadwalan G1 nanti):** `status='digantikan'`
+sendiri **TIDAK PERNAH bisa terjadi** di kode hari ini — `PdtCommitStatus` (`pdt.ts:538`) hanya
+punya EMPAT nilai (`'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak'`), `'digantikan'`
+tidak termasuk di union type-nya sama sekali. Baik `commitUploadBatch` maupun `reparsePdtBatch`
+menulis `status` dari `resolveStatusIdentitasRekonsiliasi` yang HANYA menghasilkan keempat nilai
+itu; tidak ada baris kode yang pernah menulis `'digantikan'` atau mengisi `menggantikan_batch_id`
+(digrep di seluruh `packages/`+`apps/` — nol hasil di luar definisi kolom migrasi). Separuh kedua
+Rule 36 ("submit kedua membuat batch baru dengan `menggantikan_batch_id`; batch lama ditandai
+`digantikan`") secara faktual **belum diimplementasikan** — jalur koreksi yang ADA hari ini
+hanyalah reparse-in-place (G1-11, menimpa baris batch YANG SAMA), bukan penggantian-dengan-batch-
+baru. Kolom `status='digantikan'`/`menggantikan_batch_id` di skema (`20261011010000`) menunggu
+penulisnya. Ini gap sisi G1 (alur commit upload), bukan G3 (Prefill) — di luar cakupan tiket ini,
+tidak diimplementasikan di sini (scope creep tanpa tiket sendiri). Verifikasi G3-08 tetap TUTUP
+karena klaimnya ("Prefill tidak pernah membaca batch digantikan") terbukti benar dan bahkan
+lebih kuat dari yang diminta: hari ini tidak ada baris `digantikan` yang bisa muncul sama sekali,
+jadi filter `status='verified'` sudah menegakkannya secara vakum. Disarankan tiket G1 lanjutan
+(mis. "G1-12 · Jalur supersede batch verified") sebelum Rule 36 benar-benar tertutup end-to-end.
+
 ### G3-09 · `tanggal_tarik_data` dari jam server (Rule 37)
 Verifikasi (kemungkinan sudah benar — `commitUploadBatch` sudah pakai `now()` server, bukan
 input klien): audit satu per satu titik di mana Prefill menulis tanggal, pastikan nol
 `new Date()` sisi browser lolos ke kolom ini.
+
+**Status 2026-09-17 (sesi 37) — DITUTUP, bersih.** Kolom yang dimaksud PRD §3.7 Rule 37 adalah
+`pdt_upload_batch.dibuat_pada` (`20261011010000:139`, komentar migrasi sendiri sudah mengutip
+"Rule 37"): `timestamptz NOT NULL DEFAULT now()` — enforced di LEVEL DB, bukan cuma TS (pola rumah
+CLAUDE.md §"Penegakan aturan ada di DB"). Diaudit setiap penulis: `commitUploadBatch`'s INSERT
+(`pdt.ts:849-858`) TIDAK menyertakan `dibuat_pada` di daftar kolomnya sama sekali → selalu jatuh
+ke DEFAULT kolom (jam server Postgres, bukan `new Date()` Node apalagi jam browser).
+`reparsePdtBatch`'s UPDATE (`pdt.ts:2235-2239`) juga tidak pernah menyentuh `dibuat_pada` (hanya
+`parser_versi`/`status`/`alasan_ditolak`/`reconcile_delta_pct`/`identitas_sumber`) — kolom ini
+immutable pasca-insert. Digrep seluruh `pdt.ts`: TIGA kemunculan `dibuat_pada` lainnya SEMUA
+`select`/read-back (baris 1623/1632/1647 baca-balik untuk respons; tidak ada write eksplisit di
+mana pun). Tidak ditemukan jalur — domain, API route, atau seed — yang menerima timestamp dari
+klien lalu meneruskannya ke kolom ini. `tanggalAmbil`/`tanggal_ambil_data` yang muncul di
+`strategi.ts`/`riset-awal.ts` (mis. `riset_awal_sumber_berkas.tanggal_ambil`, `strategi_channel
+.tanggal_ambil_data`) adalah field BERBEDA secara konsep — atribusi AM "kapan file sumber ini
+saya unduh dari platform" (Rule 5/B-0.6, legitimately AM-entered), bukan jam sistem menarik data
+PDT — jadi di luar cakupan Rule 37 dan sengaja tidak disentuh tiket ini. Nol perubahan kode;
+verifikasi murni.
 
 ### G3-10 · Matikan AM Baseline (Riset Awal manual + Video Factory)
 Hanya setelah G3-02…G3-09 menutup field yang PUNYA sumber fakta (Rule 33) — field yang **tidak**
