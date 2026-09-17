@@ -1602,6 +1602,34 @@ yang membungkus query agregasi bulanan atas `pdt_fact_shop_daily`/`pdt_fact_sku_
 ulang oleh G3-02…G3-06 (satu jalur baca, bukan lima query ad-hoc). Mengembalikan, per field,
 nilai + `batch_id` sumbernya (Rule 33 "tautan ke batch sumbernya") + `parser_versi`.
 
+**Status 2026-09-17 (sesi 36) — DITUTUP.** Modul baru `packages/domain/src/pdt-prefill.ts`
+(diekspor `pdtPrefill` di barrel domain), NOL migrasi (murni pembaca atas skema G1-01/G2-01 yang
+sudah ada). Bentuk balik SENGAJA tidak seragam per tabel, digrounding ke granularitas asli tiap
+tabel (bukan dipaksa satu bentuk):
+- `bacaFaktaShopDaily` — SATU-SATUNYA yang mengagregasi (tabel berbutir harian): jumlah bulanan
+  null-aware per kolom (`count(kolom)=0` ⇒ `null`, bukan 0, pola sama `bacaLive`/`bacaVideo` di
+  `pdt.ts`), `basis` WAJIB eksplisit (Rule 15/16), dan `sumberBatch` adalah DAFTAR distinct
+  `(batchId, parserVersi)` — bukan satu "batch kanonik" ditebak (Rule 1 membuat satu batch/periode
+  jadi kasus normal, tapi jalur koreksi G3-08/Rule 36 bisa membuatnya tidak selalu tunggal; pembaca
+  menampilkan apa adanya daripada menyembunyikan campuran).
+- `bacaFaktaSkuPeriode`/`bacaFaktaContent`/`bacaFaktaCreatorPeriode`/`bacaFaktaAds`/
+  `bacaFaktaKesehatanPenalti` — kelimanya SUDAH berbutir bulanan di skema aslinya (kunci unik
+  masing-masing sudah menyertakan `periode`), jadi mengembalikan DAFTAR baris apa adanya (batch_id/
+  parser_versi asli per baris) — penjumlahan/derivasi metrik (distribusi kuadran, jumlah video,
+  weighted ROAS, dst.) sengaja diserahkan ke G3-03…G3-06 masing-masing, bukan ditebak di sini.
+- **Temuan sampingan dipatch di jalan**: draf awal `bacaFaktaSkuPeriode` men-join `pdt_sku_master`
+  untuk scoping `client_platform_id` — SALAH, migrasi `20261025010000` (G1-09-2BII-ADS-CPC-SKU)
+  sudah mendenormalisasi `client_platform_id`/`platform_product_id` LANGSUNG ke
+  `pdt_fact_sku_period` justru supaya baris level-produk-induk (`sku_id IS NULL`, mis.
+  `tt_product_analytics`) tetap terjangkau tanpa join lewat `sku_id` — join itu akan diam-diam
+  membuang baris itu (kelas bug RLS yang SAMA yang migrasi itu tutup, kali ini di jalur baca).
+  Diperbaiki sebelum commit: query langsung ke `pdt_fact_sku_period.client_platform_id`, `skuId`
+  nullable, `platformProductId`/`namaProduk` (tampilan UI saja, Rule 20) ditambah ke bentuk balik.
+- Test DB nyata (`pdt-prefill.test.ts`, 8 kasus) meliputi: agregasi lintas hari + null-aware,
+  isolasi basis (Rule 15/16), nol-baris ⇒ `null`, baris level-SKU vs level-produk-induk,
+  filter `isAkunToko`/`sumber` opsional, urutan `poin desc` kesehatan toko. Full suite domain
+  2817/2818 (1 skip, bukan regresi) + typecheck seluruh paket + `web-internal` bersih.
+
 ### G3-02 · Autofill B-0.6/B-0.7/B-1 + kesehatan toko
 - B-0.6 (provenance)/B-0.7 (periode)/B-1 (GMV+pesanan per bulan) — **sudah** terwarisi hari ini
   dari `riset_awal_analisa.payload` (`DECISIONS.md` 2026-08-20); tiket ini mengganti SUMBERNYA ke

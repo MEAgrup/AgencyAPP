@@ -200,6 +200,10 @@ export * as productexchange from './productexchange';
 // `@cdps/core` `pdt` (deteksi/identitas/rekonsiliasi/parsestatus, murni) ke
 // baris `client_platforms`/`clients` sungguhan. Lihat `docs/prd/CDPS_PDT_Pusat_Data_Toko.md`.
 export * as pdt from './pdt';
+// G3-01 — pembaca fakta bersama per client_platform_id+periode (Rule 33 provenance),
+// dipakai ulang oleh G3-02..G3-06. Modul terpisah dari `pdt.ts` per catatan backlog
+// (`docs/backlog/PDT_BACKLOG.md` §3): bukan perluasan `strategi.ts`.
+export * as pdtPrefill from './pdt-prefill';
 // F-6 (feedback lapangan 2026-09-14) — Daily Activity (DACT-): log aktivitas
 // harian karyawan (keluaran kerja, bukan absensi), nyambung M14 Team
 // Performance. Lihat docs/DECISIONS.md 2026-09-14 (F-6).
