@@ -1579,7 +1579,84 @@ Itulah ruang ekspansi terbesar PDT.
 2. `mergeBaselinePrefill` (`web-internal/src/lib/strategi-baseline-inherit.ts`) **hanya mengisi
    yang kosong, tidak pernah menimpa**. Pertahankan.
 
-⛔ **`strategi.ts` (7.763 baris) tidak disentuh** (PDT-18).
+⛔ **`strategi.ts` (7.763 baris) tidak disentuh** secara luas (PDT-18) — baca ini sebagai "jangan
+refactor besar-besaran", bukan "jangan sentuh sama sekali": `getBaselinePrefill`/
+`getStrategiPrefill` adalah titik integrasi yang MEMANG ditunjuk pagar #2 di atas untuk diperluas
+(persis pola G4-02 yang menambah field ke `strategi.ts` secara bedah, bukan menulis ulang berkas).
+Yang dilarang adalah menyebar perubahan ke Section C–I yang tidak relevan.
+
+> ⚠️ **Status 2026-09-17 (sesi 35) — dipecah jadi tiket bernomor (di bawah), BELUM diimplementasikan
+> apa pun.** Backlog-grooming murni (nol kode, nol migrasi) — pemetaan field→tabel di bawah
+> diverifikasi ke `CREATE TABLE` sungguhan (`supabase/migrations/20261011010000_g1_01_pdt_tables.sql`
+> + `20261106010000_g2_01_shopee_kesehatan_writer.sql`), bukan ditebak. **Satu gap ditemukan saat
+> memetakan**: `chatResponseRatePersen`/`chatResponseMenit`/`poinPenalti` Section B — `poinPenalti`
+> SUDAH punya fakta (`pdt_fact_kesehatan_penalti.poin`, G2-01), tapi **chat response rate/menit
+> belum punya tabel fakta apa pun** (modul parser `chat_search_live` terdeteksi sejak G1-09 sub-2b-ii,
+> tapi nol writer — pola yang SAMA seperti `pdt_fact_kesehatan_penalti` sebelum G2-01 menutupnya).
+> G3-02 di bawah mencatat ini sebagai prasyaratnya sendiri, bukan tebakan skema.
+
+### G3-01 · Pembaca fakta bersama per `client_platform_id` + periode
+Satu modul baru (`packages/domain/src/pdt-prefill.ts` atau perluasan `pdt.ts` — bukan `strategi.ts`)
+yang membungkus query agregasi bulanan atas `pdt_fact_shop_daily`/`pdt_fact_sku_period`/
+`pdt_fact_content`/`pdt_fact_creator_period`/`pdt_fact_ads`/`pdt_fact_kesehatan_penalti`, dipakai
+ulang oleh G3-02…G3-06 (satu jalur baca, bukan lima query ad-hoc). Mengembalikan, per field,
+nilai + `batch_id` sumbernya (Rule 33 "tautan ke batch sumbernya") + `parser_versi`.
+
+### G3-02 · Autofill B-0.6/B-0.7/B-1 + kesehatan toko
+- B-0.6 (provenance)/B-0.7 (periode)/B-1 (GMV+pesanan per bulan) — **sudah** terwarisi hari ini
+  dari `riset_awal_analisa.payload` (`DECISIONS.md` 2026-08-20); tiket ini mengganti SUMBERNYA ke
+  `pdt_fact_shop_daily` (basis sesuai Rule 15/16 — TikTok `net`, Shopee tiga basis terpisah,
+  **tidak pernah dijumlah**) lewat G3-01, bukan payload Riset Awal.
+- `refundRatePersen` ← `pdt_fact_shop_daily.refund / gmv`.
+- `pengunjungPerBulan`/`conversionRatePersen` ← `pdt_fact_shop_daily.pengunjung`/`cr`.
+- `poinPenalti` ← `pdt_fact_kesehatan_penalti.poin` (Σ periode, sudah ada sejak G2-01).
+- ⛔ **Prasyarat belum terpenuhi**: `chatResponseRatePersen`/`chatResponseMenit` **butuh tabel
+  fakta baru** (nol writer hari ini — lihat catatan status di atas). Sub-tiket tersendiri
+  (`G3-02a`, pola sama `20261106010000_g2_01_shopee_kesehatan_writer.sql`) sebelum kedua field
+  ini bisa autofill; jangan ditebak dari kolom yang tidak ada.
+
+### G3-03 · Dimensi SKU (B-2 portofolio SKU)
+`skuListed`/`skuAktif` ← hitungan `pdt_sku_master.status_listing` (Rule 19, SKU tidak pernah
+dihapus). `skuPareto80`/`skuSlowMoving`/`topSku` ← distribusi `gmv` `pdt_fact_sku_period` per
+periode (kolom `kuadran` sudah membawa klasifikasi Riset Awal — pakai ulang, jangan hitung ulang
+ambang yang berbeda tanpa alasan).
+
+### G3-04 · Dimensi konten (video/live, bagian B-7)
+`jumlahVideoPerBulan`/`totalViews`/`gmvVideo` ← `pdt_fact_content` `jenis='video'` (vv/gmv, filter
+`is_akun_toko` sesuai kebutuhan toko-vs-afiliasi). `jamLivePerBulan`/`gmvLive` ← `jenis='live'`
+(`durasi_detik`/3600, `gmv`).
+
+### G3-05 · Dimensi afiliasi/kreator (B-6)
+`affiliateAktif30Hari`/`gmvAffiliate`/`gmvAffiliatePersen`/`topKreator`/`sampelTerkirim` ←
+`pdt_fact_creator_period` (join `pdt_fact_content.creator_handle` bila hitungan "aktif 30 hari"
+butuh tanggal posting, bukan cuma agregat bulanan).
+
+### G3-06 · Dimensi iklan (B-4/B-5 belanja+ROAS+kampanye)
+`adSpend`/`roas` ← `pdt_fact_ads` (Σ `biaya`, `roas` rata-rata tertimbang — **bukan** rata-rata
+polos, lihat catatan `report/dimensi_roas` yang sudah ada). `jumlahKampanyeAktif`/`tipeKampanye` ←
+distinct `kampanye_id`/`sumber` periode berjalan.
+
+### G3-07 · Riwayat GMV 6 bulan (Rule 35)
+`baselineBulan` (24 sel manual hari ini) ← rollup bulanan `pdt_fact_shop_daily` 6 batch
+sebelumnya per `client_platform_id`, disusun `monthIndex` 1..6 sama seperti `getBaselinePrefill`
+hari ini — **bentuk keluaran TIDAK berubah**, hanya sumbernya.
+
+### G3-08 · Jalur koreksi (Rule 36)
+Prefill selalu membaca `pdt_upload_batch` yang **belum digantikan** (`menggantikan_batch_id`
+chain, sama pola G1 D-16/reparse) — batch `digantikan` tidak pernah dibaca sebagai sumber baru,
+persis prinsip yang sudah ditegakkan di jalur upload sendiri.
+
+### G3-09 · `tanggal_tarik_data` dari jam server (Rule 37)
+Verifikasi (kemungkinan sudah benar — `commitUploadBatch` sudah pakai `now()` server, bukan
+input klien): audit satu per satu titik di mana Prefill menulis tanggal, pastikan nol
+`new Date()` sisi browser lolos ke kolom ini.
+
+### G3-10 · Matikan AM Baseline (Riset Awal manual + Video Factory)
+Hanya setelah G3-02…G3-09 menutup field yang PUNYA sumber fakta (Rule 33) — field yang **tidak**
+punya sumber (mayoritas B-2…B-9 di luar yang disebut di atas) **tetap manual** (Rule 34) selamanya,
+bukan menunggu tiket lanjutan. Iframe `web-internal/public/tools/video-factory.html` dimatikan
+mengikuti pola strangler PDT-17 (halaman lama dibiarkan sampai lalu lintasnya nol, bukan dihapus
+paksa di tengah periode aktif).
 
 ---
 
@@ -1629,6 +1706,28 @@ Jadi `pdt_satuan_t` (`rupiah`, `persen`, `hitungan`, `jam`, `hari`, `views`) **b
   `packages/core/src/report/render.ts` dan `adsscanner/tiktok/render.ts`; dan
   `toLocaleString('id-ID')` mentah di `brief-inherit.ts:182` + `ads.ts:1766`.
 
+> **Status 2026-09-17 (sesi 35) — DITUTUP.** `plan_row.satuan_kategori` dan
+> `strategi_resource.jumlah_satuan_kategori`, keduanya `pdt_satuan_t` — **dipakai ulang** enum
+> G1-01 (`pdt_usulan_katalog.satuan`), bukan enum baru untuk konsep yang sama. Kategori diturunkan
+> dari label `satuan` bebas yang sudah ada lewat **satu** mapper (`packages/core/src/satuan.ts`
+> `kategoriDariSatuanLabel`), dan **satu** formatter (`formatNilaiSatuan`, sama berkas + mirrornya
+> di `web-internal/src/lib/money.ts` untuk sisi FE) menutup Rule 28 — ini yang menutup kedua bug
+> historis yang disebut ticket ("20 sesi live dicetak Rp 20,00" pada `account/plan/[id]`, dan CTOR
+> persen `copilot.ts` L3 yang sebelumnya `unit: 'Rp'`). Label `satuan`/`jumlah` sendiri **TIDAK
+> berubah peran** — tetap teks bebas untuk tampilan dan (untuk divisi ber-katalog) kunci identitas
+> `jenisBySatuan`; kolom kategori murni sidecar tertulis-ulang di SETIAP jalur tulis
+> (`seedRowFromPillar`/`createPlanRow`/`seedRowsFromPillars`/`copyRowToPeriod`/`saveResources`),
+> bukan cuma migrasi satu kali. `strategi_resource.jumlah_satuan_kategori` nullable dengan
+> `CHECK (satuan IS NULL) = (jumlah_satuan_kategori IS NULL)` — NULL tidak pernah diam-diam jadi
+> `hitungan`. Backfill live diverifikasi terhadap data nyata (`plan_row` 10 baris, `strategi_resource`
+> 0 baris) sebelum ditulis — nol risiko backfill salah kategori. Migrasi `20261110010000` diterapkan
+> ke live `CDPS SG`; gate tidak bergerak (182/45/35/76). **Belum disentuh sesi ini** (di luar
+> cakupan G4-02): konsolidasi tiga-gaya-IDR yang disebut di atas (`report/render.ts`,
+> `adsscanner/tiktok/render.ts`, `brief-inherit.ts:182`, `ads.ts:1766`) — itu bukan bug G4-02
+> menutup, formatter BARU ini hanya dipakai jalur `plan_row`/`strategi_resource` yang memang
+> ticket ini sebut; dan bug `copilot.ts` L3/liveCtor unit-mislabeling (ditemukan sesi ini,
+> sengaja dibiarkan untuk G4-03 yang memang menyentuh ulang katalog Shopee).
+
 ### G4-03 · Minimal **6 aksi khusus Shopee** + loop verdict
 - Tiap aksi menyatakan `platform_berlaku` **eksplisit**. Aksi yang hanya berlaku TikTok
   **tidak boleh** membuat klien Shopee menerima nol usulan **tanpa pesan**; bila nol aksi memenuhi
@@ -1643,6 +1742,20 @@ Jadi `pdt_satuan_t` (`rupiah`, `persen`, `hitungan`, `jam`, `hari`, `views`) **b
 ⚠️ **Jangan tulis `wrr_metrik` langsung.** Baris ber-`otomatis` di sana UPDATE-blocked untuk AM;
 jalur yang benar dari hasil parse adalah membuat **Metric Entry (`MTR-`, `entry_method='File Export'`)**.
 GMV bulanan otoritatif tetap entri manual AM (M6B P-E / M6D §3 Rule 11).
+
+> ⚠️ **STOP 2026-09-17 (sesi 35) — belum dimulai, menunggu keputusan pemilik.** Verifikasi ke kode
+> (bukan asumsi) menemukan mesin usulan yang BENAR-BENAR berjalan hari ini (`copilot.susunUsulan` +
+> `strategi.susunPilarUsulan`) membaca `riset_awal_analisa.payload` (baseline lama) dan menulis
+> HANYA ke Strategi Section E — **nol baris TS pernah menyentuh tabel `pdt_usulan`** (grep kosong
+> di luar `_katalog`). PRD Flow C eksplisit minta mesin membaca **`pdt_fact_*`** (bukan payload
+> Riset Awal) dan mengevaluasi ulang dari **fakta batch berikutnya** (bukan Riset Awal berikutnya).
+> Ini bukan gap kosmetik: "6 aksi khusus Shopee" yang genuinely Shopee-eksklusif kemungkinan besar
+> butuh field yang cuma ada di `pdt_fact_shop_daily`/`pdt_fact_ads`/`pdt_fact_kesehatan_penalti`
+> (cancel rate, chat/response penalti, AMS/CPC, flash sale/diskon) — field yang TIDAK ADA di
+> kosakata `MetrikKunci` yang dipakai katalog hari ini. Detail lengkap + dua opsi bercabang
+> (mesin fakta baru vs snapshot Section E) dicatat `docs/DECISIONS.md` **G4-03-VERDICT-ENGINE**
+> (Open, belum diputuskan). **Jangan mulai coding G4-03 sebelum baris itu tertutup** — mengarang
+> salah satu opsi tanpa konfirmasi berisiko dua mesin evaluasi yang tidak sinkron.
 
 ---
 

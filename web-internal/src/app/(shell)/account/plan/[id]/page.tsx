@@ -64,7 +64,7 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { isAccountLead, isAccountStaff, isReadOnlyOD } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
-import { formatIDR } from '@/lib/money';
+import { formatIDR, formatNilaiSatuan } from '@/lib/money';
 import { getStrategi, listStrategiQueue, type StrategiPillar } from '@/lib/strategi';
 import { getClient, type ServiceLine } from '@/lib/clients';
 import { suggestRowFromPillar } from '@/lib/plan-row-suggest';
@@ -792,12 +792,20 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                         )}
                       </td>
                       <td style={{ paddingRight: 8, whiteSpace: 'nowrap' }}>
-                        {jenis?.money ? (
-                          <strong>{formatIDR(r.kuota)}</strong>
-                        ) : (
+                        {/* Formatter TUNGGAL (Rule 28, G4-02) — dibaca dari
+                            satuan_kategori (server-computed), bukan ditebak dari
+                            jenis.money/nama divisi. `hitungan` masih menampilkan
+                            label satuan spesifik (mis. "video") di sebelah
+                            angkanya karena formatter sendiri tidak tahu kata
+                            benda apa yang dihitung; kategori lain (rupiah/
+                            persen/jam/hari/views/rasio) sudah membawa unitnya
+                            sendiri. */}
+                        {r.satuan_kategori === 'hitungan' ? (
                           <>
-                            <strong>{r.kuota}</strong> {r.satuan}
+                            <strong>{formatNilaiSatuan(r.kuota, r.satuan_kategori)}</strong> {r.satuan}
                           </>
+                        ) : (
+                          <strong>{formatNilaiSatuan(r.kuota, r.satuan_kategori)}</strong>
                         )}
                         {/* Which registered deliverable this is. Recovered from
                             (divisi_pic, satuan) — there is no `jenis_task`

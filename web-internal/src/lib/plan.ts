@@ -12,6 +12,7 @@
 
 import { api } from './api';
 import type { Brief } from '@/lib/account';
+import type { PdtSatuanKategori } from './money';
 
 // ---------------------------------------------------------------------------
 // Shapes (mirror `apps/api/src/lib/wire.ts` Plan* wire interfaces exactly).
@@ -64,6 +65,8 @@ export interface PlanRow {
   sku_sasaran: unknown[];
   kuota: number;
   satuan: string;
+  /** G4-02 — kategori pengukuran untuk formatter tunggal (`formatNilaiSatuan`, Rule 28). */
+  satuan_kategori: PdtSatuanKategori;
   budget: number | null;
   divisi_pic: string;
   minggu_sasaran: number[];

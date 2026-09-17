@@ -1163,6 +1163,32 @@ describeDb('Section E — Rules 11 and 18', () => {
       saveResources(sql, am(), s.id, [{ jenis: 'budget_iklan', nilai: '45000000.00' }]),
     ).rejects.toThrow(ValidationError);
   });
+
+  it('derives jumlah_satuan_kategori from satuan on every resource row (Rule 27/28, G4-02) — null stays null', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const detail = await saveResources(sql, am(), s.id, [
+      { jenis: 'budget_iklan', nilai: '45000000.00', sumberDana: 'klien', jumlah: 45000000, satuan: 'Rp' },
+      { jenis: 'konten', jumlah: 10, satuan: 'video' },
+      { jenis: 'divisi', divisi: 'Live Stream', jumlah: 36, satuan: 'jam live' },
+      { jenis: 'tools' },
+    ]);
+
+    const budget = detail.resources.find((r) => r.jenis === 'budget_iklan');
+    expect(budget?.jumlahSatuanKategori).toBe('rupiah');
+    const konten = detail.resources.find((r) => r.jenis === 'konten');
+    // The historical bug this ticket closes: a count of videos must never format as Rupiah.
+    expect(konten?.jumlahSatuanKategori).toBe('hitungan');
+    const divisi = detail.resources.find((r) => r.jenis === 'divisi');
+    expect(divisi?.jumlahSatuanKategori).toBe('jam');
+    const tools = detail.resources.find((r) => r.jenis === 'tools');
+    expect(tools?.satuan).toBeNull();
+    expect(tools?.jumlahSatuanKategori).toBeNull();
+
+    // Persisted, not just returned in-memory.
+    const reloaded = await getStrategi(sql, am(), s.id);
+    expect(reloaded.resources.find((r) => r.jenis === 'budget_iklan')?.jumlahSatuanKategori).toBe('rupiah');
+  });
 });
 
 describeDb('Section A — A-05 (Konteks Klien & Bisnis)', () => {

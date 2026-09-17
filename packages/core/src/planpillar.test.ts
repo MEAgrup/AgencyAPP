@@ -188,6 +188,7 @@ describe('seedRowFromPillar', () => {
       skuSasaran: [],
       kuota: 30,
       satuan: 'video',
+      satuanKategori: 'hitungan',
       divisiPic: 'Creative',
       hasilDiharapkan: '30 video, jembatan Video bertayangan / bulan',
       instruksiBrief: null,

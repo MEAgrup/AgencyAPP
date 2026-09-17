@@ -3974,6 +3974,7 @@ export interface PlanRowWire {
   sku_sasaran: unknown[];
   kuota: number;
   satuan: string;
+  satuan_kategori: string;
   budget: number | null;
   divisi_pic: string;
   minggu_sasaran: number[];
@@ -4006,6 +4007,7 @@ export function planRowToWire(r: plan.PlanRow): PlanRowWire {
     sku_sasaran: r.skuSasaran,
     kuota: r.kuota,
     satuan: r.satuan,
+    satuan_kategori: r.satuanKategori,
     budget: r.budget,
     divisi_pic: r.divisiPic,
     minggu_sasaran: r.mingguSasaran,
@@ -4785,6 +4787,7 @@ export interface StrategiResourceWire {
   nilai: string | null;
   jumlah: number | null;
   satuan: string | null;
+  jumlah_satuan_kategori: string | null;
   sumber_dana: string | null;
   vendor_id: string | null;
   skema_biaya: string | null;
@@ -5192,6 +5195,7 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       nilai: r.nilai,
       jumlah: r.jumlah,
       satuan: r.satuan,
+      jumlah_satuan_kategori: r.jumlahSatuanKategori,
       sumber_dana: r.sumberDana,
       vendor_id: r.vendorId,
       skema_biaya: r.skemaBiaya,

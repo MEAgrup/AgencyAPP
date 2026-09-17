@@ -11,6 +11,7 @@
 // boundary lives in `apps/api/src/lib/wire.ts` and nowhere else.
 
 import { api } from './api';
+import type { PdtSatuanKategori } from './money';
 
 // ---------------------------------------------------------------------------
 // Vendor (M6A §7 / D19) — the E-8 / F-4 prerequisite.
@@ -738,6 +739,8 @@ export interface StrategiResource {
   nilai: string | null;
   jumlah: number | null;
   satuan: string | null;
+  /** G4-02 — kategori pengukuran `jumlah` untuk formatter tunggal (Rule 28). Null persis saat satuan null. */
+  jumlah_satuan_kategori: PdtSatuanKategori | null;
   sumber_dana: string | null;
   vendor_id: string | null;
   skema_biaya: string | null;
