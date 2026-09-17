@@ -2259,6 +2259,32 @@ export async function getBaselinePrefill(
       }
     }
 
+    // G3-03 (B-2/B-3 portofolio SKU) — `pdt_sku_master.status_listing` untuk
+    // B-3.1 (Rule 19, TIDAK berbutir periode — lihat `bacaJumlahSkuMaster`),
+    // distribusi `gmv` `pdt_fact_sku_period` bulan acuan untuk B-3.2/B-3.3/B-3.4
+    // (`skuPareto80DariFakta`/`skuSlowMovingDariFakta`/`topSkuDariFakta`).
+    // Sama seperti B-4 di atas: gerbangnya `periodeReferensiPdtSaran !== null`
+    // (channel ini punya ≥1 batch verified), BUKAN eksistensi baris master itu
+    // sendiri — batch `ditolak`/`parsing` tidak boleh diam-diam masuk Section B.
+    let pdtSkuListed: number | null = null;
+    let pdtSkuAktif: number | null = null;
+    let pdtSkuPareto80: number | null = null;
+    let pdtSkuSlowMoving: number | null = null;
+    let pdtTopSku: TopSkuSuggestion[] | null = null;
+    if (periodeReferensiPdtSaran !== null) {
+      const jumlahSku = await pdtPrefill.bacaJumlahSkuMaster(sql, clientPlatformIdNum);
+      if (jumlahSku.skuListed > 0) {
+        pdtSkuListed = jumlahSku.skuListed;
+        pdtSkuAktif = jumlahSku.skuAktif;
+      }
+      const faktaSku = await pdtPrefill.bacaFaktaSkuPeriode(sql, clientPlatformIdNum, periodeReferensiPdtSaran, basisShopDaily);
+      if (faktaSku.length > 0) {
+        pdtSkuPareto80 = skuPareto80DariFakta(faktaSku);
+        pdtSkuSlowMoving = skuSlowMovingDariFakta(faktaSku);
+        pdtTopSku = topSkuDariFakta(faktaSku);
+      }
+    }
+
     const riwayat = Array.isArray(gb?.riwayat) ? (gb!.riwayat as Record<string, unknown>[]) : [];
     const baselineBulan: BaselineMonthSuggestion[] =
       periodeVerified.length > 0
@@ -2344,11 +2370,11 @@ export async function getBaselinePrefill(
       trafikLivePersen: b.trafikLivePersen,
       trafikVideoPersen: b.trafikVideoPersen,
       trafikLuarPersen: b.trafikLuarPersen,
-      skuListed: b.skuListed,
-      skuAktif: b.skuAktif,
-      skuPareto80: b.skuPareto80,
-      skuSlowMoving: b.skuSlowMoving,
-      topSku: b.topSku,
+      skuListed: pdtSkuListed ?? b.skuListed,
+      skuAktif: pdtSkuAktif ?? b.skuAktif,
+      skuPareto80: pdtSkuPareto80 ?? b.skuPareto80,
+      skuSlowMoving: pdtSkuSlowMoving ?? b.skuSlowMoving,
+      topSku: pdtTopSku ?? b.topSku,
       jumlahKampanyeAktif: b.jumlahKampanyeAktif,
       // The engine emits raw material-type keys; the closed taxonomy lives here,
       // so an unrecognised key is dropped rather than travelling as free text
@@ -4015,6 +4041,63 @@ export function computeListingLayak(
   if (skuAktif === null || skuAktif === undefined) return null;
   if (skuListed === null || skuListed === undefined || Number(skuListed) <= 0) return null;
   return Math.round((Number(skuAktif) / Number(skuListed)) * 100);
+}
+
+/**
+ * B-3.2/B-3.4/B-3.3 — konsentrasi omzet per SKU, dihitung dari distribusi
+ * `gmv` `pdt_fact_sku_period` bulan acuan (G3-03). Formula DISALIN (bukan
+ * diimpor) dari `@cdps/core` `baseline/payload.ts` (`skuPareto80`/
+ * `skuSlowMoving`, mesin Riset Awal lama) — pola "copy, don't cross-import"
+ * yang sama dipakai `pdt/kuadran.ts`: `report/`/`baseline/` sedang di-strangle
+ * (PDT-17) dan harus berevolusi independen dari `pdt_fact_*`, walau nilainya
+ * identik hari ini.
+ *
+ * SENGAJA TIDAK memakai kolom `kuadran` (klik/CVR, `pdt/kuadran.ts`) untuk
+ * metrik ini: `kuadran` hanya ditulis untuk TikTok
+ * (`klasifikasikanKuadranSkuTiktok`) — toko Shopee akan SELALU `kuadran IS
+ * NULL`, dan menganggap itu "nol SKU slow-moving" melanggar "absen ≠ nol"
+ * (`baseline/payload.ts` §B1). Konsentrasi GMV bekerja sama di kedua platform
+ * langsung dari `gmv`, jadi itu yang dipakai di sini.
+ *
+ * `gmv: null` (baris fakta lama/belum terpanen metrik ini) DIKELUARKAN dari
+ * kedua hitungan, bukan diperlakukan sebagai `0` — alasan yang sama.
+ */
+function skuPareto80DariFakta(rows: readonly { gmv: number | null }[]): number | null {
+  const positif = rows
+    .map((r) => r.gmv)
+    .filter((g): g is number => g !== null && g > 0)
+    .sort((a, b) => b - a);
+  const total = positif.reduce((a, g) => a + g, 0);
+  if (total <= 0) return null;
+  const ambang = total * 0.8;
+  let kumulatif = 0;
+  for (let i = 0; i < positif.length; i++) {
+    kumulatif += positif[i];
+    // Toleransi float: Σ pecahan rupiah bisa meleset beberapa ULP dari ambang
+    // yang seharusnya persis tersentuh (uji "tepat di batas 80%").
+    if (kumulatif >= ambang - Math.abs(ambang) * 1e-9) return i + 1;
+  }
+  return positif.length;
+}
+
+function skuSlowMovingDariFakta(rows: readonly { gmv: number | null }[]): number {
+  return rows.filter((r) => r.gmv !== null && r.gmv <= 0).length;
+}
+
+/** B-3.3 — Top 5 SKU by GMV, dari baris `pdt_fact_sku_period` bulan acuan (G3-03). */
+function topSkuDariFakta(
+  rows: readonly { namaProduk: string | null; platformProductId: string | null; gmv: number | null; klik: number | null; ctor: number | null }[],
+): TopSkuSuggestion[] {
+  return rows
+    .filter((r): r is typeof r & { gmv: number } => r.gmv !== null)
+    .sort((a, b) => b.gmv - a.gmv)
+    .slice(0, TOP_SKU_MAX)
+    .map((r) => ({
+      nama: r.namaProduk ?? r.platformProductId ?? '',
+      gmv: String(r.gmv),
+      klik: r.klik,
+      ctorPersen: r.ctor === null ? null : Math.round(r.ctor * 10000) / 100,
+    }));
 }
 
 /**
