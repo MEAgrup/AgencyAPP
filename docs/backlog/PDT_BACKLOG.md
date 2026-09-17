@@ -1692,6 +1692,50 @@ dihapus). `skuPareto80`/`skuSlowMoving`/`topSku` ← distribusi `gmv` `pdt_fact_
 periode (kolom `kuadran` sudah membawa klasifikasi Riset Awal — pakai ulang, jangan hitung ulang
 ambang yang berbeda tanpa alasan).
 
+**Status 2026-09-17 (sesi 40) — DITUTUP.** Diimplementasi tanpa migrasi baru (nol kolom baru —
+tiket ini murni sumber-ulang field yang sudah ada di `ChannelBaselineSuggestion`/wire/UI sejak
+sebelum PDT):
+
+- `packages/domain/src/pdt-prefill.ts` — `bacaJumlahSkuMaster(sql, clientPlatformId)` baru:
+  `count(*)` (⇒ `skuListed`) dan `count(*) filter (where status_listing='aktif')` (⇒ `skuAktif`)
+  atas `pdt_sku_master`. SENGAJA tidak berbutir periode (Rule 19 — `status_listing`/`last_seen_at`
+  mencerminkan keadaan TERKINI toko, bukan snapshot bulan tertentu) — sama untuk periode acuan
+  PDT mana pun yang dipilih.
+- `packages/domain/src/strategi.ts` — tiga fungsi murni BARU (`skuPareto80DariFakta`,
+  `skuSlowMovingDariFakta`, `topSkuDariFakta`), disalin (bukan diimpor) dari `@cdps/core`
+  `baseline/payload.ts` (`skuPareto80`/`skuSlowMoving`, mesin Riset Awal lama) — pola "copy, don't
+  cross-import" yang sama dipakai `pdt/kuadran.ts` (`report/`/`baseline/` sedang di-strangle,
+  PDT-17). **Keputusan desain yang perlu dicatat:** ticket ini semula menyebut "kolom `kuadran`
+  sudah membawa klasifikasi ... pakai ulang" — TERNYATA tidak berlaku untuk `skuPareto80`/
+  `skuSlowMoving`: `kuadran` (`pdt/kuadran.ts`, klik/CVR 4-kuadran) HANYA ditulis untuk TikTok
+  (`klasifikasikanKuadranSkuTiktok`) — toko Shopee SELALU `kuadran IS NULL`, dan menganggap itu
+  "nol SKU slow-moving" akan melanggar "absen ≠ nol" (prinsip eksplisit `baseline/payload.ts`
+  §B1). Konsentrasi omzet (Pareto 80%/slow-moving) dihitung LANGSUNG dari `gmv` — bekerja sama di
+  kedua platform, sama definisi PRD B-3.2/B-3.4, dan sama persis dengan formula lama yang sudah
+  teruji. `gmv: null` (baris fakta yang metrik ini belum terpanen) DIKELUARKAN dari kedua
+  hitungan (bukan `0`) — alasan "absen ≠ nol" yang sama.
+  `getBaselinePrefill` memanggil `bacaJumlahSkuMaster` + `bacaFaktaSkuPeriode` (basis sama dengan
+  `basisShopDaily` G3-02 — `net` TikTok/`siap_dikirim` Shopee) di gerbang yang SAMA dengan B-4:
+  `periodeReferensiPdtSaran !== null` (channel ini punya ≥1 batch `verified`) — BUKAN eksistensi
+  baris master itu sendiri, supaya batch `ditolak`/`parsing` tidak diam-diam masuk Section B.
+  Strangler fallback identik G3-02: `pdtValue ?? b.value` per field.
+- Satu tes DB-backed baru di `strategi.test.ts` (261→262 total): 5 SKU master (4 aktif/1
+  nonaktif) + 4 baris fakta GMV (7jt/2jt/1jt/0, satu SKU master tanpa baris fakta sama sekali)
+  membuktikan `skuListed=5`, `skuAktif=4`, `skuPareto80=2` (7jt+2jt=90% dari 10jt ≥ ambang 80%),
+  `skuSlowMoving=1` (SKU gmv=0), `topSku` terurut GMV desc dengan `ctorPersen` benar (pecahan→
+  persen, 2 desimal) dan SKU tanpa `ctor` terpanen tetap `ctorPersen: null`; plus verifikasi
+  channel Shopee (nol batch PDT) tetap jatuh ke payload lama.
+- Validasi penuh: `db-rebuild.sh --yes` (263 migrasi, tanpa migrasi baru tiket ini), full
+  `npm test --workspaces` (2831/2831, 1 skip pre-existing) sekali jalan di DB segar (tanpa flaky
+  cross-run seperti sesi 39), `npm run typecheck --workspaces` bersih, `npm run lint -w @cdps/api
+  -- --max-warnings 0` bersih. `wire.ts`/`web-internal` TIDAK disentuh — kelima field ini sudah
+  ada di kontrak wire dan UI Section B sejak sebelum PDT, tiket ini murni mengganti sumbernya.
+- Lanjutan: G3-04/05/06 bisa memakai ulang pola identik (`periodeReferensiPdtSaran` dari
+  `getBaselinePrefill`, gerbang yang sama, fallback `pdtValue ?? b.value`) — G3-04/G3-05 bisa
+  jalan tanpa fungsi pure baru (agregat langsung dari `bacaFaktaContent`/`bacaFaktaCreatorPeriode`
+  tanpa distribusi), G3-06 butuh rata-rata tertimbang ROAS (lihat catatan `report/dimensi_roas`
+  yang sudah ada, jangan rata-rata polos).
+
 ### G3-04 · Dimensi konten (video/live, bagian B-7)
 
 > ✅ **RESOLVED 2026-09-17 (sesi 39)** — sama seperti G3-02: opsi (B), periode dideklarasikan AM
@@ -1701,6 +1745,26 @@ ambang yang berbeda tanpa alasan).
 `jumlahVideoPerBulan`/`totalViews`/`gmvVideo` ← `pdt_fact_content` `jenis='video'` (vv/gmv, filter
 `is_akun_toko` sesuai kebutuhan toko-vs-afiliasi). `jamLivePerBulan`/`gmvLive` ← `jenis='live'`
 (`durasi_detik`/3600, `gmv`).
+
+**Status 2026-09-17 (sesi 40) — DITUTUP.** `packages/domain/src/strategi.ts` — dua fungsi murni
+baru: `ringkasVideoDariFakta` (B-7.1) dan `ringkasLiveDariFakta` (B-7.2). **Klarifikasi "filter
+`is_akun_toko` sesuai kebutuhan":** formula DISALIN dari `@cdps/core` `baseline/section-b.ts`
+(mesin Riset Awal lama) mengungkap bahwa filternya ASIMETRIS antar dua sub-field, bukan satu
+filter yang sama dipakai ulang:
+- B-7.1 (video) menjumlahkan **toko + afiliasi digabung, TANPA filter** — komentar `section-b.ts`
+  eksplisit: "B-7.1 menghitung SELURUH video yang tayang di periode itu — toko + afiliasi."
+- B-7.2 (live) **toko SAJA** (`isAkunToko: true` diteruskan ke `bacaFaktaContent`) — komentar yang
+  sama: "jam & GMV live afiliasi bukan kapasitas yang tim MEA jadwalkan, dan menjumlahkannya
+  membuat GMV per jam (turunan) salah."
+
+`jumlahVideoPerBulan` = `rows.length` (jumlah baris video, selalu diketahui begitu ada ≥1 baris).
+`totalViews`/`gmvVideo`/`gmvLive` = Σ metrik, MENGELUARKAN baris yang metriknya `null` (belum
+terpanen) dari jumlahnya — absen ≠ nol. `jamLivePerBulan` = Σ`durasi_detik`/3600, dibulatkan 2
+desimal. Gerbang sama seperti G3-03/G3-02 (`periodeReferensiPdtSaran !== null`), fallback
+`pdtValue ?? b.value` yang sama. Satu tes DB-backed baru di `strategi.test.ts` — 3 video (toko+
+afiliasi+satu `vv=null`) + 2 live (toko+afiliasi, live afiliasi sengaja GMV sangat besar supaya
+tes gagal keras kalau salah ikut dijumlah) membuktikan kedua sisi asimetri di atas.
+`wire.ts`/`web-internal` tidak disentuh (field sudah ada sejak sebelum PDT).
 
 ### G3-05 · Dimensi afiliasi/kreator (B-6)
 
@@ -1712,6 +1776,21 @@ ambang yang berbeda tanpa alasan).
 `pdt_fact_creator_period` (join `pdt_fact_content.creator_handle` bila hitungan "aktif 30 hari"
 butuh tanggal posting, bukan cuma agregat bulanan).
 
+**Status 2026-09-17 (sesi 40) — DITUTUP.** `packages/domain/src/strategi.ts` — fungsi murni baru
+`ringkasAfiliasiDariFakta`. **Join `pdt_fact_content.creator_handle` TERNYATA tidak diperlukan**:
+`pdt_fact_creator_period` SUDAH berbutir bulanan per kreator (kunci `client_platform_id,
+creator_handle, periode`) — "aktif 30 hari" diterjemahkan sebagai "kreator yang punya baris fakta
+di bulan acuan ini", BUKAN jendela bergulir 30-hari-dari-hari-ini: periode acuan boleh
+dideklarasikan AM ke bulan yang lebih lama (G3-REFERENCE-PERIODE opsi B), dan jendela dari "hari
+ini" tidak berarti apa-apa untuk bulan yang sudah lewat. `affiliateAktif30Hari` = `rows.length`.
+`gmvAffiliate` = Σ`gmv` (baris `gmv=null` dikeluarkan, absen ≠ nol). `gmvAffiliatePersen` = formula
+DISALIN dari `baseline/section-b.ts` (`gmvAffiliate ÷ gmvTokoBulan × 100`, boleh >100%
+"over-attribution" per DECISIONS 2026-08-23, TIDAK dipangkas) — `gmvTokoBulan` DIHOIST dari
+`pdt_fact_shop_daily` yang sudah dibaca di blok G3-02 (satu query, dipakai ulang, bukan query
+kedua). `topKreator` = Top 5 by GMV (B-6.4). `sampelTerkirim` = Σ, absen ≠ nol yang sama. Gerbang
+dan fallback sama seperti G3-03/04. Satu tes DB-backed baru — 3 kreator (2 ber-GMV + 1 `gmv=null`)
++ satu baris `pdt_fact_shop_daily` (penyebut) membuktikan hitungan dan rasio.
+
 ### G3-06 · Dimensi iklan (B-4/B-5 belanja+ROAS+kampanye)
 
 > ✅ **RESOLVED 2026-09-17 (sesi 39)** — sama seperti G3-02: opsi (B), periode dideklarasikan AM
@@ -1721,6 +1800,37 @@ butuh tanggal posting, bukan cuma agregat bulanan).
 `adSpend`/`roas` ← `pdt_fact_ads` (Σ `biaya`, `roas` rata-rata tertimbang — **bukan** rata-rata
 polos, lihat catatan `report/dimensi_roas` yang sudah ada). `jumlahKampanyeAktif`/`tipeKampanye` ←
 distinct `kampanye_id`/`sumber` periode berjalan.
+
+**Status 2026-09-17 (sesi 40) — SEBAGIAN DITUTUP** (`adSpend`/`roas`/`jumlahKampanyeAktif` selesai,
+`tipeKampanye` SENGAJA ditunda — lihat alasan di bawah, bukan lupa):
+
+- `packages/domain/src/strategi.ts` — fungsi murni baru `ringkasIklanDariFakta`. `adSpend` = Σ
+  `biaya` (kolom `pdt_fact_ads.biaya` TIDAK NULLABLE, jadi selalu diketahui begitu ≥1 baris ada).
+  `roas` = Σ`gmv` ÷ Σ`biaya` — **BUKAN rata-rata kolom `roas` mentah per baris** (formula DISALIN
+  dari pola `report/dimensi_roas` yang sudah ada, `packages/core/src/pdt/laporan.ts`: "`roas` PER
+  ITEM dan TOTAL diturunkan Σgmv ÷ Σbiaya, bukan rata-rata kolom `roas` mentah per baris"), dibulat
+  2 desimal. `jumlahKampanyeAktif` = jumlah `kampanye_id` DISTINCT. Gerbang dan fallback sama
+  seperti G3-03/04/05.
+- **`tipeKampanye` TIDAK diimplementasi tiket ini — keputusan sadar, bukan celah.** Backlog di atas
+  bilang "distinct `sumber`" tapi `pdt_fact_ads.sumber` adalah NAMA MODUL PARSER
+  (`shopee_ads_cpc`/`shopee_ads_live`/`shopee_ads_search`/`tt_ads_product`/`tt_ads_live`), BUKAN
+  nilai taksonomi `CAMPAIGN_TYPES` (`gmv_max`/`manual_keyword`/`auto`/`live_ads`/`video_ads`/
+  `affiliate_ads`/`lainnya`) — satu modul export (mis. `shopee_ads_cpc`) bisa memuat kampanye dari
+  BEBERAPA tipe sekaligus di dalam Shopee Ads Manager; nama modul hanya menandai file/sumber
+  ekspornya, bukan konfigurasi kampanye di dalamnya. Memetakan nama modul → tipe kampanye akan
+  MENGARANG klasifikasi yang tidak pernah benar-benar diverifikasi dari isi berkas — kelas
+  kesalahan yang sama yang `MATERI_IKLAN` (`baseline/payload.ts`, mesin lama) SENGAJA hindari: mesin
+  itu hanya meloloskan 3 dari 7 nilai `CAMPAIGN_TYPES` secara otomatis (`gmv_max`/`live_ads`/
+  `video_ads`, lewat regex atas TEKS BEBAS yang benar-benar ada di file), dan sengaja membiarkan
+  4 sisanya (termasuk `manual_keyword`) tetap manual karena "bukan nilai yang pernah kami lihat di
+  berkas". `sumber` tidak lolos ambang yang sama (tidak ada satu pun nilainya yang secara tekstual
+  cocok dengan nilai `CAMPAIGN_TYPES` mana pun). `tipeKampanye` tetap payload-only untuk sekarang;
+  kalau AM Ads/Hans punya pemetaan sumber→tipe yang terverifikasi (bukan tebakan), itu keputusan
+  baru untuk `docs/DECISIONS.md`, bukan sesuatu yang aman diasumsikan di sini.
+- Satu tes DB-backed baru di `strategi.test.ts` — 3 kampanye lintas sumber (satu `gmv=null`)
+  membuktikan `roas` Σgmv÷Σbiaya (2.94) BERBEDA dari rata-rata polos kolom `roas` mentah (yang
+  akan memberi 3), dan `jumlahKampanyeAktif`/`adSpend` menghitung dengan benar termasuk kampanye
+  ber-`gmv=null`.
 
 ### G3-07 · Riwayat GMV 6 bulan (Rule 35)
 
@@ -1909,6 +2019,43 @@ GMV bulanan otoritatif tetap entri manual AM (M6B P-E / M6D §3 Rule 11).
 > bukan sheet baru), (8) **ROAS** — `pdt_fact_ads.roas` (rata-rata tertimbang, pola sama
 > `report.ts` `dimensi_roas`). Rincian lengkap `docs/DECISIONS.md` 2026-09-17
 > ("G4-03-VERDICT-ENGINE DIKETOK"). **Boleh mulai coding G4-03** (mesin + migrasi + 8 aksi katalog).
+
+> ### 🔴 KOREKSI PREMIS 2026-09-17 (sesi 40) — kesiapan data per aksi diverifikasi ke kode
+>
+> Riset persiapan implementasi menemukan bahwa "8 aksi dikonfirmasi" (keputusan sesi 39) adalah
+> katalog yang **disetujui secara bisnis**, bukan katalog yang **siap secara data**. Dari 8:
+>
+> | # | Aksi | Jalur fakta hari ini | Status |
+> |---|---|---|---|
+> | 1 | cancel rate | `pdt_fact_shop_daily.pesanan_dibatalkan` (ditulis `shopee_shop_stats`, 3 basis) | ✅ **SIAP** |
+> | 2 | chat response rate/menit | — modul `shopee_chat`/`_broadcast` terdeteksi tapi **nol `ekstrakBaris*`, nol routing `pdt.ts`** | 🔴 nol fakta (ambang justru ADA: `bench.ts` `chat_response_rate_good: 0.95`) |
+> | 3 | efisiensi CPC/AMS | `pdt_fact_ads.biaya` (3 modul) + `klik` (**hanya** `_cpc`/`_search`; NULL di `shopee_ads_live`) | 🟡 fakta ada, **ambang nol** |
+> | 4 | diskon/flash sale | — `shopee_diskon`/`shopee_flash_sale` ada di himpunan `UNVERIFIED` (`detect.test.ts`), nol writer | 🔴 nol fakta + parser belum terverifikasi |
+> | 5 | GMV/jam live Shopee | `pdt_fact_content` `jenis='live'` via `berkasShopeeLive` — `gmv` **TERISI**, `durasi_detik` **SELALU NULL** | 🟡 **KOREKSI**: GMV live SIAP, "per jam" tidak terhitung |
+> | 6 | afiliasi/KOL Shopee aktif | `pdt_fact_creator_period` via `shopee_ams_afiliasi` (grain bulanan/kreator) | 🟡 fakta ada, **ambang "aktif" nol** |
+> | 7 | GMV (pesanan selesai) | `pdt_fact_shop_daily` basis `dibayar` (sheet "Pesanan Dibayar") | ✅ **SIAP** |
+> | 8 | ROAS | `pdt_fact_ads.roas` (ketiga modul ads Shopee) | ✅ **SIAP** |
+>
+> **Dua koreksi terhadap catatan awal riset ini** (dicatat supaya tidak diwarisi salah lagi):
+> (a) aksi **5 BUKAN "nol writer"** — `shopee_live` punya writer penuh dan GMV live Shopee bisa
+> dihitung hari ini; yang hilang hanya `durasi_detik` (denominator "per jam"), yang `tt_live`
+> mengisi tapi `shopee_live` tidak. (b) aksi **2 dan 3 saling terbalik**: aksi 3 punya fakta tanpa
+> ambang, aksi 2 punya ambang tanpa fakta — keduanya "belum siap" karena alasan yang berlawanan,
+> dan solusinya pun berlawanan (3 butuh ketokan pemilik, 2 butuh kode parser).
+>
+> **Konsekuensi Rule 30 (≥6 aksi khusus Shopee) — lebih baik dari dugaan awal:** 4 aksi siap
+> tanpa keputusan apa pun (1, 5-absolut, 7, 8) + 2 aksi yang butuh **hanya ketokan ambang** dan
+> **nol kode parser baru** (3, 6) = **6 aksi ⇒ Rule 30 tercapai tanpa membangun satu pun writer
+> fakta baru**. Hanya aksi 2 dan 4 yang benar-benar butuh writer baru, dan keduanya bisa menyusul
+> tanpa memblokir Rule 30. Ini mengoreksi kesimpulan awal bahwa Rule 30 "tidak terpenuhi dari 3
+> aksi siap".
+>
+> **Tahap 1 (mode otonom, boleh jalan sekarang):** mesin verdict + aksi **1, 7, 8** — tiga aksi
+> nol-ambiguitas. Trigger di `pdt.ts` (`commitUploadBatch` saat status→`verified`; `reparsePdtBatch`
+> yang sudah punya `statusBerubah`), writer `pdt_usulan` (`batch_id` FK), loop `realisasi_nilai`
+> dari fakta periode berikutnya. **Jangan** bangun aksi 3/5/6 sampai `G4-03-KATALOG-KESIAPAN`
+> (`docs/DECISIONS.md` §Open) dijawab — ketiganya berubah DEFINISI, bukan implementasi. Cek skema
+> `pdt_usulan`/`pdt_usulan_katalog` yang sudah ada (G1-01/G4-01) sebelum menambah kolom.
 
 ---
 

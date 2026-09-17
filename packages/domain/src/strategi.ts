@@ -2240,6 +2240,9 @@ export async function getBaselinePrefill(
     let pdtConversionRatePersen: number | null = null;
     let pdtPoinPenalti: number | null = null;
     let pdtPeriodeReferensi: string | null = null;
+    // G3-05 (gmvAffiliatePersen) butuh GMV toko periode yang sama — dihoist di
+    // sini supaya tidak query `bacaFaktaShopDaily` dua kali untuk baris yang sama.
+    let pdtGmvTokoBulan: number | null = null;
     if (periodeReferensiPdtSaran !== null) {
       const fakta = await pdtPrefill.bacaFaktaShopDaily(sql, clientPlatformIdNum, periodeReferensiPdtSaran, basisShopDaily);
       if (fakta !== null) {
@@ -2249,6 +2252,7 @@ export async function getBaselinePrefill(
         pdtPengunjungPerBulan = fakta.pengunjung;
         pdtConversionRatePersen =
           fakta.pengunjung !== null && fakta.pengunjung > 0 ? (fakta.pesanan / fakta.pengunjung) * 100 : null;
+        pdtGmvTokoBulan = fakta.gmv;
       }
       // B-4 — poin penalti Shopee-only (nol writer TikTok, `pdt_fact_kesehatan_penalti`
       // pola sama `chatResponseRatePersen`/`chatResponseMenit`, keduanya TETAP
@@ -2257,6 +2261,62 @@ export async function getBaselinePrefill(
         const penalti = await pdtPrefill.bacaFaktaKesehatanPenalti(sql, clientPlatformIdNum, periodeReferensiPdtSaran);
         if (penalti.length > 0) pdtPoinPenalti = penalti.reduce((sum, p) => sum + p.poin, 0);
       }
+    }
+
+    // G3-03 (B-2/B-3 portofolio SKU) — `pdt_sku_master.status_listing` untuk
+    // B-3.1 (Rule 19, TIDAK berbutir periode — lihat `bacaJumlahSkuMaster`),
+    // distribusi `gmv` `pdt_fact_sku_period` bulan acuan untuk B-3.2/B-3.3/B-3.4
+    // (`skuPareto80DariFakta`/`skuSlowMovingDariFakta`/`topSkuDariFakta`).
+    // Sama seperti B-4 di atas: gerbangnya `periodeReferensiPdtSaran !== null`
+    // (channel ini punya ≥1 batch verified), BUKAN eksistensi baris master itu
+    // sendiri — batch `ditolak`/`parsing` tidak boleh diam-diam masuk Section B.
+    let pdtSkuListed: number | null = null;
+    let pdtSkuAktif: number | null = null;
+    let pdtSkuPareto80: number | null = null;
+    let pdtSkuSlowMoving: number | null = null;
+    let pdtTopSku: TopSkuSuggestion[] | null = null;
+    if (periodeReferensiPdtSaran !== null) {
+      const jumlahSku = await pdtPrefill.bacaJumlahSkuMaster(sql, clientPlatformIdNum);
+      if (jumlahSku.skuListed > 0) {
+        pdtSkuListed = jumlahSku.skuListed;
+        pdtSkuAktif = jumlahSku.skuAktif;
+      }
+      const faktaSku = await pdtPrefill.bacaFaktaSkuPeriode(sql, clientPlatformIdNum, periodeReferensiPdtSaran, basisShopDaily);
+      if (faktaSku.length > 0) {
+        pdtSkuPareto80 = skuPareto80DariFakta(faktaSku);
+        pdtSkuSlowMoving = skuSlowMovingDariFakta(faktaSku);
+        pdtTopSku = topSkuDariFakta(faktaSku);
+      }
+    }
+
+    // G3-04 (B-7 konten video/live) — `pdt_fact_content` bulan acuan yang
+    // sama. B-7.1 (video) TANPA filter `isAkunToko`: toko + afiliasi digabung
+    // (cermin `section-b.ts`). B-7.2 (live) toko-SAJA (`isAkunToko: true`) —
+    // lihat komentar `ringkasLiveDariFakta`. Gerbang sama seperti G3-03.
+    let pdtRingkasVideo: ReturnType<typeof ringkasVideoDariFakta> | null = null;
+    let pdtRingkasLive: ReturnType<typeof ringkasLiveDariFakta> | null = null;
+    if (periodeReferensiPdtSaran !== null) {
+      const faktaVideo = await pdtPrefill.bacaFaktaContent(sql, clientPlatformIdNum, periodeReferensiPdtSaran, 'video');
+      if (faktaVideo.length > 0) pdtRingkasVideo = ringkasVideoDariFakta(faktaVideo);
+      const faktaLive = await pdtPrefill.bacaFaktaContent(sql, clientPlatformIdNum, periodeReferensiPdtSaran, 'live', true);
+      if (faktaLive.length > 0) pdtRingkasLive = ringkasLiveDariFakta(faktaLive);
+    }
+
+    // G3-05 (B-6 afiliasi/kreator) — `pdt_fact_creator_period` bulan acuan
+    // yang sama, penyebut B-6.2 dari `pdtGmvTokoBulan` (dihoist di blok B-4).
+    let pdtRingkasAfiliasi: ReturnType<typeof ringkasAfiliasiDariFakta> | null = null;
+    if (periodeReferensiPdtSaran !== null) {
+      const faktaKreator = await pdtPrefill.bacaFaktaCreatorPeriode(sql, clientPlatformIdNum, periodeReferensiPdtSaran);
+      if (faktaKreator.length > 0) pdtRingkasAfiliasi = ringkasAfiliasiDariFakta(faktaKreator, pdtGmvTokoBulan);
+    }
+
+    // G3-06 (B-4/B-5 belanja iklan/ROAS/kampanye) — `pdt_fact_ads` bulan
+    // acuan yang sama. `tipeKampanye` TETAP payload-only — lihat komentar
+    // `ringkasIklanDariFakta`.
+    let pdtRingkasIklan: ReturnType<typeof ringkasIklanDariFakta> | null = null;
+    if (periodeReferensiPdtSaran !== null) {
+      const faktaAds = await pdtPrefill.bacaFaktaAds(sql, clientPlatformIdNum, periodeReferensiPdtSaran);
+      if (faktaAds.length > 0) pdtRingkasIklan = ringkasIklanDariFakta(faktaAds);
     }
 
     const riwayat = Array.isArray(gb?.riwayat) ? (gb!.riwayat as Record<string, unknown>[]) : [];
@@ -2318,8 +2378,8 @@ export async function getBaselinePrefill(
       sumberData: prov && prov.nama.length > 0 ? prov.nama.join(', ') : null,
       tanggalAmbilData: prov?.tanggal ?? null,
       lampiran: prov && prov.nama.length > 0 ? prov.nama.join(', ') : null,
-      roas: numOrNullLoose(payload.iklan?.roas),
-      adSpend: adSpendNum === null ? null : String(adSpendNum),
+      roas: pdtRingkasIklan?.roas ?? numOrNullLoose(payload.iklan?.roas),
+      adSpend: pdtRingkasIklan?.adSpend ?? (adSpendNum === null ? null : String(adSpendNum)),
       aov: aovNum === null ? null : String(aovNum),
       baselineBulan,
       gmvMix,
@@ -2344,28 +2404,28 @@ export async function getBaselinePrefill(
       trafikLivePersen: b.trafikLivePersen,
       trafikVideoPersen: b.trafikVideoPersen,
       trafikLuarPersen: b.trafikLuarPersen,
-      skuListed: b.skuListed,
-      skuAktif: b.skuAktif,
-      skuPareto80: b.skuPareto80,
-      skuSlowMoving: b.skuSlowMoving,
-      topSku: b.topSku,
-      jumlahKampanyeAktif: b.jumlahKampanyeAktif,
+      skuListed: pdtSkuListed ?? b.skuListed,
+      skuAktif: pdtSkuAktif ?? b.skuAktif,
+      skuPareto80: pdtSkuPareto80 ?? b.skuPareto80,
+      skuSlowMoving: pdtSkuSlowMoving ?? b.skuSlowMoving,
+      topSku: pdtTopSku ?? b.topSku,
+      jumlahKampanyeAktif: pdtRingkasIklan?.jumlahKampanyeAktif ?? b.jumlahKampanyeAktif,
       // The engine emits raw material-type keys; the closed taxonomy lives here,
       // so an unrecognised key is dropped rather than travelling as free text
       // into a column with a CHECK on it.
       tipeKampanye: b.tipeKampanye.filter((t): t is CampaignType =>
         (CAMPAIGN_TYPES as readonly string[]).includes(t),
       ),
-      affiliateAktif30Hari: b.affiliateAktif30Hari,
-      gmvAffiliate: b.gmvAffiliate,
-      gmvAffiliatePersen: b.gmvAffiliatePersen,
-      topKreator: b.topKreator,
-      sampelTerkirim: b.sampelTerkirim,
-      jumlahVideoPerBulan: b.jumlahVideoPerBulan,
-      totalViews: b.totalViews,
-      gmvVideo: b.gmvVideo,
-      jamLivePerBulan: b.jamLivePerBulan,
-      gmvLive: b.gmvLive,
+      affiliateAktif30Hari: pdtRingkasAfiliasi?.affiliateAktif30Hari ?? b.affiliateAktif30Hari,
+      gmvAffiliate: pdtRingkasAfiliasi?.gmvAffiliate ?? b.gmvAffiliate,
+      gmvAffiliatePersen: pdtRingkasAfiliasi?.gmvAffiliatePersen ?? b.gmvAffiliatePersen,
+      topKreator: pdtRingkasAfiliasi?.topKreator ?? b.topKreator,
+      sampelTerkirim: pdtRingkasAfiliasi?.sampelTerkirim ?? b.sampelTerkirim,
+      jumlahVideoPerBulan: pdtRingkasVideo?.jumlahVideoPerBulan ?? b.jumlahVideoPerBulan,
+      totalViews: pdtRingkasVideo?.totalViews ?? b.totalViews,
+      gmvVideo: pdtRingkasVideo?.gmvVideo ?? b.gmvVideo,
+      jamLivePerBulan: pdtRingkasLive?.jamLivePerBulan ?? b.jamLivePerBulan,
+      gmvLive: pdtRingkasLive?.gmvLive ?? b.gmvLive,
     };
   }));
 
@@ -4015,6 +4075,191 @@ export function computeListingLayak(
   if (skuAktif === null || skuAktif === undefined) return null;
   if (skuListed === null || skuListed === undefined || Number(skuListed) <= 0) return null;
   return Math.round((Number(skuAktif) / Number(skuListed)) * 100);
+}
+
+/**
+ * B-3.2/B-3.4/B-3.3 — konsentrasi omzet per SKU, dihitung dari distribusi
+ * `gmv` `pdt_fact_sku_period` bulan acuan (G3-03). Formula DISALIN (bukan
+ * diimpor) dari `@cdps/core` `baseline/payload.ts` (`skuPareto80`/
+ * `skuSlowMoving`, mesin Riset Awal lama) — pola "copy, don't cross-import"
+ * yang sama dipakai `pdt/kuadran.ts`: `report/`/`baseline/` sedang di-strangle
+ * (PDT-17) dan harus berevolusi independen dari `pdt_fact_*`, walau nilainya
+ * identik hari ini.
+ *
+ * SENGAJA TIDAK memakai kolom `kuadran` (klik/CVR, `pdt/kuadran.ts`) untuk
+ * metrik ini: `kuadran` hanya ditulis untuk TikTok
+ * (`klasifikasikanKuadranSkuTiktok`) — toko Shopee akan SELALU `kuadran IS
+ * NULL`, dan menganggap itu "nol SKU slow-moving" melanggar "absen ≠ nol"
+ * (`baseline/payload.ts` §B1). Konsentrasi GMV bekerja sama di kedua platform
+ * langsung dari `gmv`, jadi itu yang dipakai di sini.
+ *
+ * `gmv: null` (baris fakta lama/belum terpanen metrik ini) DIKELUARKAN dari
+ * kedua hitungan, bukan diperlakukan sebagai `0` — alasan yang sama.
+ */
+function skuPareto80DariFakta(rows: readonly { gmv: number | null }[]): number | null {
+  const positif = rows
+    .map((r) => r.gmv)
+    .filter((g): g is number => g !== null && g > 0)
+    .sort((a, b) => b - a);
+  const total = positif.reduce((a, g) => a + g, 0);
+  if (total <= 0) return null;
+  const ambang = total * 0.8;
+  let kumulatif = 0;
+  for (let i = 0; i < positif.length; i++) {
+    kumulatif += positif[i];
+    // Toleransi float: Σ pecahan rupiah bisa meleset beberapa ULP dari ambang
+    // yang seharusnya persis tersentuh (uji "tepat di batas 80%").
+    if (kumulatif >= ambang - Math.abs(ambang) * 1e-9) return i + 1;
+  }
+  return positif.length;
+}
+
+function skuSlowMovingDariFakta(rows: readonly { gmv: number | null }[]): number {
+  return rows.filter((r) => r.gmv !== null && r.gmv <= 0).length;
+}
+
+/** B-3.3 — Top 5 SKU by GMV, dari baris `pdt_fact_sku_period` bulan acuan (G3-03). */
+function topSkuDariFakta(
+  rows: readonly { namaProduk: string | null; platformProductId: string | null; gmv: number | null; klik: number | null; ctor: number | null }[],
+): TopSkuSuggestion[] {
+  return rows
+    .filter((r): r is typeof r & { gmv: number } => r.gmv !== null)
+    .sort((a, b) => b.gmv - a.gmv)
+    .slice(0, TOP_SKU_MAX)
+    .map((r) => ({
+      nama: r.namaProduk ?? r.platformProductId ?? '',
+      gmv: String(r.gmv),
+      klik: r.klik,
+      ctorPersen: r.ctor === null ? null : Math.round(r.ctor * 10000) / 100,
+    }));
+}
+
+/**
+ * B-7.1 — jumlah video/views/GMV video (G3-04). Formula DISALIN dari
+ * `@cdps/core` `baseline/section-b.ts`: B-7.1 menjumlahkan SELURUH video
+ * yang tayang di periode itu — toko + afiliasi — jadi pemanggil meneruskan
+ * baris `bacaFaktaContent(... , 'video')` TANPA filter `isAkunToko` di sini
+ * (berbeda dengan B-7.2 di bawah, yang toko-saja). `rows.length` = jumlah
+ * video (selalu diketahui begitu ada ≥1 baris); `totalViews`/`gmvVideo`
+ * mengeluarkan baris yang metriknya belum terpanen (`null`) dari jumlahnya,
+ * bukan memperlakukannya sebagai `0` (absen ≠ nol).
+ */
+function ringkasVideoDariFakta(
+  rows: readonly { vv: number | null; gmv: number | null }[],
+): { jumlahVideoPerBulan: number | null; totalViews: number | null; gmvVideo: string | null } {
+  if (rows.length === 0) return { jumlahVideoPerBulan: null, totalViews: null, gmvVideo: null };
+  const vvTerpanen = rows.filter((r) => r.vv !== null);
+  const gmvTerpanen = rows.filter((r) => r.gmv !== null);
+  return {
+    jumlahVideoPerBulan: rows.length,
+    totalViews: vvTerpanen.length === 0 ? null : vvTerpanen.reduce((a, r) => a + (r.vv ?? 0), 0),
+    gmvVideo: gmvTerpanen.length === 0 ? null : String(gmvTerpanen.reduce((a, r) => a + (r.gmv ?? 0), 0)),
+  };
+}
+
+/**
+ * B-7.2 — jam live/GMV live (G3-04), TOKO SAJA. Formula DISALIN dari
+ * `baseline/section-b.ts`: "jam & GMV live afiliasi bukan kapasitas yang
+ * tim MEA jadwalkan, dan menjumlahkannya membuat GMV per jam (turunan)
+ * salah" — pemanggil MENERUSKAN `isAkunToko: true` ke `bacaFaktaContent(...,
+ * 'live', true)`, berbeda dengan video di atas.
+ */
+function ringkasLiveDariFakta(
+  rows: readonly { durasiDetik: number | null; gmv: number | null }[],
+): { jamLivePerBulan: number | null; gmvLive: string | null } {
+  if (rows.length === 0) return { jamLivePerBulan: null, gmvLive: null };
+  const durasiTerpanen = rows.filter((r) => r.durasiDetik !== null);
+  const gmvTerpanen = rows.filter((r) => r.gmv !== null);
+  return {
+    jamLivePerBulan:
+      durasiTerpanen.length === 0
+        ? null
+        : Math.round((durasiTerpanen.reduce((a, r) => a + (r.durasiDetik ?? 0), 0) / 3600) * 100) / 100,
+    gmvLive: gmvTerpanen.length === 0 ? null : String(gmvTerpanen.reduce((a, r) => a + (r.gmv ?? 0), 0)),
+  };
+}
+
+/**
+ * B-6 — afiliasi/kreator (G3-05), dari `pdt_fact_creator_period` bulan acuan
+ * (satu baris/kreator/bulan, kunci tabelnya sendiri). "Aktif 30 hari" (B-6.1)
+ * diterjemahkan sebagai "kreator yang punya baris fakta bulan acuan ini" —
+ * BUKAN jendela bergulir 30 hari dari HARI INI: periode acuan boleh
+ * dideklarasikan AM ke bulan yang lebih lama (G3-REFERENCE-PERIODE opsi B),
+ * dan jendela bergulir dari "hari ini" tidak berarti apa-apa untuk bulan
+ * yang sudah lewat — `pdt_fact_content.waktu_posting` TIDAK diperlukan di
+ * sini karena tabel per-kreator sudah berbutir bulanan.
+ *
+ * `gmvTokoBulan` — GMV toko (basis `basisShopDaily`, `pdtGmvTokoBulan` di
+ * pemanggil) bulan yang SAMA, penyebut B-6.2. Formula DISALIN dari
+ * `baseline/section-b.ts`: rasio boleh >100% ("over-attribution", DECISIONS
+ * 2026-08-23) — TIDAK dipangkas.
+ */
+function ringkasAfiliasiDariFakta(
+  rows: readonly { creatorHandle: string; gmv: number | null; sampelTerkirim: number | null }[],
+  gmvTokoBulan: number | null,
+): {
+  affiliateAktif30Hari: number | null;
+  gmvAffiliate: string | null;
+  gmvAffiliatePersen: number | null;
+  topKreator: TopKreatorSuggestion[];
+  sampelTerkirim: number | null;
+} {
+  if (rows.length === 0) {
+    return { affiliateAktif30Hari: null, gmvAffiliate: null, gmvAffiliatePersen: null, topKreator: [], sampelTerkirim: null };
+  }
+  const gmvTerpanen = rows.filter((r): r is typeof r & { gmv: number } => r.gmv !== null);
+  const gmvAffiliate = gmvTerpanen.length === 0 ? null : gmvTerpanen.reduce((a, r) => a + r.gmv, 0);
+  const sampelTerpanen = rows.filter((r) => r.sampelTerkirim !== null);
+  return {
+    affiliateAktif30Hari: rows.length,
+    gmvAffiliate: gmvAffiliate === null ? null : String(gmvAffiliate),
+    gmvAffiliatePersen:
+      gmvAffiliate === null || gmvTokoBulan === null || gmvTokoBulan <= 0
+        ? null
+        : Math.round((gmvAffiliate / gmvTokoBulan) * 10000) / 100,
+    // B-6.4 — Top 5 kreator penyumbang GMV.
+    topKreator: gmvTerpanen
+      .slice()
+      .sort((a, b) => b.gmv - a.gmv)
+      .slice(0, 5)
+      .map((r) => ({ nama: r.creatorHandle, gmv: String(r.gmv) })),
+    sampelTerkirim: sampelTerpanen.length === 0 ? null : sampelTerpanen.reduce((a, r) => a + (r.sampelTerkirim ?? 0), 0),
+  };
+}
+
+/**
+ * B-4/B-5 — belanja iklan/ROAS/jumlah kampanye (G3-06), dari `pdt_fact_ads`
+ * bulan acuan. `roas` = Σ`gmv` ÷ Σ`biaya` (BUKAN rata-rata kolom `roas`
+ * mentah per baris) — pola `report/dimensi_roas` yang sudah ada
+ * (`pdt/laporan.ts`, cermin `tt_ads_product`/`shopee_ads_cpc`). `adSpend` =
+ * Σ`biaya` (kolom ini TIDAK NULLABLE per baris `pdt_fact_ads`, jadi selalu
+ * diketahui begitu ≥1 baris ada). `jumlahKampanyeAktif` = jumlah
+ * `kampanyeId` DISTINCT.
+ *
+ * `tipeKampanye` SENGAJA TIDAK disentuh di sini — lihat status G3-06 di
+ * `docs/backlog/PDT_BACKLOG.md`: `sumber` (nama modul parser —
+ * `shopee_ads_cpc`/`shopee_ads_live`/`shopee_ads_search`/`tt_ads_product`/
+ * `tt_ads_live`) tidak membawa sinyal yang bisa diandalkan untuk taksonomi
+ * `CAMPAIGN_TYPES` (gmv_max/manual_keyword/auto/live_ads/video_ads/
+ * affiliate_ads/lainnya) — satu modul export bisa memuat kampanye dari
+ * beberapa tipe sekaligus, jadi memetakan nama modul ke tipe kampanye akan
+ * MENGARANG klasifikasi yang tidak pernah benar-benar diverifikasi dari isi
+ * berkas (kelas kesalahan yang sama yang `MATERI_IKLAN`
+ * `baseline/payload.ts` sengaja hindari untuk 4 dari 7 nilai enumnya).
+ * `tipeKampanye` TETAP payload-only sampai ada keputusan pemilik.
+ */
+function ringkasIklanDariFakta(
+  rows: readonly { kampanyeId: string; biaya: number; gmv: number | null }[],
+): { adSpend: string | null; roas: number | null; jumlahKampanyeAktif: number | null } {
+  if (rows.length === 0) return { adSpend: null, roas: null, jumlahKampanyeAktif: null };
+  const totalBiaya = rows.reduce((a, r) => a + r.biaya, 0);
+  const gmvTerpanen = rows.filter((r): r is typeof r & { gmv: number } => r.gmv !== null);
+  const totalGmv = gmvTerpanen.length === 0 ? null : gmvTerpanen.reduce((a, r) => a + r.gmv, 0);
+  return {
+    adSpend: String(totalBiaya),
+    roas: totalGmv === null || totalBiaya === 0 ? null : Math.round((totalGmv / totalBiaya) * 100) / 100,
+    jumlahKampanyeAktif: new Set(rows.map((r) => r.kampanyeId)).size,
+  };
 }
 
 /**
