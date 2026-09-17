@@ -16,6 +16,7 @@ import {
   bacaFaktaKesehatanPenalti,
   bacaFaktaShopDaily,
   bacaFaktaSkuPeriode,
+  bacaPeriodeTerverifikasiTerbaru,
 } from './pdt-prefill';
 
 const URL = process.env.DATABASE_URL;
@@ -83,6 +84,26 @@ async function insertBatch(clientId: string, clientPlatformId: number, platform:
       status, parser_versi, retensi_sampai, dibuat_oleh)
     values (${clientId}, ${clientPlatformId}, ${platform}, '2026-08-01', '2026-08-31',
       'verified', ${parserVersi}, '2099-01-01', ${OWNER_AM})
+    returning id`;
+  return rows[0].id;
+}
+
+async function insertBatchPeriode(
+  clientId: string,
+  clientPlatformId: number,
+  platform: string,
+  periodeMulai: string,
+  periodeSelesai: string,
+  status: string,
+  parserVersi = 1,
+): Promise<number> {
+  // `ck_pdt_upload_batch_alasan_ditolak` wajib non-null saat status='ditolak'.
+  const alasanDitolak = status === 'ditolak' ? 'uji fixture' : null;
+  const rows = await sql<{ id: number }[]>`
+    insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+      status, alasan_ditolak, parser_versi, retensi_sampai, dibuat_oleh)
+    values (${clientId}, ${clientPlatformId}, ${platform}, ${periodeMulai}::date, ${periodeSelesai}::date,
+      ${status}, ${alasanDitolak}, ${parserVersi}, '2099-01-01', ${OWNER_AM})
     returning id`;
   return rows[0].id;
 }
@@ -262,5 +283,50 @@ describeDb('bacaFaktaKesehatanPenalti (G3-01)', () => {
     const hasil = await bacaFaktaKesehatanPenalti(sql, cpId, PERIODE);
     expect(hasil.map((r) => r.poin)).toEqual([10, 5]);
     expect(hasil[0]).toMatchObject({ deskripsi: 'Pembatalan tinggi', durasi: '7 hari', batchId, parserVersi: 1 });
+  });
+});
+
+describeDb('bacaPeriodeTerverifikasiTerbaru (G3-01, dipakai G3-07)', () => {
+  it('mengembalikan N batch verified TERBARU, urut kronologis NAIK (lama → baru)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const batchMei = await insertBatchPeriode(clientId, cpId, 'shopee', '2026-05-01', '2026-05-31', 'verified');
+    const batchJun = await insertBatchPeriode(clientId, cpId, 'shopee', '2026-06-01', '2026-06-30', 'verified');
+    const batchJul = await insertBatchPeriode(clientId, cpId, 'shopee', '2026-07-01', '2026-07-31', 'verified');
+    await insertBatchPeriode(clientId, cpId, 'shopee', '2026-08-01', '2026-08-31', 'ditolak');
+
+    const hasil = await bacaPeriodeTerverifikasiTerbaru(sql, cpId, 6);
+    expect(hasil).toEqual([
+      { periodeAwalBulan: '2026-05-01', batchId: batchMei, parserVersi: 1 },
+      { periodeAwalBulan: '2026-06-01', batchId: batchJun, parserVersi: 1 },
+      { periodeAwalBulan: '2026-07-01', batchId: batchJul, parserVersi: 1 },
+    ]);
+  });
+
+  it('membatasi ke `limit` batch TERBARU (bukan tertua) saat lebih banyak tersedia', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    await insertBatchPeriode(clientId, cpId, 'shopee', '2026-05-01', '2026-05-31', 'verified');
+    const batchJun = await insertBatchPeriode(clientId, cpId, 'shopee', '2026-06-01', '2026-06-30', 'verified');
+    const batchJul = await insertBatchPeriode(clientId, cpId, 'shopee', '2026-07-01', '2026-07-31', 'verified');
+
+    const hasil = await bacaPeriodeTerverifikasiTerbaru(sql, cpId, 2);
+    expect(hasil).toEqual([
+      { periodeAwalBulan: '2026-06-01', batchId: batchJun, parserVersi: 1 },
+      { periodeAwalBulan: '2026-07-01', batchId: batchJul, parserVersi: 1 },
+    ]);
+  });
+
+  it('batch `digantikan`/`ditolak`/`parsing` tidak pernah dianggap sumber (G3-08)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    await insertBatchPeriode(clientId, cpId, 'shopee', '2026-06-01', '2026-06-30', 'digantikan');
+    await insertBatchPeriode(clientId, cpId, 'shopee', '2026-07-01', '2026-07-31', 'ditolak');
+    await insertBatchPeriode(clientId, cpId, 'shopee', '2026-08-01', '2026-08-31', 'parsing');
+
+    expect(await bacaPeriodeTerverifikasiTerbaru(sql, cpId, 6)).toEqual([]);
   });
 });

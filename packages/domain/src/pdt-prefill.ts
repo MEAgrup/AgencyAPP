@@ -32,6 +32,11 @@
  * `(batchId, parserVersi)` distinct yang benar-benar berkontribusi —
  * menyembunyikan kemungkinan campuran lintas-batch (mis. G3-08 jalur koreksi,
  * Rule 36) akan lebih berbahaya daripada menampilkannya apa adanya.
+ *
+ * `bacaPeriodeTerverifikasiTerbaru` (G3-07) melengkapi pembaca-pembaca di atas
+ * dengan sisi "periode mana yang tersedia": daftar N batch `verified` TERBARU
+ * untuk sebuah `client_platform_id`, dipakai pemanggil untuk menyusun rentang
+ * `periodeAwalBulan` yang di-loop ke `bacaFaktaShopDaily` dkk.
  */
 import type { Queryable } from '@cdps/db';
 
@@ -442,4 +447,39 @@ export async function bacaFaktaKesehatanPenalti(
     batchId: r.batch_id,
     parserVersi: r.parser_versi,
   }));
+}
+
+export interface PdtPeriodeTerverifikasi extends PdtSumberBatch {
+  /** Awal bulan (`pdt_upload_batch.periode_mulai`) — dipakai sebagai `periodeAwalBulan` ke pembaca lain di modul ini. */
+  periodeAwalBulan: string;
+}
+
+/**
+ * `limit` batch TERBARU yang `status='verified'` untuk `client_platform_id`,
+ * urut KRONOLOGIS NAIK (lama → baru) — dipakai G3-07 (riwayat GMV, `monthIndex`
+ * 1..N sama seperti `getBaselinePrefill` hari ini, `monthIndex` N = bulan
+ * paling baru). Filter `status='verified'` SUDAH cukup untuk G3-08 (batch
+ * `digantikan`/`ditolak`/`parsing` tidak pernah dianggap sumber) — Rule 36
+ * menandai batch lama `digantikan` saat batch koreksi diverifikasi, jadi tidak
+ * ada baris chain `menggantikan_batch_id` tambahan yang perlu diikuti di sini.
+ * Array KOSONG (bukan error) ⇒ `client_platform_id` ini belum punya batch PDT
+ * terverifikasi sama sekali — pemanggil (G3-07) jatuh kembali ke sumber lama
+ * (payload Riset Awal), pola strangler yang sama dengan G3-10.
+ */
+export async function bacaPeriodeTerverifikasiTerbaru(
+  sql: Queryable,
+  clientPlatformId: number,
+  limit: number,
+): Promise<PdtPeriodeTerverifikasi[]> {
+  const rows = await sql<{ periode_awal_bulan: string; batch_id: number; parser_versi: number }[]>`
+    select periode_mulai::text as periode_awal_bulan, id as batch_id, parser_versi
+      from pdt_upload_batch
+     where client_platform_id = ${clientPlatformId}
+       and status = 'verified'
+     order by periode_mulai desc
+     limit ${limit}`;
+
+  return rows
+    .map((r) => ({ periodeAwalBulan: r.periode_awal_bulan, batchId: r.batch_id, parserVersi: r.parser_versi }))
+    .reverse();
 }
