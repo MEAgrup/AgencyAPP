@@ -290,10 +290,12 @@ function NegotiationCard({
           ]}
         />
       )}
-      {/* F-4 (2026-09-14): alasan sales mengajukan harga custom — wajib diisi di
-          server untuk versi ber-custom-terms (writeProposal), jadi Head tidak lagi
-          harus menyimpulkan sendiri dari deretan angka. */}
-      {latest?.alasan_nego && <ReasonBlock label="Alasan negosiasi" text={latest.alasan_nego} />}
+      {/* Alasan negosiasi TIDAK lagi di sini — ia naik ke badan kartu lewat prop
+          `reason` (aturan 1 `ApprovalCard`: "fakta keputusan selalu terlihat
+          tanpa klik … ALASAN berada di badan kartu, bukan di balik toggle").
+          Tujuh antrian lain sudah begitu; hanya negosiasi yang menguburnya di
+          sini, dan justru di antrian inilah kalimat itu paling menentukan.
+          Feedback lapangan pemilik 2026-09-16. */}
       {comparison && <PriceComparison comparison={comparison} />}
       {detail && detail.proposals.length > 1 && (
         <div>
@@ -337,6 +339,13 @@ function NegotiationCard({
             : 'Buka rincian',
         },
       ]}
+      /* F-4 (2026-09-14): alasan sales mengajukan harga custom — wajib diisi di
+         server untuk versi ber-custom-terms (writeProposal), jadi Head tidak
+         perlu menyimpulkannya sendiri dari deretan angka. Dirender lewat
+         `reason` (badan kartu) dan bukan di dalam `detail`, supaya ia berdiri
+         di tempat yang sama dengan alasan tujuh antrian lain — tepat di atas
+         tombol Setujui/Tolak, bukan di balik toggle rincian harga. */
+      reason={latest ? { label: 'Alasan negosiasi', text: latest.alasan_nego } : undefined}
       detail={detailBody}
       detailLabel="Rincian harga & proposal"
       open={open}

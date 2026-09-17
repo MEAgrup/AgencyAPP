@@ -1215,7 +1215,21 @@ DECLARE
     -- LAHIR KOSONG). Baris KERJA-nya (`external_orders`) TETAP ber-lengan
     -- lead/divisi dan karena itu tidak ada di daftar ini.
     'external_service_map_select',
-    'negotiation_proposal_lines_select','negotiation_proposals_select','notifications_select',
+    -- Feedback lapangan 2026-09-16 (`docs/DECISIONS.md` 2026-09-17, migrasi
+    -- `20261110010000`): `negotiation_proposals_select`,
+    -- `negotiation_proposal_lines_select`, `qualified_forms_select`,
+    -- `qualified_form_services_select` dan `prospect_attempt_nq_reasons_select`
+    -- DIHAPUS dari daftar ini. Kelimanya kini memanggil
+    -- `private.jwt_can_read_attempt()` — cermin `prospect_attempts_select`,
+    -- `prosrc`-nya memuat KEDUA `jwt_is_lead` dan `jwt_division` — jadi detektor
+    -- O60 melihat arm-nya. Ledger MENYUSUT, arah yang benar (§ATURAN), dan ini
+    -- BUKAN false-negative yang akhirnya terlihat seperti kelas O60: arm-nya
+    -- memang BELUM ADA sebelum migrasi itu. Akibat nyatanya: Head Sales membuka
+    -- `/persetujuan`, melihat kartu negosiasi timnya, dan `proposals: []` +
+    -- `qualified_form: null` — nominal dan `alasan_nego` tidak pernah muncul,
+    -- 200 tanpa error, sementara tombol Setujui/Tolak (lewat `sm_transition`,
+    -- SECURITY DEFINER — tidak lewat RLS) tetap bekerja.
+    'notifications_select',
     'optimization_logs_select',
     -- `pdt_parser_modul_sel`/`pdt_kolom_alias_sel` (PDT G1-01, migrasi
     -- 20261011010000) masuk daftar ini DENGAN SENGAJA, dicatat di
@@ -1230,7 +1244,6 @@ DECLARE
     -- AM-pemilik/lead-Account dan karena itu tidak ada di daftar ini.
     'pdt_kolom_alias_sel','pdt_parser_modul_sel',
     'plan_gate_config_select',
-    'prospect_attempt_nq_reasons_select',
     -- `px_coverage_snapshot_sel` (Product Exchange M3-B, migrasi 20261101010000)
     -- masuk daftar ini DENGAN SENGAJA, dicatat `docs/DECISIONS.md` 2026-09-15
     -- (PX-M3-…) — bukan ditambahkan agar tes hijau. Baris ini adalah AGREGAT
@@ -1243,7 +1256,6 @@ DECLARE
     -- itu tidak ada di daftar ini; `px_coverage_push` (payload mentah) default-
     -- deny total, juga tidak di sini.
     'px_coverage_snapshot_sel',
-    'qualified_form_services_select','qualified_forms_select',
     'sales_level_labels_select',
     -- `scs_kategori_select` (M19 separuh SCS, migrasi 20260928010000) masuk
     -- daftar ini DENGAN SENGAJA, dicatat di `docs/DECISIONS.md` 2026-09-09 —
@@ -1724,6 +1736,152 @@ END $$;
 DO $$ BEGIN
   IF (SELECT count(*) FROM px_coverage_snapshot WHERE batch_key = 'zpx-rls-batch-0001') <> 1
   THEN RAISE EXCEPTION 'px_coverage_snapshot: siapa pun authenticated harus membaca snapshot agregat (USING(true), justifikasi komentar migrasi)'; END IF;
+END $$;
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 49. Angka & alasan NEGOSIASI untuk Head Sales (migrasi 20261110010000,
+--     feedback lapangan pemilik 2026-09-16).
+--
+--     Yang dijaga di sini adalah satu invarian, bukan lima policy: SIAPA PUN
+--     YANG BOLEH MELIHAT ATTEMPT HARUS BOLEH MELIHAT ANGKA DAN ALASAN YANG
+--     MENEMPEL PADANYA. Kalau kelima policy anak tidak dikembarkan dengan
+--     `prospect_attempts_select`, Head Sales melihat KARTU negosiasi timnya di
+--     `/persetujuan` tapi `proposals: []` dan `qualified_form: null` — 200,
+--     hijau, tanpa error, dan ia menekan Setujui/Tolak tanpa satu angka pun.
+--     Itulah persis bug yang dilaporkan pemilik, dan alasan tes ini ada.
+--
+--     Dicek EKSPLISIT sampai ke KOLOM (bukan sekadar count baris): nominal
+--     (`proposed_price`, `harga_standar`) dan alasan (`alasan_nego`) harus
+--     benar-benar terbaca oleh Head — baris yang terlihat tapi kolomnya NULL
+--     tetap layar kosong bagi yang memutuskan.
+--
+--     Enam arah per tabel: pemilik attempt LIHAT, Head sedivisi LIHAT, sales
+--     lain TIDAK, lead divisi lain TIDAK, Director LIHAT, klaim kosong TIDAK.
+-- ---------------------------------------------------------------------------
+
+INSERT INTO leads (id, lead_name, phone_number, phone_norm, source, origin_division,
+                   record_status, created_by)
+VALUES ('LEAD-RLS-NEG1', 'rls fixture negosiasi', '08120000002', '8120000002', 'Leads - Socmed',
+        'Sales', 'active', 'EMP-RLS-SLSN');
+INSERT INTO prospect_attempts (id, lead_id, owner_employee_id, status, created_by)
+VALUES ('PRSP-RLS-NEG1', 'LEAD-RLS-NEG1', 'EMP-RLS-SLSN',
+        'Negotiation - Pending Approval', 'EMP-RLS-SLSN');
+INSERT INTO qualified_forms (attempt_id, lead_id, nama_pic, toko, kota, link_toko, kategori,
+                             gmv_baseline, target_gmv, platform, created_by)
+VALUES ('PRSP-RLS-NEG1', 'LEAD-RLS-NEG1', 'rls pic', 'Toko RLS', 'Bandung',
+        'https://shopee.co.id/tokorls', 'Fashion', 10000000, 25000000, 'Shopee',
+        'EMP-RLS-SLSN');
+INSERT INTO qualified_form_services (attempt_id, master_service_id, master_version_no, name,
+                                     standard_price, subtotal, commission_rule, platform,
+                                     created_by)
+VALUES ('PRSP-RLS-NEG1', 'MSV-RLS-0001', 1, 'Shopee Rating Optimization',
+        750000, 750000, '0% of standard price', 'Shopee', 'EMP-RLS-SLSN');
+INSERT INTO negotiation_proposals (id, attempt_id, version_no, proposed_by, alasan_nego, created_by)
+VALUES ('NEG-RLS-0001', 'PRSP-RLS-NEG1', 1, 'EMP-RLS-SLSN',
+        'karena harga yg tertera berbeda 100x co rp 1.500.000', 'EMP-RLS-SLSN');
+INSERT INTO negotiation_proposal_lines (proposal_id, master_service_id, proposed_price,
+                                        harga_standar, commission_rule, platform, created_by)
+VALUES ('NEG-RLS-0001', 'MSV-RLS-0001', 1500000, 750000, '0% of standard price', 'Shopee',
+        'EMP-RLS-SLSN');
+INSERT INTO prospect_attempt_nq_reasons (attempt_id, reason, created_by)
+VALUES ('PRSP-RLS-NEG1', 'Budget tidak cukup', 'EMP-RLS-SLSN');
+
+SET LOCAL ROLE authenticated;
+
+-- Pemilik attempt (pengaju) melihat pengajuannya sendiri — kontrol dasar.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLSN","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM negotiation_proposals WHERE id='NEG-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS negotiation_proposals: pengaju harus melihat proposalnya sendiri'; END IF;
+  IF (SELECT count(*) FROM negotiation_proposal_lines WHERE proposal_id='NEG-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS negotiation_proposal_lines: pengaju harus melihat baris harganya sendiri'; END IF;
+END $$;
+
+-- ★ REGRESI UTAMA: Head Sales sedivisi membaca SELURUH paket keputusan.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLDN","division":"Sales","level":"lead"}}', true);
+DO $$
+DECLARE
+  v_proposed numeric;
+  v_standar  numeric;
+  v_alasan   text;
+BEGIN
+  -- Nominal: baris harganya harus ada DAN kolom angkanya harus terbaca.
+  SELECT npl.proposed_price, npl.harga_standar
+    INTO v_proposed, v_standar
+    FROM negotiation_proposal_lines npl WHERE npl.proposal_id='NEG-RLS-0001';
+  IF v_proposed IS DISTINCT FROM 1500000.00 OR v_standar IS DISTINCT FROM 750000.00
+  THEN RAISE EXCEPTION
+    'RLS negotiation_proposal_lines: Head Sales harus membaca NOMINAL negosiasi timnya (proposed=%, standar=%) — ini yang dipakai menerima/menolak',
+    v_proposed, v_standar; END IF;
+
+  -- Alasan: pengaju WAJIB mengisinya (F-4), jadi Head tidak boleh melihat NULL.
+  SELECT np.alasan_nego INTO v_alasan
+    FROM negotiation_proposals np WHERE np.id='NEG-RLS-0001';
+  IF v_alasan IS NULL OR v_alasan = ''
+  THEN RAISE EXCEPTION
+    'RLS negotiation_proposals: Head Sales harus membaca ALASAN negosiasi (alasan_nego), bukan NULL'; END IF;
+
+  -- Konteks keputusan: snapshot Qualified + baris layanannya.
+  IF (SELECT count(*) FROM qualified_forms WHERE attempt_id='PRSP-RLS-NEG1') <> 1
+  THEN RAISE EXCEPTION 'RLS qualified_forms: Head Sales harus membaca snapshot Qualified timnya'; END IF;
+  IF (SELECT count(*) FROM qualified_form_services WHERE attempt_id='PRSP-RLS-NEG1') <> 1
+  THEN RAISE EXCEPTION 'RLS qualified_form_services: Head Sales harus membaca baris layanan snapshot Qualified timnya'; END IF;
+  IF (SELECT count(*) FROM prospect_attempt_nq_reasons WHERE attempt_id='PRSP-RLS-NEG1') <> 1
+  THEN RAISE EXCEPTION 'RLS prospect_attempt_nq_reasons: Head Sales harus membaca alasan Not Qualified timnya'; END IF;
+END $$;
+
+-- Kontrol negatif 1: sales LAIN (bukan pengaju, bukan pemilik attempt) tetap buta.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS8","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM negotiation_proposals WHERE id='NEG-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS negotiation_proposals: sales lain TIDAK boleh melihat negosiasi rekannya'; END IF;
+  IF (SELECT count(*) FROM negotiation_proposal_lines WHERE proposal_id='NEG-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS negotiation_proposal_lines: sales lain TIDAK boleh melihat nominal rekannya'; END IF;
+  IF (SELECT count(*) FROM qualified_forms WHERE attempt_id='PRSP-RLS-NEG1') <> 0
+  THEN RAISE EXCEPTION 'RLS qualified_forms: sales lain TIDAK boleh melihat snapshot rekannya'; END IF;
+  IF (SELECT count(*) FROM qualified_form_services WHERE attempt_id='PRSP-RLS-NEG1') <> 0
+  THEN RAISE EXCEPTION 'RLS qualified_form_services: sales lain TIDAK boleh melihat layanan rekannya'; END IF;
+  IF (SELECT count(*) FROM prospect_attempt_nq_reasons WHERE attempt_id='PRSP-RLS-NEG1') <> 0
+  THEN RAISE EXCEPTION 'RLS prospect_attempt_nq_reasons: sales lain TIDAK boleh melihat alasan NQ rekannya'; END IF;
+END $$;
+
+-- Kontrol negatif 2: lead divisi LAIN tidak — arm divisi memakai origin lead-nya,
+-- jadi pelebaran ini tidak pernah menjadi "semua lead melihat semua harga".
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE9","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM negotiation_proposals WHERE id='NEG-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS negotiation_proposals: lead divisi lain TIDAK boleh melihat negosiasi Sales'; END IF;
+  IF (SELECT count(*) FROM negotiation_proposal_lines WHERE proposal_id='NEG-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS negotiation_proposal_lines: lead divisi lain TIDAK boleh melihat nominal Sales'; END IF;
+  IF (SELECT count(*) FROM qualified_forms WHERE attempt_id='PRSP-RLS-NEG1') <> 0
+  THEN RAISE EXCEPTION 'RLS qualified_forms: lead divisi lain TIDAK boleh melihat snapshot Sales'; END IF;
+END $$;
+
+-- Kontrol positif: Director (oversight) selalu melihat.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-DIR","director":true}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM negotiation_proposals WHERE id='NEG-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS negotiation_proposals: Director harus membaca semua'; END IF;
+  IF (SELECT count(*) FROM negotiation_proposal_lines WHERE proposal_id='NEG-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS negotiation_proposal_lines: Director harus membaca semua'; END IF;
+END $$;
+
+-- Klaim kosong ⇒ default deny (helper mengembalikan NULL, bukan true).
+SELECT set_config('request.jwt.claims', '{}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM negotiation_proposals WHERE id='NEG-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS negotiation_proposals: klaim kosong harus melihat nol baris'; END IF;
+  IF (SELECT count(*) FROM negotiation_proposal_lines WHERE proposal_id='NEG-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS negotiation_proposal_lines: klaim kosong harus melihat nol baris'; END IF;
+  IF (SELECT count(*) FROM qualified_forms WHERE attempt_id='PRSP-RLS-NEG1') <> 0
+  THEN RAISE EXCEPTION 'RLS qualified_forms: klaim kosong harus melihat nol baris'; END IF;
 END $$;
 
 RESET ROLE;
