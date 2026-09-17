@@ -617,8 +617,18 @@ fixture Alpha Digital tetap lolos, event notif terdaftar sesuai katalog.
 
 ## Temuan lama disenggol, sengaja TIDAK diperbaiki di rencana ini
 
-- `account.approveBrief` mengizinkan AM menggiring Brief `[In Review]→[Approved]`
-  tanpa memeriksa status Asset anaknya (M7 §2). Scope M6, tiket sendiri.
+- ~~`account.approveBrief` mengizinkan AM menggiring Brief `[In Review]→[Approved]`
+  tanpa memeriksa status Asset anaknya (M7 §2). Scope M6, tiket sendiri.~~
+  **DIPERBAIKI 2026-09-17** (tiket sendiri, seperti disebut di atas):
+  `validateAllAssetsApproved` (`account.ts`) sekarang menggerbang edge eksplisit
+  itu untuk Brief divisi Creative — nol Asset atau ada satu saja yang belum
+  `[Approved]` ⇒ `[MSG_BRIEF_ASSETS_NOT_APPROVED]`, Brief tetap `[In Review]`.
+  Sengaja **TIDAK** diperluas ke KOL (Booking sudah auto-roll ke `[Approved]`
+  lewat salinan rantai `kol.ts` sendiri) atau Store Operation (baris SKU
+  memang tidak punya konsep "Approved" per baris — `skuRollupTarget` sengaja
+  berhenti di `[In Review]` dan menyerahkan penutupan Brief-nya ke pintu AM
+  ini oleh desain, bukan celah) — keduanya di luar cakupan temuan M7 §2 dan
+  butuh tiketnya sendiri kalau mau disentuh.
 - `assetToWire` menghilangkan `output_link` saat kosong (anti-pola O43). Wire
   baru di rencana ini ditulis benar; yang lama menunggu PR sendiri.
 - Inkonsistensi aktor sistem: TS `'SYSTEM'`, job SQL `'SISTEM'`. Job baru (L3)

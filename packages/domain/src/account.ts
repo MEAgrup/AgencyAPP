@@ -1742,6 +1742,9 @@ export const MSG_BRIEF_SUMBER_BUKAN_CREATIVE = '[brief sumber harus brief divisi
 export const MSG_QUEUE_FORBIDDEN = '[anda tidak memiliki akses ke antrean brief divisi ini]';
 export const MSG_BRIEF_REVIEW_FORBIDDEN =
   '[hanya Account Manager pemilik klien yang dapat mereview Brief layanan ini]';
+/** M7 §2 — guards the explicit AM approve edge; see `validateAllAssetsApproved`. */
+export const MSG_BRIEF_ASSETS_NOT_APPROVED =
+  '[brief belum dapat disetujui, semua aset kreatif harus berstatus Approved terlebih dahulu]';
 
 // --- Types ---
 
@@ -2379,11 +2382,46 @@ export async function reviewBrief(sql: Sql, actor: Actor, briefId: string): Prom
 
 /**
  * approveBrief approves a Brief under review ([In Review] → [Approved], §6 Flow
- * 3). Owning AM (or Director). (The M11 Blocking-Dependency approval gate is
- * DEFERRED until M11 is ported — nil-safe, same as the Go default.)
+ * 3). Owning AM (or Director). Gated on both the M11 Blocking-Dependency check
+ * and, for a Creative Brief, an explicit check that every child Asset is
+ * itself already `[Approved]` (M7 §2) — see `validateAllAssetsApproved`.
  */
 export async function approveBrief(sql: Sql, actor: Actor, briefId: string): Promise<statemachine.TransitionResult> {
   return driveReviewEdge(sql, actor, briefId, BRIEF_STATUS_APPROVED);
+}
+
+/**
+ * validateAllAssetsApproved guards the explicit AM approve edge (M7 §2): a
+ * Creative Brief may reach `[Approved]` only once every one of its Assets
+ * already has. `task.recomputeBriefRollup` only ever drives a Brief to
+ * `[Approved]` once `rollupTarget` already sees all Assets `[Approved]`, so
+ * the automatic roll-up path never needs this — but the AM's explicit
+ * "Setujui" click on this page calls the engine directly and, until this
+ * guard, never consulted the Asset table at all.
+ *
+ * Scoped to Creative on purpose: Assets are only ever created for a Creative
+ * Brief (`creative.lockAssetableBrief` rejects any other division), so every
+ * other division's Brief legitimately has zero rows here and must not be
+ * blocked. KOL Bookings already auto-roll their Brief to `[Approved]` the
+ * same way (`kol.ts`'s own copy of this chain), and Store Operation SKU rows
+ * have no per-row "Approved" concept at all — `task.ts`'s `skuRollupTarget`
+ * deliberately stops its auto-roll at `[In Review]` and relies on THIS exact
+ * explicit call to close the Brief. Extending this guard to either would need
+ * its own PRD-backed ticket, not a side effect of the Creative M7 §2 fix.
+ *
+ * `'Creative'` is a literal, not an import of `creative.CREATIVE_DIVISION`:
+ * `creative.ts` already imports `task.ts`, which imports this module —
+ * importing `creative.ts` back here would cycle.
+ */
+async function validateAllAssetsApproved(tx: Queryable, briefId: string): Promise<void> {
+  const brief = await tx<{ assigned_division: string }[]>`select assigned_division from briefs where id = ${briefId}`;
+  if (brief.length === 0 || brief[0].assigned_division !== 'Creative') {
+    return;
+  }
+  const rows = await tx<{ status: string }[]>`select status from assets where brief_id = ${briefId}`;
+  if (rows.length === 0 || rows.some((r) => r.status !== BRIEF_STATUS_APPROVED)) {
+    throw new ConflictError(MSG_BRIEF_ASSETS_NOT_APPROVED);
+  }
 }
 
 /** Shared owner-gated engine driver for the two no-notes AM review edges. */
@@ -2400,6 +2438,7 @@ async function driveReviewEdge(
     // until its Source is terminal (throws a board ConflictError; nothing changes).
     if (to === BRIEF_STATUS_APPROVED) {
       await validateBriefApproval(tx, briefId);
+      await validateAllAssetsApproved(tx, briefId);
     }
     const res = await statemachine.transition(ex.sm, {
       machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to, actor,

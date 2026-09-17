@@ -62,6 +62,7 @@ import {
   MSG_BRIEF_SUMBER_BUKAN_CREATIVE,
   MSG_BRIEF_SUMBER_KLIEN_LAIN,
   MSG_BRIEF_SUMBER_TIDAK_ADA,
+  MSG_BRIEF_ASSETS_NOT_APPROVED,
   MSG_PIC_BUKAN_WEWENANG_AM,
   type BriefInput,
   type StrategyInput,
@@ -1008,8 +1009,52 @@ describeDb('brief review edges (§6/§7)', () => {
     const { briefId, amId } = await submittedBrief();
     expect((await reviewBrief(sql, accountStaff(amId), briefId)).ok).toBe(true);
     expect(await briefStatus(briefId)).toBe('[In Review]');
+    // §2's invariant (below) needs a fully-Approved Asset before this edge opens.
+    await sql`
+      insert into assets (id, brief_id, asset_type, sequence_no, status, created_by)
+      values ('AST-ZZ-SUBMBRF-1', ${briefId}, 'Video', 1, '[Approved]', 'ZZ-C')`;
     expect((await approveBrief(sql, accountStaff(amId), briefId)).ok).toBe(true);
     expect(await briefStatus(briefId)).toBe('[Approved]');
+  });
+
+  /**
+   * M7 §2: "Brief = [Approved] only when every Asset is [Approved]" — found
+   * unenforced on this explicit AM edge (`docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md`
+   * "Temuan lama disenggol"). `driveReviewEdge` used to call the engine
+   * straight through with only the M11 dependency gate checked; an AM could
+   * force a Creative Brief to [Approved] with Assets still mid-review.
+   */
+  it('approveBrief refuses a Creative Brief with no Assets, or with any not-yet-Approved (M7 §2)', async () => {
+    const { briefId: noAssets, amId } = await submittedBrief();
+    await reviewBrief(sql, accountStaff(amId), noAssets);
+    await expect(approveBrief(sql, accountStaff(amId), noAssets))
+      .rejects.toThrow(MSG_BRIEF_ASSETS_NOT_APPROVED);
+    expect(await briefStatus(noAssets)).toBe('[In Review]'); // refused, not silently parked elsewhere
+
+    const { briefId: mixed, amId: amId2 } = await submittedBrief();
+    await reviewBrief(sql, accountStaff(amId2), mixed);
+    await sql`
+      insert into assets (id, brief_id, asset_type, sequence_no, status, created_by)
+      values ('AST-ZZ-MIXED-1', ${mixed}, 'Video', 1, '[Approved]', 'ZZ-C'),
+             ('AST-ZZ-MIXED-2', ${mixed}, 'Video', 2, '[In Review]', 'ZZ-C')`;
+    await expect(approveBrief(sql, accountStaff(amId2), mixed))
+      .rejects.toThrow(MSG_BRIEF_ASSETS_NOT_APPROVED);
+    expect(await briefStatus(mixed)).toBe('[In Review]');
+  });
+
+  /**
+   * The guard above is scoped to Creative (Assets are only ever created for a
+   * Creative Brief) — an Ads Brief-as-task has no Asset rows at all and must
+   * keep approving exactly as before.
+   */
+  it('approveBrief is unaffected on a non-Creative division (Ads) with zero Assets', async () => {
+    const { svcId, amId } = await directFixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, { ...goodBrief(), assignedDivision: 'Ads' });
+    await driveBrief(b.id, '[In Progress]', divisionStaff('Ads', 'ZZ-ADS'));
+    await driveBrief(b.id, '[Submitted]', divisionStaff('Ads', 'ZZ-ADS'));
+    await reviewBrief(sql, accountStaff(amId), b.id);
+    expect((await approveBrief(sql, accountStaff(amId), b.id)).ok).toBe(true);
+    expect(await briefStatus(b.id)).toBe('[Approved]');
   });
 
   it('only the owning AM (or Director) may review a Brief (§6 Rule 3)', async () => {
