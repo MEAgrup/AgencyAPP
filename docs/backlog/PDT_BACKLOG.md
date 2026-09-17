@@ -1631,6 +1631,19 @@ tabel (bukan dipaksa satu bentuk):
   2817/2818 (1 skip, bukan regresi) + typecheck seluruh paket + `web-internal` bersih.
 
 ### G3-02 · Autofill B-0.6/B-0.7/B-1 + kesehatan toko
+
+> ⚠️ **STOP 2026-09-17 (sesi 36)** — sebelum menulis kode, ditemukan: `refundRatePersen`/
+> `pengunjungPerBulan`/`conversionRatePersen`/`poinPenalti` (dan sebelas field B3 lain) adalah
+> angka SATU-SNAPSHOT diikat ke `periodeReferensi` tunggal (hari ini: bulan yang payload Riset
+> Awal-nya sendiri jelaskan — cuma ada satu payload, jadi "bulan mana" otomatis tunggal). PDT
+> sebaliknya punya BANYAK periode/batch valid per `client_platform_id` (upload bulanan
+> berkelanjutan) — begitu sumbernya diganti ke `pdt_fact_*`, TIDAK ada aturan PDT atau Strategi
+> yang bilang periode PDT MANA yang jadi `periodeReferensi`. Detail lengkap + tiga opsi bercabang:
+> `docs/DECISIONS.md` §Open baris `G3-REFERENCE-PERIODE`. **Sama berlaku untuk G3-03…G3-06**
+> (seluruhnya field snapshot-satu-periode) — **G3-01 (sudah tutup) dan G3-07 (definisinya sendiri
+> "6 batch PDT terbaru", tidak butuh `periodeReferensi`) TIDAK terpengaruh**, boleh dikerjakan
+> tanpa menunggu. **Jangan mulai coding G3-02…G3-06 sebelum baris itu tertutup.**
+
 - B-0.6 (provenance)/B-0.7 (periode)/B-1 (GMV+pesanan per bulan) — **sudah** terwarisi hari ini
   dari `riset_awal_analisa.payload` (`DECISIONS.md` 2026-08-20); tiket ini mengganti SUMBERNYA ke
   `pdt_fact_shop_daily` (basis sesuai Rule 15/16 — TikTok `net`, Shopee tiga basis terpisah,
@@ -1644,27 +1657,48 @@ tabel (bukan dipaksa satu bentuk):
   ini bisa autofill; jangan ditebak dari kolom yang tidak ada.
 
 ### G3-03 · Dimensi SKU (B-2 portofolio SKU)
+
+> ⚠️ Sama blokir seperti G3-02 — "periode yang mana" untuk distribusi kuadran/Pareto belum
+> punya jawaban. Lihat `DECISIONS.md` §Open `G3-REFERENCE-PERIODE`. Jangan mulai coding.
+
 `skuListed`/`skuAktif` ← hitungan `pdt_sku_master.status_listing` (Rule 19, SKU tidak pernah
 dihapus). `skuPareto80`/`skuSlowMoving`/`topSku` ← distribusi `gmv` `pdt_fact_sku_period` per
 periode (kolom `kuadran` sudah membawa klasifikasi Riset Awal — pakai ulang, jangan hitung ulang
 ambang yang berbeda tanpa alasan).
 
 ### G3-04 · Dimensi konten (video/live, bagian B-7)
+
+> ⚠️ Sama blokir seperti G3-02 — "bulan yang mana" belum punya jawaban. Lihat `DECISIONS.md`
+> §Open `G3-REFERENCE-PERIODE`. Jangan mulai coding.
+
 `jumlahVideoPerBulan`/`totalViews`/`gmvVideo` ← `pdt_fact_content` `jenis='video'` (vv/gmv, filter
 `is_akun_toko` sesuai kebutuhan toko-vs-afiliasi). `jamLivePerBulan`/`gmvLive` ← `jenis='live'`
 (`durasi_detik`/3600, `gmv`).
 
 ### G3-05 · Dimensi afiliasi/kreator (B-6)
+
+> ⚠️ Sama blokir seperti G3-02 — "periode yang mana" belum punya jawaban. Lihat `DECISIONS.md`
+> §Open `G3-REFERENCE-PERIODE`. Jangan mulai coding.
+
 `affiliateAktif30Hari`/`gmvAffiliate`/`gmvAffiliatePersen`/`topKreator`/`sampelTerkirim` ←
 `pdt_fact_creator_period` (join `pdt_fact_content.creator_handle` bila hitungan "aktif 30 hari"
 butuh tanggal posting, bukan cuma agregat bulanan).
 
 ### G3-06 · Dimensi iklan (B-4/B-5 belanja+ROAS+kampanye)
+
+> ⚠️ Sama blokir seperti G3-02 — "periode yang mana" belum punya jawaban. Lihat `DECISIONS.md`
+> §Open `G3-REFERENCE-PERIODE`. Jangan mulai coding.
+
 `adSpend`/`roas` ← `pdt_fact_ads` (Σ `biaya`, `roas` rata-rata tertimbang — **bukan** rata-rata
 polos, lihat catatan `report/dimensi_roas` yang sudah ada). `jumlahKampanyeAktif`/`tipeKampanye` ←
 distinct `kampanye_id`/`sumber` periode berjalan.
 
 ### G3-07 · Riwayat GMV 6 bulan (Rule 35)
+
+> ✅ **TIDAK terkena blokir G3-REFERENCE-PERIODE** (lihat catatan STOP di G3-02) — definisinya
+> sendiri "6 batch PDT TERBARU" per `client_platform_id`, self-contained, tidak butuh
+> `periodeReferensi` apa pun. Boleh dikerjakan sekarang.
+
 `baselineBulan` (24 sel manual hari ini) ← rollup bulanan `pdt_fact_shop_daily` 6 batch
 sebelumnya per `client_platform_id`, disusun `monthIndex` 1..6 sama seperti `getBaselinePrefill`
 hari ini — **bentuk keluaran TIDAK berubah**, hanya sumbernya.
