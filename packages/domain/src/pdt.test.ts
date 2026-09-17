@@ -213,17 +213,22 @@ afterEach(async () => {
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
   // pdt_benchmark (G2-02, tambahVersiBenchmark) — append-only/frozen
-  // (`trg_pdt_benchmark_frozen` menolak UPDATE/DELETE). Versi 1/2 adalah seed
-  // migrasi (`20261030010000`/`20261104010000`) yang HARUS bertahan setiap
-  // run; versi > 2 murni lahir dari tes `tambahVersiBenchmark` di berkas ini,
-  // jadi aman dibuang. Trigger dimatikan sebagai superuser dan dipulihkan di
-  // `finally` — pola sama `productexchange.test.ts` (`px_eligibility_policy`)
-  // — supaya kegagalan cleanup tidak pernah meninggalkan tabel bisa ditulis
-  // untuk tes berikutnya. Harus berjalan SETELAH `pdt_laporan_kiriman` di atas
-  // (baris itu FK ke `pdt_benchmark.versi`, jadi harus sudah kosong dulu).
+  // (`trg_pdt_benchmark_frozen` menolak UPDATE/DELETE). Baris seed migrasi
+  // (`dibuat_oleh = 'SYSTEM'` — versi 1/2 TikTok `20261030010000`/
+  // `20261104010000`, versi 3 Shopee `20261114010000`, G4-03) HARUS bertahan
+  // setiap run; baris yang lahir dari `tambahVersiBenchmark` di berkas ini
+  // SELALU ber-`dibuat_oleh = actor.employeeId` (never `'SYSTEM'`, lihat
+  // `tambahVersiBenchmark`), jadi disaring lewat itu — BUKAN `versi > N`
+  // (nomor absolut berubah tiap kali seed baru ditambah; menyaring pencipta
+  // aman terhadap seed berikutnya). Trigger dimatikan sebagai superuser dan
+  // dipulihkan di `finally` — pola sama `productexchange.test.ts`
+  // (`px_eligibility_policy`) — supaya kegagalan cleanup tidak pernah
+  // meninggalkan tabel bisa ditulis untuk tes berikutnya. Harus berjalan
+  // SETELAH `pdt_laporan_kiriman` di atas (baris itu FK ke
+  // `pdt_benchmark.versi`, jadi harus sudah kosong dulu).
   await sql`alter table pdt_benchmark disable trigger trg_pdt_benchmark_frozen`;
   try {
-    await sql`delete from pdt_benchmark where versi > 2`;
+    await sql`delete from pdt_benchmark where dibuat_oleh <> 'SYSTEM'`;
   } finally {
     await sql`alter table pdt_benchmark enable trigger trg_pdt_benchmark_frozen`;
   }
@@ -3751,7 +3756,7 @@ describeDb('listBenchmarkVersi + tambahVersiBenchmark (G2-02)', () => {
     }
   });
 
-  it('tambahVersiBenchmark: ValidationError untuk platform selain tiktok (Shopee tidak memakai pdt_benchmark)', async () => {
+  it('tambahVersiBenchmark: ValidationError untuk platform selain tiktok (kalibrasi admin Shopee belum dibangun, G4-03)', async () => {
     const nilai = await nilaiValidBerbasisAktif();
     await expect(tambahVersiBenchmark(sql, director(), { platform: 'shopee', nilai, catatan: 'x' })).rejects.toThrow(ValidationError);
   });
@@ -3779,9 +3784,14 @@ describeDb('listBenchmarkVersi + tambahVersiBenchmark (G2-02)', () => {
 
   it('tambahVersiBenchmark: mint versi GLOBAL berikutnya (bukan per-platform), append-only — versi lama tidak tersentuh', async () => {
     const sebelum = await bacaBenchmarkAktifTiktok(sql);
+    // Counter GLOBAL lintas platform (`uq_pdt_benchmark_versi`, dokblok `tambahVersiBenchmark`) —
+    // sejak G4-03 Shopee punya baris seed sendiri (`versi=3`) yang bisa lebih tinggi dari versi
+    // TikTok aktif, jadi "versi berikutnya" dihitung dari MAX lintas tabel di sini, bukan
+    // `sebelum.versi + 1` (itu cuma versi TikTok aktif, bukan max global).
+    const [{ max_sebelum }] = await sql<{ max_sebelum: number }[]>`select coalesce(max(versi), 0) as max_sebelum from pdt_benchmark`;
     const nilai = await nilaiValidBerbasisAktif();
     const dibuat = await tambahVersiBenchmark(sql, director(), { platform: 'tiktok', nilai, catatan: 'kalibrasi ulang tes G2-02', aktif: true });
-    expect(dibuat.versi).toBe(sebelum.versi + 1);
+    expect(dibuat.versi).toBe(max_sebelum + 1);
     expect(dibuat.platform).toBe('tiktok');
     expect(dibuat.aktif).toBe(true);
     expect(dibuat.catatan).toBe('kalibrasi ulang tes G2-02');

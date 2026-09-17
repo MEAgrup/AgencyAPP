@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { copilot, notification, pdt, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
+import * as pdtVerdict from './pdt-verdict';
 
 /**
  * canUploadBatch — siapa yang boleh mengunggah batch PDT untuk sebuah toko
@@ -898,6 +899,13 @@ export async function commitUploadBatch(
         berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
         berkasShopeeKesehatan,
       });
+
+      // G4-03 Tahap 1 (Flow C langkah 1) — mesin verdict Shopee, HANYA saat batch
+      // ini benar-benar verified. Di dalam transaksi yang sama: gagal ⇒ ikut rollback
+      // bersama penulisan batch, bukan status setengah-jadi.
+      if (platform === 'shopee' && status === 'verified') {
+        await pdtVerdict.evaluasiVerdictShopee(tx, id, clientPlatformId, periodeAwalBulan);
+      }
 
       await executors(tx).audit.insertAudit({
         entityType: 'pdt_upload_batch',
@@ -2288,6 +2296,13 @@ export async function reparsePdtBatch(
                reconcile_delta_pct = ${reconcileDeltaPct}, identitas_sumber = ${tx.json(identitasSumber as never)}
          where id = ${batchId}`;
 
+      // G4-03 Tahap 1 (Flow D — reparse) — pola sama commitUploadBatch: baris fakta
+      // bisa berubah setelah parser diperbaiki, jadi verdict dihitung ULANG setiap
+      // reparse yang berakhir verified, bukan hanya saat status baru berubah.
+      if (platform === 'shopee' && status === 'verified') {
+        await pdtVerdict.evaluasiVerdictShopee(tx, batchId, clientPlatformId, batch.periode_awal_bulan);
+      }
+
       const statusBerubah = status !== batch.status;
       await executors(tx).audit.insertAudit({
         entityType: 'pdt_upload_batch',
@@ -2712,8 +2727,13 @@ export interface PdtBenchmarkVersiInput {
 export async function tambahVersiBenchmark(sql: Sql, actor: Actor, input: PdtBenchmarkVersiInput): Promise<PdtBenchmarkVersi> {
   if (!canKelolaBenchmark(actor)) throw new ForbiddenError();
   if (input.platform !== 'tiktok') {
+    // Shopee SEKARANG membaca pdt_benchmark (G4-03 Tahap 1, mesin verdict roas/acos) — tapi
+    // hanya lewat migrasi seed (20261114010000), bentuk `nilai`-nya beda total dari
+    // `validasiNilaiBenchmarkTiktok` (dua kunci flat, bukan sebelas band good/warn). Kalibrasi
+    // admin-tunable untuk Shopee (Rule 25) BELUM dibangun — tetap ValidationError di sini,
+    // pesannya dikoreksi supaya tidak lagi mengklaim Shopee nol pemakai pdt_benchmark.
     throw new ValidationError(
-      `[platform '${input.platform}' belum didukung kalibrasi benchmark — mesin skor Shopee tidak memakai pdt_benchmark]`,
+      `[platform '${input.platform}' belum didukung kalibrasi benchmark lewat admin — hanya TikTok yang punya form kalibrasi hari ini]`,
     );
   }
   const catatan = (input.catatan ?? '').trim();

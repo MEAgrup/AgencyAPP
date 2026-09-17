@@ -1535,7 +1535,10 @@ PDT-21 membaliknya: laporan = **view atas fakta**; snapshot beku **hanya saat di
 > HURUF PER HURUF `productexchange.createEligibilityPolicy`/`listEligibilityPolicy` +
 > `/px/eligibility-policy` (append-only, `aktif` tidak pernah dibalik, versi = counter GLOBAL).
 > `pdt.listBenchmarkVersi`/`pdt.tambahVersiBenchmark` (`packages/domain/src/pdt.ts`) — TikTok SAJA
-> (platform lain ditolak eksplisit, Shopee tidak memakai `pdt_benchmark`), memvalidasi PERSIS
+> (platform lain ditolak eksplisit; **koreksi 2026-09-17 sesi 41**: Shopee SEKARANG memakai
+> `pdt_benchmark` — mesin verdict G4-03 Tahap 1 membaca `platform='shopee'` versi 3 — kalimat
+> "Shopee tidak memakai pdt_benchmark" di baris ini sudah tidak benar; yang benar ADMIN KALIBRASI
+> Shopee lewat form ini belum dibangun, hanya lewat migrasi seed), memvalidasi PERSIS
 > sepuluh kunci `PdtBenchmarkTiktok`+`PdtBenchmarkKuadranTiktok`. Route baru
 > `GET/POST /api/v1/account/pdt/benchmark` + halaman Director-only `/pdt/benchmark`
 > (`web-internal`, prefill dari versi aktif). Uji DoD eksplisit (kirim laporan versi lama → naikkan
@@ -2083,6 +2086,33 @@ GMV bulanan otoritatif tetap entri manual AM (M6B P-E / M6D §3 Rule 11).
 > dari fakta periode berikutnya. **Jangan** bangun aksi 3/5/6 sampai `G4-03-KATALOG-KESIAPAN`
 > (`docs/DECISIONS.md` §Open) dijawab — ketiganya berubah DEFINISI, bukan implementasi. Cek skema
 > `pdt_usulan`/`pdt_usulan_katalog` yang sudah ada (G1-01/G4-01) sebelum menambah kolom.
+
+> **Status 2026-09-17 (sesi 41) — Tahap 1 DIKERJAKAN, tapi bukan aksi 1/7/8: aksi 3 (ACoS) + 8
+> (ROAS).** Riset implementasi sebelum kode ditulis menemukan blocker yang catatan Tahap 1 di atas
+> belum cek: `divisi_tujuan` (dibaca Flow C langkah 3, "usulan → Plan → Brief divisi") hanya bisa
+> `Creative`/`Ads`/`KOL`/`Live Stream` (`briefs.assigned_division` CHECK). ROAS+ACoS memetakan
+> bersih ke `Ads` (preseden G4-01 D1-D5); cancel rate (1) dan GMV pesanan selesai (7) TIDAK —
+> keduanya metrik operasional toko tanpa divisi Brief yang jujur, dicatat `docs/DECISIONS.md` §Open
+> `G4-03-DIVISI-STORE-OPS`, BELUM dikodekan. Jawaban pemilik atas `G4-03-KATALOG-KESIAPAN`
+> (Q1-Q4, sesi ini): cancel rate pemicu = `cancel_rate_good` 5% (report_benchmark_shopee), target
+> 2% (skor.ts) — siap dikodekan begitu `G4-03-DIVISI-STORE-OPS` terjawab; afiliasi aktif (6) =
+> `gmv > 0` (definisi diketok, TARGET/ambang count masih tidak bersumber — dicatat opsional di baris
+> Open yang sama); GMV/jam live (5) — bangun parser durasi `shopee_live` DULU (belum dikerjakan,
+> prasyarat, bukan bagian Tahap 1); ACoS (3) dibaca sebagai ACoS (diketok, DIKODEKAN).
+> **Yang lahir:** migrasi `20261114010000` (`pdt_benchmark` platform='shopee' versi 3 — PORT
+> `roas_good`/`acos_good` dari `report_benchmark_shopee`; katalog `SHP-ROAS`/`SHP-ACOS`),
+> `packages/core/src/pdt/verdict.ts` (murni — Σgmv/Σbiaya ratio-of-sums, `tentukanVerdict` Rule 31:
+> `plan_ref IS NULL` ⇒ selalu `tidak_dikerjakan`, jembatan Plan/Brief belum dibangun sesi ini),
+> `packages/domain/src/pdt-verdict.ts` (baca `pdt-prefill.bacaFaktaAds`, tulis/loop `pdt_usulan`),
+> dipanggil `commitUploadBatch`+`reparsePdtBatch` di dalam transaksi yang sama. Rule 30 (≥6 aksi
+> Shopee): **2 dari ≥6** — TIDAK tercapai sesi ini, menunggu `G4-03-DIVISI-STORE-OPS` + parser
+> durasi (5) + writer chat/diskon (2/4). Diverifikasi: 265 migrasi + gate/invariant lolos
+> `db-rebuild.sh`; 2850/2850 tes `npm test --workspaces` (15 baru: 11 `verdict.test.ts` + 4
+> `pdt-verdict.test.ts`) + 795/795 `web-internal`; typecheck+lint bersih. Bug sampingan ditemukan
+> diperbaiki: `pdt.test.ts` afterEach `delete pdt_benchmark where versi > 2` (asumsi "versi>2 =
+> scratch tes", patah begitu Shopee dapat seed versi 3 sungguhan) → diganti
+> `where dibuat_oleh <> 'SYSTEM'`; tes `tambahVersiBenchmark: mint versi GLOBAL` yang
+> mengasumsikan versi TikTok aktif == versi global tertinggi → diganti baca `max(versi)` langsung.
 
 ---
 
