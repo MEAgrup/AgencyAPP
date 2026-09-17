@@ -1746,6 +1746,26 @@ sebelum PDT):
 `is_akun_toko` sesuai kebutuhan toko-vs-afiliasi). `jamLivePerBulan`/`gmvLive` ← `jenis='live'`
 (`durasi_detik`/3600, `gmv`).
 
+**Status 2026-09-17 (sesi 40) — DITUTUP.** `packages/domain/src/strategi.ts` — dua fungsi murni
+baru: `ringkasVideoDariFakta` (B-7.1) dan `ringkasLiveDariFakta` (B-7.2). **Klarifikasi "filter
+`is_akun_toko` sesuai kebutuhan":** formula DISALIN dari `@cdps/core` `baseline/section-b.ts`
+(mesin Riset Awal lama) mengungkap bahwa filternya ASIMETRIS antar dua sub-field, bukan satu
+filter yang sama dipakai ulang:
+- B-7.1 (video) menjumlahkan **toko + afiliasi digabung, TANPA filter** — komentar `section-b.ts`
+  eksplisit: "B-7.1 menghitung SELURUH video yang tayang di periode itu — toko + afiliasi."
+- B-7.2 (live) **toko SAJA** (`isAkunToko: true` diteruskan ke `bacaFaktaContent`) — komentar yang
+  sama: "jam & GMV live afiliasi bukan kapasitas yang tim MEA jadwalkan, dan menjumlahkannya
+  membuat GMV per jam (turunan) salah."
+
+`jumlahVideoPerBulan` = `rows.length` (jumlah baris video, selalu diketahui begitu ada ≥1 baris).
+`totalViews`/`gmvVideo`/`gmvLive` = Σ metrik, MENGELUARKAN baris yang metriknya `null` (belum
+terpanen) dari jumlahnya — absen ≠ nol. `jamLivePerBulan` = Σ`durasi_detik`/3600, dibulatkan 2
+desimal. Gerbang sama seperti G3-03/G3-02 (`periodeReferensiPdtSaran !== null`), fallback
+`pdtValue ?? b.value` yang sama. Satu tes DB-backed baru di `strategi.test.ts` — 3 video (toko+
+afiliasi+satu `vv=null`) + 2 live (toko+afiliasi, live afiliasi sengaja GMV sangat besar supaya
+tes gagal keras kalau salah ikut dijumlah) membuktikan kedua sisi asimetri di atas.
+`wire.ts`/`web-internal` tidak disentuh (field sudah ada sejak sebelum PDT).
+
 ### G3-05 · Dimensi afiliasi/kreator (B-6)
 
 > ✅ **RESOLVED 2026-09-17 (sesi 39)** — sama seperti G3-02: opsi (B), periode dideklarasikan AM
@@ -1756,6 +1776,21 @@ sebelum PDT):
 `pdt_fact_creator_period` (join `pdt_fact_content.creator_handle` bila hitungan "aktif 30 hari"
 butuh tanggal posting, bukan cuma agregat bulanan).
 
+**Status 2026-09-17 (sesi 40) — DITUTUP.** `packages/domain/src/strategi.ts` — fungsi murni baru
+`ringkasAfiliasiDariFakta`. **Join `pdt_fact_content.creator_handle` TERNYATA tidak diperlukan**:
+`pdt_fact_creator_period` SUDAH berbutir bulanan per kreator (kunci `client_platform_id,
+creator_handle, periode`) — "aktif 30 hari" diterjemahkan sebagai "kreator yang punya baris fakta
+di bulan acuan ini", BUKAN jendela bergulir 30-hari-dari-hari-ini: periode acuan boleh
+dideklarasikan AM ke bulan yang lebih lama (G3-REFERENCE-PERIODE opsi B), dan jendela dari "hari
+ini" tidak berarti apa-apa untuk bulan yang sudah lewat. `affiliateAktif30Hari` = `rows.length`.
+`gmvAffiliate` = Σ`gmv` (baris `gmv=null` dikeluarkan, absen ≠ nol). `gmvAffiliatePersen` = formula
+DISALIN dari `baseline/section-b.ts` (`gmvAffiliate ÷ gmvTokoBulan × 100`, boleh >100%
+"over-attribution" per DECISIONS 2026-08-23, TIDAK dipangkas) — `gmvTokoBulan` DIHOIST dari
+`pdt_fact_shop_daily` yang sudah dibaca di blok G3-02 (satu query, dipakai ulang, bukan query
+kedua). `topKreator` = Top 5 by GMV (B-6.4). `sampelTerkirim` = Σ, absen ≠ nol yang sama. Gerbang
+dan fallback sama seperti G3-03/04. Satu tes DB-backed baru — 3 kreator (2 ber-GMV + 1 `gmv=null`)
++ satu baris `pdt_fact_shop_daily` (penyebut) membuktikan hitungan dan rasio.
+
 ### G3-06 · Dimensi iklan (B-4/B-5 belanja+ROAS+kampanye)
 
 > ✅ **RESOLVED 2026-09-17 (sesi 39)** — sama seperti G3-02: opsi (B), periode dideklarasikan AM
@@ -1765,6 +1800,37 @@ butuh tanggal posting, bukan cuma agregat bulanan).
 `adSpend`/`roas` ← `pdt_fact_ads` (Σ `biaya`, `roas` rata-rata tertimbang — **bukan** rata-rata
 polos, lihat catatan `report/dimensi_roas` yang sudah ada). `jumlahKampanyeAktif`/`tipeKampanye` ←
 distinct `kampanye_id`/`sumber` periode berjalan.
+
+**Status 2026-09-17 (sesi 40) — SEBAGIAN DITUTUP** (`adSpend`/`roas`/`jumlahKampanyeAktif` selesai,
+`tipeKampanye` SENGAJA ditunda — lihat alasan di bawah, bukan lupa):
+
+- `packages/domain/src/strategi.ts` — fungsi murni baru `ringkasIklanDariFakta`. `adSpend` = Σ
+  `biaya` (kolom `pdt_fact_ads.biaya` TIDAK NULLABLE, jadi selalu diketahui begitu ≥1 baris ada).
+  `roas` = Σ`gmv` ÷ Σ`biaya` — **BUKAN rata-rata kolom `roas` mentah per baris** (formula DISALIN
+  dari pola `report/dimensi_roas` yang sudah ada, `packages/core/src/pdt/laporan.ts`: "`roas` PER
+  ITEM dan TOTAL diturunkan Σgmv ÷ Σbiaya, bukan rata-rata kolom `roas` mentah per baris"), dibulat
+  2 desimal. `jumlahKampanyeAktif` = jumlah `kampanye_id` DISTINCT. Gerbang dan fallback sama
+  seperti G3-03/04/05.
+- **`tipeKampanye` TIDAK diimplementasi tiket ini — keputusan sadar, bukan celah.** Backlog di atas
+  bilang "distinct `sumber`" tapi `pdt_fact_ads.sumber` adalah NAMA MODUL PARSER
+  (`shopee_ads_cpc`/`shopee_ads_live`/`shopee_ads_search`/`tt_ads_product`/`tt_ads_live`), BUKAN
+  nilai taksonomi `CAMPAIGN_TYPES` (`gmv_max`/`manual_keyword`/`auto`/`live_ads`/`video_ads`/
+  `affiliate_ads`/`lainnya`) — satu modul export (mis. `shopee_ads_cpc`) bisa memuat kampanye dari
+  BEBERAPA tipe sekaligus di dalam Shopee Ads Manager; nama modul hanya menandai file/sumber
+  ekspornya, bukan konfigurasi kampanye di dalamnya. Memetakan nama modul → tipe kampanye akan
+  MENGARANG klasifikasi yang tidak pernah benar-benar diverifikasi dari isi berkas — kelas
+  kesalahan yang sama yang `MATERI_IKLAN` (`baseline/payload.ts`, mesin lama) SENGAJA hindari: mesin
+  itu hanya meloloskan 3 dari 7 nilai `CAMPAIGN_TYPES` secara otomatis (`gmv_max`/`live_ads`/
+  `video_ads`, lewat regex atas TEKS BEBAS yang benar-benar ada di file), dan sengaja membiarkan
+  4 sisanya (termasuk `manual_keyword`) tetap manual karena "bukan nilai yang pernah kami lihat di
+  berkas". `sumber` tidak lolos ambang yang sama (tidak ada satu pun nilainya yang secara tekstual
+  cocok dengan nilai `CAMPAIGN_TYPES` mana pun). `tipeKampanye` tetap payload-only untuk sekarang;
+  kalau AM Ads/Hans punya pemetaan sumber→tipe yang terverifikasi (bukan tebakan), itu keputusan
+  baru untuk `docs/DECISIONS.md`, bukan sesuatu yang aman diasumsikan di sini.
+- Satu tes DB-backed baru di `strategi.test.ts` — 3 kampanye lintas sumber (satu `gmv=null`)
+  membuktikan `roas` Σgmv÷Σbiaya (2.94) BERBEDA dari rata-rata polos kolom `roas` mentah (yang
+  akan memberi 3), dan `jumlahKampanyeAktif`/`adSpend` menghitung dengan benar termasuk kampanye
+  ber-`gmv=null`.
 
 ### G3-07 · Riwayat GMV 6 bulan (Rule 35)
 
