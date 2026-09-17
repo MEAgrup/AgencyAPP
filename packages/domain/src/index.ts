@@ -204,6 +204,10 @@ export * as pdt from './pdt';
 // dipakai ulang oleh G3-02..G3-06. Modul terpisah dari `pdt.ts` per catatan backlog
 // (`docs/backlog/PDT_BACKLOG.md` §3): bukan perluasan `strategi.ts`.
 export * as pdtPrefill from './pdt-prefill';
+// G4-03 Tahap 1 — mesin verdict Shopee (Rule 26-32, Flow C), dipanggil `pdt.ts`
+// commitUploadBatch/reparsePdtBatch di dalam transaksi yang sama saat batch
+// verified. Modul terpisah (pola sama pdt-prefill) — bukan perluasan pdt.ts.
+export * as pdtVerdict from './pdt-verdict';
 // F-6 (feedback lapangan 2026-09-14) — Daily Activity (DACT-): log aktivitas
 // harian karyawan (keluaran kerja, bukan absensi), nyambung M14 Team
 // Performance. Lihat docs/DECISIONS.md 2026-09-14 (F-6).

@@ -18,6 +18,9 @@
  * cakupan, lihat docblock berkas), `insight-edit.ts` untuk validasi draf
  * insight AM (G2-01-INSIGHT-EDIT), `kuadran.ts` untuk klasifikasi kuadran SKU
  * TikTok (G2-01-KUADRAN-SKU langkah 2, benchmark `quad_klik`/`quad_cvr`).
+ * `verdict.ts` untuk mesin verdict Shopee (G4-03 Tahap 1, Rule 26-32 Flow C)
+ * — katalog aksi BARU membaca `pdt_fact_*` langsung, terpisah dari
+ * `copilot.ts` (katalog lama, payload baseline).
  */
 export * from './types';
 export * from './modules';
@@ -33,3 +36,4 @@ export * from './skor';
 export * from './laporan';
 export * from './insight-edit';
 export * from './kuadran';
+export * from './verdict';
