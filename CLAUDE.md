@@ -32,9 +32,18 @@ Standalone internal system covering MEA Agency's full client lifecycle: lead int
   Route handler = shell: resolve actor dari klaim JWT → validasi → panggil domain.
 - **Frontend:** React/Next. Two apps: `web-internal` (workspaces/boards/dashboards) and `web-client-portal` (external, **separate auth realm**, strict allow-list data layer — never a permission-trimmed internal view).
 - **DB:** **Supabase/Postgres**, single schema (`public`), proyek live `CDPS SG`.
-  Migrasi HANYA lewat `supabase/migrations/**` + `supabase db push` / `apply_migration`
+  Migrasi HANYA lewat `supabase/migrations/**` + `apply_migration`
   — **jangan pernah** `psql -f` (itulah yang melahirkan drift O38), dan jangan
   hand-edit schema. DB lokal dibangun ulang HANYA lewat `scripts/db-rebuild.sh`.
+  **`supabase db push` TIDAK BISA dipakai di repo ini** (dan karena itu dicabut
+  dari baris di atas): `supabase/migrations/**` memuat sebelas pasang berkas yang
+  berbagi prefix versi, sementara CLI memakai 14 digit pertama nama berkas sebagai
+  PRIMARY KEY — push mati di pasangan PERTAMA (`20260901010000`) dengan SQLSTATE
+  23505, diverifikasi 2026-09-17. `apply_migration` tidak terpengaruh (ia memberi
+  versi saat penerapan), begitu pula CI dan `db-rebuild.sh` (keduanya mengurut nama
+  PENUH). Nomor baru dijaga `scripts/check-migration-versions.sh` supaya tabrakan
+  ke-12 tidak mendarat; sebelas yang lama sengaja TIDAK dinomori ulang —
+  `docs/DECISIONS.md` 2026-09-17.
 - **Penegakan aturan ada di DB, bukan cuma di TS:** transisi status ditulis
   eksklusif oleh fungsi SQL `sm_transition` (row lock + validasi edge + gate role +
   baris audit immutable, satu transaksi), RLS memikul row-scope, dan riwayat

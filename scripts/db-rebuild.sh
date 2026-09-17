@@ -91,6 +91,14 @@ MIGRATIONS=()
 while IFS= read -r f; do MIGRATIONS+=("$f"); done < <(find "$MIG_DIR" -maxdepth 1 -name '*.sql' | sort)
 [[ ${#MIGRATIONS[@]} -gt 0 ]] || { echo "FATAL: nol berkas migrasi di $MIG_DIR" >&2; exit 1; }
 
+# Gerbang nomor migrasi — kembar langkah yang sama di job `db-and-migrations`.
+# `sort` di atas mengurut NAMA PENUH, jadi dua berkas yang berbagi prefix versi
+# tetap terurut deterministik dan skrip ini tetap hijau; yang TIDAK hijau adalah
+# `supabase db push`, yang memakai 14 digit pertama sebagai PRIMARY KEY. Cek ini
+# melihat apa yang urutan nama tidak bisa lihat. Lihat skripnya untuk riwayat
+# sebelas tabrakan yang sudah telanjur ada.
+"$(dirname "$0")/check-migration-versions.sh" 
+
 echo "══ rebuild DB CDPS ══"
 echo "  basis data : $DB_NAME"
 echo "  koneksi    : $WHERE"
