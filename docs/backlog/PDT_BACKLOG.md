@@ -1666,6 +1666,20 @@ Jadi `pdt_satuan_t` (`rupiah`, `persen`, `hitungan`, `jam`, `hari`, `views`) **b
 jalur yang benar dari hasil parse adalah membuat **Metric Entry (`MTR-`, `entry_method='File Export'`)**.
 GMV bulanan otoritatif tetap entri manual AM (M6B P-E / M6D §3 Rule 11).
 
+> ⚠️ **STOP 2026-09-17 (sesi 35) — belum dimulai, menunggu keputusan pemilik.** Verifikasi ke kode
+> (bukan asumsi) menemukan mesin usulan yang BENAR-BENAR berjalan hari ini (`copilot.susunUsulan` +
+> `strategi.susunPilarUsulan`) membaca `riset_awal_analisa.payload` (baseline lama) dan menulis
+> HANYA ke Strategi Section E — **nol baris TS pernah menyentuh tabel `pdt_usulan`** (grep kosong
+> di luar `_katalog`). PRD Flow C eksplisit minta mesin membaca **`pdt_fact_*`** (bukan payload
+> Riset Awal) dan mengevaluasi ulang dari **fakta batch berikutnya** (bukan Riset Awal berikutnya).
+> Ini bukan gap kosmetik: "6 aksi khusus Shopee" yang genuinely Shopee-eksklusif kemungkinan besar
+> butuh field yang cuma ada di `pdt_fact_shop_daily`/`pdt_fact_ads`/`pdt_fact_kesehatan_penalti`
+> (cancel rate, chat/response penalti, AMS/CPC, flash sale/diskon) — field yang TIDAK ADA di
+> kosakata `MetrikKunci` yang dipakai katalog hari ini. Detail lengkap + dua opsi bercabang
+> (mesin fakta baru vs snapshot Section E) dicatat `docs/DECISIONS.md` **G4-03-VERDICT-ENGINE**
+> (Open, belum diputuskan). **Jangan mulai coding G4-03 sebelum baris itu tertutup** — mengarang
+> salah satu opsi tanpa konfirmasi berisiko dua mesin evaluasi yang tidak sinkron.
+
 ---
 
 ## 5. G5 — Product Exchange — ⛔ **DIBLOKIR, jangan dijadwalkan**
