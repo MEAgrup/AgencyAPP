@@ -16,12 +16,13 @@
  * House rules honored here:
  *   - MSV id minted ONLY after the mandatory-field gate passes.
  *   - Immutable versions (INSERT-only); every create/version appends to audit.
- *   - Exact BI `[...]`: the house default gate + the edit-denied message.
+ *   - Exact BI `[...]`: a field-naming mandatory gate (owner QA 2026-09-17,
+ *     `DECISIONS.md`) + the edit-denied message.
  *
  * Reference: archive/backend-go/internal/admin/master_service.go.
  */
 
-import { accrual, money, permission, tz } from '@cdps/core';
+import { accrual, bi, money, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 // `plangate_rules` is pure (its only import is @cdps/core), so taking the tier
 // vocabulary from it cannot form a cycle — unlike `sales`, which this module
@@ -71,12 +72,92 @@ const FREQUENCIES = new Set(['Monthly', 'One-time', 'Campaign']);
 // Errors
 // ---------------------------------------------------------------------------
 
-/** Mandatory-field gate failure (house default BI message). */
+/**
+ * Mandatory-field gate failure.
+ *
+ * `detail` NAMES the field that is wrong, and the reason it exists is a QA
+ * report from the owner (2026-09-17): editing "Store Management (Paket)" — and
+ * adding a brand-new service — answered `[data tidak lengkap, silahkan
+ * lengkapi semua pertanyaan wajib!]` on a form where every visible box was
+ * filled in. It was not a false refusal: this gate refuses at TWENTY-TWO points,
+ * and the ones easiest to trip live in fields far below the fold (Durasi Jasa,
+ * Pilihan Durasi, Kalau Klien Beli Lebih dari Satu, Kapan Pendapatan Diakui) —
+ * and are CROSS-FIELD, so the box that is wrong is not even empty. One message
+ * for twenty-two causes cannot tell the Sales Head which box to touch, so the
+ * refusal was unactionable — exactly the complaint the Strategi Section B gate
+ * already answered the same way (owner QA 2026-08-24, `strategi.ts`
+ * `validateChannelBaselineShape`), and the same reasoning that gave
+ * `BadCommissionRuleError` its own message in O73.
+ *
+ * The bare constructor keeps the house default (CLAUDE.md #5) for the one
+ * caller that has a single cause and nothing to name: `PUT
+ * /master-services/{id}/active` with a non-boolean body.
+ */
 export class IncompleteError extends Error {
-  constructor() {
-    super('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+  /** The field-level BI message, or the house default when none was given. */
+  constructor(detail?: string) {
+    super(detail === undefined || detail.trim() === '' ? bi.INCOMPLETE_DATA : bi.bracket(detail.trim()));
     this.name = 'MslIncompleteError';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Pesan gerbang wajib, per field
+// ---------------------------------------------------------------------------
+
+/**
+ * nilai merender nilai yang DITOLAK untuk ditempel ke dalam pesan: satu baris,
+ * tanpa kurung siku (yang akan merusak invarian `[...]` rumah — `bi.isBracketed`
+ * menolak pesan berkurung ganda), dan dipotong supaya satu paragraf yang
+ * ter-paste tidak menjadi seluruh peringatan. Persis pola `describeRule` di
+ * `commission_rule.ts`.
+ */
+function nilai(v: unknown): string {
+  const flat = String(v ?? '').replace(/\s+/g, ' ').replace(/[[\]]/g, '').trim();
+  if (flat === '') {
+    return '(kosong)';
+  }
+  return flat.length > 40 ? `${flat.slice(0, 40)}…` : flat;
+}
+
+/** `[<label> wajib diisi]` — kotak wajib yang dibiarkan kosong. */
+export function msgWajibDiisi(label: string): string {
+  return `[${label} wajib diisi]`;
+}
+
+/** `[<label> "x" tidak dikenal]` — nilai di luar daftar tertutup. */
+export function msgTidakDikenal(label: string, value: unknown): string {
+  return `[${label} "${nilai(value)}" tidak dikenal]`;
+}
+
+/** `[<label> "x" bukan angka rupiah yang sah]`. */
+export function msgBukanRupiah(label: string, value: unknown): string {
+  return `[${label} "${nilai(value)}" bukan angka rupiah yang sah]`;
+}
+
+/**
+ * Label yang dipakai pesan-pesan ini SENGAJA sama dengan label di form MSL
+ * (`web-internal/.../master-services/page.tsx`): pesan yang menyebut
+ * `durasi_bulan` memaksa pembacanya menerjemahkan nama kolom database menjadi
+ * kotak di layar, dan itu pekerjaan yang tidak perlu ada.
+ */
+const L_NAMA = 'Nama Layanan';
+const L_HARGA = 'Harga Standar';
+const L_KOMISI = 'Aturan Komisi';
+const L_BERLAKU = 'Berlaku Sejak';
+const L_MODE = 'Mode';
+const L_FREKUENSI = 'Frekuensi';
+const L_MIN_QTY = 'Batas Minimal';
+const L_TIER = 'Kebutuhan Strategi & Plan';
+const L_DURASI = 'Durasi Jasa';
+const L_QTY_MENAMBAH = 'Kalau Klien Beli Lebih dari Satu';
+const L_PENGAKUAN = 'Kapan Pendapatan Diakui';
+const L_OPSI = 'Pilihan Durasi & Harga Paket';
+
+/** `Durasi Jasa` yang bukan bilangan bulat positif bulan. */
+export function msgDurasiTidakSah(value: unknown): string {
+  return `[${L_DURASI} "${nilai(value)}" harus bilangan bulat positif dalam bulan `
+    + `— kosongkan untuk layanan sekali jadi]`;
 }
 
 /** Actor may not edit the Master Service List (carries the verbatim BI message). */
@@ -530,7 +611,7 @@ export function reconcileTier(
 }
 
 /** A normalized (validated) input ready to persist. */
-interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit' | 'minQty' | 'frequency' | 'priceNote' | 'description' | 'durasiBulan' | 'durasiOptions'>> {
+export interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit' | 'minQty' | 'frequency' | 'priceNote' | 'description' | 'durasiBulan' | 'durasiOptions'>> {
   category: string;
   unit: string;
   minQty: string;
@@ -547,17 +628,31 @@ interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit
 /**
  * normalizeInput validates the MSL v2 calculator fields, applying the flat
  * default and normalizing passthrough's unit price to "0". Invalid input throws
- * IncompleteError (the house default — no new strings invented), EXCEPT for a
- * malformed `commission_rule`, which throws BadCommissionRuleError so the Sales
- * Head is told what shape to type instead of "lengkapi pertanyaan wajib" for a
- * field they did fill in (DECISIONS O73).
+ * `IncompleteError` carrying a message that NAMES the offending field (owner QA
+ * 2026-09-17 — see the class docstring; the bare house default is kept only for
+ * the one caller with a single cause), EXCEPT for a malformed
+ * `commission_rule`, which throws BadCommissionRuleError so the Sales Head is
+ * told what shape to type instead of "lengkapi pertanyaan wajib" for a field
+ * they did fill in (DECISIONS O73).
+ *
+ * Exported so the gate can be tested WITHOUT a database: it is pure, and every
+ * branch below is a refusal a person reads on a form. `createService` /
+ * `updateService` remain the only writers.
  */
-function normalizeInput(inp: ServiceInput): NormalizedInput {
+export function normalizeInput(inp: ServiceInput): NormalizedInput {
   const name = (inp.name ?? '').trim();
   const commissionRule = (inp.commissionRule ?? '').trim();
   const effectiveFrom = (inp.effectiveFrom ?? '').trim();
-  if (name === '' || commissionRule === '' || effectiveFrom === '') {
-    throw new IncompleteError();
+  // Ditanya SATU-SATU, bukan sebagai satu kondisi gabungan: tiga sebab yang
+  // berbeda tidak boleh menghasilkan satu pesan yang sama (owner QA 2026-09-17).
+  if (name === '') {
+    throw new IncompleteError(msgWajibDiisi(L_NAMA));
+  }
+  if (commissionRule === '') {
+    throw new IncompleteError(msgWajibDiisi(L_KOMISI));
+  }
+  if (effectiveFrom === '') {
+    throw new IncompleteError(msgWajibDiisi(L_BERLAKU));
   }
   // Grammar gate (DECISIONS O14/O73). Before O73 this module accepted ANY
   // non-empty string, and 56 of the 96 catalog versions in `CDPS SG` were saved
@@ -568,18 +663,18 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
   parseCommissionRule(commissionRule);
   const pricingMode = (inp.pricingMode ?? '') === '' ? PRICING_FLAT : (inp.pricingMode as string);
   if (!PRICING_MODES.has(pricingMode)) {
-    throw new IncompleteError();
+    throw new IncompleteError(msgTidakDikenal(L_MODE, pricingMode));
   }
   const frequency = inp.frequency ?? '';
   if (frequency !== '' && !FREQUENCIES.has(frequency)) {
-    throw new IncompleteError();
+    throw new IncompleteError(msgTidakDikenal(L_FREKUENSI, frequency));
   }
   // An unknown tier is rejected rather than silently coerced: the whole point of
   // O54 is that the Sales Head chooses this value, and a typo that quietly
   // became `tanpa_plan` would take the Strategi path off the table without
   // anyone being told.
   if (inp.planTier !== undefined && !PLAN_TIERS.has(inp.planTier)) {
-    throw new IncompleteError();
+    throw new IncompleteError(msgTidakDikenal(L_TIER, inp.planTier));
   }
   const tier = reconcileTier(inp.planTier, inp.requiresStrategyPlan ?? false);
 
@@ -593,20 +688,20 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
     try {
       p = money.parse(standardPrice);
     } catch {
-      throw new IncompleteError();
+      throw new IncompleteError(msgBukanRupiah(L_HARGA, standardPrice));
     }
     if (p < 0n) {
-      throw new IncompleteError();
+      throw new IncompleteError(`[${L_HARGA} tidak boleh negatif]`);
     }
   } else {
     let p: money.Money;
     try {
       p = money.parse(standardPrice);
     } catch {
-      throw new IncompleteError();
+      throw new IncompleteError(msgBukanRupiah(L_HARGA, standardPrice));
     }
     if (p <= 0n) {
-      throw new IncompleteError();
+      throw new IncompleteError(`[${L_HARGA} wajib lebih besar dari 0 untuk mode harga ${pricingMode}]`);
     }
   }
 
@@ -614,7 +709,8 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
   if (pricingMode === PRICING_MIN_FLOOR || pricingMode === PRICING_BATCH_CEILING) {
     const norm = wholePositive(minQty);
     if (norm === null) {
-      throw new IncompleteError();
+      throw new IncompleteError(
+        `[${L_MIN_QTY} "${nilai(minQty)}" harus bilangan bulat positif untuk mode harga ${pricingMode}]`);
     }
     minQty = norm;
   }
@@ -625,7 +721,7 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
   let durasiBulan: number | null = null;
   if (inp.durasiBulan !== undefined && inp.durasiBulan !== null) {
     if (!Number.isInteger(inp.durasiBulan) || inp.durasiBulan <= 0) {
-      throw new IncompleteError();
+      throw new IncompleteError(msgDurasiTidakSah(inp.durasiBulan));
     }
     durasiBulan = inp.durasiBulan;
   }
@@ -636,10 +732,12 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
   // Dua lapis karena route bukan satu-satunya penulis tabel ini.
   const qtyMenambah = inp.qtyMenambah ?? QTY_MENAMBAH_VOLUME;
   if (!QTY_MENAMBAH.has(qtyMenambah)) {
-    throw new IncompleteError();
+    throw new IncompleteError(msgTidakDikenal(L_QTY_MENAMBAH, qtyMenambah));
   }
   if (qtyMenambah === QTY_MENAMBAH_DURASI && durasiBulan === null) {
-    throw new IncompleteError();
+    throw new IncompleteError(
+      `[${L_DURASI} wajib diisi karena "${L_QTY_MENAMBAH}" dipilih Durasi — `
+      + `qty mengalikan durasi, dan tanpa durasi tidak ada yang bisa dikali]`);
   }
 
   // pengakuan (D-KOM). Tanpa `durasiBulan` hanya ada satu arti yang tersisa,
@@ -651,17 +749,21 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
   let pengakuan: Pengakuan;
   if (inp.pengakuan === undefined || inp.pengakuan === null) {
     if (durasiBulan !== null) {
-      throw new IncompleteError();
+      throw new IncompleteError(
+        `[${L_PENGAKUAN} wajib dipilih untuk layanan yang punya ${L_DURASI} `
+        + `(${durasiBulan} bulan) — tidak bisa ditebak dari durasinya]`);
     }
     pengakuan = PENGAKUAN_SAAT_SELESAI;
   } else {
     if (!PENGAKUAN.has(inp.pengakuan)) {
-      throw new IncompleteError();
+      throw new IncompleteError(msgTidakDikenal(L_PENGAKUAN, inp.pengakuan));
     }
     pengakuan = inp.pengakuan;
   }
   if (pengakuan === PENGAKUAN_PER_PERIODE && durasiBulan === null) {
-    throw new IncompleteError();
+    throw new IncompleteError(
+      `[${L_DURASI} wajib diisi karena ${L_PENGAKUAN} dipilih "Rata sepanjang durasi" — `
+      + `tidak ada periode untuk membagi ratanya]`);
   }
 
   // --- FS-6: pilihan tenor ---------------------------------------------------
@@ -676,20 +778,25 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
     const seen = new Set<number>();
     for (const o of durasiOptions) {
       if (!Number.isInteger(o.durasiBulan) || o.durasiBulan <= 0) {
-        throw new IncompleteError();
+        throw new IncompleteError(
+          `[${L_OPSI}: durasi "${nilai(o.durasiBulan)}" harus bilangan bulat positif dalam bulan]`);
       }
       if (seen.has(o.durasiBulan)) {
-        throw new IncompleteError();  // dua harga untuk satu tenor
+        // dua harga untuk satu tenor
+        throw new IncompleteError(
+          `[${L_OPSI}: tenor ${o.durasiBulan} bulan ditulis dua kali — satu tenor hanya boleh punya satu harga]`);
       }
       seen.add(o.durasiBulan);
       let harga: money.Money;
       try {
         harga = money.parse(o.harga);
       } catch {
-        throw new IncompleteError();
+        throw new IncompleteError(
+          `[${L_OPSI}: harga paket tenor ${o.durasiBulan} bulan "${nilai(o.harga)}" bukan angka rupiah yang sah]`);
       }
       if (harga < 0n) {
-        throw new IncompleteError();
+        throw new IncompleteError(
+          `[${L_OPSI}: harga paket tenor ${o.durasiBulan} bulan tidak boleh negatif]`);
       }
       o.harga = money.decimal(harga);
     }
@@ -702,9 +809,21 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
     // sudah dinormalkan ('10200000.00'). Perbandingan string akan menolak dua
     // angka yang sama persis — dan menolaknya dengan pesan "data tidak
     // lengkap", yang tidak menunjuk ke apa pun yang bisa diperbaiki.
+    //
+    // Pesannya MENYEBUT keempat angkanya (owner QA 2026-09-17). Ini cabang yang
+    // paling mudah dipicu tanpa sadar: menambah baris "3 bulan" dan "12 bulan"
+    // pada layanan berdurasi 1 bulan adalah hal yang wajar dilakukan, dan
+    // pesan `[data tidak lengkap...]` untuk itu tidak menunjuk apa pun — kotak
+    // yang salah bahkan tidak kosong. Yang perlu diketahui pembacanya: baris
+    // terpendek mana yang dia tulis, dan angka mana yang seharusnya.
     if (durasiBulan !== terpendek.durasiBulan
         || money.parse(standardPrice) !== money.parse(terpendek.harga)) {
-      throw new IncompleteError();
+      throw new IncompleteError(
+        `[${L_OPSI}: pilihan terpendek (${terpendek.durasiBulan} bulan, `
+        + `${money.format(money.parse(terpendek.harga))}) wajib sama dengan ${L_DURASI} `
+        + `(${durasiBulan === null ? 'kosong' : `${durasiBulan} bulan`}) dan ${L_HARGA} `
+        + `(${money.format(money.parse(standardPrice))}) di atas — tambahkan baris untuk tenor `
+        + `terpendek itu, atau samakan kedua angka di atas]`);
     }
   }
 

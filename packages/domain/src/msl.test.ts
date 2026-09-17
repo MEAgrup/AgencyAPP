@@ -7,13 +7,14 @@
  *   actor ids with `ZZ-` and afterEach deletes the rows it made.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { money, permission, tz } from '@cdps/core';
+import { bi, money, permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { BadCommissionRuleError } from './commission_rule';
 import {
   type Actor,
   canEditMasterServices,
   createService,
+  normalizeInput,
   deleteService,
   effectiveAt,
   ForbiddenError,
@@ -103,6 +104,168 @@ describe('reconcileTier', () => {
     expect(reconcileTier('tanpa_plan', false)).toEqual({
       planTier: 'tanpa_plan', requiresStrategyPlan: false,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit: the mandatory-field gate NAMES the field (owner QA 2026-09-17).
+//
+// The report: editing "Store Management (Paket)" (and adding a new service)
+// answered `[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]`
+// with every visible box filled in. The gate was right — one of the cross-field
+// rules under the fold was broken — but one message for twenty-two causes cannot
+// say WHICH box. Each case below pins the message that replaced it, so a later
+// edit cannot quietly collapse them back into the house default.
+//
+// `normalizeInput` is pure, so this whole section runs with no database.
+// ---------------------------------------------------------------------------
+describe('mandatory gate — pesan menyebut field', () => {
+  // The screenshot's row, as `CDPS SG` actually holds it: Store Management
+  // (Paket), 1 bulan, qty_menambah `durasi`, pengakuan `per_periode`.
+  const storeManagement = () => ({
+    name: 'Store Management (Paket)',
+    standardPrice: '8000000',
+    commissionRule: '0% of standard price',
+    category: 'Store Management',
+    unit: 'Paket',
+    minQty: '',
+    pricingMode: 'flat',
+    applyPPN: false,
+    frequency: 'Monthly',
+    priceNote: '+ komisi 5% (basis belum dikonfirmasi — lihat worksheet validasi)',
+    description: '1. Store Management: Mengelola promo toko',
+    active: true,
+    planTier: 'plan_wajib' as const,
+    durasiBulan: 1,
+    qtyMenambah: 'durasi' as const,
+    pengakuan: 'per_periode' as const,
+    durasiOptions: [],
+    effectiveFrom: '2026-09-17',
+  });
+
+  const pesan = (inp: unknown): string => {
+    try {
+      normalizeInput(inp as Parameters<typeof normalizeInput>[0]);
+    } catch (e) {
+      return (e as Error).message;
+    }
+    return 'LOLOS';
+  };
+
+  it('accepts the QA row itself — a price edit on a duration service is NOT incomplete', () => {
+    // The baseline the report has to be measured against: raising the price
+    // from Rp 6jt to Rp 8jt is a legitimate new version. If this ever starts
+    // failing, the refusal is a real bug and not a message problem.
+    const norm = normalizeInput(storeManagement());
+    expect(norm.durasiBulan).toBe(1);
+    expect(norm.pengakuan).toBe('per_periode');
+    expect(norm.standardPrice).toBe('8000000');
+  });
+
+  it('names each empty mandatory box separately', () => {
+    expect(pesan({ ...storeManagement(), name: '  ' })).toBe('[Nama Layanan wajib diisi]');
+    expect(pesan({ ...storeManagement(), commissionRule: '' })).toBe('[Aturan Komisi wajib diisi]');
+    expect(pesan({ ...storeManagement(), effectiveFrom: '' })).toBe('[Berlaku Sejak wajib diisi]');
+  });
+
+  it('names the closed-list field and quotes the value it refused', () => {
+    expect(pesan({ ...storeManagement(), pricingMode: 'flatt' }))
+      .toBe('[Mode "flatt" tidak dikenal]');
+    expect(pesan({ ...storeManagement(), frequency: 'Weekly' }))
+      .toBe('[Frekuensi "Weekly" tidak dikenal]');
+    expect(pesan({ ...storeManagement(), planTier: 'plan_wajib_' }))
+      .toBe('[Kebutuhan Strategi & Plan "plan_wajib_" tidak dikenal]');
+    expect(pesan({ ...storeManagement(), qtyMenambah: 'bulan' }))
+      .toBe('[Kalau Klien Beli Lebih dari Satu "bulan" tidak dikenal]');
+    expect(pesan({ ...storeManagement(), pengakuan: 'nanti' }))
+      .toBe('[Kapan Pendapatan Diakui "nanti" tidak dikenal]');
+  });
+
+  it('separates "bukan angka" from "harus > 0" on the price', () => {
+    expect(pesan({ ...storeManagement(), standardPrice: '8jt' }))
+      .toBe('[Harga Standar "8jt" bukan angka rupiah yang sah]');
+    expect(pesan({ ...storeManagement(), standardPrice: '0' }))
+      .toBe('[Harga Standar wajib lebih besar dari 0 untuk mode harga flat]');
+  });
+
+  it('names Batas Minimal together with the mode that demands it', () => {
+    expect(pesan({ ...storeManagement(), pricingMode: 'min_floor', minQty: '' }))
+      .toBe('[Batas Minimal "(kosong)" harus bilangan bulat positif untuk mode harga min_floor]');
+  });
+
+  it('names Durasi Jasa for a value that is not a whole positive month', () => {
+    expect(pesan({ ...storeManagement(), durasiBulan: 0 }))
+      .toBe('[Durasi Jasa "0" harus bilangan bulat positif dalam bulan — kosongkan untuk layanan sekali jadi]');
+    expect(pesan({ ...storeManagement(), durasiBulan: 1.5 }))
+      .toBe('[Durasi Jasa "1.5" harus bilangan bulat positif dalam bulan — kosongkan untuk layanan sekali jadi]');
+  });
+
+  it('points at Durasi Jasa — not at "data tidak lengkap" — for the two cross-field rules', () => {
+    // These are the two branches the QA report most likely hit: both fields are
+    // FILLED, they just contradict each other, and the old message said neither.
+    expect(pesan({ ...storeManagement(), durasiBulan: null }))
+      .toBe('[Durasi Jasa wajib diisi karena "Kalau Klien Beli Lebih dari Satu" dipilih Durasi '
+        + '— qty mengalikan durasi, dan tanpa durasi tidak ada yang bisa dikali]');
+    expect(pesan({ ...storeManagement(), durasiBulan: null, qtyMenambah: 'volume' }))
+      .toBe('[Durasi Jasa wajib diisi karena Kapan Pendapatan Diakui dipilih "Rata sepanjang durasi" '
+        + '— tidak ada periode untuk membagi ratanya]');
+  });
+
+  it('says a duration service must CHOOSE pengakuan, instead of guessing', () => {
+    expect(pesan({ ...storeManagement(), pengakuan: undefined }))
+      .toBe('[Kapan Pendapatan Diakui wajib dipilih untuk layanan yang punya Durasi Jasa '
+        + '(1 bulan) — tidak bisa ditebak dari durasinya]');
+  });
+
+  it('spells out the FS-6 shortest-tenor invariant with all four numbers', () => {
+    // Adding "3 bulan" + "12 bulan" rows to a 1-month service is an ordinary
+    // thing to try. The refusal now says which row is the shortest one and what
+    // the two numbers above it are.
+    expect(pesan({
+      ...storeManagement(),
+      durasiOptions: [{ durasiBulan: 3, harga: '22000000' }, { durasiBulan: 12, harga: '80000000' }],
+    })).toBe('[Pilihan Durasi & Harga Paket: pilihan terpendek (3 bulan, Rp. 22.000.000,00) wajib sama '
+      + 'dengan Durasi Jasa (1 bulan) dan Harga Standar (Rp. 8.000.000,00) di atas — tambahkan baris '
+      + 'untuk tenor terpendek itu, atau samakan kedua angka di atas]');
+  });
+
+  it('names the offending tenor row for a bad duration, a duplicate, or a bad price', () => {
+    expect(pesan({ ...storeManagement(), durasiOptions: [{ durasiBulan: 0, harga: '8000000' }] }))
+      .toBe('[Pilihan Durasi & Harga Paket: durasi "0" harus bilangan bulat positif dalam bulan]');
+    expect(pesan({
+      ...storeManagement(),
+      durasiOptions: [{ durasiBulan: 1, harga: '8000000' }, { durasiBulan: 1, harga: '9000000' }],
+    })).toBe('[Pilihan Durasi & Harga Paket: tenor 1 bulan ditulis dua kali — satu tenor hanya boleh '
+      + 'punya satu harga]');
+    expect(pesan({ ...storeManagement(), durasiOptions: [{ durasiBulan: 1, harga: '8jt' }] }))
+      .toBe('[Pilihan Durasi & Harga Paket: harga paket tenor 1 bulan "8jt" bukan angka rupiah yang sah]');
+  });
+
+  it('keeps every message bracketed BI (house rule #5) and never doubles the brackets', () => {
+    const rejections = [
+      { ...storeManagement(), name: '' },
+      { ...storeManagement(), pricingMode: 'x' },
+      { ...storeManagement(), durasiBulan: null },
+      { ...storeManagement(), pengakuan: undefined },
+      { ...storeManagement(), durasiOptions: [{ durasiBulan: 3, harga: '22000000' }] },
+    ];
+    for (const inp of rejections) {
+      const m = pesan(inp);
+      expect(bi.isBracketed(m)).toBe(true);
+      // A value pasted with brackets must not break the `[...]` shape.
+      expect(m.slice(1, -1)).not.toContain('[');
+      expect(m.slice(1, -1)).not.toContain(']');
+    }
+    // A pasted bracket in a REFUSED value is stripped, not echoed.
+    expect(pesan({ ...storeManagement(), pricingMode: '[flat]' }))
+      .toBe('[Mode "flat" tidak dikenal]');
+  });
+
+  it('keeps the bare house default for the one caller that has nothing to name', () => {
+    // `PUT /master-services/{id}/active` with a non-boolean body: one cause, no
+    // field to point at. That constructor must keep working unchanged.
+    expect(new IncompleteError().message)
+      .toBe('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
   });
 });
 
