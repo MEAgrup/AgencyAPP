@@ -329,7 +329,12 @@ function resolvePeriodePreview(platform: pdt.PdtPlatform, terparse: readonly Ber
       if (!MODUL_PREAMBLE_SHOPEE.includes(b.modul.kode)) return { nama: b.nama, periode: null };
       return { nama: b.nama, periode: pdt.ekstrakPreambleShopee(b.aoa, b.barisHeader).periode };
     }
-    return { nama: b.nama, periode: pdt.ekstrakPeriodePreambleTiktok(b.aoa, b.barisHeader) };
+    // Preamble DULU (aturan umum PDT), kolom data hanya sebagai cadangan
+    // ber-nama untuk modul yang mendaftarkan `kolomPeriode` — lihat docblock
+    // `PdtModuleDef.kolomPeriode` (`@cdps/core` `pdt/types.ts`).
+    const dariPreamble = pdt.ekstrakPeriodePreambleTiktok(b.aoa, b.barisHeader);
+    if (dariPreamble != null || b.modul.kolomPeriode == null) return { nama: b.nama, periode: dariPreamble };
+    return { nama: b.nama, periode: pdt.ekstrakPeriodeKolomTiktok(b.aoa, b.barisHeader, b.modul.kolomPeriode) };
   });
   return pdt.resolvePeriodeBatch(daftar);
 }
@@ -790,6 +795,9 @@ export async function commitUploadBatch(
   // blocker `G1-09-2BII-ADS-SEARCH` — "nol kolom biaya/identitas" — ditutup sesi ini).
   const berkasAdsSearch = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_ads_search');
   const berkasTtVideo = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_video');
+  // M9-OA-4 (`docs/DECISIONS.md` 2026-09-17) — `tt_affiliate_video` → `pdt_fact_content`
+  // (lihat docblock `ekstrakBarisTtAffiliateVideo`, `@cdps/core` `pdt/fakta.ts`).
+  const berkasTtAffiliateVideo = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_affiliate_video');
   // G1-09 sub-langkah 2b-ii — modul KETIGA, `shopee_parent_sku`/`tt_orders` → `pdt_sku_master`
   // (lihat docblock `ekstrakBarisSkuMasterShopeeParentSku`/`ekstrakBarisSkuMasterTtOrders`,
   // `@cdps/core` `pdt/fakta.ts`, untuk kenapa modul ini — bukan `shopee_live`/`shopee_video`
@@ -885,6 +893,7 @@ export async function commitUploadBatch(
       await tulisFaktaModulTerparse(tx, {
         id, clientPlatformId, periodeAwalBulan, akunKontenToko: row.akun_konten_toko, now,
         berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
+        berkasTtAffiliateVideo, shopIdTersimpan: row.shop_id,
         berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
         berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
         berkasShopeeKesehatan,
@@ -948,6 +957,9 @@ interface TulisFaktaModulTerparseInput {
   berkasAdsCpc: readonly BerkasTerparse[];
   berkasAdsSearch: readonly BerkasTerparse[];
   berkasTtVideo: readonly BerkasTerparse[];
+  berkasTtAffiliateVideo: readonly BerkasTerparse[];
+  /** Gerbang "satu berkas = satu toko" untuk `tt_affiliate_video` (keputusan pemilik (b), `docs/DECISIONS.md` 2026-09-17) — `null` bila toko belum terikat, yang berarti gerbangnya tidak menyaring apa pun (pola sama `usulkan_ikat`). */
+  shopIdTersimpan: string | null;
   berkasShopeeLive: readonly BerkasTerparse[];
   berkasTtLive: readonly BerkasTerparse[];
   berkasShopStatsTiktok: readonly BerkasTerparse[];
@@ -992,6 +1004,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   const {
     id, clientPlatformId, periodeAwalBulan, akunKontenToko, now,
     berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
+    berkasTtAffiliateVideo, shopIdTersimpan,
     berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
     berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
     berkasShopeeKesehatan,
@@ -1104,6 +1117,41 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
             creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
             is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, likes = excluded.likes,
             dibagikan = excluded.dibagikan, klik_produk = excluded.klik_produk, gmv = excluded.gmv`;
+      }
+    }
+  }
+
+  // M9-OA-4 (`docs/DECISIONS.md` 2026-09-17) — `tt_affiliate_video` → `pdt_fact_content`
+  // (lihat docblock `ekstrakBarisTtAffiliateVideo`, `@cdps/core` `pdt/fakta.ts`): sumber
+  // `Attributed GMV` KOL, dicocokkan ke `creator_bookings` lewat `Video ID` di langkah
+  // berikutnya. Pola `ON CONFLICT ... DO UPDATE` sama seperti `tt_video` di atas —
+  // `platform_content_id` (`Video ID`) selalu ada untuk baris yang ditulis, dan baris
+  // ganda per video sudah dikerucutkan jadi satu di ekstraktor (TIDAK dijumlah, lihat
+  // docblock-nya). `creator_platform_id` SELALU NULL dan `is_akun_toko` SELALU false —
+  // ekspor sisi partner tidak membawa ID kreator sama sekali. `jenis` = 'video'.
+  //
+  // Gerbang toko (keputusan pemilik (b)): ekspor diambil PER TOKO, jadi `Shop ID` di
+  // berkas wajib sama dengan `client_platforms.shop_id`. Baris yang tokonya lain
+  // DILEWATI, bukan menggagalkan batch — satu berkas salah-tempel tidak boleh menulis
+  // GMV toko lain ke toko ini. Bila `shop_id` klien belum terikat (NULL), gerbangnya
+  // tidak menyaring apa pun (pola sama `usulkan_ikat` Rule 2).
+  if (berkasTtAffiliateVideo.length > 0) {
+    for (const b of berkasTtAffiliateVideo) {
+      for (const baris of pdt.ekstrakBarisTtAffiliateVideo(b.aoa, b.barisHeader)) {
+        if (shopIdTersimpan != null && baris.shopId != null && baris.shopId !== shopIdTersimpan) continue;
+        await tx`
+          insert into pdt_fact_content
+            (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis,
+             creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
+             vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
+          values
+            (${clientPlatformId}, ${baris.platformContentId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'video',
+             null, ${baris.creatorHandle}, false, null, null,
+             ${baris.vv}, ${baris.likes}, null, null, null, null, null, ${baris.gmv}, ${baris.durasiDetik})
+          on conflict (client_platform_id, platform_content_id, periode) do update set
+            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+            creator_handle = excluded.creator_handle, vv = excluded.vv, likes = excluded.likes,
+            gmv = excluded.gmv, durasi_detik = excluded.durasi_detik`;
       }
     }
   }
@@ -2217,6 +2265,8 @@ export async function reparsePdtBatch(
         berkasAdsCpc: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ads_cpc'),
         berkasAdsSearch: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ads_search'),
         berkasTtVideo: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_video'),
+        berkasTtAffiliateVideo: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_affiliate_video'),
+        shopIdTersimpan: cpRow.shop_id,
         berkasShopeeLive: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_live'),
         berkasTtLive: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_live'),
         berkasShopStatsTiktok: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_shop_analytics'),

@@ -208,6 +208,39 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     kolomDipanen: ['Nama LIVE', 'ID Campaign', 'Biaya', 'Pesanan SKU', 'Pendapatan kotor', 'Tayangan LIVE'],
     wajib: false,
   },
+  {
+    kode: 'tt_affiliate_video',
+    platform: 'tiktok',
+    namaTampilan: 'TikTok Shop Affiliate — Custom Report (Campaign/Creator/Product/Shop/Video)',
+    // Ekspor sisi PARTNER AFILIASI/TAP, bukan sisi seller — itulah yang
+    // membedakannya dari `tt_video`/`tt_transaction_creator` yang header-nya
+    // berbahasa Indonesia. Tanda tangannya dua kolom yang hanya ada di sisi
+    // partner; `Video ID` sendirian tidak cukup (bisa bertabrakan dengan
+    // ekspor lain berbahasa Inggris di masa depan).
+    tandaTanganKolom: { must: ['Affiliate video-attributed GMV', 'Video ID'] },
+    barisHeaderHint: 1,
+    // Diverifikasi dari sample asli pemilik (Anjalie Factory, periode
+    // 2026-08-01..31, 180 baris data + 1 baris `Summary`). **`Estimated
+    // affiliate partner commission ` BERAKHIR SPASI** di file aslinya — ditulis
+    // apa adanya di sini, sama seperti koreksi ejaan kolom sample-driven
+    // lain (`ROI (Toko saat ini)` di `tt_ads_live`). Menormalkannya diam-diam
+    // akan membuat `validasiKolomWajib` gagal untuk setiap file nyata.
+    kolomDipanen: [
+      'Date', 'Campaign ID', 'Campaign name', 'Creator name', 'Creator follower count',
+      'Product ID', 'Product name', 'Shop ID', 'Shop code', 'Shop name',
+      'Video ID', 'Video name', 'Post time', 'Duration',
+      'Affiliate video-attributed GMV', 'Creator video-attributed orders', 'Affiliate video orders',
+      'Estimated affiliate partner commission ', 'Actual affiliate partner commission',
+      'Video views', 'Video likes', 'Video product RPM', 'Creator-attributed items sold',
+    ],
+    // Berkas ini NOL baris preamble (header di baris 1) — rentangnya ada di
+    // kolom data `Date`, konstan `2026-08-01-2026-08-31` di seluruh 180 baris
+    // sample dan sama persis dengan rentang di nama berkasnya. Lihat docblock
+    // `PdtModuleDef.kolomPeriode` untuk kenapa ini pengecualian ber-nama,
+    // bukan pelonggaran aturan "periode selalu dari preamble".
+    kolomPeriode: 'Date',
+    wajib: false,
+  },
 
   // ===========================================================================
   // Shopee (PRD §7.2 / PDT_KOLOM_DIPANEN §2) — 15 modul

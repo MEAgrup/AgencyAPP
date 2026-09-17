@@ -14,6 +14,7 @@ import {
   ekstrakBarisKesehatanShopee,
   ekstrakBarisTtAdsLive,
   ekstrakBarisTtAdsProduct,
+  ekstrakBarisTtAffiliateVideo,
   ekstrakBarisTtLive,
   ekstrakBarisTtProductAnalytics,
   ekstrakBarisTtVideo,
@@ -391,6 +392,127 @@ describe('ekstrakBarisTtLive (modul KESEPULUH, G1-09-2BII-TTLIVE DITUTUP via sam
         vv: null, gmv: null, durasiDetik: null,
       },
     ]);
+  });
+});
+
+// Urutan kolom PERSIS sample asli pemilik (Anjalie Factory, 2026-08-01..31) —
+// termasuk `Estimated affiliate partner commission ` yang BERAKHIR SPASI.
+const HEADER_TT_AFFILIATE = [
+  'Date', 'Comparison date', 'Campaign ID', 'Campaign name', 'Campaign duration', 'Creator name',
+  'Creator follower count', 'Product ID', 'Product name', 'Shop code', 'Shop ID', 'Shop name',
+  'Video ID', 'Video name', 'Post time', 'Affiliate video-attributed GMV',
+  'Creator video-attributed orders', 'Affiliate video orders',
+  'Estimated affiliate partner commission ', 'Actual affiliate partner commission',
+  'Duration', 'Video views', 'Video likes', 'Video product RPM', 'Creator-attributed items sold',
+];
+
+/** Satu baris sample dengan nilai yang boleh ditimpa lewat `ubah` (indeks kolom → nilai). */
+function barisAff(ubah: Record<number, string>): string[] {
+  const b = [
+    '2026-08-01-2026-08-31', '--', '7514571237240309505', 'TAP Campaign Internal', '2025-06-11-2026-10-31',
+    'wiyati496', '29002', '1729692880686844585', 'Kebaya Encim', 'IDLC3FWLCA', '7494656817002875561',
+    'Anjalie Factory', '7551822826588736775', 'judul video', '2025-09-19 22:29:32', 'Rp0',
+    '0', '0', 'Rp0', 'Rp0', '43s', '20', '0', 'Rp0', '0',
+  ];
+  for (const [i, v] of Object.entries(ubah)) b[Number(i)] = v;
+  return b;
+}
+
+const BARIS_SUMMARY = [
+  'Summary', '--', '-', '-', '-', '-', '--', '-', '-', '-', '-', '-', '-', '-', '-',
+  'Rp0', '0', '0', 'Rp0', 'Rp0', '2min', '15369', '19', 'Rp0', '0',
+];
+
+describe('ekstrakBarisTtAffiliateVideo (M9-OA-4 — sumber Attributed GMV KOL)', () => {
+  it('memetakan Video ID/Creator name/Shop ID/views/likes/GMV/Duration dari baris data', () => {
+    expect(ekstrakBarisTtAffiliateVideo([HEADER_TT_AFFILIATE, barisAff({ 15: 'Rp1.250.000', 22: '7' })], 1)).toEqual([
+      {
+        platformContentId: '7551822826588736775',
+        creatorHandle: 'wiyati496',
+        shopId: '7494656817002875561',
+        vv: 20,
+        likes: 7,
+        gmv: 1250000,
+        durasiDetik: 43,
+      },
+    ]);
+  });
+
+  it('baris "Summary" TikTok DILEWATI — dikenali dari kolom Date yang bukan rentang, bukan dari Video ID kosong', () => {
+    const hasil = ekstrakBarisTtAffiliateVideo([HEADER_TT_AFFILIATE, BARIS_SUMMARY, barisAff({})], 1);
+    expect(hasil).toHaveLength(1);
+    expect(hasil[0].platformContentId).toBe('7551822826588736775');
+    // Bukti bahwa filter "Video ID kosong" saja TIDAK cukup: Summary mengisinya '-'.
+    expect(BARIS_SUMMARY[12]).toBe('-');
+  });
+
+  it('baris ganda untuk satu Video ID dikerucutkan jadi SATU — TIDAK dijumlah', () => {
+    const hasil = ekstrakBarisTtAffiliateVideo(
+      [HEADER_TT_AFFILIATE, barisAff({ 22: '20' }), barisAff({ 4: '2025-06-11-2026-12-31', 6: '28912', 21: '15' })],
+      1,
+    );
+    expect(hasil).toHaveLength(1);
+    expect(hasil[0].vv).toBe(20); // BUKAN 35
+  });
+
+  it('pemilihan deterministik: GMV terbesar menang, lalu views, lalu follower — bebas urutan baris', () => {
+    const kecil = barisAff({ 15: 'Rp100.000', 21: '99' });
+    const besar = barisAff({ 15: 'Rp900.000', 21: '1' });
+    const majuMundur = ekstrakBarisTtAffiliateVideo([HEADER_TT_AFFILIATE, kecil, besar], 1);
+    const mundurMaju = ekstrakBarisTtAffiliateVideo([HEADER_TT_AFFILIATE, besar, kecil], 1);
+    expect(majuMundur[0].gmv).toBe(900000);
+    expect(mundurMaju[0].gmv).toBe(900000);
+    // Nilai diambil dari SATU baris yang sama, bukan max per kolom.
+    expect(majuMundur[0].vv).toBe(1);
+    expect(mundurMaju[0].vv).toBe(1);
+  });
+
+  it('GMV seri ⇒ views yang memutus; views seri ⇒ follower count', () => {
+    const [aVv] = ekstrakBarisTtAffiliateVideo(
+      [HEADER_TT_AFFILIATE, barisAff({ 21: '5', 22: '1' }), barisAff({ 21: '9', 22: '2' })],
+      1,
+    );
+    expect(aVv.vv).toBe(9);
+    expect(aVv.likes).toBe(2);
+    const [aFollower] = ekstrakBarisTtAffiliateVideo(
+      [HEADER_TT_AFFILIATE, barisAff({ 6: '100', 22: '1' }), barisAff({ 6: '200', 22: '2' })],
+      1,
+    );
+    expect(aFollower.likes).toBe(2);
+  });
+
+  it('dua video berbeda tetap dua baris, urutan kemunculan pertama dipertahankan', () => {
+    const hasil = ekstrakBarisTtAffiliateVideo(
+      [HEADER_TT_AFFILIATE, barisAff({ 12: 'VID-B' }), barisAff({ 12: 'VID-A' }), barisAff({ 12: 'VID-B' })],
+      1,
+    );
+    expect(hasil.map((b) => b.platformContentId)).toEqual(['VID-B', 'VID-A']);
+  });
+
+  it('Duration "43s"/"2min"/"1min 30s"/"1h 2min 3s" → detik; bentuk tak dikenal → null', () => {
+    const detik = (d: string): number | null =>
+      ekstrakBarisTtAffiliateVideo([HEADER_TT_AFFILIATE, barisAff({ 20: d })], 1)[0].durasiDetik;
+    expect(detik('43s')).toBe(43);
+    expect(detik('2min')).toBe(120);
+    expect(detik('1min 30s')).toBe(90);
+    expect(detik('1h 2min 3s')).toBe(3723);
+    expect(detik('')).toBeNull();
+    expect(detik('sebentar')).toBeNull();
+  });
+
+  it('kolom opsional hilang ⇒ null untuk field itu (bukan 0); Date/Video ID tetap wajib', () => {
+    const headerMinimal = ['Date', 'Video ID'];
+    expect(ekstrakBarisTtAffiliateVideo([headerMinimal, ['2026-08-01-2026-08-31', 'VID-1']], 1)).toEqual([
+      { platformContentId: 'VID-1', creatorHandle: null, shopId: null, vv: null, likes: null, gmv: null, durasiDetik: null },
+    ]);
+  });
+
+  it('nol kolom Date ⇒ nol baris (baris data tidak dapat dibedakan dari Summary)', () => {
+    expect(ekstrakBarisTtAffiliateVideo([['Video ID'], ['VID-1']], 1)).toEqual([]);
+  });
+
+  it('baris ber-Video ID kosong dilewati walau Date-nya rentang yang sah', () => {
+    expect(ekstrakBarisTtAffiliateVideo([HEADER_TT_AFFILIATE, barisAff({ 12: '' })], 1)).toEqual([]);
   });
 });
 

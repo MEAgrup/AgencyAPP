@@ -1,5 +1,5 @@
 /**
- * G1-02 — tes `detectPdtModule` terhadap seluruh 25 modul.
+ * G1-02 — tes `detectPdtModule` terhadap seluruh 26 modul.
  *
  * DoD backlog: "deteksi diuji terhadap 28 berkas sample (Fim Motor/Shopee,
  * Avitaskin/TikTok) dengan target nol salah-slot". Berkas mentahnya sendiri
@@ -37,7 +37,7 @@ function expectExactMatch(rows: Aoa, expected: string): void {
   expect(r.ambiguous, `fixture ${expected}`).toBe(false);
 }
 
-describe('detectPdtModule — TikTok (9 modul)', () => {
+describe('detectPdtModule — TikTok (10 modul)', () => {
   it('tt_orders', () => {
     expectExactMatch(
       [
@@ -134,11 +134,34 @@ describe('detectPdtModule — TikTok (9 modul)', () => {
     );
   });
 
-  it('kesembilan fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
+  // M9-OA-4 — header PERSIS sample asli pemilik (ekspor sisi partner/TAP,
+  // bahasa Inggris). Tanda tangannya (`Affiliate video-attributed GMV` +
+  // `Video ID`) sengaja tidak memakai `Video ID` sendirian: kolom itu juga
+  // muncul di ekspor sisi seller berbahasa Inggris lain di masa depan.
+  it('tt_affiliate_video (Custom report sisi MCN/partner, header baris 1)', () => {
+    expectExactMatch(
+      [
+        ['Date', 'Comparison date', 'Campaign ID', 'Campaign name', 'Campaign duration', 'Creator name',
+          'Creator follower count', 'Product ID', 'Product name', 'Shop code', 'Shop ID', 'Shop name',
+          'Video ID', 'Video name', 'Post time', 'Affiliate video-attributed GMV',
+          'Creator video-attributed orders', 'Affiliate video orders',
+          'Estimated affiliate partner commission ', 'Actual affiliate partner commission',
+          'Duration', 'Video views', 'Video likes', 'Video product RPM', 'Creator-attributed items sold'],
+        ['Summary', '--', '-', '-', '-', '-', '--', '-', '-', '-', '-', '-', '-', '-', '-',
+          'Rp0', '0', '0', 'Rp0', 'Rp0', '2min', '15369', '19', 'Rp0', '0'],
+        ['2026-08-01-2026-08-31', '--', '751…', 'TAP Campaign Internal', '2025-06-11-2026-10-31', 'wiyati496',
+          '29002', '172…', 'Kebaya Encim', 'IDLC3FWLCA', '749…', 'Anjalie Factory',
+          '755…', 'judul video', '2025-09-19 22:29:32', 'Rp0', '0', '0', 'Rp0', 'Rp0', '43s', '20', '0', 'Rp0', '0'],
+      ],
+      'tt_affiliate_video',
+    );
+  });
+
+  it('kesepuluh fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
     // Sudah tercakup satu-per-satu di atas (expectExactMatch memaksa matches
-    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 9 sekaligus,
+    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 10 sekaligus,
     // bukan cuma yang paling akhir diuji.
-    expect(TIKTOK).toHaveLength(9);
+    expect(TIKTOK).toHaveLength(10);
   });
 });
 
@@ -363,9 +386,9 @@ describe('detectPdtModule — meta_ads', () => {
 });
 
 describe('detectPdtModule — registry', () => {
-  it('25 modul total, kode unik', () => {
-    expect(PDT_MODULES).toHaveLength(25);
-    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(25);
+  it('26 modul total, kode unik', () => {
+    expect(PDT_MODULES).toHaveLength(26);
+    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(26);
   });
 
   it('sheet kosong tidak pernah cocok ke modul manapun', () => {

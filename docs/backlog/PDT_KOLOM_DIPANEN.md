@@ -208,6 +208,49 @@ Bucket 2 (derived-add — `report/metrik.ts:151,191` `adsReport`):
 |---|---|---|
 | `Pendapatan kotor` | -- konsumen: pdt_fact_ads.gmv/roas, report.dim_gmvmax(0.22) | `requireCols` throw di `:151`; dimensi 0.22 mati |
 
+### 1.10 `tt_affiliate_video` — `CustomReport_Campaign_Creator_Product_Shop_Video_*.xlsx`
+
+**MODUL BARU (M9-OA-4, 2026-09-17)** — tidak ada di PRD §7 sama sekali; ia lahir
+dari keputusan pemilik tentang dari mana `creator_bookings.attributed_gmv` diisi
+(`docs/DECISIONS.md` 2026-09-17). Ini ekspor **sisi MCN/partner afiliasi (TAP)**,
+bukan sisi seller — header berbahasa Inggris dan membawa kolom komisi partner
+yang tidak pernah muncul di `tt_video`/`tt_transaction_creator`. Header di baris
+1, **nol preamble**: periodenya dibaca dari kolom data `Date`
+(`PdtModuleDef.kolomPeriode`, satu-satunya pengecualian ber-nama terhadap aturan
+"periode selalu dari preamble").
+
+⚠️ Baris pertama di bawah header adalah baris `Summary` milik TikTok dan
+**dibuang** — dikenali dari kolom `Date` yang bukan rentang. ⚠️ Satu `Video ID`
+bisa punya beberapa baris; ekstraktor **memilih satu, tidak pernah menjumlah**
+(lihat `G-TTAFF-BARIS-GANDA`, `docs/DECISIONS.md` §Open).
+
+Bucket 1:
+
+| Kolom | Konsumen |
+|---|---|
+| `Date` | -- konsumen: periode batch (`kolomPeriode`) + penanda baris data vs `Summary` |
+| `Video ID` | -- konsumen: pdt_fact_content.platform_content_id — **kunci join ke `creator_bookings.content_link` (M9-OA-4)** |
+| `Shop ID` | -- konsumen: gerbang "satu berkas = satu toko" vs `client_platforms.shop_id` |
+| `Creator name` | -- konsumen: pdt_fact_content.creator_handle |
+| `Affiliate video-attributed GMV` | -- konsumen: pdt_fact_content.gmv → **creator_bookings.attributed_gmv** |
+| `Video views` | -- konsumen: pdt_fact_content.vv |
+| `Video likes` | -- konsumen: pdt_fact_content.likes |
+| `Duration` | -- konsumen: pdt_fact_content.durasi_detik |
+
+Bucket 2 (dipanen ke berkas mentah, **belum punya kolom tujuan** di `pdt_fact_content`):
+
+| Kolom | Konsumen | Dampak bila hilang |
+|---|---|---|
+| `Campaign ID` / `Campaign name` | -- konsumen: konteks kampanye TAP | nol — belum ada kolom tujuan |
+| `Creator follower count` | -- konsumen: pemutus seri pemilihan baris ganda | pemilihan jatuh ke kemunculan pertama |
+| `Product ID` / `Product name` | -- konsumen: calon `sku_id` setelah SKU master TikTok ada | nol hari ini |
+| `Shop code` / `Shop name` | -- konsumen: label tampilan | nol |
+| `Video name` | -- konsumen: caption/judul video | nol |
+| `Post time` | -- konsumen: calon `waktu_posting` — **DITAHAN**, zona waktu dashboard TikTok belum terverifikasi (alasan sama `tt_live`) | nol hari ini |
+| `Creator video-attributed orders` / `Affiliate video orders` / `Creator-attributed items sold` | -- konsumen: belum ada (nol kolom pesanan/unit di `pdt_fact_content`) | nol |
+| `Estimated affiliate partner commission ` (**berakhir spasi**, ejaan asli TikTok) / `Actual affiliate partner commission` | -- konsumen: calon komisi partner MCN | nol hari ini |
+| `Video product RPM` | -- konsumen: belum ada | nol |
+
 ---
 
 ## 2. Shopee

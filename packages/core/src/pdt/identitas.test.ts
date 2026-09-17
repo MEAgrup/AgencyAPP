@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   bangunIdentitasSumberShopee,
+  ekstrakPeriodeKolomTiktok,
   ekstrakPeriodePreambleTiktok,
   ekstrakPreambleShopee,
   kolomTerbanyak,
@@ -168,10 +169,51 @@ describe('parseRentangTanggalTiktok — dua bentuk TERVERIFIKASI sample asli (do
     expect(parseRentangTanggalTiktok('2026-07-01 ~ 2026-07-31')).toEqual({ mulai: '2026-07-01', selesai: '2026-07-31' });
   });
 
+  it('YYYY-MM-DD-YYYY-MM-DD dengan hyphen, TANPA tilde (kolom `Date` tt_affiliate_video, M9-OA-4)', () => {
+    expect(parseRentangTanggalTiktok('2026-08-01-2026-08-31')).toEqual({ mulai: '2026-08-01', selesai: '2026-08-31' });
+  });
+
   it('null bila salah satu sisi rusak atau bentuk tidak dikenal', () => {
     expect(parseRentangTanggalTiktok('01/07/2026–bukan tanggal')).toBeNull();
     expect(parseRentangTanggalTiktok('2026-07-01')).toBeNull();
     expect(parseRentangTanggalTiktok('bukan rentang sama sekali')).toBeNull();
+    expect(parseRentangTanggalTiktok('Summary')).toBeNull();
+    expect(parseRentangTanggalTiktok('2026-08-01-2026-08')).toBeNull();
+  });
+});
+
+describe('ekstrakPeriodeKolomTiktok — cadangan ber-nama untuk berkas TANPA preamble (M9-OA-4)', () => {
+  const HEADER = ['Date', 'Video ID'];
+
+  it('membaca rentang dari kolom data ketika preamble memang tidak ada', () => {
+    const aoa = [HEADER, ['2026-08-01-2026-08-31', 'VID-1'], ['2026-08-01-2026-08-31', 'VID-2']];
+    expect(ekstrakPeriodeKolomTiktok(aoa, 1, 'Date')).toEqual({ mulai: '2026-08-01', selesai: '2026-08-31' });
+  });
+
+  it('baris "Summary" tidak bisa menang — sel yang bukan rentang tidak ikut dihitung sama sekali', () => {
+    const aoa = [HEADER, ['Summary', '-'], ['2026-08-01-2026-08-31', 'VID-1'], ['2026-08-01-2026-08-31', 'VID-2']];
+    expect(ekstrakPeriodeKolomTiktok(aoa, 1, 'Date')).toEqual({ mulai: '2026-08-01', selesai: '2026-08-31' });
+  });
+
+  it('SATU baris data saja tetap menang atas "Summary" (seri 1-1 — beda dari kolomTerbanyak Rule 3)', () => {
+    const aoa = [HEADER, ['Summary', '-'], ['2026-08-01-2026-08-31', 'VID-1']];
+    expect(ekstrakPeriodeKolomTiktok(aoa, 1, 'Date')).toEqual({ mulai: '2026-08-01', selesai: '2026-08-31' });
+  });
+
+  it('dua rentang berbeda ⇒ yang paling sering menang', () => {
+    const aoa = [
+      HEADER,
+      ['2026-07-01-2026-07-31', 'VID-1'],
+      ['2026-08-01-2026-08-31', 'VID-2'],
+      ['2026-08-01-2026-08-31', 'VID-3'],
+    ];
+    expect(ekstrakPeriodeKolomTiktok(aoa, 1, 'Date')).toEqual({ mulai: '2026-08-01', selesai: '2026-08-31' });
+  });
+
+  it('null bila kolomnya tidak ada, nol baris data, atau nilai terbanyaknya bukan rentang', () => {
+    expect(ekstrakPeriodeKolomTiktok([HEADER, ['2026-08-01-2026-08-31', 'VID-1']], 1, 'Periode')).toBeNull();
+    expect(ekstrakPeriodeKolomTiktok([HEADER], 1, 'Date')).toBeNull();
+    expect(ekstrakPeriodeKolomTiktok([HEADER, ['Summary', '-']], 1, 'Date')).toBeNull();
   });
 });
 
