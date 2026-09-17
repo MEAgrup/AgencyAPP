@@ -4420,6 +4420,73 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     }
   });
 
+  it('G3-03: skuListed/skuAktif come from pdt_sku_master.status_listing, skuPareto80/skuSlowMoving/topSku come from the pdt_fact_sku_period GMV distribution for the resolved reference period', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+
+    // 5 SKU terdaftar, 4 aktif, 1 nonaktif (B-3.1). `pdt_sku_master` tidak
+    // berbutir periode (Rule 19) — status TERKINI saja.
+    const skus = await sql<{ id: number }[]>`
+      insert into pdt_sku_master (client_platform_id, platform_product_id, status_listing)
+      values (${tiktokId}, 'PROD-A', 'aktif'),
+             (${tiktokId}, 'PROD-B', 'aktif'),
+             (${tiktokId}, 'PROD-C', 'aktif'),
+             (${tiktokId}, 'PROD-D', 'aktif'),
+             (${tiktokId}, 'PROD-E', 'nonaktif')
+      returning id`;
+    const [skuA, skuB, skuC, skuD] = skus;
+
+    // GMV Juli: A=7jt, B=2jt, C=1jt (positif, total 10jt) — 80% (8jt) tertutup
+    // begitu A+B (9jt) diikutkan → skuPareto80 = 2. D=0 (slow-moving). SKU
+    // nonaktif (E) SENGAJA nol baris fakta — tidak setiap SKU master punya
+    // penjualan bulan ini, dan baris fakta yang tidak ada TETAP tidak dihitung
+    // sebagai 0 (bukan baris fakta sama sekali, beda dengan D yang gmv=0 tegas).
+    await sql`
+      insert into pdt_fact_sku_period (sku_id, client_platform_id, periode, basis, batch_id, parser_versi,
+        nama_produk, gmv, klik, ctor)
+      values (${skuA.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Serum A', '7000000.00', 500, '0.045'),
+             (${skuB.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Toner B', '2000000.00', 300, '0.030'),
+             (${skuC.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Cream C', '1000000.00', 100, null),
+             (${skuD.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Sabun D', '0.00', 20, null)`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+      expect(tt.periodeReferensiPdtSaran).toBe('2026-07-01');
+      expect(tt.skuListed).toBe(5);
+      expect(tt.skuAktif).toBe(4);
+      expect(tt.skuPareto80).toBe(2);
+      expect(tt.skuSlowMoving).toBe(1);
+      expect(tt.topSku).toEqual([
+        { nama: 'Serum A', gmv: '7000000', klik: 500, ctorPersen: 4.5 },
+        { nama: 'Toner B', gmv: '2000000', klik: 300, ctorPersen: 3 },
+        { nama: 'Cream C', gmv: '1000000', klik: 100, ctorPersen: null },
+        { nama: 'Sabun D', gmv: '0', klik: 20, ctorPersen: null },
+      ]);
+
+      // Shopee has zero PDT batches — falls back to its own manual-baseline
+      // payload (no SKU fields there, so all four stay null/empty).
+      const sh = prefill!.channels.find((c) => c.channel === 'Shopee')!;
+      expect(sh.skuListed).toBeNull();
+      expect(sh.skuAktif).toBeNull();
+      expect(sh.topSku).toEqual([]);
+    } finally {
+      await sql`delete from pdt_fact_sku_period where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_sku_master where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
+
   it('returns null when the client has no riset awal analysis', async () => {
     const serviceId = await seedService();
     const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`

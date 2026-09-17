@@ -1692,6 +1692,50 @@ dihapus). `skuPareto80`/`skuSlowMoving`/`topSku` ← distribusi `gmv` `pdt_fact_
 periode (kolom `kuadran` sudah membawa klasifikasi Riset Awal — pakai ulang, jangan hitung ulang
 ambang yang berbeda tanpa alasan).
 
+**Status 2026-09-17 (sesi 40) — DITUTUP.** Diimplementasi tanpa migrasi baru (nol kolom baru —
+tiket ini murni sumber-ulang field yang sudah ada di `ChannelBaselineSuggestion`/wire/UI sejak
+sebelum PDT):
+
+- `packages/domain/src/pdt-prefill.ts` — `bacaJumlahSkuMaster(sql, clientPlatformId)` baru:
+  `count(*)` (⇒ `skuListed`) dan `count(*) filter (where status_listing='aktif')` (⇒ `skuAktif`)
+  atas `pdt_sku_master`. SENGAJA tidak berbutir periode (Rule 19 — `status_listing`/`last_seen_at`
+  mencerminkan keadaan TERKINI toko, bukan snapshot bulan tertentu) — sama untuk periode acuan
+  PDT mana pun yang dipilih.
+- `packages/domain/src/strategi.ts` — tiga fungsi murni BARU (`skuPareto80DariFakta`,
+  `skuSlowMovingDariFakta`, `topSkuDariFakta`), disalin (bukan diimpor) dari `@cdps/core`
+  `baseline/payload.ts` (`skuPareto80`/`skuSlowMoving`, mesin Riset Awal lama) — pola "copy, don't
+  cross-import" yang sama dipakai `pdt/kuadran.ts` (`report/`/`baseline/` sedang di-strangle,
+  PDT-17). **Keputusan desain yang perlu dicatat:** ticket ini semula menyebut "kolom `kuadran`
+  sudah membawa klasifikasi ... pakai ulang" — TERNYATA tidak berlaku untuk `skuPareto80`/
+  `skuSlowMoving`: `kuadran` (`pdt/kuadran.ts`, klik/CVR 4-kuadran) HANYA ditulis untuk TikTok
+  (`klasifikasikanKuadranSkuTiktok`) — toko Shopee SELALU `kuadran IS NULL`, dan menganggap itu
+  "nol SKU slow-moving" akan melanggar "absen ≠ nol" (prinsip eksplisit `baseline/payload.ts`
+  §B1). Konsentrasi omzet (Pareto 80%/slow-moving) dihitung LANGSUNG dari `gmv` — bekerja sama di
+  kedua platform, sama definisi PRD B-3.2/B-3.4, dan sama persis dengan formula lama yang sudah
+  teruji. `gmv: null` (baris fakta yang metrik ini belum terpanen) DIKELUARKAN dari kedua
+  hitungan (bukan `0`) — alasan "absen ≠ nol" yang sama.
+  `getBaselinePrefill` memanggil `bacaJumlahSkuMaster` + `bacaFaktaSkuPeriode` (basis sama dengan
+  `basisShopDaily` G3-02 — `net` TikTok/`siap_dikirim` Shopee) di gerbang yang SAMA dengan B-4:
+  `periodeReferensiPdtSaran !== null` (channel ini punya ≥1 batch `verified`) — BUKAN eksistensi
+  baris master itu sendiri, supaya batch `ditolak`/`parsing` tidak diam-diam masuk Section B.
+  Strangler fallback identik G3-02: `pdtValue ?? b.value` per field.
+- Satu tes DB-backed baru di `strategi.test.ts` (261→262 total): 5 SKU master (4 aktif/1
+  nonaktif) + 4 baris fakta GMV (7jt/2jt/1jt/0, satu SKU master tanpa baris fakta sama sekali)
+  membuktikan `skuListed=5`, `skuAktif=4`, `skuPareto80=2` (7jt+2jt=90% dari 10jt ≥ ambang 80%),
+  `skuSlowMoving=1` (SKU gmv=0), `topSku` terurut GMV desc dengan `ctorPersen` benar (pecahan→
+  persen, 2 desimal) dan SKU tanpa `ctor` terpanen tetap `ctorPersen: null`; plus verifikasi
+  channel Shopee (nol batch PDT) tetap jatuh ke payload lama.
+- Validasi penuh: `db-rebuild.sh --yes` (263 migrasi, tanpa migrasi baru tiket ini), full
+  `npm test --workspaces` (2831/2831, 1 skip pre-existing) sekali jalan di DB segar (tanpa flaky
+  cross-run seperti sesi 39), `npm run typecheck --workspaces` bersih, `npm run lint -w @cdps/api
+  -- --max-warnings 0` bersih. `wire.ts`/`web-internal` TIDAK disentuh — kelima field ini sudah
+  ada di kontrak wire dan UI Section B sejak sebelum PDT, tiket ini murni mengganti sumbernya.
+- Lanjutan: G3-04/05/06 bisa memakai ulang pola identik (`periodeReferensiPdtSaran` dari
+  `getBaselinePrefill`, gerbang yang sama, fallback `pdtValue ?? b.value`) — G3-04/G3-05 bisa
+  jalan tanpa fungsi pure baru (agregat langsung dari `bacaFaktaContent`/`bacaFaktaCreatorPeriode`
+  tanpa distribusi), G3-06 butuh rata-rata tertimbang ROAS (lihat catatan `report/dimensi_roas`
+  yang sudah ada, jangan rata-rata polos).
+
 ### G3-04 · Dimensi konten (video/live, bagian B-7)
 
 > ✅ **RESOLVED 2026-09-17 (sesi 39)** — sama seperti G3-02: opsi (B), periode dideklarasikan AM
