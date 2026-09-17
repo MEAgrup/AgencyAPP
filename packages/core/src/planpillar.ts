@@ -32,6 +32,7 @@
  */
 import * as division from './division';
 import * as plantask from './plantask';
+import * as satuanModule from './satuan';
 
 /**
  * Lima jenis pilar yang punya SATU divisi pemilik tanpa ambiguitas. Nilai
@@ -196,6 +197,7 @@ export interface SeededPlanRow {
   skuSasaran: string[]; // PC-5
   kuota: number; // PC-6
   satuan: string; // PC-6 unit
+  satuanKategori: satuanModule.PdtSatuanKategori; // G4-02 — formatter dispatch, turunan dari `satuan`
   divisiPic: string; // PC-8
   hasilDiharapkan: string; // PC-11
   /**
@@ -280,6 +282,7 @@ export function seedRowFromPillar(
   if (kuota !== null && kuota.kuota > 0) {
     usulan.kuota = kuota.kuota;
     usulan.satuan = divisiPic === null ? kuota.satuan : satuanKanonik(divisiPic, kuota.satuan);
+    usulan.satuanKategori = satuanModule.kategoriDariSatuanLabel(usulan.satuan);
   }
 
   if (alasan.length > 0) return { disemai: false, alasan, usulan };
@@ -296,6 +299,7 @@ export function seedRowFromPillar(
       skuSasaran: usulan.skuSasaran ?? [],
       kuota: usulan.kuota as number,
       satuan: usulan.satuan ?? '',
+      satuanKategori: usulan.satuanKategori ?? satuanModule.kategoriDariSatuanLabel(usulan.satuan ?? ''),
       divisiPic: divisiPic as string,
       hasilDiharapkan: usulan.hasilDiharapkan ?? '',
       instruksiBrief: usulan.instruksiBrief ?? null,

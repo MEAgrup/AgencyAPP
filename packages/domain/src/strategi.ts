@@ -75,7 +75,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { baseline as bl, copilot as cp, division, ident, interview as iv, money, notification, permission, statemachine, visibility } from '@cdps/core';
+import { baseline as bl, copilot as cp, division, ident, interview as iv, money, notification, permission, satuan, statemachine, visibility } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -1204,6 +1204,8 @@ export interface StrategiResource {
   nilai: string | null;
   jumlah: number | null;
   satuan: string | null;
+  /** G4-02 — kategori pengukuran `jumlah` (Rule 28), turunan dari `satuan`. Persis null saat satuan null. */
+  jumlahSatuanKategori: satuan.PdtSatuanKategori | null;
   sumberDana: 'klien' | 'paket_mea' | null;
   vendorId: string | null;
   skemaBiaya: string | null;
@@ -2623,6 +2625,7 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
         nilai: string | null;
         jumlah: string | null;
         satuan: string | null;
+        jumlah_satuan_kategori: string | null;
         sumber_dana: string | null;
         vendor_id: string | null;
         skema_biaya: string | null;
@@ -2875,6 +2878,7 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       nilai: r.nilai,
       jumlah: r.jumlah === null ? null : Number(r.jumlah),
       satuan: r.satuan,
+      jumlahSatuanKategori: r.jumlah_satuan_kategori as satuan.PdtSatuanKategori | null,
       sumberDana: r.sumber_dana as 'klien' | 'paket_mea' | null,
       vendorId: r.vendor_id,
       skemaBiaya: r.skema_biaya,
@@ -4993,13 +4997,15 @@ export async function saveResources(
     }
     await tx`delete from strategi_resource where strategi_id = ${id}`;
     for (const r of resources) {
+      const satuanLabel = nullIfBlank(r.satuan);
+      const jumlahSatuanKategori = satuanLabel === null ? null : satuan.kategoriDariSatuanLabel(satuanLabel);
       await tx`
         insert into strategi_resource
-          (strategi_id, jenis, channel, divisi, nilai, jumlah, satuan, sumber_dana,
+          (strategi_id, jenis, channel, divisi, nilai, jumlah, satuan, jumlah_satuan_kategori, sumber_dana,
            vendor_id, skema_biaya, catatan, created_by)
         values
           (${id}, ${r.jenis}, ${nullIfBlank(r.channel)}, ${nullIfBlank(r.divisi)},
-           ${r.nilai ?? null}, ${r.jumlah ?? null}, ${nullIfBlank(r.satuan)},
+           ${r.nilai ?? null}, ${r.jumlah ?? null}, ${satuanLabel}, ${jumlahSatuanKategori},
            ${nullIfBlank(r.sumberDana)}, ${nullIfBlank(r.vendorId)},
            ${nullIfBlank(r.skemaBiaya)}, ${(r.catatan ?? '').trim()}, ${actor.employeeId})`;
     }
@@ -7662,9 +7668,9 @@ async function copyChildren(
 
   await tx`
     insert into strategi_resource
-      (strategi_id, jenis, channel, divisi, nilai, jumlah, satuan, sumber_dana, vendor_id,
+      (strategi_id, jenis, channel, divisi, nilai, jumlah, satuan, jumlah_satuan_kategori, sumber_dana, vendor_id,
        skema_biaya, catatan, created_by)
-    select ${toId}, jenis, channel, divisi, nilai, jumlah, satuan, sumber_dana, vendor_id,
+    select ${toId}, jenis, channel, divisi, nilai, jumlah, satuan, jumlah_satuan_kategori, sumber_dana, vendor_id,
            skema_biaya, catatan, ${actorId}
       from strategi_resource where strategi_id = ${fromId}`;
 

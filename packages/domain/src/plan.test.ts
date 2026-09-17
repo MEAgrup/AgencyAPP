@@ -715,6 +715,8 @@ describeDb('createPlanRow (RAB-14, Section P-C)', () => {
     expect(row.planId).toBe(id);
     expect(row.diLuarStrategi).toBe(true);
     expect(row.kuota).toBe(40);
+    // G4-02 (Rule 27) — 'kampanye' matches no known unit label, defaults to hitungan (never Rupiah).
+    expect(row.satuanKategori).toBe('hitungan');
     // Owner-added 2026-09-02, not a PC-numbered field (docs/DECISIONS.md).
     expect(row.instruksiBrief).toBe('https://drive.google.com/drive/folders/xyz');
     // A fresh row is born Rencana, un-carried, not settable by the caller (PC-14).
@@ -739,6 +741,33 @@ describeDb('createPlanRow (RAB-14, Section P-C)', () => {
       channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', diLuarStrategi: true, diLuarAlasan: 'x',
     });
     expect(row.instruksiBrief).toBeNull();
+  });
+
+  it('derives satuan_kategori from the label (Rule 27/28, G4-02) — never guessed from divisi/jenis', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    const rp = await createPlanRow(sql, am(), id, {
+      channel: 'Shopee', pilar: 'iklan', kuota: 15000000, satuan: 'Rp',
+      divisiPic: 'Ads', diLuarStrategi: true, diLuarAlasan: 'x',
+    });
+    expect(rp.satuanKategori).toBe('rupiah');
+    const sesi = await createPlanRow(sql, am(), id, {
+      channel: 'Shopee', pilar: 'live', kuota: 20, satuan: 'sesi',
+      divisiPic: 'Live Stream', diLuarStrategi: true, diLuarAlasan: 'x',
+    });
+    // The historical bug this ticket closes: a count of sessions must never format as Rupiah.
+    expect(sesi.satuanKategori).toBe('hitungan');
+    const jam = await createPlanRow(sql, am(), id, {
+      channel: 'Shopee', pilar: 'live', kuota: 36, satuan: 'jam live',
+      divisiPic: 'Live Stream', diLuarStrategi: true, diLuarAlasan: 'x',
+    });
+    expect(jam.satuanKategori).toBe('jam');
+
+    // Persisted, not just returned in-memory — copyRowToPeriod (carry-over) must
+    // carry the same category, and a fresh read must agree.
+    const reloaded = await getPlanDetail(sql, am(), id);
+    const reloadedRp = reloaded.rows.find((r) => r.id === rp.id);
+    expect(reloadedRp?.satuanKategori).toBe('rupiah');
   });
 
   it('demands exactly one origin (PC-3 / ck_plan_row_asal_tunggal), before the DB CHECK', async () => {

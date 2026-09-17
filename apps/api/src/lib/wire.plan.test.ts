@@ -95,7 +95,7 @@ describe('planTargetToWire (Section P-B / Rule 9)', () => {
 });
 
 describe('planRowToWire (Section P-C)', () => {
-  it('carries all 28 fields, arrays and carry-over included', () => {
+  it('carries all 29 fields, arrays and carry-over included', () => {
     const r: plan.PlanRow = {
       id: 42,
       planId: 'PLAN-202608-0001',
@@ -110,6 +110,7 @@ describe('planRowToWire (Section P-C)', () => {
       skuSasaran: ['SKU-1', 'SKU-2'],
       kuota: 40,
       satuan: 'kampanye',
+      satuanKategori: 'hitungan',
       budget: 5000000,
       divisiPic: 'Ads',
       mingguSasaran: [1, 3],
@@ -129,6 +130,7 @@ describe('planRowToWire (Section P-C)', () => {
     const w = planRowToWire(r);
     noCamel(w);
     expect(w.strategi_pillar_id).toBe(7);
+    expect(w.satuan_kategori).toBe('hitungan');
     expect(w.di_luar_strategi).toBe(false);
     expect(w.sku_sasaran).toEqual(['SKU-1', 'SKU-2']);
     expect(w.minggu_sasaran).toEqual([1, 3]);

@@ -27,7 +27,7 @@
  * *their own rows* is an RLS arm on `plan_row`, not a whole-Plan grant.
  */
 
-import { division, ident, notification, permission, planpillar, statemachine } from '@cdps/core';
+import { division, ident, notification, permission, planpillar, satuan, statemachine } from '@cdps/core';
 import {
   executors,
   withTransaction,
@@ -277,6 +277,8 @@ export interface PlanRow {
   skuSasaran: unknown[];
   kuota: number;
   satuan: string;
+  /** G4-02 — kategori pengukuran untuk formatter tunggal (Rule 28), turunan dari `satuan`. */
+  satuanKategori: satuan.PdtSatuanKategori;
   budget: number | null;
   divisiPic: string;
   mingguSasaran: number[];
@@ -786,6 +788,7 @@ function rowToPlanRow(r: Record<string, unknown>): PlanRow {
     skuSasaran: (r.sku_sasaran as unknown[]) ?? [],
     kuota: num(r.kuota as number),
     satuan: r.satuan as string,
+    satuanKategori: r.satuan_kategori as satuan.PdtSatuanKategori,
     budget: r.budget === null ? null : num(r.budget as number),
     divisiPic: r.divisi_pic as string,
     mingguSasaran: (r.minggu_sasaran as number[]) ?? [],
@@ -1038,11 +1041,11 @@ async function seedRowsFromPillars(
     const inserted = await tx<{ id: string | number }[]>`
       insert into plan_row (
         plan_id, channel, pilar, strategi_pillar_id,
-        aksi, sku_sasaran, kuota, satuan, divisi_pic, hasil_diharapkan,
+        aksi, sku_sasaran, kuota, satuan, satuan_kategori, divisi_pic, hasil_diharapkan,
         instruksi_brief, created_by)
       values (
         ${planId}, ${r.channel}, ${r.pilar}, ${r.strategiPillarId},
-        ${r.aksi}, ${tx.json(r.skuSasaran as JsonParam)}, ${r.kuota}, ${r.satuan},
+        ${r.aksi}, ${tx.json(r.skuSasaran as JsonParam)}, ${r.kuota}, ${r.satuan}, ${r.satuanKategori},
         ${r.divisiPic}, ${r.hasilDiharapkan}, ${r.instruksiBrief}, ${actor.employeeId})
       returning id`;
 
@@ -2394,7 +2397,8 @@ export async function createPlanRow(
   }
 
   const aksi = input.aksi ?? '';
-  const satuan = input.satuan ?? '';
+  const satuanLabel = input.satuan ?? '';
+  const satuanKategori = satuan.kategoriDariSatuanLabel(satuanLabel);
   const hasilDiharapkan = input.hasilDiharapkan ?? '';
   const prasyarat = (input.prasyarat ?? '').trim() || null;
   const instruksiBrief = (input.instruksiBrief ?? '').trim() || null;
@@ -2413,12 +2417,12 @@ export async function createPlanRow(
       insert into plan_row (
         plan_id, channel, pilar,
         strategi_pillar_id, service_id, di_luar_strategi, di_luar_service, di_luar_alasan,
-        aksi, sku_sasaran, kuota, satuan, budget, divisi_pic, minggu_sasaran,
+        aksi, sku_sasaran, kuota, satuan, satuan_kategori, budget, divisi_pic, minggu_sasaran,
         prioritas, hasil_diharapkan, prasyarat, instruksi_brief, visibilitas, created_by)
       values (
         ${planId}, ${channel}, ${pilar},
         ${strategiPillarId}, ${serviceId}, ${diLuarStrategi}, ${diLuarService}, ${diLuarAlasan},
-        ${aksi}, ${tx.json(skuSasaran as JsonParam)}, ${kuota}, ${satuan}, ${budget}, ${divisiPic}, ${tx.json(mingguSasaran as JsonParam)},
+        ${aksi}, ${tx.json(skuSasaran as JsonParam)}, ${kuota}, ${satuanLabel}, ${satuanKategori}, ${budget}, ${divisiPic}, ${tx.json(mingguSasaran as JsonParam)},
         ${prioritas}, ${hasilDiharapkan}, ${prasyarat}, ${instruksiBrief}, ${visibilitas}, ${actor.employeeId})
       returning id`;
     const newId = num(inserted[0].id);
@@ -3003,7 +3007,7 @@ async function copyRowToPeriod(
     insert into plan_row
       (plan_id, channel, pilar, strategi_pillar_id, service_id,
        di_luar_strategi, di_luar_service, di_luar_alasan,
-       aksi, sku_sasaran, kuota, satuan, budget, divisi_pic, minggu_sasaran,
+       aksi, sku_sasaran, kuota, satuan, satuan_kategori, budget, divisi_pic, minggu_sasaran,
        prioritas, hasil_diharapkan, prasyarat, instruksi_brief,
        status_baris, status_baris_alasan, visibilitas,
        keberatan_kapasitas, keberatan_alasan,
@@ -3013,7 +3017,7 @@ async function copyRowToPeriod(
        ${source.strategiPillarId}, ${source.serviceId},
        ${source.diLuarStrategi}, ${source.diLuarService}, ${source.diLuarAlasan},
        ${source.aksi}, ${tx.json((source.skuSasaran ?? []) as JsonParam)},
-       ${source.kuota}, ${source.satuan}, ${source.budget}, ${source.divisiPic},
+       ${source.kuota}, ${source.satuan}, ${source.satuanKategori}, ${source.budget}, ${source.divisiPic},
        ${tx.json((source.mingguSasaran ?? []) as JsonParam)},
        ${source.prioritas}, ${source.hasilDiharapkan}, ${source.prasyarat}, ${source.instruksiBrief},
        'Rencana', null, ${source.visibilitas},

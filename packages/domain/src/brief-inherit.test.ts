@@ -46,6 +46,7 @@ function planRow(over: Partial<PlanRow> = {}): PlanRow {
     skuSasaran: [],
     kuota: 30,
     satuan: 'video',
+    satuanKategori: 'hitungan',
     budget: null,
     divisiPic: 'Ads',
     mingguSasaran: [],

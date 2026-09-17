@@ -68,6 +68,10 @@ export * as report from './report';
 export * as skuscreener from './skuscreener';
 export * as adsscanner from './adsscanner';
 export * as reportShopee from './report/shopee';
+// G4-02 — satuan bertipe: kategori pengukuran (rupiah/persen/hitungan/jam/
+// hari/views/rasio) untuk plan_row.kuota/strategi_resource.jumlah + satu
+// formatter (Rule 27-28), reuse pdt_satuan_t (G1-01).
+export * as satuan from './satuan';
 // Gelombang C — pemilih "klien terbaik" untuk halaman Showcase (gerbang C-2/C-4).
 export * as showcase from './showcase';
 // Gelombang D — mesin accrual: kapan sebuah rupiah masuk ke bulan mana
