@@ -201,7 +201,7 @@
  */
 import { WIB_OFFSET_HOURS } from '../tz';
 import { parsePdtAngka } from './angka';
-import { parseTanggalId, parseTanggalIdStrip } from './identitas';
+import { parseRentangTanggalTiktok, parseTanggalId, parseTanggalIdStrip } from './identitas';
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
 
@@ -480,6 +480,156 @@ export function ekstrakBarisTtVideo(
     });
   }
   return hasil;
+}
+
+/** `"43s"` / `"2min"` / `"1min 30s"` / `"1h 2min 3s"` (TikTok Affiliate `Duration`) → detik, atau `null` bila nol komponen terbaca. BEDA dari `parseDurasiTiktokDetik` (`tt_live`, bentuk KAKU `"Xh Ymin"` — sengaja tidak dilonggarkan supaya modul yang sudah terverifikasi tidak ikut bergeser). */
+function parseDurasiAffiliateDetik(s: string): number | null {
+  const t = s.trim();
+  if (t === '') return null;
+  const m = /^(?:(\d+)\s*h)?\s*(?:(\d+)\s*min)?\s*(?:(\d+)\s*s)?$/.exec(t);
+  if (!m || (m[1] == null && m[2] == null && m[3] == null)) return null;
+  return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
+}
+
+/**
+ * Satu baris `pdt_fact_content` mentah dari `tt_affiliate_video`, SEBELUM
+ * `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang
+ * melengkapi). `shopId` BUKAN kolom `pdt_fact_content` — ia dibawa keluar
+ * untuk gerbang "satu berkas = satu toko" di pemanggil (lihat docblock
+ * `ekstrakBarisTtAffiliateVideo`).
+ *
+ * `creatorPlatformId` SELALU `null` dan `isAkunToko` SELALU `false`: ekspor
+ * sisi partner ini TIDAK membawa ID kreator sama sekali (hanya `Creator
+ * name`), jadi tak ada nilai yang bisa dibandingkan ke
+ * `client_platforms.akun_konten_toko` — menebak lewat pencocokan nama adalah
+ * persis kelas kesalahan yang Rule 3-4 larang. Konten di berkas ini memang
+ * konten AFILIASI (bukan akun toko), jadi `false` juga benar secara semantik.
+ */
+export interface PdtBarisContentTtAffiliateVideo {
+  platformContentId: string;
+  creatorHandle: string | null;
+  shopId: string | null;
+  vv: number | null;
+  likes: number | null;
+  gmv: number | null;
+  durasiDetik: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `tt_affiliate_video` — ekspor "Custom report"
+ * TikTok Shop Affiliate SISI PARTNER/TAP (M9-OA-4, `docs/DECISIONS.md`
+ * 2026-09-17), sumber `Affiliate video-attributed GMV` per `Video ID`.
+ *
+ * **Baris `Summary`.** Berkas ini menaruh satu baris agregat TikTok tepat di
+ * bawah header, ber-`Date` = `"Summary"` dan sebagian besar kolom `"-"`.
+ * Baris data sungguhan dikenali dari kolom `Date` yang HARUS bisa diparse
+ * jadi rentang (`parseRentangTanggalTiktok`) — bukan dari `Video ID` kosong
+ * seperti `tt_video`, karena `Summary` mengisi `Video ID` dengan `"-"` yang
+ * "tidak kosong" tapi juga bukan ID.
+ *
+ * **Baris ganda per video: DIPILIH SATU, TIDAK PERNAH DIJUMLAH.** Di sample
+ * asli 67 dari 111 video punya lebih dari satu baris. Baris kembar itu sama
+ * `Video ID`, sama `Creator name`, sama `Product ID`, sama `Post time`, sama
+ * `Duration`, dan HANYA berbeda pada metadata kampanye (`Campaign duration`
+ * — kampanye yang sama diperpanjang) + `Creator follower count`, tapi
+ * membawa metrik yang berbeda (mis. `Video views` 20 vs 15). Bukti bahwa
+ * baris-baris itu BUKAN irisan yang saling lepas: menjumlahkan seluruh baris
+ * memberi 24.381 views sementara baris `Summary` TikTok sendiri menyebut
+ * 15.369 — jumlah MELAMPAUI total platform 59%. Karena itu menjumlah
+ * dilarang (ia mengarang uang yang tidak ada di baris mana pun, melanggar
+ * house convention #4 dan "never estimated" M9-OA-4), dan kunci unik
+ * `pdt_fact_content` (`client_platform_id, platform_content_id, periode`)
+ * memang memaksa satu baris per video.
+ *
+ * Pemilihannya DETERMINISTIK dan bebas urutan: GMV terbesar, lalu `Video
+ * views` terbesar, lalu `Creator follower count` terbesar, terakhir
+ * kemunculan pertama. Seluruh nilai baris terpilih diambil dari SATU baris
+ * yang sama (bukan max per kolom) supaya angka yang tersimpan tetap kombinasi
+ * yang benar-benar pernah ada di berkas. **Mengapa nilai TERBESAR, bukan
+ * terkecil/terbaru:** `Affiliate video-attributed GMV` adalah angka KUMULATIF
+ * seumur video (keputusan pemilik, `docs/DECISIONS.md` 2026-09-17) — dari dua
+ * pengamatan angka kumulatif yang sama, yang lebih besar adalah yang lebih
+ * lengkap.
+ *
+ * Kenapa selisih 24.381 vs 15.369 itu sendiri tidak dijelaskan di sini:
+ * semantik baris-ganda ekspor TikTok tidak terdokumentasi di mana pun, dan
+ * menebaknya dilarang CLAUDE.md — ia dicatat sebagai pertanyaan terbuka
+ * `G-TTAFF-BARIS-GANDA` di `docs/DECISIONS.md`. Yang dibangun di sini adalah
+ * aturan yang AMAN apa pun jawabannya: tidak pernah melebihi nilai yang
+ * sungguh tertulis di berkas.
+ *
+ * Kolom yang TIDAK punya rumah di `pdt_fact_content` sengaja tidak ditulis:
+ * `Creator video-attributed orders`/`Affiliate video orders`/
+ * `Creator-attributed items sold` (nol kolom pesanan/unit di tabel ini),
+ * kedua kolom komisi partner, dan `Video product RPM`. Keduanya tetap ada di
+ * `kolomDipanen` (whitelist panen, PDT-27) supaya tidak hilang dari berkas
+ * mentah yang tersimpan. `waktu_posting` TIDAK diisi dari `Post time` — zona
+ * waktu dashboard TikTok belum terverifikasi di repo ini, alasan yang sama
+ * persis dengan `ekstrakBarisTtLive`.
+ *
+ * Angka: `parsePdtAngka(v)` TANPA `raw` — konvensi Seller Center, sama
+ * seperti seluruh modul TikTok lain. ⚠️ Kolom uang di sample asli SELURUHNYA
+ * `Rp0`, jadi pemisah ribuan/desimalnya belum dapat diverifikasi — dicatat
+ * bersama `G-TTAFF-BARIS-GANDA`.
+ */
+export function ekstrakBarisTtAffiliateVideo(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisContentTtAffiliateVideo[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iDate = idx('Date');
+  const iVideoId = idx('Video ID');
+  const iCreator = idx('Creator name');
+  const iFollower = idx('Creator follower count');
+  const iShopId = idx('Shop ID');
+  const iViews = idx('Video views');
+  const iLikes = idx('Video likes');
+  const iGmv = idx('Affiliate video-attributed GMV');
+  const iDurasi = idx('Duration');
+
+  // Kunci = `Video ID`; nilai = kandidat terbaik sejauh ini + skor pemilihnya.
+  const terpilih = new Map<string, { baris: PdtBarisContentTtAffiliateVideo; skor: readonly number[] }>();
+  const urutan: string[] = [];
+
+  for (const row of aoa.slice(barisHeader)) {
+    if (iDate === -1) break; // nol kolom `Date` ⇒ baris data tidak dapat dibedakan dari `Summary`
+    if (parseRentangTanggalTiktok(String(row?.[iDate] ?? '')) == null) continue;
+    const platformContentId = iVideoId === -1 ? '' : String(row?.[iVideoId] ?? '').trim();
+    if (platformContentId === '') continue;
+
+    const gmv = iGmv === -1 ? null : parsePdtAngka(row?.[iGmv]);
+    const vv = iViews === -1 ? null : parsePdtAngka(row?.[iViews]);
+    const follower = iFollower === -1 ? 0 : parsePdtAngka(row?.[iFollower]);
+    const baris: PdtBarisContentTtAffiliateVideo = {
+      platformContentId,
+      creatorHandle: iCreator === -1 ? null : (String(row?.[iCreator] ?? '').trim() || null),
+      shopId: iShopId === -1 ? null : (String(row?.[iShopId] ?? '').trim() || null),
+      vv,
+      likes: iLikes === -1 ? null : parsePdtAngka(row?.[iLikes]),
+      gmv,
+      durasiDetik: iDurasi === -1 ? null : parseDurasiAffiliateDetik(String(row?.[iDurasi] ?? '')),
+    };
+    // NaN (sel ada tapi gagal diparse, G1-03) tidak boleh MENANG pemilihan —
+    // ia diperlakukan sebagai skor terendah, tapi nilainya tetap ditulis apa
+    // adanya bila baris itu yang akhirnya terpilih.
+    const skorAman = (n: number | null): number => (n == null || Number.isNaN(n) ? -1 : n);
+    const skor = [skorAman(gmv), skorAman(vv), skorAman(follower)] as const;
+
+    const lama = terpilih.get(platformContentId);
+    if (lama == null) {
+      terpilih.set(platformContentId, { baris, skor });
+      urutan.push(platformContentId);
+      continue;
+    }
+    for (let i = 0; i < skor.length; i += 1) {
+      if (skor[i] === lama.skor[i]) continue;
+      if (skor[i] > lama.skor[i]) terpilih.set(platformContentId, { baris, skor });
+      break;
+    }
+  }
+
+  return urutan.map((k) => terpilih.get(k)!.baris);
 }
 
 /** `DD-MM-YYYY HH:mm` (Shopee `Waktu Mulai`) → `{ digitMentah, instantUtc }`, atau `null` bila tidak cocok pola. `digitMentah` adalah string angka MENTAH (`YYYYMMDDHHmm`, concat langsung dari komponen tertulis) — untuk identitas, tidak lewat objek Date. `instantUtc` adalah instant UTC sungguhan (WIB − `WIB_OFFSET_HOURS`) — untuk kolom informasi `waktu_posting`, BUKAN untuk identitas. */

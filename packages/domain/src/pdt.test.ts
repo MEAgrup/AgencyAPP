@@ -2812,6 +2812,150 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KESEPULUH) — tt_
 });
 
 // ---------------------------------------------------------------------------
+// M9-OA-4 (docs/DECISIONS.md 2026-09-17) — `tt_affiliate_video` →
+// pdt_fact_content: sumber `Attributed GMV` KOL, ekspor sisi MCN/partner.
+// Dua hal yang TIDAK dimiliki modul TikTok lain mana pun dan karena itu diuji
+// end-to-end di sini (bukan cuma di ekstraktor `@cdps/core`):
+//  1. periode datang dari KOLOM DATA `Date`, bukan preamble — berkas ini bisa
+//     berdiri SENDIRIAN dalam satu batch tanpa ditolak Rule 5;
+//  2. gerbang `Shop ID` vs `client_platforms.shop_id` (keputusan pemilik (b):
+//     ekspor diambil per toko).
+// ---------------------------------------------------------------------------
+// Header PENUH sample asli — `validasiKolomWajib` (Rule 9) menuntut SELURUH
+// `kolomDipanen` hadir, jadi fixture tidak boleh memakai subset.
+const HEADER_TT_AFFILIATE = [
+  'Date', 'Comparison date', 'Campaign ID', 'Campaign name', 'Campaign duration', 'Creator name',
+  'Creator follower count', 'Product ID', 'Product name', 'Shop code', 'Shop ID', 'Shop name',
+  'Video ID', 'Video name', 'Post time', 'Affiliate video-attributed GMV',
+  'Creator video-attributed orders', 'Affiliate video orders',
+  'Estimated affiliate partner commission ', 'Actual affiliate partner commission',
+  'Duration', 'Video views', 'Video likes', 'Video product RPM', 'Creator-attributed items sold',
+];
+
+/** Baris `Summary` TikTok — SELALU disertakan di tes supaya jalur pembuangannya ikut teruji, bukan cuma diasumsikan. */
+const BARIS_SUMMARY_AFF = [
+  'Summary', '--', '-', '-', '-', '-', '--', '-', '-', '-', '-', '-', '-', '-', '-',
+  'Rp0', '0', '0', 'Rp0', 'Rp0', '2min', '99999', '19', 'Rp0', '0',
+];
+
+/** Satu baris data affiliate; `ubah` memakai INDEKS kolom `HEADER_TT_AFFILIATE`. */
+function barisAffiliate(ubah: Record<number, string>, periode = '2026-07-01-2026-07-31'): string[] {
+  const b = [
+    periode, '--', '7514571237240309505', 'TAP Campaign Internal', '2025-06-11-2026-10-31', 'wiyati496',
+    '29002', '1729692880686844585', 'Kebaya Encim', 'IDLC3FWLCA', '749-TOKO', 'Anjalie Factory',
+    'VID-1', 'judul video', '2025-09-19 22:29:32', 'Rp0', '0', '0', 'Rp0', 'Rp0', '43s', '20', '0', 'Rp0', '0',
+  ];
+  for (const [i, v] of Object.entries(ubah)) b[Number(i)] = v;
+  return b;
+}
+
+function ttAffiliateVideoBerkas(nama: string, baris: readonly (readonly string[])[]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [HEADER_TT_AFFILIATE, BARIS_SUMMARY_AFF, ...baris.map((b) => [...b])];
+  return {
+    nama, sha256: 'sha-tt-aff', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'tt_affiliate_video', ambiguous: false, matches: ['tt_affiliate_video'],
+  };
+}
+
+describeDb('commitUploadBatch (M9-OA-4) — tt_affiliate_video → pdt_fact_content', () => {
+  it('berdiri SENDIRIAN dalam batch: periode dibaca dari kolom Date, Summary dibuang, satu baris per Video ID', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', '749-TOKO', null);
+    const berkas = [
+      ttAffiliateVideoBerkas('affiliate.xlsx', [
+        barisAffiliate({ 15: 'Rp1.250.000', 22: '3' }),
+        barisAffiliate({ 5: 'lelinofita99', 12: 'VID-2', 20: '41s', 21: '9' }),
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    // Rule 5 TIDAK menolak batch ini walau nol berkas membawa preamble — periodenya
+    // datang dari kolom `Date`, dan itu terbukti dari baris batch yang tersimpan.
+    const batch = await sql<{ periode_mulai: Date; periode_selesai: Date }[]>`
+      select periode_mulai, periode_selesai from pdt_upload_batch where id = ${persiapan.batchId}`;
+    expect(ymd(batch[0].periode_mulai)).toBe('2026-07-01');
+    expect(ymd(batch[0].periode_selesai)).toBe('2026-07-31');
+
+    const rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(2); // baris `Summary` TIDAK ikut
+    expect(rows[0]).toMatchObject({
+      platform_content_id: 'VID-1', jenis: 'video', batch_id: persiapan.batchId,
+      creator_platform_id: null, creator_handle: 'wiyati496', is_akun_toko: false, sku_id: null,
+      vv: 20, likes: 3, durasi_detik: 43,
+    });
+    expect(rows[0].waktu_posting).toBeNull(); // zona waktu dashboard TikTok belum terverifikasi
+    expect(Number(rows[0].gmv)).toBe(1250000);
+    expect(rows[1]).toMatchObject({ platform_content_id: 'VID-2', creator_handle: 'lelinofita99', vv: 9 });
+  });
+
+  it('baris ganda untuk satu Video ID ⇒ SATU baris fakta, nilainya TIDAK dijumlah (G-TTAFF-BARIS-GANDA)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttAffiliateVideoBerkas('affiliate.xlsx', [
+        barisAffiliate({ 21: '20' }),
+        barisAffiliate({ 4: '2025-06-11-2026-12-31', 6: '28912', 21: '15' }),
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].vv).toBe(20); // BUKAN 35
+  });
+
+  it('gerbang Shop ID: baris milik toko LAIN dilewati, baris toko ini tetap ditulis (bukan batch digagalkan)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', '749-TOKO', null);
+    const berkas = [
+      ttAffiliateVideoBerkas('affiliate.xlsx', [
+        barisAffiliate({ 12: 'VID-KITA' }),
+        barisAffiliate({ 10: '999-TOKO-LAIN', 12: 'VID-LAIN' }),
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactContent(cpId);
+    expect(rows.map((r) => r.platform_content_id)).toEqual(['VID-KITA']);
+  });
+
+  it('shop_id klien BELUM terikat (null) ⇒ gerbang tidak menyaring apa pun (pola sama usulkan_ikat)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttAffiliateVideoBerkas('affiliate.xlsx', [
+        barisAffiliate({}),
+        barisAffiliate({ 10: '999-TOKO-LAIN', 12: 'VID-2' }),
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect((await loadFactContent(cpId)).map((r) => r.platform_content_id)).toEqual(['VID-1', 'VID-2']);
+  });
+
+  it('commit ULANG periode sama ⇒ ON CONFLICT DO UPDATE (diperbarui di tempat); periode BERBEDA ⇒ baris baru', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const juli = barisAffiliate({ 15: 'Rp100', 20: '10s', 21: '1' });
+    await commitUploadBatch(sql, ownerActor(), cpId, [ttAffiliateVideoBerkas('juli.xlsx', [juli])], []);
+
+    const juliRevisi = barisAffiliate({ 15: 'Rp999', 20: '20s', 21: '7', 22: '2' });
+    const persiapanRevisi = await commitUploadBatch(sql, ownerActor(), cpId, [ttAffiliateVideoBerkas('juli-revisi.xlsx', [juliRevisi])], []);
+    let rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2
+    expect(rows[0]).toMatchObject({ batch_id: persiapanRevisi.batchId, vv: 7, likes: 2, durasi_detik: 20 });
+    expect(Number(rows[0].gmv)).toBe(999);
+
+    const agustus = barisAffiliate({ 15: 'Rp100', 20: '10s', 21: '1' }, '2026-08-01-2026-08-31');
+    await commitUploadBatch(sql, ownerActor(), cpId, [ttAffiliateVideoBerkas('agustus.xlsx', [agustus])], []);
+    rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(2); // periode berbeda ⇒ baris terpisah, Juli tidak tertimpa
+    expect(rows.map((r) => ymd(r.periode)).sort()).toEqual(['2026-07-01', '2026-08-01']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // G1-09-SHEET-BUKAN-PERTAMA — override AM ke modul ber-`namaSheet` HARUS
 // membaca sheet YANG DIMINTA modul itu (`input.sheets`), bukan `input.aoa`
 // yang sudah kadung dipilih deteksi OTOMATIS (biasanya sheet pertama/salah).

@@ -215,7 +215,65 @@ export function parseRentangTanggalTiktok(s: string): PdtRentangTanggal | null {
     const selesai = parseTanggalIso(mIso[2]);
     if (mulai != null && selesai != null) return { mulai, selesai };
   }
+  // Bentuk KETIGA, terverifikasi ke sample asli `tt_affiliate_video`
+  // ("CustomReport_Campaign_Creator_Product_Shop_Video_2026-08-01_2026-08-31.xlsx",
+  // kolom `Date` = "2026-08-01-2026-08-31"): dua tanggal ISO dipisah hyphen,
+  // TANPA tilde. Tidak ambigu walau hyphen juga jadi pemisah komponen tanggal —
+  // panjang tiap sisi terkunci `\d{4}-\d{2}-\d{2}`.
+  const mIsoHyphen = /^\s*(\d{4}-\d{2}-\d{2})-(\d{4}-\d{2}-\d{2})\s*$/.exec(s);
+  if (mIsoHyphen) {
+    const mulai = parseTanggalIso(mIsoHyphen[1]);
+    const selesai = parseTanggalIso(mIsoHyphen[2]);
+    if (mulai != null && selesai != null) return { mulai, selesai };
+  }
   return null;
+}
+
+/**
+ * Baca rentang tanggal dari sebuah KOLOM DATA (bukan preamble) — dipakai HANYA
+ * oleh modul yang mendaftarkan `PdtModuleDef.kolomPeriode`, lihat docblock
+ * field itu untuk kenapa pengecualian ini ada dan kenapa ia ber-nama.
+ *
+ * Nilai yang dipakai adalah rentang TERBANYAK di kolom itu, bukan baris
+ * pertama dan bukan nilai terbanyak apa pun: baris `Summary` TikTok duduk
+ * tepat di bawah header dan mengisi kolom ini dengan literal `"Summary"`.
+ * Sel yang TIDAK bisa diparse jadi rentang karena itu tidak ikut dihitung
+ * sama sekali — bukan sekadar kalah suara. Bedanya nyata untuk berkas
+ * ber-SATU baris data: di sana `"Summary"` dan rentangnya sama-sama muncul
+ * sekali, dan `kolomTerbanyak` (Rule 3 `ID Kreator`) akan memenangkan yang
+ * PERTAMA, yaitu `"Summary"`.
+ *
+ * `null` bila kolomnya tidak ada atau nol sel yang bisa diparse jadi rentang
+ * — berkas lalu MEWARISI periode batch (Rule 5 ayat 2), sama seperti berkas
+ * tanpa preamble.
+ */
+export function ekstrakPeriodeKolomTiktok(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+  namaKolom: string,
+): PdtRentangTanggal | null {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = header.findIndex((c) => normLabel(c) === normLabel(namaKolom));
+  if (idx === -1) return null;
+
+  const hitung = new Map<string, { rentang: PdtRentangTanggal; jumlah: number }>();
+  for (const row of aoa.slice(barisHeader)) {
+    const v = String(row?.[idx] ?? '').trim();
+    if (v === '') continue;
+    const sudah = hitung.get(v);
+    if (sudah) {
+      sudah.jumlah += 1;
+      continue;
+    }
+    const rentang = parseRentangTanggalTiktok(v);
+    if (rentang) hitung.set(v, { rentang, jumlah: 1 });
+  }
+
+  let menang: { rentang: PdtRentangTanggal; jumlah: number } | null = null;
+  for (const kandidat of hitung.values()) {
+    if (menang == null || kandidat.jumlah > menang.jumlah) menang = kandidat;
+  }
+  return menang?.rentang ?? null;
 }
 
 /**

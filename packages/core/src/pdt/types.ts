@@ -98,6 +98,25 @@ export interface PdtModuleDef {
   barisHeaderHint: number;
   /** Whitelist PDT-27 (`docs/backlog/PDT_KOLOM_DIPANEN.md`) — kolom yang benar-benar dipanen ke tabel fakta. Boleh berbeda dari `tandaTanganKolom` (sinyal deteksi boleh memakai kolom yang tidak dipanen). */
   kolomDipanen: readonly string[];
+  /**
+   * Nama kolom DATA yang membawa rentang periode berkas, dipakai HANYA bila
+   * preamble tidak menghasilkan rentang apa pun. `undefined` = perilaku lama
+   * (preamble saja).
+   *
+   * Seluruh resolusi periode PDT membaca PREAMBLE (baris di atas header),
+   * tidak pernah sel data — dan itu tetap aturannya. Field ini adalah
+   * pengecualian ber-nama untuk satu bentuk ekspor yang TERBUKTI tidak punya
+   * preamble sama sekali (`tt_affiliate_video`: header di baris 1, rentangnya
+   * ada di kolom `Date` dan KONSTAN di seluruh baris). Tanpa ini berkas
+   * semacam itu selalu "tidak membawa periode terbaca" (Rule 5 ayat 2) dan
+   * batch yang HANYA berisi berkas itu ditolak.
+   *
+   * Yang dibaca adalah nilai TERBANYAK kolom tsb (`kolomTerbanyak`, pola sama
+   * `ID Kreator`), bukan baris pertama — supaya baris `Summary`/placeholder
+   * tidak bisa menang. TS-only, TIDAK ada kolom pasangannya di
+   * `pdt_parser_modul` (sama seperti `namaSheet`/`sheetTambahan`).
+   */
+  kolomPeriode?: string;
   wajib: boolean;
 }
 
