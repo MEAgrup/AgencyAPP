@@ -2029,9 +2029,9 @@ GMV bulanan otoritatif tetap entri manual AM (M6B P-E / M6D §3 Rule 11).
 > |---|---|---|---|
 > | 1 | cancel rate | `pdt_fact_shop_daily.pesanan_dibatalkan` (ditulis `shopee_shop_stats`, 3 basis) | ✅ **SIAP** |
 > | 2 | chat response rate/menit | — modul `shopee_chat`/`_broadcast` terdeteksi tapi **nol `ekstrakBaris*`, nol routing `pdt.ts`** | 🔴 nol fakta (ambang justru ADA: `bench.ts` `chat_response_rate_good: 0.95`) |
-> | 3 | efisiensi CPC/AMS | `pdt_fact_ads.biaya` (3 modul) + `klik` (**hanya** `_cpc`/`_search`; NULL di `shopee_ads_live`) | 🟡 fakta ada, **ambang nol** |
+> | 3 | efisiensi CPC/AMS | `pdt_fact_ads.biaya` (3 modul) + `klik` (**hanya** `_cpc`/`_search`; NULL di `shopee_ads_live`) | ✅ **SIAP** — lihat KOREKSI KEDUA: ACoS 0.25/0.40 ADA di `report_benchmark_shopee` |
 > | 4 | diskon/flash sale | — `shopee_diskon`/`shopee_flash_sale` ada di himpunan `UNVERIFIED` (`detect.test.ts`), nol writer | 🔴 nol fakta + parser belum terverifikasi |
-> | 5 | GMV/jam live Shopee | `pdt_fact_content` `jenis='live'` via `berkasShopeeLive` — `gmv` **TERISI**, `durasi_detik` **SELALU NULL** | 🟡 **KOREKSI**: GMV live SIAP, "per jam" tidak terhitung |
+> | 5 | GMV/jam live Shopee | `pdt_fact_content` `jenis='live'` via `berkasShopeeLive` — `gmv` **TERISI**, `durasi_detik` **SELALU NULL** | 🟡 **BUTUH KETOKAN** — lihat KOREKSI KEDUA: Shopee nol ambang live-GMV |
 > | 6 | afiliasi/KOL Shopee aktif | `pdt_fact_creator_period` via `shopee_ams_afiliasi` (grain bulanan/kreator) | 🟡 fakta ada, **ambang "aktif" nol** |
 > | 7 | GMV (pesanan selesai) | `pdt_fact_shop_daily` basis `dibayar` (sheet "Pesanan Dibayar") | ✅ **SIAP** |
 > | 8 | ROAS | `pdt_fact_ads.roas` (ketiga modul ads Shopee) | ✅ **SIAP** |
@@ -2044,11 +2044,38 @@ GMV bulanan otoritatif tetap entri manual AM (M6B P-E / M6D §3 Rule 11).
 > dan solusinya pun berlawanan (3 butuh ketokan pemilik, 2 butuh kode parser).
 >
 > **Konsekuensi Rule 30 (≥6 aksi khusus Shopee) — lebih baik dari dugaan awal:** 4 aksi siap
-> tanpa keputusan apa pun (1, 5-absolut, 7, 8) + 2 aksi yang butuh **hanya ketokan ambang** dan
-> **nol kode parser baru** (3, 6) = **6 aksi ⇒ Rule 30 tercapai tanpa membangun satu pun writer
+> tanpa keputusan apa pun (**1, 3, 7, 8** — dikoreksi di blok bawah) + 2 aksi yang butuh **hanya ketokan ambang** dan
+> **nol kode parser baru** (**5, 6** — dikoreksi) = **6 aksi ⇒ Rule 30 tercapai tanpa membangun satu pun writer
 > fakta baru**. Hanya aksi 2 dan 4 yang benar-benar butuh writer baru, dan keduanya bisa menyusul
 > tanpa memblokir Rule 30. Ini mengoreksi kesimpulan awal bahwa Rule 30 "tidak terpenuhi dari 3
 > aksi siap".
+>
+> ### 🔴 KOREKSI KEDUA (sesi 40) — `report_benchmark_shopee` terlewat di audit ambang
+>
+> Audit ambang di tabel atas hanya memeriksa `pdt_benchmark`, yang isinya **HANYA**
+> `platform='tiktok'` (versi 1+2, nol baris Shopee), dan melewatkan tabel
+> **`report_benchmark_shopee`** (versi 1, `aktif=true`, live) yang memuat ambang Shopee
+> sungguhan: `health.roas_good 4`/`roas_warn 2`, `health.acos_good 0.25`/`acos_warn 0.40`,
+> `layanan.cancel_rate_good 0.05`/`cancel_rate_warn 0.10`, `layanan.chat_response_rate_good 0.95`.
+>
+> - **Aksi 3 naik jadi SIAP.** Bukan "ambang nol" — pasangan ACoS 0.25/0.40 ada, jadi sisanya
+>   cuma INTERPRETASI (apakah "efisiensi CPC/AMS" dibaca sebagai ACoS), bukan angka yang hilang.
+> - **Aksi 5 turun jadi BUTUH KETOKAN.** Satu-satunya ambang live-GMV (`gmv_per_jam_live`
+>   300k/150k) hidup di `pdt_benchmark` **platform=tiktok**, jadi Shopee nol ambang untuk metrik
+>   ini — per-jam MAUPUN absolut. Klaim "GMV live absolut siap" keliru.
+>
+> **Komposisi benar: SIAP = 1, 3, 7, 8 · BUTUH AMBANG = 5, 6 · BUTUH WRITER = 2, 4.**
+> Aritmetika Rule 30 tidak berubah (4 + 2 = 6, tanpa writer baru) — isi keranjangnya yang tertukar.
+>
+> **Konflik baru:** cancel rate punya DUA sumber ambang — `report_benchmark_shopee` 0.05/0.10
+> versus `packages/core/src/pdt/skor.ts` yang men-`scale(cancelRate, 0.02, 0.2)` hardcoded untuk
+> skor kesehatan. Mana yang otoritatif untuk **pemicu aksi** (bukan skor) belum diputuskan —
+> lihat `docs/DECISIONS.md` §Open.
+>
+> **Arsitektur:** mesin verdict PDT semestinya baca `pdt_benchmark` (tabel miliknya), bukan tabel
+> mesin laporan. Preseden G2-02 mem-port `REPORT_BENCH_V1` → `pdt_benchmark` `platform='tiktok'`;
+> langkah cerminnya port `BENCH` Shopee → `pdt_benchmark` `platform='shopee'` lewat migrasi seed
+> — nol angka dikarang.
 >
 > **Tahap 1 (mode otonom, boleh jalan sekarang):** mesin verdict + aksi **1, 7, 8** — tiga aksi
 > nol-ambiguitas. Trigger di `pdt.ts` (`commitUploadBatch` saat status→`verified`; `reparsePdtBatch`
