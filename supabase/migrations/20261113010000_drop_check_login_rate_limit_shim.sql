@@ -1,0 +1,39 @@
+-- =============================================================================
+-- Buang shim `check_login_rate_limit` — objek TERAKHIR yang membuat live
+-- berbeda dari repo.
+--
+-- KENAPA INI ADA. `20260906010000_login_rate_limit.sql` melahirkan
+-- `check_login_rate_limit(text,int,int)`. `20261020010000_feedback_lapangan_20260914.sql`
+-- sudah MEN-DROP-nya dan menggantinya dua fungsi (`login_rate_limit_check`
+-- baca-saja sebelum `passwordGrant`, `login_rate_limit_record_failure` penulis
+-- HANYA saat gagal) karena yang lama mencatat login BERHASIL sebagai percobaan
+-- dan berkunci IP saja — satu kantor di balik satu NAT berbagi satu ember.
+--
+-- Tapi di live ia DIHIDUPKAN KEMBALI sesudah drop itu, lewat
+-- `hotfix_check_login_rate_limit_compat` yang diterapkan LANGSUNG ke live
+-- 2026-09-14 (versi `20260914161632`) dan TIDAK PERNAH punya berkas di
+-- `supabase/migrations/**`. Audit objek-per-objek 2026-09-17 (DB lokal dibangun
+-- dari nol lewat `scripts/db-rebuild.sh`, dibanding live `CDPS SG`) menemukan ia
+-- adalah SATU-SATUNYA sisa beda: tabel/kolom/index/policy/trigger/komentar
+-- identik (MD5 definisi kolom lengkap sama), hanya fungsi 115 vs 114.
+--
+-- KENAPA DIHAPUS, BUKAN DICATAT SEBAGAI PENGECUALIAN. Satu-satunya manfaat
+-- mempertahankannya adalah asuransi rollback kode ke build pra-rename. Manfaat
+-- itu batal: `d3_buang_sm_transition_lama` sudah men-drop signature lama
+-- `sm_transition` TANPA shim, dan `sm_transition` adalah penulis eksklusif
+-- SEMUA transisi status (aturan rumah #2) — jadi rollback sejauh itu mati di
+-- state machine lebih dulu, jauh lebih luas daripada login. Shim ini menjaga
+-- pintu depan sementara dindingnya sudah dibongkar. Nol pemanggil hari ini
+-- (`packages/domain/src/auth.ts` memanggil nama baru), jadi nol perlindungan
+-- yang hilang. Ditokan pemilik 2026-09-17.
+--
+-- AMAN: fungsi ini nol pemanggil, dan barisnya di `login_rate_limit_attempts`
+-- ber-`email = ''` sementara `login_rate_limit_check` mencocokkan
+-- `email = p_email` — jadi ember pengguna sungguhan tidak pernah tersentuh,
+-- dan membuang fungsinya tidak mengubah perilaku rate-limit yang berjalan.
+-- Baris `email = ''` sisa peninggalannya SENGAJA dibiarkan: ia data historis
+-- percobaan login, bukan objek skema, dan `login_rate_limit_check` tidak pernah
+-- membacanya.
+-- =============================================================================
+
+DROP FUNCTION IF EXISTS public.check_login_rate_limit(text, int, int);
