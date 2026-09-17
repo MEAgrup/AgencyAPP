@@ -4662,6 +4662,8 @@ export interface StrategiChannelWire {
   periode_baseline_bulan: number | null;
   periode_mulai: string | null;
   periode_akhir: string | null;
+  /** G3-REFERENCE-PERIODE opsi (B) — periode PDT (awal bulan) yang AM deklarasikan sebagai acuan Section B3. */
+  periode_referensi_pdt: string | null;
   alasan_periode_pendek: string | null;
   /** E-2 (A-09b) — Section E, stored per channel because that is its grain. */
   prioritas: string | null;
@@ -5018,6 +5020,7 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       periode_baseline_bulan: c.periodeBaselineBulan,
       periode_mulai: c.periodeMulai,
       periode_akhir: c.periodeAkhir,
+      periode_referensi_pdt: c.periodeReferensiPdt,
       alasan_periode_pendek: c.alasanPeriodePendek,
       prioritas: c.prioritas,
       prioritas_alasan: c.prioritasAlasan,
@@ -5504,6 +5507,10 @@ export interface StrategiChannelBaselineSuggestionWire {
   payload_schema: string | null;
   payload_terbaca: boolean;
   periode_referensi: string | null;
+  /** G3-REFERENCE-PERIODE opsi (B) — periode PDT saran (deklarasi AM bila
+   *  ada, else batch verified terbaru) dan daftar periode verified tersedia. */
+  periode_referensi_pdt_saran: string | null;
+  periode_referensi_pdt_opsi: string[];
   refund_rate_persen: number | null;
   chat_response_rate_persen: number | null;
   chat_response_menit: number | null;
@@ -5582,6 +5589,8 @@ export function strategiBaselinePrefillToWire(
       payload_schema: c.payloadSchema ?? null,
       payload_terbaca: c.payloadTerbaca,
       periode_referensi: c.periodeReferensi ?? null,
+      periode_referensi_pdt_saran: c.periodeReferensiPdtSaran ?? null,
+      periode_referensi_pdt_opsi: [...c.periodeReferensiPdtOpsi],
       refund_rate_persen: c.refundRatePersen ?? null,
       chat_response_rate_persen: c.chatResponseRatePersen ?? null,
       chat_response_menit: c.chatResponseMenit ?? null,
@@ -5769,6 +5778,7 @@ export function strategiChannelsFromWire(v: unknown): strategi.ChannelInput[] {
     periodeBaselineBulan: numOrNull(c.periode_baseline_bulan),
     periodeMulai: strOrNull(c.periode_mulai),
     periodeAkhir: strOrNull(c.periode_akhir),
+    periodeReferensiPdt: strOrNull(c.periode_referensi_pdt),
     alasanPeriodePendek: strOrNull(c.alasan_periode_pendek),
     prioritas: strOrNull(c.prioritas) as strategi.ChannelPrioritas | null,
     prioritasAlasan: strOrNull(c.prioritas_alasan),

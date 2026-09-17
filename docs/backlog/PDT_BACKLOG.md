@@ -1653,6 +1653,34 @@ tabel (bukan dipaksa satu bentuk):
   (`G3-02a`, pola sama `20261106010000_g2_01_shopee_kesehatan_writer.sql`) sebelum kedua field
   ini bisa autofill; jangan ditebak dari kolom yang tidak ada.
 
+**Status 2026-09-17 (sesi 39) — DITUTUP.** Migrasi `20261112010000_g3_02_periode_referensi_pdt.sql`
+menambah `strategi_channel.periode_referensi_pdt` (date, awal bulan, nullable — CHECK
+`ck_strch_periode_referensi_pdt_awal_bulan`), dieksekusi ke live `CDPS SG` via `apply_migration`.
+`ChannelInput`/`StrategiChannel`/`ChannelBaselineSuggestion` (`strategi.ts`) dan `wire.ts` dapat
+field ini penuh (write + read + suggestion), thread lewat `saveChannels` (insert + validasi shape
+`validateChannel`, awal-bulan-saja) dan `copyChildren` (revisi mewarisi deklarasi lama).
+`getBaselinePrefill` menghitung `periodeReferensiPdtSaran` (deklarasi tersimpan di
+`strategi_channel` MENANG mutlak bila ada; jatuh ke batch `verified` PALING BARU sebagai saran
+default hanya bila belum pernah dideklarasikan — opsi (B) persis, BUKAN opsi (A)) +
+`periodeReferensiPdtOpsi` (seluruh periode verified tersedia, untuk dropdown AM, bukan tebakan
+bebas). `refundRatePersen` = `refund/gmv×100`, `pengunjungPerBulan` = `pengunjung` mentah,
+`conversionRatePersen` = `pesanan/pengunjung×100` (BUKAN kolom `cr` — itu rasio harian yang tidak
+bisa dijumlah, Rule 7) — ketiganya berlaku KEDUA platform (basis `net` TikTok/`siap_dikirim`
+Shopee, sama seperti G3-07). `poinPenalti` = Σ `pdt_fact_kesehatan_penalti.poin` periode itu,
+Shopee-only (nol writer TikTok, sama batasan `chatResponseRatePersen`/`chatResponseMenit` yang
+TETAP payload-only). Setiap field jatuh ke payload Riset Awal lama bila PDT mengembalikan `null`
+(nol data periode itu) — strangler coexistence persis G3-07, nol angka yang diam-diam salah.
+UI: `web-internal/src/components/strategi/SectionB.tsx` dapat dropdown "Periode acuan PDT
+(B-0.7a)" (opsi dari `periode_referensi_pdt_opsi`, placeholder dari saran) di bawah blok B-0.7 —
+TIDAK auto-terapkan seperti `periode_baseline_bulan` (AM boleh sengaja pilih bulan lampau). Dua
+test DB nyata baru di `strategi.test.ts` (default-ke-terbaru + deklarasi-menang-atas-terbaru,
+termasuk poinPenalti Shopee) — full suite domain 2830/2831 (1 skip, bukan regresi; dua kegagalan
+`admin.test.ts`/`client.test.ts` yang sempat muncul terbukti flakiness lintas-run tanpa
+`db-rebuild` di antaranya, bukan regresi — hilang total setelah DB dibangun ulang bersih), api/
+core/db package suites, dan `web-internal` (test + build) semuanya hijau. **G3-03..G3-06 sekarang
+punya jalur `periodeReferensiPdtSaran` siap pakai — sub-tiket berikutnya tinggal memanggil
+`pdt-prefill.ts` dengan periode itu, pola identik ticket ini.**
+
 ### G3-03 · Dimensi SKU (B-2 portofolio SKU)
 
 > ✅ **RESOLVED 2026-09-17 (sesi 39)** — sama seperti G3-02: opsi (B), periode dideklarasikan AM

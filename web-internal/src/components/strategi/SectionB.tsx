@@ -109,6 +109,9 @@ export interface ChannelDraft {
   periode_baseline_bulan: string;
   periode_mulai: string;
   periode_akhir: string;
+  // G3-REFERENCE-PERIODE opsi (B) — periode PDT (awal bulan) yang AM
+  // deklarasikan sebagai acuan Section B3 (refund rate, pengunjung/bulan, dst.)
+  periode_referensi_pdt: string;
   alasan_periode_pendek: string;
   catatan_periode_pendek: string;
   // E-2 priority (saved with channels)
@@ -202,6 +205,7 @@ export function blankChannel(channel: string): ChannelDraft {
     periode_baseline_bulan: '',
     periode_mulai: '',
     periode_akhir: '',
+    periode_referensi_pdt: '',
     alasan_periode_pendek: '',
     catatan_periode_pendek: '',
     prioritas: '',
@@ -283,6 +287,7 @@ export function channelsDraftOf(d: StrategiDetail): ChannelDraft[] {
       c.periode_baseline_bulan !== null ? String(c.periode_baseline_bulan) : '',
     periode_mulai: c.periode_mulai ?? '',
     periode_akhir: c.periode_akhir ?? '',
+    periode_referensi_pdt: c.periode_referensi_pdt ?? '',
     alasan_periode_pendek: c.alasan_periode_pendek ?? '',
     catatan_periode_pendek: c.catatan_periode_pendek ?? '',
     prioritas: c.prioritas ?? '',
@@ -404,6 +409,17 @@ function numOrNull(s: string): number | null {
   return t === '' ? null : Number(t);
 }
 
+const BULAN_ID = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des',
+];
+/** "2026-08-01" → "Agu 2026" (G3-REFERENCE-PERIODE opsi (B) — periode acuan PDT). */
+function formatPeriodeBulan(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(iso);
+  if (!m) return iso;
+  const idx = Number(m[2]) - 1;
+  return idx >= 0 && idx < 12 ? `${BULAN_ID[idx]} ${m[1]}` : iso;
+}
+
 /** Converts one ChannelDraft to the body shape saveStrategiChannels expects. */
 export function channelDraftToBody(ch: ChannelDraft) {
   return {
@@ -424,6 +440,7 @@ export function channelDraftToBody(ch: ChannelDraft) {
     periode_baseline_bulan: numOrNull(ch.periode_baseline_bulan),
     periode_mulai: ch.periode_mulai || null,
     periode_akhir: ch.periode_akhir || null,
+    periode_referensi_pdt: ch.periode_referensi_pdt || null,
     alasan_periode_pendek: ch.alasan_periode_pendek || null,
     catatan_periode_pendek: ch.catatan_periode_pendek || null,
     prioritas: ch.prioritas || null,
@@ -1091,6 +1108,36 @@ export default function SectionB({
                     disabled={disabled}
                     onChange={(e) => setCh({ catatan_periode_pendek: e.target.value })}
                   />
+                </label>
+              </div>
+            )}
+            {/* G3-REFERENCE-PERIODE opsi (B) — AM mendeklarasikan SENDIRI periode
+                PDT yang jadi acuan Section B3 (refund rate, pengunjung/bulan,
+                conversion rate, poin penalti). Saran (batch verified terbaru)
+                mengisi placeholder saja — TIDAK auto-terapkan seperti B-0.7,
+                karena AM boleh sengaja memilih bulan lampau (docs/DECISIONS.md
+                2026-09-17 "G3-REFERENCE-PERIODE DIKETOK"). */}
+            {sugg && sugg.periode_referensi_pdt_opsi.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <label className="field" style={{ display: 'block', maxWidth: 280 }}>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Periode acuan PDT (B-0.7a) — untuk refund rate, pengunjung/bulan,
+                    conversion rate, poin penalti
+                  </span>
+                  <select
+                    value={ch.periode_referensi_pdt || sugg.periode_referensi_pdt_saran || ''}
+                    disabled={disabled}
+                    onChange={(e) => setCh({ periode_referensi_pdt: e.target.value })}
+                  >
+                    {sugg.periode_referensi_pdt_opsi
+                      .slice()
+                      .reverse()
+                      .map((p) => (
+                        <option key={p} value={p}>
+                          {formatPeriodeBulan(p)}
+                        </option>
+                      ))}
+                  </select>
                 </label>
               </div>
             )}

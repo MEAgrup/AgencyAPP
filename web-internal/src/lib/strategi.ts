@@ -595,6 +595,7 @@ export interface StrategiChannel {
   periode_baseline_bulan: number | null;
   periode_mulai: string | null;
   periode_akhir: string | null;
+  periode_referensi_pdt: string | null;
   alasan_periode_pendek: string | null;
   catatan_periode_pendek: string | null;
   /**
@@ -1036,6 +1037,11 @@ export interface StrategiChannelBaselineSuggestion {
   payload_terbaca: boolean;
   /** The month the period figures describe, e.g. "Agu 2026". */
   periode_referensi: string | null;
+  /** G3-REFERENCE-PERIODE opsi (B) — periode PDT saran (awal bulan): deklarasi
+   *  AM tersimpan bila ada, else batch verified terbaru sebagai titik awal. */
+  periode_referensi_pdt_saran: string | null;
+  /** Seluruh periode PDT verified yang tersedia untuk channel ini (kronologis naik). */
+  periode_referensi_pdt_opsi: string[];
   /** B-1.4 — a period aggregate. Seeded into one baseline month only when that
    *  month's label matches `periode_referensi` exactly; never spread. */
   refund_rate_persen: number | null;
