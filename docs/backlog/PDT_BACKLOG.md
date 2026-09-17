@@ -66,6 +66,14 @@ CI merah, bukan diskusi gaya.
    (koreksi K-3; ketokan PX-M2a 2026-09-12). RLS memikul row-scope.
 8. **`archive/backend-go/**` tidak disentuh.** Arsip read-only (C-05).
 
+> ⚠️ **Status 2026-09-17 (sesi 35).** Live `CDPS SG` ditemukan tertinggal 23 migrasi (sejak
+> `20261018010000` sampai `20261109010000` — praktis seluruh G1-09 sub-langkah 2b-ii, G1-10,
+> G2-01, G2-02, dan G4-01) meski backlog/DECISIONS mencatatnya DITUTUP. Sudah ditutup (lihat
+> `docs/DECISIONS.md` 2026-09-17 "DRIFT SKEMA LIVE DITEMUKAN+DITUTUP"). **Pelajaran untuk sesi
+> berikutnya: jangan percaya "sudah di-apply live" dari catatan sesi lalu — jalankan
+> `mcp__Supabase__list_migrations` terhadap `egddxfcnrtecheiykhlf` di awal sesi dan bandingkan
+> langsung ke `supabase/migrations/**` sebelum mulai tiket baru.**
+
 ---
 
 ## 1. G1 — Fondasi: tabel, parser, rekonsiliasi, upload
