@@ -776,6 +776,195 @@ export async function resumeService(sql: Sql, actor: Actor, serviceId: string, r
 }
 
 // ---------------------------------------------------------------------------
+// Close Service — TWO-STEP (O75, owner decision 2026-09-18). `[In Execution] →
+// Done` existed in `sm_edges` since the machine was born but had NO caller — no
+// Service could ever reach a terminal state. Mirrors T-2b Hold exactly: the
+// owning Account/AM REQUESTS ([In Execution] → [Closure Requested]), Director
+// APPROVES (→ Done, terminal) or REJECTS (→ [In Execution]). Narrower than
+// Hold's approve gate (Head of Account OR Director) — here the owner's answer
+// was Director specifically, so `canApproveClosure` does not fall back to
+// Account Lead.
+//
+// Minimum gate (owner's own words): "seluruh Brief aktif sudah selesai".
+// Checked at REQUEST time and re-checked at APPROVE time (a request does not
+// freeze Briefs — one could regress between the two steps), against the same
+// `[Approved]`/voided vocabulary `voidService` already uses. A Service with
+// zero Briefs trivially passes (nothing to be incomplete).
+//
+// Each step appends to audit_log and emits a v19 notification: request →
+// Directors (`finance.directorIds`, a layered role not resolvable by
+// division — same reason `pdt.purge.guard_exceeded` uses 'explicit'); approve/
+// reject → the owning AM.
+// ---------------------------------------------------------------------------
+
+export const SERVICE_CLOSURE_REQUESTED = '[Closure Requested]';
+
+/** No active (non-voided) Brief on this Service may be anything but [Approved]. */
+export const MSG_SERVICE_CLOSURE_BRIEFS_INCOMPLETE =
+  '[seluruh Brief aktif pada Service ini harus berstatus Approved sebelum penutupan bisa diajukan]';
+
+/** canRequestClosure: the owning AM, an Account lead, or Director may REQUEST closure. */
+export function canRequestClosure(actor: Actor, ownerAm: string): boolean {
+  if (actor.role.director) return true;
+  if (actor.role.division === ACCOUNT_DIVISION) {
+    if (actor.role.level === permission.LevelLead) return true;
+    return actor.employeeId === ownerAm; // owning AM
+  }
+  return false;
+}
+
+/** canApproveClosure: Director only (owner decision — narrower than Hold's approve gate). */
+export function canApproveClosure(actor: Actor): boolean {
+  return actor.role.director;
+}
+
+/** Every active (non-voided) Brief on the Service must already be [Approved]. */
+async function assertBriefsCloseable(tx: Queryable, serviceId: string): Promise<void> {
+  const briefs = await tx<{ id: string; status: string }[]>`
+    select id, status from briefs where service_id = ${serviceId} for update`;
+  const notReady = briefs.some((b) => b.status !== BRIEF_APPROVED && b.status !== SERVICE_VOIDED);
+  if (notReady) {
+    throw new ServiceStateError(MSG_SERVICE_CLOSURE_BRIEFS_INCOMPLETE);
+  }
+}
+
+/**
+ * requestClosure moves a Service [In Execution] → [Closure Requested] (O75). The
+ * owning AM / Account lead / Director, reason mandatory, audited; notifies
+ * Directors. Blocked (ServiceStateError) if any active Brief is not yet
+ * [Approved], or if the Service is not [In Execution].
+ */
+export async function requestClosure(sql: Sql, actor: Actor, serviceId: string, reason: string): Promise<void> {
+  const why = (reason ?? '').trim();
+  if (why === '') throw new IncompleteError();
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await lockServiceWithOwner(tx, serviceId);
+    if (!canRequestClosure(actor, svc.ownerAm)) throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+    if (svc.status !== SERVICE_IN_EXECUTION) throw new ServiceStateError();
+    await assertBriefsCloseable(tx, serviceId);
+    await moveService(ex, serviceId, SERVICE_CLOSURE_REQUESTED, actor);
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_closure_requested', beforeJson: { status: svc.status },
+      afterJson: { status: SERVICE_CLOSURE_REQUESTED, reason: why }, createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.ServiceClosureRequested,
+      entityType: 'service', entityId: serviceId, actor: actor.employeeId,
+      explicitRecipients: await finance.directorIds(tx),
+    });
+  });
+}
+
+/**
+ * approveClosure moves a Service [Closure Requested] → Done (O75), terminal.
+ * Director only. Re-checks the Brief gate (a Brief may have regressed since the
+ * request). Audited; notifies the owning AM. A Service not [Closure Requested]
+ * is rejected (ServiceStateError → 409).
+ */
+export async function approveClosure(sql: Sql, actor: Actor, serviceId: string): Promise<void> {
+  if (!canApproveClosure(actor)) throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await lockServiceWithOwner(tx, serviceId);
+    if (svc.status !== SERVICE_CLOSURE_REQUESTED) throw new ServiceStateError();
+    await assertBriefsCloseable(tx, serviceId);
+    await moveService(ex, serviceId, SERVICE_DONE, actor);
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_closed', beforeJson: { status: svc.status },
+      afterJson: { status: SERVICE_DONE }, createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.ServiceClosed,
+      entityType: 'service', entityId: serviceId, actor: actor.employeeId,
+      explicitRecipients: svc.ownerAm === '' ? [] : [svc.ownerAm],
+    });
+  });
+}
+
+/**
+ * rejectClosure moves a Service [Closure Requested] → [In Execution] (O75) — the
+ * Director declines the closure request. Director only. Audited; notifies the
+ * owning AM. A Service not [Closure Requested] is rejected (ServiceStateError → 409).
+ */
+export async function rejectClosure(sql: Sql, actor: Actor, serviceId: string, reason: string): Promise<void> {
+  if (!canApproveClosure(actor)) throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+  const why = (reason ?? '').trim();
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await lockServiceWithOwner(tx, serviceId);
+    if (svc.status !== SERVICE_CLOSURE_REQUESTED) throw new ServiceStateError();
+    await moveService(ex, serviceId, SERVICE_IN_EXECUTION, actor);
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_closure_rejected', beforeJson: { status: svc.status },
+      afterJson: { status: SERVICE_IN_EXECUTION, reason: why === '' ? null : why }, createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.ServiceClosureRejected,
+      entityType: 'service', entityId: serviceId, actor: actor.employeeId,
+      explicitRecipients: svc.ownerAm === '' ? [] : [svc.ownerAm],
+    });
+  });
+}
+
+/** One Service sitting in [Closure Requested], waiting on a Director's call. */
+export interface PendingClosureRequest {
+  serviceId: string;
+  clientId: string;
+  toko: string;
+  namaPic: string;
+  serviceName: string;
+  ownerAm: string | null;
+  ownerAmNama: string;
+  updatedAt: Date;
+  /** The MANDATORY reason the AM typed on `requestClosure` (audit-only, mirrors PendingHoldRequest). */
+  reason: string;
+  requestedBy: string;
+  requestedByNama: string;
+}
+
+/**
+ * pendingClosureRequests lists every Service in [Closure Requested], oldest
+ * first — the Director's "Perlu Persetujuan Saya" queue (`canApproveClosure`'s
+ * exact set). Row read itself is RLS-scoped; this gates explicitly and returns
+ * empty for anyone who cannot actually decide (mirrors `pendingHoldRequests`).
+ */
+export async function pendingClosureRequests(sql: Queryable, actor: Actor): Promise<PendingClosureRequest[]> {
+  if (!canApproveClosure(actor)) return [];
+  const rows = await sql<{
+    id: string; client_id: string; toko: string; nama_pic: string; name: string;
+    assigned_am_id: string | null; owner_am_nama: string | null; updated_at: Date;
+    reason: string | null; requested_by: string | null; requested_by_nama: string | null;
+  }[]>`
+    select s.id, s.client_id, c.toko, c.nama_pic, s.name, c.assigned_am_id,
+           private.employee_display_name(c.assigned_am_id) as owner_am_nama,
+           coalesce(req.created_at, s.created_at) as updated_at,
+           req.reason, req.actor_employee_id as requested_by,
+           private.employee_display_name(req.actor_employee_id) as requested_by_nama
+      from services s
+      join clients c on c.id = s.client_id
+      left join lateral (
+        select a.after_json->>'reason' as reason, a.actor_employee_id, a.created_at
+          from audit_log a
+         where a.entity_type = 'service' and a.entity_id = s.id
+           and a.action = 'service_closure_requested'
+         order by a.created_at desc, a.id desc
+         limit 1
+      ) req on true
+     where s.status = ${SERVICE_CLOSURE_REQUESTED}
+     order by coalesce(req.created_at, s.created_at) asc, s.id asc`;
+  return rows.map((r) => ({
+    serviceId: r.id, clientId: r.client_id, toko: r.toko, namaPic: r.nama_pic, serviceName: r.name,
+    ownerAm: r.assigned_am_id, ownerAmNama: r.owner_am_nama ?? '', updatedAt: r.updated_at,
+    reason: r.reason ?? '', requestedBy: r.requested_by ?? '',
+    requestedByNama: r.requested_by_nama ?? '',
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Payment-intent handoff (M4 §5) — Sales → Admin & Finance.
 //
 // The Sales PIC's single client-level declaration that routes the Client Record

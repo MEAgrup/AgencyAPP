@@ -186,7 +186,14 @@ check() { # nama · sql · harapan
 check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "183"
 check "entity_prefix"    "select count(*) from entity_prefix"    "45"
 check "sm_machines"      "select count(*) from sm_machines"      "35"
-check "notif_events"     "select count(*) from notif_events"     "76"
+check "notif_events"     "select count(*) from notif_events"     "79"
+# --- O75 (20261118010000) — Service Closure two-step -----------------------
+# notif_events 76→79: +3 event katalog v19 (service_closure_requested/
+#       service_closed/service_closure_rejected). Edge langsung
+#       [In Execution]→Done DICABUT, digantikan dua-langkah via
+#       [Closure Requested] (mirrors T-2b Hold). Nol tabel baru ⇒ tabel public
+#       TETAP 183, entity_prefix TETAP 45. Nol mesin baru (`service` sudah ada
+#       sejak awal) ⇒ sm_machines TETAP 35.
 # --- G3-02a (20261115010000) — shopee_chat writer --------------------------
 # 183 = 182 + 1 tabel `pdt_fact_layanan_chat` (fakta murni, sama kelas
 #       pdt_fact_kesehatan_penalti — nol identitas PREFIX-YYYYMM-NNNN) ⇒

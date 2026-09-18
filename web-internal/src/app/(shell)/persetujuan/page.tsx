@@ -78,8 +78,12 @@ import {
 } from '@/lib/leads';
 import {
   approveHoldService,
+  approveServiceClosure,
+  listPendingClosureRequests,
   listPendingHoldRequests,
   rejectHoldService,
+  rejectServiceClosure,
+  type PendingClosureRequest,
   type PendingHoldRequest,
 } from '@/lib/clients';
 import {
@@ -724,6 +728,66 @@ function HoldCard({
 }
 
 // ---------------------------------------------------------------------------
+// 5b. Permintaan Penutupan Service (O75)
+// ---------------------------------------------------------------------------
+
+function ClosureCard({
+  row,
+  canDecide,
+  onDone,
+}: {
+  row: PendingClosureRequest;
+  canDecide: boolean;
+  onDone: () => void;
+}) {
+  const { busy, error, run } = useDecision(onDone);
+  return (
+    <ApprovalCard
+      id={row.service_id}
+      href={`/clients/${row.client_id}`}
+      title={
+        <>
+          {row.toko} &middot; {row.service_name}
+        </>
+      }
+      badge={<span className="badge badge-amber">Closure Requested</span>}
+      meta={[
+        { label: 'PIC klien', value: row.nama_pic || '—' },
+        { label: 'AM pemilik', value: row.owner_am_nama || row.owner_am || '—' },
+        { label: 'Diajukan oleh', value: row.requested_by_nama || row.requested_by || '—' },
+        { label: 'Diminta pada', value: formatDateTime(row.updated_at) },
+      ]}
+      reason={{ label: 'Alasan penutupan', text: row.reason }}
+    >
+      {canDecide ? (
+        <DecisionActions
+          fieldId={`closure-note-${row.service_id}`}
+          busy={busy}
+          error={error}
+          approveLabel="Setujui penutupan"
+          rejectLabel="Tolak penutupan"
+          noteLabel="Catatan (opsional; tercatat di audit saat menolak)"
+          noteRequiredForReject={false}
+          confirmText={(k) =>
+            k === 'approve'
+              ? `Setujui penutupan ${row.service_name} untuk ${row.toko}? Service berhenti di Done — tidak bisa dibuka lagi.`
+              : `Tolak penutupan ${row.service_name}? Service kembali ke [In Execution].`
+          }
+          onDecide={(kind, note) =>
+            run(kind, () =>
+              kind === 'approve' ? approveServiceClosure(row.service_id) : rejectServiceClosure(row.service_id, note),
+            )
+          }
+          hint="Done adalah status terminal — Service yang sudah selesai tidak dapat dibuka kembali."
+        />
+      ) : (
+        <WaitingNote who="Director" />
+      )}
+    </ApprovalCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 6. Permintaan Block Task (M12)
 // ---------------------------------------------------------------------------
 
@@ -1047,6 +1111,7 @@ const SECTION_LABELS = [
   // KEDUANYA. Menambah di salah satunya saja membuat pesan galat satu antrian
   // dilabeli nama antrian lain.
   'Permintaan ke Finance',
+  'Permintaan Penutupan Service',
 ] as const;
 
 export default function PerluPersetujuanPage() {
@@ -1077,6 +1142,8 @@ export default function PerluPersetujuanPage() {
   const canDecideTcr = !readOnly && isDirector;
   const canDecideLeadDelete = !readOnly && (isDirector || role?.level === 'lead');
   const canDecideHold = !readOnly && (isAccountLead(role) || isDirector);
+  // Narrower than Hold (O75 owner decision): Director only, no Account Lead fallback.
+  const canDecideClosure = !readOnly && isDirector;
   // Mirror `req.canProcess`: divisi tujuan (Finance) level apa pun, atau
   // Director. `readOnly` menjaga OD tetap read-only (Phase 0 §4).
   const canDecideFinanceReq = !readOnly && (isDirector || role?.division === 'Finance');
@@ -1097,6 +1164,7 @@ export default function PerluPersetujuanPage() {
   const [tcrs, setTcrs] = useState<SchemeChangeRequest[] | null>(null);
   const [deleteRequests, setDeleteRequests] = useState<DeleteRequestQueueRow[] | null>(null);
   const [holdRequests, setHoldRequests] = useState<PendingHoldRequest[] | null>(null);
+  const [closureRequests, setClosureRequests] = useState<PendingClosureRequest[] | null>(null);
   const [financeReqs, setFinanceReqs] = useState<Permintaan[] | null>(null);
   const [blockRequests, setBlockRequests] = useState<PendingBlockRequest[] | null>(null);
   const [escalations, setEscalations] = useState<PendingEscalation[] | null>(null);
@@ -1122,10 +1190,11 @@ export default function PerluPersetujuanPage() {
         listPendingEscalations(),
         canViewBlockQueue ? getTeamPortal() : Promise.resolve(null),
         canViewFinanceReq ? listPermintaanQueue('Finance') : Promise.resolve([]),
+        listPendingClosureRequests(),
       ]);
       const [
         attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, blockRes,
-        financeReqRes,
+        financeReqRes, closureRes,
       ] = results;
       setAttempts(attemptRes.status === 'fulfilled' ? attemptRes.value.data : []);
       setAttemptsTruncated(attemptRes.status === 'fulfilled' && attemptRes.value.next_cursor !== null);
@@ -1139,6 +1208,7 @@ export default function PerluPersetujuanPage() {
         blockRes.status === 'fulfilled' && blockRes.value ? blockRes.value.block_queue : [],
       );
       setFinanceReqs(financeReqRes.status === 'fulfilled' ? financeReqRes.value : []);
+      setClosureRequests(closureRes.status === 'fulfilled' ? closureRes.value.data : []);
       setSectionErrors(
         results
           .map((r, i) => (r.status === 'rejected' ? `${SECTION_LABELS[i]}: ${errorMessage(r.reason)}` : null))
@@ -1182,6 +1252,7 @@ export default function PerluPersetujuanPage() {
     kol: escalations?.length ?? 0,
     block: blockRequests?.length ?? 0,
     financeReq: financeReqs?.length ?? 0,
+    closure: closureRequests?.length ?? 0,
   };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
@@ -1191,6 +1262,7 @@ export default function PerluPersetujuanPage() {
     { id: 'tcr', label: 'Skema Pembayaran', count: counts.tcr },
     { id: 'lead', label: 'Hapus Lead', count: counts.lead },
     { id: 'hold', label: 'Hold Service', count: counts.hold },
+    { id: 'closure', label: 'Penutupan Service', count: counts.closure },
     { id: 'block', label: 'Block Task', count: counts.block },
     { id: 'kol', label: 'Eskalasi KOL', count: counts.kol },
     { id: 'financeReq', label: 'Permintaan Finance', count: counts.financeReq },
@@ -1340,6 +1412,17 @@ export default function PerluPersetujuanPage() {
           >
             {holdRequests?.map((r) => (
               <HoldCard key={r.service_id} row={r} canDecide={canDecideHold} onDone={load} />
+            ))}
+          </Section>
+
+          <Section
+            id="closure"
+            title="Permintaan Penutupan Service"
+            count={counts.closure}
+            hint="AM mengajukan, Director memutuskan (O75). Done adalah status terminal."
+          >
+            {closureRequests?.map((r) => (
+              <ClosureCard key={r.service_id} row={r} canDecide={canDecideClosure} onDone={load} />
             ))}
           </Section>
 
