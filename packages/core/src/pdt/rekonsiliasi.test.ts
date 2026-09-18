@@ -150,6 +150,37 @@ describe('sumShopeeParentSkuGmv', () => {
   it('0 bila kolom tidak ditemukan', () => {
     expect(sumShopeeParentSkuGmv(aoa, 'Kolom Tidak Ada')).toBe(0);
   });
+
+  // G1-07-SHOPEE-DOBEL-HITUNG (docs/DECISIONS.md 2026-09-18): bentuk asli
+  // parentskudetail.xlsx HIERARKIS — satu baris "parent" per produk
+  // (Kode Variasi = '-', total produk) diikuti baris varian di bawahnya
+  // (Kode Variasi terisi, kontribusi varian itu sendiri). Angka di bawah
+  // REPRODUKSI PERSIS sample asli Fim Motor (satu produk dua varian dari
+  // `parentskudetail.20260701_20260731.xlsx`, dibulatkan agar ringkas):
+  // produk Rp600jt/Rp560jt SAJA, terurai jadi varian A Rp350jt/Rp330jt +
+  // varian B Rp250jt/Rp230jt (350+250=600, 330+230=560 — varian menjumlah
+  // PERSIS ke baris parent-nya, persis pola hierarkis file asli).
+  describe('baris hierarkis (parent + varian) — G1-07-SHOPEE-DOBEL-HITUNG', () => {
+    const aoaHierarkis = [
+      ['Kode Produk', 'Kode Variasi', 'Total Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)'],
+      ['SKU-A', '-', 'Rp600.000.000', 'Rp560.000.000'], // parent: total produk
+      ['SKU-A', 'VAR-A1', 'Rp350.000.000', 'Rp330.000.000'], // varian 1
+      ['SKU-A', 'VAR-A2', 'Rp250.000.000', 'Rp230.000.000'], // varian 2
+      ['SKU-B', '-', 'Rp400.000.000', 'Rp380.000.000'], // parent tanpa varian tercantum terpisah
+    ];
+
+    it('menjumlah HANYA baris parent (Kode Variasi = "-"), mengabaikan baris varian di bawahnya', () => {
+      expect(sumShopeeParentSkuGmv(aoaHierarkis, 'Total Penjualan (Pesanan Dibuat) (IDR)')).toBe(600_000_000 + 400_000_000);
+      expect(sumShopeeParentSkuGmv(aoaHierarkis, 'Penjualan (Pesanan Siap Dikirim) (IDR)')).toBe(560_000_000 + 380_000_000);
+    });
+
+    it('TANPA kolom Kode Variasi ⇒ jatuh ke perilaku lama (jumlah semua baris)', () => {
+      const tanpaKolomVariasi = aoaHierarkis.map((row) => [row[0], row[2], row[3]]);
+      expect(sumShopeeParentSkuGmv(tanpaKolomVariasi, 'Total Penjualan (Pesanan Dibuat) (IDR)')).toBe(
+        600_000_000 + 350_000_000 + 250_000_000 + 400_000_000,
+      );
+    });
+  });
 });
 
 describe('rekonsiliasiGmvPesanan (Rule 13-14)', () => {

@@ -610,11 +610,18 @@ export interface PdtCommitPersiapan {
  * `status='ok'`. Basis dipilih Rule 16 (default laporan klien = **Pesanan
  * Siap Dikirim** — basis Dibayar/PDT-19 adalah gerbang Product Exchange
  * TERPISAH, di luar cakupan gerbang Flow A ini). **Perbandingan pesanan
- * (separuh Rule 13) DILEWATI** — `shopee_parent_sku.kolomDipanen`
- * (`PDT_KOLOM_DIPANEN.md` §2.2, bucket 1+2 SUDAH lengkap dicek) nol kolom
- * jumlah-pesanan per-SKU terverifikasi; `rekonsiliasiGmvPesanan` menerima
- * ini (parameter opsional) dan menilai HANYA dari GMV sampai kolomnya
- * ditemukan — dicatat `G1-07-PERSKU-PESANAN` (Open, `docs/DECISIONS.md`).
+ * (separuh Rule 13) DILEWATI PERMANEN** — `G1-07-PERSKU-PESANAN` DITUTUP
+ * `docs/DECISIONS.md` 2026-09-18 dengan jawaban NEGATIF DEFINITIF, bukan
+ * kolom belum ditemukan: kolom `'Pesanan Dibuat'`/`'Pesanan Siap Dikirim'`
+ * ADA di sample asli Fim Motor, tapi Σ-nya (baris parent saja) menyimpang
+ * ≈12,8% dari shop-level — STRUKTURAL (satu order multi-produk dihitung
+ * sekali di shop-level, sekali PER PRODUK di per-SKU), bukan sesuatu yang
+ * bisa diperbaiki dengan sample lain atau filter baris tambahan. Mengaktifkan
+ * perbandingan ini (seperti cabang TikTok di bawah) akan menolak KELIRU
+ * setiap batch Shopee dengan order multi-produk (mayoritas toko nyata).
+ * `rekonsiliasiGmvPesanan` menerima `perSkuPesanan`/`shopLevelPesanan`
+ * opsional dan menilai HANYA dari GMV — dipanggil TANPA keduanya di sini,
+ * sengaja, bukan sementara.
  * **TikTok**: butuh `tt_shop_analytics` + `tt_product_analytics` KEDUANYA
  * `status='ok'` — `G1-07-TIKTOK-REKONSILIASI` DITUTUP lewat sample asli
  * ("Tiktok - Avitaskin.zip"): BEDA dari Shopee, perbandingan pesanan TIDAK

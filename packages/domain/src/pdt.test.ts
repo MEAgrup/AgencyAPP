@@ -498,7 +498,9 @@ const HEADER_PARENT_SKU = [
 function shopeeParentSkuBerkas(nama: string, gmvSiapKirimTotal: number): PdtPreviewBerkasInput {
   const aoa: unknown[][] = [
     HEADER_PARENT_SKU,
-    ['P1', 'V1', 'SKU1', String(gmvSiapKirimTotal), String(gmvSiapKirimTotal), '100', '10', '5%', '10%', '50'],
+    // 'Kode Variasi' = '-' ⇒ baris PARENT (G1-07-SHOPEE-DOBEL-HITUNG, docs/DECISIONS.md
+    // 2026-09-18) — sumShopeeParentSkuGmv HANYA menjumlah baris ini, persis bentuk asli.
+    ['P1', '-', 'SKU1', String(gmvSiapKirimTotal), String(gmvSiapKirimTotal), '100', '10', '5%', '10%', '50'],
   ];
   return {
     nama, sha256: 'sha-parentsku', bytes: 100, ditolakPagar: null, decodeGagal: null,
