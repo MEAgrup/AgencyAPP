@@ -784,6 +784,7 @@ interface BatchRow {
   raw_bytes: string | null;
   raw_entri: number | null;
   raw_entri_dilewati: number | null;
+  menggantikan_batch_id: string | null; // bigint — string dari driver
 }
 
 async function loadBatch(id: number): Promise<BatchRow> {
@@ -999,7 +1000,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-i) — rekonsiliasi Shopee',
     expect(persiapan.reconcileDeltaPct).toBeNull();
   });
 
-  it('batch verified KEDUA untuk (toko, periode) yang sama ⇒ ValidationError BI (uq_pdt_upload_batch_verified, Rule 36), bukan 500 mentah', async () => {
+  it('batch verified KEDUA untuk (toko, periode) yang sama ⇒ G1-12 supersede otomatis (Rule 36), bukan ValidationError', async () => {
     const cpId = await fixtureCocok();
     const berkas = [
       shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
@@ -1008,7 +1009,39 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-i) — rekonsiliasi Shopee',
     ];
     const pertama = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(pertama.status).toBe('verified');
-    await expect(commitUploadBatch(sql, ownerActor(), cpId, berkas, [])).rejects.toBeInstanceOf(ValidationError);
+    expect(pertama.menggantikanBatchId).toBeNull();
+
+    const kedua = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(kedua.status).toBe('verified');
+    expect(kedua.menggantikanBatchId).toBe(pertama.batchId);
+
+    const lama = await loadBatch(pertama.batchId);
+    expect(lama.status).toBe('digantikan');
+    const baru = await loadBatch(kedua.batchId);
+    expect(baru.status).toBe('verified');
+    expect(Number(baru.menggantikan_batch_id)).toBe(Number(pertama.batchId));
+  });
+
+  it('batch KEDUA yang hasilnya BUKAN verified (mis. identitas belum terikat) TIDAK menyupersede batch verified lama', async () => {
+    const cpId = await fixtureCocok();
+    const berkasVerified = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeShopStatsBerkas('shop-stats.xlsx', 1_000_000, 100),
+      shopeeParentSkuBerkas('parent-sku.xlsx', 1_000_000),
+    ];
+    const pertama = await commitUploadBatch(sql, ownerActor(), cpId, berkasVerified, []);
+    expect(pertama.status).toBe('verified');
+
+    // Berkas parsial (hanya ads.xlsx) untuk periode yang SAMA — tidak lolos rekonsiliasi,
+    // berhenti di 'parsing'. Batch verified LAMA harus tetap berdiri, bukan ikut tergantikan.
+    const kedua = await commitUploadBatch(
+      sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('ads2.xlsx', '938284780', '01/07/2026 - 31/07/2026')], [],
+    );
+    expect(kedua.status).toBe('parsing');
+    expect(kedua.menggantikanBatchId).toBeNull();
+
+    const lama = await loadBatch(pertama.batchId);
+    expect(lama.status).toBe('verified');
   });
 });
 
@@ -1133,7 +1166,7 @@ describeDb('commitUploadBatch (G1-07-TIKTOK-REKONSILIASI DITUTUP) — rekonsilia
     expect(persiapan.reconcileDeltaPct).toBeNull();
   });
 
-  it('batch verified KEDUA untuk (toko, periode) yang sama ⇒ ValidationError BI (uq_pdt_upload_batch_verified, Rule 36), bukan 500 mentah', async () => {
+  it('batch verified KEDUA untuk (toko, periode) yang sama ⇒ G1-12 supersede otomatis (Rule 36), bukan ValidationError', async () => {
     const cpId = await fixtureCocok();
     const berkas = [
       ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
@@ -1142,7 +1175,13 @@ describeDb('commitUploadBatch (G1-07-TIKTOK-REKONSILIASI DITUTUP) — rekonsilia
     ];
     const pertama = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(pertama.status).toBe('verified');
-    await expect(commitUploadBatch(sql, ownerActor(), cpId, berkas, [])).rejects.toBeInstanceOf(ValidationError);
+
+    const kedua = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(kedua.status).toBe('verified');
+    expect(kedua.menggantikanBatchId).toBe(pertama.batchId);
+
+    const lama = await loadBatch(pertama.batchId);
+    expect(lama.status).toBe('digantikan');
   });
 });
 
@@ -5672,6 +5711,7 @@ describeDb('listRiwayatBatchPdt (G1-09 sub-langkah 3) — riwayat batch + status
       dibuatOleh: OWNER_AM,
       paketStatus: 'tersedia',
       retensiSampai: '2030-06-15',
+      menggantikanBatchId: null,
     }]);
   });
 

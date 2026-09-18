@@ -9197,7 +9197,7 @@ export interface PdtCommitBatchWire {
   batch_id: number;
   client_platform_id: number;
   platform: string;
-  status: string; // 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak'
+  status: string; // 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak' | 'digantikan'
   alasan_ditolak: string | null;
   /** `null` bila rekonsiliasi (Rule 13-16) belum/tidak dijalankan — lihat `status`, bukan berarti 0%. */
   reconcile_delta_pct: number | null;
@@ -9205,6 +9205,8 @@ export interface PdtCommitBatchWire {
   periode_selesai: string;
   berkas: PdtCommitBerkasWire[];
   identitas: PdtPreviewIdentitasWire;
+  /** G1-12 (Rule 36) — batch `verified` LAMA yang baru saja digantikan oleh commit ini, `null` bila bukan supersede. */
+  menggantikan_batch_id: number | null;
 }
 
 export function pdtCommitBatchToWire(h: pdt.PdtCommitPersiapan): PdtCommitBatchWire {
@@ -9240,6 +9242,7 @@ export function pdtCommitBatchToWire(h: pdt.PdtCommitPersiapan): PdtCommitBatchW
       deteksi_oleh: b.deteksiOleh,
     })),
     identitas: pdtPreviewIdentitasToWire(h.identitas),
+    menggantikan_batch_id: h.menggantikanBatchId,
   };
 }
 
@@ -9284,6 +9287,8 @@ export interface PdtBatchRingkasWire {
   dibuat_oleh: string;
   paket_status: string; // 'tersedia' | 'kedaluwarsa' | 'legal_hold'
   retensi_sampai: string | null;
+  /** G1-12 (Rule 36) — batch LAMA yang baris ini gantikan, `null` bila bukan hasil supersede. */
+  menggantikan_batch_id: number | null;
 }
 
 export function pdtBatchRingkasToWire(b: pdt.PdtBatchRingkas): PdtBatchRingkasWire {
@@ -9300,6 +9305,7 @@ export function pdtBatchRingkasToWire(b: pdt.PdtBatchRingkas): PdtBatchRingkasWi
     dibuat_oleh: b.dibuatOleh,
     paket_status: b.paketStatus,
     retensi_sampai: b.retensiSampai,
+    menggantikan_batch_id: b.menggantikanBatchId,
   };
 }
 
