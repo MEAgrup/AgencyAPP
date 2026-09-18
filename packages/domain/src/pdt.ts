@@ -550,8 +550,14 @@ export interface PdtCommitRawMeta {
  * berhenti di `'parsing'`, BUKAN otomatis `'verified'` — menunggu batch
  * berikutnya yang membawa berkas lengkap, atau sub-langkah 2b-ii (baris
  * fakta) menambah jalur lain.
+ *
+ * `'digantikan'` (G1-12, Rule 36, `docs/DECISIONS.md` 2026-09-18) — ditulis
+ * HANYA oleh `commitUploadBatch` sendiri (jalur supersede otomatis di bawah),
+ * tidak pernah oleh `resolveStatusIdentitasRekonsiliasi`/`reparsePdtBatch`
+ * (keduanya tidak tahu apa-apa soal batch LAIN, murni menilai berkas yang
+ * sedang diproses).
  */
-export type PdtCommitStatus = 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak';
+export type PdtCommitStatus = 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak' | 'digantikan';
 
 export interface PdtCommitBerkasHasil extends PdtPreviewBerkasHasil {
   /** `pdt_file.deteksi_oleh` — METODE yang dipakai (signature vs override AM), terisi apa pun hasilnya (termasuk yang berakhir `modulKode: null`). */
@@ -570,6 +576,8 @@ export interface PdtCommitPersiapan {
   periodeSelesai: string;
   berkas: readonly PdtCommitBerkasHasil[];
   identitas: PdtPreviewIdentitas;
+  /** `pdt_upload_batch.menggantikan_batch_id` (G1-12, Rule 36) — batch `verified` LAMA yang baru saja digantikan ditandai `digantikan` (lihat docblock `commitUploadBatch`), `null` bila commit ini bukan penggantian (batch pertama untuk periode ini, atau hasilnya bukan `verified`). */
+  menggantikanBatchId: number | null;
   /**
    * Path final Rule 44 (`{client_id}/{client_platform_id}/{periode_selesai}/{batch_id}.zip`).
    * Domain TIDAK mengunggah byte ke sini (tidak boleh menyentuh Storage) —
@@ -633,7 +641,39 @@ export interface PdtCommitPersiapan {
  * (partial unique index, Rule 36) menolak batch verified KEDUA untuk
  * `(client_platform_id, periode_mulai, periode_selesai)` yang sama; commit
  * ini menerjemahkan pelanggaran itu jadi `ValidationError` BI, bukan 500
- * mentah (lihat `catch` di bawah).
+ * mentah (lihat `catch` di bawah) — sisa (bukan mencegah) satu-satunya jalur
+ * ini, karena jalur normalnya sekarang supersede otomatis (di bawah).
+ *
+ * **Jalur koreksi/supersede (G1-12, Rule 36 separuh kedua, `docs/DECISIONS.md`
+ * 2026-09-18) — "submit kedua membuat batch baru dengan `menggantikan_batch_id`;
+ * batch lama ditandai `digantikan`, bukan dihapus."** Bila hasil commit INI
+ * (`status` di atas) adalah `'verified'` DAN sudah ada batch `'verified'` LAIN
+ * untuk `(client_platform_id, periode_mulai, periode_selesai)` yang SAMA (satu
+ * SELECT ... FOR UPDATE di dalam transaksi, mengunci baris itu sepanjang
+ * transaksi ini — cegah race dua commit verified bersamaan untuk periode yang
+ * sama, pola sama `konfirmasiIdentitasBatch`), batch lama itu ditandai
+ * `status='digantikan'` (SATU baris `audit_log` tersendiri untuknya,
+ * `action='pdt_batch_digantikan'`) dan batch baru ini ditulis dengan
+ * `menggantikan_batch_id` menunjuk batch lama. Ini BUKAN opsi terpisah yang
+ * AM pilih — endpoint upload sama sekali tidak menerima "batch mana yang
+ * digantikan" (Flow A tidak berubah: AM cukup unggah ulang paket yang benar
+ * untuk toko+periode yang sama). Bila hasil commit BUKAN `'verified'`
+ * (`parsing`/`identitas_belum_terikat`/`ditolak`), TIDAK ADA supersede yang
+ * terjadi sama sekali — batch verified lama (bila ada) dibiarkan berdiri APA
+ * ADANYA, karena `uq_pdt_upload_batch_verified` hanya melarang DUA baris
+ * verified sekaligus, dan upload yang gagal/belum lolos gerbang tidak berhak
+ * menggantikan satu yang sudah terbukti benar. Pembaca fakta (`bacaFakta*`,
+ * G3-01/G3-07/G3-08) SUDAH menyaring `status='verified'` secara eksplisit di
+ * query masing-masing (diverifikasi `docs/backlog/PDT_BACKLOG.md` G3-08) —
+ * batch `digantikan` otomatis tidak pernah terbaca sebagai sumber tanpa
+ * perubahan apa pun di sisi baca; baris fakta (`pdt_fact_*`) sendiri
+ * ber-scope `(client_platform_id, periode)`, BUKAN `batch_id` (delete-then-
+ * insert/`ON CONFLICT DO UPDATE`, `tulisFaktaModulTerparse`), jadi menulis
+ * fakta batch baru otomatis MENIMPA fakta batch lama untuk periode yang sama
+ * — pola yang SAMA persis dengan reparse (G1-11), tidak ada mekanisme baru
+ * yang diperlukan di sana. `retensi_sampai`/`retensi_alasan`/`legal_hold`
+ * batch lama TIDAK disentuh (Rule 45 di luar cakupan Rule 36 — tidak ada
+ * dasar PRD untuk mengubah retensi batch yang digantikan).
  */
 interface PdtStatusRekonsiliasiHasil {
   status: PdtCommitStatus;
@@ -879,19 +919,57 @@ export async function commitUploadBatch(
   const retensiAlasan = status === 'ditolak' ? 'ditolak' : 'default';
 
   let batchId: number;
+  let menggantikanBatchId: number | null = null;
   try {
     batchId = await withTransaction(sql, async (tx) => {
+      // G1-12 (Rule 36 separuh kedua, docs/DECISIONS.md 2026-09-18) — supersede
+      // otomatis: HANYA saat commit INI menghasilkan 'verified' (jalur satu-satunya
+      // yang bisa membentur uq_pdt_upload_batch_verified). `for update` mengunci
+      // baris batch lama sepanjang transaksi ini — pola sama `konfirmasiIdentitasBatch`
+      // — mencegah dua commit 'verified' bersamaan untuk periode yang sama saling
+      // lolos gerbang ini lalu berdua membentur unique index.
+      if (status === 'verified') {
+        const existing = await tx<{ id: number }[]>`
+          select id from pdt_upload_batch
+           where client_platform_id = ${clientPlatformId}
+             and periode_mulai = ${periode.mulai}::date and periode_selesai = ${periode.selesai}::date
+             and status = 'verified'
+           for update`;
+        if (existing[0]) menggantikanBatchId = existing[0].id;
+      }
+
+      // Baris lama ditandai 'digantikan' SEBELUM baris baru disisipkan sebagai 'verified' — bukan
+      // sebaliknya. `uq_pdt_upload_batch_verified` diperiksa PER PERNYATAAN (bukan deferred), jadi
+      // menyisipkan baris 'verified' baru SELAGI baris lama masih 'verified' membentur index itu
+      // sendiri walau baris lama akan segera diturunkan sesudahnya — urutan ini menghindarinya sama
+      // sekali alih-alih bergantung pada backstop `catch` di bawah.
+      if (menggantikanBatchId != null) {
+        await tx`update pdt_upload_batch set status = 'digantikan' where id = ${menggantikanBatchId}`;
+      }
+
       const rows = await tx<{ id: number }[]>`
         insert into pdt_upload_batch
           (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
            alasan_ditolak, reconcile_delta_pct, parser_versi, identitas_sumber, retensi_sampai,
-           retensi_alasan, dibuat_oleh)
+           retensi_alasan, menggantikan_batch_id, dibuat_oleh)
         values
           (${row.client_id}, ${clientPlatformId}, ${platform}, ${periode.mulai}::date, ${periode.selesai}::date,
            ${status}, ${alasanDitolak}, ${reconcileDeltaPct}, ${pdt.PDT_PARSER_VERSI}, ${tx.json(identitasSumber as never)},
-           ${retensiSampai}::date, ${retensiAlasan}, ${actor.employeeId})
+           ${retensiSampai}::date, ${retensiAlasan}, ${menggantikanBatchId}, ${actor.employeeId})
         returning id`;
       const id = rows[0].id;
+
+      if (menggantikanBatchId != null) {
+        await executors(tx).audit.insertAudit({
+          entityType: 'pdt_upload_batch',
+          entityId: String(menggantikanBatchId),
+          actorEmployeeId: actor.employeeId,
+          action: 'pdt_batch_digantikan',
+          beforeJson: { status: 'verified' },
+          afterJson: { status: 'digantikan', menggantikan_batch_id: id },
+          createdBy: actor.employeeId,
+        });
+      }
 
       for (const b of hasilBerkas) {
         // ditolakPagar/gagalEkstrak — nol bytes sungguhan dibaca (sha256/bytes null di sumbernya),
@@ -942,6 +1020,7 @@ export async function commitUploadBatch(
         afterJson: {
           status, platform, periode_mulai: periode.mulai, periode_selesai: periode.selesai,
           jumlah_berkas: hasilBerkas.length, identitas_status: identitas.status, reconcile_delta_pct: reconcileDeltaPct,
+          menggantikan_batch_id: menggantikanBatchId,
         },
         createdBy: actor.employeeId,
       });
@@ -949,13 +1028,15 @@ export async function commitUploadBatch(
       return id;
     });
   } catch (e) {
-    // uq_pdt_upload_batch_verified (Rule 36) — SATU batch verified per (toko, periode); batch
-    // ditolak/digantikan tidak menghalangi penggantinya, jadi hanya rekonsiliasi 'verified' KEDUA
-    // untuk periode yang sama yang bisa memicu ini. BI, bukan 500 mentah — AM diberi tahu kenapa,
-    // bukan "internal server error".
+    // uq_pdt_upload_batch_verified (Rule 36) — SISA jalur ini sekarang murni backstop race:
+    // jalur NORMAL (G1-12, di atas) sudah menyupersede batch verified lama SEBELUM insert,
+    // di bawah `for update` yang sama, jadi konflik ini seharusnya nyaris tidak pernah
+    // tersentuh lagi — hanya bisa terjadi bila DUA commit 'verified' untuk periode yang SAMA
+    // benar-benar bersamaan dan salah satu commit terjadi TEPAT di antara SELECT ... FOR UPDATE
+    // pemenang dan baris lama itu benar-benar ditandai 'digantikan'. BI, bukan 500 mentah.
     if (isUniqueViolation(e)) {
       throw new ValidationError(
-        `[batch verified untuk toko dan periode ${periode.mulai} s.d. ${periode.selesai} ini sudah ada — reparse batch lama (Flow D) alih-alih mengunggah batch verified baru untuk periode yang sama]`,
+        `[batch verified untuk toko dan periode ${periode.mulai} s.d. ${periode.selesai} ini sudah ada — coba unggah ulang]`,
       );
     }
     throw e;
@@ -968,6 +1049,7 @@ export async function commitUploadBatch(
     status,
     alasanDitolak,
     reconcileDeltaPct,
+    menggantikanBatchId,
     periodeMulai: periode.mulai,
     periodeSelesai: periode.selesai,
     berkas: hasilBerkas,
@@ -1717,6 +1799,8 @@ export interface PdtBatchRingkas {
   paketStatus: PdtPaketStatus;
   /** `null` hanya bila `paketStatus==='kedaluwarsa'` (paket sudah dipurge, Rule 45) — selain itu selalu tanggal, termasuk `legal_hold`. */
   retensiSampai: string | null;
+  /** `pdt_upload_batch.menggantikan_batch_id` (G1-12, Rule 36) — batch LAMA yang baris ini gantikan, `null` bila baris ini bukan hasil supersede. */
+  menggantikanBatchId: number | null;
 }
 
 /**
@@ -1757,12 +1841,13 @@ export async function listRiwayatBatchPdt(sql: Sql, actor: Actor, clientPlatform
     legal_hold: boolean;
     raw_dihapus_pada: string | null;
     retensi_sampai: string | null;
+    menggantikan_batch_id: string | null;
   }[]>`
     select id, client_platform_id, platform, status, alasan_ditolak, reconcile_delta_pct,
            to_char(periode_mulai, 'YYYY-MM-DD') as periode_mulai,
            to_char(periode_selesai, 'YYYY-MM-DD') as periode_selesai,
            dibuat_pada::text as dibuat_pada, dibuat_oleh, legal_hold, raw_dihapus_pada,
-           to_char(retensi_sampai, 'YYYY-MM-DD') as retensi_sampai
+           to_char(retensi_sampai, 'YYYY-MM-DD') as retensi_sampai, menggantikan_batch_id
       from pdt_upload_batch
      where client_platform_id = ${clientPlatformId}
      order by id desc`;
@@ -1780,6 +1865,7 @@ export async function listRiwayatBatchPdt(sql: Sql, actor: Actor, clientPlatform
     dibuatOleh: r.dibuat_oleh,
     paketStatus: r.legal_hold ? 'legal_hold' : r.raw_dihapus_pada != null ? 'kedaluwarsa' : 'tersedia',
     retensiSampai: r.raw_dihapus_pada != null ? null : r.retensi_sampai,
+    menggantikanBatchId: r.menggantikan_batch_id == null ? null : Number(r.menggantikan_batch_id),
   }));
 }
 

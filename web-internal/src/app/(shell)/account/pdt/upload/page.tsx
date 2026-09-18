@@ -246,7 +246,7 @@ export default function UploadPdtPage() {
     const overrideList: PdtCommitOverrideInput[] = Object.entries(overrides)
       .filter(([, kode]) => kode !== '')
       .map(([nama, modul_kode]) => ({ nama, modul_kode }));
-    if (!window.confirm('Simpan batch ini? Setelah disimpan, batch akan menjalani rekonsiliasi dan tidak bisa diunggah ulang untuk periode yang sama selama masih verified.')) {
+    if (!window.confirm('Simpan batch ini? Setelah disimpan, batch akan menjalani rekonsiliasi. Bila batch verified untuk toko dan periode yang sama sudah ada, batch ini akan MENGGANTIKANNYA (batch lama ditandai "Digantikan", bukan dihapus).')) {
       return;
     }
     setCommitLoading(true);
@@ -500,6 +500,11 @@ export default function UploadPdtPage() {
                         <> — selisih rekonsiliasi {formatDeltaPct(commitResult.reconcile_delta_pct)}</>
                       )}
                     </div>
+                    {commitResult.menggantikan_batch_id !== null && (
+                      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                        Menggantikan batch #{commitResult.menggantikan_batch_id} — batch lama sekarang ditandai <em>Digantikan</em>, datanya tidak dihapus (Rule 36).
+                      </p>
+                    )}
                     {commitResult.alasan_ditolak && (
                       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>{commitResult.alasan_ditolak}</p>
                     )}
@@ -578,6 +583,9 @@ export default function UploadPdtPage() {
                           <span className={`badge ${statusBadgeClass(b.status)}`}>{STATUS_LABEL[b.status] ?? b.status}</span>
                           {b.alasan_ditolak && (
                             <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>{b.alasan_ditolak}</p>
+                          )}
+                          {b.menggantikan_batch_id !== null && (
+                            <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>Menggantikan #{b.menggantikan_batch_id}</p>
                           )}
                         </td>
                         <td>{formatDeltaPct(b.reconcile_delta_pct)}</td>

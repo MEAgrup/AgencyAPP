@@ -73,13 +73,16 @@ export interface PdtCommitBatch {
   batch_id: number;
   client_platform_id: number;
   platform: string;
-  status: string; // 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak'
+  status: string; // 'parsing' | 'identitas_belum_terikat' | 'verified' | 'ditolak' | 'digantikan'
   alasan_ditolak: string | null;
   reconcile_delta_pct: number | null;
   periode_mulai: string;
   periode_selesai: string;
   berkas: PdtCommitBerkas[];
   identitas: PdtPreviewIdentitas;
+  // G1-12 (Rule 36) — batch verified LAMA yang baru saja digantikan oleh commit ini
+  // (supersede otomatis, bukan pilihan AM — lihat docblock commitUploadBatch), null bila bukan supersede.
+  menggantikan_batch_id: number | null;
 }
 
 // G1-09 sub-langkah 3 — halaman upload. Tiga panggilan berurutan (Flow A
@@ -151,6 +154,8 @@ export interface PdtBatchRingkas {
   dibuat_oleh: string;
   paket_status: string; // 'tersedia' | 'kedaluwarsa' | 'legal_hold'
   retensi_sampai: string | null;
+  // G1-12 (Rule 36) — batch LAMA yang baris ini gantikan, null bila baris ini bukan hasil supersede.
+  menggantikan_batch_id: number | null;
 }
 
 export async function riwayatBatchPdt(clientPlatformId: number): Promise<PdtBatchRingkas[]> {
