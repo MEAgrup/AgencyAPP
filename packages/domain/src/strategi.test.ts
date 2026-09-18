@@ -4346,6 +4346,9 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       expect(tt.conversionRatePersen).toBe(10);
       // poinPenalti is Shopee-only (nol writer TikTok) — stays payload-derived (null here).
       expect(tt.poinPenalti).toBeNull();
+      // chatResponseRatePersen/chatResponseMenit are ALSO Shopee-only (nol writer TikTok, G3-02a).
+      expect(tt.chatResponseRatePersen).toBeNull();
+      expect(tt.chatResponseMenit).toBeNull();
     } finally {
       await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
       await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
@@ -4384,6 +4387,13 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     await sql`
       insert into pdt_fact_kesehatan_penalti (client_platform_id, periode, batch_id, parser_versi, poin, deskripsi, durasi)
       values (${shopeeId}, '2026-07-01', ${batchShopee[0].id}, 1, '3.50', 'Chat response lambat', '30 hari')`;
+    // Dua baris (mis. dua unggahan berkontribusi periode yang sama) — pemanggil
+    // menjumlahkan (Σchat_dibalas/Σchat_masuk×100 = (180+45)/(200+50)×100 = 90;
+    // rata-rata waktuResponDetik = (90+150)/2 = 120 detik = 2 menit).
+    await sql`
+      insert into pdt_fact_layanan_chat (client_platform_id, periode, batch_id, parser_versi, chat_masuk, chat_dibalas, waktu_respon_detik)
+      values (${shopeeId}, '2026-07-01', ${batchShopee[0].id}, 1, 200, 180, 90),
+             (${shopeeId}, '2026-07-01', ${batchShopee[0].id}, 1, 50, 45, 150)`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);
@@ -4413,8 +4423,11 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       // Shopee never declared a period, so it defaults to its own latest verified (July).
       expect(sh.periodeReferensiPdtSaran).toBe('2026-07-01');
       expect(sh.poinPenalti).toBe(3.5);
+      expect(sh.chatResponseRatePersen).toBe(90);
+      expect(sh.chatResponseMenit).toBe(2);
     } finally {
       await sql`delete from pdt_fact_kesehatan_penalti where client_platform_id = ${shopeeId}`;
+      await sql`delete from pdt_fact_layanan_chat where client_platform_id = ${shopeeId}`;
       await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
       await sql`delete from pdt_upload_batch where client_platform_id in (${tiktokId}, ${shopeeId})`;
     }

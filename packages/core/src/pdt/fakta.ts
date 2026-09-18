@@ -1515,3 +1515,70 @@ export function ekstrakBarisKesehatanShopee(aoa: readonly (readonly unknown[])[]
   }
   return hasil;
 }
+
+/**
+ * Satu baris `pdt_fact_layanan_chat` mentah dari `shopee_chat` ("Performa
+ * Chat", sheet "Kriteria Utama"), SEBELUM `client_platform_id`/`batch_id`/
+ * `periode`/`parser_versi` (pemanggil yang melengkapi). G3-02a —
+ * `chatResponseRatePersen`/`chatResponseMenit` (Section B-4.2) sebelum ini
+ * tidak pernah punya tabel fakta (`docs/backlog/PDT_BACKLOG.md` G3-02).
+ * `chatMasuk`/`chatDibalas` disimpan MENTAH, bukan rasio pra-hitung —
+ * pemanggil (`pdt-prefill.ts`) yang menjumlahkan (Σnumerator/Σdenominator,
+ * pola sama seluruh rasio PDT lain). `tingkatKonversiChatDibalas` (kolom
+ * `Tingkat Konversi (Chat Dibalas)`) disimpan APA ADANYA sebagai insight —
+ * SENGAJA BUKAN pengganti response rate (`modules.ts` `shopee_chat` sudah
+ * mendokumentasikan dua kolom ini semantiknya beda).
+ */
+export interface PdtBarisLayananChatShopee {
+  pengunjung: number | null;
+  chatMasuk: number | null;
+  chatDibalas: number | null;
+  waktuResponDetik: number | null;
+  csatPersen: number | null;
+  totalPesanan: number | null;
+  penjualan: number | null;
+  tingkatKonversiChatDibalas: number | null;
+}
+
+/**
+ * Ekstrak baris `shopee_chat` (G3-02a) — sheet "Kriteria Utama" SATU baris
+ * ringkasan periode (cermin `report/shopee/metrik.ts` `parseChat`'s
+ * `rows[iH+1]`), bukan daftar per-chat individual. Baris tanpa `Periode
+ * Waktu` terisi dilewati (bukan baris data sungguhan). Angka dibaca format
+ * Seller Center (titik ribuan/koma desimal, BUKAN Ads Manager — modul ini
+ * bukan ekspor AMS, pola sama `shopee_live`/`shopee_shop_stats`, beda dari
+ * `shopee_ads_*`/`shopee_ams_*` yang `raw=true`).
+ */
+export function ekstrakBarisLayananChatShopee(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisLayananChatShopee[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iPeriode = idx('Periode Waktu');
+  const iPengunjung = idx('Pengunjung');
+  const iChatMasuk = idx('Jumlah Chat');
+  const iChatDibalas = idx('Chat Dibalas');
+  const iWaktuRespon = idx('Waktu Respon Rata-rata');
+  const iCsat = idx('CSAT %');
+  const iTotalPesanan = idx('Total Pesanan');
+  const iPenjualan = idx('Penjualan (IDR)');
+  const iKonversiChatDibalas = idx('Tingkat Konversi (Chat Dibalas)');
+
+  const hasil: PdtBarisLayananChatShopee[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const periode = iPeriode === -1 ? '' : String(row?.[iPeriode] ?? '').trim();
+    if (periode === '') continue;
+    hasil.push({
+      pengunjung: iPengunjung === -1 ? null : parsePdtAngka(row?.[iPengunjung]),
+      chatMasuk: iChatMasuk === -1 ? null : parsePdtAngka(row?.[iChatMasuk]),
+      chatDibalas: iChatDibalas === -1 ? null : parsePdtAngka(row?.[iChatDibalas]),
+      waktuResponDetik: iWaktuRespon === -1 ? null : parsePdtAngka(row?.[iWaktuRespon]),
+      csatPersen: iCsat === -1 ? null : parsePdtAngka(row?.[iCsat]),
+      totalPesanan: iTotalPesanan === -1 ? null : parsePdtAngka(row?.[iTotalPesanan]),
+      penjualan: iPenjualan === -1 ? null : parsePdtAngka(row?.[iPenjualan]),
+      tingkatKonversiChatDibalas: iKonversiChatDibalas === -1 ? null : parsePdtAngka(row?.[iKonversiChatDibalas]),
+    });
+  }
+  return hasil;
+}

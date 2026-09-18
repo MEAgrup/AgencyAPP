@@ -183,10 +183,15 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "182"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "183"
 check "entity_prefix"    "select count(*) from entity_prefix"    "45"
 check "sm_machines"      "select count(*) from sm_machines"      "35"
 check "notif_events"     "select count(*) from notif_events"     "76"
+# --- G3-02a (20261115010000) — shopee_chat writer --------------------------
+# 183 = 182 + 1 tabel `pdt_fact_layanan_chat` (fakta murni, sama kelas
+#       pdt_fact_kesehatan_penalti — nol identitas PREFIX-YYYYMM-NNNN) ⇒
+#       entity_prefix TETAP 45. Nol lifecycle/notifikasi baru ⇒ sm_machines
+#       TETAP 35, notif_events TETAP 76.
 # --- G2-01-SHOPEE-KESEHATAN-WRITER (20261106010000) ------------------------
 # 182 = 181 + 1 tabel `pdt_fact_kesehatan_penalti` (fakta murni, sama kelas
 #       pdt_fact_sku_period/pdt_fact_creator_period — nol identitas PREFIX-

@@ -453,8 +453,9 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // Whitelist di sini SENGAJA MVP — HANYA agregat harian sheet "Kriteria Utama" ("berapa GMV
     // dari diskon toko per hari"), BUKAN sheet "Rincian Performa" (per-promosi individual, 20+
     // kolom lagi, belum ada yang minta — HANDOFF_PDT_SESI21.md §3.C opsi 2, ditunda). Nol writer
-    // fact-table — sama seperti shopee_voucher/shopee_chat/shopee_chat_broadcast/meta_ads,
-    // modul ini cuma perlu parse_status='ok' + audit kolom, konsumen fact table menyusul.
+    // fact-table — sama seperti shopee_voucher/shopee_chat_broadcast/meta_ads, modul ini cuma
+    // perlu parse_status='ok' + audit kolom, konsumen fact table menyusul. (`shopee_chat` sendiri
+    // DAPAT writer G3-02a, `pdt_fact_layanan_chat` — dikeluarkan dari daftar ini.)
     tandaTanganKolom: { must: ['Tanggal', 'Tipe Promosi'] },
     barisHeaderHint: 1,
     kolomDipanen: [

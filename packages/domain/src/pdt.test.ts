@@ -209,6 +209,9 @@ afterEach(async () => {
   // pdt_fact_kesehatan_penalti (G2-01-SHOPEE-KESEHATAN-WRITER) — sama alasan (FK ke
   // client_platforms/pdt_upload_batch TANPA ON DELETE CASCADE).
   await sql`delete from pdt_fact_kesehatan_penalti where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
+  // pdt_fact_layanan_chat (G3-02a) — sama alasan (FK ke client_platforms/pdt_upload_batch
+  // TANPA ON DELETE CASCADE).
+  await sql`delete from pdt_fact_layanan_chat where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -1416,6 +1419,101 @@ describeDb('commitUploadBatch (G2-01-SHOPEE-KESEHATAN-WRITER) — shopee_kesehat
     ];
     await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(await loadFactKesehatanPenalti(cpId)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G3-02a) — shopee_chat → pdt_fact_layanan_chat. Modul
+// terdaftar+terdeteksi sejak G1-09 sub-2b-ii, tapi belum pernah punya penulis
+// fakta sama sekali sampai tiket ini (docs/backlog/PDT_BACKLOG.md G3-02).
+// ---------------------------------------------------------------------------
+interface FactLayananChatRow {
+  client_platform_id: number;
+  periode: string | Date;
+  batch_id: number;
+  parser_versi: number;
+  pengunjung: number | null;
+  chat_masuk: number | null;
+  chat_dibalas: number | null;
+  waktu_respon_detik: number | null;
+  csat_persen: string | null;
+  total_pesanan: number | null;
+  penjualan: string | null;
+  tingkat_konversi_chat_dibalas: string | null;
+}
+
+async function loadFactLayananChat(clientPlatformId: number): Promise<FactLayananChatRow[]> {
+  return sql<FactLayananChatRow[]>`select * from pdt_fact_layanan_chat where client_platform_id = ${clientPlatformId} order by id`;
+}
+
+const HEADER_SHOPEE_CHAT = [
+  'Periode Waktu', 'Pengunjung', 'Jumlah Chat', 'Chat Dibalas', 'Waktu Respon Rata-rata', 'CSAT %',
+  'Total Pesanan', 'Penjualan (IDR)', 'Tingkat Konversi (Chat Dibalas)',
+];
+
+function shopeeChatBerkas(nama: string, baris: readonly (string | number)[][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [HEADER_SHOPEE_CHAT, ...baris];
+  return {
+    nama, sha256: 'sha-chat', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'shopee_chat', ambiguous: false, matches: ['shopee_chat'],
+  };
+}
+
+describeDb('commitUploadBatch (G3-02a) — shopee_chat → pdt_fact_layanan_chat', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', shopId);
+  }
+
+  it('satu baris ringkasan, nol identitas natural', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'), // identitas+periode
+      shopeeChatBerkas('chat.xlsx', [
+        ['01/07/2026 - 31/07/2026', '1.234', '200', '180', '95', '4,8', '50', '15.000.000', '25,5'],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactLayananChat(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      client_platform_id: cpId, batch_id: persiapan.batchId, parser_versi: 1,
+      pengunjung: 1234, chat_masuk: 200, chat_dibalas: 180, waktu_respon_detik: 95, total_pesanan: 50,
+    });
+    expect(Number(rows[0].csat_persen)).toBe(4.8);
+    expect(Number(rows[0].penjualan)).toBe(15000000);
+    expect(Number(rows[0].tingkat_konversi_chat_dibalas)).toBe(25.5);
+  });
+
+  it('commit ULANG periode yang sama ⇒ baris LAMA diganti (replace-on-recommit)', async () => {
+    const cpId = await fixture();
+    const pertama = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeChatBerkas('chat.xlsx', [['01/07/2026 - 31/07/2026', '1000', '200', '180', '95', '4,8', '50', '15000000', '25,5']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect(await loadFactLayananChat(cpId)).toHaveLength(1);
+
+    const kedua = [
+      shopeeAdsCpcBerkas('ads-2.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeChatBerkas('chat-revisi.xlsx', [['01/07/2026 - 31/07/2026', '2000', '300', '270', '80', '4,9', '60', '20000000', '30']]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = await loadFactLayananChat(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — replace-on-recommit
+    expect(rows[0].chat_masuk).toBe(300);
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+  });
+
+  it('sheet tanpa baris data ⇒ nol baris ditulis, TIDAK error', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeChatBerkas('chat.xlsx', []),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(await loadFactLayananChat(cpId)).toHaveLength(0);
   });
 });
 
