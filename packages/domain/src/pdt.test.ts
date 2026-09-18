@@ -2390,6 +2390,128 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KETIGA) — tt_ord
 });
 
 // ---------------------------------------------------------------------------
+// commitUploadBatch (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR, `docs/backlog/PX_M3_BACKLOG.md`)
+// — tt_orders → pdt_fact_sku_period, basis 'dibayar'. Sisi TikTok untuk tabel
+// yang sebelumnya HANYA diisi Shopee (`shopee_ams_produk`) di basis ini —
+// `tt_product_analytics` di atas menulis basis 'net' terpisah. Lihat docblock
+// `ekstrakBarisFaktaSkuTtOrders` (`@cdps/core` `pdt/fakta.ts`) untuk kenapa
+// hanya `Order Status` `Completed` yang dihitung.
+// ---------------------------------------------------------------------------
+function ttOrdersFaktaBerkas(
+  nama: string,
+  baris: readonly [skuId: string, quantity: string, subtotal: string, status: string, creatorHandle: string][],
+): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TT_ORDERS,
+    ...baris.map(([skuId, quantity, subtotal, status, creatorHandle], i) => [
+      `ORD-${i + 1}`, skuId, 'SLR-1', 'Produk', 'Varian', quantity, '0', subtotal, status, '01/07/2026', 'Kat', creatorHandle,
+    ]),
+  ];
+  return {
+    nama, sha256: 'sha-ttorders-fakta', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'tt_orders', ambiguous: false, matches: ['tt_orders'],
+  };
+}
+
+describeDb('commitUploadBatch (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR) — tt_orders → pdt_fact_sku_period', () => {
+  async function fixture(akunKontenToko: readonly string[] | null = ['KR-1']): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'TikTok Shop', null, akunKontenToko);
+  }
+
+  it('menjumlah gmv/pesanan_sku lintas baris ber-SKU sama, sku_id NULL, basis="dibayar"', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttOrdersFaktaBerkas('orders.xlsx', [
+        ['SKU-1', '2', '95.000', 'Completed', ''],
+        ['SKU-1', '1', '48.000', 'Completed', ''],
+        ['SKU-2', '3', '40.000', 'Completed', ''],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactSkuPeriod(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      sku_id: null, client_platform_id: cpId, platform_product_id: 'SKU-1', basis: 'dibayar',
+      batch_id: persiapan.batchId, parser_versi: 1, pesanan_sku: 3,
+    });
+    expect(Number(rows[0].gmv)).toBe(143000);
+    expect(Number(rows[0].gmv_dari_kreator)).toBe(0);
+    expect(rows[1].platform_product_id).toBe('SKU-2');
+    expect(Number(rows[1].gmv)).toBe(40000);
+  });
+
+  it('Order Status selain Completed dilewati SELURUHNYA — tidak menyumbang 0 ke agregat', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttOrdersFaktaBerkas('orders.xlsx', [
+        ['SKU-1', '1', '10.000', 'Completed', ''],
+        ['SKU-1', '5', '50.000', 'Cancelled', ''],
+        ['SKU-1', '9', '90.000', 'Unpaid', ''],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactSkuPeriod(cpId);
+    expect(rows).toHaveLength(1);
+    expect(Number(rows[0].gmv)).toBe(10000);
+    expect(rows[0].pesanan_sku).toBe(1);
+  });
+
+  it('gmv_dari_kreator = Σ gmv HANYA baris ber-Creator Handle terisi', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttOrdersFaktaBerkas('orders.xlsx', [
+        ['SKU-1', '1', '30.000', 'Completed', 'KR-AFF'],
+        ['SKU-1', '1', '20.000', 'Completed', ''],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactSkuPeriod(cpId);
+    expect(Number(rows[0].gmv)).toBe(50000);
+    expect(Number(rows[0].gmv_dari_kreator)).toBe(30000);
+  });
+
+  it('commit ULANG periode yang sama ⇒ baris LAMA diganti (replace-on-recommit) — SKU yang hilang dari batch baru IKUT terhapus', async () => {
+    const cpId = await fixture();
+    const pertama = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttOrdersFaktaBerkas('orders.xlsx', [
+        ['SKU-1', '1', '10.000', 'Completed', ''],
+        ['SKU-2', '1', '5.000', 'Completed', ''],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect(await loadFactSkuPeriod(cpId)).toHaveLength(2);
+
+    const kedua = [
+      ttVideoBerkasDenganPeriode('video-2.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttOrdersFaktaBerkas('orders-revisi.xlsx', [['SKU-1', '1', '15.000', 'Completed', '']]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = await loadFactSkuPeriod(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 2 — SKU-2 hilang dari batch baru, ikut terhapus
+    expect(rows[0].platform_product_id).toBe('SKU-1');
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(Number(rows[0].gmv)).toBe(15000);
+  });
+
+  it("identitas 'tolak' (ID Kreator tidak terdaftar) ⇒ NOL baris fakta ditulis (tt_orders)", async () => {
+    const cpId = await fixture(['KR-LAIN']);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttOrdersFaktaBerkas('orders.xlsx', [['SKU-1', '1', '10.000', 'Completed', '']]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(await loadFactSkuPeriod(cpId)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEEMPAT) — tt_transaction_creator
 // → pdt_fact_creator_period (lihat fakta.ts @cdps/core untuk kenapa modul ini —
 // grain barisnya SUDAH per-kreator, nol ambiguitas kelas shopee_ads_cpc).

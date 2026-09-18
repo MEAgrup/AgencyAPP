@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ekstrakBarisFaktaSkuTtOrders,
   ekstrakBarisKreatorShopeeAmsAfiliasi,
   ekstrakBarisKreatorTtTransactionCreator,
   ekstrakBarisShopeeAdsCpc,
@@ -608,6 +609,82 @@ describe('ekstrakBarisSkuMasterTtOrders', () => {
         namaProduk: null, namaVariasi: null, kategoriPlatform: null, hargaSatuanTerakhir: null,
       },
     ]);
+  });
+});
+
+describe('ekstrakBarisFaktaSkuTtOrders (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR)', () => {
+  it('menjumlah gmv (SKU Subtotal After Discount) dan pesananSku (Quantity) lintas baris untuk SKU yang sama', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '2', '50.000', '95.000', 'Completed', '01/07/2026', 'Kat', ''],
+      ['O2', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '50.000', '48.000', 'Completed', '02/07/2026', 'Kat', ''],
+    ];
+    expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
+      { platformProductId: 'SKU-1', gmv: 143000, pesananSku: 3, gmvDariKreator: 0 },
+    ]);
+  });
+
+  it('SKU berbeda ⇒ baris terpisah', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '10.000', 'Completed', '01/07/2026', 'Kat', ''],
+      ['O2', 'SKU-2', 'SLR-2', 'X', 'Y', '2', '20.000', '40.000', 'Completed', '01/07/2026', 'Kat', ''],
+    ];
+    expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
+      { platformProductId: 'SKU-1', gmv: 10000, pesananSku: 1, gmvDariKreator: 0 },
+      { platformProductId: 'SKU-2', gmv: 40000, pesananSku: 2, gmvDariKreator: 0 },
+    ]);
+  });
+
+  it('basis dibayar: baris Order Status selain Completed dilewati SELURUHNYA — tidak menyumbang 0', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '10.000', 'Completed', '01/07/2026', 'Kat', ''],
+      ['O2', 'SKU-1', 'SLR-1', 'X', 'Y', '5', '10.000', '50.000', 'Cancelled', '01/07/2026', 'Kat', ''],
+      ['O3', 'SKU-1', 'SLR-1', 'X', 'Y', '9', '10.000', '90.000', 'Unpaid', '01/07/2026', 'Kat', ''],
+    ];
+    expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
+      { platformProductId: 'SKU-1', gmv: 10000, pesananSku: 1, gmvDariKreator: 0 },
+    ]);
+  });
+
+  it('status dibaca case-insensitive + trim', () => {
+    const aoa = [HEADER_TT_ORDERS, ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '10.000', ' completed ', '01/07/2026', 'Kat', '']];
+    expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
+      { platformProductId: 'SKU-1', gmv: 10000, pesananSku: 1, gmvDariKreator: 0 },
+    ]);
+  });
+
+  it('gmvDariKreator = Σ gmv HANYA baris ber-Creator Handle terisi, bukan cacah baris', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '30.000', 'Completed', '01/07/2026', 'Kat', 'KR-1'],
+      ['O2', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '20.000', 'Completed', '01/07/2026', 'Kat', ''],
+    ];
+    expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
+      { platformProductId: 'SKU-1', gmv: 50000, pesananSku: 2, gmvDariKreator: 30000 },
+    ]);
+  });
+
+  it('baris ber-SKU ID kosong dilewati', () => {
+    const aoa = [HEADER_TT_ORDERS, ['O1', '', 'SLR-1', 'X', 'Y', '1', '10.000', '10.000', 'Completed', '01/07/2026', 'Kat', '']];
+    expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toHaveLength(0);
+  });
+
+  it('satu baris gagal parse (NaN) meracuni agregat SKU itu — TERLIHAT, bukan diam-diam jadi 0 (Rule 12)', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '10.000', 'Completed', '01/07/2026', 'Kat', ''],
+      ['O2', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', 'tidak terbatas', 'Completed', '02/07/2026', 'Kat', ''],
+    ];
+    const hasil = ekstrakBarisFaktaSkuTtOrders(aoa, 1);
+    expect(hasil).toHaveLength(1);
+    expect(hasil[0].gmv).toBeNaN();
+  });
+
+  it('konvensi Seller Center (titik ribuan, koma desimal)', () => {
+    const aoa = [HEADER_TT_ORDERS, ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '1.234.567,89', 'Completed', '01/07/2026', 'Kat', '']];
+    expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)[0].gmv).toBe(1234567.89);
   });
 });
 

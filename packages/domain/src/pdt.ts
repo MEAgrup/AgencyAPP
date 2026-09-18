@@ -1405,6 +1405,32 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     }
   }
 
+  // PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR (`docs/backlog/PX_M3_BACKLOG.md`) — `tt_orders` →
+  // `pdt_fact_sku_period` (lihat docblock `ekstrakBarisFaktaSkuTtOrders`, `@cdps/core`
+  // `pdt/fakta.ts`). `sku_id` SELALU NULL, `basis = 'dibayar'` LITERAL — pola SAMA
+  // `shopee_ams_produk` di atas (delete-then-insert per scope, bukan `ON CONFLICT` per
+  // baris: SKU yang berhenti muncul di export baru harus ikut hilang). Nol tabrakan
+  // dengan blok `shopee_ams_produk`: `client_platform_id` sudah per-platform, jadi satu
+  // baris `pdt_fact_sku_period` untuk toko TikTok tertentu hanya pernah berasal dari SATU
+  // penulis (`tt_orders` di sini) untuk (sku_id null, basis 'dibayar').
+  if (berkasTtOrders.length > 0) {
+    await tx`
+      delete from pdt_fact_sku_period
+       where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'dibayar'
+         and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasTtOrders) {
+      for (const baris of pdt.ekstrakBarisFaktaSkuTtOrders(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_sku_period
+            (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id,
+             parser_versi, gmv, gmv_dari_kreator, pesanan_sku)
+          values
+            (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'dibayar', ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.gmvDariKreator}, ${baris.pesananSku})`;
+      }
+    }
+  }
+
   // G2-01-KUADRAN-SKU langkah 1 — `tt_product_analytics` → `pdt_fact_sku_period` (lihat
   // docblock `ekstrakBarisTtProductAnalytics`, `@cdps/core` `pdt/fakta.ts`). `sku_id` SELALU
   // NULL (level produk-induk, sama keputusan pemilik `G1-09-2BII-ADS-CPC-SKU` dipakai
