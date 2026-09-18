@@ -212,6 +212,12 @@ afterEach(async () => {
   // pdt_fact_layanan_chat (G3-02a) — sama alasan (FK ke client_platforms/pdt_upload_batch
   // TANPA ON DELETE CASCADE).
   await sql`delete from pdt_fact_layanan_chat where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
+  // pdt_usulan (G4-03, mesin verdict) — FK ke pdt_upload_batch TANPA ON DELETE CASCADE, jadi
+  // harus dibersihkan SEBELUM pdt_upload_batch. Sebelum aksi 6 (SHP-KREATOR-AKTIF, yang menyala
+  // tanpa syarat saat nol kreator aktif) baris ini tidak pernah lahir dari batch Shopee fixture
+  // berkas ini (ROAS/ACoS fixture selalu sehat/tanpa pdt_fact_ads) — sekarang SELALU lahir untuk
+  // setiap batch Shopee verified yang di sini nol pdt_fact_creator_period-nya.
+  await sql`delete from pdt_usulan where batch_id in (select id from pdt_upload_batch where client_id like 'CLI-ZPDT-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDT-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;

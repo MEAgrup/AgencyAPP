@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluasiAcosShopee, evaluasiRoasShopee, tentukanVerdict, type PdtVerdictBenchmarkShopee } from './verdict';
+import { evaluasiAcosShopee, evaluasiKreatorAktifShopee, evaluasiRoasShopee, tentukanVerdict, type PdtVerdictBenchmarkShopee } from './verdict';
 
 const BENCH: PdtVerdictBenchmarkShopee = { roasGood: 4, acosGood: 0.25 };
 
@@ -39,6 +39,20 @@ describe('evaluasiAcosShopee', () => {
 
   it('Σgmv = 0 ⇒ null', () => {
     expect(evaluasiAcosShopee(500_000, 0, BENCH)).toBeNull();
+  });
+});
+
+describe('evaluasiKreatorAktifShopee', () => {
+  it('nol kreator aktif ⇒ menyala, target = 1 (keluar dari nol)', () => {
+    expect(evaluasiKreatorAktifShopee(0)).toEqual({
+      kodeAksi: 'SHP-KREATOR-AKTIF', menyala: true, nilaiSekarang: 0, satuanSekarang: 'hitungan',
+      targetNilai: 1, satuanTarget: 'hitungan', arah: 'naik',
+    });
+  });
+
+  it('minimal satu kreator aktif ⇒ tidak menyala', () => {
+    expect(evaluasiKreatorAktifShopee(1).menyala).toBe(false);
+    expect(evaluasiKreatorAktifShopee(7).menyala).toBe(false);
   });
 });
 

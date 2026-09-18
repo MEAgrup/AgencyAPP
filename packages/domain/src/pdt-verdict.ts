@@ -23,13 +23,15 @@
  * Kegagalan baca benchmark (`pdt_benchmark` platform='shopee' kosong) TIDAK
  * boleh menggagalkan commit/reparse batch itu sendiri — usulan adalah lapisan
  * turunan (Rule 4), bukan gerbang upload. Kegagalan itu di-catch dan
- * dilewati diam-diam di sini.
+ * dilewati diam-diam di sini. `SHP-KREATOR-AKTIF` (aksi 6) TIDAK butuh
+ * benchmark sama sekali (pemicunya nol kreator aktif, bukan ambang tabel) —
+ * ia tetap dievaluasi walau `pdt_benchmark` platform='shopee' kosong.
  */
 import type { Queryable } from '@cdps/db';
 import { pdt } from '@cdps/core';
-import { bacaFaktaAds } from './pdt-prefill';
+import { bacaFaktaAds, bacaFaktaCreatorPeriode } from './pdt-prefill';
 
-const KATALOG_KODE = ['SHP-ROAS', 'SHP-ACOS'] as const;
+const KATALOG_KODE = ['SHP-ROAS', 'SHP-ACOS', 'SHP-KREATOR-AKTIF'] as const;
 
 async function bacaBenchmarkAktifShopeeVerdict(sql: Queryable): Promise<pdt.PdtVerdictBenchmarkShopee | null> {
   const rows = await sql<{ nilai: { roas_good: number; acos_good: number } }[]>`
@@ -102,18 +104,24 @@ async function bukaUsulanBaru(sql: Queryable, batchId: number, hasilByKode: Read
  * itu sendiri gagal ditulis.
  */
 export async function evaluasiVerdictShopee(sql: Queryable, batchId: number, clientPlatformId: number, periodeAwalBulan: string): Promise<void> {
-  const bench = await bacaBenchmarkAktifShopeeVerdict(sql);
-  if (!bench) return; // pdt_benchmark platform='shopee' belum ada versi aktif — usulan bukan gerbang upload (Rule 4), lewati diam-diam
-
-  const adsRows = await bacaFaktaAds(sql, clientPlatformId, periodeAwalBulan);
-  const sigmaGmv = adsRows.reduce((acc, r) => acc + (r.gmv ?? 0), 0);
-  const sigmaBiaya = adsRows.reduce((acc, r) => acc + r.biaya, 0);
-
   const hasilByKode = new Map<string, HasilUntukTulis>();
-  const roas = pdt.evaluasiRoasShopee(sigmaGmv, sigmaBiaya, bench);
-  if (roas) hasilByKode.set(roas.kodeAksi, roas);
-  const acos = pdt.evaluasiAcosShopee(sigmaBiaya, sigmaGmv, bench);
-  if (acos) hasilByKode.set(acos.kodeAksi, acos);
+
+  const bench = await bacaBenchmarkAktifShopeeVerdict(sql);
+  if (bench) {
+    const adsRows = await bacaFaktaAds(sql, clientPlatformId, periodeAwalBulan);
+    const sigmaGmv = adsRows.reduce((acc, r) => acc + (r.gmv ?? 0), 0);
+    const sigmaBiaya = adsRows.reduce((acc, r) => acc + r.biaya, 0);
+
+    const roas = pdt.evaluasiRoasShopee(sigmaGmv, sigmaBiaya, bench);
+    if (roas) hasilByKode.set(roas.kodeAksi, roas);
+    const acos = pdt.evaluasiAcosShopee(sigmaBiaya, sigmaGmv, bench);
+    if (acos) hasilByKode.set(acos.kodeAksi, acos);
+  } // pdt_benchmark platform='shopee' belum ada versi aktif — usulan bukan gerbang upload (Rule 4), lewati diam-diam untuk ROAS/ACoS saja
+
+  const creatorRows = await bacaFaktaCreatorPeriode(sql, clientPlatformId, periodeAwalBulan);
+  const jumlahKreatorAktif = creatorRows.filter((r) => (r.gmv ?? 0) > 0).length;
+  const kreatorAktif = pdt.evaluasiKreatorAktifShopee(jumlahKreatorAktif);
+  hasilByKode.set(kreatorAktif.kodeAksi, kreatorAktif);
 
   await tutupUsulanLama(sql, clientPlatformId, batchId, hasilByKode);
   await bukaUsulanBaru(sql, batchId, hasilByKode);
