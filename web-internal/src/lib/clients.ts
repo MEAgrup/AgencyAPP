@@ -184,6 +184,44 @@ export function resumeService(serviceId: string, reason?: string): Promise<{ ok:
   return api.post<{ ok: boolean }>(`/services/${serviceId}/resume`, { reason: reason ?? '' });
 }
 
+// client.PendingClosureRequest — one Service in [Closure Requested], for the
+// Director's "Perlu Persetujuan Saya" queue (GET /services/closure-requests).
+export interface PendingClosureRequest {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  service_name: string;
+  owner_am: string | null;
+  owner_am_nama: string;
+  /** Waktu penutupan DIMINTA (dari audit `service_closure_requested`; fallback lahirnya Service). */
+  updated_at: string;
+  /** Alasan wajib yang diketik AM saat mengajukan penutupan; '' kalau baris auditnya tak terbaca. */
+  reason: string;
+  requested_by: string;
+  requested_by_nama: string;
+}
+
+/** GET /services/closure-requests — every Service in [Closure Requested], oldest first (Director only). */
+export function listPendingClosureRequests(): Promise<{ data: PendingClosureRequest[] }> {
+  return api.get<{ data: PendingClosureRequest[] }>('/services/closure-requests');
+}
+
+/** O75: AM MENGAJUKAN penutupan ([In Execution] → [Closure Requested]); reason wajib. Director lalu ACC/tolak. */
+export function requestServiceClosure(serviceId: string, reason: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/close`, { reason });
+}
+
+/** O75: Director MENYETUJUI penutupan ([Closure Requested] → Done, terminal). */
+export function approveServiceClosure(serviceId: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/close/approve`);
+}
+
+/** O75: Director MENOLAK penutupan ([Closure Requested] → [In Execution]); reason opsional. */
+export function rejectServiceClosure(serviceId: string, reason?: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/close/reject`, { reason: reason ?? '' });
+}
+
 export function setPaymentIntent(clientId: string, paymentIntent: string): Promise<{ client: Client }> {
   return api.post<{ client: Client }>(`/clients/${clientId}/payment-intent`, {
     payment_intent: paymentIntent,

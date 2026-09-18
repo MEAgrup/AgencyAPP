@@ -278,6 +278,58 @@ describe('mapPayloadToSectionB — bentuk payload Shopee', () => {
 });
 
 // ---------------------------------------------------------------------------
+// B-2.3 Shopee — B23-SHP, keputusan pemilik 2026-09-18
+// ---------------------------------------------------------------------------
+
+describe('mapPayloadToSectionB — B-2.3 Shopee (B23-SHP)', () => {
+  const shopeeMix = {
+    toko: { gmv: 1_000_000 },
+    gmv_mix: { shopee_video: 100_000, affiliate: 200_000, shopee_ads: 50_000, voucher: 80_000, chat: 40_000, meta_cpas: 30_000 },
+  };
+
+  it('shopee_video → Video, affiliate → Affiliate, shopee_ads → Iklan, voucher+chat+meta_cpas digabung → Luar', () => {
+    const s = mapPayloadToSectionB(shopeeMix);
+    expect(s.trafikVideoPersen).toBe(10); // 100k / 1jt
+    expect(s.trafikAffiliatePersen).toBe(20); // 200k / 1jt
+    expect(s.trafikIklanPersen).toBe(5); // 50k / 1jt — MENANG atas iklan.setara_persen_gmv
+    expect(s.trafikLuarPersen).toBe(15); // (80k+40k+30k) / 1jt
+    expect(s.trafikLivePersen).toBeNull(); // Shopee tidak mengekspor kanal `live` lewat gmv_mix
+  });
+
+  it('overlap antar kolom disengaja — total boleh melebihi 100% (CHECK dicabut 20260822010000)', () => {
+    const s = mapPayloadToSectionB(shopeeMix);
+    const total = (s.trafikVideoPersen ?? 0) + (s.trafikAffiliatePersen ?? 0) + (s.trafikIklanPersen ?? 0) + (s.trafikLuarPersen ?? 0);
+    expect(total).toBe(50); // kanal Shopee TIDAK membagi habis GMV seperti lima bucket TikTok
+  });
+
+  it('shopee_ads MENANG atas iklan.setara_persen_gmv saat gmv_mix membawanya (keputusan pemilik eksplisit)', () => {
+    const s = mapPayloadToSectionB({ ...shopeeMix, iklan: { setara_persen_gmv: 0.99 } });
+    expect(s.trafikIklanPersen).toBe(5); // dari gmv_mix.shopee_ads, BUKAN 99 dari iklan.setara_persen_gmv
+  });
+
+  it('gmv_mix Shopee absen shopee_ads ⇒ jatuh balik ke iklan.setara_persen_gmv', () => {
+    const s = mapPayloadToSectionB({
+      toko: { gmv: 1_000_000 },
+      gmv_mix: { affiliate: 200_000 },
+      iklan: { setara_persen_gmv: 0.15 },
+    });
+    expect(s.trafikIklanPersen).toBe(15);
+  });
+
+  it('toko.gmv absen atau 0 ⇒ seluruh share Shopee null, bukan 0% (aturan rumah #7)', () => {
+    const s1 = mapPayloadToSectionB({ gmv_mix: { shopee_video: 100_000 } });
+    expect(s1.trafikVideoPersen).toBeNull();
+    const s2 = mapPayloadToSectionB({ toko: { gmv: 0 }, gmv_mix: { shopee_video: 100_000 } });
+    expect(s2.trafikVideoPersen).toBeNull();
+  });
+
+  it('mix TikTok (lima bucket) tidak ikut terbaca sebagai Shopee — nol regresi', () => {
+    const s = mapPayloadToSectionB(PAYLOAD);
+    expect(s.trafikAffiliatePersen).toBeNull(); // tetap null, bukan dipetakan dari `affiliate` TikTok (tidak ada kunci itu)
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Jahitan lintas-mesin — pemeta ini vs keluaran ASLI engine baseline Shopee
 // ---------------------------------------------------------------------------
 
@@ -380,12 +432,18 @@ describe('jahitan B2→B3 — pemeta membaca keluaran ASLI engine baseline Shope
     // Shopee Live hanya mengekspor "ada aktivitas", bukan jam/GMV.
     expect(s.jamLivePerBulan).toBeNull();
     expect(s.gmvLive).toBeNull();
-    // B-2.3: gmv_mix Shopee memakai taksonomi kanal yang BERBEDA dan saling
-    // tumpang tindih (shopee_ads / affiliate / voucher / chat / meta_cpas /
-    // shopee_video), bukan lima bucket TikTok. Pemetaannya butuh ketokan
-    // pemilik, jadi B-2.3 Shopee sengaja tetap manual — lihat DECISIONS.
+    // B-2.3 (B23-SHP, keputusan pemilik 2026-09-18): gmv_mix Shopee memakai
+    // taksonomi kanal yang BERBEDA dan saling tumpang tindih (shopee_ads /
+    // affiliate / voucher / chat / meta_cpas / shopee_video), dipetakan lewat
+    // `shareMixShopee` (penyebut `toko.gmv`, bukan jumlah bucket). Fixture ini
+    // hanya membawa berkas `layanan|chat` — jadi HANYA kanal `chat` yang
+    // terisi di `gmv_mix` (16 juta / 100 juta gmv toko = 16%, masuk Luar).
+    // `live` tetap null (Shopee tidak mengekspor kanal itu lewat `gmv_mix`);
+    // `video`/`affiliate` tetap null (nol berkas `shopee_video`/`aff_product`
+    // di fixture ini).
     expect(s.trafikVideoPersen).toBeNull();
     expect(s.trafikLivePersen).toBeNull();
-    expect(s.trafikLuarPersen).toBeNull();
+    expect(s.trafikLuarPersen).toBe(16);
+    expect(s.trafikAffiliatePersen).toBeNull();
   });
 });

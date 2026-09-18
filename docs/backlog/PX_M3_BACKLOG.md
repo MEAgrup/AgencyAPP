@@ -21,7 +21,17 @@ Migrasi `20261101010000` + `packages/core/src/px/` + `packages/domain/src/produc
 
 ## Tiket untuk chat PDT
 
-### `PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR` — `tt_orders` → `pdt_fact_sku_period` basis `'dibayar'`
+### `PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR` — `tt_orders` → `pdt_fact_sku_period` basis `'dibayar'` — **SELESAI 2026-09-18**
+
+Dibangun persis usulan di bawah (lihat `docs/DECISIONS.md` 2026-09-18 untuk rincian penuh):
+`ekstrakBarisFaktaSkuTtOrders` (`packages/core/src/pdt/fakta.ts`) + blok penulis di `pdt.ts`
+(pola sama `shopee_ams_produk`, DELETE-then-INSERT, `sku_id` selalu `null`). Whitelist
+`kolom_dipanen` sudah lengkap sejak awal — nol reparse dibutuhkan. `harga_satuan_terakhir`
+dari `SKU Unit Original Price` dikonfirmasi SUDAH ADA (`ekstrakBarisSkuMasterTtOrders`).
+**Residual belum diverifikasi** (dicatat eksplisit, sama seperti tiket ini menuntut):
+literal status `'Completed'` diambil dari fixture repo, BUKAN dikonfirmasi ke sample
+`tt_orders` asli — lihat `docs/DECISIONS.md` untuk detail dan apa yang perlu dicek ulang
+begitu sample nyata tersedia.
 
 **Kenapa ini penting untuk M3**: satu-satunya penulis `pdt_fact_sku_period` hari ini
 (`shopee_ams_produk`) hanya Shopee. TikTok TIDAK punya penulis fakta per-SKU sama sekali —

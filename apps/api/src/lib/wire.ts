@@ -3362,6 +3362,30 @@ export function pendingHoldRequestToWire(r: client.PendingHoldRequest): PendingH
   };
 }
 
+/** GET /services/closure-requests row — the Director's "Perlu Persetujuan Saya" Closure queue (O75). */
+export interface PendingClosureRequestWire {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  service_name: string;
+  owner_am: string | null;
+  owner_am_nama: string;
+  updated_at: string;
+  /** Alasan wajib yang diketik AM saat mengajukan penutupan (dari audit `service_closure_requested`). */
+  reason: string;
+  requested_by: string;
+  requested_by_nama: string;
+}
+
+export function pendingClosureRequestToWire(r: client.PendingClosureRequest): PendingClosureRequestWire {
+  return {
+    service_id: r.serviceId, client_id: r.clientId, toko: r.toko, nama_pic: r.namaPic, service_name: r.serviceName,
+    owner_am: r.ownerAm, owner_am_nama: r.ownerAmNama, updated_at: r.updatedAt.toISOString(),
+    reason: r.reason, requested_by: r.requestedBy, requested_by_nama: r.requestedByNama,
+  };
+}
+
 // --- M4 service void (Go module4_client.VoidResult) ---
 
 /** The void cascade result as web-internal's `VoidResult` (lib/clients.ts) expects it. */
@@ -9067,7 +9091,7 @@ export interface PdtPreviewBerkasWire {
   baris_header: number | null;
   kolom_dipanen: number;
   kolom_baru: string[];
-  status: string; // 'ok' | 'perlu_pilih_modul' | 'gagal' | 'ditolak_pagar'
+  status: string; // 'ok' | 'sebagian' | 'perlu_pilih_modul' | 'gagal' | 'ditolak_pagar'
   pesan: string | null;
   sha256: string | null;
   bytes: number | null;

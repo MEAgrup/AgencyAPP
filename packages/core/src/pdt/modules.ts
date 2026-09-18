@@ -89,6 +89,9 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       'Pesanan SKU', 'AOV', 'CTR', 'CTOR', 'Impresi produk', 'Status daftar produk',
       'Nama', 'Klik produk',
     ],
+    // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.2 — dibutuhkan report.dim_produk(0.12)/
+    // adsscanner, bukan gerbang PDT sendiri (Rule 13-16/PX). Hilang ⇒ 'sebagian', bukan 'gagal'.
+    kolomOpsional: ['Nama', 'Klik produk'],
     wajib: true,
   },
   {
@@ -113,6 +116,9 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       'Creator name', 'GMV dari kreator', 'AOV', 'CTOR', 'Pesanan teratribusi', 'Tayangan video',
       'Video', 'Siaran LIVE', 'Perkiraan komisi',
     ],
+    // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.4 — dibutuhkan copilot A1/A2 +
+    // PX Flow D commission_pct, bukan gerbang PDT sendiri. Hilang ⇒ 'sebagian', bukan 'gagal'.
+    kolomOpsional: ['Video', 'Siaran LIVE', 'Perkiraan komisi'],
     wajib: true,
   },
   {
@@ -127,6 +133,9 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       'ID Kreator', 'ID Video', 'Waktu', 'Produk', 'VV', 'Likes', 'Dibagikan', 'Klik Produk', 'Nama Kreator',
       'Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)',
     ],
+    // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.5 — dibutuhkan report.dim_video(0.18),
+    // bukan gerbang PDT sendiri. Hilang ⇒ 'sebagian', bukan 'gagal'.
+    kolomOpsional: ['Informasi Video', 'GPM (Rp)', 'GMV dari video (Rp)'],
     wajib: true,
   },
   {
@@ -141,6 +150,9 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     tandaTanganKolom: { must: ['GMV dari LIVE (Rp)', 'Waktu Live'] },
     barisHeaderHint: 3, // Rule 7
     kolomDipanen: ['ID Kreator', 'Waktu Live', 'Durasi', 'GMV dari LIVE (Rp)', 'Produk Terjual', 'Penonton', 'CTOR', 'Kreator'],
+    // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.6 — dibutuhkan report.dim_live(0.22)/
+    // copilot L3/pemisah toko-vs-afiliasi, bukan gerbang PDT sendiri. Hilang ⇒ 'sebagian'.
+    kolomOpsional: ['Penonton', 'CTOR', 'Kreator'],
     wajib: true,
   },
   {
@@ -162,6 +174,12 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       'GMV', 'Pesanan', 'Pembeli', 'Pesanan SKU', 'Pengunjung', 'Persentase konversi', 'Pendapatan bruto',
       'Pengembalian dana', 'GMV dari LIVE kreator', 'GMV dari LIVE akun tertaut', 'GMV dari video afiliasi',
       'GMV dari video akun tertaut',
+    ],
+    // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.7 — dibutuhkan gmvNet/channel-mix
+    // (baseline/metrik.ts toko(), report B-2.3), bukan gerbang PDT sendiri. Hilang ⇒ 'sebagian'.
+    kolomOpsional: [
+      'Pengembalian dana', 'GMV dari LIVE kreator', 'GMV dari LIVE akun tertaut',
+      'GMV dari video afiliasi', 'GMV dari video akun tertaut',
     ],
     wajib: true,
   },
@@ -185,6 +203,11 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // memblokir parse. `Impresi iklan produk`/`Jumlah klik iklan produk`
     // ditambahkan sesi ini (baru diekstrak jadi tayangan/klik).
     kolomDipanen: ['ID Campaign', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor', 'Impresi iklan produk', 'Jumlah klik iklan produk'],
+    // G1-08-SEBAGIAN: 'Pendapatan kotor' Bucket 2 PDT_KOLOM_DIPANEN.md §1.8 — dibutuhkan
+    // report.dim_gmvmax(0.22) (sisi pendapatan ROAS), bukan gerbang PDT sendiri. Kolom lain di
+    // sini SUDAH bucket 1 atau tambahan undokumentasi ('Impresi iklan produk'/'Jumlah klik iklan
+    // produk') — dibiarkan wajib, tidak ditebak. Hilang 'Pendapatan kotor' ⇒ 'sebagian'.
+    kolomOpsional: ['Pendapatan kotor'],
     wajib: false, // opsional — sisi ads, bukan sisi rekonsiliasi GMV toko
   },
   {
@@ -206,6 +229,10 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // toh tidak pernah dibaca (`roas` diturunkan gmv÷biaya). `Tayangan LIVE`
     // ditambahkan (baru diekstrak jadi tayangan).
     kolomDipanen: ['Nama LIVE', 'ID Campaign', 'Biaya', 'Pesanan SKU', 'Pendapatan kotor', 'Tayangan LIVE'],
+    // G1-08-SEBAGIAN: 'Pendapatan kotor' Bucket 2 PDT_KOLOM_DIPANEN.md §1.9 — dibutuhkan
+    // report.dim_gmvmax(0.22), bukan gerbang PDT sendiri. 'Tayangan LIVE' tambahan
+    // undokumentasi — dibiarkan wajib, tidak ditebak. Hilang 'Pendapatan kotor' ⇒ 'sebagian'.
+    kolomOpsional: ['Pendapatan kotor'],
     wajib: false,
   },
   {
@@ -232,6 +259,17 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       'Affiliate video-attributed GMV', 'Creator video-attributed orders', 'Affiliate video orders',
       'Estimated affiliate partner commission ', 'Actual affiliate partner commission',
       'Video views', 'Video likes', 'Video product RPM', 'Creator-attributed items sold',
+    ],
+    // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.10 — dipanen ke berkas mentah tapi
+    // BELUM PUNYA kolom tujuan di pdt_fact_content (bukan gerbang PDT sendiri, yang hanya
+    // butuh 8 kolom Bucket 1: Date/Video ID/Shop ID/Creator name/Affiliate video-attributed
+    // GMV/Video views/Video likes/Duration). Hilang salah satu ⇒ 'sebagian', bukan 'gagal'.
+    kolomOpsional: [
+      'Campaign ID', 'Campaign name', 'Creator follower count', 'Product ID', 'Product name',
+      'Shop code', 'Shop name', 'Video name', 'Post time',
+      'Creator video-attributed orders', 'Affiliate video orders', 'Creator-attributed items sold',
+      'Estimated affiliate partner commission ', 'Actual affiliate partner commission',
+      'Video product RPM',
     ],
     // Berkas ini NOL baris preamble (header di baris 1) — rentangnya ada di
     // kolom data `Date`, konstan `2026-08-01-2026-08-31` di seluruh 180 baris
@@ -307,6 +345,10 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       'Jumlah Produk Dilihat', 'Produk Diklik', 'Tingkat Konversi (Pesanan yang Dibuat)',
       'repeat order', 'Pengunjung Produk (Kunjungan)',
     ],
+    // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §2.2 — dibutuhkan dim
+    // product_performance(0.14)/sumbu X 4-kuadran Shopee, bukan gerbang PDT sendiri
+    // (Rule 13-16/PX). Hilang ⇒ 'sebagian', bukan 'gagal'.
+    kolomOpsional: ['Pengunjung Produk (Kunjungan)'],
     wajib: true,
   },
   {
@@ -333,6 +375,9 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       'Kode Produk', 'Dilihat', 'Jumlah Klik', 'Konversi', 'Biaya',
       'nama iklan', 'omzet penjualan', 'Efektifitas Iklan', 'Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)',
     ],
+    // G1-08-SEBAGIAN: 'ACOS' Bucket 2 PDT_KOLOM_DIPANEN.md §2.3 — dibutuhkan HealthAds.acos/
+    // B-4.3, bukan gerbang PDT sendiri. Hilang ⇒ 'sebagian', bukan 'gagal'.
+    kolomOpsional: ['Persentase Biaya Iklan terhadap Penjualan dari Iklan (ACOS)'],
     wajib: false,
   },
   {
@@ -632,6 +677,10 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       'Impresi', 'Klik tautan', 'CTR Unik (rasio klik tayang tautan)', 'CPM (Biaya Per 1.000 Tayangan)',
       'CPC (biaya per klik tautan)', 'Minggu',
     ],
+    // G1-08-SEBAGIAN: 'Minggu' Bucket 2 PDT_KOLOM_DIPANEN.md §3.1 — kunci pemisah baris
+    // ringkasan vs mingguan, bukan gerbang PDT sendiri (modul ini `wajib: false` sudah, PDT-22).
+    // Hilang ⇒ 'sebagian', bukan 'gagal'.
+    kolomOpsional: ['Minggu'],
     wajib: false, // opsional (PDT-22) — tidak masuk rekonsiliasi GMV toko
   },
 ];

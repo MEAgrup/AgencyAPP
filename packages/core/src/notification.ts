@@ -215,6 +215,17 @@ export const EVENTS = {
   // packages/domain/src/pdt.ts planPdtPurgeTick().
   PdtPurgeGuardExceeded: 'pdt.purge.guard_exceeded', // -> Directors
 
+  // ----- catalog v19 (O75 — Service closure two-step) — 3 event -----
+  // Mirrors v8 Hold exactly, but the approver is Director only (owner
+  // decision, narrower than Hold's Head-of-Account-or-Director) — so the
+  // request event cannot use `leadsOfDivision` (Director is a layered role,
+  // not resolvable by division) and instead goes 'explicit' to
+  // `finance.directorIds`. Emitter: packages/domain/src/client.ts
+  // requestClosure()/approveClosure()/rejectClosure().
+  ServiceClosureRequested: 'service_closure_requested', // -> Directors
+  ServiceClosed: 'service_closed', // -> owning AM
+  ServiceClosureRejected: 'service_closure_rejected', // -> owning AM
+
 } as const;
 
 /** A cataloged event type. */
@@ -359,6 +370,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'PDT G1-10 (job purge harian) — 1 event: pdt.purge.guard_exceeded (pagar 5%/hari, Rule 48, terlampaui → Directors, nol objek dihapus tick itu).',
     eventCount: 1,
     decisionRef: 'docs/DECISIONS.md 2026-09-15 (G1-10 purge harian)',
+  },
+  {
+    version: 19,
+    description:
+      'O75 Service Closure two-step — 3 event (service_closure_requested, service_closed, service_closure_rejected). Account/AM mengajukan, Director menyetujui/menolak — mirrors v8 Hold, approver lebih sempit (Director saja).',
+    eventCount: 3,
+    decisionRef: 'docs/DECISIONS.md 2026-09-18 (O75 — Service selesai)',
   },
 ] as const;
 
@@ -541,6 +559,27 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
     description: 'Pagar 5%/hari purge PDT terlampaui — nol objek dihapus, ke Directors',
     resolver: 'explicit',
     version: 18,
+  },
+
+  // --- v19 (O75 — Service Closure two-step). Description/resolver WAJIB sama
+  // persis dengan seed migrasi 20261118010000_o75_service_closure_twostep.sql.
+  // 'explicit' (bukan 'leadsOfDivision' seperti Hold) karena approver-nya
+  // Director — layered role, tidak resolvable lewat divisi (sama alasan
+  // PdtPurgeGuardExceeded di atas). Caller memasok `finance.directorIds`. ---
+  [EVENTS.ServiceClosureRequested]: {
+    description: 'Account/AM mengajukan penutupan Service — ke Director',
+    resolver: 'explicit',
+    version: 19,
+  },
+  [EVENTS.ServiceClosed]: {
+    description: 'Penutupan Service disetujui Director — ke AM pemilik',
+    resolver: 'explicit',
+    version: 19,
+  },
+  [EVENTS.ServiceClosureRejected]: {
+    description: 'Penutupan Service ditolak Director — ke AM pemilik',
+    resolver: 'explicit',
+    version: 19,
   },
 };
 

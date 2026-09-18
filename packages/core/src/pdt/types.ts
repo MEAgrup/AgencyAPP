@@ -99,6 +99,19 @@ export interface PdtModuleDef {
   /** Whitelist PDT-27 (`docs/backlog/PDT_KOLOM_DIPANEN.md`) — kolom yang benar-benar dipanen ke tabel fakta. Boleh berbeda dari `tandaTanganKolom` (sinyal deteksi boleh memakai kolom yang tidak dipanen). */
   kolomDipanen: readonly string[];
   /**
+   * Subset `kolomDipanen` yang boleh HILANG tanpa membuat berkas `gagal`
+   * (G1-08-SEBAGIAN, `docs/DECISIONS.md` — opsi (a) yang diketok pemilik).
+   * Persis "Bucket 2 (derived-add)" `PDT_KOLOM_DIPANEN.md` per modul: kolom
+   * yang dibutuhkan KONSUMEN LAIN (mesin laporan — `requireCols` di
+   * `report/metrik.ts` dst., dimensi skor Rule 12) tapi TIDAK dibutuhkan
+   * gerbang penerimaan PDT sendiri (rekonsiliasi Rule 13-16/PX). Kolom di
+   * `kolomDipanen` yang TIDAK ada di sini tetap WAJIB (perilaku lama, tidak
+   * berubah) — `undefined`/`[]` = seluruh `kolomDipanen` tetap wajib, sama
+   * seperti sebelum field ini ada. Modul yang PDT_KOLOM_DIPANEN.md tulis
+   * "Tidak ada baris bucket 2" SENGAJA tidak mengisi field ini.
+   */
+  kolomOpsional?: readonly string[];
+  /**
    * Nama kolom DATA yang membawa rentang periode berkas, dipakai HANYA bila
    * preamble tidak menghasilkan rentang apa pun. `undefined` = perilaku lama
    * (preamble saja).

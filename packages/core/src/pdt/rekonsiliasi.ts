@@ -36,6 +36,25 @@
  * memblokir — rekonsiliasi basis `dibayar` PX (PDT-19) tetap bisa jalan
  * shop-level-vs-shop-level sampai kolomnya ketemu.
  *
+ * **Baris HANYA "parent"** (`'Kode Variasi' === '-'`) — bug G1-07-SHOPEE-
+ * DOBEL-HITUNG DITUTUP `docs/DECISIONS.md` 2026-09-18: `parentskudetail.xlsx`
+ * asli berbaris HIERARKIS, satu baris "parent" per produk (`Kode Variasi` =
+ * `'-'`, total PRODUK) diikuti satu baris per varian (`Kode Variasi` terisi,
+ * kontribusi varian ITU SENDIRI) — kolom GMV terisi di KEDUA jenis baris,
+ * menjumlah SEMUA baris menghitung ganda kontribusi varian (produk PUNYA
+ * varian ⇒ total-nya muncul dua kali: sekali di baris parent, sekali lagi
+ * tersebar di baris varian di bawahnya). TERBUKTI ke sample asli Fim Motor
+ * (`fim_motor.shopee-shop-stats.20260701-20260731.xlsx` sheet 'Pesanan Siap
+ * Dikirim'/'Pesanan Dibuat', baris ringkasan periode): Σ baris parent SAJA
+ * basis Dibuat = Rp1.624.937.476 = shop-level Dibuat PERSIS; Σ baris parent
+ * basis Siap Dikirim = Rp1.515.002.476 = shop-level Siap Dikirim PERSIS.
+ * Σ SEMUA baris (parent+varian, perilaku lama) = ≈1,87× angka shop-level —
+ * gerbang Rule 13-14 sebelum perbaikan ini akan MENOLAK batch valid mana pun
+ * yang produknya punya varian (norma Shopee, bukan kasus tepi). Bila kolom
+ * `'Kode Variasi'` tidak ditemukan (bentuk berkas di luar ekspektasi), fungsi
+ * jatuh ke perilaku lama (jumlah semua baris) — bukan diam-diam mengembalikan
+ * 0, supaya kegagalan terlihat lewat delta rekonsiliasi, bukan hilang.
+ *
  * **`parseTiktokShopAnalytics`/`sumTiktokProductAnalyticsGmv`** menutup
  * `G1-07-TIKTOK-REKONSILIASI` — TERVERIFIKASI ke sample asli ("Tiktok -
  * Avitaskin.zip"): `tt_shop_analytics` (`Shop Analytics_Key metrics_*.xlsx`)
@@ -102,8 +121,12 @@ export function sumShopeeParentSkuGmv(aoa: readonly (readonly unknown[])[], kolo
   const header = aoa[barisHeader - 1] ?? [];
   const idx = header.findIndex((c) => norm(c) === norm(kolomGmv));
   if (idx === -1) return 0;
+  const idxVariasi = header.findIndex((c) => norm(c) === 'kode variasi');
   let total = 0;
-  for (const row of aoa.slice(barisHeader)) total += parsePdtAngka(row?.[idx]);
+  for (const row of aoa.slice(barisHeader)) {
+    if (idxVariasi !== -1 && norm(row?.[idxVariasi]) !== '-') continue; // lewati baris varian — lihat docblock berkas
+    total += parsePdtAngka(row?.[idx]);
+  }
   return total;
 }
 

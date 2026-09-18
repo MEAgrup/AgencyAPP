@@ -30,8 +30,12 @@
  *    B-2.3, % GMV affiliate, penjumlahan video toko+afiliasi) dihitung di sini.
  * 3. **Organik BUKAN residu** (`DECISIONS.md` 2026-08-22). Share platform boleh
  *    tumpang tindih dan boleh >100%, jadi "sisanya organik" adalah angka karangan.
- *    `trafikOrganikPersen` selalu `null` — begitu juga `trafikAffiliatePersen`,
- *    karena GMV afiliasi sudah ikut terhitung di bucket video dan LIVE.
+ *    `trafikOrganikPersen` selalu `null` — untuk TikTok begitu juga
+ *    `trafikAffiliatePersen` (GMV afiliasi TikTok sudah ikut terhitung di
+ *    bucket video dan LIVE, lihat `shareMix`). **Shopee beda** (B23-SHP,
+ *    keputusan pemilik 2026-09-18): kanal `affiliate` Shopee BUKAN sub-bucket
+ *    dari video/LIVE — ia kolom `gmv_mix` sendiri, jadi `trafikAffiliatePersen`
+ *    terisi untuk Shopee lewat `shareMixShopee`.
  */
 import { nil } from './angka';
 
@@ -94,8 +98,8 @@ export interface SectionBFromBaseline {
   /** Selalu null — organik tidak boleh dihitung sebagai residu. */
   trafikOrganikPersen: null;
   trafikIklanPersen: number | null;
-  /** Selalu null — GMV afiliasi sudah masuk bucket video & LIVE (dobel hitung). */
-  trafikAffiliatePersen: null;
+  /** TikTok: selalu null (GMV afiliasi sudah masuk bucket video & LIVE, dobel hitung bila diisi). Shopee: terisi dari `gmv_mix.affiliate` (B23-SHP). */
+  trafikAffiliatePersen: number | null;
   trafikLivePersen: number | null;
   trafikVideoPersen: number | null;
   trafikLuarPersen: number | null;
@@ -226,6 +230,51 @@ function shareMix(mix: Record<string, unknown> | null): {
   return { video: bagi(vidToko, vidAff), live: bagi(liveToko, liveAff), luar: bagi(lain, null) };
 }
 
+const SHOPEE_MIX_KEYS = ['shopee_ads', 'affiliate', 'voucher', 'chat', 'meta_cpas', 'shopee_video'] as const;
+
+function isShopeeMix(mix: Record<string, unknown> | null): mix is Record<string, unknown> {
+  return mix !== null && SHOPEE_MIX_KEYS.some((k) => k in mix);
+}
+
+/**
+ * B-2.3 Shopee (B23-SHP, keputusan pemilik 2026-09-18) — satu-satunya cabang
+ * per platform yang disengaja di berkas ini (lih. `videoDatar` untuk preseden
+ * yang sama: dikenali dari BENTUK payload, bukan `schema`). Kanal `gmv_mix`
+ * Shopee (`shopee_ads`/`affiliate`/`voucher`/`chat`/`meta_cpas`/`shopee_video`)
+ * SALING TUMPANG TINDIH — satu pesanan bervoucher bisa sekaligus pesanan iklan
+ * — beda dari lima bucket TikTok yang membagi habis GMV tanpa tumpang tindih.
+ * Karena itu penyebutnya di sini BUKAN jumlah bucket (`shareMix` TikTok) tapi
+ * `toko.gmv`: persis penyebut yang sudah dipakai `computeChannels` sendiri
+ * (`report/shopee/metrik.ts`) sebelum `persen`-nya dibuang di
+ * `metrik-baseline.ts` — bukan angka baru, sekadar dihitung ulang dari `nilai`
+ * yang masih dibawa `gmv_mix`. Overlap antar kolom (dan total >100%) memang
+ * disengaja (CHECK `ck_strch_trafik_total` sudah dicabut migrasi 20260822010000).
+ * Pemetaan: `shopee_video`→Video, `affiliate`→Affiliate, `shopee_ads`→Iklan
+ * (menang atas `iklan.setara_persen_gmv` bila `gmv_mix` membawanya), dan
+ * `voucher`+`chat`+`meta_cpas` digabung ke Luar (bukan didrop, supaya nilainya
+ * tetap kebaca walau maknanya jadi "kanal lain-lain"). Tidak ada `live` — Shopee
+ * tidak mengekspor kanal itu lewat `gmv_mix`.
+ */
+function shareMixShopee(
+  mix: Record<string, unknown>,
+  gmvToko: number | null,
+): { video: number | null; affiliate: number | null; iklan: number | null; luar: number | null } {
+  const kosong = { video: null, affiliate: null, iklan: null, luar: null };
+  // Penyebut 0/absen = tidak ada dasar untuk membagi, BUKAN nol (aturan rumah #7).
+  // `gmvToko` sudah lolos `numOrNull` di pemanggil (finite atau null) — `=== null`
+  // cukup di sini, dan menyempitkan tipenya ke `number` untuk sisa fungsi.
+  if (gmvToko === null || gmvToko <= 0) return kosong;
+  const bagi = (v: number | null): number | null =>
+    v === null ? null : Math.round((v / gmvToko) * 10000) / 100;
+  const luarRaw = tambah(tambah(numOrNull(mix.voucher), numOrNull(mix.chat)), numOrNull(mix.meta_cpas));
+  return {
+    video: bagi(numOrNull(mix.shopee_video)),
+    affiliate: bagi(numOrNull(mix.affiliate)),
+    iklan: bagi(numOrNull(mix.shopee_ads)),
+    luar: bagi(luarRaw),
+  };
+}
+
 function daftarTeks(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   const out: string[] = [];
@@ -270,6 +319,7 @@ export function mapPayloadToSectionB(payload: unknown): SectionBFromBaseline {
 
   const share = shareMix(mix);
   const gmvToko = numOrNull(toko?.gmv);
+  const shareShopee = isShopeeMix(mix) ? shareMixShopee(mix, gmvToko) : null;
   const gmvAff = numOrNull(afiliasi?.gmv);
 
   return {
@@ -286,11 +336,11 @@ export function mapPayloadToSectionB(payload: unknown): SectionBFromBaseline {
     pengunjungPerBulan: numOrNull(toko?.pengunjung),
     conversionRatePersen: pecahanKePersen(toko?.konversi),
     trafikOrganikPersen: null,
-    trafikIklanPersen: pecahanKePersen(iklan?.setara_persen_gmv),
-    trafikAffiliatePersen: null,
+    trafikIklanPersen: shareShopee?.iklan ?? pecahanKePersen(iklan?.setara_persen_gmv),
+    trafikAffiliatePersen: shareShopee?.affiliate ?? null,
     trafikLivePersen: share.live,
-    trafikVideoPersen: share.video,
-    trafikLuarPersen: share.luar,
+    trafikVideoPersen: shareShopee?.video ?? share.video,
+    trafikLuarPersen: shareShopee?.luar ?? share.luar,
 
     skuListed: numOrNull(produk?.sku_total),
     skuAktif: numOrNull(produk?.sku_ada_penjualan),

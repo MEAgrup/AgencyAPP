@@ -891,6 +891,89 @@ export function ekstrakBarisSkuMasterTtOrders(
   return dedupSkuMaster(hasil);
 }
 
+/** `NaN` menang atas angka apa pun saat dijumlah — satu baris yang gagal parse harus TERLIHAT di agregat (Rule 12), bukan diam-diam diperlakukan sebagai 0. */
+function tambahAngka(a: number, b: number): number {
+  return Number.isNaN(a) || Number.isNaN(b) ? NaN : a + b;
+}
+
+/**
+ * Satu baris `pdt_fact_sku_period` mentah dari `tt_orders`, SEBELUM
+ * `client_platform_id`/`batch_id`/`periode`/`parser_versi`/`basis` (pemanggil
+ * yang melengkapi, pola sama `PdtBarisSkuPeriodShopeeAmsProduk`). `sku_id`
+ * SELALU `null` di pemanggil — sama alasan `shopee_ams_produk`: `SKU ID`
+ * `tt_orders` memang sudah level VARIAN (lihat `ekstrakBarisSkuMasterTtOrders`
+ * di atas, yang memakainya sebagai `platformProductId` dengan
+ * `platformVariationId` kosong), tapi modul ini tidak melakukan lookup ke
+ * `pdt_sku_master` — ia menulis identitas Ads/Seller Center APA ADANYA,
+ * persis pola `shopee_ams_produk` (`PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR`).
+ */
+export interface PdtBarisFaktaSkuTtOrders {
+  platformProductId: string;
+  gmv: number;
+  pesananSku: number;
+  gmvDariKreator: number;
+}
+
+/**
+ * Ekstrak & AGREGASI baris `tt_orders` (modul `Semua pesanan*.csv`) jadi satu
+ * baris `pdt_fact_sku_period` per SKU (`PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR`,
+ * `docs/backlog/PX_M3_BACKLOG.md`). Beda dari SETIAP ekstraktor lain di berkas
+ * ini — `tt_orders` adalah data level BARIS PESANAN (banyak baris per SKU per
+ * periode), bukan satu baris ringkasan per SKU seperti `shopee_ams_produk` —
+ * jadi fungsi ini SATU-SATUNYA yang menjumlahkan lintas-baris (`Map` per
+ * `SKU ID`), bukan memetakan 1:1.
+ *
+ * **`basis = 'dibayar'`**: hanya baris ber-`Order Status` **`Completed`**
+ * (dinormalisasi lower-case+trim) yang dihitung — baris status lain (mis.
+ * `Unpaid`/`Cancelled`/`Shipped`) DILEWATI SELURUHNYA, tidak menyumbang 0 ke
+ * agregat maupun ke `gmv`/`pesanan_sku`/`gmv_dari_kreator`. ⚠️ **Belum
+ * diverifikasi ke sample `tt_orders` asli** (dicatat eksplisit di tiket dan
+ * `docs/DECISIONS.md`) — literal `'Completed'` diambil dari SATU-SATUNYA
+ * nilai yang muncul di fixture repo ini sejauh ini (`fakta.test.ts`,
+ * `detect.test.ts`, termasuk baris tersamar `576…`/`17123…` yang tampak
+ * berasal dari export asli), bukan dikonfirmasi langsung ke tim PDT.
+ *
+ * `gmv` = Σ `SKU Subtotal After Discount`, `pesananSku` = Σ `Quantity`,
+ * `gmvDariKreator` = Σ `SKU Subtotal After Discount` UNTUK baris yang
+ * `Creator Handle`-nya terisi (sinyal afiliasi PX, kolom sudah ada sejak
+ * G1-01) — kolom skema `numeric`, jadi ini jumlah GMV, bukan cacah baris.
+ * Angka: `parsePdtAngka(v)` TANPA `raw` — konvensi Seller Center, sama seperti
+ * `ekstrakBarisSkuMasterTtOrders`. Baris ber-`SKU ID` kosong dilewati (bukan
+ * baris data sungguhan, sama pola modul lain di paket ini).
+ */
+export function ekstrakBarisFaktaSkuTtOrders(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisFaktaSkuTtOrders[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iSkuId = idx('SKU ID');
+  const iQuantity = idx('Quantity');
+  const iSubtotal = idx('SKU Subtotal After Discount');
+  const iStatus = idx('Order Status');
+  const iCreator = idx('Creator Handle');
+
+  const byProduk = new Map<string, { gmv: number; pesananSku: number; gmvDariKreator: number }>();
+  for (const row of aoa.slice(barisHeader)) {
+    const platformProductId = iSkuId === -1 ? '' : String(row?.[iSkuId] ?? '').trim();
+    if (platformProductId === '') continue;
+    const status = iStatus === -1 ? '' : norm(row?.[iStatus]);
+    if (status !== 'completed') continue;
+
+    const subtotal = iSubtotal === -1 ? 0 : parsePdtAngka(row?.[iSubtotal]);
+    const qty = iQuantity === -1 ? 0 : parsePdtAngka(row?.[iQuantity]);
+    const creatorHandle = iCreator === -1 ? '' : String(row?.[iCreator] ?? '').trim();
+
+    const acc = byProduk.get(platformProductId) ?? { gmv: 0, pesananSku: 0, gmvDariKreator: 0 };
+    acc.gmv = tambahAngka(acc.gmv, subtotal);
+    acc.pesananSku = tambahAngka(acc.pesananSku, qty);
+    if (creatorHandle !== '') acc.gmvDariKreator = tambahAngka(acc.gmvDariKreator, subtotal);
+    byProduk.set(platformProductId, acc);
+  }
+
+  return [...byProduk.entries()].map(([platformProductId, acc]) => ({ platformProductId, ...acc }));
+}
+
 /** Satu baris `pdt_fact_creator_period` mentah dari `tt_transaction_creator`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi, pola sama fungsi lain di paket ini). */
 export interface PdtBarisKreatorTtTransactionCreator {
   creatorHandle: string;

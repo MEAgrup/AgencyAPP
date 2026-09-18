@@ -8,7 +8,7 @@
  *   against a migrated Postgres, over a Client Record born from the closing
  *   pipeline. Ids namespaced `ZZ-`; afterEach deletes what it made.
  */
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { money, page, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { finance, leads, sales } from './index';
@@ -17,13 +17,19 @@ import {
   canEditAccountRevisable,
   canEditBaseline,
   canEditProfile,
+  canApproveClosure,
   canApproveHold,
+  canRequestClosure,
   canRequestHold,
   canReassignPic,
   canSetPaymentIntent,
   canVoidService,
   editableFields,
   ForbiddenError,
+  requestClosure,
+  approveClosure,
+  rejectClosure,
+  pendingClosureRequests,
   requestHold,
   approveHold,
   rejectHold,
@@ -37,6 +43,7 @@ import {
   listClients,
   LockedFieldError,
   MSG_INTENT_LOCKED,
+  MSG_SERVICE_CLOSURE_BRIEFS_INCOMPLETE,
   NotFoundError,
   PlatformDuplicateError,
   resumeService,
@@ -555,6 +562,126 @@ describeDb('Hold Service two-step (T-2b / RM-2)', () => {
     await approveHold(sql, accountLead(), svc);
     const b = await sql<{ status: string }[]>`select status from briefs where id = ${brief}`;
     expect(b[0].status).toBe('[To Do]'); // untouched by the hold
+  });
+});
+
+describeDb('Close Service two-step (O75)', () => {
+  const CLOSE_DIRECTOR = 'ZZ-CLOSE-DIR';
+  const serviceOf = async (clientId: string): Promise<string> =>
+    (await sql<{ id: string }[]>`select id from services where client_id = ${clientId} limit 1`)[0].id;
+  const statusOf = async (svc: string): Promise<string> =>
+    (await sql<{ status: string }[]>`select status from services where id = ${svc}`)[0].status;
+
+  /** A fresh [In Execution] service on the client, whose AM is set to ZZ-AM (the accountStaff owner). */
+  async function inExecService(clientId: string): Promise<string> {
+    await sql`update clients set assigned_am_id = 'ZZ-AM' where id = ${clientId}`;
+    const id = `SVC-CLOSE-${seq++}`;
+    await sql`insert into services (id, client_id, master_service_id, master_version_no, name,
+        standard_price, commission_rule, status, requires_strategy_plan, created_by)
+      values (${id}, ${clientId}, 'MSV-X', 1, 'Full Mgmt', '10000000.00', 'rule', '[In Execution]', false, 'ZZ-ADMIN')`;
+    return id;
+  }
+
+  beforeAll(async () => {
+    if (!sql) return;
+    // A real employee + `employee_layered_roles` row, so `finance.directorIds`
+    // (the notification recipient list for `service_closure_requested`) has
+    // someone real to find — `director()`'s Actor object alone is enough for
+    // the permission GATE (role comes off the actor, not a DB lookup), but not
+    // enough for the notification RESOLVER, which is a separate DB query.
+    // Mirrors `pdt.test.ts`'s `PURGE_DIRECTOR` fixture for the same reason.
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values (${CLOSE_DIRECTOR}, 'Direktur Uji Closure', 'zz-close-dir@mea.co.id', 'Management', 'Direktur', true, 'SYSTEM')
+      on conflict (employee_id) do nothing`;
+    await sql`
+      insert into employee_layered_roles (employee_id, role, enabled, created_by)
+      values (${CLOSE_DIRECTOR}, 'director', true, 'SYSTEM')
+      on conflict (employee_id, role) do update set enabled = true`;
+  });
+
+  afterAll(async () => {
+    if (!sql) return;
+    // `notifications` deliberately left alone — append-only, same as pdt.test.ts.
+    await sql`delete from employee_layered_roles where employee_id = ${CLOSE_DIRECTOR}`;
+    await sql`delete from employees where employee_id = ${CLOSE_DIRECTOR}`;
+  });
+
+  it('AM requests → [Closure Requested]: owner gate + mandatory reason + audit + notif to Directors', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    // Sales cannot request; reason mandatory.
+    await expect(requestClosure(sql, budi(), svc, 'tuntas')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(requestClosure(sql, accountStaff(), svc, '   ')).rejects.toBeInstanceOf(IncompleteError);
+    // Owning AM (ZZ-AM) requests — zero Briefs is vacuously closeable.
+    await requestClosure(sql, accountStaff(), svc, 'seluruh deliverable selesai');
+    expect(await statusOf(svc)).toBe('[Closure Requested]');
+    const audit = await sql<{ after_json: { reason: string; status: string } }[]>`
+      select after_json from audit_log where entity_id = ${svc} and action = 'service_closure_requested' order by id desc limit 1`;
+    expect(audit[0].after_json.status).toBe('[Closure Requested]');
+    expect(audit[0].after_json.reason).toBe('seluruh deliverable selesai');
+    const notif = await sql<{ n: string }[]>`
+      select count(*) as n from notifications
+       where entity_id = ${svc} and event_type = 'service_closure_requested' and recipient_employee_id = ${CLOSE_DIRECTOR}`;
+    expect(Number(notif[0].n)).toBe(1);
+  });
+
+  it('an active Brief that is not [Approved] blocks the request; [Approved]/voided Briefs do not', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    const brief = `BRF-CLOSE-${seq++}`;
+    await sql`insert into briefs (id, service_id, title, status, created_by)
+      values (${brief}, ${svc}, 'Brief belum selesai', '[To Do]', 'ZZ-ADMIN')`;
+    await expect(requestClosure(sql, accountStaff(), svc, 'x')).rejects.toThrow(MSG_SERVICE_CLOSURE_BRIEFS_INCOMPLETE);
+    await sql`update briefs set status = '[Cancelled — Service Voided]' where id = ${brief}`;
+    // Voided doesn't count as "active" — closeable now with zero active Briefs.
+    await requestClosure(sql, accountStaff(), svc, 'brief dibatalkan');
+    expect(await statusOf(svc)).toBe('[Closure Requested]');
+  });
+
+  it('Director approves [Closure Requested] → Done (terminal); Account Lead cannot approve', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    await requestClosure(sql, accountStaff(), svc, 'tuntas');
+    // Narrower than Hold: Account Lead is NOT enough here, only Director.
+    await expect(approveClosure(sql, accountLead(), svc)).rejects.toBeInstanceOf(ForbiddenError);
+    await approveClosure(sql, director(), svc);
+    expect(await statusOf(svc)).toBe('Done');
+    const audit = await sql<{ n: string }[]>`
+      select count(*) as n from audit_log where entity_id = ${svc} and action = 'service_closed'`;
+    expect(Number(audit[0].n)).toBe(1);
+    const notif = await sql<{ n: string }[]>`
+      select count(*) as n from notifications
+       where entity_id = ${svc} and event_type = 'service_closed' and recipient_employee_id = 'ZZ-AM'`;
+    expect(Number(notif[0].n)).toBe(1);
+  });
+
+  it('Director rejects [Closure Requested] → [In Execution]', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    await requestClosure(sql, accountStaff(), svc, 'tuntas');
+    await rejectClosure(sql, director(), svc, 'belum lengkap');
+    expect(await statusOf(svc)).toBe('[In Execution]');
+  });
+
+  it('wrong-state moves are rejected (409): approve without a request, request on non-[In Execution]', async () => {
+    const clientId = await closedClient();
+    const svc = await serviceOf(clientId); // [Awaiting Onboarding]
+    await sql`update clients set assigned_am_id = 'ZZ-AM' where id = ${clientId}`;
+    await expect(approveClosure(sql, director(), svc)).rejects.toBeInstanceOf(ServiceStateError);
+    await expect(requestClosure(sql, accountStaff(), svc, 'x')).rejects.toBeInstanceOf(ServiceStateError);
+  });
+
+  it('pendingClosureRequests is Director-only (unlike Hold, Account Lead does not see it)', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    await requestClosure(sql, accountStaff(), svc, 'tuntas');
+    expect(await pendingClosureRequests(sql, accountLead())).toEqual([]);
+    const rows = await pendingClosureRequests(sql, director());
+    const mine = rows.find((r) => r.serviceId === svc);
+    expect(mine).toBeDefined();
+    expect(mine!.reason).toBe('tuntas');
+    expect(mine!.ownerAm).toBe('ZZ-AM');
   });
 });
 

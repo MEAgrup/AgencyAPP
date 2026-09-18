@@ -136,7 +136,7 @@ function aoaUntukModulEfektif(input: PdtPreviewBerkasInput, kodeEfektif: string)
 }
 
 /** Status TAMPILAN pratinjau per berkas — beda dari `pdt_file.parse_status` (DB, hanya lahir saat commit): di sini ada dua status TAMBAHAN (`ditolak_pagar`/`perlu_pilih_modul`) yang belum berhak jadi baris DB sama sekali. */
-export type PdtPreviewBerkasStatus = 'ok' | 'perlu_pilih_modul' | 'gagal' | 'ditolak_pagar';
+export type PdtPreviewBerkasStatus = 'ok' | 'sebagian' | 'perlu_pilih_modul' | 'gagal' | 'ditolak_pagar';
 
 export interface PdtPreviewBerkasHasil {
   nama: string;
@@ -256,11 +256,21 @@ function bangunSatuPreviewBerkas(input: PdtPreviewBerkasInput): { hasil: PdtPrev
   const barisHeader = pdt.temukanBarisHeader(input.aoa, modul.kolomDipanen, modul.barisHeaderHint);
   const header = input.aoa[barisHeader - 1] ?? [];
   const { jumlahDipanen, kolomBaru } = pdt.hitungKolomDipanenBaru(header, modul.kolomDipanen, aliasPerKolom);
-  const kolomWajibGagal = pdt.validasiKolomWajib(header, modul.kolomDipanen, aliasPerKolom);
-  const parseStatus = pdt.turunkanParseStatus({ decodeGagal: null, kolomWajibGagal });
+  // G1-08-SEBAGIAN: kolomOpsional (bila ada) DIKELUARKAN dari daftar wajib — kehilangannya
+  // menurunkan status ke 'sebagian', bukan 'gagal' (docs/DECISIONS.md, opsi (a) diketok pemilik).
+  const kolomOpsional = modul.kolomOpsional ?? [];
+  const kolomWajib = modul.kolomDipanen.filter((k) => !kolomOpsional.includes(k));
+  const kolomWajibGagal = pdt.validasiKolomWajib(header, kolomWajib, aliasPerKolom);
+  const kolomOpsionalGagal = pdt.validasiKolomOpsional(header, kolomOpsional, aliasPerKolom);
+  const parseStatus = pdt.turunkanParseStatus({ decodeGagal: null, kolomWajibGagal, kolomOpsionalGagal });
 
   return {
-    terparse: parseStatus.status === 'ok' ? { nama: input.nama, aoa: input.aoa, sheets: input.sheets, modul, barisHeader } : null,
+    // 'sebagian' TETAP dipakai untuk ekstraksi/rekonsiliasi (kolom wajibnya lengkap) — hanya
+    // 'gagal'/status pra-deteksi yang mengeluarkan berkas dari `terparse`.
+    terparse:
+      parseStatus.status === 'ok' || parseStatus.status === 'sebagian'
+        ? { nama: input.nama, aoa: input.aoa, sheets: input.sheets, modul, barisHeader }
+        : null,
     hasil: {
       ...dasar,
       modulKode: modul.kode,
@@ -600,11 +610,18 @@ export interface PdtCommitPersiapan {
  * `status='ok'`. Basis dipilih Rule 16 (default laporan klien = **Pesanan
  * Siap Dikirim** — basis Dibayar/PDT-19 adalah gerbang Product Exchange
  * TERPISAH, di luar cakupan gerbang Flow A ini). **Perbandingan pesanan
- * (separuh Rule 13) DILEWATI** — `shopee_parent_sku.kolomDipanen`
- * (`PDT_KOLOM_DIPANEN.md` §2.2, bucket 1+2 SUDAH lengkap dicek) nol kolom
- * jumlah-pesanan per-SKU terverifikasi; `rekonsiliasiGmvPesanan` menerima
- * ini (parameter opsional) dan menilai HANYA dari GMV sampai kolomnya
- * ditemukan — dicatat `G1-07-PERSKU-PESANAN` (Open, `docs/DECISIONS.md`).
+ * (separuh Rule 13) DILEWATI PERMANEN** — `G1-07-PERSKU-PESANAN` DITUTUP
+ * `docs/DECISIONS.md` 2026-09-18 dengan jawaban NEGATIF DEFINITIF, bukan
+ * kolom belum ditemukan: kolom `'Pesanan Dibuat'`/`'Pesanan Siap Dikirim'`
+ * ADA di sample asli Fim Motor, tapi Σ-nya (baris parent saja) menyimpang
+ * ≈12,8% dari shop-level — STRUKTURAL (satu order multi-produk dihitung
+ * sekali di shop-level, sekali PER PRODUK di per-SKU), bukan sesuatu yang
+ * bisa diperbaiki dengan sample lain atau filter baris tambahan. Mengaktifkan
+ * perbandingan ini (seperti cabang TikTok di bawah) akan menolak KELIRU
+ * setiap batch Shopee dengan order multi-produk (mayoritas toko nyata).
+ * `rekonsiliasiGmvPesanan` menerima `perSkuPesanan`/`shopLevelPesanan`
+ * opsional dan menilai HANYA dari GMV — dipanggil TANPA keduanya di sini,
+ * sengaja, bukan sementara.
  * **TikTok**: butuh `tt_shop_analytics` + `tt_product_analytics` KEDUANYA
  * `status='ok'` — `G1-07-TIKTOK-REKONSILIASI` DITUTUP lewat sample asli
  * ("Tiktok - Avitaskin.zip"): BEDA dari Shopee, perbandingan pesanan TIDAK
@@ -669,7 +686,9 @@ function resolveStatusIdentitasRekonsiliasi(
           );
           const modulTerlibat = hasilBerkas
             .filter((b) => b.modulKode != null)
-            .map((b) => ({ kode: b.modulKode as string, parseStatusOk: b.status === 'ok' }));
+            // G1-08-SEBAGIAN: 'sebagian' punya kolom wajib lengkap (hanya kolom opsional/laporan
+            // yang hilang) — sama layaknya 'ok' untuk keperluan rekonsiliasi Rule 13-16.
+            .map((b) => ({ kode: b.modulKode as string, parseStatusOk: b.status === 'ok' || b.status === 'sebagian' }));
           const hasilRekon = pdt.rekonsiliasiGmvPesanan({ perSkuGmv, shopLevelGmv: shopLevel.gmv, modulTerlibat });
           if (hasilRekon.status === 'verified') {
             status = 'verified';
@@ -698,7 +717,9 @@ function resolveStatusIdentitasRekonsiliasi(
           const perSku = pdt.sumTiktokProductAnalyticsGmv(productAnalyticsBerkas.aoa, productAnalyticsBerkas.barisHeader);
           const modulTerlibat = hasilBerkas
             .filter((b) => b.modulKode != null)
-            .map((b) => ({ kode: b.modulKode as string, parseStatusOk: b.status === 'ok' }));
+            // G1-08-SEBAGIAN: 'sebagian' punya kolom wajib lengkap (hanya kolom opsional/laporan
+            // yang hilang) — sama layaknya 'ok' untuk keperluan rekonsiliasi Rule 13-16.
+            .map((b) => ({ kode: b.modulKode as string, parseStatusOk: b.status === 'ok' || b.status === 'sebagian' }));
           const hasilRekon = pdt.rekonsiliasiGmvPesanan({
             perSkuGmv: perSku.gmv, shopLevelGmv: shopLevel.gmv,
             perSkuPesanan: perSku.pesanan, shopLevelPesanan: shopLevel.pesanan,
@@ -878,10 +899,10 @@ export async function commitUploadBatch(
         // diketahui) — tetap terlihat di respons commit ini untuk request yang sama, didiagnosis
         // dari pesan sha256=null/bytes=null di sana; docs/DECISIONS.md 2026-09-14.
         if (b.sha256 == null || b.bytes == null) continue;
-        // 'sebagian' TIDAK PERNAH diproduksi hari ini — turunkanParseStatus (G1-08) hanya
-        // mengembalikan 'ok'/'gagal' (pemicu 'sebagian' belum didefinisikan, G1-08-SEBAGIAN,
-        // docs/DECISIONS.md, masih terbuka). Peta di sini APA ADANYA sampai itu terjawab.
-        const parseStatusDb = b.status === 'ok' ? 'ok' : 'gagal';
+        // G1-08-SEBAGIAN (docs/DECISIONS.md, opsi (a) diketok pemilik): 'sebagian' sekarang
+        // punya pemicu (kolom opsional hilang, kolom wajib lengkap) — dipetakan apa adanya,
+        // bukan diturunkan paksa ke 'gagal' seperti sebelumnya.
+        const parseStatusDb = b.status === 'ok' || b.status === 'sebagian' ? b.status : 'gagal';
         await tx`
           insert into pdt_file
             (batch_id, modul_kode, nama_entri, sha256, bytes, baris_header, deteksi_oleh,
@@ -1401,6 +1422,32 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
           values
             (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'dibayar', ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.produkTerjual}, ${baris.pesanan})`;
+      }
+    }
+  }
+
+  // PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR (`docs/backlog/PX_M3_BACKLOG.md`) — `tt_orders` →
+  // `pdt_fact_sku_period` (lihat docblock `ekstrakBarisFaktaSkuTtOrders`, `@cdps/core`
+  // `pdt/fakta.ts`). `sku_id` SELALU NULL, `basis = 'dibayar'` LITERAL — pola SAMA
+  // `shopee_ams_produk` di atas (delete-then-insert per scope, bukan `ON CONFLICT` per
+  // baris: SKU yang berhenti muncul di export baru harus ikut hilang). Nol tabrakan
+  // dengan blok `shopee_ams_produk`: `client_platform_id` sudah per-platform, jadi satu
+  // baris `pdt_fact_sku_period` untuk toko TikTok tertentu hanya pernah berasal dari SATU
+  // penulis (`tt_orders` di sini) untuk (sku_id null, basis 'dibayar').
+  if (berkasTtOrders.length > 0) {
+    await tx`
+      delete from pdt_fact_sku_period
+       where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'dibayar'
+         and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasTtOrders) {
+      for (const baris of pdt.ekstrakBarisFaktaSkuTtOrders(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_sku_period
+            (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id,
+             parser_versi, gmv, gmv_dari_kreator, pesanan_sku)
+          values
+            (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'dibayar', ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.gmvDariKreator}, ${baris.pesananSku})`;
       }
     }
   }

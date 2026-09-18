@@ -28,6 +28,9 @@ import {
   requestHoldService,
   approveHoldService,
   rejectHoldService,
+  requestServiceClosure,
+  approveServiceClosure,
+  rejectServiceClosure,
   resumeService,
   setPaymentIntent,
   setShopId,
@@ -56,6 +59,8 @@ const VOIDED_STATUS = '[Cancelled — Service Voided]';
 const ON_HOLD_STATUS = '[On Hold]';
 const HOLD_REQUESTED_STATUS = '[Hold Requested]';
 const IN_EXECUTION_STATUS = '[In Execution]';
+const CLOSURE_REQUESTED_STATUS = '[Closure Requested]';
+const DONE_STATUS = 'Done';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
@@ -97,6 +102,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const canRequestHold = isAccountStaff(role) || isAccountLead(role) || !!role?.director;
   const canApproveHold = isAccountLead(role) || !!role?.director;
   const [holdPendingId, setHoldPendingId] = useState<string | null>(null);
+
+  // Close Service two-step (O75). AM (owner) / lead / Director may REQUEST;
+  // Director ONLY approves/rejects — narrower than Hold, per owner decision.
+  const canRequestClosure = isAccountStaff(role) || isAccountLead(role) || !!role?.director;
+  const canApproveClosure = !!role?.director;
+  const [closurePendingId, setClosurePendingId] = useState<string | null>(null);
 
   // Payment Intent
   const [intentChoice, setIntentChoice] = useState<string>('');
@@ -232,6 +243,42 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   async function handleResume(serviceId: string, serviceName: string) {
     if (!window.confirm(`Lanjutkan (resume) service "${serviceName}" dari On Hold?`)) return;
     await runHold(serviceId, () => resumeService(serviceId), `Service "${serviceName}" dilanjutkan (In Execution).`);
+  }
+
+  async function runClosure(serviceId: string, fn: () => Promise<unknown>, ok: string) {
+    setVoidError(null);
+    setVoidMessage(null);
+    setClosurePendingId(serviceId);
+    try {
+      await fn();
+      setVoidMessage(ok);
+      await load();
+    } catch (err) {
+      setVoidError(errorMessage(err));
+    } finally {
+      setClosurePendingId(null);
+    }
+  }
+
+  async function handleRequestClosure(serviceId: string, serviceName: string) {
+    const reason = window.prompt(`Alasan ajukan selesai service "${serviceName}"? (wajib)`);
+    if (reason === null) return; // cancelled
+    if (reason.trim() === '') {
+      setVoidError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+    await runClosure(serviceId, () => requestServiceClosure(serviceId, reason), `Pengajuan selesai "${serviceName}" dikirim — menunggu ACC Director.`);
+  }
+
+  async function handleApproveClosure(serviceId: string, serviceName: string) {
+    if (!window.confirm(`Setujui penutupan service "${serviceName}"? Service berhenti di Done — tidak bisa dibuka lagi.`)) return;
+    await runClosure(serviceId, () => approveServiceClosure(serviceId), `Service "${serviceName}" ditutup (Done).`);
+  }
+
+  async function handleRejectClosure(serviceId: string, serviceName: string) {
+    const reason = window.prompt(`Alasan tolak penutupan "${serviceName}"? (opsional)`);
+    if (reason === null) return; // cancelled
+    await runClosure(serviceId, () => rejectServiceClosure(serviceId, reason), `Pengajuan penutupan "${serviceName}" ditolak (kembali In Execution).`);
   }
 
   async function handleSetIntent(e: FormEvent) {
@@ -777,7 +824,42 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                             {holdPendingId === s.id ? 'Memproses...' : 'Resume Service'}
                           </button>
                         )}
-                        {s.status !== VOIDED_STATUS && (
+                        {canRequestClosure && s.status === IN_EXECUTION_STATUS && (
+                          <button
+                            type="button"
+                            className="btn btnSecondary btnSm"
+                            disabled={closurePendingId !== null}
+                            onClick={() => handleRequestClosure(s.id, s.name)}
+                          >
+                            {closurePendingId === s.id ? 'Memproses...' : 'Ajukan Selesai'}
+                          </button>
+                        )}
+                        {s.status === CLOSURE_REQUESTED_STATUS && (
+                          <>
+                            <span className="badge badge-amber" title="Menunggu ACC Director">Menunggu ACC</span>
+                            {canApproveClosure && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btnPrimary btnSm"
+                                  disabled={closurePendingId !== null}
+                                  onClick={() => handleApproveClosure(s.id, s.name)}
+                                >
+                                  {closurePendingId === s.id ? '...' : 'Setujui Selesai'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btnGhost btnSm"
+                                  disabled={closurePendingId !== null}
+                                  onClick={() => handleRejectClosure(s.id, s.name)}
+                                >
+                                  {closurePendingId === s.id ? '...' : 'Tolak'}
+                                </button>
+                              </>
+                            )}
+                          </>
+                        )}
+                        {s.status !== VOIDED_STATUS && s.status !== DONE_STATUS && (
                           <button
                             type="button"
                             className="btn btnDanger btnSm"

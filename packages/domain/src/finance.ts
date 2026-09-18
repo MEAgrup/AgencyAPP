@@ -1708,8 +1708,14 @@ async function resolveChange(
   return toChangeRequest(rows[0]);
 }
 
-/** The Directors' employee ids — layered role, so never resolvable by division. */
-async function directorIds(tx: Queryable): Promise<string[]> {
+/**
+ * The Directors' employee ids — layered role, so never resolvable by division
+ * (the `leadsOfDivision` notification resolver only ever matches `rm.level =
+ * 'lead'`, which a Director-flagged employee need not carry). Exported for
+ * `client.ts` (O75 Service closure approval — also Director-only, also not
+ * expressible via `leadsOfDivision`).
+ */
+export async function directorIds(tx: Queryable): Promise<string[]> {
   const rows = await tx<{ employee_id: string }[]>`
     select e.employee_id
     from employee_layered_roles r
