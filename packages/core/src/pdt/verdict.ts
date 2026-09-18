@@ -18,11 +18,18 @@
  * `20261114010000`) — HANYA `roas_good`/`acos_good`, satu-satunya dua kunci
  * yang dua aksi Tahap 1 ini konsumsi. `target_nilai` usulan = ambang `_good`
  * itu sendiri (bukan ambisi persen buatan) — nol angka dikarang.
+ *
+ * `SHP-KREATOR-AKTIF` (aksi 6, ditambah sesi berikutnya) beda pola: nol
+ * benchmark dikonsumsi (`docs/DECISIONS.md` G4-03-KATALOG-KESIAPAN — "aktif"
+ * = `gmv > 0` DIKETOK, tapi target/ambang COUNT tidak pernah punya sumber
+ * terverifikasi). Pemicu yang diketok pemilik: HANYA nol kreator aktif (floor
+ * alami, bukan angka dikarang) — `targetNilai` fixed di 1 (keluar dari nol),
+ * bukan target ambisi jumlah.
  */
 
-export type PdtVerdictAksiKode = 'SHP-ROAS' | 'SHP-ACOS';
+export type PdtVerdictAksiKode = 'SHP-ROAS' | 'SHP-ACOS' | 'SHP-KREATOR-AKTIF';
 
-export type PdtVerdictSatuan = 'rasio' | 'persen';
+export type PdtVerdictSatuan = 'rasio' | 'persen' | 'hitungan';
 
 export type PdtVerdictArah = 'naik' | 'turun';
 
@@ -82,6 +89,25 @@ export function evaluasiAcosShopee(
     targetNilai: bench.acosGood,
     satuanTarget: 'persen',
     arah: 'turun',
+  };
+}
+
+/**
+ * Aksi 6 — afiliasi/KOL Shopee aktif. "Aktif" = `gmv > 0` (definisi diketok
+ * pemilik), COUNT dihitung pemanggil dari `pdt_fact_creator_period` (satu
+ * baris/kreator/periode — COUNT baris yang `gmv > 0` = jumlah kreator aktif,
+ * pola sama `ringkasAfiliasiDariFakta` G3-05). Selalu mengembalikan hasil
+ * (beda dari ROAS/ACoS) — jumlah kreator selalu terhitung meski nol baris.
+ */
+export function evaluasiKreatorAktifShopee(jumlahKreatorAktif: number): PdtVerdictHasil {
+  return {
+    kodeAksi: 'SHP-KREATOR-AKTIF',
+    menyala: jumlahKreatorAktif === 0,
+    nilaiSekarang: jumlahKreatorAktif,
+    satuanSekarang: 'hitungan',
+    targetNilai: 1,
+    satuanTarget: 'hitungan',
+    arah: 'naik',
   };
 }
 

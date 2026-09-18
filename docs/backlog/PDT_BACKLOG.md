@@ -2146,6 +2146,40 @@ GMV bulanan otoritatif tetap entri manual AM (M6B P-E / M6D §3 Rule 11).
 > `where dibuat_oleh <> 'SYSTEM'`; tes `tambahVersiBenchmark: mint versi GLOBAL` yang
 > mengasumsikan versi TikTok aktif == versi global tertinggi → diganti baca `max(versi)` langsung.
 
+> **Status 2026-09-18 (sesi 42) — aksi 6 (afiliasi/KOL Shopee aktif) DIKODEKAN; `G4-03-DIVISI-STORE-OPS`
+> RESOLVED (opsi (c), read-only); aksi 5 masih tertunda murni karena angka Rupiah belum ada.**
+> Tiga ketokan langsung dari pemilik (`AskUserQuestion`, bukan mode otonom — semuanya keputusan
+> bisnis/routing Brief): **(1)** cancel rate (1) & GMV pesanan selesai (7) — opsi (c) dipilih:
+> TIDAK PERNAH menulis `pdt_usulan`, tetap metrik read-only di laporan/dashboard. **(2)** Aksi 2
+> (chat response, baru SIAP fakta dari G3-02a) — ketokan TERPISAH seperti dicatat baris di atas
+> ("jangan diasumsikan otomatis ikut store-ops"): jawabannya SAMA, read-only. **(3)** Aksi 5 (GMV
+> live Shopee) — definisi "absolut" (bukan per-jam) DIKETOK, tapi riset kode (sebelum ditanya)
+> memastikan NOL angka ambang live-GMV absolut di `pdt_benchmark`/`report_benchmark_shopee` mana
+> pun untuk platform mana pun (`gmv_per_jam_live` TikTok itu PER JAM, satuan beda, tidak bisa
+> dipakai ulang) — pemilik memilih TUNDA sampai ada angka Rupiah `good`/`warn`, TIDAK dikodekan.
+> **Aksi 6 sendiri:** pemicu paling konservatif dari tiga opsi yang diajukan — **nol kreator aktif**
+> (floor alami, bukan target COUNT dikarang — `report/shopee/bench.ts` memang nol kunci kreator),
+> `target_nilai` tetap **1** (keluar dari nol). Migrasi `20261116010000` (seed `pdt_usulan_katalog`
+> `SHP-KREATOR-AKTIF`, divisi `KOL` — bersih, beda dari 1/2/7; nol tabel/kolom baru, `satuan`
+> `hitungan` sudah ada di enum sejak G1-01). `packages/core/src/pdt/verdict.ts`
+> `evaluasiKreatorAktifShopee` (murni, SELALU mengembalikan hasil — beda ROAS/ACoS yang bisa
+> `null`) + `packages/domain/src/pdt-verdict.ts` (baca `bacaFaktaCreatorPeriode` G3-05, COUNT baris
+> `gmv > 0`; nol benchmark dikonsumsi — mesin direstrukturkan supaya aksi ini tetap dievaluasi walau
+> `pdt_benchmark` platform='shopee' kosong). Rule 30 (≥6 aksi Shopee **actionable**): **3 dari ≥6**
+> (ROAS, ACoS, kreator aktif) — 1/2/7 PERMANEN tidak akan pernah menyumbang (read-only, RESOLVED),
+> sisa jalur ke 6 lewat aksi 4 (diskon/flash sale, masih nol fakta+parser) dan/atau aksi 5 (menunggu
+> angka Rp dari pemilik). **Bug sampingan ditemukan+diperbaiki:** `pdt.test.ts` `afterEach` tidak
+> pernah menghapus `pdt_usulan` sebelum `pdt_upload_batch` (FK `batch_id` tanpa `ON DELETE CASCADE`)
+> — laten sejak Tahap 1 karena fixture Shopee berkas itu tidak pernah memicu ROAS/ACoS, langsung
+> pecah begitu aksi 6 SELALU menyala untuk fixture tanpa kreator (mencemari namespace `ZZ-%` bersama
+> lintas berkas tes lain via `fileParallelism: false` sequential run) → ditambah baris cleanup dengan
+> urutan FK yang sama. Diverifikasi: `db-rebuild.sh --yes` 267 migrasi + gate/4 invariant lolos;
+> `npm test --workspaces` 2858/2859 (1 skip pra-ada, +5 tes baru: 2 unit `verdict.test.ts` + 3
+> integrasi `pdt-verdict.test.ts`); `npm test --prefix web-internal` 795/795 (tidak tersentuh);
+> `typecheck --workspaces` + `tsc --noEmit` web-internal + `eslint apps/api --max-warnings 0` bersih.
+> Rincian lengkap ketokan: `docs/DECISIONS.md` 2026-09-18 (baris Decided) + `G4-03-DIVISI-STORE-OPS`
+> (RESOLVED) + `G4-03-KATALOG-KESIAPAN` (UPDATE).
+
 ---
 
 ## 5. G5 — Product Exchange — ⛔ **DIBLOKIR, jangan dijadwalkan**
