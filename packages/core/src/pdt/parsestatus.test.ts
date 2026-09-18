@@ -6,6 +6,7 @@ import {
   renormalisasiDimensi,
   totalSkorDimensi,
   turunkanParseStatus,
+  validasiKolomOpsional,
   validasiKolomWajib,
   type PdtDimensiSkor,
 } from './parsestatus';
@@ -157,6 +158,72 @@ describe('turunkanParseStatus (Rule 10)', () => {
       kolomWajibGagal: [{ kolom: 'X', pesan: 'pesan X' }],
     });
     expect(hasil.error).toBe('gagal dekode');
+  });
+
+  it('sebagian (G1-08-SEBAGIAN) — kolom wajib lengkap, kolom opsional hilang', () => {
+    const hasil = turunkanParseStatus({
+      decodeGagal: null,
+      kolomWajibGagal: [],
+      kolomOpsionalGagal: [{ kolom: 'Minggu', pesan: "[kolom opsional 'Minggu' tidak ditemukan di berkas]" }],
+    });
+    expect(hasil).toEqual({ status: 'sebagian', error: "[kolom opsional 'Minggu' tidak ditemukan di berkas]" });
+  });
+
+  it('kolom wajib gagal menang atas kolom opsional gagal bila keduanya terjadi (Rule 9 lebih dulu secara logis)', () => {
+    const hasil = turunkanParseStatus({
+      decodeGagal: null,
+      kolomWajibGagal: [{ kolom: 'ID Kreator', pesan: "[kolom wajib 'ID Kreator' tidak ditemukan di berkas]" }],
+      kolomOpsionalGagal: [{ kolom: 'Minggu', pesan: "[kolom opsional 'Minggu' tidak ditemukan di berkas]" }],
+    });
+    expect(hasil.status).toBe('gagal');
+    expect(hasil.error).toContain('ID Kreator');
+  });
+
+  it('kolomOpsionalGagal diabaikan bila tidak diberikan (backward-compat, pemanggil lama)', () => {
+    expect(turunkanParseStatus({ decodeGagal: null, kolomWajibGagal: [] })).toEqual({ status: 'ok', error: null });
+  });
+});
+
+describe('validasiKolomOpsional (G1-08-SEBAGIAN)', () => {
+  const header = ['Kode Produk', 'GMV dari kreator'];
+
+  it('kosong bila semua kolom opsional ada', () => {
+    expect(validasiKolomOpsional(header, ['Kode Produk'])).toEqual([]);
+  });
+
+  it('pesan menyebut "kolom opsional" (BEDA dari "kolom wajib") — menyebut nama kolom yang hilang', () => {
+    const gagal = validasiKolomOpsional(header, ['Minggu']);
+    expect(gagal).toEqual([{ kolom: 'Minggu', pesan: "[kolom opsional 'Minggu' tidak ditemukan di berkas]" }]);
+  });
+
+  it('alias menyelamatkan kolom opsional dari dianggap hilang', () => {
+    expect(validasiKolomOpsional(header, ['GMV Kreator'], { 'GMV Kreator': ['GMV dari kreator'] })).toEqual([]);
+  });
+});
+
+describe('PDT_MODULES.kolomOpsional (G1-08-SEBAGIAN) — subset kolomDipanen, tidak pernah seluruhnya', () => {
+  it('setiap modul ber-kolomOpsional: seluruh anggotanya ada di kolomDipanen modul yang sama', () => {
+    for (const m of PDT_MODULES) {
+      const dipanen = new Set(m.kolomDipanen);
+      for (const k of m.kolomOpsional ?? []) {
+        expect(dipanen.has(k), `${m.kode}.kolomOpsional punya '${k}' yang bukan bagian kolomDipanen`).toBe(true);
+      }
+    }
+  });
+
+  it('meta_ads — validasiKolomWajib (whitelist minus kolomOpsional) tetap lolos tanpa "Minggu"', () => {
+    const header = [
+      'Nama kampanye', 'Nama iklan', 'Jumlah yang dibelanjakan (IDR)',
+      'Nilai Konversi Pembelian Khusus untuk Item Bersama', 'ROAS pembelian khusus untuk item bersama',
+      'Impresi', 'Klik tautan', 'CTR Unik (rasio klik tayang tautan)', 'CPM (Biaya Per 1.000 Tayangan)',
+      'CPC (biaya per klik tautan)',
+    ];
+    const opsional = kolomDipanenModul('meta_ads').filter((k) => (PDT_MODULES.find((m) => m.kode === 'meta_ads')!.kolomOpsional ?? []).includes(k));
+    const wajib = kolomDipanenModul('meta_ads').filter((k) => !opsional.includes(k));
+    expect(validasiKolomWajib(header, wajib)).toEqual([]);
+    expect(validasiKolomOpsional(header, opsional)).toEqual([
+      { kolom: 'Minggu', pesan: "[kolom opsional 'Minggu' tidak ditemukan di berkas]" },
+    ]);
   });
 });
 

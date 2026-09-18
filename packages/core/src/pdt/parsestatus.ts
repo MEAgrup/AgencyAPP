@@ -2,18 +2,17 @@
  * PDT (Pusat Data Toko) — kegagalan parse tidak ditelan (G1-08, PRD §3.2
  * Rule 9-10, PDT_BACKLOG.md G1-08).
  *
- * Fungsi murni saja — nol I/O, nol DB. Pemanggil (belum ada, G1-09) yang
- * menulis `pdt_file.parse_status`/`parse_error`.
+ * Fungsi murni saja — nol I/O, nol DB. Pemanggil (`@cdps/domain` `pdt.ts`)
+ * yang menulis `pdt_file.parse_status`/`parse_error`.
  *
- * ⚠️ **Status `sebagian` BELUM punya pemicu terdefinisi.** `pdt_file.parse_status`
- * (migrasi G1-01) sudah punya CHECK `ok`/`sebagian`/`gagal`, tapi PRD/backlog
- * tidak pernah merinci APA yang membuat suatu berkas `sebagian` (bukan `ok`
- * atau `gagal`) — kandidat paling wajar ("kolom OPSIONAL hilang, kolom WAJIB
- * lengkap") butuh pembedaan bucket-1 (wajib)/bucket-2 (opsional) PER KOLOM di
- * `PdtModuleDef.kolomDipanen`, yang hari ini masih array datar tanpa
- * pembedaan itu (lihat `PDT_KOLOM_DIPANEN.md` yang membedakannya per
- * dokumen, bukan per kode). Fungsi di sini SENGAJA hanya menurunkan `ok`/
- * `gagal` — dicatat `docs/DECISIONS.md` G1-08-SEBAGIAN, bukan ditebak.
+ * **Pemicu `sebagian` (G1-08-SEBAGIAN, `docs/DECISIONS.md` — opsi (a)
+ * diketok pemilik):** kolom WAJIB (`PdtModuleDef.kolomDipanen` minus
+ * `kolomOpsional`) lengkap, TAPI satu atau lebih kolom OPSIONAL
+ * (`PdtModuleDef.kolomOpsional` — persis "Bucket 2 (derived-add)"
+ * `PDT_KOLOM_DIPANEN.md` per modul) hilang. Berkas `sebagian` TETAP dipakai
+ * untuk ekstraksi/rekonsiliasi (beda dari `gagal`) — hanya konsekuensinya
+ * yang berbeda: dimensi laporan yang membaca kolom opsional itu (Rule 12)
+ * jadi tidak tersedia, BUKAN batch ditolak.
  */
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
@@ -44,6 +43,20 @@ export interface PdtKolomWajibGagal {
   pesan: string;
 }
 
+function cariKolomGagal(
+  header: readonly unknown[],
+  kolom: readonly string[],
+  aliasPerKolom: Readonly<Record<string, readonly string[]>>,
+  label: 'wajib' | 'opsional',
+): PdtKolomWajibGagal[] {
+  const gagal: PdtKolomWajibGagal[] = [];
+  for (const k of kolom) {
+    const hasil = cariKolomWajib(header, k, aliasPerKolom[k] ?? []);
+    if (!hasil.ditemukan) gagal.push({ kolom: k, pesan: `[kolom ${label} '${k}' tidak ditemukan di berkas]` });
+  }
+  return gagal;
+}
+
 /**
  * Rule 9: validasi SELURUH kolom wajib sebuah modul terhadap satu header.
  * Setiap kolom yang tidak ditemukan DAN tidak punya alias yang cocok masuk
@@ -55,38 +68,53 @@ export function validasiKolomWajib(
   kolomWajib: readonly string[],
   aliasPerKolom: Readonly<Record<string, readonly string[]>> = {},
 ): PdtKolomWajibGagal[] {
-  const gagal: PdtKolomWajibGagal[] = [];
-  for (const kolom of kolomWajib) {
-    const hasil = cariKolomWajib(header, kolom, aliasPerKolom[kolom] ?? []);
-    if (!hasil.ditemukan) gagal.push({ kolom, pesan: `[kolom wajib '${kolom}' tidak ditemukan di berkas]` });
-  }
-  return gagal;
+  return cariKolomGagal(header, kolomWajib, aliasPerKolom, 'wajib');
 }
 
-export type PdtParseStatus = 'ok' | 'gagal';
+/**
+ * G1-08-SEBAGIAN: sama seperti `validasiKolomWajib`, tapi untuk
+ * `PdtModuleDef.kolomOpsional` — kehilangannya TIDAK menggagalkan berkas,
+ * hanya menurunkan status ke `sebagian` (lihat `turunkanParseStatus`).
+ */
+export function validasiKolomOpsional(
+  header: readonly unknown[],
+  kolomOpsional: readonly string[],
+  aliasPerKolom: Readonly<Record<string, readonly string[]>> = {},
+): PdtKolomWajibGagal[] {
+  return cariKolomGagal(header, kolomOpsional, aliasPerKolom, 'opsional');
+}
+
+export type PdtParseStatus = 'ok' | 'sebagian' | 'gagal';
 
 export interface PdtParseStatusHasil {
   status: PdtParseStatus;
-  /** `null` hanya bila `status === 'ok'` — cermin CHECK `ck_pdt_file_parse_error` (G1-01). */
+  /** `null` hanya bila `status === 'ok'` — cermin CHECK `ck_pdt_file_parse_error` (G1-01). `sebagian` JUGA wajib mengisi ini (constraint sama seperti `gagal`). */
   error: string | null;
 }
 
 /**
  * Rule 10: turunkan `parse_status`/`parse_error` dari kegagalan dekode
- * (G1-05, `PdtParseGagal.pesan`) DAN kolom wajib yang hilang (Rule 9) —
- * dua sumber kegagalan berbeda, satu status. **"Berkas tidak diunggah"
- * TIDAK PERNAH dipakai di sini** — parameter fungsi ini secara struktural
- * hanya bisa dipanggil untuk berkas yang SUDAH ada isinya (entri ZIP yang
- * `bacaDanEkstrakPdtZip` sudah ekstrak); ketidakhadiran berkas sama sekali
- * bukan kegagalan PARSE dan tidak pernah lewat fungsi ini.
+ * (G1-05, `PdtParseGagal.pesan`), kolom wajib yang hilang (Rule 9), DAN
+ * kolom opsional yang hilang (G1-08-SEBAGIAN) — tiga sumber, satu status,
+ * diprioritaskan dalam urutan itu (decode > wajib > opsional). **"Berkas
+ * tidak diunggah" TIDAK PERNAH dipakai di sini** — parameter fungsi ini
+ * secara struktural hanya bisa dipanggil untuk berkas yang SUDAH ada isinya
+ * (entri ZIP yang `bacaDanEkstrakPdtZip` sudah ekstrak); ketidakhadiran
+ * berkas sama sekali bukan kegagalan PARSE dan tidak pernah lewat fungsi
+ * ini.
  */
 export function turunkanParseStatus(input: {
   decodeGagal: string | null;
   kolomWajibGagal: readonly PdtKolomWajibGagal[];
+  kolomOpsionalGagal?: readonly PdtKolomWajibGagal[];
 }): PdtParseStatusHasil {
   if (input.decodeGagal != null) return { status: 'gagal', error: input.decodeGagal };
   if (input.kolomWajibGagal.length > 0) {
     return { status: 'gagal', error: input.kolomWajibGagal.map((g) => g.pesan).join('; ') };
+  }
+  const opsionalGagal = input.kolomOpsionalGagal ?? [];
+  if (opsionalGagal.length > 0) {
+    return { status: 'sebagian', error: opsionalGagal.map((g) => g.pesan).join('; ') };
   }
   return { status: 'ok', error: null };
 }

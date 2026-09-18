@@ -9091,7 +9091,7 @@ export interface PdtPreviewBerkasWire {
   baris_header: number | null;
   kolom_dipanen: number;
   kolom_baru: string[];
-  status: string; // 'ok' | 'perlu_pilih_modul' | 'gagal' | 'ditolak_pagar'
+  status: string; // 'ok' | 'sebagian' | 'perlu_pilih_modul' | 'gagal' | 'ditolak_pagar'
   pesan: string | null;
   sha256: string | null;
   bytes: number | null;

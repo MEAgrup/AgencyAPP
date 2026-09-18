@@ -101,6 +101,33 @@ describeDb('PDT modules — TS ≡ pdt_parser_modul', () => {
       expect([...byKode.get(m.kode)!].sort(), m.kode).toEqual([...m.kolomDipanen].sort());
     }
   });
+
+  it('kolom_opsional (text[]) ≡ kolomOpsional TS, set-equal (G1-08-SEBAGIAN)', async () => {
+    const rows = await db()<{ kode: string; kolom_opsional: string[] }[]>`select kode, kolom_opsional from pdt_parser_modul`;
+    const byKode = new Map(rows.map((r) => [r.kode, r.kolom_opsional]));
+    for (const m of pdt.PDT_MODULES) {
+      expect([...byKode.get(m.kode)!].sort(), m.kode).toEqual([...(m.kolomOpsional ?? [])].sort());
+    }
+  });
+});
+
+describe('PDT modules (TS) — kolomOpsional invariant (G1-08-SEBAGIAN)', () => {
+  it('kolomOpsional (bila ada) SELALU subset kolomDipanen — nol kolom opsional yang tidak dipanen', () => {
+    for (const m of pdt.PDT_MODULES) {
+      const dipanen = new Set(m.kolomDipanen);
+      for (const k of m.kolomOpsional ?? []) {
+        expect(dipanen.has(k), `${m.kode}.kolomOpsional punya '${k}' yang tidak ada di kolomDipanen`).toBe(true);
+      }
+    }
+  });
+
+  it('kolomOpsional TIDAK PERNAH sama dengan seluruh kolomDipanen — selalu ada setidaknya satu kolom wajib', () => {
+    for (const m of pdt.PDT_MODULES) {
+      const opsional = m.kolomOpsional ?? [];
+      if (opsional.length === 0) continue; // modul tanpa kolomOpsional (termasuk shopee_video, kolomDipanen-nya sendiri kosong) — tidak relevan
+      expect(opsional.length, `${m.kode} — seluruh kolomDipanen jadi opsional, nol kolom wajib tersisa`).toBeLessThan(m.kolomDipanen.length);
+    }
+  });
 });
 
 describeDb('PDT alias — TS ≡ pdt_kolom_alias', () => {

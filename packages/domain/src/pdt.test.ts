@@ -653,6 +653,19 @@ describeDb('previewUploadBatch (G1-09) — status per berkas', () => {
     });
   });
 
+  it('G1-08-SEBAGIAN: kolom wajib LENGKAP tapi kolom opsional (ACOS) HILANG ⇒ status sebagian, pesan menyebut ACOS', async () => {
+    const cpId = await fixture();
+    const berkas = shopeeAdsCpcBerkas('e2.xlsx', '111', '01/07/2026 - 31/07/2026');
+    // Buang kolom ACOS (satu-satunya kolomOpsional shopee_ads_cpc) dari header DAN baris data —
+    // 8 kolom wajib sisanya tetap lengkap.
+    (berkas.aoa as unknown[][])[7] = (berkas.aoa as unknown[][])[7].slice(0, -1);
+    (berkas.aoa as unknown[][])[8] = (berkas.aoa as unknown[][])[8].slice(0, -1);
+    const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [berkas]);
+    expect(hasil.berkas[0]).toMatchObject({ status: 'sebagian', modulKode: 'shopee_ads_cpc', kolomDipanen: 8 });
+    expect(hasil.berkas[0].pesan).toContain('opsional');
+    expect(hasil.berkas[0].pesan).toContain('ACOS');
+  });
+
   it('modul terdeteksi, kolom wajib HILANG ⇒ status gagal, pesan menyebut nama kolom (Rule 9)', async () => {
     const cpId = await fixture();
     const input: PdtPreviewBerkasInput = {
@@ -682,6 +695,19 @@ describeDb('previewUploadBatch (G1-09) — identitas (Rule 2-4) + periode (Rule 
     await insertClient(clientId, OWNER_AM);
     const cpId = await insertClientPlatform(clientId, 'Shopee', null);
     const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')]);
+    expect(hasil.identitas).toEqual({ status: 'usulkan_ikat', usulan: '938284780' });
+    expect(hasil.periode).toEqual({ status: 'ok', mulai: '2026-07-01', selesai: '2026-07-31' });
+  });
+
+  it('G1-08-SEBAGIAN: berkas status sebagian TETAP dipakai untuk identitas/periode (beda dari gagal)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', null);
+    const berkas = shopeeAdsCpcBerkas('a2.xlsx', '938284780', '01/07/2026 - 31/07/2026');
+    (berkas.aoa as unknown[][])[7] = (berkas.aoa as unknown[][])[7].slice(0, -1); // buang kolom ACOS (opsional)
+    (berkas.aoa as unknown[][])[8] = (berkas.aoa as unknown[][])[8].slice(0, -1);
+    const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [berkas]);
+    expect(hasil.berkas[0].status).toBe('sebagian');
     expect(hasil.identitas).toEqual({ status: 'usulkan_ikat', usulan: '938284780' });
     expect(hasil.periode).toEqual({ status: 'ok', mulai: '2026-07-01', selesai: '2026-07-31' });
   });
