@@ -449,6 +449,44 @@ export async function bacaFaktaKesehatanPenalti(
   }));
 }
 
+export interface PdtFaktaLayananChatBaris extends PdtSumberBatch {
+  chatMasuk: number | null;
+  chatDibalas: number | null;
+  waktuResponDetik: number | null;
+}
+
+/**
+ * Baris `pdt_fact_layanan_chat` bulan berjalan (satu baris ringkasan per
+ * unggahan `shopee_chat`, G3-02a) — dipakai G3-02 (`chatResponseRatePersen`
+ * = Σ`chatDibalas`/Σ`chatMasuk`×100, `chatResponseMenit` dari rata-rata
+ * `waktuResponDetik`÷60 — pemanggil yang menjumlahkan, pola ratio-of-sums
+ * sama seperti `bacaFaktaKesehatanPenalti`/seluruh rasio PDT lain).
+ * `pengunjung`/`csatPersen`/`totalPesanan`/`penjualan`/
+ * `tingkatKonversiChatDibalas` TIDAK dibaca di sini — nol konsumen hari ini
+ * (insight-only, lihat docblock kolom di migrasi).
+ */
+export async function bacaFaktaLayananChat(
+  sql: Queryable,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+): Promise<PdtFaktaLayananChatBaris[]> {
+  const rows = await sql<
+    { chat_masuk: number | null; chat_dibalas: number | null; waktu_respon_detik: number | null; batch_id: number; parser_versi: number }[]
+  >`
+    select chat_masuk, chat_dibalas, waktu_respon_detik, batch_id, parser_versi
+      from pdt_fact_layanan_chat
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date`;
+
+  return rows.map((r) => ({
+    chatMasuk: r.chat_masuk,
+    chatDibalas: r.chat_dibalas,
+    waktuResponDetik: r.waktu_respon_detik,
+    batchId: r.batch_id,
+    parserVersi: r.parser_versi,
+  }));
+}
+
 export interface PdtPeriodeTerverifikasi extends PdtSumberBatch {
   /** Awal bulan (`pdt_upload_batch.periode_mulai`) — dipakai sebagai `periodeAwalBulan` ke pembaca lain di modul ini. */
   periodeAwalBulan: string;

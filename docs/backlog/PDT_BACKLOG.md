@@ -1651,10 +1651,10 @@ tabel (bukan dipaksa satu bentuk):
 - `refundRatePersen` ← `pdt_fact_shop_daily.refund / gmv`.
 - `pengunjungPerBulan`/`conversionRatePersen` ← `pdt_fact_shop_daily.pengunjung`/`cr`.
 - `poinPenalti` ← `pdt_fact_kesehatan_penalti.poin` (Σ periode, sudah ada sejak G2-01).
-- ⛔ **Prasyarat belum terpenuhi**: `chatResponseRatePersen`/`chatResponseMenit` **butuh tabel
-  fakta baru** (nol writer hari ini — lihat catatan status di atas). Sub-tiket tersendiri
-  (`G3-02a`, pola sama `20261106010000_g2_01_shopee_kesehatan_writer.sql`) sebelum kedua field
-  ini bisa autofill; jangan ditebak dari kolom yang tidak ada.
+- ✅ **`G3-02a` DITUTUP (2026-09-18)** — `chatResponseRatePersen`/`chatResponseMenit` ← tabel
+  fakta baru `pdt_fact_layanan_chat` (`shopee_chat` writer, pola sama
+  `20261106010000_g2_01_shopee_kesehatan_writer.sql`). Rincian lengkap di bawah blok DITUTUP
+  G3-02.
 
 **Status 2026-09-17 (sesi 39) — DITUTUP.** Migrasi `20261112010000_g3_02_periode_referensi_pdt.sql`
 menambah `strategi_channel.periode_referensi_pdt` (date, awal bulan, nullable — CHECK
@@ -1683,6 +1683,38 @@ termasuk poinPenalti Shopee) — full suite domain 2830/2831 (1 skip, bukan regr
 core/db package suites, dan `web-internal` (test + build) semuanya hijau. **G3-03..G3-06 sekarang
 punya jalur `periodeReferensiPdtSaran` siap pakai — sub-tiket berikutnya tinggal memanggil
 `pdt-prefill.ts` dengan periode itu, pola identik ticket ini.**
+
+**Status 2026-09-18 (sesi 42) — `G3-02a` DITUTUP: `shopee_chat` → `pdt_fact_layanan_chat`.**
+Modul `shopee_chat` ("Performa Chat", sheet "Kriteria Utama") terdaftar+terdeteksi sejak G1-02
+tapi nol penulis fakta sampai tiket ini (`docs/DECISIONS.md` `G4-03-KATALOG-KESIAPAN` sudah
+mencatatnya sebagai gap #2, dan G3-02 mencatatnya sebagai prasyarat belum terpenuhi). Migrasi
+`20261115010000_g3_02a_shopee_chat_writer.sql` menambah `pdt_fact_layanan_chat` (satu baris
+ringkasan per unggahan, replace-on-recommit — pola sama `pdt_fact_kesehatan_penalti`, nol
+identitas natural per-baris di sumber). `ekstrakBarisLayananChatShopee` (`@cdps/core`
+`pdt/fakta.ts`) membaca `Pengunjung`/`Jumlah Chat`/`Chat Dibalas`/`Waktu Respon Rata-rata`/
+`CSAT %`/`Total Pesanan`/`Penjualan (IDR)`/`Tingkat Konversi (Chat Dibalas)` — format angka
+Seller Center (BUKAN `raw=true` Ads Manager, modul ini bukan ekspor AMS). Dipanggil
+`commitUploadBatch`+`reparsePdtBatch` (pola sama sembilan writer lain). `pdt-prefill.ts`
+`bacaFaktaLayananChat` membaca `chat_masuk`/`chat_dibalas`/`waktu_respon_detik` MENTAH (bukan
+rasio pra-hitung); `strategi.ts` `getBaselinePrefill` menghitung `chatResponseRatePersen` =
+Σ`chatDibalas`/Σ`chatMasuk`×100 (ratio-of-sums, pola sama seluruh rasio PDT lain — BUKAN dari
+kolom `Tingkat Konversi (Chat Dibalas)`, yang semantiknya beda dan tetap disimpan APA ADANYA
+sebagai insight, `modules.ts` sudah mendokumentasikan ini) dan `chatResponseMenit` = rata-rata
+`waktuResponDetik`÷60 dibulatkan (Shopee mengekspor detik, dikonfirmasi `docs/DECISIONS.md`
+2026-09-06 "B-4 Shopee otomatis" — jalur payload lama yang sudah memakai kolom sumber yang sama).
+Kedua field sekarang mengikuti pola G3-02 lain: sumber `pdt_fact_*` menang bila periode acuan
+resolve ke batch verified sungguhan, jatuh ke payload lama bila `null`. `pengunjung`/`csatPersen`/
+`totalPesanan`/`penjualan`/`tingkatKonversiChatDibalas` disimpan tapi BELUM ada konsumen (insight,
+menyusul kalau ada yang butuh — pola sama `deskripsi`/`durasi` kesehatan). **Konsekuensi untuk
+`G4-03-KATALOG-KESIAPAN` (Rule 30, ≥6 aksi Shopee):** aksi 2 (chat response rate) sekarang PUNYA
+fakta (dulu 🔴 nol fakta) — ambang JUGA sudah ada (`report_benchmark_shopee`
+`chat_response_rate_good: 0.95`) — tapi `divisi_tujuan`-nya BELUM diketok (gap sama
+`G4-03-DIVISI-STORE-OPS`? **TIDAK** — chat response rate adalah metrik LAYANAN/CS, bukan store-ops
+seperti cancel rate/GMV; katalog verdict aksi 2 TETAP di luar cakupan tiket ini, dicatat sebagai
+kandidat sesi berikutnya, bukan diasumsikan otomatis mengikuti G4-03-DIVISI-STORE-OPS). Nol
+migrasi lain, nol perubahan skema di luar SATU tabel baru. Diverifikasi: `db-rebuild.sh` bersih
+(266 migrasi + gate/invariant lolos); full suite `npm test --workspaces` + `npm test --prefix
+web-internal` hijau (rincian jumlah di commit/PR); typecheck+lint bersih.
 
 ### G3-03 · Dimensi SKU (B-2 portofolio SKU)
 

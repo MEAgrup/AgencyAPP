@@ -12,6 +12,7 @@ import {
   ekstrakBarisSkuMasterShopeeParentSku,
   ekstrakBarisSkuMasterTtOrders,
   ekstrakBarisKesehatanShopee,
+  ekstrakBarisLayananChatShopee,
   ekstrakBarisTtAdsLive,
   ekstrakBarisTtAdsProduct,
   ekstrakBarisTtAffiliateVideo,
@@ -1172,5 +1173,78 @@ describe('ekstrakBarisKesehatanShopee (G2-01-SHOPEE-KESEHATAN-WRITER)', () => {
     expect(ekstrakBarisKesehatanShopee(aoa, 1)).toEqual([
       { poin: 2, deskripsi: 'Pelanggaran', durasi: '' },
     ]);
+  });
+});
+
+const HEADER_SHOPEE_CHAT = [
+  'Periode Waktu', 'Pengunjung', 'Jumlah Chat', 'Chat Dibalas', 'Waktu Respon Rata-rata', 'CSAT %',
+  'Total Pesanan', 'Penjualan (IDR)', 'Tingkat Konversi (Chat Dibalas)',
+];
+
+describe('ekstrakBarisLayananChatShopee (G3-02a)', () => {
+  it('memetakan satu baris ringkasan lengkap, angka format Seller Center', () => {
+    const aoa = [
+      HEADER_SHOPEE_CHAT,
+      ['01/08/2026 - 31/08/2026', '1.234', '200', '180', '95', '4,8', '50', '15.000.000', '25,5'],
+    ];
+    expect(ekstrakBarisLayananChatShopee(aoa, 1)).toEqual([
+      {
+        pengunjung: 1234,
+        chatMasuk: 200,
+        chatDibalas: 180,
+        waktuResponDetik: 95,
+        csatPersen: 4.8,
+        totalPesanan: 50,
+        penjualan: 15000000,
+        tingkatKonversiChatDibalas: 25.5,
+      },
+    ]);
+  });
+
+  it('sheet TANPA baris data ⇒ array kosong, BUKAN error', () => {
+    const aoa = [HEADER_SHOPEE_CHAT];
+    expect(ekstrakBarisLayananChatShopee(aoa, 1)).toEqual([]);
+  });
+
+  it('baris ber-"Periode Waktu" kosong dilewati (bukan baris data sungguhan)', () => {
+    const aoa = [HEADER_SHOPEE_CHAT, ['', '', '', '', '', '', '', '', '']];
+    expect(ekstrakBarisLayananChatShopee(aoa, 1)).toEqual([]);
+  });
+
+  it('kolom hilang ⇒ null untuk field itu, bukan error (mis. sample tanpa CSAT)', () => {
+    const aoa = [
+      ['Periode Waktu', 'Jumlah Chat', 'Chat Dibalas', 'Waktu Respon Rata-rata'],
+      ['Agu 2026', '100', '90', '120'],
+    ];
+    const hasil = ekstrakBarisLayananChatShopee(aoa, 1);
+    expect(hasil).toEqual([
+      {
+        pengunjung: null,
+        chatMasuk: 100,
+        chatDibalas: 90,
+        waktuResponDetik: 120,
+        csatPersen: null,
+        totalPesanan: null,
+        penjualan: null,
+        tingkatKonversiChatDibalas: null,
+      },
+    ]);
+  });
+
+  it('"Tingkat Konversi (Chat Dibalas)" disimpan apa adanya, TIDAK dipakai sebagai response rate', () => {
+    // Response rate sungguhan (chatDibalas/chatMasuk = 180/200 = 90%) berbeda dari
+    // "Tingkat Konversi (Chat Dibalas)" (25,5% di sample) — dua kolom semantiknya beda,
+    // pemanggil (pdt-prefill.ts) TIDAK boleh membaca kolom ini sebagai response rate.
+    const aoa = [
+      HEADER_SHOPEE_CHAT,
+      ['Agu 2026', '1.000', '200', '180', '95', '4,8', '50', '15.000.000', '25,5'],
+    ];
+    const hasil = ekstrakBarisLayananChatShopee(aoa, 1)[0];
+    const chatDibalas = hasil.chatDibalas ?? NaN;
+    const chatMasuk = hasil.chatMasuk ?? NaN;
+    expect(chatDibalas).toBe(180);
+    expect(chatMasuk).toBe(200);
+    expect(hasil.tingkatKonversiChatDibalas).toBe(25.5);
+    expect(hasil.tingkatKonversiChatDibalas).not.toBe((chatDibalas / chatMasuk) * 100);
   });
 });

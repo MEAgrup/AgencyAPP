@@ -2239,6 +2239,8 @@ export async function getBaselinePrefill(
     let pdtPengunjungPerBulan: number | null = null;
     let pdtConversionRatePersen: number | null = null;
     let pdtPoinPenalti: number | null = null;
+    let pdtChatResponseRatePersen: number | null = null;
+    let pdtChatResponseMenit: number | null = null;
     let pdtPeriodeReferensi: string | null = null;
     // G3-05 (gmvAffiliatePersen) butuh GMV toko periode yang sama — dihoist di
     // sini supaya tidak query `bacaFaktaShopDaily` dua kali untuk baris yang sama.
@@ -2254,12 +2256,26 @@ export async function getBaselinePrefill(
           fakta.pengunjung !== null && fakta.pengunjung > 0 ? (fakta.pesanan / fakta.pengunjung) * 100 : null;
         pdtGmvTokoBulan = fakta.gmv;
       }
-      // B-4 — poin penalti Shopee-only (nol writer TikTok, `pdt_fact_kesehatan_penalti`
-      // pola sama `chatResponseRatePersen`/`chatResponseMenit`, keduanya TETAP
-      // payload-only sampai G3-02a membangun tabel faktanya — lihat backlog).
+      // B-4 — poin penalti Shopee-only (nol writer TikTok, `pdt_fact_kesehatan_penalti`).
+      // `chatResponseRatePersen`/`chatResponseMenit` juga Shopee-only (nol writer
+      // TikTok) — G3-02a membangun `pdt_fact_layanan_chat`, dibaca di sini sekarang.
       if (channel === 'Shopee') {
         const penalti = await pdtPrefill.bacaFaktaKesehatanPenalti(sql, clientPlatformIdNum, periodeReferensiPdtSaran);
         if (penalti.length > 0) pdtPoinPenalti = penalti.reduce((sum, p) => sum + p.poin, 0);
+
+        const layananChat = await pdtPrefill.bacaFaktaLayananChat(sql, clientPlatformIdNum, periodeReferensiPdtSaran);
+        if (layananChat.length > 0) {
+          const sigmaChatMasuk = layananChat.reduce((sum, r) => sum + (r.chatMasuk ?? 0), 0);
+          const sigmaChatDibalas = layananChat.reduce((sum, r) => sum + (r.chatDibalas ?? 0), 0);
+          pdtChatResponseRatePersen = sigmaChatMasuk > 0 ? (sigmaChatDibalas / sigmaChatMasuk) * 100 : null;
+          const waktuResponValid = layananChat
+            .map((r) => r.waktuResponDetik)
+            .filter((v): v is number => v !== null);
+          pdtChatResponseMenit =
+            waktuResponValid.length > 0
+              ? Math.round(waktuResponValid.reduce((sum, v) => sum + v, 0) / waktuResponValid.length / 60)
+              : null;
+        }
       }
     }
 
@@ -2393,8 +2409,8 @@ export async function getBaselinePrefill(
       periodeReferensiPdtSaran,
       periodeReferensiPdtOpsi: periodeReferensiOpsi.map((p) => p.periodeAwalBulan),
       refundRatePersen: pdtRefundRatePersen ?? b.refundRatePersen,
-      chatResponseRatePersen: b.chatResponseRatePersen,
-      chatResponseMenit: b.chatResponseMenit,
+      chatResponseRatePersen: pdtChatResponseRatePersen ?? b.chatResponseRatePersen,
+      chatResponseMenit: pdtChatResponseMenit ?? b.chatResponseMenit,
       poinPenalti: pdtPoinPenalti ?? b.poinPenalti,
       pengunjungPerBulan: pdtPengunjungPerBulan ?? b.pengunjungPerBulan,
       conversionRatePersen: pdtConversionRatePersen ?? b.conversionRatePersen,

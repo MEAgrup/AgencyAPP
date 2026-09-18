@@ -847,6 +847,11 @@ export async function commitUploadBatch(
   // (lihat docblock `ekstrakBarisKesehatanShopee`, `@cdps/core` `pdt/fakta.ts`) — modul
   // ini terdaftar+terdeteksi sejak awal, tapi belum pernah punya penulis fakta sama sekali.
   const berkasShopeeKesehatan = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_kesehatan');
+  // G3-02a — `shopee_chat` → `pdt_fact_layanan_chat` (lihat docblock
+  // `ekstrakBarisLayananChatShopee`, `@cdps/core` `pdt/fakta.ts`) — modul ini
+  // terdaftar+terdeteksi sejak G1-09 sub-2b-ii, tapi belum pernah punya
+  // penulis fakta sama sekali sampai tiket ini.
+  const berkasShopeeChat = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_chat');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -897,7 +902,7 @@ export async function commitUploadBatch(
         berkasTtAffiliateVideo, shopIdTersimpan: row.shop_id,
         berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
         berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
-        berkasShopeeKesehatan,
+        berkasShopeeKesehatan, berkasShopeeChat,
       });
 
       // G4-03 Tahap 1 (Flow C langkah 1) — mesin verdict Shopee, HANYA saat batch
@@ -981,6 +986,7 @@ interface TulisFaktaModulTerparseInput {
   berkasTtAdsLive: readonly BerkasTerparse[];
   berkasTtProductAnalytics: readonly BerkasTerparse[];
   berkasShopeeKesehatan: readonly BerkasTerparse[];
+  berkasShopeeChat: readonly BerkasTerparse[];
 }
 
 /**
@@ -1015,7 +1021,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     berkasTtAffiliateVideo, shopIdTersimpan,
     berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
     berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
-    berkasShopeeKesehatan,
+    berkasShopeeKesehatan, berkasShopeeChat,
   } = input;
 
   // G1-09 sub-langkah 2b-ii — baris fakta tertipe, `shopee_ads_live` → `pdt_fact_ads`
@@ -1445,6 +1451,29 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
           values
             (${clientPlatformId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
              ${baris.poin}, ${baris.deskripsi}, ${baris.durasi})`;
+      }
+    }
+  }
+
+  // G3-02a — `shopee_chat` → `pdt_fact_layanan_chat` (lihat docblock
+  // `ekstrakBarisLayananChatShopee`, `@cdps/core` `pdt/fakta.ts`). Nol
+  // identitas natural per-baris di sumber (satu baris ringkasan per
+  // unggahan) — replace-on-recommit, pola sama `pdt_fact_kesehatan_penalti`.
+  if (berkasShopeeChat.length > 0) {
+    await tx`
+      delete from pdt_fact_layanan_chat
+       where client_platform_id = ${clientPlatformId} and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasShopeeChat) {
+      for (const baris of pdt.ekstrakBarisLayananChatShopee(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_layanan_chat
+            (client_platform_id, periode, batch_id, parser_versi, pengunjung, chat_masuk,
+             chat_dibalas, waktu_respon_detik, csat_persen, total_pesanan, penjualan,
+             tingkat_konversi_chat_dibalas)
+          values
+            (${clientPlatformId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
+             ${baris.pengunjung}, ${baris.chatMasuk}, ${baris.chatDibalas}, ${baris.waktuResponDetik},
+             ${baris.csatPersen}, ${baris.totalPesanan}, ${baris.penjualan}, ${baris.tingkatKonversiChatDibalas})`;
       }
     }
   }
@@ -2288,6 +2317,7 @@ export async function reparsePdtBatch(
         berkasTtAdsLive: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_live'),
         berkasTtProductAnalytics: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_product_analytics'),
         berkasShopeeKesehatan: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_kesehatan'),
+        berkasShopeeChat: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_chat'),
       });
 
       await tx`

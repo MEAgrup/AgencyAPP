@@ -14,6 +14,7 @@ import {
   bacaFaktaContent,
   bacaFaktaCreatorPeriode,
   bacaFaktaKesehatanPenalti,
+  bacaFaktaLayananChat,
   bacaFaktaShopDaily,
   bacaFaktaSkuPeriode,
   bacaPeriodeTerverifikasiTerbaru,
@@ -55,6 +56,7 @@ afterEach(async () => {
   await sql`delete from pdt_sku_master where client_platform_id in (select id from client_platforms where created_by = 'ZZPDTPF-TEST')`;
   await sql`delete from pdt_fact_shop_daily where client_platform_id in (select id from client_platforms where created_by = 'ZZPDTPF-TEST')`;
   await sql`delete from pdt_fact_kesehatan_penalti where client_platform_id in (select id from client_platforms where created_by = 'ZZPDTPF-TEST')`;
+  await sql`delete from pdt_fact_layanan_chat where client_platform_id in (select id from client_platforms where created_by = 'ZZPDTPF-TEST')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-ZPDTPF-%'`;
   await sql`delete from client_platforms where created_by = 'ZZPDTPF-TEST'`;
   await sql`delete from clients where created_by = 'ZZPDTPF-TEST'`;
@@ -283,6 +285,30 @@ describeDb('bacaFaktaKesehatanPenalti (G3-01)', () => {
     const hasil = await bacaFaktaKesehatanPenalti(sql, cpId, PERIODE);
     expect(hasil.map((r) => r.poin)).toEqual([10, 5]);
     expect(hasil[0]).toMatchObject({ deskripsi: 'Pembatalan tinggi', durasi: '7 hari', batchId, parserVersi: 1 });
+  });
+});
+
+describeDb('bacaFaktaLayananChat (G3-02a)', () => {
+  it('mengembalikan baris chat mentah (chatMasuk/chatDibalas/waktuResponDetik) apa adanya, pemanggil yang menjumlahkan', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const batchId = await insertBatch(clientId, cpId, 'shopee');
+
+    await sql`
+      insert into pdt_fact_layanan_chat (client_platform_id, periode, batch_id, parser_versi, chat_masuk, chat_dibalas, waktu_respon_detik)
+      values (${cpId}, ${PERIODE}::date, ${batchId}, 1, 200, 180, 90)`;
+
+    const hasil = await bacaFaktaLayananChat(sql, cpId, PERIODE);
+    expect(hasil).toEqual([{ chatMasuk: 200, chatDibalas: 180, waktuResponDetik: 90, batchId, parserVersi: 1 }]);
+  });
+
+  it('client_platform_id/periode tanpa baris ⇒ array kosong', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+
+    expect(await bacaFaktaLayananChat(sql, cpId, PERIODE)).toEqual([]);
   });
 });
 
