@@ -1,7 +1,17 @@
 'use client';
 
 /**
- * Panel "Isi dari PDT" — jembatan Section B Strategi → `/account/pdt/upload`.
+ * Panel "Isi dari PDT" — jembatan Strategi → `/account/pdt/upload`.
+ *
+ * **Tinggal di Section A**, bersama `InterviewPrefillPanel`,
+ * `VideoFactoryImportPanel` dan (di Section C/E) `CockpitImportPanel`, walau
+ * field yang diisinya ada di Section B. Itu bukan kelalaian: Section A adalah
+ * tempat berkumpulnya SUMBER, dan Video Factory sudah dipindah ke sana lebih
+ * dulu atas alasan yang sama (owner QA STRG-202608-0001). Menaruh satu sumber
+ * sendirian di Section B membuat AM menemukannya SESUDAH ia terlanjur mengetik
+ * baseline dengan tangan — terlambat, karena PDT butuh unggah + batch
+ * `verified` + muat ulang, bukan tempel seketika. Keputusan pemilik
+ * 2026-09-19.
  *
  * ## Kenapa panel ini ada
  *
@@ -88,9 +98,10 @@ export default function PdtUploadPanel({
       <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
         Unggah satu paket ZIP export toko per bulan di halaman <b>Upload Data Toko (PDT)</b>. Begitu
         batch-nya berstatus <b>Terverifikasi</b>, <b>muat ulang halaman Strategi ini</b> — field B3 di
-        atas terisi dari data toko, dan selektor <b>“Periode acuan PDT (B-0.7a)”</b> muncul di kartu
-        kanal untuk memilih bulan acuannya. Tidak perlu menempel apa pun: alirannya lewat server,
-        bukan copy-paste.
+        <b>Section B</b> (refund rate, pengunjung/bulan, conversion rate, poin penalti) terisi dari
+        data toko, dan selektor <b>“Periode acuan PDT (B-0.7a)”</b> muncul di kartu kanal untuk
+        memilih bulan acuannya. Tidak perlu menempel apa pun: alirannya lewat server, bukan
+        copy-paste.
       </p>
 
       {channels.length === 0 && (

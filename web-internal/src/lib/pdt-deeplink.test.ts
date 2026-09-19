@@ -147,9 +147,31 @@ describe('tautan STRG → Upload PDT benar-benar terpasang di kedua ujung', () =
   const ROOT = resolve(__dirname, '..', '..');
   const baca = (...bagian: string[]) => readFileSync(join(ROOT, 'src', ...bagian), 'utf8');
 
-  it('Section B Strategi merender PdtUploadPanel, tanpa digerbangi baselinePrefill', () => {
+  it('panelnya dirender di SECTION A, bersama sumber-sumber lain — bukan di Section B', () => {
     const src = baca('app', '(shell)', 'account', 'strategi', '[id]', 'page.tsx');
-    expect(src).toContain('PdtUploadPanel');
+    expect(src).toContain('<PdtUploadPanel');
+
+    // Section A adalah rumah semua SUMBER yang mengisi Strategi (Interview,
+    // Video Factory). Panel PDT sempat mendarat di Section B karena di situlah
+    // field-nya; pemilik menolaknya 2026-09-19 — AM baru menemukan PDT sesudah
+    // terlanjur mengetik baseline dengan tangan, dan PDT butuh unggah + batch
+    // verified + muat ulang, jadi "terlambat" di sini berarti pekerjaan
+    // terbuang. Posisinya dijaga di sini karena memindahkannya balik tidak
+    // memerahkan satu pun tes lain.
+    // Penanda blok RENDER-nya, bukan `active === 'A'` telanjang — string itu
+    // muncul lebih dulu di dispatcher penyimpanan, dan mengambil kecocokan
+    // pertama membuat tes ini mengukur bagian file yang salah.
+    const iA = src.indexOf("{active === 'A' && (");
+    const iB = src.indexOf("{active === 'B' && (");
+    expect(iA, "blok render Section A tidak ditemukan").toBeGreaterThan(-1);
+    expect(iB, "blok render Section B tidak ditemukan").toBeGreaterThan(iA);
+
+    const blokA = src.slice(iA, iB);
+    expect(blokA, 'PdtUploadPanel tidak ada di blok render Section A').toContain('<PdtUploadPanel');
+    // Tetangganya, dan alasan posisinya: keduanya sumber, keduanya di Section A.
+    expect(blokA).toContain('<VideoFactoryImportPanel');
+    expect(src.slice(iB), 'PdtUploadPanel masih tertinggal di Section B').not.toContain('<PdtUploadPanel');
+
     // `{baselinePrefill && <PdtUploadPanel …>}` akan menyembunyikan panel tepat
     // pada klien yang paling butuh tautannya (belum punya riset awal/PDT).
     expect(src).not.toMatch(/baselinePrefill\s*&&\s*<PdtUploadPanel/);
