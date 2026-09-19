@@ -1996,6 +1996,17 @@ verifikasi murni.
 > **Jangan matikan AM Baseline sebelum itu**, dan jangan membaca "0/10" historis di atas sebagai
 > bukti PDT tidak akurat: akurasinya nol persen selisih begitu whitelist-nya benar.
 
+> 🔒 **KETOKAN PEMILIK 2026-09-19: AM Baseline TETAP HIDUP sebagai fallback — jangan dimatikan,
+> juga TIDAK otomatis mati begitu gerbang ≥10 klien verified tercapai.** Ini mengubah bentuk tiket
+> G3-10, bukan sekadar menunda tanggalnya: "matikan" berubah jadi "PDT jadi sumber utama, AM
+> Baseline jadi jaring pengaman yang tetap ada". Alasannya nyata — sesi ini baru membuktikan satu
+> kegagalan senyap yang membuat 0 dari 10 klien tidak bisa `verified` tanpa ada satu pun error;
+> kalau AM Baseline sudah dimatikan saat itu terjadi, Riset Awal akan kosong total tanpa jalan
+> mundur. Konsekuensi praktis: pola **strangler coexistence** yang sudah dipakai G3-07 dan G3-06
+> (`null`/nol batch verified ⇒ jatuh ke payload AM) menjadi **bentuk akhir yang disengaja**, bukan
+> tahap transisi menuju penghapusan. Iframe `video-factory.html` juga tetap. Mematikan AM Baseline
+> di kemudian hari butuh ketokan pemilik BARU + entri `DECISIONS.md` tersendiri.
+
 Hanya setelah G3-02…G3-09 menutup field yang PUNYA sumber fakta (Rule 33) — field yang **tidak**
 punya sumber (mayoritas B-2…B-9 di luar yang disebut di atas) **tetap manual** (Rule 34) selamanya,
 bukan menunggu tiket lanjutan. Iframe `web-internal/public/tools/video-factory.html` dimatikan

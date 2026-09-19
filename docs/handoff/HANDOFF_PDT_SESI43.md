@@ -122,8 +122,24 @@ verified", seakan jalur teknisnya sudah siap. §1 membuktikan sebaliknya: **jalu
 tidak pernah bisa lulus**. Kini ia terbuka untuk pertama kalinya.
 
 **Yang tersisa memang tinggal gerbang bisnisnya** — 10 klien nyata di-upload ke sistem PRODUKSI,
-bukan disimulasikan dari ZIP. Jangan matikan AM Baseline sebelum itu, dan **jangan membaca "0/10"
-historis sebagai bukti PDT tidak akurat**: akurasinya nol persen selisih begitu whitelist-nya benar.
+bukan disimulasikan dari ZIP. Dan **jangan membaca "0/10" historis sebagai bukti PDT tidak akurat**:
+akurasinya nol persen selisih begitu whitelist-nya benar.
+
+### 3.1 🔒 Ketokan pemilik: AM Baseline TETAP HIDUP, permanen
+
+Pemilik memutuskan **AM Baseline tidak dimatikan** — juga tidak otomatis mati begitu gerbang ≥10
+klien tercapai. Tiket G3-10 berubah bentuk: dari "matikan AM Baseline" jadi **"PDT jadi sumber
+utama, AM Baseline jadi jaring pengaman permanen"**.
+
+Konsekuensi teknis yang langsung berlaku: pola **strangler coexistence** yang sudah dipakai G3-07
+(nol batch verified ⇒ jatuh ke `riwayat` payload) dan G3-06 (`tipeKampanye === null` ⇒ jatuh ke
+payload AM) adalah **bentuk akhir yang disengaja**, bukan tahap transisi. **Jangan buat tiket
+lanjutan yang "membereskan" fallback itu.** Iframe `video-factory.html` tetap.
+
+Alasannya nyata dan baru saja terbukti: §1 adalah kegagalan SENYAP yang membuat 0/10 klien tidak
+bisa `verified` tanpa satu pun error. Kalau AM Baseline sudah mati saat itu terjadi, Riset Awal
+akan kosong total tanpa jalan mundur. Mematikannya nanti butuh ketokan pemilik BARU + entri
+`DECISIONS.md` tersendiri.
 
 ---
 
