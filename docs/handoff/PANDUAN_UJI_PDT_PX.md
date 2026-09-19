@@ -542,28 +542,34 @@ menghasilkan satu batch `verified` sebelum §10.3 bisa menghasilkan apa pun.
 > di langkah ini tidak bisa ditarik balik dari UI.
 
 Sample ekspor yang dipakai untuk uji coba hampir tidak pernah milik klien yang
-sudah terdaftar. Per 2026-09-19 produksi memuat **29 klien** dan **31 baris
-platform aktif** (12 Shopee · 16 TikTok Shop · sisanya Tokopedia/gabungan) —
-dan nol di antaranya bernama seperti toko di sample mana pun.
+sudah terdaftar, jadi godaannya selalu sama: "pinjam" klien nyata sebentar.
+Jangan. Pakai klien uji yang memang disediakan untuk ini.
 
-**Pakai klien testing yang sudah ada, jangan bikin data baru.** Tiga klien
-testing hidup di produksi (`toko ku1`, `testwf`, `tasdadf.ocm`). Ketiganya
-punya baris platform bernilai **gabungan** (`TikTok Shop, Shopee`) — nilai lama
-yang sengaja di-grandfather migrasi `20261010010000` — dan dropdown PDT
-mengecualikannya, karena PDT hanya mengenal nilai tunggal `Shopee` dan
-`TikTok Shop`. Karena itu klien testing tampak "belum punya toko".
+**Klien uji resmi: `CLI-202609-0020` — "TEST PDT Store".** Dibuat 2026-09-19
+(`docs/DECISIONS.md` tanggal yang sama) sesudah sebelas klien test lama dihapus
+permanen dari produksi. Isinya sudah lengkap untuk menempuh alur PDT dari nol:
 
-Perbaikannya satu langkah, dari UI, tanpa menyentuh klien nyata:
+| Bagian | Nilai |
+|---|---|
+| Klien | `CLI-202609-0020` · toko **TEST PDT Store** · AM `200000001` |
+| Kontrak | `CTR-202609-0012` · 6 bulan · 2026-09-01 → 2027-03-01 |
+| Service | `SVC-202609-0027` **Store Management (Paket)** · `plan_wajib` · butuh strategi |
+| Platform | `cp_id=56` **Shopee** · `cp_id=57` **TikTok Shop** |
 
-1. Buka **Detail Klien** klien testing (mis. `CLI-202608-0005` — `testwf`).
-2. **Tambah Platform** → pilih `Shopee` (untuk ZIP Shopee) atau `TikTok Shop`
-   (untuk ZIP TikTok) → simpan.
-3. Kembali ke **Upload Data Toko (PDT)** — platform itu sekarang muncul di
-   dropdown **Toko / Platform**.
+Dua baris platform itu sengaja bernilai **TUNGGAL**. Di situlah klien test lama
+gagal dipakai: mereka menyimpan nilai **gabungan** (`TikTok Shop, Shopee`) —
+nilai lama yang di-grandfather migrasi `20261010010000` — sedangkan dropdown PDT
+hanya mengenal nilai tunggal `Shopee` dan `TikTok Shop`, sehingga klien itu
+tampak "belum punya toko" padahal barisnya ada.
 
-Baris platform gabungan yang lama tidak perlu disentuh: gerbang duplikat
-mencocokkan nilai platform PERSIS, jadi `Shopee` dan `TikTok Shop, Shopee`
-tidak bertabrakan.
+Kalau suatu saat butuh platform ketiga (Tokopedia/Lazada/Blibli), tambahkan dari
+**Detail Klien → Tambah Platform** sebagai baris tersendiri, satu nilai satu
+baris. Gerbang duplikat mencocokkan nilai platform PERSIS, jadi baris baru tidak
+akan bertabrakan dengan yang sudah ada.
+
+> `transaction_id` klien uji ini sengaja `NULL` — supaya ia tidak pernah muncul
+> di buku Finance. Jangan "melengkapinya" dengan transaksi palsu: justru itu yang
+> mengotori Finance dan memaksa pembersihan 2026-09-19.
 
 ### 10.1 Uji asap 1 menit — apakah kunci Storage benar-benar bekerja?
 
