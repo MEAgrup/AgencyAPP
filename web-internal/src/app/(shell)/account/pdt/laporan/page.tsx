@@ -113,22 +113,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
-import { listClients, type Client } from '@/lib/clients';
+import { listClients, type Client, type Platform } from '@/lib/clients';
 import {
   getPdtLaporan,
   kirimLaporanPdt,
-  riwayatKirimanPdt,
+  listPlatformPdtKlien,
   type PdtKirimanRingkas,
   type PdtLaporan,
   type PdtLaporanInsight,
   type PdtLaporanKiriman,
   type PdtLaporanRekomendasi,
   type PdtTahapSatuan,
+  riwayatKirimanPdt,
 } from '@/lib/pdt';
 import { formatIDR } from '@/lib/money';
 
-/** Platform toko yang didukung PDT (PDT-22) — cermin `platformKeVokabPdt`. */
-const PDT_PLATFORMS = new Set(['Shopee', 'TikTok Shop']);
 
 /** Label kuadran produk — SAMA persis `report/render.ts` `KUADRAN_META` (mesin lama), bukan istilah baru. */
 const KUADRAN_LABEL: Record<string, string> = {
@@ -338,10 +337,40 @@ export default function LaporanPdtPage() {
     [clients, clientId],
   );
 
-  const platformOptions = useMemo(
-    () => (selectedClient ? selectedClient.platforms.filter((p) => p.active && PDT_PLATFORMS.has(p.platform)) : []),
-    [selectedClient],
-  );
+  // G1-09-PLATFORM-DARI-DETAIL — platform dibaca dari DETAIL klien, bukan dari
+  // baris roster: `ClientListRowWire` sengaja tidak memuat `platforms`, jadi
+  // `selectedClient.platforms` adalah `undefined` dan `.filter` di sini dulu
+  // mematikan seluruh halaman begitu AM memilih klien (bug kelas O43).
+  const [platformOptions, setPlatformOptions] = useState<Platform[]>([]);
+  const [platformLoading, setPlatformLoading] = useState(false);
+  const [platformErr, setPlatformErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (clientId === '') {
+      setPlatformOptions([]);
+      setPlatformErr(null);
+      return;
+    }
+    let batal = false;
+    setPlatformLoading(true);
+    setPlatformErr(null);
+    void (async () => {
+      try {
+        const rows = await listPlatformPdtKlien(clientId);
+        if (!batal) setPlatformOptions(rows);
+      } catch (e) {
+        if (!batal) {
+          setPlatformOptions([]);
+          setPlatformErr(errorMessage(e));
+        }
+      } finally {
+        if (!batal) setPlatformLoading(false);
+      }
+    })();
+    return () => {
+      batal = true;
+    };
+  }, [clientId]);
 
   const loadLaporan = useCallback(async () => {
     // Ganti toko/periode -> hasil kirim sebelumnya (kalau ada) sudah tidak relevan.
@@ -460,14 +489,14 @@ export default function LaporanPdtPage() {
               id="pdtLaporanPlatform"
               className="input"
               value={platformId}
-              disabled={!selectedClient || platformOptions.length === 0}
+              disabled={!selectedClient || platformLoading || platformOptions.length === 0}
               onChange={(e) => {
                 setPlatformId(e.target.value === '' ? '' : Number(e.target.value));
                 setLaporan(null);
                 setErr(null);
               }}
             >
-              <option value="">— pilih platform —</option>
+              <option value="">{platformLoading ? 'memuat toko…' : '— pilih platform —'}</option>
               {platformOptions.map((p) => (
                 <option key={p.client_platform_id} value={p.client_platform_id}>
                   {p.platform}
@@ -493,7 +522,12 @@ export default function LaporanPdtPage() {
             {clientsErr}
           </div>
         )}
-        {selectedClient && platformOptions.length === 0 && (
+        {platformErr && (
+          <div className="alert alertError" role="alert" style={{ marginTop: 12 }}>
+            {platformErr}
+          </div>
+        )}
+        {selectedClient && !platformLoading && !platformErr && platformOptions.length === 0 && (
           <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
             Klien ini belum punya toko Shopee/TikTok Shop aktif — Tokopedia/Lazada/Blibli tetap manual (PDT-22).
           </p>

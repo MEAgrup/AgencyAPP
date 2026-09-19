@@ -6,6 +6,7 @@
 // deteksi + dropdown override AM + commit + riwayat batch/status paket.
 
 import { api } from '@/lib/api';
+import { getClient, type Platform } from '@/lib/clients';
 
 export interface PdtPreviewBerkas {
   nama: string;
@@ -495,4 +496,35 @@ export interface TambahVersiBenchmarkInput {
 
 export function tambahVersiBenchmark(input: TambahVersiBenchmarkInput): Promise<PdtBenchmarkVersi> {
   return api.post<PdtBenchmarkVersi>('/account/pdt/benchmark', input);
+}
+
+/**
+ * Platform toko yang didukung PDT (PDT-22) — cermin `platformKeVokabPdt`
+ * (`@cdps/core` `pdt/types.ts`). Satu-satunya salinan daftar ini di FE: sebelum
+ * G1-09-PLATFORM-DARI-DETAIL ia digandakan sebagai `const` lokal di halaman
+ * upload DAN halaman laporan, yang berarti menambah platform PDT menuntut dua
+ * suntingan yang mudah terlewat satu.
+ */
+export const PDT_PLATFORMS: ReadonlySet<string> = new Set(['Shopee', 'TikTok Shop']);
+
+/**
+ * Daftar toko ber-platform PDT milik satu klien, dibaca dari **detail klien**
+ * (`GET /clients/{id}`) — BUKAN dari baris roster `GET /clients`.
+ *
+ * Ini perbaikan bug kelas O43 (`CLAUDE.md`: "Kunci yang HILANG lebih berbahaya
+ * daripada null"). `ClientListRowWire` adalah proyeksi yang SENGAJA sempit dan
+ * tidak pernah memuat `platforms` — melebarkannya berarti N+1 atas
+ * platforms/allocations/services untuk daftar yang tidak membacanya (lihat
+ * docblock `ClientListRowWire` di `apps/api/src/lib/wire.ts`). Tapi tipe FE
+ * `Client` menyatakan `platforms: Platform[]` WAJIB, jadi
+ * `selectedClient.platforms.filter(...)` lolos typecheck, lalu melempar
+ * `Cannot read properties of undefined (reading 'filter')` di browser: halaman
+ * mati total ("This page couldn't load") setiap kali AM memilih klien —
+ * route-nya sendiri tetap menjawab 200, persis gejala O43.
+ *
+ * Karena itu platform HARUS diambil dari detail, satu klien sekali pilih.
+ */
+export async function listPlatformPdtKlien(clientId: string): Promise<Platform[]> {
+  const { client } = await getClient(clientId);
+  return (client.platforms ?? []).filter((p) => p.active && PDT_PLATFORMS.has(p.platform));
 }
