@@ -88,6 +88,7 @@ import {
   expireStrategi,
   PILLAR_KINDS,
   getBaselinePrefill,
+  petakanTipeKampanye,
   susunPilarUsulan,
   getStrategi,
   getStrategiPrefill,
@@ -4630,6 +4631,79 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     }
   });
 
+  it('G3-06: tipeKampanye comes from pdt_fact_ads.tipe_kampanye_sumber, overriding the payload taxonomy', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+
+    // Empat kampanye, teks konfigurasi PERSIS seperti di ekspor nyata:
+    //  - CAMP-1 Shopee CPC  'GMV Max ROAS'            -> gmv_max
+    //  - CAMP-2 Shopee Live 'Live GMV Max ROAS'       -> live_ads (BUKAN gmv_max, walau memuat "GMV Max")
+    //  - CAMP-3 Search      'Bidding Manual'          -> manual_keyword
+    //  - CAMP-4 TT produk   'Strategi Yang Belum Ada' -> tak terpetakan, tidak menyumbang apa pun
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi,
+        biaya, gmv, roas, tipe_kampanye_sumber)
+      values (${tiktokId}, 'shopee_ads_cpc', 'CAMP-1', '2026-07-01', ${batchJul[0].id}, 1, '1000000.00', '4000000.00', '4.0', 'GMV Max ROAS'),
+             (${tiktokId}, 'shopee_ads_live', 'CAMP-2', '2026-07-01', ${batchJul[0].id}, 1, '500000.00', '1000000.00', '2.0', 'Live GMV Max ROAS'),
+             (${tiktokId}, 'shopee_ads_search', 'CAMP-3', '2026-07-01', ${batchJul[0].id}, 1, '200000.00', '400000.00', '2.0', 'Bidding Manual'),
+             (${tiktokId}, 'tt_ads_product', 'CAMP-4', '2026-07-01', ${batchJul[0].id}, 1, '100000.00', '100000.00', '1.0', 'Strategi Yang Belum Ada')`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+      // Urutan mengikuti CAMPAIGN_TYPES, bukan urutan baris — hasilnya stabil saat
+      // dihitung ulang dari ekspor yang sama dengan urutan baris berbeda.
+      expect(tt.tipeKampanye).toEqual(['gmv_max', 'manual_keyword', 'live_ads']);
+    } finally {
+      await sql`delete from pdt_fact_ads where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
+
+  it('G3-06: nol baris terpetakan ⇒ payload TETAP dipakai (absen ≠ "tidak ada tipe kampanye")', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+
+    // Seluruh baris ber-`tipe_kampanye_sumber` NULL — persis keadaan setiap baris
+    // yang ditulis SEBELUM migrasi 20261120010000. Fakta lain (adSpend) tetap
+    // menang; hanya tipeKampanye yang jatuh balik ke payload, bukan dikosongkan
+    // paksa. Itulah kenapa `ringkasIklanDariFakta` mengembalikan `null` dan bukan
+    // `[]` ketika nol baris terpetakan.
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi,
+        biaya, gmv, roas, tipe_kampanye_sumber)
+      values (${tiktokId}, 'shopee_ads_cpc', 'CAMP-1', '2026-07-01', ${batchJul[0].id}, 1, '1000000.00', '4000000.00', '4.0', null)`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+      expect(tt.adSpend).toBe('1000000'); // fakta tetap menang untuk field lain
+      expect(tt.tipeKampanye).toEqual([]); // payload seed ini memang kosong
+    } finally {
+      await sql`delete from pdt_fact_ads where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
   it('returns null when the client has no riset awal analysis', async () => {
     const serviceId = await seedService();
     const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
@@ -5196,5 +5270,70 @@ describeDb('A-3 — approval → Brief, the seam (Account #5)', () => {
     // throwing and rolling the whole revision approval back.
     await approveStrategi(sql, spv(), v2.id);
     expect(await statusOf(serviceId)).toBe('[Briefed]');
+  });
+});
+
+// ===========================================================================
+// G3-06 (sesi 43) — `tipeKampanye` bersumber fakta.
+//
+// Nilai-nilai yang diuji di bawah bukan karangan: seluruhnya adalah nilai yang
+// BENAR-BENAR muncul di 12 klien nyata (tiga ZIP sample pemilik, Juli 2026),
+// lengkap dengan frekuensinya di docblock `petakanTipeKampanye`.
+// ===========================================================================
+describe('petakanTipeKampanye (G3-06) — teks konfigurasi kampanye → CAMPAIGN_TYPES', () => {
+  it('Shopee CPC: ketiga varian Mode Bidding nyata → gmv_max', () => {
+    for (const teks of ['GMV Max ROAS', 'GMV Max Auto Bidding (Shop)', 'GMV Max Auto']) {
+      expect(petakanTipeKampanye('shopee_ads_cpc', teks), teks).toBe('gmv_max');
+    }
+  });
+
+  it('Shopee Search: Bidding Manual → manual_keyword, Bidding Otomatis → auto', () => {
+    expect(petakanTipeKampanye('shopee_ads_search', 'Bidding Manual')).toBe('manual_keyword');
+    expect(petakanTipeKampanye('shopee_ads_search', 'Bidding Otomatis')).toBe('auto');
+  });
+
+  it('Mode Bidding yang sama dibaca BERBEDA per modul — itu gunanya parameter `sumber`', () => {
+    // Kalau pemetaan hanya melihat teksnya, 'Bidding Manual' dari Search Ads dan
+    // dari CPC akan jatuh ke tipe yang sama. Mereka bukan hal yang sama: Search
+    // Ads adalah iklan KATA KUNCI (berkasnya punya kolom `Kata Pencarian`).
+    expect(petakanTipeKampanye('shopee_ads_search', 'Bidding Manual')).toBe('manual_keyword');
+    expect(petakanTipeKampanye('shopee_ads_cpc', 'Bidding Manual')).toBeNull();
+  });
+
+  it('Shopee Live: ketiga Tujuan nyata → live_ads, TERMASUK dua yang memuat "GMV Max"', () => {
+    // Ini jebakan urutan yang paling mudah keliru: 'Live GMV Max ROAS' cocok ke
+    // regex /gmv\s*max/ juga. Kalau cabang gmv_max diperiksa lebih dulu, seluruh
+    // kampanye Live Shopee akan terbaca gmv_max dan dimensi Live-nya HILANG dari
+    // Section B tanpa satu pun error.
+    expect(petakanTipeKampanye('shopee_ads_live', 'Live GMV Max Auto')).toBe('live_ads');
+    expect(petakanTipeKampanye('shopee_ads_live', 'Live GMV Max ROAS')).toBe('live_ads');
+    expect(petakanTipeKampanye('shopee_ads_live', 'Tingkatkan Jumlah Penonton')).toBe('live_ads');
+  });
+
+  it('TikTok produk: Jenis materi iklan Video → video_ads, Kartu produk → lainnya (BUKAN gmv_max)', () => {
+    expect(petakanTipeKampanye('tt_ads_product', 'Video')).toBe('video_ads');
+    expect(petakanTipeKampanye('tt_ads_product', 'Kartu produk')).toBe('lainnya');
+  });
+
+  it('TikTok live: tipenya dari IDENTITAS MODUL, jadi teks null pun tetap live_ads', () => {
+    // Satu-satunya modul tanpa kolom konfigurasi kampanye. Kolom DB-nya memang
+    // ditulis NULL oleh `pdt.ts`, jadi cabang ini yang menanggungnya.
+    expect(petakanTipeKampanye('tt_ads_live', null)).toBe('live_ads');
+  });
+
+  it('teks tak dikenal/kosong → null, BUKAN "lainnya"', () => {
+    // "Belum pernah melihat nilai ini" ≠ "tahu ini di luar keenam kategori".
+    // Melipat keduanya akan menyembunyikan nilai baru saat platform berubah.
+    expect(petakanTipeKampanye('shopee_ads_cpc', 'Strategi Baru 2027')).toBeNull();
+    expect(petakanTipeKampanye('shopee_ads_cpc', '')).toBeNull();
+    expect(petakanTipeKampanye('shopee_ads_cpc', null)).toBeNull();
+  });
+
+  it('nama kampanye bebas ketikan AM TIDAK pernah jadi sumber tipe (affiliate_ads tetap tak terpetakan)', () => {
+    // `affiliate_PC_7496001635930573579_…` MEMANG muncul sebagai NAMA KAMPANYE di
+    // sample nyata, tapi itu teks yang diketik orang, bukan konfigurasi kampanye.
+    // Mengklasifikasi darinya = mengarang — persis yang MATERI_IKLAN hindari.
+    expect(petakanTipeKampanye('tt_ads_product', 'affiliate_PC_7496001635930573579_1775028391')).toBeNull();
+    expect(petakanTipeKampanye('tt_ads_product', 'Bismilah cekout banyak melimpah')).toBeNull();
   });
 });

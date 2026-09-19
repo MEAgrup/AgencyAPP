@@ -1147,10 +1147,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
           values
             (${clientPlatformId}, 'shopee_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
+             ${baris.tipeKampanyeSumber})`;
       }
     }
   }
@@ -1174,10 +1175,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, platform_product_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
           values
             (${clientPlatformId}, 'shopee_ads_cpc', ${baris.kampanyeId}, ${baris.platformProductId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
+             ${baris.tipeKampanyeSumber})`;
       }
     }
   }
@@ -1198,10 +1200,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
           values
             (${clientPlatformId}, 'shopee_ads_search', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
+             ${baris.tipeKampanyeSumber})`;
       }
     }
   }
@@ -1623,10 +1626,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
           values
             (${clientPlatformId}, 'tt_ads_product', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
+             ${baris.tipeKampanyeSumber})`;
       }
     }
   }
@@ -1636,6 +1640,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // diturunkan/`sku_id`/`content_id` null/replace-on-recommit). `tayangan` diisi
   // 2026-09-16 (`G1-09-2BII-TTADS-SAMPLE` DITUTUP, dari `Tayangan LIVE`) — `klik`
   // TETAP null, modul ini tidak punya kolom klik (sama pola `shopee_ads_live`).
+  // G3-06: `tipe_kampanye_sumber` SELALU null untuk modul ini — berkas "livestream data
+  // for live campaigns" nol kolom konfigurasi kampanye, jadi tidak ada yang bisa dipanen.
+  // `strategi.petakanTipeKampanye` mengembalikan 'live_ads' dari `sumber` saja untuk
+  // `tt_ads_live`; kolomnya sengaja dibiarkan NULL supaya tidak ada nilai yang TAMPAK
+  // dipanen dari berkas padahal berasal dari identitas modul. Satu rumah untuk asumsi itu.
   if (berkasTtAdsLive.length > 0) {
     await tx`
       delete from pdt_fact_ads
@@ -1645,10 +1654,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
           values
             (${clientPlatformId}, 'tt_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
+             null)`;
       }
     }
   }

@@ -2426,12 +2426,14 @@ export async function getBaselinePrefill(
       skuSlowMoving: pdtSkuSlowMoving ?? b.skuSlowMoving,
       topSku: pdtTopSku ?? b.topSku,
       jumlahKampanyeAktif: pdtRingkasIklan?.jumlahKampanyeAktif ?? b.jumlahKampanyeAktif,
-      // The engine emits raw material-type keys; the closed taxonomy lives here,
-      // so an unrecognised key is dropped rather than travelling as free text
-      // into a column with a CHECK on it.
-      tipeKampanye: b.tipeKampanye.filter((t): t is CampaignType =>
-        (CAMPAIGN_TYPES as readonly string[]).includes(t),
-      ),
+      // G3-06 (sesi 43) — fakta menang atas payload, pola `??` yang SAMA dipakai
+      // seluruh field PDT di blok ini. Fallback-nya tetap jalur lama: mesin
+      // Riset Awal memancarkan key materi-iklan mentah, dan taksonomi tertutup
+      // disaring DI SINI supaya key yang tidak dikenali dibuang, bukan berjalan
+      // sebagai teks bebas ke kolom yang punya CHECK.
+      tipeKampanye:
+        pdtRingkasIklan?.tipeKampanye ??
+        b.tipeKampanye.filter((t): t is CampaignType => (CAMPAIGN_TYPES as readonly string[]).includes(t)),
       affiliateAktif30Hari: pdtRingkasAfiliasi?.affiliateAktif30Hari ?? b.affiliateAktif30Hari,
       gmvAffiliate: pdtRingkasAfiliasi?.gmvAffiliate ?? b.gmvAffiliate,
       gmvAffiliatePersen: pdtRingkasAfiliasi?.gmvAffiliatePersen ?? b.gmvAffiliatePersen,
@@ -4244,6 +4246,72 @@ function ringkasAfiliasiDariFakta(
 }
 
 /**
+ * B-5.3 — teks konfigurasi kampanye MENTAH (`pdt_fact_ads.tipe_kampanye_sumber`)
+ * → taksonomi `CAMPAIGN_TYPES`. Satu-satunya rumah pemetaan ini (G3-06).
+ *
+ * **Dasar buktinya.** Nilai-nilai di bawah adalah SELURUH nilai berbeda yang
+ * muncul di 12 klien nyata, periode Juli 2026 (tiga ZIP sample pemilik, sesi
+ * 43) — dihitung, bukan dibayangkan:
+ *
+ * | `sumber` | kolom | nilai (frekuensi) |
+ * |---|---|---|
+ * | `shopee_ads_cpc` | `Mode Bidding` | `GMV Max ROAS` (107), `GMV Max Auto Bidding (Shop)` (5), `GMV Max Auto` (1) |
+ * | `shopee_ads_search` | `Mode Bidding` | `Bidding Manual` (5), `Bidding Otomatis` (3) |
+ * | `shopee_ads_live` | `Tujuan` | `Live GMV Max Auto` (3), `Live GMV Max ROAS` (1), `Tingkatkan Jumlah Penonton` (1) |
+ * | `tt_ads_product` | `Jenis materi iklan` | `Video` (63.924), `Kartu produk` (311) |
+ * | `tt_ads_live` | — | (nol kolom; seluruh berkasnya kampanye LIVE) |
+ *
+ * **Kenapa `sumber` ikut jadi parameter.** `Mode Bidding` muncul di DUA modul
+ * dengan arti berbeda: di `shopee_ads_cpc` ia menggambarkan strategi bidding
+ * GMV Max, di `shopee_ads_search` ia menggambarkan bidding atas KATA KUNCI
+ * (laporan itu punya kolom `Kata Pencarian`). Memetakan `Bidding Manual` tanpa
+ * melihat modulnya akan menghasilkan tipe yang salah untuk separuh baris.
+ *
+ * **Yang SENGAJA tidak dipetakan.**
+ *  - `affiliate_ads` — nol berkas membawa nilai yang menandainya. Nama kampanye
+ *    bebas seperti `affiliate_PC_7496…` MEMANG muncul di `tt_ads_product`, tapi
+ *    itu teks yang diketik AM, bukan konfigurasi kampanye; membacanya akan
+ *    mengklasifikasi dari ketikan orang — persis yang `MATERI_IKLAN` hindari.
+ *  - `Kartu produk` (`tt_ads_product`) → `lainnya`, BUKAN `gmv_max`. Ia memang
+ *    materi iklan kartu produk, dan `lainnya` adalah satu-satunya nilai jujur
+ *    yang tersedia di enum untuk itu.
+ *  - Teks yang tidak dikenali → `null` (baris itu tidak menyumbang tipe apa
+ *    pun), BUKAN `lainnya`. "Kami belum pernah melihat nilai ini" berbeda dari
+ *    "kami tahu ini di luar keenam kategori", dan melipat keduanya jadi satu
+ *    akan menyembunyikan nilai baru yang muncul ketika platform berubah.
+ */
+export function petakanTipeKampanye(sumber: string, teks: string | null): CampaignType | null {
+  // `tt_ads_live` — tipenya melekat pada IDENTITAS MODUL, bukan isi sel: berkas
+  // "livestream data for live campaigns" seluruh barisnya kampanye LIVE. Ini
+  // satu-satunya cabang yang tidak membaca `teks`, dan itu disengaja.
+  if (sumber === 'tt_ads_live') return 'live_ads';
+
+  if (teks === null) return null;
+  const t = teks.trim().toLowerCase();
+  if (t === '') return null;
+
+  // `shopee_ads_live` diperiksa DULUAN: ketiga nilainya bermakna live_ads, dan
+  // dua di antaranya JUGA memuat "GMV Max" — tanpa urutan ini kampanye Live
+  // Shopee akan terbaca `gmv_max` dan dimensi Live-nya hilang dari Section B.
+  if (sumber === 'shopee_ads_live') return 'live_ads';
+
+  // Search Ads: `Mode Bidding` di sini adalah bidding atas KATA KUNCI.
+  if (sumber === 'shopee_ads_search') {
+    if (t.includes('manual')) return 'manual_keyword';
+    if (t.includes('otomatis') || t.includes('auto')) return 'auto';
+    return null;
+  }
+
+  // Sisanya (`shopee_ads_cpc`, `tt_ads_product`) dibaca dari teksnya.
+  // `/gmv\s*max/` adalah regex yang SAMA yang sudah dipercaya `MATERI_IKLAN`
+  // (`@cdps/core` `baseline/payload.ts`) sejak mesin lama — bukan pola baru.
+  if (/gmv\s*max/.test(t)) return 'gmv_max';
+  if (t === 'video') return 'video_ads';
+  if (t === 'kartu produk') return 'lainnya';
+  return null;
+}
+
+/**
  * B-4/B-5 — belanja iklan/ROAS/jumlah kampanye (G3-06), dari `pdt_fact_ads`
  * bulan acuan. `roas` = Σ`gmv` ÷ Σ`biaya` (BUKAN rata-rata kolom `roas`
  * mentah per baris) — pola `report/dimensi_roas` yang sudah ada
@@ -4252,29 +4320,44 @@ function ringkasAfiliasiDariFakta(
  * diketahui begitu ≥1 baris ada). `jumlahKampanyeAktif` = jumlah
  * `kampanyeId` DISTINCT.
  *
- * `tipeKampanye` SENGAJA TIDAK disentuh di sini — lihat status G3-06 di
- * `docs/backlog/PDT_BACKLOG.md`: `sumber` (nama modul parser —
- * `shopee_ads_cpc`/`shopee_ads_live`/`shopee_ads_search`/`tt_ads_product`/
- * `tt_ads_live`) tidak membawa sinyal yang bisa diandalkan untuk taksonomi
- * `CAMPAIGN_TYPES` (gmv_max/manual_keyword/auto/live_ads/video_ads/
- * affiliate_ads/lainnya) — satu modul export bisa memuat kampanye dari
- * beberapa tipe sekaligus, jadi memetakan nama modul ke tipe kampanye akan
- * MENGARANG klasifikasi yang tidak pernah benar-benar diverifikasi dari isi
- * berkas (kelas kesalahan yang sama yang `MATERI_IKLAN`
- * `baseline/payload.ts` sengaja hindari untuk 4 dari 7 nilai enumnya).
- * `tipeKampanye` TETAP payload-only sampai ada keputusan pemilik.
+ * `tipeKampanye` (B-5.3) DITUTUP sesi 43 — lihat `petakanTipeKampanye` di bawah.
+ * Catatan lama di tempat ini ("`sumber` tidak membawa sinyal yang bisa
+ * diandalkan") TETAP BENAR dan tidak dibatalkan: yang berubah bukan pembacaan
+ * atas `sumber`, melainkan bahwa ekspornya ternyata membawa kolom KONFIGURASI
+ * kampanye tersendiri (`Mode Bidding`/`Tujuan`/`Jenis materi iklan`) yang
+ * selama ini tidak pernah dipanen. `sumber` sekarang dipakai hanya untuk
+ * MEMBEDAKAN ARTI teks itu antar modul, bukan sebagai tipenya sendiri.
  */
 function ringkasIklanDariFakta(
-  rows: readonly { kampanyeId: string; biaya: number; gmv: number | null }[],
-): { adSpend: string | null; roas: number | null; jumlahKampanyeAktif: number | null } {
-  if (rows.length === 0) return { adSpend: null, roas: null, jumlahKampanyeAktif: null };
+  rows: readonly { kampanyeId: string; biaya: number; gmv: number | null; sumber: string; tipeKampanyeSumber: string | null }[],
+): {
+  adSpend: string | null;
+  roas: number | null;
+  jumlahKampanyeAktif: number | null;
+  tipeKampanye: CampaignType[] | null;
+} {
+  if (rows.length === 0) {
+    return { adSpend: null, roas: null, jumlahKampanyeAktif: null, tipeKampanye: null };
+  }
   const totalBiaya = rows.reduce((a, r) => a + r.biaya, 0);
   const gmvTerpanen = rows.filter((r): r is typeof r & { gmv: number } => r.gmv !== null);
   const totalGmv = gmvTerpanen.length === 0 ? null : gmvTerpanen.reduce((a, r) => a + r.gmv, 0);
+
+  const tipeTerbaca = new Set<CampaignType>();
+  for (const r of rows) {
+    const t = petakanTipeKampanye(r.sumber, r.tipeKampanyeSumber);
+    if (t !== null) tipeTerbaca.add(t);
+  }
   return {
     adSpend: String(totalBiaya),
     roas: totalGmv === null || totalBiaya === 0 ? null : Math.round((totalGmv / totalBiaya) * 100) / 100,
     jumlahKampanyeAktif: new Set(rows.map((r) => r.kampanyeId)).size,
+    // Urutan `CAMPAIGN_TYPES`, bukan urutan kemunculan di berkas — supaya hasilnya
+    // byte-identik saat dihitung ulang dari ekspor yang sama dengan urutan baris
+    // berbeda (pola PERSIS `tipeMateriIklan`, `@cdps/core` `baseline/payload.ts`).
+    // `null` (bukan `[]`) ketika nol baris terpetakan: `[]` akan terbaca "iklan
+    // berjalan tanpa tipe apa pun", padahal artinya kami tidak tahu tipenya.
+    tipeKampanye: tipeTerbaca.size === 0 ? null : CAMPAIGN_TYPES.filter((t) => tipeTerbaca.has(t)),
   };
 }
 

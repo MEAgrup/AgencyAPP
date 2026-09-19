@@ -258,6 +258,8 @@ export interface PdtBarisAdsShopeeLive {
   gmv: number | null;
   biaya: number;
   roas: number | null;
+  /** G3-06 — teks mentah kolom `Tujuan`. Lihat `bacaTipeKampanyeSumber`. */
+  tipeKampanyeSumber: string | null;
 }
 
 /**
@@ -281,6 +283,7 @@ export function ekstrakBarisShopeeAdsLive(
   const iGmv = idx('Omzet Penjualan');
   const iBiaya = idx('Biaya');
   const iRoas = idx('Efektifitas Iklan');
+  const iTipe = idx('Tujuan'); // G3-06
 
   const hasil: PdtBarisAdsShopeeLive[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -293,10 +296,37 @@ export function ekstrakBarisShopeeAdsLive(
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
       roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+      tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
   return hasil;
 }
+
+/**
+ * Teks MENTAH konfigurasi kampanye (`pdt_fact_ads.tipe_kampanye_sumber`, G3-06).
+ *
+ * Nama kolomnya berbeda per modul karena memang berbeda di berkasnya —
+ * diverifikasi ke 12 klien nyata (sesi 43), bukan ditebak:
+ *
+ * | modul | kolom | nilai yang benar-benar muncul |
+ * |---|---|---|
+ * | `shopee_ads_cpc` | `Mode Bidding` | `GMV Max ROAS`, `GMV Max Auto Bidding (Shop)`, `GMV Max Auto` |
+ * | `shopee_ads_search` | `Mode Bidding` | `Bidding Manual`, `Bidding Otomatis` |
+ * | `shopee_ads_live` | `Tujuan` | `Live GMV Max Auto`, `Live GMV Max ROAS`, `Tingkatkan Jumlah Penonton` |
+ * | `tt_ads_product` | `Jenis materi iklan` | `Video`, `Kartu produk` |
+ *
+ * `tt_ads_live` TIDAK punya kolom semacam ini dan tidak membutuhkannya: seluruh
+ * berkasnya adalah kampanye LIVE, jadi tipenya melekat pada identitas modul.
+ * Pemanggilnya (`pdt.ts`) yang mengisi konstanta itu — BUKAN fungsi di sini,
+ * supaya tidak ada nilai yang tampak "dipanen dari berkas" padahal diasumsikan.
+ *
+ * Dikembalikan APA ADANYA (trim saja); sel kosong ⇒ `null`, bukan `''` — absen
+ * ≠ nol, pola sama seluruh kolom fakta PDT lain. Pemetaan ke `CAMPAIGN_TYPES`
+ * ada di `packages/domain`; lihat migrasi `20261120010000` untuk alasannya
+ * ("taksonomi tidak punya dua rumah").
+ */
+const bacaTipeKampanyeSumber = (row: readonly unknown[] | undefined, i: number): string | null =>
+  i === -1 ? null : (String(row?.[i] ?? '').trim() || null);
 
 const roasTurunan = (gmv: number | null, biaya: number): number | null =>
   gmv == null || biaya === 0 ? null : gmv / biaya;
@@ -316,6 +346,8 @@ export interface PdtBarisAdsTtProduct {
   roas: number | null;
   tayangan: number | null;
   klik: number | null;
+  /** G3-06 — teks mentah kolom `Jenis materi iklan`. Lihat `bacaTipeKampanyeSumber`. */
+  tipeKampanyeSumber: string | null;
 }
 
 /**
@@ -352,6 +384,7 @@ export function ekstrakBarisTtAdsProduct(
   const iBiaya = idx('Biaya');
   const iTayangan = idx('Impresi iklan produk');
   const iKlik = idx('Jumlah klik iklan produk');
+  const iTipe = idx('Jenis materi iklan'); // G3-06
 
   const hasil: PdtBarisAdsTtProduct[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -367,6 +400,7 @@ export function ekstrakBarisTtAdsProduct(
       roas: roasTurunan(gmv, biaya),
       tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
       klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik], true),
+      tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
   return hasil;
@@ -1203,6 +1237,8 @@ export interface PdtBarisAdsShopeeCpc {
   gmv: number | null;
   biaya: number;
   roas: number | null;
+  /** G3-06 — teks mentah kolom `Mode Bidding`. Lihat `bacaTipeKampanyeSumber`. */
+  tipeKampanyeSumber: string | null;
 }
 
 /**
@@ -1240,6 +1276,7 @@ export function ekstrakBarisShopeeAdsCpc(
   const iGmv = idx('omzet penjualan');
   const iBiaya = idx('Biaya');
   const iRoas = idx('Efektifitas Iklan');
+  const iTipe = idx('Mode Bidding'); // G3-06
 
   const hasil: PdtBarisAdsShopeeCpc[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -1255,6 +1292,7 @@ export function ekstrakBarisShopeeAdsCpc(
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
       roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+      tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
   return hasil;
@@ -1269,6 +1307,14 @@ export interface PdtBarisAdsShopeeSearch {
   gmv: number | null;
   biaya: number;
   roas: number | null;
+  /**
+   * G3-06 — teks mentah kolom `Mode Bidding`. Nama kolomnya SAMA dengan
+   * `shopee_ads_cpc` tapi artinya tidak: laporan ini Search Ads (punya kolom
+   * `Kata Pencarian`), jadi 'Bidding Manual' di sini berarti bidding manual
+   * atas KATA KUNCI. Pembedaannya dilakukan pemeta di `packages/domain` lewat
+   * `sumber` baris itu, bukan dengan menebak dari teksnya saja.
+   */
+  tipeKampanyeSumber: string | null;
 }
 
 /**
@@ -1300,6 +1346,7 @@ export function ekstrakBarisShopeeAdsSearch(
   const iGmv = idx('Omzet Penjualan');
   const iBiaya = idx('Biaya');
   const iRoas = idx('Efektifitas Iklan');
+  const iTipe = idx('Mode Bidding'); // G3-06
 
   const hasil: PdtBarisAdsShopeeSearch[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -1314,6 +1361,7 @@ export function ekstrakBarisShopeeAdsSearch(
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
       roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+      tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
   return hasil;

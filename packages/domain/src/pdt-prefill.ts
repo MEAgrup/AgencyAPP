@@ -365,6 +365,14 @@ export interface PdtFaktaAdsBaris extends PdtSumberBatch {
   pesananSku: number | null;
   gmv: number | null;
   roas: number | null;
+  /**
+   * G3-06 — teks MENTAH konfigurasi kampanye dari berkas, apa adanya.
+   * Pemetaannya ke `CAMPAIGN_TYPES` ada di `strategi.petakanTipeKampanye`
+   * (taksonomi punya satu rumah), dan dilakukan saat DIBACA, bukan disimpan.
+   * `null` = berkas sumbernya tidak membawa kolomnya (termasuk seluruh baris
+   * yang ditulis sebelum migrasi `20261120010000`).
+   */
+  tipeKampanyeSumber: string | null;
 }
 
 /**
@@ -391,12 +399,13 @@ export async function bacaFaktaAds(
       pesanan_sku: number | null;
       gmv: string | null;
       roas: string | null;
+      tipe_kampanye_sumber: string | null;
       batch_id: number;
       parser_versi: number;
     }[]
   >`
     select sumber, kampanye_id, sku_id, content_id, biaya, tayangan, klik, pesanan_sku, gmv, roas,
-           batch_id, parser_versi
+           tipe_kampanye_sumber, batch_id, parser_versi
       from pdt_fact_ads
      where client_platform_id = ${clientPlatformId}
        and periode = ${periodeAwalBulan}::date
@@ -414,6 +423,7 @@ export async function bacaFaktaAds(
     pesananSku: r.pesanan_sku,
     gmv: r.gmv === null ? null : Number(r.gmv),
     roas: r.roas === null ? null : Number(r.roas),
+    tipeKampanyeSumber: r.tipe_kampanye_sumber,
     batchId: r.batch_id,
     parserVersi: r.parser_versi,
   }));
