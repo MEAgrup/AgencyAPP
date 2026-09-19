@@ -270,6 +270,23 @@ function InterviewMirror({
   );
 }
 
+/**
+ * Katalog kelima field yang Section A hanya CERMINKAN dari Interview — urutan
+ * dan judulnya, tanpa nilainya. Dipisah dari nilainya supaya render dan
+ * hitungan "belum diisi" memakai daftar yang SAMA (lihat `cermin` di bawah).
+ */
+const CERMIN_INTERVIEW: readonly {
+  kode: 'A-1' | 'A-5' | 'A-8' | 'A-10' | 'A-12';
+  title: string;
+  badge?: ReactNode;
+}[] = [
+  { kode: 'A-1', title: 'A-1 · Brand & Kategori' },
+  { kode: 'A-5', title: 'A-5 · USP Produk' },
+  { kode: 'A-8', title: 'A-8 · Titik Kirim (kota gudang / origin)' },
+  { kode: 'A-10', title: 'A-10 · Riwayat Agensi', badge: <span className="badge badge-red">Hard-internal</span> },
+  { kode: 'A-12', title: 'A-12 · Decision Maker' },
+];
+
 export default function SectionA({
   detail,
   draft,
@@ -297,6 +314,18 @@ export default function SectionA({
       .map((d) => [d.nama, d.jabatan].filter(Boolean).join(' — '))
       .filter(Boolean)
       .join('; ') || null);
+  const nilaiCermin: Record<(typeof CERMIN_INTERVIEW)[number]['kode'], string | null> = {
+    'A-1':
+      brand || kategori
+        ? [brand ? `Brand: ${brand}` : null, kategori ? `Kategori: ${kategori}` : null]
+            .filter(Boolean)
+            .join('\n')
+        : null,
+    'A-5': uspText,
+    'A-8': titikKirim,
+    'A-10': riwayat,
+    'A-12': decisionMaker,
+  };
   // Channels that appear in the contract — the access matrix axis.
   const contractChannels = detail.channels.map((c) => c.channel);
 
@@ -336,19 +365,48 @@ export default function SectionA({
     }
   };
 
+  // Satu daftar, satu sumber: dipakai untuk merender kelima cermin DAN untuk
+  // menghitung berapa yang masih kosong. Dua daftar terpisah akan lepas sinkron
+  // diam-diam — badge "belum diisi" lalu berbohong.
+  const cermin = CERMIN_INTERVIEW.map((c) => ({ ...c, value: nilaiCermin[c.kode] }));
+  const kosongCermin = cermin.filter((c) => !c.value || c.value.trim() === '').length;
+
   return (
     <div className="stack">
-      {/* A-1 (read-only, dari Interview + kategori dari data klien) --------- */}
-      <InterviewMirror
-        title="A-1 · Brand & Kategori"
-        value={
-          brand || kategori
-            ? [brand ? `Brand: ${brand}` : null, kategori ? `Kategori: ${kategori}` : null]
-                .filter(Boolean)
-                .join('\n')
-            : null
-        }
-      />
+      {/* Kelima cermin Interview (A-1/A-5/A-8/A-10/A-12) dikumpulkan di SATU
+          blok terlipat, tertutup secara default — keputusan pemilik 2026-09-19:
+          "ada beberapa kolom yg sudah terisi otomatis dari interview awal,
+          apakah bisa disembunyikan supaya AM tidak perlu melihat kolom sama
+          berulang kali". Dulu kelimanya tersebar di posisi 1/5/8/10/12 dan
+          memotong alur pengisian lima kali.
+
+          DILIPAT, bukan DIHAPUS, dan dua hal itu tidak sama: AM tetap perlu
+          MEMBACA nilai warisan saat menulis Section C/E, dan `InterviewMirror`
+          juga satu-satunya tempat yang bilang "Belum diisi — isi di modul
+          Interview". Karena itu ringkasan di <summary> menghitung yang masih
+          kosong: kalau ada, jumlahnya tampil TANPA perlu dibuka, sehingga
+          melipatnya tidak pernah menyembunyikan pekerjaan yang tersisa.
+          Kelimanya memang TIDAK menggerbangi submit (`checkCompleteness`
+          tidak membacanya, QA §3.A 2026-08-20) — itulah yang membuat pelipatan
+          ini aman. */}
+      <details className="card" style={{ padding: 12 }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+          Dari Interview — {CERMIN_INTERVIEW.length} field, sudah terisi otomatis{' '}
+          <span className="badge badge-gray" style={{ fontWeight: 400 }}>
+            A-1 · A-5 · A-8 · A-10 · A-12
+          </span>
+          {kosongCermin > 0 && (
+            <span className="badge badge-amber" style={{ fontWeight: 400, marginLeft: 6 }}>
+              {kosongCermin} belum diisi di Interview
+            </span>
+          )}
+        </summary>
+        <div className="stack" style={{ marginTop: 8 }}>
+          {cermin.map((c) => (
+            <InterviewMirror key={c.kode} title={c.title} value={c.value} badge={c.badge} />
+          ))}
+        </div>
+      </details>
 
       {/* A-2/A-4 ----------------------------------------------------------- */}
       <div className="card">
@@ -403,9 +461,6 @@ export default function SectionA({
         />
       </label>
 
-      {/* A-5 (read-only, dari Interview) ----------------------------------- */}
-      <InterviewMirror title="A-5 · USP Produk" value={uspText} />
-
       {/* A-6 --------------------------------------------------------------- */}
       {/* A-7 (plafon unit/bulan) retired — see DECISIONS.md 2026-08-20. */}
       <div className="card">
@@ -438,9 +493,6 @@ export default function SectionA({
         </div>
       </div>
 
-      {/* A-8 (read-only, dari Interview — fulfillment) --------------------- */}
-      <InterviewMirror title="A-8 · Titik Kirim (kota gudang / origin)" value={titikKirim} />
-
       {/* A-9 --------------------------------------------------------------- */}
       <label className="field" style={{ display: 'block' }}>
         <span style={{ fontWeight: 600 }}>A-9 · Ekspektasi Klien</span>
@@ -454,13 +506,6 @@ export default function SectionA({
           onChange={(e) => onChange({ ekspektasi_klien: e.target.value })}
         />
       </label>
-
-      {/* A-10 (read-only, dari Interview — hard-internal) ------------------ */}
-      <InterviewMirror
-        title="A-10 · Riwayat Agensi"
-        badge={<span className="badge badge-red">Hard-internal</span>}
-        value={riwayat}
-      />
 
       {/* A-11 -------------------------------------------------------------- */}
       <div className="field" style={{ display: 'block' }}>
@@ -505,9 +550,6 @@ export default function SectionA({
           </RepeatList>
         )}
       </div>
-
-      {/* A-12 (read-only, dari Interview — teks bebas) --------------------- */}
-      <InterviewMirror title="A-12 · Decision Maker" value={decisionMaker} />
 
       {/* A-13 -------------------------------------------------------------- */}
       <div className="card">
