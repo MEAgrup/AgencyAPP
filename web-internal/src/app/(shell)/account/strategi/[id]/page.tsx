@@ -831,6 +831,20 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                     onApply={(channels) => patch('channels', channels)}
                     disabled={!editable}
                   />
+                  {/* Pintu masuk PDT — di Section A, bukan Section B, atas
+                      keputusan pemilik 2026-09-19. Alasannya sama persis dengan
+                      Video Factory tepat di atas: ini SUMBER yang mengisi Section
+                      B, dan seluruh sumber lain (Interview, Video Factory, AM
+                      Co-Pilot) sudah berkumpul di Section A. Menaruh satu sumber
+                      sendirian di Section B membuat AM baru menemukannya SESUDAH
+                      ia terlanjur mengetik baseline dengan tangan — terlambat,
+                      karena PDT butuh unggah + batch verified + muat ulang.
+                      Sengaja TIDAK di-gate `baselinePrefill`: selektor "Periode
+                      acuan PDT" di SectionB hanya muncul saat
+                      `periode_referensi_pdt_opsi` tidak kosong, jadi justru pada
+                      toko yang belum punya batch (keadaan yang butuh diperbaiki)
+                      tak ada satu pun kata "PDT" di seluruh halaman. */}
+                  <PdtUploadPanel clientId={detail.client_id} prefill={baselinePrefill} />
                   <SectionA
                     detail={detail}
                     draft={drafts.konteks}
@@ -843,14 +857,6 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
               {active === 'B' && (
                 <>
                   {baselinePrefill && <BaselinePrefillPanel prefill={baselinePrefill} />}
-                  {/* Pintu masuk PDT. Sengaja TIDAK di-gate `baselinePrefill` —
-                      selektor "Periode acuan PDT" di dalam SectionB hanya muncul
-                      saat `periode_referensi_pdt_opsi` tidak kosong, jadi tepat
-                      saat toko belum punya batch terverifikasi (keadaan yang
-                      justru butuh diperbaiki) tak ada satu pun kata "PDT" di
-                      halaman ini, dan AM mengetik B3 dengan tangan. Dilaporkan
-                      pemilik saat uji produksi 2026-09-19. */}
-                  <PdtUploadPanel clientId={detail.client_id} prefill={baselinePrefill} />
                   <SectionB
                     draft={drafts.channels}
                     onChange={(channels) => patch('channels', channels)}
