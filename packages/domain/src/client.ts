@@ -69,6 +69,26 @@ export const MSG_INTENT_LOCKED =
 export const MSG_PLATFORM_DUPLIKAT =
   '[klien ini sudah punya toko aktif di platform tersebut — nonaktifkan dulu sebelum menambah yang baru]';
 
+/**
+ * G1-00 lanjutan — kosakata `client_platforms.platform`, SAMA PERSIS dengan
+ * CHECK `ck_client_platforms_platform` (migrasi
+ * `20261010010000_g1_00_client_platforms_platform_check.sql`, yang mengutip PDT
+ * PRD Rule 22 untuk Lazada/Blibli). Ditegakkan di sini karena CHECK-nya
+ * memvalidasi setiap INSERT baru: tanpa gerbang domain, nilai di luar daftar
+ * ini keluar sebagai SQLSTATE 23514 mentah — 500 dengan pesan Postgres, bukan
+ * pesan BI `[...]` (melanggar aturan rumah #5).
+ *
+ * Kosakata ini juga yang dicerminkan `PLATFORM_OPTIONS` di
+ * `web-internal/src/lib/clients.ts`. Keduanya sempat berselisih: FE menawarkan
+ * `'Others'` (tidak ada di CHECK — setiap penambahan dengan pilihan itu gagal)
+ * dan TIDAK menawarkan `'Blibli'` (ada di CHECK, jadi tak terjangkau sama
+ * sekali). Menambah nilai baru berarti mengubah CHECK, konstanta ini, dan
+ * `PLATFORM_OPTIONS` sekaligus — bukan salah satunya.
+ */
+export const PLATFORM_VOCAB = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Blibli'] as const;
+
+export const MSG_PLATFORM_TIDAK_VALID = '[platform tidak valid]';
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -140,6 +160,14 @@ export class PlatformDuplicateError extends Error {
   constructor() {
     super(MSG_PLATFORM_DUPLIKAT);
     this.name = 'ClientPlatformDuplicateError';
+  }
+}
+
+/** Platform di luar `PLATFORM_VOCAB` (→ 400, bukan 23514 mentah dari CHECK DB). */
+export class PlatformInvalidError extends Error {
+  constructor() {
+    super(MSG_PLATFORM_TIDAK_VALID);
+    this.name = 'ClientPlatformInvalidError';
   }
 }
 
@@ -328,6 +356,11 @@ export async function addPlatform(sql: Sql, actor: Actor, clientId: string, inpu
   const platform = (input.platform ?? '').trim();
   if (platform === '') {
     throw new IncompleteError();
+  }
+  // Gerbang kosakata SEBELUM transaksi — CHECK DB akan menolak nilai yang sama,
+  // tapi sebagai SQLSTATE 23514 mentah tanpa pesan BI (lihat PLATFORM_VOCAB).
+  if (!(PLATFORM_VOCAB as readonly string[]).includes(platform)) {
+    throw new PlatformInvalidError();
   }
   validDateOpt(input.managedSince);
 
