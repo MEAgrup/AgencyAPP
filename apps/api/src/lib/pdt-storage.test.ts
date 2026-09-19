@@ -158,6 +158,24 @@ describe('unggahPdtRawObjek (G1-09 sub-langkah 2a) — bentuk request (fetch dis
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  // Ditemukan di PRODUKSI 2026-09-19, bukan oleh tes: bucket `pdt-raw` memasang
+  // `allowed_mime_types = {application/zip, application/x-zip-compressed}`, dan
+  // header ini dulu `application/octet-stream` ⇒ Storage menolak 415
+  // `invalid_mime_type` ⇒ commit 500. Unggah STAGING tidak pernah kena karena
+  // ia dikirim browser lewat signed URL dengan `File.type` (= application/zip),
+  // jadi unggah+pratinjau tampak sehat dan kegagalannya baru muncul di tombol
+  // "Simpan Batch". Tes di atas memeriksa setiap header LAIN — celah itulah
+  // yang meloloskannya. Baris ini menutupnya.
+  it('Content-Type application/zip — octet-stream ditolak bucket 415 (allowed_mime_types)', async () => {
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const headers = init?.headers as Record<string, string>;
+      expect(headers['Content-Type']).toBe('application/zip');
+      return new Response(null, { status: 200 });
+    });
+    await unggahPdtRawObjek('CLI-1/1/2026-07-31/42.zip', Buffer.from([0x50, 0x4b]), fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it('melempar error yang menyebut status saat Storage API menolak', async () => {
     const fetchImpl = vi.fn(async () => new Response('rusak', { status: 500 }));
     await expect(unggahPdtRawObjek('a.zip', Buffer.from([1]), fetchImpl)).rejects.toThrow(/500/);

@@ -126,6 +126,15 @@ export async function buatPdtRawSignedUploadUrl(path: string, fetchImpl?: FetchL
  * objek "yatim" yang Rule 49 sudah antisipasi (purge > 7 hari), sama seperti
  * `siapkanUploadBatch` sudah mendokumentasikan untuk staging yang tidak
  * pernah dipakai sama sekali.
+ *
+ * ⚠️ `Content-Type` WAJIB `application/zip`, bukan `application/octet-stream`.
+ * Bucket `pdt-raw` memasang `allowed_mime_types`
+ * `{application/zip, application/x-zip-compressed}`, jadi octet-stream ditolak
+ * 415 `invalid_mime_type` — dan penolakannya baru muncul di COMMIT, bukan saat
+ * unggah staging, karena staging diunggah BROWSER lewat signed URL dengan
+ * `Content-Type` dari `File.type` (`application/zip` untuk .zip). Artinya
+ * seluruh jalur unggah+pratinjau tampak sehat sampai orang menekan "Simpan
+ * Batch", lalu gagal 500. Diperbaiki setelah terlihat di produksi 2026-09-19.
  */
 export async function unggahPdtRawObjek(path: string, isi: Buffer, fetchImpl?: FetchLike): Promise<void> {
   const { url, serviceRoleKey } = config();
@@ -134,7 +143,7 @@ export async function unggahPdtRawObjek(path: string, isi: Buffer, fetchImpl?: F
   const res = await doFetch(`${url}/storage/v1/object/pdt-raw/${path.split('/').map(encodeURIComponent).join('/')}`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/octet-stream',
+      'Content-Type': 'application/zip',
       apikey: serviceRoleKey,
       Authorization: `Bearer ${serviceRoleKey}`,
       'x-upsert': 'true',
