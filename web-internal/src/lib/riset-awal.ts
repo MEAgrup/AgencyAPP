@@ -115,10 +115,20 @@ export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 }
 
 /**
- * Parse ONE uploaded workbook into the shape the API expects. Reads the FIRST
- * sheet as array-of-arrays (header:1) — exactly what the server's `readSheet`
- * consumes. The heavy xlsx dependency is loaded lazily so it never enters the
- * initial bundle of pages that don't touch Riset Awal.
+ * Parse ONE uploaded workbook into the shape the API expects — **TikTok only**.
+ * Reads the FIRST sheet as array-of-arrays (header:1), exactly what the
+ * server's `readSheet` consumes. The heavy xlsx dependency is loaded lazily so
+ * it never enters the initial bundle of pages that don't touch Riset Awal.
+ *
+ * ⛔ **Not for Shopee** — use `parseShopeeExportFile` below. A Seller Centre
+ * export carries its sections as separate WORKSHEETS ("Pesanan Dibuat",
+ * "Pesanan Siap Dikirim", "Pesanan Dibayar"), and `@cdps/core`
+ * `report/shopee/metrik.ts` finds them by searching for a ROW whose text names
+ * the section — which only exists once the reader emits a `__SHEET__:name`
+ * marker per sheet. Feeding a Shopee workbook to this reader hands the engine
+ * sheet 1 alone, with no marker, so every section search misses and the whole
+ * analysis dies on `[Home: section pesanan tidak dikenali]`. That is O78, seen
+ * in production 2026-09-19 (`docs/DECISIONS.md`).
  */
 export async function parseExportFile(file: File): Promise<ParsedExport> {
   const buf = await file.arrayBuffer();
@@ -135,6 +145,48 @@ export async function parseExportFile(file: File): Promise<ParsedExport> {
   };
 }
 
+/** Row emitted between worksheets so server parsers stop at their own table. */
+const SHEET_MARK = '__SHEET__:';
+
+/**
+ * Parse ONE Shopee export the way the Shopee engine expects it.
+ *
+ * Two differences from `parseExportFile` (TikTok), both required by
+ * `@cdps/core` `report/shopee`:
+ *
+ *  1. **Every worksheet is read, not just the first.** A single Shopee export
+ *     bundles several tables across sheets, and `metrik.ts` needs all of them.
+ *  2. **A `__SHEET__:name` marker row precedes each sheet.** Every
+ *     section-scanning parser in `metrik.ts` breaks on `isSheetMarker`, which is
+ *     what stops one sheet's table from being read into the next. The marker is
+ *     emitted before EVERY sheet (the first included) so the shape does not
+ *     depend on how many sheets the workbook happens to have; parsers locate
+ *     their header by search, so a leading marker row is inert.
+ *
+ * The browser still does nothing but decode and hash — detection, scoring, and
+ * every threshold stay server-side (PLAN §3 rule 4).
+ */
+export async function parseShopeeExportFile(file: File): Promise<ParsedExport> {
+  const buf = await file.arrayBuffer();
+  const XLSX = await import('xlsx');
+  const wb = XLSX.read(buf, { type: 'array' });
+  const aoa: unknown[][] = [];
+  for (const name of wb.SheetNames) {
+    aoa.push([`${SHEET_MARK}${name}`]);
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], {
+      header: 1,
+      raw: false,
+      defval: '',
+    });
+    for (const r of rows) aoa.push(r as unknown[]);
+  }
+  return {
+    filename: file.name,
+    aoa,
+    sha256: await sha256Hex(buf),
+    ukuran_bytes: file.size,
+  };
+}
 // ---------------------------------------------------------------------------
 // API client
 // ---------------------------------------------------------------------------

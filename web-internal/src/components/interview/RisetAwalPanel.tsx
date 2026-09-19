@@ -38,6 +38,7 @@ import {
   confirmBaselineIsian,
   mesinPlatform,
   parseExportFile,
+  parseShopeeExportFile,
   submitBaselineAnalisa,
   submitBaselineManual,
   TIPE_OVERRIDE_OPTIONS,
@@ -489,9 +490,16 @@ function AnalisaPenuhForm({
     setParsing(true);
     setErr(null);
     try {
+      // Pembaca DIPILIH per platform, bukan satu untuk semua (O78,
+      // `docs/DECISIONS.md` 2026-09-19). Export Shopee menaruh tiap section di
+      // WORKSHEET terpisah; mesinnya mencari section lewat baris penanda
+      // `__SHEET__:<nama>` yang hanya ditulis `parseShopeeExportFile`. Memakai
+      // pembaca TikTok (sheet pertama saja) di sini membuat SETIAP unggahan
+      // Shopee mati dengan `[Home: section pesanan tidak dikenali]`.
+      const baca = mesin === 'shopee' ? parseShopeeExportFile : parseExportFile;
       const parsed: UploadedFile[] = [];
       for (const f of Array.from(list)) {
-        const p = await parseExportFile(f);
+        const p = await baca(f);
         parsed.push({ ...p, tipe: '' });
       }
       setFiles((prev) => [...prev, ...parsed]);

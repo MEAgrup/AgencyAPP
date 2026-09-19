@@ -15,8 +15,16 @@
  * `clientReport*ToWire` exactly (shape-parity guards it).
  */
 import { api } from './api';
-import { sha256Hex, type ParsedExport } from './riset-awal';
+import { parseShopeeExportFile, sha256Hex, type ParsedExport } from './riset-awal';
 import { type Role } from './types';
+
+/**
+ * Re-export only. The reader itself moved to `./riset-awal` beside
+ * `parseExportFile` and `sha256Hex`, because Riset Awal needs the SAME reader
+ * for Shopee and a second copy would be a second contract to keep in sync —
+ * exactly the drift that produced O78 (`docs/DECISIONS.md` 2026-09-19).
+ */
+export { parseShopeeExportFile };
 
 // ---------------------------------------------------------------------------
 // Wire types (snake_case) — mirror apps/api `clientReport*ToWire`.
@@ -337,49 +345,6 @@ export const SHOPEE_MODULE_OPTIONS: ReadonlyArray<{ value: string; label: string
   { value: 'layanan_broadcast', label: 'Layanan — Broadcast' },
   { value: 'meta', label: 'Meta CPAS' },
 ];
-
-/** Row emitted between worksheets so server parsers stop at their own table. */
-const SHEET_MARK = '__SHEET__:';
-
-/**
- * Parse ONE Shopee export the way the Shopee engine expects it.
- *
- * Two differences from `parseExportFile` (TikTok), both required by
- * `@cdps/core` `report/shopee`:
- *
- *  1. **Every worksheet is read, not just the first.** A single Shopee export
- *     bundles several tables across sheets, and `metrik.ts` needs all of them.
- *  2. **A `__SHEET__:name` marker row precedes each sheet.** Every
- *     section-scanning parser in `metrik.ts` breaks on `isSheetMarker`, which is
- *     what stops one sheet's table from being read into the next. The marker is
- *     emitted before EVERY sheet (the first included) so the shape does not
- *     depend on how many sheets the workbook happens to have; parsers locate
- *     their header by search, so a leading marker row is inert.
- *
- * The browser still does nothing but decode and hash — detection, scoring, and
- * every threshold stay server-side (PLAN §3 rule 4).
- */
-export async function parseShopeeExportFile(file: File): Promise<ParsedExport> {
-  const buf = await file.arrayBuffer();
-  const XLSX = await import('xlsx');
-  const wb = XLSX.read(buf, { type: 'array' });
-  const aoa: unknown[][] = [];
-  for (const name of wb.SheetNames) {
-    aoa.push([`${SHEET_MARK}${name}`]);
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], {
-      header: 1,
-      raw: false,
-      defval: '',
-    });
-    for (const r of rows) aoa.push(r as unknown[]);
-  }
-  return {
-    filename: file.name,
-    aoa,
-    sha256: await sha256Hex(buf),
-    ukuran_bytes: file.size,
-  };
-}
 
 /** One active `Shopee Ads` campaign overlapping the report period (SH-06 split). */
 export interface ShopeeAdsCampaignOption {
