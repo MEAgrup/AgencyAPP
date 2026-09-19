@@ -201,9 +201,54 @@
  */
 import { WIB_OFFSET_HOURS } from '../tz';
 import { parsePdtAngka } from './angka';
+import { PDT_KOLOM_ALIAS } from './modules';
 import { parseRentangTanggalTiktok, parseTanggalId, parseTanggalIdStrip } from './identitas';
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
+
+/**
+ * Indeks alias `pdt_kolom_alias` (Rule 9) dikelompokkan modul → kolom kanonik.
+ * Diturunkan dari `PDT_KOLOM_ALIAS` — satu rumah ejaan untuk SELURUH pipeline,
+ * bukan daftar kedua yang bisa menyimpang diam-diam.
+ */
+const ALIAS_EJAAN: ReadonlyMap<string, Record<string, readonly string[]>> = (() => {
+  const map = new Map<string, Record<string, string[]>>();
+  for (const a of PDT_KOLOM_ALIAS) {
+    const perKolom = map.get(a.modulKode) ?? {};
+    (perKolom[a.kolomKanonik] ??= []).push(a.alias);
+    map.set(a.modulKode, perKolom);
+  }
+  return map;
+})();
+
+/**
+ * Cari indeks kolom di baris header: ejaan KANONIK dulu, baru alias modul itu
+ * (`PDT_KOLOM_ALIAS`, Rule 9) — urutan yang SAMA dipakai `cariKolomWajib`
+ * (`parsestatus.ts`), supaya satu berkas tidak pernah lolos validasi lewat
+ * alias lalu diekstrak sebagai kolom kosong.
+ *
+ * **Kenapa ini ada (sesi 43).** Sebelum ini alias hanya dibaca
+ * `validasiKolomWajib`/`hitungKolomDipanenBaru`; setiap `ekstrakBaris*` memakai
+ * `header.findIndex(exact)` sendiri. Jadi alias menaikkan `parse_status` ke
+ * `ok` TANPA membuat kolomnya terbaca — kegagalan SENYAP (nilai `null`,
+ * bukan error), justru kelas bug yang paling sulit ketahuan karena gerbangnya
+ * hijau. `tt_live`'s `Kreator` → `Nama panggilan` (alias sejak seed pertama)
+ * sudah terkena persis itu. Ekstraktor yang modulnya PUNYA alias wajib lewat
+ * sini; invariannya dijaga tes `fakta.test.ts` ("setiap modul ber-alias punya
+ * ekstraktor sadar-alias"), bukan kedisiplinan penulis.
+ */
+function pencariKolom(header: readonly unknown[], modulKode: string): (nama: string) => number {
+  const alias = ALIAS_EJAAN.get(modulKode) ?? {};
+  return (nama: string): number => {
+    const exact = header.findIndex((c) => norm(c) === norm(nama));
+    if (exact !== -1) return exact;
+    for (const a of alias[nama] ?? []) {
+      const i = header.findIndex((c) => norm(c) === norm(a));
+      if (i !== -1) return i;
+    }
+    return -1;
+  };
+}
 
 /** Satu baris `pdt_fact_ads` mentah dari `shopee_ads_live`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi — sama seperti fungsi lain di paket ini, murni tidak tahu konteks batch). */
 export interface PdtBarisAdsShopeeLive {
@@ -213,6 +258,8 @@ export interface PdtBarisAdsShopeeLive {
   gmv: number | null;
   biaya: number;
   roas: number | null;
+  /** G3-06 — teks mentah kolom `Tujuan`. Lihat `bacaTipeKampanyeSumber`. */
+  tipeKampanyeSumber: string | null;
 }
 
 /**
@@ -227,13 +274,16 @@ export function ekstrakBarisShopeeAdsLive(
   barisHeader: number,
 ): PdtBarisAdsShopeeLive[] {
   const header = aoa[barisHeader - 1] ?? [];
-  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const idx = pencariKolom(header, 'shopee_ads_live'); // sadar-alias (Rule 9) — lihat docblock `pencariKolom`
   const iKampanye = idx('ID Iklan');
   const iTayangan = idx('Penonton');
   const iPesanan = idx('Pesanan');
-  const iGmv = idx('Omzet');
+  // `Omzet Penjualan` (ejaan sel yang sebenarnya, dikoreksi sesi 43); `Omzet` polos
+  // tetap terbaca lewat alias.
+  const iGmv = idx('Omzet Penjualan');
   const iBiaya = idx('Biaya');
   const iRoas = idx('Efektifitas Iklan');
+  const iTipe = idx('Tujuan'); // G3-06
 
   const hasil: PdtBarisAdsShopeeLive[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -246,10 +296,37 @@ export function ekstrakBarisShopeeAdsLive(
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
       roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+      tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
   return hasil;
 }
+
+/**
+ * Teks MENTAH konfigurasi kampanye (`pdt_fact_ads.tipe_kampanye_sumber`, G3-06).
+ *
+ * Nama kolomnya berbeda per modul karena memang berbeda di berkasnya —
+ * diverifikasi ke 12 klien nyata (sesi 43), bukan ditebak:
+ *
+ * | modul | kolom | nilai yang benar-benar muncul |
+ * |---|---|---|
+ * | `shopee_ads_cpc` | `Mode Bidding` | `GMV Max ROAS`, `GMV Max Auto Bidding (Shop)`, `GMV Max Auto` |
+ * | `shopee_ads_search` | `Mode Bidding` | `Bidding Manual`, `Bidding Otomatis` |
+ * | `shopee_ads_live` | `Tujuan` | `Live GMV Max Auto`, `Live GMV Max ROAS`, `Tingkatkan Jumlah Penonton` |
+ * | `tt_ads_product` | `Jenis materi iklan` | `Video`, `Kartu produk` |
+ *
+ * `tt_ads_live` TIDAK punya kolom semacam ini dan tidak membutuhkannya: seluruh
+ * berkasnya adalah kampanye LIVE, jadi tipenya melekat pada identitas modul.
+ * Pemanggilnya (`pdt.ts`) yang mengisi konstanta itu — BUKAN fungsi di sini,
+ * supaya tidak ada nilai yang tampak "dipanen dari berkas" padahal diasumsikan.
+ *
+ * Dikembalikan APA ADANYA (trim saja); sel kosong ⇒ `null`, bukan `''` — absen
+ * ≠ nol, pola sama seluruh kolom fakta PDT lain. Pemetaan ke `CAMPAIGN_TYPES`
+ * ada di `packages/domain`; lihat migrasi `20261120010000` untuk alasannya
+ * ("taksonomi tidak punya dua rumah").
+ */
+const bacaTipeKampanyeSumber = (row: readonly unknown[] | undefined, i: number): string | null =>
+  i === -1 ? null : (String(row?.[i] ?? '').trim() || null);
 
 const roasTurunan = (gmv: number | null, biaya: number): number | null =>
   gmv == null || biaya === 0 ? null : gmv / biaya;
@@ -269,6 +346,8 @@ export interface PdtBarisAdsTtProduct {
   roas: number | null;
   tayangan: number | null;
   klik: number | null;
+  /** G3-06 — teks mentah kolom `Jenis materi iklan`. Lihat `bacaTipeKampanyeSumber`. */
+  tipeKampanyeSumber: string | null;
 }
 
 /**
@@ -305,6 +384,7 @@ export function ekstrakBarisTtAdsProduct(
   const iBiaya = idx('Biaya');
   const iTayangan = idx('Impresi iklan produk');
   const iKlik = idx('Jumlah klik iklan produk');
+  const iTipe = idx('Jenis materi iklan'); // G3-06
 
   const hasil: PdtBarisAdsTtProduct[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -320,6 +400,7 @@ export function ekstrakBarisTtAdsProduct(
       roas: roasTurunan(gmv, biaya),
       tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
       klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik], true),
+      tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
   return hasil;
@@ -748,10 +829,10 @@ export function ekstrakBarisTtLive(
   akunKontenToko: readonly string[] | null,
 ): PdtBarisContentTtLive[] {
   const header = aoa[barisHeader - 1] ?? [];
-  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const idx = pencariKolom(header, 'tt_live'); // sadar-alias (Rule 9)
   const iIdKreator = idx('ID Kreator');
   const iWaktuLive = idx('Waktu Live');
-  const iKreator = idx('Kreator');
+  const iKreator = idx('Kreator'); // alias `Nama panggilan` — sebelum sesi 43 TIDAK pernah terbaca ekstraktor
   const iDurasi = idx('Durasi');
   const iGmv = idx('GMV dari LIVE (Rp)');
   const iPenonton = idx('Penonton');
@@ -1156,6 +1237,8 @@ export interface PdtBarisAdsShopeeCpc {
   gmv: number | null;
   biaya: number;
   roas: number | null;
+  /** G3-06 — teks mentah kolom `Mode Bidding`. Lihat `bacaTipeKampanyeSumber`. */
+  tipeKampanyeSumber: string | null;
 }
 
 /**
@@ -1193,6 +1276,7 @@ export function ekstrakBarisShopeeAdsCpc(
   const iGmv = idx('omzet penjualan');
   const iBiaya = idx('Biaya');
   const iRoas = idx('Efektifitas Iklan');
+  const iTipe = idx('Mode Bidding'); // G3-06
 
   const hasil: PdtBarisAdsShopeeCpc[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -1208,6 +1292,7 @@ export function ekstrakBarisShopeeAdsCpc(
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
       roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+      tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
   return hasil;
@@ -1222,6 +1307,14 @@ export interface PdtBarisAdsShopeeSearch {
   gmv: number | null;
   biaya: number;
   roas: number | null;
+  /**
+   * G3-06 — teks mentah kolom `Mode Bidding`. Nama kolomnya SAMA dengan
+   * `shopee_ads_cpc` tapi artinya tidak: laporan ini Search Ads (punya kolom
+   * `Kata Pencarian`), jadi 'Bidding Manual' di sini berarti bidding manual
+   * atas KATA KUNCI. Pembedaannya dilakukan pemeta di `packages/domain` lewat
+   * `sumber` baris itu, bukan dengan menebak dari teksnya saja.
+   */
+  tipeKampanyeSumber: string | null;
 }
 
 /**
@@ -1253,6 +1346,7 @@ export function ekstrakBarisShopeeAdsSearch(
   const iGmv = idx('Omzet Penjualan');
   const iBiaya = idx('Biaya');
   const iRoas = idx('Efektifitas Iklan');
+  const iTipe = idx('Mode Bidding'); // G3-06
 
   const hasil: PdtBarisAdsShopeeSearch[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -1267,6 +1361,7 @@ export function ekstrakBarisShopeeAdsSearch(
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
       roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+      tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
   return hasil;
@@ -1517,7 +1612,7 @@ export function ekstrakBarisTtProductAnalytics(
   barisHeader: number,
 ): PdtBarisSkuPeriodTtProductAnalytics[] {
   const header = aoa[barisHeader - 1] ?? [];
-  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const idx = pencariKolom(header, 'tt_product_analytics'); // sadar-alias (Rule 9)
   const iIdProduk = idx('ID Produk');
   const iNama = idx('Nama');
   const iGmv = idx('GMV');
@@ -1527,8 +1622,8 @@ export function ekstrakBarisTtProductAnalytics(
   const iPesananSku = idx('Pesanan SKU');
   const iImpresi = idx('Impresi produk');
   const iKlik = idx('Klik produk');
-  const iCtr = idx('CTR');
-  const iCtor = idx('CTOR');
+  const iCtr = idx('CTR'); // kolom `CTR` polos MEMANG ada di berkas nyata — bukan salah eja
+  const iCtor = idx('CTOR (pesanan SKU)'); // dikoreksi sesi 43; `CTOR` polos tetap jalan lewat alias
 
   const hasil: PdtBarisSkuPeriodTtProductAnalytics[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -1579,7 +1674,9 @@ export interface PdtBarisKesehatanShopee {
  */
 export function ekstrakBarisKesehatanShopee(aoa: readonly (readonly unknown[])[], barisHeader: number): PdtBarisKesehatanShopee[] {
   const header = aoa[barisHeader - 1] ?? [];
-  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  // Sadar-alias (Rule 9): ekspor nyata menulis `Poin Pinalti`/`Pinalti Berjalan`,
+  // whitelist-nya `Poin Penalti`/`Deskripsi`. Keduanya sah — lihat `PDT_KOLOM_ALIAS`.
+  const idx = pencariKolom(header, 'shopee_kesehatan');
   const iPoin = idx('Poin Penalti');
   const iDeskripsi = idx('Deskripsi');
   const iDurasi = idx('Durasi');
@@ -1661,6 +1758,130 @@ export function ekstrakBarisLayananChatShopee(
       totalPesanan: iTotalPesanan === -1 ? null : parsePdtAngka(row?.[iTotalPesanan]),
       penjualan: iPenjualan === -1 ? null : parsePdtAngka(row?.[iPenjualan]),
       tingkatKonversiChatDibalas: iKonversiChatDibalas === -1 ? null : parsePdtAngka(row?.[iKonversiChatDibalas]),
+    });
+  }
+  return hasil;
+}
+
+/**
+ * Satu baris `pdt_fact_promo` mentah dari `shopee_diskon` atau
+ * `shopee_flash_sale`, SEBELUM `client_platform_id`/`batch_id`/`periode`/
+ * `parser_versi` (pemanggil yang melengkapi — pola sama fungsi lain di berkas
+ * ini). G4-03 aksi 4.
+ */
+export interface PdtBarisPromoShopee {
+  /**
+   * HANYA terisi untuk `shopee_diskon`. `'Semua'` adalah total periode yang
+   * SUDAH di-dedup oleh Shopee; nilai lain adalah KOMPONEN yang boleh saling
+   * tumpang tindih. `null` untuk flash sale (berkasnya nol dimensi tipe).
+   */
+  tipePromosi: string | null;
+  penjualanDibuat: number | null;
+  penjualanSiapDikirim: number | null;
+  pesananDibuat: number | null;
+  pesananSiapDikirim: number | null;
+  /** HANYA `shopee_flash_sale` — satu-satunya kolom yang diskon tidak punya. */
+  produkDilihat: number | null;
+  produkDiklik: number | null;
+}
+
+/**
+ * Ekstrak sheet "Kriteria Utama" `shopee_diskon` (G4-03 aksi 4).
+ *
+ * ⚠️ **Fungsi ini mengembalikan SELURUH baris, termasuk `Tipe Promosi='Semua'`,
+ * dan pemanggilnya TIDAK BOLEH menjumlahkannya.** Baris `'Semua'` bukan jumlah
+ * baris lain — ia MEN-DEDUP: satu pesanan bisa membawa beberapa tipe promosi
+ * sekaligus (produk ber-Diskon yang juga masuk Paket Diskon), jadi ia muncul di
+ * kedua baris komponen dan dihitung SEKALI di `'Semua'`.
+ *
+ * Diverifikasi ke berkas nyata, dan ini hanya ketahuan karena ada klien kelima:
+ * pada 5 dari 6 klien Σ komponen KEBETULAN sama persis dengan `'Semua'`. Pada
+ * klien keenam tidak — Σ komponen Rp444.444.312 vs `'Semua'` Rp354.987.431,
+ * 25% lebih tinggi. Menjumlahkan tabel ini adalah bug kelas
+ * `G1-07-SHOPEE-DOBEL-HITUNG` (lihat `rekonsiliasi.ts` `sumShopeeParentSkuGmv`).
+ *
+ * Baris ber-`Tanggal` kosong dilewati (bukan baris data). Sheet "Grafik setiap
+ * Kriteria" (rincian HARIAN, header identik) dan "Rincian Performa" (per promosi
+ * individual) TIDAK diekstrak di sini — `modules.ts` sudah menetapkan cakupan MVP
+ * "hanya agregat sheet Kriteria Utama"; pemanggil memilih sheet-nya lewat
+ * `PdtModuleDef.namaSheet`.
+ */
+export function ekstrakBarisPromoDiskonShopee(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisPromoShopee[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = pencariKolom(header, 'shopee_diskon');
+  const iTanggal = idx('Tanggal');
+  const iTipe = idx('Tipe Promosi');
+  const iJualDibuat = idx('Penjualan (Pesanan Dibuat) (IDR)');
+  const iJualSiap = idx('Penjualan (Pesanan Siap Dikirim) (IDR)');
+  const iPesDibuat = idx('Pesanan (Pesanan Dibuat)');
+  const iPesSiap = idx('Pesanan (Pesanan Siap Dikirim)');
+
+  const hasil: PdtBarisPromoShopee[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const tanggal = iTanggal === -1 ? '' : String(row?.[iTanggal] ?? '').trim();
+    if (tanggal === '') continue;
+    const tipe = iTipe === -1 ? '' : String(row?.[iTipe] ?? '').trim();
+    hasil.push({
+      tipePromosi: tipe === '' ? null : tipe,
+      penjualanDibuat: iJualDibuat === -1 ? null : parsePdtAngka(row?.[iJualDibuat]),
+      penjualanSiapDikirim: iJualSiap === -1 ? null : parsePdtAngka(row?.[iJualSiap]),
+      pesananDibuat: iPesDibuat === -1 ? null : parsePdtAngka(row?.[iPesDibuat]),
+      pesananSiapDikirim: iPesSiap === -1 ? null : parsePdtAngka(row?.[iPesSiap]),
+      produkDilihat: null, // kolom funnel HANYA ada di flash sale
+      produkDiklik: null,
+    });
+  }
+  return hasil;
+}
+
+/**
+ * Ekstrak sheet "Kriteria Utama" `shopee_flash_sale` (G4-03 aksi 4).
+ *
+ * Bentuknya BEDA dari diskon meski nama sheet-nya sama, dan bedanya tidak boleh
+ * disamakan diam-diam:
+ *  - kunci barisnya `Periode Waktu` (bukan `Tanggal`), dan hanya ADA SATU baris
+ *    data — agregat seluruh periode, nol dimensi tipe promosi;
+ *  - kolom uangnya bersufiks `(Rp)` TANPA spasi (`Penjualan (Pesanan Dibuat)(Rp)`),
+ *    sementara diskon memakai ` (IDR)` dengan spasi. Menyalin ejaan diskon ke sini
+ *    akan menghasilkan seluruh kolom `null` tanpa satu pun error — kelas kegagalan
+ *    senyap yang sama yang baru saja menelan lima whitelist (sesi 43);
+ *  - `Jumlah Produk Dilihat`/`Produk Diklik` adalah satu-satunya hal yang flash
+ *    sale punya dan diskon tidak (dan juga tanda tangan deteksinya).
+ *
+ * Berkas ber-nol baris data (flash sale tidak pernah dijalankan periode itu)
+ * mengembalikan array kosong — BEDA dari baris ber-angka nol, yang berarti
+ * dijalankan tapi nol hasil. Pemanggil membedakan keduanya lewat `pdt_file`/
+ * `pdt_upload_batch`, pola sama `ekstrakBarisKesehatanShopee`.
+ */
+export function ekstrakBarisPromoFlashSaleShopee(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisPromoShopee[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = pencariKolom(header, 'shopee_flash_sale');
+  const iPeriode = idx('Periode Waktu');
+  const iJualDibuat = idx('Penjualan (Pesanan Dibuat)(Rp)');
+  const iJualSiap = idx('Penjualan (Pesanan Siap Dikirim)(Rp)');
+  const iPesDibuat = idx('Pesanan (Pesanan Dibuat)');
+  const iPesSiap = idx('Pesanan (Pesanan Siap Dikirim)');
+  const iDilihat = idx('Jumlah Produk Dilihat');
+  const iDiklik = idx('Produk Diklik');
+
+  const hasil: PdtBarisPromoShopee[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const periode = iPeriode === -1 ? '' : String(row?.[iPeriode] ?? '').trim();
+    if (periode === '') continue;
+    hasil.push({
+      tipePromosi: null, // flash sale nol dimensi tipe — dijaga CHECK di DB juga
+      penjualanDibuat: iJualDibuat === -1 ? null : parsePdtAngka(row?.[iJualDibuat]),
+      penjualanSiapDikirim: iJualSiap === -1 ? null : parsePdtAngka(row?.[iJualSiap]),
+      pesananDibuat: iPesDibuat === -1 ? null : parsePdtAngka(row?.[iPesDibuat]),
+      pesananSiapDikirim: iPesSiap === -1 ? null : parsePdtAngka(row?.[iPesSiap]),
+      produkDilihat: iDilihat === -1 ? null : parsePdtAngka(row?.[iDilihat]),
+      produkDiklik: iDiklik === -1 ? null : parsePdtAngka(row?.[iDiklik]),
     });
   }
   return hasil;

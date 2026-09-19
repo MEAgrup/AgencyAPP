@@ -183,7 +183,7 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "183"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "184"
 check "entity_prefix"    "select count(*) from entity_prefix"    "45"
 check "sm_machines"      "select count(*) from sm_machines"      "35"
 check "notif_events"     "select count(*) from notif_events"     "79"
@@ -194,6 +194,11 @@ check "notif_events"     "select count(*) from notif_events"     "79"
 #       [Closure Requested] (mirrors T-2b Hold). Nol tabel baru ⇒ tabel public
 #       TETAP 183, entity_prefix TETAP 45. Nol mesin baru (`service` sudah ada
 #       sejak awal) ⇒ sm_machines TETAP 35.
+# --- G4-03 aksi 4 (20261121010000) — writer fakta promo Shopee -------------
+# 184 = 183 + 1 tabel `pdt_fact_promo` (fakta murni untuk shopee_diskon +
+#       shopee_flash_sale, sama kelas pdt_fact_layanan_chat — nol identitas
+#       PREFIX-YYYYMM-NNNN) ⇒ entity_prefix TETAP 45. Nol lifecycle/notifikasi
+#       baru ⇒ sm_machines TETAP 35, notif_events TETAP 79.
 # --- G3-02a (20261115010000) — shopee_chat writer --------------------------
 # 183 = 182 + 1 tabel `pdt_fact_layanan_chat` (fakta murni, sama kelas
 #       pdt_fact_kesehatan_penalti — nol identitas PREFIX-YYYYMM-NNNN) ⇒

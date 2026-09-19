@@ -913,6 +913,13 @@ export async function commitUploadBatch(
   // terdaftar+terdeteksi sejak G1-09 sub-2b-ii, tapi belum pernah punya
   // penulis fakta sama sekali sampai tiket ini.
   const berkasShopeeChat = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_chat');
+  // G4-03 aksi 4 — `shopee_diskon`/`shopee_flash_sale` → `pdt_fact_promo` (lihat
+  // docblock `ekstrakBarisPromoDiskonShopee`/`ekstrakBarisPromoFlashSaleShopee`,
+  // `@cdps/core` `pdt/fakta.ts`). Dua modul terakhir yang terdaftar+terdeteksi sejak
+  // G1-02 tapi nol penulis fakta — pola sama `shopee_kesehatan` (G2-01) dan
+  // `shopee_chat` (G3-02a) sebelumnya.
+  const berkasShopeeDiskon = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_diskon');
+  const berkasShopeeFlashSale = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_flash_sale');
 
   const retensiHari = status === 'ditolak' ? 30 : 120; // Rule 45 — default/ditolak; diperpanjang belakangan (G1-10/2b-ii), tidak pernah diperpendek
   const retensiSampai = tz.addDaysToDate(tz.dateString(now), retensiHari);
@@ -1001,7 +1008,7 @@ export async function commitUploadBatch(
         berkasTtAffiliateVideo, shopIdTersimpan: row.shop_id,
         berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
         berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
-        berkasShopeeKesehatan, berkasShopeeChat,
+        berkasShopeeKesehatan, berkasShopeeChat, berkasShopeeDiskon, berkasShopeeFlashSale,
       });
 
       // G4-03 Tahap 1 (Flow C langkah 1) — mesin verdict Shopee, HANYA saat batch
@@ -1090,6 +1097,8 @@ interface TulisFaktaModulTerparseInput {
   berkasTtProductAnalytics: readonly BerkasTerparse[];
   berkasShopeeKesehatan: readonly BerkasTerparse[];
   berkasShopeeChat: readonly BerkasTerparse[];
+  berkasShopeeDiskon: readonly BerkasTerparse[];
+  berkasShopeeFlashSale: readonly BerkasTerparse[];
 }
 
 /**
@@ -1124,7 +1133,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     berkasTtAffiliateVideo, shopIdTersimpan,
     berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
     berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
-    berkasShopeeKesehatan, berkasShopeeChat,
+    berkasShopeeKesehatan, berkasShopeeChat, berkasShopeeDiskon, berkasShopeeFlashSale,
   } = input;
 
   // G1-09 sub-langkah 2b-ii — baris fakta tertipe, `shopee_ads_live` → `pdt_fact_ads`
@@ -1147,10 +1156,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
           values
             (${clientPlatformId}, 'shopee_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
+             ${baris.tipeKampanyeSumber})`;
       }
     }
   }
@@ -1174,10 +1184,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, platform_product_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
           values
             (${clientPlatformId}, 'shopee_ads_cpc', ${baris.kampanyeId}, ${baris.platformProductId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
+             ${baris.tipeKampanyeSumber})`;
       }
     }
   }
@@ -1198,10 +1209,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
           values
             (${clientPlatformId}, 'shopee_ads_search', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
+             ${baris.tipeKampanyeSumber})`;
       }
     }
   }
@@ -1607,6 +1619,51 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     }
   }
 
+  // G4-03 aksi 4 — `shopee_diskon`/`shopee_flash_sale` → `pdt_fact_promo`.
+  // Replace-on-recommit per (toko, jenis, periode), pola sama blok-blok di atas.
+  //
+  // Baris ditulis APA ADANYA, termasuk `Tipe Promosi='Semua'`. Pembacanya yang
+  // WAJIB memilih: `'Semua'` adalah total periode yang sudah di-dedup Shopee,
+  // baris lain adalah komponen yang boleh saling tumpang tindih (satu pesanan
+  // bisa membawa beberapa tipe promosi). Menjumlahkan seluruh baris = bug kelas
+  // `G1-07-SHOPEE-DOBEL-HITUNG`; lihat docblock ekstraktornya untuk angka nyata
+  // yang membuktikannya (Σ komponen 25% di atas baris 'Semua' pada satu klien).
+  if (berkasShopeeDiskon.length > 0) {
+    await tx`
+      delete from pdt_fact_promo
+       where client_platform_id = ${clientPlatformId} and jenis = 'diskon' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasShopeeDiskon) {
+      for (const baris of pdt.ekstrakBarisPromoDiskonShopee(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_promo
+            (client_platform_id, periode, batch_id, parser_versi, jenis, tipe_promosi,
+             penjualan_dibuat, penjualan_siap_dikirim, pesanan_dibuat, pesanan_siap_dikirim)
+          values
+            (${clientPlatformId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'diskon', ${baris.tipePromosi},
+             ${baris.penjualanDibuat}, ${baris.penjualanSiapDikirim}, ${baris.pesananDibuat}, ${baris.pesananSiapDikirim})`;
+      }
+    }
+  }
+
+  if (berkasShopeeFlashSale.length > 0) {
+    await tx`
+      delete from pdt_fact_promo
+       where client_platform_id = ${clientPlatformId} and jenis = 'flash_sale' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasShopeeFlashSale) {
+      for (const baris of pdt.ekstrakBarisPromoFlashSaleShopee(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_promo
+            (client_platform_id, periode, batch_id, parser_versi, jenis, tipe_promosi,
+             penjualan_dibuat, penjualan_siap_dikirim, pesanan_dibuat, pesanan_siap_dikirim,
+             produk_dilihat, produk_diklik)
+          values
+            (${clientPlatformId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'flash_sale', null,
+             ${baris.penjualanDibuat}, ${baris.penjualanSiapDikirim}, ${baris.pesananDibuat}, ${baris.pesananSiapDikirim},
+             ${baris.produkDilihat}, ${baris.produkDiklik})`;
+      }
+    }
+  }
+
   // 2026-09-16 — `tt_ads_product` → `pdt_fact_ads` (lihat docblock
   // `ekstrakBarisTtAdsProduct`, `@cdps/core` `pdt/fakta.ts`, untuk kenapa `roas`
   // DITURUNKAN dan `sku_id`/`content_id` SELALU null). Replace-on-recommit,
@@ -1623,10 +1680,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
           values
             (${clientPlatformId}, 'tt_ads_product', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
+             ${baris.tipeKampanyeSumber})`;
       }
     }
   }
@@ -1636,6 +1694,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // diturunkan/`sku_id`/`content_id` null/replace-on-recommit). `tayangan` diisi
   // 2026-09-16 (`G1-09-2BII-TTADS-SAMPLE` DITUTUP, dari `Tayangan LIVE`) — `klik`
   // TETAP null, modul ini tidak punya kolom klik (sama pola `shopee_ads_live`).
+  // G3-06: `tipe_kampanye_sumber` SELALU null untuk modul ini — berkas "livestream data
+  // for live campaigns" nol kolom konfigurasi kampanye, jadi tidak ada yang bisa dipanen.
+  // `strategi.petakanTipeKampanye` mengembalikan 'live_ads' dari `sumber` saja untuk
+  // `tt_ads_live`; kolomnya sengaja dibiarkan NULL supaya tidak ada nilai yang TAMPAK
+  // dipanen dari berkas padahal berasal dari identitas modul. Satu rumah untuk asumsi itu.
   if (berkasTtAdsLive.length > 0) {
     await tx`
       delete from pdt_fact_ads
@@ -1645,10 +1708,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
           values
             (${clientPlatformId}, 'tt_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
+             null)`;
       }
     }
   }
@@ -2451,6 +2515,8 @@ export async function reparsePdtBatch(
         berkasTtProductAnalytics: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_product_analytics'),
         berkasShopeeKesehatan: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_kesehatan'),
         berkasShopeeChat: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_chat'),
+        berkasShopeeDiskon: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_diskon'),
+        berkasShopeeFlashSale: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_flash_sale'),
       });
 
       await tx`

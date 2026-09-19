@@ -212,6 +212,9 @@ afterEach(async () => {
   // pdt_fact_layanan_chat (G3-02a) — sama alasan (FK ke client_platforms/pdt_upload_batch
   // TANPA ON DELETE CASCADE).
   await sql`delete from pdt_fact_layanan_chat where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
+  // pdt_fact_promo (G4-03 aksi 4) — sama alasan (FK ke client_platforms/pdt_upload_batch
+  // TANPA ON DELETE CASCADE).
+  await sql`delete from pdt_fact_promo where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
   // pdt_usulan (G4-03, mesin verdict) — FK ke pdt_upload_batch TANPA ON DELETE CASCADE, jadi
   // harus dibersihkan SEBELUM pdt_upload_batch. Sebelum aksi 6 (SHP-KREATOR-AKTIF, yang menyala
   // tanpa syarat saat nol kreator aktif) baris ini tidak pernah lahir dari batch Shopee fixture
@@ -1587,6 +1590,217 @@ describeDb('commitUploadBatch (G3-02a) — shopee_chat → pdt_fact_layanan_chat
     ];
     await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     expect(await loadFactLayananChat(cpId)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (G4-03 aksi 4) — shopee_diskon + shopee_flash_sale →
+// pdt_fact_promo. Dua modul TERAKHIR yang terdaftar+terdeteksi sejak G1-02 tapi
+// nol penulis fakta; pola sama shopee_kesehatan (G2-01) dan shopee_chat (G3-02a).
+// ---------------------------------------------------------------------------
+interface FactPromoRow {
+  client_platform_id: number;
+  periode: string | Date;
+  batch_id: number;
+  parser_versi: number;
+  jenis: string;
+  tipe_promosi: string | null;
+  penjualan_dibuat: string | null;
+  penjualan_siap_dikirim: string | null;
+  pesanan_dibuat: number | null;
+  pesanan_siap_dikirim: number | null;
+  produk_dilihat: number | null;
+  produk_diklik: number | null;
+}
+
+async function loadFactPromo(clientPlatformId: number): Promise<FactPromoRow[]> {
+  return sql<FactPromoRow[]>`select * from pdt_fact_promo where client_platform_id = ${clientPlatformId} order by id`;
+}
+
+// Header PERSIS sheet "Kriteria Utama" `[promo]-Diskon` (6/6 klien identik).
+const HEADER_SHOPEE_DISKON = [
+  'Tanggal', 'Tipe Promosi', 'Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+  'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)',
+];
+
+// Header PERSIS sheet "Kriteria Utama" `[promo]-Flashsale`. Perhatikan `(Rp)`
+// TANPA spasi — diskon memakai ` (IDR)` DENGAN spasi. Bedanya nyata di berkas.
+const HEADER_SHOPEE_FLASHSALE = [
+  'Periode Waktu', 'Penjualan (Pesanan Dibuat)(Rp)', 'Penjualan (Pesanan Siap Dikirim)(Rp)',
+  'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)', 'Pembeli (Pesanan Dibuat)',
+  'Pembeli (Pesanan Siap Dikirim)', 'Persentase Klik', 'Jumlah Produk Dilihat', 'Produk Diklik',
+];
+
+function shopeeDiskonBerkas(nama: string, baris: readonly (string | number)[][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [HEADER_SHOPEE_DISKON, ...baris];
+  return {
+    nama, sha256: 'sha-diskon', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'shopee_diskon', ambiguous: false, matches: ['shopee_diskon'],
+  };
+}
+
+function shopeeFlashSaleBerkas(nama: string, baris: readonly (string | number)[][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [HEADER_SHOPEE_FLASHSALE, ...baris];
+  return {
+    nama, sha256: 'sha-flash', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'shopee_flash_sale', ambiguous: false, matches: ['shopee_flash_sale'],
+  };
+}
+
+describeDb('commitUploadBatch (G4-03 aksi 4) — shopee_diskon/shopee_flash_sale → pdt_fact_promo', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', shopId);
+  }
+
+  it('SELURUH baris Tipe Promosi ditulis apa adanya, termasuk "Semua"', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeDiskonBerkas('diskon.xlsx', [
+        ['01-07-2026 - 31-07-2026', 'Semua', '10.559.000', '10.294.000', '118', '114'],
+        ['01-07-2026 - 31-07-2026', 'Diskon', '7.579.000', '7.314.000', '104', '100'],
+        ['01-07-2026 - 31-07-2026', 'Paket Diskon', '2.980.000', '2.980.000', '14', '14'],
+      ]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactPromo(cpId);
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => r.tipe_promosi)).toEqual(['Semua', 'Diskon', 'Paket Diskon']);
+    expect(rows.every((r) => r.jenis === 'diskon')).toBe(true);
+    // CHECK DB: diskon tidak pernah punya kolom funnel tampilan.
+    expect(rows.every((r) => r.produk_dilihat === null && r.produk_diklik === null)).toBe(true);
+    expect(rows[0]).toMatchObject({ client_platform_id: cpId, batch_id: persiapan.batchId, parser_versi: 1, pesanan_dibuat: 118 });
+    expect(Number(rows[0].penjualan_dibuat)).toBe(10559000);
+  });
+
+  it('baris "Semua" MEN-DEDUP, bukan menjumlah — Σ komponen boleh MELEBIHI totalnya', async () => {
+    // Angka PERSIS dari klien nyata (Nubutik, Juli 2026), dan ini satu-satunya
+    // dari 6 klien yang mengungkapnya: pada 5 klien lain Σ komponen KEBETULAN
+    // sama persis dengan 'Semua', yang membuat "jumlahkan saja komponennya"
+    // tampak benar. Sebabnya nyata — satu pesanan bisa membawa beberapa tipe
+    // promosi sekaligus, jadi tercatat di dua baris komponen dan dihitung
+    // SEKALI di 'Semua'.
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeDiskonBerkas('diskon.xlsx', [
+        ['01-07-2026 - 31-07-2026', 'Semua', '354.987.431', '324.883.365', '2.019', '1.838'],
+        ['01-07-2026 - 31-07-2026', 'Diskon', '318.741.842', '290.509.817', '1.926', '1.750'],
+        ['01-07-2026 - 31-07-2026', 'Paket Diskon', '125.702.470', '117.139.744', '412', '384'],
+        ['01-07-2026 - 31-07-2026', 'Kombo Hemat', '0', '0', '0', '0'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactPromo(cpId);
+
+    const semua = rows.find((r) => r.tipe_promosi === 'Semua')!;
+    const komponen = rows.filter((r) => r.tipe_promosi !== 'Semua');
+    const sumKomponen = komponen.reduce((a, r) => a + Number(r.penjualan_dibuat), 0);
+
+    expect(Number(semua.penjualan_dibuat)).toBe(354987431);
+    expect(sumKomponen).toBe(444444312);
+    // Inilah pernyataannya: menjumlahkan baris tabel ini adalah BUG. Kalau
+    // suatu saat writer diubah jadi menyimpan hanya total-yang-dijumlah,
+    // tes ini gagal — dan itu memang yang diinginkan.
+    expect(sumKomponen).toBeGreaterThan(Number(semua.penjualan_dibuat));
+    expect(komponen.reduce((a, r) => a + (r.pesanan_dibuat ?? 0), 0)).toBe(2338);
+    expect(semua.pesanan_dibuat).toBe(2019);
+  });
+
+  it('flash sale: satu baris, kolom funnel terisi, tipe_promosi SELALU null', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeFlashSaleBerkas('flash.xlsx', [
+        ['01-07-2026 - 31-07-2026', '8.889.057', '8.323.771', '56', '53', '55', '52', '3,27%', '6.357', '208'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactPromo(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      jenis: 'flash_sale', tipe_promosi: null, pesanan_dibuat: 56, produk_dilihat: 6357, produk_diklik: 208,
+    });
+    expect(Number(rows[0].penjualan_dibuat)).toBe(8889057);
+  });
+
+  it('ejaan kolom uang flash sale "(Rp)" BEDA dari diskon " (IDR)" — berkas salah ejaan DITOLAK whitelist, nol baris', async () => {
+    // Kedua modul mirip sekali, dan godaan untuk menyatukan ekstraktornya nyata.
+    // Ejaan kolom uangnya BEDA: flash sale `(Rp)` tanpa spasi, diskon ` (IDR)`
+    // dengan spasi. Tes ini mengunci pertahanan BERLAPIS terhadap tertukarnya:
+    //
+    //  lapis 1 (yang bekerja di sini) — `validasiKolomWajib` menolak berkasnya,
+    //    status `gagal`, dikeluarkan dari `terparse`, NOL baris fakta ditulis.
+    //    Itu perilaku yang BENAR dan lebih baik daripada menulis baris ber-null:
+    //    AM melihat berkasnya ditolak, bukan laporan yang diam-diam kosong.
+    //  lapis 2 — ekstraktornya sendiri tidak membaca ejaan seberangnya; diuji
+    //    terpisah sebagai unit di `@cdps/core` `pdt/fakta.test.ts`, tanpa perlu
+    //    menembus gerbang whitelist dulu.
+    const cpId = await fixture();
+    const aoaSalahEjaan: unknown[][] = [
+      // Ejaan DISKON dipakai di berkas yang dideteksi sebagai flash sale.
+      ['Periode Waktu', 'Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+        'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)', 'Jumlah Produk Dilihat', 'Produk Diklik'],
+      ['01-07-2026 - 31-07-2026', '8.889.057', '8.323.771', '56', '53', '6.357', '208'],
+    ];
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      {
+        nama: 'flash-salah.xlsx', sha256: 'sha-x', bytes: 100, ditolakPagar: null, decodeGagal: null,
+        aoa: aoaSalahEjaan, sheets: null, modulTerdeteksi: 'shopee_flash_sale',
+        ambiguous: false, matches: ['shopee_flash_sale'],
+      } as PdtPreviewBerkasInput,
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(await loadFactPromo(cpId)).toHaveLength(0);
+  });
+
+  it('diskon dan flash sale hidup berdampingan di satu batch, terpisah lewat `jenis`', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeDiskonBerkas('diskon.xlsx', [['01-07-2026 - 31-07-2026', 'Semua', '1.000.000', '900.000', '10', '9']]),
+      shopeeFlashSaleBerkas('flash.xlsx', [['01-07-2026 - 31-07-2026', '500.000', '450.000', '5', '4', '5', '4', '1%', '100', '10']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactPromo(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.jenis).sort()).toEqual(['diskon', 'flash_sale']);
+  });
+
+  it('commit ULANG periode yang sama ⇒ baris LAMA diganti per jenis (replace-on-recommit)', async () => {
+    const cpId = await fixture();
+    const pertama = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeDiskonBerkas('diskon.xlsx', [
+        ['01-07-2026 - 31-07-2026', 'Semua', '1.000.000', '900.000', '10', '9'],
+        ['01-07-2026 - 31-07-2026', 'Diskon', '1.000.000', '900.000', '10', '9'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect(await loadFactPromo(cpId)).toHaveLength(2);
+
+    const kedua = [
+      shopeeAdsCpcBerkas('ads-2.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeDiskonBerkas('diskon-revisi.xlsx', [['01-07-2026 - 31-07-2026', 'Semua', '2.000.000', '1.800.000', '20', '18']]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = await loadFactPromo(cpId);
+    expect(rows).toHaveLength(1); // BUKAN 3 — replace-on-recommit menghapus KEDUA baris lama
+    expect(Number(rows[0].penjualan_dibuat)).toBe(2000000);
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+  });
+
+  it('sheet tanpa baris data ⇒ nol baris ditulis, TIDAK error (flash sale tidak dijalankan ≠ nol hasil)', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      shopeeFlashSaleBerkas('flash.xlsx', []),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(await loadFactPromo(cpId)).toHaveLength(0);
   });
 });
 
