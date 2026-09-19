@@ -38,9 +38,19 @@
  * `client_platforms`, lalu SEGERA menjalankan ulang pipeline reparse (G1-11)
  * untuk batch yang sama — AM melihat batch pindah status tanpa menunggu tick
  * harian besok (`konfirmasiIdentitasBatchPdt`).
+ *
+ * **Tautan-dalam `?client=…&platform=…`** (G1-09-TAUTAN-STRATEGI): Section B
+ * Strategi menunjuk ke sini dengan klien + toko sudah terpilih, supaya AM yang
+ * sedang mengisi STRG tidak perlu mencari ulang kliennya di dua dropdown.
+ * Aturan parameternya di `lib/pdt-deeplink.ts` — termasuk satu hal yang gagal
+ * SENYAP kalau dilewat: `<select>` terkendali yang `value`-nya tidak punya
+ * `<option>` cocok menampilkan opsi PERTAMA sementara state React tetap
+ * memegang nilai lama, jadi halaman ini bisa menyiapkan unggahan untuk toko
+ * LAIN daripada yang terbaca di layar.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { listClients, type Client, type Platform } from '@/lib/clients';
 import {
@@ -56,6 +66,12 @@ import {
   riwayatBatchPdt,
   siapkanUploadBatchPdt,
 } from '@/lib/pdt';
+import {
+  bacaParamKlien,
+  bacaParamPlatform,
+  opsiKlienPdt,
+  platformDipakai,
+} from '@/lib/pdt-deeplink';
 
 const STATUS_LABEL: Record<string, string> = {
   verified: 'Terverifikasi',
@@ -118,12 +134,24 @@ function formatDeltaPct(v: number | null): string {
   return `${v.toFixed(2)}%`;
 }
 
-export default function UploadPdtPage() {
+function UploadPdtWorkspace() {
+  // Parameter tautan dibaca SEKALI, saat mount. Sesudah itu dropdown-lah yang
+  // berkuasa: membacanya ulang tiap render akan melawan AM yang mengganti
+  // pilihan tanpa mengubah URL.
+  const sp = useSearchParams();
+  const [klienDiminta] = useState(() => bacaParamKlien((k) => sp.get(k)));
+  const [platformDiminta] = useState(() => bacaParamPlatform((k) => sp.get(k)));
+  // Sekali pakai: sesudah daftar toko klien itu dimuat sekali, parameternya
+  // habis. Tanpa ini, AM yang mengganti toko lalu kembali ke klien semula akan
+  // dilempar balik ke toko yang ada di URL.
+  const platformParamHabis = useRef(false);
+  const [platformParamDitolak, setPlatformParamDitolak] = useState(false);
+
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsLoading, setClientsLoading] = useState(true);
   const [clientsErr, setClientsErr] = useState<string | null>(null);
 
-  const [clientId, setClientId] = useState('');
+  const [clientId, setClientId] = useState(klienDiminta);
   const [platformId, setPlatformId] = useState<number | ''>('');
 
   const [file, setFile] = useState<File | null>(null);
@@ -192,7 +220,21 @@ export default function UploadPdtPage() {
     void (async () => {
       try {
         const rows = await listPlatformPdtKlien(clientId);
-        if (!batal) setPlatformOptions(rows);
+        if (!batal) {
+          setPlatformOptions(rows);
+          // Tautan-dalam `?platform=`: dipakai HANYA kalau tokonya benar-benar
+          // ada di daftar yang baru saja dimuat. `platformDipakai` sengaja
+          // tidak menawarkan opsi bayangan untuk toko — ID di luar daftar
+          // berarti toko tidak aktif / bukan platform PDT / milik klien lain,
+          // dan menerimanya cuma memindahkan penolakan server ke SETELAH ZIP
+          // terlanjur diunggah.
+          if (platformDiminta !== null && !platformParamHabis.current) {
+            platformParamHabis.current = true;
+            const dipakai = platformDipakai(platformDiminta, rows);
+            if (dipakai !== null) setPlatformId(dipakai);
+            setPlatformParamDitolak(dipakai === null);
+          }
+        }
       } catch (e) {
         if (!batal) {
           setPlatformOptions([]);
@@ -205,7 +247,7 @@ export default function UploadPdtPage() {
     return () => {
       batal = true;
     };
-  }, [clientId]);
+  }, [clientId, platformDiminta]);
 
   const resetUploadState = useCallback(() => {
     setFile(null);
@@ -331,13 +373,18 @@ export default function UploadPdtPage() {
               onChange={(e) => {
                 setClientId(e.target.value);
                 setPlatformId('');
+                setPlatformParamDitolak(false);
                 resetUploadState();
               }}
             >
-              <option value="">— pilih klien —</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.toko} ({c.id})
+              {/* Opsinya disusun `lib/pdt-deeplink`, bukan di sini: aturan yang
+                  load-bearing adalah APAKAH `clientId` yang aktif punya opsi
+                  yang cocok. Tautan `?client=…` bisa membawa ID di luar scope
+                  baca aktor, dan `<select>` tidak mengeluh saat tidak cocok —
+                  ia diam-diam menampilkan opsi pertama. */}
+              {opsiKlienPdt(clientId, clients, { loading: clientsLoading }).map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
                 </option>
               ))}
             </select>
@@ -373,6 +420,12 @@ export default function UploadPdtPage() {
         {platformErr && (
           <div className="alert alertError" role="alert" style={{ marginTop: 12 }}>
             {platformErr}
+          </div>
+        )}
+        {platformParamDitolak && !platformLoading && platformOptions.length > 0 && (
+          <div className="alert alertInfo" role="status" style={{ marginTop: 12, fontSize: 12 }}>
+            Toko yang ditunjuk tautan tidak ada di daftar toko PDT klien ini (tidak aktif, atau bukan
+            Shopee/TikTok Shop) — pilih tokonya sendiri di atas.
           </div>
         )}
         {selectedClient && !platformLoading && !platformErr && platformOptions.length === 0 && (
@@ -661,5 +714,18 @@ export default function UploadPdtPage() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * `useSearchParams()` di `UploadPdtWorkspace` membuat halaman ini butuh batas
+ * <Suspense> saat prerender — pola sama `tasks/page.tsx`, `account/rekap` dan
+ * `ads/screening`.
+ */
+export default function UploadPdtPage() {
+  return (
+    <Suspense fallback={<div className="stack"><p className="muted">Memuat...</p></div>}>
+      <UploadPdtWorkspace />
+    </Suspense>
   );
 }

@@ -164,6 +164,7 @@ import {
 } from '@/lib/strategi';
 import InterviewPrefillPanel from '@/components/strategi/InterviewPrefillPanel';
 import BaselinePrefillPanel from '@/components/strategi/BaselinePrefillPanel';
+import PdtUploadPanel from '@/components/strategi/PdtUploadPanel';
 import VideoFactoryImportPanel from '@/components/strategi/VideoFactoryImportPanel';
 import CockpitImportPanel from '@/components/strategi/CockpitImportPanel';
 import PlanPeriodsPanel from '@/components/strategi/PlanPeriodsPanel';
@@ -842,6 +843,14 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
               {active === 'B' && (
                 <>
                   {baselinePrefill && <BaselinePrefillPanel prefill={baselinePrefill} />}
+                  {/* Pintu masuk PDT. Sengaja TIDAK di-gate `baselinePrefill` —
+                      selektor "Periode acuan PDT" di dalam SectionB hanya muncul
+                      saat `periode_referensi_pdt_opsi` tidak kosong, jadi tepat
+                      saat toko belum punya batch terverifikasi (keadaan yang
+                      justru butuh diperbaiki) tak ada satu pun kata "PDT" di
+                      halaman ini, dan AM mengetik B3 dengan tangan. Dilaporkan
+                      pemilik saat uji produksi 2026-09-19. */}
+                  <PdtUploadPanel clientId={detail.client_id} prefill={baselinePrefill} />
                   <SectionB
                     draft={drafts.channels}
                     onChange={(channels) => patch('channels', channels)}
