@@ -687,8 +687,14 @@ function AnalisaPenuhForm({
             GMV net (standar MEA)
           </label>
           <div className="field" style={{ flex: 1, minWidth: 220 }}>
-            <label style={{ fontSize: 12 }}>Akun TikTok toko sendiri (pisahkan koma) — bantu bedakan toko vs afiliasi</label>
-            <input value={linked} disabled={saving} placeholder="@tokoklien, @tokoklien.id" onChange={(e) => setLinked(e.target.value)} />
+            <label style={{ fontSize: 12 }}>
+              Akun TikTok toko sendiri (pisahkan koma) — bantu bedakan toko vs afiliasi.
+              Boleh pakai <code>@</code> atau tanpa <code>@</code>, huruf besar-kecil bebas.
+              Isi <strong>semua</strong> ejaan yang dipakai export: handle (<code>tokoklien_official</code>)
+              DAN nama tampilan (<code>Toko Klien</code>) — berkas LIVE memakai nama tampilan,
+              berkas Video memakai handle.
+            </label>
+            <input value={linked} disabled={saving} placeholder="@tokoklien, tokoklien_official, Toko Klien" onChange={(e) => setLinked(e.target.value)} />
           </div>
         </div>
       )}

@@ -120,6 +120,27 @@ describe('detect', () => {
     expect(detect(vidToko(), { linkedAccounts: ['Toko Resmi'] })).toEqual({ type: 'vid_toko', ambiguous: false });
     expect(detect(vidToko(), { linkedAccounts: ['Akun Lain'] })).toEqual({ type: 'vid_aff', ambiguous: false });
   });
+
+  // ── O79 — handle dinormalisasi di KEDUA sisi ──────────────────────────────
+  // Sebelum perbaikan, ketiga bentuk di bawah ini menghasilkan `vid_aff` dengan
+  // `ambiguous: false`: berkas milik TOKO diklasifikasikan afiliasi, GMV-nya
+  // pindah bucket, skornya bergeser, dan AM tidak diberi tahu apa pun. Itu lebih
+  // buruk daripada ambigu — ambigu setidaknya bertanya. Bentuk pertama adalah
+  // yang paling mungkin diketik orang, karena begitulah handle TikTok ditulis
+  // di mana-mana (dan begitu pula contoh di kolomnya sendiri dulu).
+  it('O79: prefiks @ pada daftar akun tetap cocok — bukan diam-diam jadi afiliasi', () => {
+    expect(detect(vidToko(), { linkedAccounts: ['@Toko Resmi'] })).toEqual({ type: 'vid_toko', ambiguous: false });
+  });
+  it('O79: beda kapital tetap cocok — satu toko sering punya dua ejaan di dua berkas', () => {
+    expect(detect(vidToko(), { linkedAccounts: ['toko resmi'] })).toEqual({ type: 'vid_toko', ambiguous: false });
+    expect(detect(vidToko(), { linkedAccounts: ['  @TOKO RESMI  '] })).toEqual({ type: 'vid_toko', ambiguous: false });
+  });
+  it('O79: normalisasi TIDAK membuat kreator luar ikut cocok', () => {
+    expect(detect(vidToko(), { linkedAccounts: ['@akun lain'] })).toEqual({ type: 'vid_aff', ambiguous: false });
+  });
+  it('O79: daftar yang isinya hanya sampah diperlakukan seperti tanpa daftar — ambigu, bukan tebakan diam', () => {
+    expect(detect(vidToko(), { linkedAccounts: ['@', '   ', '@@'] }).ambiguous).toBe(true);
+  });
 });
 
 // ── fix #2: missing required column → hard fail, not 0 ───────────────────────

@@ -58,15 +58,42 @@ export interface DetectResult {
 const uniqueCreators = (d: Sheet, col: string, alt?: string): Set<string> =>
   new Set(d.rows.map((r) => String((r[col] ?? (alt ? r[alt] : '')) || '').trim()).filter(Boolean));
 
+/**
+ * Normalise a TikTok handle before comparing. Trim, drop a leading `@`, lowercase.
+ *
+ * ⚠️ WAJIB dipakai di KEDUA sisi perbandingan. Tanpa ini, daftar akun yang
+ * ditulis AM dan nama kreator di dalam export tidak pernah bertemu, dan
+ * kegagalannya DIAM — bukan ambigu:
+ *
+ *  - AM menulis `@avitaskin_official` (persis format yang contoh di kolomnya
+ *    sendiri tunjukkan); export menulis `avitaskin_official`. Tidak ada yang
+ *    cocok ⇒ `noneOwn` ⇒ `{ own: false, ambiguous: false }`. Berkas Video/LIVE
+ *    milik TOKO diklasifikasikan sebagai AFILIASI, GMV-nya pindah bucket,
+ *    skornya bergeser, dan AM tidak pernah diberi tahu apa pun.
+ *  - Sama persis untuk beda kapital: export LIVE memakai kolom `Kreator` yang
+ *    berisi nama tampilan (`Avitaskin`), sementara export Video memakai
+ *    `Nama Kreator` yang berisi handle (`avitaskin_official`) — satu toko, dua
+ *    ejaan, di dua berkas yang harus sama-sama dikenali "toko sendiri".
+ *
+ * Itu lebih buruk daripada ambigu: ambigu setidaknya BERTANYA. O79,
+ * `docs/DECISIONS.md` 2026-09-19, ditemukan dengan export asli Avitaskin
+ * Juli 2026.
+ *
+ * Normalisasi ini hanya bisa membuat akun yang AM SENDIRI nyatakan miliknya
+ * jadi cocok; ia tidak bisa membuat kreator luar ikut cocok.
+ */
+const normalizeHandle = (s: string): string => s.trim().replace(/^@+/, '').toLowerCase();
+
 /** Own-vs-affiliate from CDPS linked accounts (fix #3); falls back flagged-ambiguous. */
 function ownVsAff(u: Set<string>, opts?: DetectOptions): { own: boolean; ambiguous: boolean } {
   const linked = opts?.linkedAccounts;
   if (linked && linked.length) {
-    const linkedSet = new Set(linked.map((x) => x.trim()).filter(Boolean));
+    const linkedSet = new Set(linked.map(normalizeHandle).filter(Boolean));
     const names = [...u];
     if (names.length === 0) return { own: true, ambiguous: true }; // no creators named → assume own, flag
-    const allOwn = names.every((nm) => linkedSet.has(nm));
-    const noneOwn = names.every((nm) => !linkedSet.has(nm));
+    if (linkedSet.size === 0) return { own: u.size <= 2, ambiguous: true }; // daftar berisi sampah saja
+    const allOwn = names.every((nm) => linkedSet.has(normalizeHandle(nm)));
+    const noneOwn = names.every((nm) => !linkedSet.has(normalizeHandle(nm)));
     if (allOwn) return { own: true, ambiguous: false };
     if (noneOwn) return { own: false, ambiguous: false };
     return { own: false, ambiguous: true }; // mixed → treat as affiliate but ask AM
