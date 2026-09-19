@@ -201,9 +201,54 @@
  */
 import { WIB_OFFSET_HOURS } from '../tz';
 import { parsePdtAngka } from './angka';
+import { PDT_KOLOM_ALIAS } from './modules';
 import { parseRentangTanggalTiktok, parseTanggalId, parseTanggalIdStrip } from './identitas';
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
+
+/**
+ * Indeks alias `pdt_kolom_alias` (Rule 9) dikelompokkan modul → kolom kanonik.
+ * Diturunkan dari `PDT_KOLOM_ALIAS` — satu rumah ejaan untuk SELURUH pipeline,
+ * bukan daftar kedua yang bisa menyimpang diam-diam.
+ */
+const ALIAS_EJAAN: ReadonlyMap<string, Record<string, readonly string[]>> = (() => {
+  const map = new Map<string, Record<string, string[]>>();
+  for (const a of PDT_KOLOM_ALIAS) {
+    const perKolom = map.get(a.modulKode) ?? {};
+    (perKolom[a.kolomKanonik] ??= []).push(a.alias);
+    map.set(a.modulKode, perKolom);
+  }
+  return map;
+})();
+
+/**
+ * Cari indeks kolom di baris header: ejaan KANONIK dulu, baru alias modul itu
+ * (`PDT_KOLOM_ALIAS`, Rule 9) — urutan yang SAMA dipakai `cariKolomWajib`
+ * (`parsestatus.ts`), supaya satu berkas tidak pernah lolos validasi lewat
+ * alias lalu diekstrak sebagai kolom kosong.
+ *
+ * **Kenapa ini ada (sesi 43).** Sebelum ini alias hanya dibaca
+ * `validasiKolomWajib`/`hitungKolomDipanenBaru`; setiap `ekstrakBaris*` memakai
+ * `header.findIndex(exact)` sendiri. Jadi alias menaikkan `parse_status` ke
+ * `ok` TANPA membuat kolomnya terbaca — kegagalan SENYAP (nilai `null`,
+ * bukan error), justru kelas bug yang paling sulit ketahuan karena gerbangnya
+ * hijau. `tt_live`'s `Kreator` → `Nama panggilan` (alias sejak seed pertama)
+ * sudah terkena persis itu. Ekstraktor yang modulnya PUNYA alias wajib lewat
+ * sini; invariannya dijaga tes `fakta.test.ts` ("setiap modul ber-alias punya
+ * ekstraktor sadar-alias"), bukan kedisiplinan penulis.
+ */
+function pencariKolom(header: readonly unknown[], modulKode: string): (nama: string) => number {
+  const alias = ALIAS_EJAAN.get(modulKode) ?? {};
+  return (nama: string): number => {
+    const exact = header.findIndex((c) => norm(c) === norm(nama));
+    if (exact !== -1) return exact;
+    for (const a of alias[nama] ?? []) {
+      const i = header.findIndex((c) => norm(c) === norm(a));
+      if (i !== -1) return i;
+    }
+    return -1;
+  };
+}
 
 /** Satu baris `pdt_fact_ads` mentah dari `shopee_ads_live`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi — sama seperti fungsi lain di paket ini, murni tidak tahu konteks batch). */
 export interface PdtBarisAdsShopeeLive {
@@ -227,11 +272,13 @@ export function ekstrakBarisShopeeAdsLive(
   barisHeader: number,
 ): PdtBarisAdsShopeeLive[] {
   const header = aoa[barisHeader - 1] ?? [];
-  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const idx = pencariKolom(header, 'shopee_ads_live'); // sadar-alias (Rule 9) — lihat docblock `pencariKolom`
   const iKampanye = idx('ID Iklan');
   const iTayangan = idx('Penonton');
   const iPesanan = idx('Pesanan');
-  const iGmv = idx('Omzet');
+  // `Omzet Penjualan` (ejaan sel yang sebenarnya, dikoreksi sesi 43); `Omzet` polos
+  // tetap terbaca lewat alias.
+  const iGmv = idx('Omzet Penjualan');
   const iBiaya = idx('Biaya');
   const iRoas = idx('Efektifitas Iklan');
 
@@ -748,10 +795,10 @@ export function ekstrakBarisTtLive(
   akunKontenToko: readonly string[] | null,
 ): PdtBarisContentTtLive[] {
   const header = aoa[barisHeader - 1] ?? [];
-  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const idx = pencariKolom(header, 'tt_live'); // sadar-alias (Rule 9)
   const iIdKreator = idx('ID Kreator');
   const iWaktuLive = idx('Waktu Live');
-  const iKreator = idx('Kreator');
+  const iKreator = idx('Kreator'); // alias `Nama panggilan` — sebelum sesi 43 TIDAK pernah terbaca ekstraktor
   const iDurasi = idx('Durasi');
   const iGmv = idx('GMV dari LIVE (Rp)');
   const iPenonton = idx('Penonton');
@@ -1517,7 +1564,7 @@ export function ekstrakBarisTtProductAnalytics(
   barisHeader: number,
 ): PdtBarisSkuPeriodTtProductAnalytics[] {
   const header = aoa[barisHeader - 1] ?? [];
-  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const idx = pencariKolom(header, 'tt_product_analytics'); // sadar-alias (Rule 9)
   const iIdProduk = idx('ID Produk');
   const iNama = idx('Nama');
   const iGmv = idx('GMV');
@@ -1527,8 +1574,8 @@ export function ekstrakBarisTtProductAnalytics(
   const iPesananSku = idx('Pesanan SKU');
   const iImpresi = idx('Impresi produk');
   const iKlik = idx('Klik produk');
-  const iCtr = idx('CTR');
-  const iCtor = idx('CTOR');
+  const iCtr = idx('CTR'); // kolom `CTR` polos MEMANG ada di berkas nyata — bukan salah eja
+  const iCtor = idx('CTOR (pesanan SKU)'); // dikoreksi sesi 43; `CTOR` polos tetap jalan lewat alias
 
   const hasil: PdtBarisSkuPeriodTtProductAnalytics[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -1579,7 +1626,9 @@ export interface PdtBarisKesehatanShopee {
  */
 export function ekstrakBarisKesehatanShopee(aoa: readonly (readonly unknown[])[], barisHeader: number): PdtBarisKesehatanShopee[] {
   const header = aoa[barisHeader - 1] ?? [];
-  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  // Sadar-alias (Rule 9): ekspor nyata menulis `Poin Pinalti`/`Pinalti Berjalan`,
+  // whitelist-nya `Poin Penalti`/`Deskripsi`. Keduanya sah — lihat `PDT_KOLOM_ALIAS`.
+  const idx = pencariKolom(header, 'shopee_kesehatan');
   const iPoin = idx('Poin Penalti');
   const iDeskripsi = idx('Deskripsi');
   const iDurasi = idx('Durasi');

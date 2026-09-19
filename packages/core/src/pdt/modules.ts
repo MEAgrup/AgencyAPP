@@ -84,10 +84,21 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // Sama persis `baseline/detect.ts` TYPES.prod_tt.
     tandaTanganKolom: { must: ['ID Produk', 'GMV dari kreator', 'Klik produk'] },
     barisHeaderHint: 4, // Rule 7: "product_list baris 4"
+    // `'AOV'`/`'CTOR'` DIKOREKSI → `'AOV (pesanan SKU)'`/`'CTOR (pesanan SKU)'` (sesi 43).
+    // Kedua ejaan lama TIDAK PERNAH cocok ke berkas nyata mana pun — diverifikasi ke ENAM
+    // ekspor: kelima klien ZIP "Sample tiktok 5 client" DAN sample asli Avitaskin
+    // (`product_list_20260701.xlsx`) yang dipakai sesi 33, semuanya menulis sufiks
+    // `(pesanan SKU)`. `CTR` polos MEMANG ada (kolom terpisah, tetap kanonik).
+    // Ini bug PALING mahal dari lima yang ditemukan sesi 43: `wajib: true`, jadi
+    // `tt_product_analytics` selalu `gagal` ⇒ dikeluarkan dari `terparse` ⇒ pasangan
+    // rekonsiliasi TikTok (Rule 13-14) tidak pernah lengkap ⇒ **nol batch TikTok yang
+    // pernah bisa mencapai `verified`**, sejak modul ini dibangun. Sesi 33 menghitung
+    // paritas Σper-SKU vs shop-level LANGSUNG dari berkas (bukan lewat pipeline), jadi
+    // bug ini lolos dari verifikasi itu. Ejaan lama tetap hidup sebagai alias Rule 9.
     kolomDipanen: [
       'ID Produk', 'GMV', 'GMV dari kreator', 'GMV dari video penjual', 'GMV dari LIVE penjual',
-      'Pesanan SKU', 'AOV', 'CTR', 'CTOR', 'Impresi produk', 'Status daftar produk',
-      'Nama', 'Klik produk',
+      'Pesanan SKU', 'AOV (pesanan SKU)', 'CTR', 'CTOR (pesanan SKU)', 'Impresi produk',
+      'Status daftar produk', 'Nama', 'Klik produk',
     ],
     // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.2 — dibutuhkan report.dim_produk(0.12)/
     // adsscanner, bukan gerbang PDT sendiri (Rule 13-16/PX). Hilang ⇒ 'sebagian', bukan 'gagal'.
@@ -343,7 +354,12 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       'Kode Produk', 'Kode Variasi', 'SKU Induk',
       'Total Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
       'Jumlah Produk Dilihat', 'Produk Diklik', 'Tingkat Konversi (Pesanan yang Dibuat)',
-      'repeat order', 'Pengunjung Produk (Kunjungan)',
+      // `'repeat order'` DIKOREKSI → `'Tingkat Pesanan Berulang (Pesanan Dibuat)'` (sesi 43).
+      // Ejaan lama adalah DESKRIPSI konsep (huruf kecil semua, bahasa Inggris di berkas
+      // berbahasa Indonesia), bukan nama sel — nol kecocokan di keenam ekspor nyata.
+      // `wajib: true` ⇒ modul ini selalu `gagal` ⇒ pasangan rekonsiliasi Shopee tidak
+      // pernah lengkap, cermin persis kasus `tt_product_analytics` di atas.
+      'Tingkat Pesanan Berulang (Pesanan Dibuat)', 'Pengunjung Produk (Kunjungan)',
     ],
     // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §2.2 — dibutuhkan dim
     // product_performance(0.14)/sumbu X 4-kuadran Shopee, bukan gerbang PDT sendiri
@@ -415,7 +431,15 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // Sama persis `report/shopee/detect.ts` CONTENT_SIGNATURES.ads_live.
     tandaTanganKolom: { must: ['Nama Iklan', 'Penonton'] },
     barisHeaderHint: 7, // PRD §7.2 + PDT_KOLOM_DIPANEN §2.5: "header baris 7"
-    kolomDipanen: ['ID Iklan', 'Penonton', 'Pesanan', 'Omzet', 'Biaya', 'Efektifitas Iklan'],
+    // `'Omzet'` DIKOREKSI → `'Omzet Penjualan'` (sesi 43, ZIP "Sample shopee 5 client" +
+    // "Sample nama asli" pemilik). Ejaan lama TIDAK PERNAH cocok ke satu pun berkas nyata:
+    // keenam ekspor Shopee Ads Live yang ada di repo (5 klien baru + Fim Motor) menulis
+    // `Omzet Penjualan` di baris header 7. Konsekuensinya BUKAN kolom kosong melainkan
+    // modul GAGAL total — `validasiKolomWajib` menolak, berkas dikeluarkan dari `terparse`,
+    // dan `pdt_fact_ads` tidak pernah menerima satu pun baris iklan Live Shopee. Ejaan lama
+    // dipertahankan sebagai ALIAS di `PDT_KOLOM_ALIAS` (Rule 9, append-only) — bukan dibuang,
+    // supaya ekspor lama (bila ada) tetap terbaca. Pola koreksi SAMA `meta_ads` di bawah.
+    kolomDipanen: ['ID Iklan', 'Penonton', 'Pesanan', 'Omzet Penjualan', 'Biaya', 'Efektifitas Iklan'],
     wajib: false,
   },
   {
@@ -649,6 +673,13 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // ('Poin Pinalti' varian salah eja yang memang muncul di export nyata).
     tandaTanganKolom: { anyOf: [{ must: ['Poin Pinalti'] }, { must: ['Poin Penalti'] }] },
     barisHeaderHint: 1, // seluruh sheet hanya 3 kolom (PRD §7.2)
+    // Ejaan KANONIK sengaja TIDAK diubah (beda dari `shopee_ads_live`/`tt_product_analytics`
+    // di berkas ini): `tandaTanganKolom` di atas sudah lama mengakui DUA ejaan 'Penalti'/
+    // 'Pinalti' sebagai sama-sama nyata, jadi ini kasus Rule 9 murni (dua ejaan hidup
+    // berdampingan) — bukan whitelist yang salah tulis. Kelima ekspor nyata sesi 43 memakai
+    // `Poin Pinalti` + `Pinalti Berjalan`; keduanya masuk `PDT_KOLOM_ALIAS` di bawah.
+    // Tanpa alias itu modul ini GAGAL di 5/5 klien nyata — dan `wajib: true`, jadi ia
+    // menghentikan dimensi Kesehatan Toko (0,12) untuk setiap batch Shopee.
     kolomDipanen: ['Poin Penalti', 'Deskripsi', 'Durasi'],
     wajib: true, // modul baru sesi 2 — tidak ada di PRD v1.1, dimensi Kesehatan Toko 0,12
   },
@@ -704,4 +735,36 @@ export const PDT_KOLOM_ALIAS: readonly PdtKolomAliasDef[] = [
   // di sini akan mengarang alias yang belum ada dasarnya).
   { modulKode: 'shopee_parent_sku', kolomKanonik: 'Total Penjualan (Pesanan Dibuat) (IDR)', alias: 'Total Penjualan' },
   { modulKode: 'shopee_parent_sku', kolomKanonik: 'Tingkat Konversi (Pesanan yang Dibuat)', alias: 'Tingkat Konversi Pesanan' },
+
+  // -------------------------------------------------------------------------
+  // Sesi 43 — lima modul yang kolom wajibnya TIDAK PERNAH cocok ke berkas nyata.
+  // Ditemukan dengan menjalankan SELURUH 78 berkas tiga ZIP pemilik ("Sample
+  // shopee 5 client", "Sample tiktok 5 client", "Sample nama asli") lewat
+  // `detectPdtModule` + `temukanBarisHeader` + `validasiKolomWajib` yang asli.
+  // Empat ejaan lama di bawah dipertahankan sebagai ALIAS, bukan dihapus:
+  // append-only (Rule 9) dan nol biaya — bila ekspor lama benar-benar pernah
+  // memakainya, ia tetap terbaca. Ejaan yang MENANG sekarang ada di
+  // `kolomDipanen` masing-masing modul di atas.
+  // -------------------------------------------------------------------------
+  { modulKode: 'tt_product_analytics', kolomKanonik: 'AOV (pesanan SKU)', alias: 'AOV' },
+  { modulKode: 'tt_product_analytics', kolomKanonik: 'CTOR (pesanan SKU)', alias: 'CTOR' },
+  { modulKode: 'shopee_parent_sku', kolomKanonik: 'Tingkat Pesanan Berulang (Pesanan Dibuat)', alias: 'repeat order' },
+  { modulKode: 'shopee_ads_live', kolomKanonik: 'Omzet Penjualan', alias: 'Omzet' },
+
+  // `shopee_kesehatan` — DUA ejaan sama-sama nyata (bukan whitelist salah
+  // tulis): `tandaTanganKolom` modul ini sudah lama ber-`anyOf` 'Poin Pinalti'/
+  // 'Poin Penalti', dan `report/shopee/metrik.ts` `parseKesehatan` legacy
+  // menerima keduanya juga. Yang belum pernah ditulis di mana pun adalah nama
+  // sel kolom kedua: kelima ekspor nyata menulis `Pinalti Berjalan`, sementara
+  // whitelist meminta `Deskripsi` (nama konsep, bukan nama sel).
+  { modulKode: 'shopee_kesehatan', kolomKanonik: 'Poin Penalti', alias: 'Poin Pinalti' },
+  { modulKode: 'shopee_kesehatan', kolomKanonik: 'Deskripsi', alias: 'Pinalti Berjalan' },
+
+  // `meta_ads` — juga dua ejaan yang sama-sama nyata, dan ini SATU-SATUNYA dari
+  // lima yang terbukti bercabang DI DALAM satu periode yang sama: dari 5 klien
+  // Juli 2026, dua ("Eighty eight", "Healthy") mengekspor `CTR Unik (rasio klik
+  // tayang tautan)` dan tiga ("Nubutik", "Pawlovin", "Umar Media") `CTR (rasio
+  // klik tayang tautan)`. Karena itu kanoniknya TIDAK dikoreksi — menggantinya
+  // hanya memindahkan kegagalan dari tiga klien ke dua klien lain.
+  { modulKode: 'meta_ads', kolomKanonik: 'CTR Unik (rasio klik tayang tautan)', alias: 'CTR (rasio klik tayang tautan)' },
 ];
