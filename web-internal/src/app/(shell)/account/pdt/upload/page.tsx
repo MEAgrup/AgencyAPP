@@ -486,7 +486,17 @@ export default function UploadPdtPage() {
                     </span>
                     {preview.identitas.usulan && (
                       <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                        Diusulkan dari berkas: <strong>{preview.identitas.usulan}</strong> — akan tersimpan permanen setelah batch pertama toko ini disimpan.
+                        {/* Teks lama ("akan tersimpan permanen setelah batch pertama toko ini
+                            disimpan") salah menggambarkan KAPAN pengikatan terjadi, dan membuat
+                            "Simpan Batch" terlihat seperti tombol yang tidak bisa dibatalkan.
+                            Yang sebenarnya: `resolveStatusIdentitasRekonsiliasi` menghentikan
+                            batch ber-identitas `usulkan_ikat` di status `identitas_belum_terikat`
+                            TANPA menulis `shop_id`; satu-satunya penulis `shop_id` adalah
+                            `konfirmasiIdentitasBatch` — tombol "Konfirmasi Identitas" yang
+                            terpisah. Dilaporkan pemilik saat uji produksi 2026-09-19. */}
+                        Diusulkan dari berkas: <strong>{preview.identitas.usulan}</strong> — <em>belum</em> terikat.
+                        Menyimpan batch tidak mengikatnya; pengikatan baru terjadi saat tombol{' '}
+                        <strong>Konfirmasi Identitas</strong> ditekan setelah batch tersimpan.
                       </p>
                     )}
                     {preview.identitas.pesan && (
