@@ -82,6 +82,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   BoardValidationError: 400, // board.ValidationError
   CampaignValidationError: 400, // campaign.ValidationError
   ClientIncompleteError: 400, // client.IncompleteError
+  ClientPlatformInvalidError: 400, // client.PlatformInvalidError (G1-00 kosakata platform)
   ClientPortalValidationError: 400, // clientPortal.PortalValidationError
   CreativeValidationError: 400, // creative.ValidationError
   DailyActivityIncompleteError: 400, // dailyactivity.IncompleteError (F-6)

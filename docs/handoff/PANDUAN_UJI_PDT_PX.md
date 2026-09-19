@@ -532,6 +532,39 @@ Alamat: **https://app.meagency.co.id** (internal), API di `agency-app-api.vercel
 Urutannya searah dan tidak bisa dibalik — PX membaca hasil PDT, jadi §10.2 harus
 menghasilkan satu batch `verified` sebelum §10.3 bisa menghasilkan apa pun.
 
+### 10.0 Pilih klien uji DULU — jangan pakai klien nyata
+
+> ⛔ **Batch dan fakta PDT tidak pernah dihapus (Rule 36).** Kalau data toko A
+> diunggah di bawah klien B, klien B permanen memiliki satu batch dan satu set
+> baris `pdt_fact_*` yang bukan miliknya — dan itu ikut terbaca laporan klien,
+> health score, dan PX. `shop_id` memang masih bisa dikosongkan lagi lewat
+> **Detail Klien** (PX-M2a §4a), tapi batch dan faktanya tidak. Jadi kesalahan
+> di langkah ini tidak bisa ditarik balik dari UI.
+
+Sample ekspor yang dipakai untuk uji coba hampir tidak pernah milik klien yang
+sudah terdaftar. Per 2026-09-19 produksi memuat **29 klien** dan **31 baris
+platform aktif** (12 Shopee · 16 TikTok Shop · sisanya Tokopedia/gabungan) —
+dan nol di antaranya bernama seperti toko di sample mana pun.
+
+**Pakai klien testing yang sudah ada, jangan bikin data baru.** Tiga klien
+testing hidup di produksi (`toko ku1`, `testwf`, `tasdadf.ocm`). Ketiganya
+punya baris platform bernilai **gabungan** (`TikTok Shop, Shopee`) — nilai lama
+yang sengaja di-grandfather migrasi `20261010010000` — dan dropdown PDT
+mengecualikannya, karena PDT hanya mengenal nilai tunggal `Shopee` dan
+`TikTok Shop`. Karena itu klien testing tampak "belum punya toko".
+
+Perbaikannya satu langkah, dari UI, tanpa menyentuh klien nyata:
+
+1. Buka **Detail Klien** klien testing (mis. `CLI-202608-0005` — `testwf`).
+2. **Tambah Platform** → pilih `Shopee` (untuk ZIP Shopee) atau `TikTok Shop`
+   (untuk ZIP TikTok) → simpan.
+3. Kembali ke **Upload Data Toko (PDT)** — platform itu sekarang muncul di
+   dropdown **Toko / Platform**.
+
+Baris platform gabungan yang lama tidak perlu disentuh: gerbang duplikat
+mencocokkan nilai platform PERSIS, jadi `Shopee` dan `TikTok Shop, Shopee`
+tidak bertabrakan.
+
 ### 10.1 Uji asap 1 menit — apakah kunci Storage benar-benar bekerja?
 
 Ini menjawab "apakah `SUPABASE_SERVICE_ROLE_KEY` sudah bisa dipakai", dan hasilnya

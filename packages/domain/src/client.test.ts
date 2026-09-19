@@ -43,9 +43,12 @@ import {
   listClients,
   LockedFieldError,
   MSG_INTENT_LOCKED,
+  MSG_PLATFORM_TIDAK_VALID,
   MSG_SERVICE_CLOSURE_BRIEFS_INCOMPLETE,
   NotFoundError,
+  PLATFORM_VOCAB,
   PlatformDuplicateError,
+  PlatformInvalidError,
   resumeService,
   ServiceStateError,
   setPaymentIntent,
@@ -162,6 +165,34 @@ describe('platform gate (no DB)', () => {
     await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: '  ' })).rejects.toBeInstanceOf(IncompleteError);
     await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'Shopee', managedSince: '01-2026' }))
       .rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  // O77 — gerbang kosakata. Tanpa ini, nilai di luar daftar lolos domain dan
+  // baru mati di CHECK `ck_client_platforms_platform` sebagai SQLSTATE 23514:
+  // 500 berpesan Postgres, bukan 400 berpesan BI (aturan rumah #5).
+  it('addPlatform: platform di luar PLATFORM_VOCAB ditolak dengan pesan BI, bukan dilempar ke CHECK DB', async () => {
+    // 'Others' ada di M0 §4.3 tapi TIDAK di CHECK — persis pilihan yang dulu
+    // ditawarkan dropdown dan selalu gagal sebagai 500.
+    await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'Others' }))
+      .rejects.toBeInstanceOf(PlatformInvalidError);
+    await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'Bukalapak' }))
+      .rejects.toBeInstanceOf(PlatformInvalidError);
+    // Pencocokan persis: casing dan spasi bukan urusan penebak.
+    await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'shopee' }))
+      .rejects.toBeInstanceOf(PlatformInvalidError);
+    await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'Others' }))
+      .rejects.toThrow(MSG_PLATFORM_TIDAK_VALID);
+    // Gerbang kosakata dilewati untuk nilai sah — yang gagal berikutnya adalah
+    // tanggal, membuktikan penolakan di atas memang dari kosakata, bukan efek
+    // samping `noSql`.
+    for (const p of PLATFORM_VOCAB) {
+      await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: p, managedSince: '01-2026' }))
+        .rejects.toBeInstanceOf(IncompleteError);
+    }
+  });
+
+  it('PLATFORM_VOCAB = kosakata CHECK ck_client_platforms_platform (O77)', () => {
+    expect([...PLATFORM_VOCAB]).toEqual(['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Blibli']);
   });
 
   it('updatePlatform: profile authority + at least one field', async () => {

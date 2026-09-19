@@ -114,12 +114,22 @@ export const PAYMENT_INTENT_OPTIONS = [
  *  is still editable server-side. */
 export const PAYMENT_STATUS_MENUNGGU_VERIFIKASI = '[Menunggu Verifikasi]';
 
-/** Platform List checklist (M0 §4.3 — verbatim from the PRD). Shared by the Sales
- *  Qualified Lead Form and the Client Record Platform List editor so the two
- *  never drift. Each selection becomes its own `client_platforms` row (M4-OA-2:
- *  "each entry carries its own sub-data") — `close()` now splits the Qualified
- *  Lead Form's joined selection back into one row per platform. */
-export const PLATFORM_OPTIONS = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Others'] as const;
+/** Platform List checklist. Shared by the Sales Qualified Lead Form and the
+ *  Client Record Platform List editor so the two never drift. Each selection
+ *  becomes its own `client_platforms` row (M4-OA-2: "each entry carries its own
+ *  sub-data") — `close()` splits the Qualified Lead Form's joined selection back
+ *  into one row per platform.
+ *
+ *  ⚠️ Bukan lagi "verbatim from the PRD": M0 §4.3 menulis `… / Lazada / Others`,
+ *  sedangkan CHECK `ck_client_platforms_platform` menegakkan `… / Lazada /
+ *  Blibli`. Selama daftar ini memuat `Others`, memilihnya melahirkan SQLSTATE
+ *  23514 — 500 berpesan Postgres, bukan pesan BI. Daftar di sini mengikuti
+ *  kosakata yang BENAR-BENAR ditegakkan DB (cerminan `client.PLATFORM_VOCAB`),
+ *  supaya UI berhenti menawarkan pilihan yang pasti gagal. Mana dari keduanya
+ *  yang sah adalah pertanyaan terbuka **O77** (`docs/DECISIONS.md`) — menambah
+ *  atau mencabut nilai di sini berarti mengubah CHECK dan `PLATFORM_VOCAB`
+ *  sekaligus, bukan salah satunya. */
+export const PLATFORM_OPTIONS = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Blibli'] as const;
 
 // GET /clients[?limit=&cursor=] — P2 §6: dipaginasi server-side. `next_cursor`
 // null = halaman terakhir; kirim balik sebagai `cursor` untuk lanjutannya.
