@@ -32,17 +32,23 @@
  *
  * Modul dengan sinyal isi BELUM terverifikasi (dicatat `docs/DECISIONS.md`
  * 2026-09-13 G1-02, bukan ditebak):
- *  - `shopee_diskon` / `shopee_flash_sale` — UAT Fim Motor (SHP-3) membuktikan
- *    pasangan ini hanya terselesaikan lewat NAMA BERKAS MENTAH
- *    (`discount_`/`flash_sale`), yang Rule 6 PDT larang. Tak ada kolom
- *    pembeda yang terverifikasi di sample atau di kode manapun di repo ini.
+ *  - ~~`shopee_diskon` / `shopee_flash_sale`~~ — **TIDAK LAGI berlaku sejak
+ *    2026-09-19 (G4-03 aksi 4).** Catatan lama ("hanya terselesaikan lewat NAMA
+ *    BERKAS MENTAH `discount_`/`flash_sale`, Rule 6 PDT larang") benar pada
+ *    sample TUNGGAL Fim Motor; ia gugur pada korpus 6 klien nyata:
+ *    `shopee_diskon` menang tunggal lewat (`Tanggal` + `Tipe Promosi`) dan
+ *    `shopee_flash_sale` lewat (`Periode Waktu` + `Jumlah Produk Dilihat`),
+ *    NOL ambiguitas di 6 dari 6 berkas, nol andalan nama berkas. Header
+ *    aslinya terekam `header-nyata.fixture.ts`; keduanya sudah punya tanda
+ *    tangan isi sungguhan di bawah (sejak sesi 23) dan kini punya writer fakta
+ *    (`pdt_fact_promo`).
  *  - `shopee_video` — PDT_KOLOM_DIPANEN §2.7 dan PRD §7.2 sama-sama menulis
  *    "11 dari 54 kolom" secara ABSTRAK; tak satu pun dari 54 nama kolom
  *    tertulis literal di dokumen atau kode manapun di repo ini (fixture
  *    `bisnisVideoAoa` di `report/shopee/shopee.test.ts` memodelkan berkas
  *    LAIN — ekspor "[bisnis]-Video" konvensi tim yang lebih sederhana, bukan
  *    `video-overview-v3` mentah 54-kolom 2-lapis header).
- * Keduanya memakai `UNVERIFIED_SIGNATURE` — lihat `types.ts`. Baris seed-nya
+ * `shopee_video` memakai `UNVERIFIED_SIGNATURE` — lihat `types.ts`. Baris seed-nya
  * tetap ada (DoD G1-02: "setiap modul di PRD §7 punya baris"), tapi
  * deteksinya sengaja TIDAK PERNAH menang secara otomatis — AM memilih modul
  * lewat dropdown (Rule G1-09) sampai sample asli membuka pembedanya.
@@ -521,10 +527,13 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // basis, produk terjual 2 basis, pembeli 2 basis, PLUS rincian Paket Diskon/Kombo Hemat).
     // Whitelist di sini SENGAJA MVP — HANYA agregat harian sheet "Kriteria Utama" ("berapa GMV
     // dari diskon toko per hari"), BUKAN sheet "Rincian Performa" (per-promosi individual, 20+
-    // kolom lagi, belum ada yang minta — HANDOFF_PDT_SESI21.md §3.C opsi 2, ditunda). Nol writer
-    // fact-table — sama seperti shopee_voucher/shopee_chat_broadcast/meta_ads, modul ini cuma
-    // perlu parse_status='ok' + audit kolom, konsumen fact table menyusul. (`shopee_chat` sendiri
-    // DAPAT writer G3-02a, `pdt_fact_layanan_chat` — dikeluarkan dari daftar ini.)
+    // kolom lagi, belum ada yang minta — HANDOFF_PDT_SESI21.md §3.C opsi 2, ditunda).
+    // **Writer fakta ADA sejak G4-03 aksi 4 (2026-09-19)** — `pdt_fact_promo`, lihat
+    // `ekstrakBarisPromoDiskonShopee` (`pdt/fakta.ts`). Modul ini dikeluarkan dari daftar
+    // "nol writer fact-table" (yang kini tinggal shopee_voucher/shopee_chat_broadcast/meta_ads;
+    // `shopee_chat` keluar lebih dulu lewat G3-02a `pdt_fact_layanan_chat`).
+    // ⚠️ Baris `Tipe Promosi='Semua'` MEN-DEDUP, bukan menjumlah baris komponen — jangan
+    // pernah menjumlahkan baris tabel faktanya; angka pembuktiannya ada di docblock ekstraktor.
     tandaTanganKolom: { must: ['Tanggal', 'Tipe Promosi'] },
     barisHeaderHint: 1,
     kolomDipanen: [
@@ -542,6 +551,10 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // sheet "Kriteria Utama") lebih dekat ke `shopee_voucher` (sama-sama `Periode Waktu`) TAPI
     // juga tidak punya `Klaim`/`Total Biaya` — kolom uniknya `Jumlah Produk Dilihat`/`Produk
     // Diklik` (funnel tampilan, satu-satunya hal unik dibanding diskon/voucher), dipanen di sini.
+    // **Writer fakta ADA sejak G4-03 aksi 4 (2026-09-19)** — `pdt_fact_promo` `jenis='flash_sale'`,
+    // lihat `ekstrakBarisPromoFlashSaleShopee`. ⚠️ Kolom uangnya bersufiks `(Rp)` TANPA spasi,
+    // BEDA dari diskon yang memakai ` (IDR)` — menyalin ejaan diskon ke sini menghasilkan seluruh
+    // kolom `null` tanpa satu pun error.
     tandaTanganKolom: { must: ['Periode Waktu', 'Jumlah Produk Dilihat'] },
     barisHeaderHint: 1,
     kolomDipanen: [

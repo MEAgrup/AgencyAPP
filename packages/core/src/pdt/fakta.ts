@@ -1762,3 +1762,127 @@ export function ekstrakBarisLayananChatShopee(
   }
   return hasil;
 }
+
+/**
+ * Satu baris `pdt_fact_promo` mentah dari `shopee_diskon` atau
+ * `shopee_flash_sale`, SEBELUM `client_platform_id`/`batch_id`/`periode`/
+ * `parser_versi` (pemanggil yang melengkapi — pola sama fungsi lain di berkas
+ * ini). G4-03 aksi 4.
+ */
+export interface PdtBarisPromoShopee {
+  /**
+   * HANYA terisi untuk `shopee_diskon`. `'Semua'` adalah total periode yang
+   * SUDAH di-dedup oleh Shopee; nilai lain adalah KOMPONEN yang boleh saling
+   * tumpang tindih. `null` untuk flash sale (berkasnya nol dimensi tipe).
+   */
+  tipePromosi: string | null;
+  penjualanDibuat: number | null;
+  penjualanSiapDikirim: number | null;
+  pesananDibuat: number | null;
+  pesananSiapDikirim: number | null;
+  /** HANYA `shopee_flash_sale` — satu-satunya kolom yang diskon tidak punya. */
+  produkDilihat: number | null;
+  produkDiklik: number | null;
+}
+
+/**
+ * Ekstrak sheet "Kriteria Utama" `shopee_diskon` (G4-03 aksi 4).
+ *
+ * ⚠️ **Fungsi ini mengembalikan SELURUH baris, termasuk `Tipe Promosi='Semua'`,
+ * dan pemanggilnya TIDAK BOLEH menjumlahkannya.** Baris `'Semua'` bukan jumlah
+ * baris lain — ia MEN-DEDUP: satu pesanan bisa membawa beberapa tipe promosi
+ * sekaligus (produk ber-Diskon yang juga masuk Paket Diskon), jadi ia muncul di
+ * kedua baris komponen dan dihitung SEKALI di `'Semua'`.
+ *
+ * Diverifikasi ke berkas nyata, dan ini hanya ketahuan karena ada klien kelima:
+ * pada 5 dari 6 klien Σ komponen KEBETULAN sama persis dengan `'Semua'`. Pada
+ * klien keenam tidak — Σ komponen Rp444.444.312 vs `'Semua'` Rp354.987.431,
+ * 25% lebih tinggi. Menjumlahkan tabel ini adalah bug kelas
+ * `G1-07-SHOPEE-DOBEL-HITUNG` (lihat `rekonsiliasi.ts` `sumShopeeParentSkuGmv`).
+ *
+ * Baris ber-`Tanggal` kosong dilewati (bukan baris data). Sheet "Grafik setiap
+ * Kriteria" (rincian HARIAN, header identik) dan "Rincian Performa" (per promosi
+ * individual) TIDAK diekstrak di sini — `modules.ts` sudah menetapkan cakupan MVP
+ * "hanya agregat sheet Kriteria Utama"; pemanggil memilih sheet-nya lewat
+ * `PdtModuleDef.namaSheet`.
+ */
+export function ekstrakBarisPromoDiskonShopee(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisPromoShopee[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = pencariKolom(header, 'shopee_diskon');
+  const iTanggal = idx('Tanggal');
+  const iTipe = idx('Tipe Promosi');
+  const iJualDibuat = idx('Penjualan (Pesanan Dibuat) (IDR)');
+  const iJualSiap = idx('Penjualan (Pesanan Siap Dikirim) (IDR)');
+  const iPesDibuat = idx('Pesanan (Pesanan Dibuat)');
+  const iPesSiap = idx('Pesanan (Pesanan Siap Dikirim)');
+
+  const hasil: PdtBarisPromoShopee[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const tanggal = iTanggal === -1 ? '' : String(row?.[iTanggal] ?? '').trim();
+    if (tanggal === '') continue;
+    const tipe = iTipe === -1 ? '' : String(row?.[iTipe] ?? '').trim();
+    hasil.push({
+      tipePromosi: tipe === '' ? null : tipe,
+      penjualanDibuat: iJualDibuat === -1 ? null : parsePdtAngka(row?.[iJualDibuat]),
+      penjualanSiapDikirim: iJualSiap === -1 ? null : parsePdtAngka(row?.[iJualSiap]),
+      pesananDibuat: iPesDibuat === -1 ? null : parsePdtAngka(row?.[iPesDibuat]),
+      pesananSiapDikirim: iPesSiap === -1 ? null : parsePdtAngka(row?.[iPesSiap]),
+      produkDilihat: null, // kolom funnel HANYA ada di flash sale
+      produkDiklik: null,
+    });
+  }
+  return hasil;
+}
+
+/**
+ * Ekstrak sheet "Kriteria Utama" `shopee_flash_sale` (G4-03 aksi 4).
+ *
+ * Bentuknya BEDA dari diskon meski nama sheet-nya sama, dan bedanya tidak boleh
+ * disamakan diam-diam:
+ *  - kunci barisnya `Periode Waktu` (bukan `Tanggal`), dan hanya ADA SATU baris
+ *    data — agregat seluruh periode, nol dimensi tipe promosi;
+ *  - kolom uangnya bersufiks `(Rp)` TANPA spasi (`Penjualan (Pesanan Dibuat)(Rp)`),
+ *    sementara diskon memakai ` (IDR)` dengan spasi. Menyalin ejaan diskon ke sini
+ *    akan menghasilkan seluruh kolom `null` tanpa satu pun error — kelas kegagalan
+ *    senyap yang sama yang baru saja menelan lima whitelist (sesi 43);
+ *  - `Jumlah Produk Dilihat`/`Produk Diklik` adalah satu-satunya hal yang flash
+ *    sale punya dan diskon tidak (dan juga tanda tangan deteksinya).
+ *
+ * Berkas ber-nol baris data (flash sale tidak pernah dijalankan periode itu)
+ * mengembalikan array kosong — BEDA dari baris ber-angka nol, yang berarti
+ * dijalankan tapi nol hasil. Pemanggil membedakan keduanya lewat `pdt_file`/
+ * `pdt_upload_batch`, pola sama `ekstrakBarisKesehatanShopee`.
+ */
+export function ekstrakBarisPromoFlashSaleShopee(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisPromoShopee[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = pencariKolom(header, 'shopee_flash_sale');
+  const iPeriode = idx('Periode Waktu');
+  const iJualDibuat = idx('Penjualan (Pesanan Dibuat)(Rp)');
+  const iJualSiap = idx('Penjualan (Pesanan Siap Dikirim)(Rp)');
+  const iPesDibuat = idx('Pesanan (Pesanan Dibuat)');
+  const iPesSiap = idx('Pesanan (Pesanan Siap Dikirim)');
+  const iDilihat = idx('Jumlah Produk Dilihat');
+  const iDiklik = idx('Produk Diklik');
+
+  const hasil: PdtBarisPromoShopee[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const periode = iPeriode === -1 ? '' : String(row?.[iPeriode] ?? '').trim();
+    if (periode === '') continue;
+    hasil.push({
+      tipePromosi: null, // flash sale nol dimensi tipe — dijaga CHECK di DB juga
+      penjualanDibuat: iJualDibuat === -1 ? null : parsePdtAngka(row?.[iJualDibuat]),
+      penjualanSiapDikirim: iJualSiap === -1 ? null : parsePdtAngka(row?.[iJualSiap]),
+      pesananDibuat: iPesDibuat === -1 ? null : parsePdtAngka(row?.[iPesDibuat]),
+      pesananSiapDikirim: iPesSiap === -1 ? null : parsePdtAngka(row?.[iPesSiap]),
+      produkDilihat: iDilihat === -1 ? null : parsePdtAngka(row?.[iDilihat]),
+      produkDiklik: iDiklik === -1 ? null : parsePdtAngka(row?.[iDiklik]),
+    });
+  }
+  return hasil;
+}

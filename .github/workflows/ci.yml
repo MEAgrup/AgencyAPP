@@ -537,12 +537,14 @@ jobs:
       # `pdt_fact_kesehatan_penalti` (fakta murni, nol prefix/mesin/event baru).
       # G3-02a (20261115010000): 183 = 182 + 1 tabel `pdt_fact_layanan_chat`
       # (fakta murni, sama kelas — nol prefix/mesin/event baru).
-      - name: Verify table count (expect 183)
+      # G4-03 aksi 4 (20261121010000): 184 = 183 + 1 tabel `pdt_fact_promo`
+      # (fakta murni untuk shopee_diskon + shopee_flash_sale, sama kelas).
+      - name: Verify table count (expect 184)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 183
+          test "$n" -eq 184
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

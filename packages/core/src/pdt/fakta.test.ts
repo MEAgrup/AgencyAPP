@@ -14,6 +14,8 @@ import {
   ekstrakBarisSkuMasterTtOrders,
   ekstrakBarisKesehatanShopee,
   ekstrakBarisLayananChatShopee,
+  ekstrakBarisPromoDiskonShopee,
+  ekstrakBarisPromoFlashSaleShopee,
   ekstrakBarisTtAdsLive,
   ekstrakBarisTtAdsProduct,
   ekstrakBarisTtAffiliateVideo,
@@ -32,7 +34,7 @@ describe('ekstrakBarisShopeeAdsLive', () => {
       ['Live Sore', 'AD-1', 'Aktif', '1000', '5%', '20', '2000000', '150000.50', '13.33'],
     ];
     expect(ekstrakBarisShopeeAdsLive(aoa, 1)).toEqual([
-      { kampanyeId: 'AD-1', tayangan: 1000, pesananSku: 20, gmv: 2000000, biaya: 150000.5, roas: 13.33 },
+      { kampanyeId: 'AD-1', tayangan: 1000, pesananSku: 20, gmv: 2000000, biaya: 150000.5, roas: 13.33, tipeKampanyeSumber: null },
     ]);
   });
 
@@ -67,7 +69,7 @@ describe('ekstrakBarisShopeeAdsLive', () => {
     const headerTanpaOpsional = ['ID Iklan', 'Biaya'];
     const aoa = [headerTanpaOpsional, ['AD-1', '150000']];
     expect(ekstrakBarisShopeeAdsLive(aoa, 1)).toEqual([
-      { kampanyeId: 'AD-1', tayangan: null, pesananSku: null, gmv: null, biaya: 150000, roas: null },
+      { kampanyeId: 'AD-1', tayangan: null, pesananSku: null, gmv: null, biaya: 150000, roas: null, tipeKampanyeSumber: null },
     ]);
   });
 });
@@ -81,7 +83,7 @@ describe('ekstrakBarisTtAdsProduct', () => {
       ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'avitaskin_official', '100000', '5', '20000', '400000', '10000', '150'],
     ];
     expect(ekstrakBarisTtAdsProduct(aoa, 1)).toEqual([
-      { kampanyeId: 'CAM-1', biaya: 100000, pesananSku: 5, gmv: 400000, roas: 4, tayangan: 10000, klik: 150 },
+      { kampanyeId: 'CAM-1', biaya: 100000, pesananSku: 5, gmv: 400000, roas: 4, tayangan: 10000, klik: 150, tipeKampanyeSumber: null },
     ]);
   });
 
@@ -106,7 +108,7 @@ describe('ekstrakBarisTtAdsProduct', () => {
     const headerTanpaGmv = ['ID Campaign', 'Biaya', 'Pesanan SKU'];
     const aoa = [headerTanpaGmv, ['CAM-1', '100000', '5']];
     expect(ekstrakBarisTtAdsProduct(aoa, 1)).toEqual([
-      { kampanyeId: 'CAM-1', biaya: 100000, pesananSku: 5, gmv: null, roas: null, tayangan: null, klik: null },
+      { kampanyeId: 'CAM-1', biaya: 100000, pesananSku: 5, gmv: null, roas: null, tayangan: null, klik: null, tipeKampanyeSumber: null },
     ]);
   });
 
@@ -120,7 +122,9 @@ describe('ekstrakBarisTtAdsProduct', () => {
     const [baris] = ekstrakBarisTtAdsProduct(aoa, 1);
     expect(baris).not.toHaveProperty('platformProductId');
     expect(baris).not.toHaveProperty('platformContentId');
-    expect(Object.keys(baris).sort()).toEqual(['biaya', 'gmv', 'kampanyeId', 'klik', 'pesananSku', 'roas', 'tayangan']);
+    expect(Object.keys(baris).sort()).toEqual(
+      ['biaya', 'gmv', 'kampanyeId', 'klik', 'pesananSku', 'roas', 'tayangan', 'tipeKampanyeSumber'],
+    );
   });
 
   // Diverifikasi 2026-09-16 (`G1-09-2BII-TTADS-SAMPLE` DITUTUP) terhadap sample
@@ -832,6 +836,8 @@ describe('ekstrakBarisShopeeAdsCpc', () => {
       {
         kampanyeId: 'Tameng Depan Besar Kecil Vario Techno 125', platformProductId: '19484539752',
         tayangan: 447740, klik: 21428, pesananSku: 616, gmv: 105473414, biaya: 10628677, roas: 9.92,
+        // G3-06: fixture ini header sample asli Fim Motor, yang nol kolom `Mode Bidding`.
+        tipeKampanyeSumber: null,
       },
     ]);
   });
@@ -889,6 +895,7 @@ describe('ekstrakBarisShopeeAdsCpc', () => {
       {
         kampanyeId: 'Iklan A', platformProductId: null,
         tayangan: null, klik: null, pesananSku: null, gmv: null, biaya: 150000, roas: null,
+        tipeKampanyeSumber: null,
       },
     ]);
   });
@@ -910,6 +917,7 @@ describe('ekstrakBarisShopeeAdsSearch', () => {
       {
         kampanyeId: 'Iklan toko by MEA :: Semua',
         tayangan: 3, klik: 20677, pesananSku: 330, gmv: 32480316, biaya: 6200000, roas: 5.24,
+        tipeKampanyeSumber: null,
       },
     ]);
   });
@@ -955,6 +963,7 @@ describe('ekstrakBarisShopeeAdsSearch', () => {
       {
         kampanyeId: 'Iklan A :: Semua',
         tayangan: null, klik: null, pesananSku: null, gmv: null, biaya: 150000, roas: null,
+        tipeKampanyeSumber: null,
       },
     ]);
   });
@@ -1439,5 +1448,64 @@ describe('invarian alias (sesi 43) — setiap modul ber-alias WAJIB punya ekstra
         `alias '${a.alias}' menunjuk kolom kanonik '${a.kolomKanonik}' yang tidak ada di kolomDipanen ${a.modulKode}`,
       ).toContain(a.kolomKanonik);
     }
+  });
+});
+
+describe('ekstrakBarisPromo* (G4-03 aksi 4) — diskon dan flash sale tidak boleh disatukan', () => {
+  const HEADER_DISKON = [
+    'Tanggal', 'Tipe Promosi', 'Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+    'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)',
+  ];
+  const HEADER_FLASH = [
+    'Periode Waktu', 'Penjualan (Pesanan Dibuat)(Rp)', 'Penjualan (Pesanan Siap Dikirim)(Rp)',
+    'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)', 'Jumlah Produk Dilihat', 'Produk Diklik',
+  ];
+
+  it('diskon: seluruh baris Tipe Promosi dikembalikan, "Semua" TIDAK diistimewakan di sini', () => {
+    // Ekstraktor sengaja tidak memilih — pembacanya yang memutuskan. Menyaring di
+    // sini akan membuang rincian komponen yang memang ada di berkas.
+    const aoa = [
+      HEADER_DISKON,
+      ['01-07-2026 - 31-07-2026', 'Semua', '10.559.000', '10.294.000', '118', '114'],
+      ['01-07-2026 - 31-07-2026', 'Diskon', '7.579.000', '7.314.000', '104', '100'],
+    ];
+    const hasil = ekstrakBarisPromoDiskonShopee(aoa, 1);
+    expect(hasil.map((h) => h.tipePromosi)).toEqual(['Semua', 'Diskon']);
+    expect(hasil[0].penjualanDibuat).toBe(10559000);
+    expect(hasil[0].pesananDibuat).toBe(118);
+    // Kolom funnel HANYA milik flash sale — selalu null di sini (CHECK DB juga menjaganya).
+    expect(hasil.every((h) => h.produkDilihat === null && h.produkDiklik === null)).toBe(true);
+  });
+
+  it('flash sale: satu baris, funnel terisi, tipePromosi selalu null', () => {
+    const aoa = [HEADER_FLASH, ['01-07-2026 - 31-07-2026', '8.889.057', '8.323.771', '56', '53', '6.357', '208']];
+    expect(ekstrakBarisPromoFlashSaleShopee(aoa, 1)).toEqual([
+      {
+        tipePromosi: null, penjualanDibuat: 8889057, penjualanSiapDikirim: 8323771,
+        pesananDibuat: 56, pesananSiapDikirim: 53, produkDilihat: 6357, produkDiklik: 208,
+      },
+    ]);
+  });
+
+  it('ejaan uang SALING TIDAK terbaca — bukti kedua ekstraktor tidak boleh disatukan', () => {
+    // Inilah alasan teknis kenapa keduanya fungsi terpisah meski bentuk barisnya
+    // sama: `(Rp)` tanpa spasi vs ` (IDR)` dengan spasi. Menyatukannya akan
+    // menghasilkan kolom uang null di salah satu sisi TANPA satu pun error —
+    // kelas kegagalan senyap yang sama dengan lima whitelist sesi 43.
+    const barisFlash = ['01-07-2026 - 31-07-2026', '8.889.057', '8.323.771', '56', '53', '6.357', '208'];
+    const barisDiskon = ['01-07-2026 - 31-07-2026', 'Semua', '10.559.000', '10.294.000', '118', '114'];
+
+    // Ekstraktor flash sale atas header DISKON: kolom uang tak dikenali ⇒ null.
+    const salah1 = ekstrakBarisPromoFlashSaleShopee([HEADER_DISKON, barisDiskon], 1);
+    expect(salah1).toHaveLength(0); // `Periode Waktu` pun tidak ada ⇒ baris dilewati
+
+    // Ekstraktor diskon atas header FLASH SALE: `Tanggal` tidak ada ⇒ nol baris.
+    const salah2 = ekstrakBarisPromoDiskonShopee([HEADER_FLASH, barisFlash], 1);
+    expect(salah2).toHaveLength(0);
+  });
+
+  it('baris tanpa kunci (Tanggal/Periode Waktu kosong) dilewati, bukan ditulis sebagai baris nol', () => {
+    expect(ekstrakBarisPromoDiskonShopee([HEADER_DISKON, ['', 'Semua', '1', '1', '1', '1']], 1)).toHaveLength(0);
+    expect(ekstrakBarisPromoFlashSaleShopee([HEADER_FLASH, ['', '1', '1', '1', '1', '1', '1']], 1)).toHaveLength(0);
   });
 });
