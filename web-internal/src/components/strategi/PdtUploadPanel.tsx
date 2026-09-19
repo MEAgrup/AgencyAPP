@@ -47,7 +47,13 @@
  * ## Satu syarat yang harus DISEBUT, bukan disembunyikan
  *
  * `getBaselinePrefill` mengembalikan `null` selama klien belum punya interview
- * ber-skor dengan baris `riset_awal_analisa` — dan field B3 dari PDT menumpang
+ * SELESAI (`latestScoredInterview`: `isInterviewComplete(status)` **dan**
+ * `verdict != null` — status `Sedang Berlangsung` tidak lolos) dengan baris
+ * `riset_awal_analisa`. Dua syarat, dan yang pertama yang paling sering
+ * terlewat: analisa Riset Awal bisa sudah tersimpan lengkap sementara
+ * Interview-nya masih berjalan, dan hasilnya Section B tetap kosong total.
+ * Panel menyebut KEDUANYA — versi pertama teks ini cuma menyebut Riset Awal
+ * dan menuduh hal yang salah saat pemilik mengujinya 2026-09-19. Field B3 PDT menumpang
  * di usulan per-kanal yang sama (strangler coexistence, `docs/DECISIONS.md`
  * 2026-09-17 "G3-REFERENCE-PERIODE DIKETOK"). Batch PDT yang `verified` SAJA
  * karena itu belum cukup. Panel menyebutkan itu ketika `prefill` `null`,
@@ -106,9 +112,20 @@ export default function PdtUploadPanel({
 
       {channels.length === 0 && (
         <div className="alert alertInfo" style={{ fontSize: 12, marginTop: 8 }}>
-          Klien ini belum punya <b>Riset Awal</b> ber-analisa. Field B3 dari PDT menumpang di usulan
-          baseline per kanal yang sama, jadi batch PDT terverifikasi saja belum cukup — selesaikan
-          Riset Awal di modul Interview lebih dulu, lalu unggah batch PDT-nya.
+          <b>Usulan baseline belum muncul untuk klien ini.</b> Field B3 dari PDT menumpang di usulan
+          per-kanal yang sama, jadi batch PDT terverifikasi saja belum cukup. Dua sebab, cek
+          berurutan:
+          <ol style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            <li>
+              <b>Interview-nya belum berstatus “Selesai”.</b> Usulan baseline baru dikirim setelah
+              Interview selesai <i>dan</i> punya verdict — walau analisa Riset Awal-nya sudah
+              tersimpan. Ini penyebab yang paling sering.
+            </li>
+            <li>
+              Klien ini memang belum punya analisa <b>Riset Awal</b> — selesaikan di modul Interview
+              lebih dulu.
+            </li>
+          </ol>
         </div>
       )}
 
