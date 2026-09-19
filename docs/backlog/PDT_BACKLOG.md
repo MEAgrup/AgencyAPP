@@ -1836,6 +1836,10 @@ dan fallback sama seperti G3-03/04. Satu tes DB-backed baru — 3 kreator (2 ber
 polos, lihat catatan `report/dimensi_roas` yang sudah ada). `jumlahKampanyeAktif`/`tipeKampanye` ←
 distinct `kampanye_id`/`sumber` periode berjalan.
 
+> ✅ **DITUTUP PENUH 2026-09-19 (sesi 43)** — `tipeKampanye` akhirnya punya sumber fakta yang jujur.
+> Lihat "Status 2026-09-19" di bawah blok sesi 40; catatan sesi 40 sengaja dibiarkan utuh karena
+> alasan penundaannya masih benar (ia menolak `sumber`, dan `sumber` memang tetap ditolak).
+
 **Status 2026-09-17 (sesi 40) — SEBAGIAN DITUTUP** (`adSpend`/`roas`/`jumlahKampanyeAktif` selesai,
 `tipeKampanye` SENGAJA ditunda — lihat alasan di bawah, bukan lupa):
 
@@ -1866,6 +1870,33 @@ distinct `kampanye_id`/`sumber` periode berjalan.
   membuktikan `roas` Σgmv÷Σbiaya (2.94) BERBEDA dari rata-rata polos kolom `roas` mentah (yang
   akan memberi 3), dan `jumlahKampanyeAktif`/`adSpend` menghitung dengan benar termasuk kampanye
   ber-`gmv=null`.
+
+**Status 2026-09-19 (sesi 43) — `tipeKampanye` DITUTUP; tiket G3-06 SELESAI PENUH.**
+Ketokan pemilik: pemetaan **penuh** (semua 5 nilai yang berkasnya nyatakan), bukan subset.
+Yang membuka jalannya bukan perubahan pikiran soal `sumber` — `sumber` tetap ditolak sebagai
+sumber taksonomi, persis seperti sesi 40 putuskan. Yang berubah: sample nyata membuktikan berkas
+iklan memang MEMUAT kolom konfigurasi kampanye, hanya namanya berbeda per modul.
+
+- **Kolom baru `pdt_fact_ads.tipe_kampanye_sumber`** (migrasi `20261120010000`) menyimpan **teks
+  MENTAH** kolom itu apa adanya, bukan nilai taksonomi hasil pemetaan — supaya pemetaannya bisa
+  dikoreksi kapan saja tanpa re-upload (house convention #4, "selalu bisa dihitung ulang dari log").
+  Peta sumbernya: `shopee_ads_live`→`Tujuan`, `shopee_ads_cpc`→`Mode Bidding`,
+  `shopee_ads_search`→`Mode Bidding`, `tt_ads_product`→`Jenis materi iklan`. **`tt_ads_live` menulis
+  `null`** — berkasnya memang nol kolom konfigurasi, dan tipenya sudah tertentu dari modulnya sendiri.
+- **Pemetaan mentah→`CAMPAIGN_TYPES` hidup di SATU tempat**, `strategi.ts` `petakanTipeKampanye`
+  (taksonomi tidak boleh punya dua rumah). Lima dari tujuh nilai kini otomatis: `gmv_max`
+  (regex `gmv max` atas teks bebas), `manual_keyword`/`auto` (`Mode Bidding` Shopee Search),
+  `live_ads` (`shopee_ads_live` + `tt_ads_live`, diperiksa SEBELUM `gmv_max` karena berkas live
+  Shopee juga bisa menulis "GMV Max" di `Tujuan`), `video_ads` (`Jenis materi iklan`='Video');
+  `lainnya` untuk 'Kartu produk'. **`affiliate_ads` TIDAK dipetakan dari modul iklan mana pun** —
+  nol berkas iklan menyatakannya, dan mengarangnya adalah kesalahan yang sama yang sesi 40 hindari.
+- **Teks tak dikenal → `null`, BUKAN `lainnya`.** "Tidak tahu" tidak dilipat jadi "kategori lain"
+  (pola sama Rule 13 PX: `data_kurang` ≠ `tidak layak`).
+- `ringkasIklanDariFakta` mengembalikan `tipeKampanye: CampaignType[] | null`, terurut mengikuti
+  urutan `CAMPAIGN_TYPES` (stabil, bukan urutan kemunculan). `null` ⇒ Section B jatuh ke payload AM
+  persis seperti sebelum tiket ini — **strangler coexistence** yang sama dengan G3-07, bukan
+  hard-swap yang mengosongkan field untuk toko yang belum PDT.
+- Rincian ketokan: `docs/DECISIONS.md` 2026-09-19 (baris Decided "G3-06 `tipeKampanye` DITUTUP").
 
 ### G3-07 · Riwayat GMV 6 bulan (Rule 35)
 
@@ -1952,6 +1983,19 @@ PDT — jadi di luar cakupan Rule 37 dan sengaja tidak disentuh tiket ini. Nol p
 verifikasi murni.
 
 ### G3-10 · Matikan AM Baseline (Riset Awal manual + Video Factory)
+
+> 🟡 **MASIH DIBLOKIR 2026-09-19 (sesi 43) — gerbang bisnisnya TETAP belum tercapai, tapi
+> premis blokirnya BERUBAH dan itu penting.** Sebelum sesi ini, backlog membaca seolah G3-10
+> hanya menunggu "≥10 klien verified" — sebuah gerbang BISNIS, seakan jalur teknisnya sudah siap.
+> Simulasi pipeline penuh atas 78 berkas nyata 12 klien membuktikan sebaliknya: **0 dari 10 klien
+> bisa mencapai `verified` di kedua platform**, karena lima ejaan `kolomDipanen` tidak pernah cocok
+> dengan satu pun berkas nyata (`docs/DECISIONS.md` 2026-09-19 "LIMA EJAAN WHITELIST"). Sesudah
+> perbaikan: **10 dari 10 klien mencapai `verified`, ΔGMV 0,0000%**. Jadi jalur teknisnya kini
+> BENAR-BENAR terbuka untuk pertama kalinya; yang tersisa memang tinggal gerbang bisnisnya —
+> 10 klien nyata di-upload ke sistem produksi, bukan disimulasikan dari ZIP sample.
+> **Jangan matikan AM Baseline sebelum itu**, dan jangan membaca "0/10" historis di atas sebagai
+> bukti PDT tidak akurat: akurasinya nol persen selisih begitu whitelist-nya benar.
+
 Hanya setelah G3-02…G3-09 menutup field yang PUNYA sumber fakta (Rule 33) — field yang **tidak**
 punya sumber (mayoritas B-2…B-9 di luar yang disebut di atas) **tetap manual** (Rule 34) selamanya,
 bukan menunggu tiket lanjutan. Iframe `web-internal/public/tools/video-factory.html` dimatikan
@@ -2179,6 +2223,40 @@ GMV bulanan otoritatif tetap entri manual AM (M6B P-E / M6D §3 Rule 11).
 > `typecheck --workspaces` + `tsc --noEmit` web-internal + `eslint apps/api --max-warnings 0` bersih.
 > Rincian lengkap ketokan: `docs/DECISIONS.md` 2026-09-18 (baris Decided) + `G4-03-DIVISI-STORE-OPS`
 > (RESOLVED) + `G4-03-KATALOG-KESIAPAN` (UPDATE).
+
+> **Status 2026-09-19 (sesi 43) — aksi 4: lapisan FAKTA dibangun, aksi katalognya TIDAK.
+> Rule 30 TETAP 3 dari ≥6.** Ketokan pemilik: "Tulis fakta dulu, aksi menyusul".
+>
+> **Premis "modul ini sengaja UNVERIFIED" GUGUR.** Catatan G1-02 bahwa `shopee_diskon`/
+> `shopee_flash_sale` "hanya terselesaikan lewat NAMA BERKAS MENTAH (`discount_`/`flash_sale`),
+> yang Rule 6 larang" benar pada sample TUNGGAL Fim Motor; pada korpus 6 klien nyata ia tidak lagi
+> benar — `shopee_diskon` menang tunggal lewat (`Tanggal`+`Tipe Promosi`), `shopee_flash_sale` lewat
+> (`Periode Waktu`+`Jumlah Produk Dilihat`), **nol ambiguitas di 6 dari 6 berkas**, nol andalan nama
+> berkas. Catatan lama di `modules.ts` sudah dicoret di tempatnya, bukan dibiarkan menyesatkan.
+>
+> **Yang dibangun:** migrasi `20261121010000` → `pdt_fact_promo` (satu tabel, kolom `jenis`
+> `diskon`/`flash_sale`; replace-on-recommit per (toko, jenis, periode) — pola sama
+> `pdt_fact_layanan_chat`/`pdt_fact_kesehatan_penalti`); dua ekstraktor baru `pdt/fakta.ts`
+> (`ekstrakBarisPromoDiskonShopee`/`ekstrakBarisPromoFlashSaleShopee`); routing di
+> `commitUploadBatch` DAN `reparsePdtBatch`. Gate tabel **183→184** (`db-rebuild.sh` + CI).
+>
+> ⚠️ **Temuan yang menentukan bentuk tabelnya: baris `Tipe Promosi='Semua'` MEN-DEDUP, bukan
+> menjumlah baris komponen.** Pada 5 dari 6 klien Σ(Diskon+Paket Diskon+Kombo Hemat) KEBETULAN sama
+> persis dengan baris 'Semua' — klien kelimalah yang membongkarnya: Nubutik Σ komponen
+> Rp444.444.312 (2.338 pesanan) vs 'Semua' Rp354.987.431 (2.019), **25% lebih tinggi**, karena satu
+> pesanan bisa membawa beberapa tipe promosi sekaligus. Karena itu SELURUH baris disimpan apa
+> adanya dan **menjumlahkan baris tabel ini adalah bug** kelas `G1-07-SHOPEE-DOBEL-HITUNG` —
+> diperingatkan di `COMMENT ON COLUMN`, docblock ekstraktor, dan docblock writer. Bentuknya
+> ditegakkan **di DB** (`CHECK`: flash sale tidak pernah punya `tipe_promosi`, diskon tidak pernah
+> punya funnel `produk_dilihat`/`produk_diklik`), bukan hanya di TS.
+>
+> **Kenapa aksi katalognya TIDAK dikodekan:** riset kode memastikan **NOL** angka ambang
+> diskon/flash-sale di `pdt_benchmark` MAUPUN `report_benchmark_shopee` untuk platform mana pun —
+> situasi yang sama persis dengan aksi 5 (GMV live) yang pemilik tunda sesi 42. Mengarang ambang
+> `good`/`warn` melanggar house convention #4. Aksi 4 tinggal membaca `pdt_fact_promo` begitu angka
+> Rupiah/persennya datang. **Rule 30 (≥6 aksi Shopee actionable): 3 dari ≥6** — tidak bergerak sesi
+> ini; sisa jalur ke 6 tetap aksi 4 (kini tinggal ambang) dan aksi 5 (tinggal ambang).
+> Rincian: `docs/DECISIONS.md` 2026-09-19 (baris Decided "G4-03 aksi 4").
 
 ---
 

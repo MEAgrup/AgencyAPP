@@ -58,9 +58,9 @@ Bucket 1:
 | `GMV dari kreator` | -- konsumen: pdt_fact_sku_period.gmv_dari_kreator [PX] |
 | `GMV dari video penjual` / `GMV dari LIVE penjual` | -- konsumen: pdt_fact_sku_period.gmv_video_penjual / gmv_live_penjual |
 | `Pesanan SKU` | -- konsumen: pdt_fact_sku_period.pesanan_sku |
-| `AOV` | -- konsumen: pdt_fact_sku_period (turunan) |
-| `CTR` | -- konsumen: pdt_fact_sku_period.ctr |
-| `CTOR` | -- konsumen: pdt_fact_sku_period.ctor |
+| `AOV (pesanan SKU)` | -- konsumen: pdt_fact_sku_period (turunan) — **ejaan DIKOREKSI 2026-09-19** dari `AOV` polos (alias) |
+| `CTR` | -- konsumen: pdt_fact_sku_period.ctr — polos, ini memang ejaan nyatanya |
+| `CTOR (pesanan SKU)` | -- konsumen: pdt_fact_sku_period.ctor — **ejaan DIKOREKSI 2026-09-19** dari `CTOR` polos (alias) |
 | `Impresi produk` | -- konsumen: pdt_fact_sku_period.impresi |
 | `Status daftar produk` | -- konsumen: pdt_sku_master.status_listing |
 
@@ -184,6 +184,11 @@ Bucket 1:
 | `Biaya` | -- konsumen: pdt_fact_ads.biaya, report.dim_gmvmax(0.22) |
 | `Pesanan SKU` | -- konsumen: pdt_fact_ads.pesanan_sku |
 | `Biaya per pesanan` | -- konsumen: pdt_fact_ads (turunan CPA) |
+| `Impresi iklan produk` / `Jumlah klik iklan produk` | -- konsumen: pdt_fact_ads.tayangan / klik (ditambahkan `20261107010000`) |
+
+**Kolom opsional G3-06** (dibaca, TIDAK di-whitelist — 2026-09-19): `Jenis materi iklan`
+⇒ `pdt_fact_ads.tipe_kampanye_sumber`. Isi nyatanya `Video` → `video_ads`, `Kartu produk`
+→ `lainnya`. Alasan tidak di-whitelist sama §2.3.
 
 Bucket 2 (derived-add — `report/metrik.ts:150,171` `adsReport`):
 
@@ -200,7 +205,11 @@ Bucket 1:
 | `ID Campaign` | -- konsumen: pdt_fact_ads.kampanye_id |
 | `Biaya` | -- konsumen: pdt_fact_ads.biaya, report.dim_gmvmax(0.22) |
 | `Pesanan SKU` | -- konsumen: pdt_fact_ads.pesanan_sku |
-| `ROI` | -- konsumen: pdt_fact_ads.roas (turunan) |
+| ~~`ROI`~~ | **DIHAPUS `20261107010000`** — nama kolom aslinya `ROI (Toko saat ini)`, bukan `ROI` polos; membiarkannya menggagalkan setiap berkas nyata. `roas` toh diturunkan gmv÷biaya |
+| `Tayangan LIVE` | -- konsumen: pdt_fact_ads.tayangan (ditambahkan `20261107010000`) |
+
+`tt_ads_live` **nol kolom konfigurasi kampanye** — G3-06 menulis `tipe_kampanye_sumber = null`
+untuk modul ini; tipenya (`live_ads`) sudah tertentu dari modulnya sendiri.
 
 Bucket 2 (derived-add — `report/metrik.ts:151,191` `adsReport`):
 
@@ -223,6 +232,23 @@ yang tidak pernah muncul di `tt_video`/`tt_transaction_creator`. Header di baris
 **dibuang** — dikenali dari kolom `Date` yang bukan rentang. ⚠️ Satu `Video ID`
 bisa punya beberapa baris; ekstraktor **memilih satu, tidak pernah menjumlah**
 (lihat `G-TTAFF-BARIS-GANDA`, `docs/DECISIONS.md` §Open).
+
+> 📄 **CARA MENGEKSPOR BERKAS INI DENGAN BENAR (2026-09-19, sesi 43).** Ketiga ZIP sample pemilik
+> dipindai seluruhnya — **78 berkas, 12 klien, NOL yang cocok modul ini**; semuanya ekspor sisi
+> SELLER. Supaya ekspor berikutnya tidak meleset lagi:
+>
+> | Hal | Nilai |
+> |---|---|
+> | Sumber | TikTok Shop **Affiliate** (**bukan** Seller Center) |
+> | Menu | **Custom report** |
+> | Bahasa header | **Inggris** |
+> | Kolom wajib | `Affiliate video-attributed GMV`, `Video ID` |
+> | Periode | **yang GMV-nya TIDAK nol** ← paling sering meleset |
+>
+> Sample yang sudah ada (Anjalie Factory) **seluruh kolom uangnya `Rp0`**, jadi pemisah
+> ribuan/desimal sisi partner **belum terverifikasi** — hari ini diparse dengan konvensi Seller
+> Center (titik ribuan, koma desimal) seperti seluruh modul TikTok lain. Satu berkas yang benar
+> menutup DUA hal sekaligus: aturan pilih-satu-baris DAN format angka uangnya.
 
 Bucket 1:
 
@@ -272,7 +298,7 @@ Bucket 1:
 | `Jumlah Produk Dilihat` | -- konsumen: pdt_fact_sku_period (turunan CTR) |
 | `Produk Diklik` | -- konsumen: pdt_fact_sku_period.klik |
 | `Tingkat Konversi (Pesanan yang Dibuat)` | -- konsumen: pdt_fact_sku_period.cr |
-| repeat order | -- konsumen: dim conversion_retention(0.18) |
+| `Tingkat Pesanan Berulang (Pesanan Dibuat)` | -- konsumen: dim conversion_retention(0.18) — **ejaan DIKOREKSI 2026-09-19**; `repeat order` jadi alias |
 
 Bucket 2 (derived-add — `report/shopee/metrik.ts:250` `pengunjung_produk`, sumbu X kuadran Shopee):
 
@@ -324,6 +350,13 @@ Bucket 1 (kolom baris header sesungguhnya):
 | `omzet penjualan` | -- konsumen: pdt_fact_ads.gmv, dim roas_channel(0.22) |
 | `Efektifitas Iklan` | -- konsumen: pdt_fact_ads.roas, dim roas_channel(0.22) (`metrik.ts:464`) |
 
+**Kolom opsional G3-06** (dibaca ekstraktor, **TIDAK** masuk `kolomDipanen` — 2026-09-19;
+ini BUKAN "bucket 3" §7, yang artinya kolom tanpa konsumen):
+
+| Kolom | Konsumen | Kenapa tidak di `kolomDipanen` |
+|---|---|---|
+| `Mode Bidding` | -- konsumen: pdt_fact_ads.tipe_kampanye_sumber — teks MENTAH, dipetakan ke `CAMPAIGN_TYPES` oleh `strategi.petakanTipeKampanye` | `kolomDipanen` = kolom **WAJIB**; memasukkannya akan menggagalkan setiap ekspor yang tidak punya kolom ini. Absennya menghasilkan `null`, dan `null` ⇒ Section B jatuh ke payload AM — bukan error |
+
 Bucket 2 (derived-add — `report/shopee/metrik.ts:460-477` `ads_toko`/`ads_produk`/`ads_banner`):
 
 | Kolom | Konsumen | Dampak bila hilang |
@@ -345,6 +378,10 @@ biaya/identitas") sudah usang. `ekstrakBarisShopeeAdsSearch` (`packages/core/src
 sample yang tersedia hanya satu baris, tidak membuktikan apakah satu iklan search bisa muncul
 berkali-kali dengan `Kata Pencarian` berbeda dalam satu periode; komposit aman di kedua kasus.
 
+**Kolom opsional G3-06** (dibaca, TIDAK di-whitelist — 2026-09-19): `Mode Bidding`
+⇒ `pdt_fact_ads.tipe_kampanye_sumber`. Isi nyatanya `Bidding Manual` → `manual_keyword`,
+`Bidding Otomatis` → `auto`. Alasan tidak di-whitelist sama §2.3.
+
 Bucket 3 (human call — **ditahan**, bukan dibuang, ketokan Q-6): `Kata Pencarian`, `SOV`. `Kata
 Pencarian` DIBACA oleh `ekstrakBarisShopeeAdsSearch` untuk membentuk `kampanye_id` (identitas
 baris) — TIDAK ditambahkan ke `kolomDipanen` (isinya masih bukan dimensi laporan). Riset keyword
@@ -352,8 +389,19 @@ sendiri belum punya konsumen yang dibangun; menunggu Anty menjawab apakah dibang
 dibuang secara permanen (§6 handoff, baris ketiga).
 
 ### 2.5 `shopee_ads_live` — `Data-Semua-Iklan-Live-*.csv` (header baris 7)
-Bucket 1: `ID Iklan`, `Penonton`, `Pesanan`, `Omzet`, `Biaya`, `Efektifitas Iklan` ⇒ `pdt_fact_ads`.
-Tidak ada baris bucket 2.
+Bucket 1: `ID Iklan`, `Penonton`, `Pesanan`, `Omzet Penjualan`, `Biaya`, `Efektifitas Iklan`
+⇒ `pdt_fact_ads`. **Kolom opsional G3-06** (dibaca, TIDAK di-whitelist — 2026-09-19): `Tujuan`
+⇒ `pdt_fact_ads.tipe_kampanye_sumber`, alasan sama §2.3 — absennya menghasilkan `null`, bukan error.
+`shopee_ads_live` SELALU memetakan ke `live_ads` apa pun isi `Tujuan`-nya; kolomnya tetap disimpan
+mentah supaya pemetaan bisa dikoreksi tanpa re-upload. Tidak ada baris bucket 2.
+
+> ⚠️ **DUA ejaan DIKOREKSI 2026-09-19 (sesi 43) — keduanya memblokir SELURUH jalur `verified`.**
+> `'Omzet'` → `'Omzet Penjualan'` dan `'Efektivitas Iklan'` → `'Efektifitas Iklan'` (ejaan Shopee
+> sendiri, dengan **f**). Sebelum koreksi, `validasiKolomWajib` menolak SETIAP berkas
+> `shopee_ads_live` nyata, `parse_status` jatuh ke `gagal`, dan berkasnya dibuang dari `terparse`
+> seluruhnya. Ejaan lama didaftarkan sebagai alias `pdt_kolom_alias` (Rule 9, append-only).
+> Simulasi pipeline penuh atas 78 berkas nyata 12 klien: **0/10 klien `verified` sebelum, 10/10
+> sesudah, ΔGMV 0,0000%** (`docs/DECISIONS.md` 2026-09-19 "LIMA EJAAN WHITELIST").
 
 ### 2.6 `shopee_live` — `live_streaming_*.xlsx` (3 sheet, sheet "Daftar Streaming")
 Bucket 1: `Informasi Streaming`, `Waktu Mulai`, `Pengunjung`, `Penjualan (Pesanan Siap Dikirim)(Rp)`
@@ -434,9 +482,32 @@ baris bucket 2.
 > `tandaTanganKolom: { must: ['Periode Waktu', 'Jumlah Produk Dilihat'] }`,
 > `kolomDipanen: ['Periode Waktu', 'Penjualan (Pesanan Dibuat)(Rp)', 'Penjualan (Pesanan Siap
 > Dikirim)(Rp)', 'Pesanan (Pesanan Dibuat)', 'Pesanan (Pesanan Siap Dikirim)', 'Jumlah Produk
-> Dilihat', 'Produk Diklik']`. **Nol writer fact-table** untuk keduanya — sama seperti
+> Dilihat', 'Produk Diklik']`. ~~**Nol writer fact-table** untuk keduanya~~ — sama seperti
 > `shopee_voucher`/`shopee_chat`/`shopee_chat_broadcast`/`meta_ads`, cukup `parse_status='ok'` +
 > audit `pdt_file.kolom_dipanen`; konsumen fact-table menyusul kalau ada yang butuh.
+>
+> **PEMBARUAN 2026-09-19 (sesi 43, G4-03 aksi 4) — dua hal di atas sudah usang:**
+> **(1) "MASIH `UNVERIFIED_SIGNATURE`" tidak berlaku** sejak sesi 23 (judul blok di atas
+> tertinggal), dan premis aslinya — bahwa pasangan ini hanya terselesaikan lewat NAMA BERKAS,
+> yang Rule 6 larang — kini terbantah pada korpus **6 klien nyata**: `shopee_diskon` menang
+> tunggal lewat (`Tanggal`+`Tipe Promosi`), `shopee_flash_sale` lewat (`Periode Waktu`+`Jumlah
+> Produk Dilihat`), **nol ambiguitas di 6 dari 6 berkas**. Satu-satunya yang masih
+> `UNVERIFIED_SIGNATURE` hari ini adalah `shopee_video`.
+> **(2) Writer fact-table SUDAH ADA** — `pdt_fact_promo` (migrasi `20261121010000`), satu tabel
+> untuk keduanya dengan kolom `jenis` `diskon`/`flash_sale`, replace-on-recommit per
+> (toko, jenis, periode). Daftar "nol writer" kini tinggal
+> `shopee_voucher`/`shopee_chat_broadcast`/`meta_ads` (`shopee_chat` keluar lebih dulu lewat
+> G3-02a, `pdt_fact_layanan_chat`).
+>
+> ⚠️ **Jangan pernah menjumlahkan baris `pdt_fact_promo`.** Baris `Tipe Promosi='Semua'`
+> MEN-DEDUP, bukan menjumlah baris komponen: satu pesanan bisa membawa beberapa tipe promosi
+> sekaligus. Pada 5 dari 6 klien Σ komponen KEBETULAN sama persis dengan 'Semua'; pada klien
+> keenam ia **25% lebih tinggi** (Rp444.444.312 vs Rp354.987.431). Menjumlahkannya = bug kelas
+> `G1-07-SHOPEE-DOBEL-HITUNG`.
+>
+> ⚠️ **Ejaan kolom uang BERBEDA antara kedua modul dan itu bukan salah ketik:** diskon memakai
+> `' (IDR)'` (dengan spasi), flash sale memakai `'(Rp)'` (TANPA spasi). Menyalin ejaan yang satu
+> ke yang lain menghasilkan seluruh kolom `null` **tanpa satu pun error**.
 
 ### 2.9 `shopee_chat` / `shopee_chat_broadcast`
 > **`kolomDipanen` DIKOREKSI sesi lanjutan pasca-sesi 20 (docs/DECISIONS.md 2026-09-14)** terhadap
@@ -549,6 +620,40 @@ terpisah — masuk `pdt_kolom_alias` sebagai alias dari `shopee_parent_sku`:
 | `Kode Variasi` | `Kode Variasi` (sudah kanonik, bukan alias) |
 | `Produk` | `Produk` (sudah kanonik, bukan alias) |
 | `Pesanan Dibuat` | `Pesanan Dibuat` (sudah kanonik, bukan alias) |
+
+### 5.1 Alias ejaan-lama → kanonik nyata (ditambahkan 2026-09-19, sesi 43)
+
+Tujuh alias ditambahkan `PDT_KOLOM_ALIAS` supaya berkas lama tetap terbaca sesudah ejaan kanonik
+dikoreksi ke ejaan yang benar-benar dipakai ekspor platform. **Append-only (Rule 9)** — alias lama
+tidak pernah dihapus.
+
+| Modul | Kanonik (ejaan NYATA) | Alias (ejaan lama/varian) |
+|---|---|---|
+| `tt_product_analytics` | `AOV (pesanan SKU)` | `AOV` |
+| `tt_product_analytics` | `CTOR (pesanan SKU)` | `CTOR` |
+| `shopee_parent_sku` | `Tingkat Pesanan Berulang (Pesanan Dibuat)` | `repeat order` |
+| `shopee_ads_live` | `Omzet Penjualan` | `Omzet` |
+| `shopee_kesehatan` | `Poin Penalti` | `Poin Pinalti` |
+| `shopee_kesehatan` | `Deskripsi` | `Pinalti Berjalan` |
+| `meta_ads` | `CTR Unik (rasio klik tayang tautan)` | `CTR (rasio klik tayang tautan)` |
+
+> `meta_ads` **sengaja TIDAK dikoreksi kanoniknya**: kedua ejaan sama-sama NYATA di periode yang
+> sama (3 klien masing-masing), jadi yang lama tetap kanonik dan yang baru jadi alias. Ini bukan
+> kasus salah eja — ini dua varian ekspor Meta yang hidup berdampingan.
+
+> ⚠️ **Bug tingkat dua yang ikut diperbaiki sesi ini:** alias selama ini HANYA dibaca
+> `validasiKolomWajib`, tidak pernah oleh satu pun `ekstrakBaris*` — jadi sebuah alias membuat
+> `parse_status` hijau sementara kolomnya diam-diam terbaca `null`. Ini sudah aktif menelan
+> `tt_live` `Kreator`→`Nama panggilan` sejak alias pertama diseed. Perbaikannya `pencariKolom(header,
+> modulKode)` di `packages/core/src/pdt/fakta.ts` — satu pencari sadar-alias, dipasang ke empat
+> ekstraktor yang memang punya alias.
+
+> 🛡️ **Pencegah kambuh:** `packages/core/src/pdt/header-nyata.fixture.ts` — korpus header NYATA
+> (24 modul, 28 varian, 12 klien; **nama kolom saja, NOL baris data klien**) + `header-nyata.test.ts`
+> (31 tes) yang **membalik arah pengujian**: header datang dari berkas, registry yang wajib
+> menyesuaikan. Tes lama menulis fixture-nya sendiri DARI `kolomDipanen`, jadi ia hanya membuktikan
+> registry konsisten dengan dirinya sendiri dan secara struktural tidak bisa menangkap kelas
+> kegagalan ini.
 
 ## 6. Dua celah Product Exchange yang tidak punya sumber (§3 handoff)
 
