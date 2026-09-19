@@ -18,6 +18,10 @@
 | **PX — Kandidat & konfirmasi kategori** | ⚠️ Halaman tampil, **isinya kosong** | butuh batch PDT `verified` + tick evaluate dipicu manual |
 | **PX — Katalog** | ⚠️ Halaman tampil, **isinya kosong** | butuh `px_coverage_snapshot` dari repo **`mcnapp`** — tidak bisa diisi dari repo ini |
 
+> 🔴 **Mau uji langsung di PRODUKSI, bukan lokal? Loncat ke §8 dulu.** Kode & database
+> produksi sudah benar, tapi `SUPABASE_SERVICE_ROLE_KEY` belum dipasang di Vercel —
+> tanpa itu seluruh alur upload PDT menjawab 500. §8.2 memuat langkah pemasangannya.
+
 ### Yang memang BELUM ADA (jangan dicari)
 - Tombol **reparse manual**. Reparse hanya terjadi (a) lewat cron harian, atau (b) sebagai efek
   samping tombol "Konfirmasi Identitas".
@@ -275,3 +279,105 @@ ditutup — bukan bukti PDT tidak akurat. Pastikan DB yang dipakai sudah memuat 
 6. **`/account/pdt/laporan`** — buka laporannya, sunting insight, kirim ke klien.
 7. **Picu tick evaluate PX** (§5.2) → **`/px/kandidat`** — konfirmasi kategori beberapa produk.
 8. **`/px/katalog`** — harapkan kosong; baca laporan `kreator_kosong`.
+
+---
+
+## 8. Menguji langsung di PRODUKSI (`app.meagency.co.id`)
+
+Bagian §1–§7 di atas menulis jalur **lokal**. Bagian ini menjawab satu pertanyaan
+berbeda: **apakah PDT & PX bisa diuji langsung di produksi hari ini?**
+
+Jawabannya: **hampir** — kode dan database produksi sudah benar, tapi **satu variabel
+environment belum dipasang**, dan tanpa itu seluruh jalur upload PDT mati.
+
+### 8.1 Yang sudah siap di produksi (diverifikasi 2026-09-19)
+
+| Hal | Keadaan |
+|---|---|
+| Kode `agency-app-api` | `main` @ `2cf20d3` — **sudah** memuat perbaikan whitelist |
+| Kode `web-internal-mea` | `main` @ `2cf20d3` — sama |
+| Migrasi live `CDPS SG` | 4 migrasi terakhir sudah mendarat; 184 tabel, 12 alias |
+| Registry parser DB | set-identik dengan registry TS (26 modul) |
+| Bucket Storage `pdt-raw` | ada, privat, plafon 50 MB (sesuai Rule 42) |
+| Menu PDT & PX | terdaftar di `nav.ts`, gerbang izin mencerminkan domain |
+| Akun yang bisa upload | 6 AM divisi Account (punya login) + 2 Director |
+| `px_eligibility_policy` | 3 versi sudah ada |
+
+### 8.2 🔴 Pemblokir tunggal — `SUPABASE_SERVICE_ROLE_KEY` belum dipasang
+
+Project Vercel `agency-app-api` (production) saat ini memuat 9 variabel:
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`,
+`SUPABASE_JWT_PUBLIC_JWK`, `DATABASE_URL`, `CRON_SECRET`, `PLAN_TICK_SECRET`,
+`BRIDGE_INGEST_SECRET`, `MEAGO_BRIDGE_EMPLOYEE_ID`.
+
+**`SUPABASE_SERVICE_ROLE_KEY` tidak ada di antaranya.**
+
+`apps/api/src/lib/pdt-storage.ts` menuntutnya (bersama `NEXT_PUBLIC_SUPABASE_URL`) dan
+melempar `Supabase URL / service role key tidak dikonfigurasi` bila salah satu kosong.
+Enam route memakainya, dan **empat di antaranya adalah seluruh alur Flow A**:
+
+| Route | Akibat tanpa kunci |
+|---|---|
+| `POST /account/pdt/batches/upload-url` | tombol "Pilih ZIP" gagal di langkah pertama |
+| `POST /account/pdt/batches/preview` | pratinjau tidak pernah muncul |
+| `POST /account/pdt/batches` (commit) | batch tidak pernah tersimpan |
+| `POST /account/pdt/batches/konfirmasi-identitas` | `shop_id` tidak pernah bisa diikat |
+| `internal/pdt/reparse/tick` | reparse harian mati |
+| `internal/pdt/purge/tick` | purge retensi (Rule 45) mati |
+
+> Gejalanya di layar adalah **error 500**, bukan pesan `[...]` Bahasa Indonesia —
+> ini kegagalan konfigurasi server, bukan kegagalan validasi. Jangan dibaca sebagai
+> "PDT-nya rusak".
+
+**Cara memasang (hanya pemilik yang bisa — kuncinya rahasia dan tidak terbaca lewat tooling):**
+
+1. Supabase → project **CDPS SG** → *Project Settings* → *API Keys* → salin **`service_role`** (bukan `anon`).
+2. Vercel → team `meagency` → project **`agency-app-api`** → *Settings* → *Environment Variables*.
+3. Tambah `SUPABASE_SERVICE_ROLE_KEY`, nilai = kunci tadi, target **Production** (tandai *Sensitive*).
+4. **Redeploy** — variabel environment hanya terbaca oleh build/deploy baru.
+
+Kunci ini **tidak boleh** dipasang di `web-internal-mea`: ia melewati batas server dan
+akan bocor ke browser. Hanya `agency-app-api` yang memakainya, dan hanya dari route handler.
+
+### 8.3 🟡 `BRIDGE_PX_SECRET` juga belum ada — memblokir L4 PX saja
+
+`bridgePxSecretOk` bersikap *fail-closed*: tanpa secret, **setiap** request ke
+`POST /internal/bridge/px-coverage` ditolak. Itu satu-satunya pintu masuk
+`px_coverage_snapshot`, jadi lapis 4 (cakupan kreator) **tidak akan pernah** memberi
+verdict `lolos` sampai secret ini dipasang di `agency-app-api` **dan** nilai yang sama
+dipasang di pipeline `mcnapp`.
+
+Ini **tidak** memblokir PDT, dan **tidak** memblokir halaman PX — kandidat tetap
+terevaluasi sampai lapis 3. Kerjakan setelah §8.2 beres.
+
+### 8.4 Yang terlihat kosong tapi BUKAN bug
+
+Snapshot produksi 2026-09-19: **29 klien**, **35 toko** (28 di antaranya Shopee/TikTok Shop
+aktif), **0 toko ber-`shop_id`**, **0 batch PDT**, **0 baris coverage**.
+
+`shop_id` kosong di semua toko adalah **keadaan awal yang benar**, bukan data yang hilang.
+Ia tidak diisi manusia lewat form: ia lahir dari batch PDT pertama toko itu — batch
+pertama berstatus `identitas_belum_terikat`, lalu tombol **"Konfirmasi Identitas"**
+yang menuliskannya (`pdt.ts` → `update client_platforms set shop_id = …`) sekaligus
+memicu reparse. Jadi urutannya searah:
+
+```
+upload PDT → batch identitas_belum_terikat → Konfirmasi Identitas → shop_id terisi
+          → batch berikutnya bisa verified → PX lapis 1 & 2 terbuka
+```
+
+Artinya PX **tidak bisa** diuji lebih dulu daripada PDT — dan PDT belum bisa diuji
+sama sekali sampai §8.2 selesai.
+
+### 8.5 Urutan setelah kuncinya terpasang
+
+1. Redeploy `agency-app-api`, pastikan deployment production hijau.
+2. Login sebagai AM pemilik toko (atau Director) → menu **"Upload Data Toko (PDT)"**.
+3. Upload ZIP ekspor **lengkap** satu toko — ingat §0: ZIP isi satu-dua berkas tidak
+   akan pernah `verified`. Shopee butuh `shopee_shop_stats` **+** `shopee_parent_sku`;
+   TikTok butuh `tt_shop_analytics` **+** `tt_product_analytics`.
+4. Commit → batch akan berstatus `identitas_belum_terikat` → klik **Konfirmasi Identitas**.
+5. Upload periode kedua toko yang sama → sekarang seharusnya `verified`.
+6. Ulangi sampai 10 toko `verified` — itulah gerbang bisnis G3-10 yang tersisa
+   (`docs/backlog/PDT_BACKLOG.md`), dan satu-satunya cara menutupnya adalah
+   dengan data produksi nyata, bukan simulasi.
