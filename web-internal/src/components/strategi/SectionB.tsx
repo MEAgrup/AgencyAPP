@@ -667,7 +667,14 @@ function dariRiset(v: unknown) {
  * B3 — per-channel "what the one upload answered, and what is still manual".
  *
  * Three honest states, never a fourth that pretends:
- *   - no analysis for this channel at all ⇒ say so;
+ *   - no analysis for this channel at all ⇒ say so, and name the gate that is
+ *     most often the real cause: `getBaselinePrefill` → `latestScoredInterview`
+ *     menolak interview yang belum `Selesai`/`Selesai dengan Catatan`, jadi
+ *     `sugg` bisa `null` padahal `riset_awal_analisa` DAN batch PDT `verified`
+ *     dua-duanya sudah ada. Teks lama ("belum punya analisa Riset Awal")
+ *     menuduh yang salah — pemilik menemukannya 2026-09-19 dengan
+ *     `CLI-202609-0020`, yang punya analisa Riset Awal Shopee+TikTok lengkap
+ *     sementara `ITV-202609-0013` masih `Sedang Berlangsung`;
  *   - an old / manual payload ⇒ say that only the four legacy fields carry over,
  *     rather than showing a wall of empty columns that looks like a bug;
  *   - an analysed payload ⇒ count what came through and NAME what did not.
@@ -677,7 +684,10 @@ function RingkasanOtomatis({ sugg }: { sugg: StrategiChannelBaselineSuggestion |
   if (!sugg) {
     return (
       <div className="alert alertInfo" style={{ fontSize: 12 }}>
-        Channel ini belum punya analisa Riset Awal — seluruh Section B diisi manual.
+        Belum ada usulan analisa untuk channel ini — seluruh Section B diisi manual.{' '}
+        <b>Cek Interview klien dulu:</b> usulan baseline (termasuk field B3 dari PDT) baru dikirim
+        setelah Interview berstatus <i>Selesai</i> dan punya verdict — analisa Riset Awal yang sudah
+        tersimpan dan batch PDT yang sudah <i>Terverifikasi</i> tidak cukup tanpa itu.
       </div>
     );
   }
