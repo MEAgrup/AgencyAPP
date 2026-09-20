@@ -990,12 +990,15 @@ export interface StrategiGmvMixRincian {
   kartu_produk_dan_lain: number | null;
 }
 
-/** B-3.3 — one top-SKU row the baseline payload carries. `unit_terjual`,
- *  `harga_jual` and `margin_persen` are NOT here: no export carries them, so
- *  they stay manual (they are what B-3 margin math needs). */
+/** B-3.3 — one top-SKU row. `unit_terjual` terisi dari `pdt_fact_sku_period.
+ *  produk_terjual` bila jalur PDT yang memasoknya, `null` di jalur payload
+ *  Riset Awal dan untuk TikTok basis `net`. `harga_jual`/`margin_persen` TIDAK
+ *  ada di sini: HPP tidak ada di export mana pun, dan maksud "harga jual" B-3.3
+ *  masih pertanyaan terbuka (`docs/DECISIONS.md` 2026-09-20). */
 export interface StrategiTopSkuSuggestion {
   nama: string;
   gmv: string | null;
+  unit_terjual: number | null;
   klik: number | null;
   ctor_persen: number | null;
 }

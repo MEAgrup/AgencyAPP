@@ -794,11 +794,19 @@ export interface StrategiDecisionMaker {
   jalurEskalasi: string;
 }
 
-/** B-3.3 — top SKU by GMV. */
+/**
+ * B-3.3 — top SKU by GMV. `hargaJual` adalah TURUNAN read-only sejak ketokan
+ * pemilik 2026-09-20 (`docs/DECISIONS.md`, B33-HARGA-JUAL opsi (a)): harga
+ * RATA-RATA REALISASI = `gmv ÷ unitTerjual`, dihitung server saat simpan dan
+ * tidak pernah diambil dari wire — house rule #4, pola yang SAMA dipakai B-3.6
+ * (`computeListingLayak`). `marginPersen` tetap input manual: ia butuh HPP,
+ * yang tidak ada di export mana pun dan hanya klien yang tahu.
+ */
 export interface StrategiTopSku {
   nama: string;
   gmv: string;
   unitTerjual: number;
+  /** TURUNAN — lihat `computeHargaRataRata`. Jangan pernah tulis dari wire. */
   hargaJual: string;
   marginPersen: number;
 }
@@ -1965,14 +1973,29 @@ export interface GmvMixRincian {
  * `sumber='riset_awal'` provenance column on `strategi_channel`.
  */
 /**
- * B-3.3 — one top-SKU row the baseline payload carries. `unitTerjual`,
- * `hargaJual` and `marginPersen` are deliberately absent: no export carries
- * them, and they are exactly the three the B-3 margin math needs — so they stay
- * manual rather than arriving as a plausible-looking zero.
+ * B-3.3 — one top-SKU row. `unitTerjual` DIISI dari `pdt_fact_sku_period.
+ * produk_terjual` bila jalur PDT yang memasok baris ini (laporan pemilik
+ * 2026-09-20: kolomnya kosong di produksi walau angkanya sudah ada di DB —
+ * 264/264 baris Shopee `produk_terjual` terisi, pembacanya sudah membawanya
+ * sampai `PdtFaktaSkuPeriodeBaris`, dan hanya pemetaan `topSkuDariFakta` yang
+ * membuangnya). `null` untuk jalur payload Riset Awal (`produk.top_sku[]`
+ * memuat `{nama,gmv,klik,ctor}` TikTok / `{nama,kode,gmv,pengunjung,konversi}`
+ * Shopee — nol kunci jumlah unit di kedua skema) dan untuk TikTok basis `net`,
+ * yang penulisnya (`tt_product_analytics`) memang tidak menulis kolom itu.
+ *
+ * `hargaJual` dan `marginPersen` TETAP absen. Bukan karena tidak terhitung —
+ * GMV ÷ unit terjual mudah — melainkan karena PRD B-3.3 meminta GMV, unit
+ * terjual DAN harga jual bertiga sekaligus; kalau yang dimaksud harga rata-rata
+ * realisasi, kolom ketiga itu tidak menambah informasi apa pun atas dua yang
+ * lain. Jadi maksudnya ambigu, dan CLAUDE.md melarang memilih tafsir diam-diam
+ * — dicatat sebagai pertanyaan terbuka `docs/DECISIONS.md` 2026-09-20, bukan
+ * ditebak. `marginPersen` butuh HPP, yang tidak ada di export mana pun.
  */
 export interface TopSkuSuggestion {
   nama: string;
   gmv: string | null;
+  /** Unit terjual bulan acuan — `null` bila sumbernya tidak memanennya (lihat docblock). */
+  unitTerjual: number | null;
   klik: number | null;
   ctorPersen: number | null;
 }
@@ -2457,7 +2480,11 @@ export async function getBaselinePrefill(
       skuAktif: pdtSkuAktif ?? b.skuAktif,
       skuPareto80: pdtSkuPareto80 ?? b.skuPareto80,
       skuSlowMoving: pdtSkuSlowMoving ?? b.skuSlowMoving,
-      topSku: pdtTopSku ?? b.topSku,
+      // Jalur payload Riset Awal tidak punya jumlah unit di skemanya (lihat
+      // docblock `TopSkuSuggestion`), jadi `unitTerjual` dieja `null` DI SINI
+      // alih-alih dititipkan ke `SectionBTopSku` — bentuk payload di `@cdps/core`
+      // tetap menggambarkan apa yang payload-nya sungguh bawa.
+      topSku: pdtTopSku ?? b.topSku.map((s) => ({ ...s, unitTerjual: null })),
       jumlahKampanyeAktif: pdtRingkasIklan?.jumlahKampanyeAktif ?? b.jumlahKampanyeAktif,
       // G3-06 (sesi 43) — fakta menang atas payload, pola `??` yang SAMA dipakai
       // seluruh field PDT di blok ini. Fallback-nya tetap jalur lama: mesin
@@ -4129,6 +4156,34 @@ export function computeListingLayak(
 }
 
 /**
+ * B-3.3 Harga jual — DERIVED, read-only (ketokan pemilik 2026-09-20, DECISIONS
+ * B33-HARGA-JUAL opsi (a)).
+ *
+ * PRD B-3.3 meminta "nama, GMV, unit terjual, harga jual, margin %" tanpa
+ * pernah mendefinisikan harga jual yang mana; pemilik memilih **harga rata-rata
+ * realisasi** = `GMV ÷ unit terjual`. Karena ia sekarang terhitung, ia tidak
+ * boleh lagi diketik (house rule #4) — sama persis perjalanan B-3.6, yang juga
+ * berubah dari observasi manual jadi turunan lewat entri DECISIONS.
+ *
+ * Penyebut nol/absen ⇒ `null` (house rule #7: bagi-nol jadi `—`, tidak pernah
+ * error), sehingga baris yang unit terjualnya belum diisi meninggalkan sel
+ * kosong alih-alih "Rp. 0,00" yang terbaca seperti fakta.
+ *
+ * Dibulatkan ke 2 desimal dan dikembalikan sebagai string rupiah major —
+ * satuan yang `strategi_channel.top_sku` memang simpan.
+ */
+export function computeHargaRataRata(
+  gmv: string | number | null | undefined,
+  unitTerjual: number | null | undefined,
+): string | null {
+  if (gmv === null || gmv === undefined || String(gmv).trim() === '') return null;
+  const g = Number(gmv);
+  const u = Number(unitTerjual);
+  if (!Number.isFinite(g) || !Number.isFinite(u) || u <= 0) return null;
+  return (Math.round((g / u) * 100) / 100).toFixed(2);
+}
+
+/**
  * B-3.2/B-3.4/B-3.3 — konsentrasi omzet per SKU, dihitung dari distribusi
  * `gmv` `pdt_fact_sku_period` bulan acuan (G3-03). Formula DISALIN (bukan
  * diimpor) dari `@cdps/core` `baseline/payload.ts` (`skuPareto80`/
@@ -4171,7 +4226,14 @@ function skuSlowMovingDariFakta(rows: readonly { gmv: number | null }[]): number
 
 /** B-3.3 — Top 5 SKU by GMV, dari baris `pdt_fact_sku_period` bulan acuan (G3-03). */
 function topSkuDariFakta(
-  rows: readonly { namaProduk: string | null; platformProductId: string | null; gmv: number | null; klik: number | null; ctor: number | null }[],
+  rows: readonly {
+    namaProduk: string | null;
+    platformProductId: string | null;
+    gmv: number | null;
+    produkTerjual: number | null;
+    klik: number | null;
+    ctor: number | null;
+  }[],
 ): TopSkuSuggestion[] {
   return rows
     .filter((r): r is typeof r & { gmv: number } => r.gmv !== null)
@@ -4180,6 +4242,9 @@ function topSkuDariFakta(
     .map((r) => ({
       nama: r.namaProduk ?? r.platformProductId ?? '',
       gmv: String(r.gmv),
+      // Diteruskan apa adanya — `null` tetap `null` (absen ≠ nol, aturan yang
+      // sama dipakai seluruh peringkas fakta di berkas ini).
+      unitTerjual: r.produkTerjual,
       klik: r.klik,
       ctorPersen: r.ctor === null ? null : Math.round(r.ctor * 10000) / 100,
     }));
@@ -4463,6 +4528,14 @@ export async function saveChannels(
       const lampiran = nullIfBlank(c.lampiran) ?? lampiranDefaultFor(c.channel, storeLinks);
       // B-3.6: derived, never taken from the wire (see computeListingLayak).
       const listingLayak = computeListingLayak(c.skuAktif, c.skuListed);
+      // B-3.3 harga jual: idem — dihitung ulang di sini dari `gmv`/`unitTerjual`
+      // baris itu sendiri, apa pun yang wire kirim. `null` (unit belum diisi)
+      // disimpan '0' karena kolomnya non-null; yang membaca menampilkan `—`,
+      // bukan "Rp. 0,00" — lihat `computeHargaRataRata`.
+      const topSkuTersimpan = (c.topSku ?? []).map((s) => ({
+        ...s,
+        hargaJual: computeHargaRataRata(s.gmv, s.unitTerjual) ?? '0',
+      }));
       await tx`
         insert into strategi_channel
           (strategi_id, channel, channel_lain, status_channel, nama_toko, url_toko,
@@ -4507,7 +4580,7 @@ export async function saveChannels(
            ${c.trafikVideoPersen ?? null}, ${c.trafikLuarPersen ?? null},
            ${nullIfBlank(c.entryPointUtama)}, ${nullIfBlank(c.entryPointCatatan)},
            ${c.skuListed ?? null}, ${c.skuAktif ?? null}, ${c.skuPareto80 ?? null},
-           ${(c.topSku ?? []).map(topSkuToJson) as never}, ${c.skuSlowMoving ?? null},
+           ${topSkuTersimpan.map(topSkuToJson) as never}, ${c.skuSlowMoving ?? null},
            ${(c.skuStokKritis ?? []) as never}, ${listingLayak},
            ${c.ratingToko ?? null}, ${c.jumlahUlasan ?? null},
            ${c.chatResponseRatePersen ?? null}, ${c.chatResponseMenit ?? null},
@@ -4723,7 +4796,11 @@ function validateChannelBaselineShape(c: ChannelInput): void {
       throw new ValidationError('[nama SKU wajib diisi pada setiap baris Top SKU (B-3.3)]');
     nonNeg(s.unitTerjual, `Unit terjual SKU "${s.nama}" (B-3.3)`);
     nonNeg(s.gmv, `GMV SKU "${s.nama}" (B-3.3)`);
-    nonNeg(s.hargaJual, `Harga jual SKU "${s.nama}" (B-3.3)`);
+    // `hargaJual` SENGAJA tidak divalidasi lagi: sejak ketokan 2026-09-20 ia
+    // turunan yang server hitung ulang saat simpan (`computeHargaRataRata`),
+    // jadi menolak nilai wire berarti menolak draf yang server sendiri akan
+    // perbaiki sedetik kemudian. `gmv`/`unitTerjual` — dua masukan sungguhannya
+    // — tetap divalidasi di atas dan di bawah baris ini.
     pct(s.marginPersen, `Margin % SKU "${s.nama}" (B-3.3)`);
   }
   for (const k of c.kompetitor ?? []) {

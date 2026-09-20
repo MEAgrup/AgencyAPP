@@ -74,7 +74,12 @@ function prefillShopee(): StrategiBaselinePrefill {
         sku_aktif: 1182,
         sku_pareto_80: 143,
         sku_slow_moving: 604,
-        top_sku: [],
+        // Bentuk Shopee sungguhan: `nama_produk` null di `pdt_fact_sku_period`
+        // (`shopee_ams_produk` tidak menulisnya) ⇒ server jatuh ke
+        // `platform_product_id`; `unit_terjual` DARI `produk_terjual`.
+        top_sku: [
+          { nama: 'SH-1504', gmv: '8000000', unit_terjual: 80, klik: null, ctor_persen: null },
+        ],
         jumlah_kampanye_aktif: 14,
         tipe_kampanye: [],
         affiliate_aktif_30hari: 997,
@@ -116,6 +121,10 @@ describe('channel yang ditambahkan SESUDAH halaman termuat tetap tersemai', () =
     // B-4.2 dari `pdt_fact_layanan_chat` (Shopee-only).
     expect(ch.chat_response_rate_persen).toBe('97.5');
     expect(ch.chat_response_menit).toBe('79');
+    // B-3.3 — laporan pemilik lanjutan 2026-09-20: unit terjual ikut mendarat.
+    expect(ch.top_sku).toEqual([
+      { nama: 'SH-1504', gmv: '8000000', unit_terjual: '80', harga_jual: '', margin_persen: '' },
+    ]);
   });
 
   it('field yang memang tidak punya export tetap kosong — melipat bukan mengarang', () => {

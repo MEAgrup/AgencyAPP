@@ -185,6 +185,32 @@ export interface ChannelDraft {
 }
 
 // ---------------------------------------------------------------------------
+// Turunan B-3.3
+// ---------------------------------------------------------------------------
+
+/**
+ * B-3.3 Harga jual — TURUNAN read-only (ketokan pemilik 2026-09-20, DECISIONS
+ * B33-HARGA-JUAL opsi (a)): harga RATA-RATA REALISASI = GMV ÷ unit terjual.
+ *
+ * Cermin `computeHargaRataRata` di `@cdps/domain` — server menghitung ulang
+ * angka ini saat simpan dan tidak pernah memakai nilai dari wire, jadi yang di
+ * layar adalah pratinjau rumus yang sama, bukan sumber kebenaran kedua. Pola
+ * identik B-3.6 (`listingLayakDerived`).
+ *
+ * `null` (⇒ layar menampilkan `—`) bila GMV kosong atau unit terjual nol/kosong
+ * — house rule #7: bagi-nol tidak pernah jadi error, dan "Rp. 0,00" akan
+ * terbaca seperti fakta padahal artinya "belum bisa dihitung".
+ */
+export function hargaRataRata(gmv: string, unitTerjual: string): string | null {
+  if (!gmv.trim() || !unitTerjual.trim()) return null;
+  const g = Number(gmv);
+  const u = Number(unitTerjual);
+  if (!Number.isFinite(g) || !Number.isFinite(u) || u <= 0) return null;
+  // Format rumah (aturan #7): `Rp. X.XXX.XXX,00`.
+  return `Rp. ${Math.round(g / u).toLocaleString('id-ID')},00`;
+}
+
+// ---------------------------------------------------------------------------
 // Draft factory
 // ---------------------------------------------------------------------------
 
@@ -1486,11 +1512,19 @@ export default function SectionB({
                   </label>
                   <label className="field">
                     <span className="muted" style={{ fontSize: 12 }}>Harga jual</span>
+                    {/* B-3.3 harga jual — TURUNAN read-only sejak ketokan pemilik
+                        2026-09-20 (DECISIONS B33-HARGA-JUAL opsi (a)): harga
+                        RATA-RATA REALISASI = GMV ÷ unit terjual. Cermin
+                        `computeHargaRataRata` di server, yang menghitung ulang
+                        saat simpan — ini pratinjau langsung rumus yang sama,
+                        pola identik B-3.6 di atas. Penyebut nol/kosong ⇒ "—",
+                        bukan "Rp. 0,00" (house rule #7). */}
                     <input
-                      value={row.harga_jual}
-                      disabled={disabled}
-                      placeholder="Rp."
-                      onChange={(e) => set({ harga_jual: e.target.value })}
+                      type="text"
+                      readOnly
+                      value={hargaRataRata(row.gmv, row.unit_terjual) ?? '—'}
+                      title="Dihitung otomatis dari GMV ÷ unit terjual (harga rata-rata realisasi)"
+                      style={{ background: 'var(--bg-muted, #f3f4f6)' }}
                     />
                   </label>
                   <label className="field">
