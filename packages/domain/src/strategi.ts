@@ -2220,6 +2220,27 @@ export async function getBaselinePrefill(
     // SAMA yang sudah dipakai `bacaKpiShopDaily` untuk "KPI ringkas laporan"
     // (`pdt.ts`, Rule 16) — angka penjualan headline, bukan kanal/ads.
     const basisShopDaily = channel === 'TikTok Shop' ? 'net' : 'siap_dikirim';
+    // G3-03-BASIS-SKU — basis SKU-level BUKAN basis shop-daily, dan menyamakan
+    // keduanya membuat B-3.2/B-3.3/B-3.4 KOSONG PERMANEN di Shopee.
+    //
+    // `pdt_fact_shop_daily` Shopee membawa tiga basis ('dibuat'/'siap_dikirim'/
+    // 'dibayar', satu per sheet `shopee_shop_stats`), dan 'siap_dikirim' yang
+    // dipilih di atas. `pdt_fact_sku_period` TIDAK: seluruh penulisnya memakai
+    // literal tetap — `shopee_ams_produk` dan `tt_orders` menulis 'dibayar',
+    // `tt_product_analytics` menulis 'net' (lihat `pdt.ts`, ketiganya
+    // terdokumentasi sebagai keputusan pemilik / hasil rekonsiliasi). Tidak ada
+    // satu pun penulis yang pernah menulis 'siap_dikirim' ke tabel ini.
+    //
+    // Jadi kueri Shopee lama meminta basis yang tidak pernah ada: nol baris,
+    // setiap kali, untuk setiap toko Shopee — Pareto 80%, Top SKU dan SKU slow
+    // moving tidak pernah terisi walau `pdt_fact_sku_period` penuh (264 baris
+    // pada `CLI-202609-0020`). Gagal SUNYI: nol baris tidak bisa dibedakan dari
+    // "toko ini memang belum punya data SKU".
+    //
+    // TikTok TETAP 'net' dan itu disengaja: hanya `tt_product_analytics` yang
+    // menulis `nama_produk`, sedangkan `tt_orders` ('dibayar') tidak — memindah
+    // TikTok ke 'dibayar' akan menukar nama produk jadi ID mentah di B-3.3.
+    const basisSkuPeriode = channel === 'TikTok Shop' ? 'net' : 'dibayar';
     const periodeVerified = await pdtPrefill.bacaPeriodeTerverifikasiTerbaru(sql, clientPlatformIdNum, 6);
 
     // G3-02..G3-06 (G3-REFERENCE-PERIODE opsi (B)) — periode acuan Section B3
@@ -2309,7 +2330,7 @@ export async function getBaselinePrefill(
         pdtSkuListed = jumlahSku.skuListed;
         pdtSkuAktif = jumlahSku.skuAktif;
       }
-      const faktaSku = await pdtPrefill.bacaFaktaSkuPeriode(sql, clientPlatformIdNum, periodeReferensiPdtSaran, basisShopDaily);
+      const faktaSku = await pdtPrefill.bacaFaktaSkuPeriode(sql, clientPlatformIdNum, periodeReferensiPdtSaran, basisSkuPeriode);
       if (faktaSku.length > 0) {
         pdtSkuPareto80 = skuPareto80DariFakta(faktaSku);
         pdtSkuSlowMoving = skuSlowMovingDariFakta(faktaSku);
