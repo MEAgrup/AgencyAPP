@@ -70,6 +70,20 @@ Bucket 2 (derived-add — `report/metrik.ts:457`, `adsscanner/tiktok/metrik.ts:5
 |---|---|---|
 | `Nama` | -- konsumen: report.dim_produk(0.12) label sumbu, adsscanner.nama (`adsscanner/tiktok/metrik.ts:67`) | `requireCols` throw di `report/metrik.ts:457` |
 | `Klik produk` | -- konsumen: report.dim_produk(0.12) sumbu X kuadran SKU, adsscanner.klik (`:62`) | dimensi Portfolio Produk 0.12 mati; sumbu X kuadran hilang |
+| `Produk terjual` | -- konsumen: pdt_fact_sku_period.produk_terjual → Strategi B-3.3 (unit terjual per SKU) | kolom "unit terjual" B-3.3 TikTok kosong; berkas TETAP dipakai (`sebagian`, bukan `gagal`) |
+
+> **`Produk terjual` DITAMBAHKAN 2026-09-20** (`docs/DECISIONS.md` B33-TIKTOK-UNIT).
+> Kolom ke-22 di bawah kelompok `'Semua'`, jadi `header.findIndex` (kecocokan
+> PERTAMA) mengambilnya seperti kolom lain. Ia BERBEDA dari `Pesanan SKU` yang
+> sudah dipanen: pada tiga produk teratas berkas asli, `Pesanan SKU` 57/27/12
+> vs `Produk terjual` 58/27/12 — unit selalu ≥ pesanan. Menukar keduanya akan
+> membuat B-3.3 melaporkan pesanan sebagai unit.
+>
+> Ia masuk **Bucket 2 (opsional)**, bukan Bucket 1, dengan alasan yang sama
+> `shopee_parent_sku`: modul ini `wajib: true`, jadi kolom WAJIB yang hilang
+> menjatuhkan berkas ke `gagal` dan menutup pintu upload seluruh batch —
+> persis regresi yang koreksi ejaan `AOV`/`CTOR` 2026-09-19 baru saja bereskan
+> untuk modul INI.
 
 ### 1.3 `tt_transaction_product` — `Transaction_Analysis_Product_List_*.xlsx`
 Bucket 1:

@@ -1589,10 +1589,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_sku_period
             (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id,
-             parser_versi, gmv, gmv_dari_kreator, pesanan_sku)
+             parser_versi, gmv, gmv_dari_kreator, pesanan_sku, produk_terjual)
           values
             (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'dibayar', ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.gmvDariKreator}, ${baris.pesananSku})`;
+             ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.gmvDariKreator}, ${baris.pesananSku},
+             ${baris.produkTerjual})`;
       }
     }
   }
@@ -1617,11 +1618,12 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
           insert into pdt_fact_sku_period
             (sku_id, client_platform_id, platform_product_id, nama_produk, periode, basis, batch_id,
              parser_versi, gmv, gmv_dari_kreator, gmv_video_penjual, gmv_live_penjual,
-             pesanan_sku, impresi, klik, ctr, ctor)
+             pesanan_sku, produk_terjual, impresi, klik, ctr, ctor)
           values
             (null, ${clientPlatformId}, ${baris.platformProductId}, ${baris.namaProduk}, ${periodeAwalBulan}::date, 'net', ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.gmvDariKreator}, ${baris.gmvVideoPenjual},
-             ${baris.gmvLivePenjual}, ${baris.pesananSku}, ${baris.impresi}, ${baris.klik}, ${baris.ctr}, ${baris.ctor})`;
+             ${baris.gmvLivePenjual}, ${baris.pesananSku}, ${baris.produkTerjual}, ${baris.impresi}, ${baris.klik},
+             ${baris.ctr}, ${baris.ctor})`;
       }
     }
   }

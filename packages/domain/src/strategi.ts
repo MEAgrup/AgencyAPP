@@ -1947,6 +1947,21 @@ export interface BaselineMonthSuggestion {
   /** Rupiah (major, 2dp scale), the same unit `strategi_baseline_bulan.gmv` stores. */
   gmv: string | null;
   jumlahPesanan: number | null;
+  /**
+   * B1-IKLAN-PER-BULAN (`docs/DECISIONS.md` 2026-09-20) — tiga kolom iklan B-1
+   * yang selama ini SELALU diketik AM walau angkanya sudah ada di
+   * `pdt_fact_ads` sejak batch pertama. Σ`biaya` bulan itu, Σ`gmv`÷Σ`biaya`,
+   * dan kebalikannya dalam persen. Dihitung dari baris fakta bulan YANG
+   * BERSANGKUTAN, bukan diambil dari agregat channel-level bulan acuan.
+   *
+   * `null` kalau bulan itu nol baris `pdt_fact_ads` — toko yang memang tidak
+   * beriklan tidak dipaksa jadi `0`, sama aturan "absen ≠ nol" yang dipakai
+   * seluruh peringkas fakta di berkas ini. `roas`/`acos` juga `null` saat
+   * penyebutnya nol (aturan rumah #7: bagi-nol tidak pernah error).
+   */
+  adSpend: string | null;
+  roas: number | null;
+  acos: number | null;
 }
 
 /**
@@ -2423,12 +2438,20 @@ export async function getBaselinePrefill(
         ? await Promise.all(
             periodeVerified.map(async (p, i) => {
               const fakta = await pdtPrefill.bacaFaktaShopDaily(sql, clientPlatformIdNum, p.periodeAwalBulan, basisShopDaily);
+              // B1-IKLAN-PER-BULAN — per bulan, bukan sekali untuk bulan acuan.
+              // `pdtRingkasIklan` di atas tetap ada dan tetap channel-level: ia
+              // memberi makan field `roas`/`adSpend` channel + `tipeKampanye`,
+              // bukan baris tabel bulanan ini.
+              const iklan = ringkasIklanBulan(await pdtPrefill.bacaFaktaAds(sql, clientPlatformIdNum, p.periodeAwalBulan));
               const d = new Date(`${p.periodeAwalBulan}T00:00:00Z`);
               return {
                 monthIndex: i + 1,
                 label: `${bl.MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
                 gmv: fakta === null ? null : String(fakta.gmv),
                 jumlahPesanan: fakta === null ? null : fakta.pesanan,
+                adSpend: iklan.adSpend,
+                roas: iklan.roas,
+                acos: iklan.acos,
               };
             }),
           )
@@ -2437,6 +2460,11 @@ export async function getBaselinePrefill(
             label: (h.label as string | null) ?? null,
             gmv: numOrNullLoose(h.gmv) === null ? null : String(numOrNullLoose(h.gmv)),
             jumlahPesanan: numOrNullLoose(h.order),
+            // Jalur payload lama (nol batch PDT verified) tidak pernah punya
+            // angka iklan per bulan — `riwayat` hanya membawa gmv+order.
+            adSpend: null,
+            roas: null,
+            acos: null,
           }));
 
     const mix = payload.gmv_mix ?? null;
@@ -4433,6 +4461,38 @@ export function petakanTipeKampanye(sumber: string, teks: string | null): Campai
   if (t === 'video') return 'video_ads';
   if (t === 'kartu produk') return 'lainnya';
   return null;
+}
+
+/**
+ * B1-IKLAN-PER-BULAN — tiga angka iklan B-1 untuk SATU bulan.
+ *
+ * Sengaja TERPISAH dari `ringkasIklanDariFakta` walau formulanya bersinggungan:
+ * yang itu juga menghitung `jumlahKampanyeAktif`/`tipeKampanye` (dan karena itu
+ * butuh `kampanyeId`/`sumber`/`tipeKampanyeSumber`), sementara baris tabel
+ * bulanan hanya butuh tiga angka. Menggabungkannya berarti memaksa pemanggil
+ * per-bulan membawa field yang tidak dipakainya.
+ *
+ * `roas` = Σ`gmv` ÷ Σ`biaya` — pola `report/dimensi_roas` yang sudah ada,
+ * BUKAN rata-rata kolom `roas` mentah per baris (rata-rata dari rasio bukan
+ * rasio dari total). `acos` adalah kebalikannya dalam persen, jadi keduanya
+ * dihitung dari Σ yang SAMA dan tidak akan pernah saling bertentangan.
+ *
+ * Nol baris ⇒ ketiganya `null` (absen ≠ nol). Penyebut nol ⇒ `roas`/`acos`
+ * `null`, tapi `adSpend` TETAP dilaporkan: toko yang membelanjakan Rp0 dengan
+ * baris fakta sungguhan berbeda dari toko yang tidak punya data iklan.
+ */
+function ringkasIklanBulan(
+  rows: readonly { biaya: number; gmv: number | null }[],
+): { adSpend: string | null; roas: number | null; acos: number | null } {
+  if (rows.length === 0) return { adSpend: null, roas: null, acos: null };
+  const totalBiaya = rows.reduce((a, r) => a + r.biaya, 0);
+  const gmvTerpanen = rows.filter((r): r is typeof r & { gmv: number } => r.gmv !== null);
+  const totalGmv = gmvTerpanen.length === 0 ? null : gmvTerpanen.reduce((a, r) => a + r.gmv, 0);
+  return {
+    adSpend: String(totalBiaya),
+    roas: totalGmv === null || totalBiaya === 0 ? null : Math.round((totalGmv / totalBiaya) * 100) / 100,
+    acos: totalGmv === null || totalGmv === 0 ? null : Math.round((totalBiaya / totalGmv) * 10000) / 100,
+  };
 }
 
 /**

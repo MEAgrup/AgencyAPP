@@ -101,14 +101,24 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // pernah bisa mencapai `verified`**, sejak modul ini dibangun. Sesi 33 menghitung
     // paritas Σper-SKU vs shop-level LANGSUNG dari berkas (bukan lewat pipeline), jadi
     // bug ini lolos dari verifikasi itu. Ejaan lama tetap hidup sebagai alias Rule 9.
+    // `'Produk terjual'` DITAMBAHKAN 2026-09-20 (B33-TIKTOK-UNIT, `docs/DECISIONS.md`).
+    // Docblock `ekstrakBarisTtProductAnalytics` dulu menyebutnya "bukan celah — kolomnya
+    // memang tidak pernah masuk whitelist"; ternyata kolomnya ADA di berkas nyata, kolom
+    // ke-22 di bawah kelompok `'Semua'` (dibaca langsung dari `product_list_20260701.xlsx`,
+    // bukan ditebak: 58/27/12 untuk tiga produk teratas, konsisten ≥ `Pesanan SKU` 57/27/12
+    // persis seperti yang seharusnya — unit ≥ pesanan). Jadi itu celah, bukan ketiadaan.
     kolomDipanen: [
       'ID Produk', 'GMV', 'GMV dari kreator', 'GMV dari video penjual', 'GMV dari LIVE penjual',
       'Pesanan SKU', 'AOV (pesanan SKU)', 'CTR', 'CTOR (pesanan SKU)', 'Impresi produk',
-      'Status daftar produk', 'Nama', 'Klik produk',
+      'Status daftar produk', 'Nama', 'Klik produk', 'Produk terjual',
     ],
     // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.2 — dibutuhkan report.dim_produk(0.12)/
     // adsscanner, bukan gerbang PDT sendiri (Rule 13-16/PX). Hilang ⇒ 'sebagian', bukan 'gagal'.
-    kolomOpsional: ['Nama', 'Klik produk'],
+    // `'Produk terjual'` ikut OPSIONAL dengan alasan yang sama persis `shopee_parent_sku`
+    // (B33-PARENT-SKU): modul ini `wajib: true`, jadi kolom WAJIB yang hilang menjatuhkan
+    // berkas ke `gagal`, membuangnya dari `terparse`, dan menggagalkan pasangan rekonsiliasi
+    // TikTok — menukar satu kolom B-3.3 yang kosong dengan pintu upload yang tertutup.
+    kolomOpsional: ['Nama', 'Klik produk', 'Produk terjual'],
     wajib: true,
   },
   {

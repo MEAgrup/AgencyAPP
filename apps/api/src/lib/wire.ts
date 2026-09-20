@@ -5481,6 +5481,10 @@ export interface StrategiBaselineMonthSuggestionWire {
   label: string | null;
   gmv: string | null;
   jumlah_pesanan: number | null;
+  /** B1-IKLAN-PER-BULAN — `null` eksplisit, tidak pernah dihilangkan (kelas O43). */
+  ad_spend: string | null;
+  roas: number | null;
+  acos: number | null;
 }
 
 /** RAB-12 — attribution WITHIN the TikTok Shop platform, never a channel of its own. */
@@ -5602,6 +5606,9 @@ export function strategiBaselinePrefillToWire(
         label: m.label ?? null,
         gmv: m.gmv ?? null,
         jumlah_pesanan: m.jumlahPesanan ?? null,
+        ad_spend: m.adSpend ?? null,
+        roas: m.roas ?? null,
+        acos: m.acos ?? null,
       })),
       gmv_mix:
         c.gmvMix === null

@@ -619,14 +619,15 @@ describe('ekstrakBarisSkuMasterTtOrders', () => {
 });
 
 describe('ekstrakBarisFaktaSkuTtOrders (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR)', () => {
-  it('menjumlah gmv (SKU Subtotal After Discount) dan pesananSku (Quantity) lintas baris untuk SKU yang sama', () => {
+  it('menjumlah gmv lintas baris; produkTerjual = Σ Quantity (UNIT) dan pesananSku = cacah BARIS — dua angka BERBEDA (B33-TIKTOK-UNIT)', () => {
     const aoa = [
       HEADER_TT_ORDERS,
       ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '2', '50.000', '95.000', 'Completed', '01/07/2026', 'Kat', ''],
       ['O2', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '50.000', '48.000', 'Completed', '02/07/2026', 'Kat', ''],
     ];
     expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
-      { platformProductId: 'SKU-1', gmv: 143000, pesananSku: 3, gmvDariKreator: 0 },
+      // Dua baris pesanan, tiga unit — sebelum B33-TIKTOK-UNIT keduanya dilaporkan `3`.
+      { platformProductId: 'SKU-1', gmv: 143000, pesananSku: 2, produkTerjual: 3, gmvDariKreator: 0 },
     ]);
   });
 
@@ -637,8 +638,8 @@ describe('ekstrakBarisFaktaSkuTtOrders (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR)', () 
       ['O2', 'SKU-2', 'SLR-2', 'X', 'Y', '2', '20.000', '40.000', 'Completed', '01/07/2026', 'Kat', ''],
     ];
     expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
-      { platformProductId: 'SKU-1', gmv: 10000, pesananSku: 1, gmvDariKreator: 0 },
-      { platformProductId: 'SKU-2', gmv: 40000, pesananSku: 2, gmvDariKreator: 0 },
+      { platformProductId: 'SKU-1', gmv: 10000, pesananSku: 1, produkTerjual: 1, gmvDariKreator: 0 },
+      { platformProductId: 'SKU-2', gmv: 40000, pesananSku: 1, produkTerjual: 2, gmvDariKreator: 0 },
     ]);
   });
 
@@ -650,14 +651,14 @@ describe('ekstrakBarisFaktaSkuTtOrders (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR)', () 
       ['O3', 'SKU-1', 'SLR-1', 'X', 'Y', '9', '10.000', '90.000', 'Unpaid', '01/07/2026', 'Kat', ''],
     ];
     expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
-      { platformProductId: 'SKU-1', gmv: 10000, pesananSku: 1, gmvDariKreator: 0 },
+      { platformProductId: 'SKU-1', gmv: 10000, pesananSku: 1, produkTerjual: 1, gmvDariKreator: 0 },
     ]);
   });
 
   it('status dibaca case-insensitive + trim', () => {
     const aoa = [HEADER_TT_ORDERS, ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '10.000', ' completed ', '01/07/2026', 'Kat', '']];
     expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
-      { platformProductId: 'SKU-1', gmv: 10000, pesananSku: 1, gmvDariKreator: 0 },
+      { platformProductId: 'SKU-1', gmv: 10000, pesananSku: 1, produkTerjual: 1, gmvDariKreator: 0 },
     ]);
   });
 
@@ -668,7 +669,7 @@ describe('ekstrakBarisFaktaSkuTtOrders (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR)', () 
       ['O2', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '20.000', 'Completed', '01/07/2026', 'Kat', ''],
     ];
     expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
-      { platformProductId: 'SKU-1', gmv: 50000, pesananSku: 2, gmvDariKreator: 30000 },
+      { platformProductId: 'SKU-1', gmv: 50000, pesananSku: 2, produkTerjual: 2, gmvDariKreator: 30000 },
     ]);
   });
 
@@ -691,6 +692,56 @@ describe('ekstrakBarisFaktaSkuTtOrders (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR)', () 
   it('konvensi Seller Center (titik ribuan, koma desimal)', () => {
     const aoa = [HEADER_TT_ORDERS, ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '1.234.567,89', 'Completed', '01/07/2026', 'Kat', '']];
     expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)[0].gmv).toBe(1234567.89);
+  });
+
+  // B33-TT-ORDERS-STATUS (`docs/DECISIONS.md` 2026-09-20). Ketiga literal di
+  // bawah dibaca LANGSUNG dari ekspor asli `Semua pesanan-2026-08-10-15_50.csv`
+  // (Avitaskin Juli 2026 — berkas yang SAMA dengan batch produksi #7), bukan
+  // diterjemahkan sendiri: `Selesai` 117 baris, `Dibatalkan` 50, `Dikirim` 4,
+  // dan `Completed` NOL. Filter lama mencocokkan `'completed'` saja, jadi 171
+  // dari 171 baris terbuang dan modul ini menulis nol baris fakta — diam-diam.
+  describe('label Order Status Bahasa Indonesia (B33-TT-ORDERS-STATUS)', () => {
+    it('`Selesai` DIHITUNG — ini yang dipakai ekspor Seller Center berbahasa Indonesia', () => {
+      const aoa = [
+        HEADER_TT_ORDERS,
+        ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '2', '50.000', '95.000', 'Selesai', '01/07/2026', 'Kat', ''],
+      ];
+      expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
+        { platformProductId: 'SKU-1', gmv: 95000, pesananSku: 1, produkTerjual: 2, gmvDariKreator: 0 },
+      ]);
+    });
+
+    it('`Dibatalkan` dan `Dikirim` TETAP dilewati — memperluas label tidak boleh memperluas ARTI basis `dibayar`', () => {
+      const aoa = [
+        HEADER_TT_ORDERS,
+        ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '10.000', 'Selesai', '01/07/2026', 'Kat', ''],
+        ['O2', 'SKU-1', 'SLR-1', 'X', 'Y', '5', '10.000', '50.000', 'Dibatalkan', '01/07/2026', 'Kat', ''],
+        ['O3', 'SKU-1', 'SLR-1', 'X', 'Y', '9', '10.000', '90.000', 'Dikirim', '01/07/2026', 'Kat', ''],
+      ];
+      expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
+        { platformProductId: 'SKU-1', gmv: 10000, pesananSku: 1, produkTerjual: 1, gmvDariKreator: 0 },
+      ]);
+    });
+
+    it('`Selesai` dan `Completed` hidup berdampingan — ekspor mengikuti bahasa akun, bukan satu ejaan global', () => {
+      const aoa = [
+        HEADER_TT_ORDERS,
+        ['O1', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '10.000', 'Selesai', '01/07/2026', 'Kat', ''],
+        ['O2', 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '10.000', 'Completed', '01/07/2026', 'Kat', ''],
+      ];
+      expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
+        { platformProductId: 'SKU-1', gmv: 20000, pesananSku: 2, produkTerjual: 2, gmvDariKreator: 0 },
+      ]);
+    });
+
+    it('komposisi ASLI berkas produksi: 117 Selesai / 50 Dibatalkan / 4 Dikirim — hanya yang Selesai yang mendarat', () => {
+      const baris = (n: number, status: string) =>
+        Array.from({ length: n }, (_, i) => ['O' + i, 'SKU-1', 'SLR-1', 'X', 'Y', '1', '10.000', '1.000', status, '01/07/2026', 'Kat', '']);
+      const aoa = [HEADER_TT_ORDERS, ...baris(117, 'Selesai'), ...baris(50, 'Dibatalkan'), ...baris(4, 'Dikirim')];
+      expect(ekstrakBarisFaktaSkuTtOrders(aoa, 1)).toEqual([
+        { platformProductId: 'SKU-1', gmv: 117000, pesananSku: 117, produkTerjual: 117, gmvDariKreator: 0 },
+      ]);
+    });
   });
 });
 
@@ -1246,10 +1297,10 @@ describe('ekstrakBarisShopDailyShopee (sesi 34 lanjutan — G1-09-2BII-SHOPDAILY
 // preamble di atasnya diabaikan sepenuhnya oleh fungsi (pemanggil yang sudah resolve barisHeader).
 const HEADER_TT_PRODUCT_ANALYTICS = [
   'Nama', 'ID Produk', 'GMV', 'GMV dari kreator', 'GMV dari video penjual', 'GMV dari LIVE penjual',
-  'Pesanan SKU', 'Impresi produk', 'Klik produk', 'CTR', 'CTOR',
+  'Pesanan SKU', 'Produk terjual', 'Impresi produk', 'Klik produk', 'CTR', 'CTOR',
   // Kolom BERULANG dari kelompok kategori breakdown (mis. 'LIVE penjual') — label sama persis
-  // 'GMV'/'Pesanan SKU', TIDAK boleh terpilih (bukan grup 'Semua').
-  'GMV', 'Pesanan SKU',
+  // 'GMV'/'Pesanan SKU'/'Produk terjual', TIDAK boleh terpilih (bukan grup 'Semua').
+  'GMV', 'Pesanan SKU', 'Produk terjual',
 ];
 const ttProductAnalyticsAoa = (rows: readonly (readonly unknown[])[]): (readonly unknown[])[] => [
   ['Tanggal analisis: 2026-07-01 - 2026-07-31'], ['Ringkasan data'], [], HEADER_TT_PRODUCT_ANALYTICS, ...rows,
@@ -1258,45 +1309,45 @@ const ttProductAnalyticsAoa = (rows: readonly (readonly unknown[])[]): (readonly
 describe('ekstrakBarisTtProductAnalytics (G2-01-KUADRAN-SKU langkah 1)', () => {
   it('memetakan satu baris lengkap — kolom PERTAMA (grup "Semua") yang terpilih, bukan duplikat grup breakdown', () => {
     const aoa = ttProductAnalyticsAoa([
-      ['Produk A', 'PRD-1', '1000000', '200000', '300000', '400000', '50', '10000', '500', '0.05', '0.1', '999999', '999'],
+      ['Produk A', 'PRD-1', '1000000', '200000', '300000', '400000', '50', '58', '10000', '500', '0.05', '0.1', '999999', '999', '888'],
     ]);
     expect(ekstrakBarisTtProductAnalytics(aoa, 4)).toEqual([
       {
         platformProductId: 'PRD-1', namaProduk: 'Produk A', gmv: 1000000, gmvDariKreator: 200000, gmvVideoPenjual: 300000,
-        gmvLivePenjual: 400000, pesananSku: 50, impresi: 10000, klik: 500, ctr: 0.05, ctor: 0.1,
+        gmvLivePenjual: 400000, pesananSku: 50, produkTerjual: 58, impresi: 10000, klik: 500, ctr: 0.05, ctor: 0.1,
       },
     ]);
   });
 
   it('baris ber-"ID Produk" kosong dilewati (bukan baris data sungguhan)', () => {
     const aoa = ttProductAnalyticsAoa([
-      ['Produk A', '', '1000000', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
+      ['Produk A', '', '1000000', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
     ]);
     expect(ekstrakBarisTtProductAnalytics(aoa, 4)).toHaveLength(0);
   });
 
   it('dua produk terpisah tetap terpetakan masing-masing', () => {
     const aoa = ttProductAnalyticsAoa([
-      ['Produk A', 'PRD-1', '1000000', '0', '0', '0', '10', '0', '0', '0', '0', '0', '0'],
-      ['Produk B', 'PRD-2', '500000', '0', '0', '0', '5', '0', '0', '0', '0', '0', '0'],
+      ['Produk A', 'PRD-1', '1000000', '0', '0', '0', '10', '0', '0', '0', '0', '0', '0', '0', '0'],
+      ['Produk B', 'PRD-2', '500000', '0', '0', '0', '5', '0', '0', '0', '0', '0', '0', '0', '0'],
     ]);
     expect(ekstrakBarisTtProductAnalytics(aoa, 4).map((b) => b.platformProductId)).toEqual(['PRD-1', 'PRD-2']);
   });
 
-  it('kolom opsional hilang ⇒ null untuk field itu ("Produk terjual" TIDAK ada di whitelist modul ini, TIDAK pernah dibaca)', () => {
+  it('kolom opsional hilang ⇒ null untuk field itu — termasuk `Produk terjual` (ekspor lama tanpa kolom itu TIDAK ditolak, hanya unitnya yang tidak lahir)', () => {
     const headerMinimal = ['ID Produk'];
     const aoa = [['preamble'], ['preamble2'], headerMinimal, ['PRD-1']];
     expect(ekstrakBarisTtProductAnalytics(aoa, 3)).toEqual([
       {
         platformProductId: 'PRD-1', namaProduk: null, gmv: null, gmvDariKreator: null, gmvVideoPenjual: null,
-        gmvLivePenjual: null, pesananSku: null, impresi: null, klik: null, ctr: null, ctor: null,
+        gmvLivePenjual: null, pesananSku: null, produkTerjual: null, impresi: null, klik: null, ctr: null, ctor: null,
       },
     ]);
   });
 
   it('konvensi Seller Center (bukan Ads Manager) — titik ribuan/koma desimal TIDAK diasumsikan', () => {
     const aoa = ttProductAnalyticsAoa([
-      ['Produk A', 'PRD-1', '1000000.5', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
+      ['Produk A', 'PRD-1', '1000000.5', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
     ]);
     expect(ekstrakBarisTtProductAnalytics(aoa, 4)[0].gmv).toBe(1000000.5);
   });
@@ -1305,8 +1356,8 @@ describe('ekstrakBarisTtProductAnalytics (G2-01-KUADRAN-SKU langkah 1)', () => {
   // sejak sesi ini, disalin LANGSUNG (bukan lookup, TAMPILAN UI SAJA Rule 20).
   it('"Nama" dipetakan ke namaProduk, sel kosong ⇒ null (bukan string kosong)', () => {
     const aoa = ttProductAnalyticsAoa([
-      ['  Kaos Polos Hitam  ', 'PRD-1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
-      ['', 'PRD-2', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
+      ['  Kaos Polos Hitam  ', 'PRD-1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
+      ['', 'PRD-2', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
     ]);
     const hasil = ekstrakBarisTtProductAnalytics(aoa, 4);
     expect(hasil[0].namaProduk).toBe('Kaos Polos Hitam'); // trimmed

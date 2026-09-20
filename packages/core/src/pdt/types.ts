@@ -24,6 +24,12 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  *       `pdt_fact_sku_period` basis `dibuat`+`siap_dikirim`. Berkas yang
  *       SAMA karena itu melahirkan baris fakta yang BERBEDA sebelum dan
  *       sesudahnya — persis syarat kenaikan di paragraf atas.
+ *   3 — B33-TIKTOK-UNIT + B33-TT-ORDERS-STATUS (`docs/DECISIONS.md`
+ *       2026-09-20): `tt_product_analytics` memanen `'Produk terjual'`, dan
+ *       `tt_orders` berhenti mencocokkan label status yang tidak pernah ada
+ *       di ekspor nyata (`'Completed'`) sehingga ia menulis baris fakta
+ *       untuk pertama kalinya. Dua-duanya mengubah hasil baris fakta dari
+ *       berkas yang SAMA.
  *
  * Kenaikan ini BUKAN kosmetik: `planPdtReparseTick` memilih batch lewat
  * `parser_versi < PDT_PARSER_VERSI`, jadi selama angkanya tetap 1 predikat
@@ -32,7 +38,7 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  * backlog begitu ia naik"). Menambah writer tanpa menaikkan angka ini =
  * fitur yang hanya berlaku untuk batch yang diunggah sesudahnya.
  */
-export const PDT_PARSER_VERSI = 2;
+export const PDT_PARSER_VERSI = 3;
 
 /**
  * Satu grup AND/NOT: seluruh `must` harus muncul (cocok substring, tanpa

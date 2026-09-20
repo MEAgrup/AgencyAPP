@@ -101,6 +101,13 @@ export function mergeBaselinePrefill(
             : sm?.jumlah_pesanan != null
               ? String(sm.jumlah_pesanan)
               : '',
+          // B1-IKLAN-PER-BULAN — aturan yang SAMA dengan dua baris di atas:
+          // hanya mengisi sel yang masih kosong, tidak pernah menimpa angka
+          // yang sudah AM ketik. `% batal` sengaja TIDAK di sini — ia tetap
+          // agregat periode (lihat blok di bawah), bukan angka per bulan.
+          ad_spend: existing.ad_spend.trim() ? existing.ad_spend : (sm?.ad_spend ?? ''),
+          roas: existing.roas.trim() ? existing.roas : sm?.roas != null ? String(sm.roas) : '',
+          acos: existing.acos.trim() ? existing.acos : sm?.acos != null ? String(sm.acos) : '',
         };
       });
       // B-1.4 (% batal) is a PERIOD aggregate in the payload, not a per-month
@@ -263,7 +270,11 @@ const FIELD_BERSUMBER: readonly [
 export const SELALU_MANUAL: readonly string[] = [
   'B-3.3 margin % per SKU (butuh HPP — tidak ada di export mana pun, hanya klien yang tahu)',
   'B-4.1/B-4.3 rating, jumlah ulasan, % pesanan terlambat (tidak ada export-nya di platform mana pun)',
-  'B-5.1/B-5.2 belanja iklan & ROAS per bulan (payload hanya punya agregat periode)',
+  // B1-IKLAN-PER-BULAN (2026-09-20): belanja iklan, ROAS dan ACOS per bulan TIDAK
+  // lagi selalu manual — ketiganya terisi dari `pdt_fact_ads` per bulan. Yang
+  // tersisa manual hanya toko yang belum punya batch PDT verified sama sekali,
+  // dan itu bukan "selalu manual", itu "belum ada datanya".
+  'B-1 % batal per bulan (Shopee punya; TikTok belum — lihat DECISIONS B1-BATAL-TIKTOK)',
   'B-6.3 komisi open & target',
   'B-6.5 siapa yang menanggung program sampel',
   'B-7.3/B-7.4 host & studio live',
