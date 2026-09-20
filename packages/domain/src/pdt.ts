@@ -1493,6 +1493,57 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     }
   }
 
+  // B33-PARENT-SKU (`docs/DECISIONS.md` 2026-09-20) — `shopee_parent_sku` →
+  // `pdt_fact_sku_period` (lihat docblock `ekstrakBarisFaktaSkuShopeeParentSku`,
+  // `@cdps/core` `pdt/fakta.ts`). Berkas yang SAMA yang sudah lama memberi makan
+  // `pdt_sku_master` di atas ternyata juga membawa performa per produk — nama,
+  // GMV, unit terjual, pesanan, dilihat, klik — dan selama ini semuanya dibuang
+  // begitu identitasnya selesai dibaca.
+  //
+  // SATU baris berkas ⇒ DUA baris fakta: berkasnya berkolom ganda (`Pesanan
+  // Dibuat` dan `Pesanan Siap Dikirim`), jadi kedua basis ditulis apa adanya
+  // alih-alih memilih salah satu di sini. Yang MEMBACA yang memilih — dan itu
+  // `getBaselinePrefill`, yang mengambil `siap_dikirim` supaya B-3.3 memakai
+  // basis yang SAMA dengan B-1 (`basisShopDaily` Shopee juga `siap_dikirim`),
+  // sehingga Σ Top SKU menggulung ke angka GMV bulanan yang sama persis —
+  // kesetaraan yang sudah dibuktikan G1-07-SHOPEE-DOBEL-HITUNG ke sample asli
+  // (Σ baris parent Siap Dikirim = Rp1.515.002.476 = shop-level PERSIS).
+  //
+  // `impresi`/`klik` ditulis pada KEDUA basis: keduanya trafik per produk yang
+  // memang tidak berbasis pesanan, jadi ia sama untuk kedua pandangan. Basis
+  // adalah pandangan ALTERNATIF atas periode yang sama, tidak pernah dijumlah
+  // silang — jadi ini bukan dobel hitung.
+  //
+  // Replace-on-recommit (DELETE scope lalu INSERT), pola SAMA `shopee_ams_produk`
+  // di bawah dan alasan yang sama: produk yang berhenti muncul di ekspor baru
+  // harus ikut hilang, bukan tertinggal sebagai baris hantu. Nol tabrakan dengan
+  // `shopee_ams_produk` — ia menulis basis `dibayar`, dua basis di sini tidak
+  // pernah disentuhnya.
+  if (berkasParentSkuUntukMaster.length > 0) {
+    await tx`
+      delete from pdt_fact_sku_period
+       where client_platform_id = ${clientPlatformId} and sku_id is null
+         and basis in ('dibuat', 'siap_dikirim')
+         and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasParentSkuUntukMaster) {
+      for (const baris of pdt.ekstrakBarisFaktaSkuShopeeParentSku(b.aoa, b.barisHeader)) {
+        for (const [basis, gmv, produkTerjual, pesanan] of [
+          ['dibuat', baris.gmvDibuat, baris.produkTerjualDibuat, baris.pesananDibuat],
+          ['siap_dikirim', baris.gmvSiapDikirim, baris.produkTerjualSiapDikirim, baris.pesananSiapDikirim],
+        ] as const) {
+          await tx`
+            insert into pdt_fact_sku_period
+              (sku_id, client_platform_id, platform_product_id, nama_produk, periode, basis,
+               batch_id, parser_versi, gmv, produk_terjual, pesanan, impresi, klik)
+            values
+              (null, ${clientPlatformId}, ${baris.platformProductId}, ${baris.namaProduk},
+               ${periodeAwalBulan}::date, ${basis}, ${id}, ${pdt.PDT_PARSER_VERSI},
+               ${gmv}, ${produkTerjual}, ${pesanan}, ${baris.dilihat}, ${baris.klik})`;
+        }
+      }
+    }
+  }
+
   // G1-09 sub-langkah 2b-ii — modul KEDELAPAN (sesi 23), `shopee_ams_produk` →
   // `pdt_fact_sku_period` (lihat docblock `ekstrakBarisShopeeAmsProduk`, `@cdps/core`
   // `pdt/fakta.ts`). `sku_id` SELALU NULL (level produk-induk, `G1-09-2BII-ADS-CPC-SKU`

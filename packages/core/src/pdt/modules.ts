@@ -366,11 +366,31 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       // `wajib: true` ⇒ modul ini selalu `gagal` ⇒ pasangan rekonsiliasi Shopee tidak
       // pernah lengkap, cermin persis kasus `tt_product_analytics` di atas.
       'Tingkat Pesanan Berulang (Pesanan Dibuat)', 'Pengunjung Produk (Kunjungan)',
+      // B33-PARENT-SKU (2026-09-20) — lima kolom yang membuat modul ini bisa
+      // memberi makan `pdt_fact_sku_period`, bukan cuma `pdt_sku_master`.
+      // Terverifikasi ke header ASLI `parentskudetail.20260701_20260731.xlsx`
+      // (Fim Motor), bukan ditebak: `'Produk'` adalah NAMA produk (kolom 2),
+      // dan `'Produk (…)'` adalah JUMLAH UNIT — bukan jumlah pesanan, yang
+      // kolom terpisah `'Pesanan (…)'` bawa (baris contoh: Pesanan Siap
+      // Dikirim 1.798 vs Produk Siap Dikirim 2.586 untuk produk yang sama).
+      'Produk', 'Produk (Pesanan Dibuat)', 'Produk (Pesanan Siap Dikirim)',
+      'Pesanan Dibuat', 'Pesanan Siap Dikirim',
     ],
     // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §2.2 — dibutuhkan dim
     // product_performance(0.14)/sumbu X 4-kuadran Shopee, bukan gerbang PDT sendiri
     // (Rule 13-16/PX). Hilang ⇒ 'sebagian', bukan 'gagal'.
-    kolomOpsional: ['Pengunjung Produk (Kunjungan)'],
+    //
+    // Kelima kolom B33-PARENT-SKU ikut OPSIONAL dengan sengaja: modul ini
+    // `wajib: true`, jadi menaruhnya di kolom WAJIB berarti satu ekspor lama
+    // yang tidak membawanya menggagalkan SELURUH batch klien itu — menukar
+    // satu kolom B-3.3 yang kosong dengan pintu upload yang tertutup. Hilang
+    // ⇒ `sebagian`: berkasnya TETAP dipakai, hanya fakta per-SKU-nya yang
+    // tidak lahir.
+    kolomOpsional: [
+      'Pengunjung Produk (Kunjungan)',
+      'Produk', 'Produk (Pesanan Dibuat)', 'Produk (Pesanan Siap Dikirim)',
+      'Pesanan Dibuat', 'Pesanan Siap Dikirim',
+    ],
     wajib: true,
   },
   {

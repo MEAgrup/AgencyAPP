@@ -7,6 +7,7 @@ import {
   ekstrakBarisShopeeAdsLive,
   ekstrakBarisShopeeAdsSearch,
   ekstrakBarisShopeeAmsProduk,
+  ekstrakBarisFaktaSkuShopeeParentSku,
   ekstrakBarisShopeeLive,
   ekstrakBarisShopDailyShopee,
   ekstrakBarisShopDailyTiktok,
@@ -775,6 +776,105 @@ describe('ekstrakBarisKreatorShopeeAmsAfiliasi', () => {
     expect(ekstrakBarisKreatorShopeeAmsAfiliasi(aoa, 1)).toEqual([
       { creatorHandle: 'kreator_a', gmv: null, pesananTeratribusi: null },
     ]);
+  });
+});
+
+// Header DISALIN dari berkas ASLI `parentskudetail.20260701_20260731.xlsx`
+// (Fim Motor) — 40 kolom, termasuk `'Kode Variasi'` yang muncul DUA KALI
+// (indeks 3 dan 6) persis seperti di ekspor sungguhan. Yang dipakai fungsi
+// ini cuma sebelas; sisanya sengaja ikut supaya tes memetakan lewat NAMA
+// kolom, bukan posisi.
+const HEADER_PARENT_SKU_ASLI = [
+  'Kode Produk', 'Produk', 'Status Produk Saat Ini', 'Kode Variasi', 'Nama Variasi',
+  'Status Variasi Saat Ini', 'Kode Variasi', 'SKU Induk',
+  'Total Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+  'Jumlah Produk Dilihat', 'Produk Diklik', 'Persentase Klik',
+  'Tingkat Konversi Pesanan (Pesanan Dibuat)', 'Tingkat Konversi Pesanan (Pesanan Siap Dikirim)',
+  'Pesanan Dibuat', 'Pesanan Siap Dikirim', 'Produk (Pesanan Dibuat)', 'Produk (Pesanan Siap Dikirim)',
+];
+
+/** Baris parent Fim Motor yang sungguhan, angkanya apa adanya dari berkas. */
+const BARIS_PARENT_ASLI = [
+  '22571212550', 'Cover Body Kasar Atas Bawah Kolong Samping Tengah Vario 125 150 LED 2015 2016 2017',
+  'Normal', '-', '-', '-', '-', '-',
+  '189.344.344', '175.749.606', '1383429', '76100', '5,50%', '2,51%', '2,36%',
+  '1908', '1798', '2785', '2586',
+];
+
+/** Baris VARIAN milik produk yang sama — inilah yang harus dibuang. */
+const BARIS_VARIAN_ASLI = [
+  '22571212550', 'Cover Body Kasar Atas Bawah Kolong Samping Tengah Vario 125 150 LED 2015 2016 2017',
+  'Normal', '195500017909', 'COVER RADIATOR', 'Normal', 'NR02-B44-358-82AA', '-',
+  '1.355.292', '1.192.710', '-', '-', '-', '-', '-', '-', '-', '50', '44',
+];
+
+describe('ekstrakBarisFaktaSkuShopeeParentSku (B33-PARENT-SKU)', () => {
+  it('memetakan nama, GMV dua basis, UNIT dua basis, pesanan, dilihat, klik', () => {
+    expect(ekstrakBarisFaktaSkuShopeeParentSku([HEADER_PARENT_SKU_ASLI, BARIS_PARENT_ASLI], 1)).toEqual([
+      {
+        platformProductId: '22571212550',
+        namaProduk:
+          'Cover Body Kasar Atas Bawah Kolong Samping Tengah Vario 125 150 LED 2015 2016 2017',
+        gmvDibuat: 189344344,
+        gmvSiapDikirim: 175749606,
+        // Inilah yang B-3.3 cari: UNIT, bukan pesanan. Keduanya beda kolom dan
+        // beda angka pada baris yang sama — 1.798 pesanan memuat 2.586 unit.
+        produkTerjualDibuat: 2785,
+        produkTerjualSiapDikirim: 2586,
+        pesananDibuat: 1908,
+        pesananSiapDikirim: 1798,
+        dilihat: 1383429,
+        klik: 76100,
+      },
+    ]);
+  });
+
+  it('baris VARIAN dibuang — kalau tidak, kunci unik per produk tabrakan', () => {
+    const hasil = ekstrakBarisFaktaSkuShopeeParentSku(
+      [HEADER_PARENT_SKU_ASLI, BARIS_PARENT_ASLI, BARIS_VARIAN_ASLI],
+      1,
+    );
+    expect(hasil).toHaveLength(1);
+    // Angka parent yang menang, bukan varian (1.355.292 / 50 unit).
+    expect(hasil[0].gmvDibuat).toBe(189344344);
+    expect(hasil[0].produkTerjualDibuat).toBe(2785);
+  });
+
+  it('tanpa kolom "Kode Variasi" pun tidak pernah melahirkan produk ganda', () => {
+    // Lapis kedua penjaga: berkas di luar ekspektasi (kolom varian hilang).
+    // Di rekonsiliasi kasus ini boleh jatuh ke "jumlah semua baris"; di sini
+    // tidak boleh — dua baris ber-Kode Produk sama = commit mati.
+    const header = HEADER_PARENT_SKU_ASLI.filter((h) => h !== 'Kode Variasi');
+    const potong = (b: readonly string[]) =>
+      b.filter((_, i) => HEADER_PARENT_SKU_ASLI[i] !== 'Kode Variasi');
+    const hasil = ekstrakBarisFaktaSkuShopeeParentSku(
+      [header, potong(BARIS_PARENT_ASLI), potong(BARIS_VARIAN_ASLI)],
+      1,
+    );
+    expect(hasil).toHaveLength(1);
+    expect(hasil[0].gmvDibuat).toBe(189344344);
+  });
+
+  it('konvensi Seller Center: titik = ribuan, bukan desimal', () => {
+    // `parsePdtAngka` tanpa `raw`, sama seperti `sumShopeeParentSkuGmv` atas
+    // berkas yang sama. Kalau ini terbalik, Rp189 juta jadi Rp189,3.
+    const hasil = ekstrakBarisFaktaSkuShopeeParentSku([HEADER_PARENT_SKU_ASLI, BARIS_PARENT_ASLI], 1);
+    expect(hasil[0].gmvDibuat).toBe(189344344);
+    expect(hasil[0].gmvDibuat).not.toBe(189.344344);
+  });
+
+  it('baris ber-"Kode Produk" kosong dilewati', () => {
+    const kosong = ['', ...BARIS_PARENT_ASLI.slice(1)];
+    expect(ekstrakBarisFaktaSkuShopeeParentSku([HEADER_PARENT_SKU_ASLI, kosong], 1)).toHaveLength(0);
+  });
+
+  it('dua produk induk berbeda tetap dua baris', () => {
+    const kedua = ['99999999999', ...BARIS_PARENT_ASLI.slice(1)];
+    const hasil = ekstrakBarisFaktaSkuShopeeParentSku(
+      [HEADER_PARENT_SKU_ASLI, BARIS_PARENT_ASLI, kedua],
+      1,
+    );
+    expect(hasil.map((h) => h.platformProductId)).toEqual(['22571212550', '99999999999']);
   });
 });
 

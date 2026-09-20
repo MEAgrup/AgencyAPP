@@ -203,17 +203,28 @@ describeDb('POST /pdt/batches/preview — real DB', () => {
     expect(res.status).toBe(403);
   });
 
+  /** Sepuluh kolom WAJIB `shopee_parent_sku` + lima kolom opsional B33-PARENT-SKU. */
+  const HEADER_PARENT_SKU_LENGKAP = [
+    'Kode Produk', 'Kode Variasi', 'SKU Induk',
+    'Total Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+    'Jumlah Produk Dilihat', 'Produk Diklik', 'Tingkat Konversi (Pesanan yang Dibuat)',
+    'repeat order', 'Pengunjung Produk (Kunjungan)',
+    'Produk', 'Produk (Pesanan Dibuat)', 'Produk (Pesanan Siap Dikirim)',
+    'Pesanan Dibuat', 'Pesanan Siap Dikirim',
+  ];
+  const BARIS_PARENT_LENGKAP = [
+    'P1', 'V1', 'SKU1', '100000', '90000', '500', '50', '10%', '2', '400',
+    'Produk Satu', '12', '11', '9', '8',
+  ];
+
   it('200: ZIP sungguhan ⇒ tabel hasil deteksi wire snake_case, kunci eksplisit', async () => {
     const clientId = nextClientId();
     await insertClient(clientId, 'ZZ-PDTRT-AM');
     const cpId = await insertClientPlatform(clientId, 'Shopee');
-    const header = [
-      'Kode Produk', 'Kode Variasi', 'SKU Induk',
-      'Total Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
-      'Jumlah Produk Dilihat', 'Produk Diklik', 'Tingkat Konversi (Pesanan yang Dibuat)',
-      'repeat order', 'Pengunjung Produk (Kunjungan)',
-    ];
-    const aoa = [header, ['P1', 'V1', 'SKU1', '100000', '90000', '500', '50', '10%', '2', '400']];
+    // Header LENGKAP (termasuk lima kolom B33-PARENT-SKU) — tes ini menguji
+    // BENTUK wire, jadi berkasnya harus utuh supaya `status`/`pesan` tidak
+    // ikut menguji kebijakan kolom. Kebijakannya diuji tes berikutnya.
+    const aoa = [HEADER_PARENT_SKU_LENGKAP, BARIS_PARENT_LENGKAP];
     stubStorageDownload(await zipkan([{ nama: 'parent_sku.xlsx', isi: xlsxDariAoa(aoa) }]));
 
     const res = await POST(req(owner, { client_platform_id: cpId, storage_path: STORAGE_PATH }));
@@ -231,5 +242,25 @@ describeDb('POST /pdt/batches/preview — real DB', () => {
     expect(body.berkas).toHaveLength(1);
     expect(body.berkas[0]).toMatchObject({ nama: 'parent_sku.xlsx', modul_kode: 'shopee_parent_sku', status: 'ok', pesan: null });
     expect(body.module_options.some((m: { kode: string }) => m.kode === 'shopee_parent_sku')).toBe(true);
+  });
+
+  // B33-PARENT-SKU: kelima kolom baru OPSIONAL, bukan wajib. Ekspor lama yang
+  // tidak membawanya TETAP dipakai — turun ke `sebagian` dengan pesan yang
+  // menyebut kolomnya, bukan `gagal` yang membuang berkasnya dan ikut
+  // menggagalkan pasangan rekonsiliasi Shopee seluruh batch.
+  it("200: parent SKU tanpa lima kolom B33 ⇒ `sebagian` yang menyebut kolomnya, BUKAN `gagal`", async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, 'ZZ-PDTRT-AM');
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const lama = HEADER_PARENT_SKU_LENGKAP.slice(0, 10);
+    const aoa = [lama, BARIS_PARENT_LENGKAP.slice(0, 10)];
+    stubStorageDownload(await zipkan([{ nama: 'parent_sku.xlsx', isi: xlsxDariAoa(aoa) }]));
+
+    const res = await POST(req(owner, { client_platform_id: cpId, storage_path: STORAGE_PATH }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.berkas[0]).toMatchObject({ modul_kode: 'shopee_parent_sku', status: 'sebagian' });
+    expect(body.berkas[0].pesan).toContain("'Produk (Pesanan Siap Dikirim)'");
+    expect(body.berkas[0].status).not.toBe('gagal');
   });
 });
