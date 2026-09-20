@@ -4501,6 +4501,75 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     }
   });
 
+  // G3-03-BASIS-SKU — laporan pemilik 2026-09-20: `pdt_fact_sku_period` penuh
+  // (264 baris pada CLI-202609-0020) tapi B-3.2/B-3.3/B-3.4 Shopee kosong.
+  //
+  // Sebabnya satu kata: BASIS. `getBaselinePrefill` dulu meneruskan
+  // `basisShopDaily` ('siap_dikirim' untuk Shopee) ke `bacaFaktaSkuPeriode` —
+  // padahal TIDAK ADA penulis `pdt_fact_sku_period` yang pernah menulis
+  // 'siap_dikirim'. `shopee_ams_produk` menulis 'dibayar' (literal),
+  // `tt_product_analytics` menulis 'net' (literal). Jadi kueri Shopee meminta
+  // basis yang tidak pernah ada: nol baris, selalu.
+  //
+  // Tes G3-03 di atas TIDAK menangkapnya karena ia hanya menaruh fakta SKU di
+  // TikTok — yang basisnya 'net' dan kebetulan cocok — lalu meng-assert Shopee
+  // kosong justru karena Shopee-nya nol batch. Jalur Shopee ber-fakta tidak
+  // pernah dijalankan sama sekali. Karena itu tes ini ada, dan sengaja memakai
+  // 'dibayar': basis yang writer sungguhan pakai.
+  it('G3-03 (Shopee): fakta SKU basis `dibayar` — yang writer Shopee sungguhan tulis — sampai ke B-3.2/B-3.3/B-3.4', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { shopeeId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${shopeeId}, 'shopee', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+
+    const skus = await sql<{ id: number }[]>`
+      insert into pdt_sku_master (client_platform_id, platform_product_id, status_listing)
+      values (${shopeeId}, 'SH-A', 'aktif'),
+             (${shopeeId}, 'SH-B', 'aktif'),
+             (${shopeeId}, 'SH-C', 'nonaktif')
+      returning id`;
+    const [skuA, skuB, skuC] = skus;
+
+    // A=8jt, B=2jt (total 10jt) → 80% tertutup oleh A saja ⇒ pareto80 = 1.
+    // C=0 ⇒ slowMoving = 1. `nama_produk` SENGAJA null: `shopee_ams_produk`
+    // memang tidak menulis kolom itu, jadi B-3.3 jatuh ke `platform_product_id`
+    // — dan tes ini mengunci perilaku itu apa adanya, bukan versi idealnya.
+    await sql`
+      insert into pdt_fact_sku_period (sku_id, client_platform_id, platform_product_id, periode, basis,
+        batch_id, parser_versi, gmv, produk_terjual, pesanan)
+      values (${skuA.id}, ${shopeeId}, 'SH-A', '2026-07-01', 'dibayar', ${batchJul[0].id}, 1, '8000000.00', 80, 40),
+             (${skuB.id}, ${shopeeId}, 'SH-B', '2026-07-01', 'dibayar', ${batchJul[0].id}, 1, '2000000.00', 20, 10),
+             (${skuC.id}, ${shopeeId}, 'SH-C', '2026-07-01', 'dibayar', ${batchJul[0].id}, 1, '0.00', 0, 0)`;
+
+    try {
+      const st = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), st.id);
+      const sh = prefill!.channels.find((c) => c.clientPlatformId === shopeeId)!;
+      expect(sh.periodeReferensiPdtSaran).toBe('2026-07-01');
+      expect(sh.skuListed).toBe(3);
+      expect(sh.skuAktif).toBe(2);
+      // Inilah tiga yang kosong permanen sebelum perbaikan.
+      expect(sh.skuPareto80).toBe(1);
+      expect(sh.skuSlowMoving).toBe(1);
+      expect(sh.topSku).toEqual([
+        { nama: 'SH-A', gmv: '8000000', klik: null, ctorPersen: null },
+        { nama: 'SH-B', gmv: '2000000', klik: null, ctorPersen: null },
+        { nama: 'SH-C', gmv: '0', klik: null, ctorPersen: null },
+      ]);
+    } finally {
+      await sql`delete from pdt_fact_sku_period where client_platform_id = ${shopeeId}`;
+      await sql`delete from pdt_sku_master where client_platform_id = ${shopeeId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${shopeeId}`;
+    }
+  });
+
   it('G3-04: jumlahVideoPerBulan/totalViews/gmvVideo sum toko+afiliasi video, jamLivePerBulan/gmvLive count TOKO live only — both from pdt_fact_content for the resolved reference period', async () => {
     const serviceId = await seedService();
     const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
