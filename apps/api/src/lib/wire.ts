@@ -5492,11 +5492,14 @@ export interface StrategiGmvMixRincianWire {
   kartu_produk_dan_lain: number | null;
 }
 
-/** B-3.3 — one top-SKU row the baseline payload carries (no unit/harga/margin:
- *  no export has them, so those three stay manual). */
+/** B-3.3 — one top-SKU row. `unit_terjual` terisi dari `pdt_fact_sku_period.
+ *  produk_terjual` (jalur PDT), `null` di jalur payload Riset Awal dan untuk
+ *  TikTok basis `net`. `harga_jual`/`margin_persen` TIDAK ada di sini — lihat
+ *  docblock `TopSkuSuggestion` (`@cdps/domain`) untuk kenapa. */
 export interface StrategiTopSkuSuggestionWire {
   nama: string;
   gmv: string | null;
+  unit_terjual: number | null;
   klik: number | null;
   ctor_persen: number | null;
 }
@@ -5634,6 +5637,7 @@ export function strategiBaselinePrefillToWire(
       top_sku: c.topSku.map((t) => ({
         nama: t.nama,
         gmv: t.gmv ?? null,
+        unit_terjual: t.unitTerjual ?? null,
         klik: t.klik ?? null,
         ctor_persen: t.ctorPersen ?? null,
       })),

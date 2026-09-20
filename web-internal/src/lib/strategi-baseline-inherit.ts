@@ -160,14 +160,21 @@ function mergeSectionBFigures(
   next.sku_aktif = isi(next.sku_aktif, s.sku_aktif);
   next.sku_pareto_80 = isi(next.sku_pareto_80, s.sku_pareto_80);
   next.sku_slow_moving = isi(next.sku_slow_moving, s.sku_slow_moving);
-  // B-3.3 hero SKU: seeded only into an EMPTY list. `unit_terjual`, `harga_jual`
-  // and `margin_persen` stay blank — no export carries them, and they are what
-  // the margin math needs, so a zero there would be worse than an empty cell.
+  // B-3.3 hero SKU: seeded only into an EMPTY list. `unit_terjual` IKUT tersemai
+  // sejak 2026-09-20 — `pdt_fact_sku_period.produk_terjual` memang dipanen
+  // `shopee_ams_produk` ('Produk Terjual'), jadi mengosongkannya adalah membuang
+  // angka yang sudah ada, bukan menahan tebakan. `txt` menjaga `null` (TikTok
+  // basis `net`, jalur payload Riset Awal) tetap jadi sel kosong.
+  //
+  // `harga_jual` dan `margin_persen` TETAP kosong: margin butuh HPP yang tidak
+  // ada di export mana pun, dan maksud "harga jual" B-3.3 masih pertanyaan
+  // terbuka (`docs/DECISIONS.md` 2026-09-20) — angka yang masuk akal di tempat
+  // yang salah lebih berbahaya daripada sel kosong yang AM lihat dan isi.
   if (next.top_sku.length === 0 && s.top_sku.length > 0) {
     next.top_sku = s.top_sku.map((t) => ({
       nama: t.nama,
       gmv: txt(t.gmv),
-      unit_terjual: '',
+      unit_terjual: txt(t.unit_terjual),
       harga_jual: '',
       margin_persen: '',
     }));
@@ -250,6 +257,7 @@ const FIELD_BERSUMBER: readonly [
  * two apart will wait for an auto-fill that is never coming.
  */
 export const SELALU_MANUAL: readonly string[] = [
+  'B-3.3 harga jual & margin % per SKU (HPP tidak ada di export mana pun; "harga jual" sendiri masih pertanyaan terbuka PRD)',
   'B-4.1/B-4.3 rating, jumlah ulasan, % pesanan terlambat (tidak ada export-nya di platform mana pun)',
   'B-5.1/B-5.2 belanja iklan & ROAS per bulan (payload hanya punya agregat periode)',
   'B-6.3 komisi open & target',

@@ -1965,14 +1965,29 @@ export interface GmvMixRincian {
  * `sumber='riset_awal'` provenance column on `strategi_channel`.
  */
 /**
- * B-3.3 — one top-SKU row the baseline payload carries. `unitTerjual`,
- * `hargaJual` and `marginPersen` are deliberately absent: no export carries
- * them, and they are exactly the three the B-3 margin math needs — so they stay
- * manual rather than arriving as a plausible-looking zero.
+ * B-3.3 — one top-SKU row. `unitTerjual` DIISI dari `pdt_fact_sku_period.
+ * produk_terjual` bila jalur PDT yang memasok baris ini (laporan pemilik
+ * 2026-09-20: kolomnya kosong di produksi walau angkanya sudah ada di DB —
+ * 264/264 baris Shopee `produk_terjual` terisi, pembacanya sudah membawanya
+ * sampai `PdtFaktaSkuPeriodeBaris`, dan hanya pemetaan `topSkuDariFakta` yang
+ * membuangnya). `null` untuk jalur payload Riset Awal (`produk.top_sku[]`
+ * memuat `{nama,gmv,klik,ctor}` TikTok / `{nama,kode,gmv,pengunjung,konversi}`
+ * Shopee — nol kunci jumlah unit di kedua skema) dan untuk TikTok basis `net`,
+ * yang penulisnya (`tt_product_analytics`) memang tidak menulis kolom itu.
+ *
+ * `hargaJual` dan `marginPersen` TETAP absen. Bukan karena tidak terhitung —
+ * GMV ÷ unit terjual mudah — melainkan karena PRD B-3.3 meminta GMV, unit
+ * terjual DAN harga jual bertiga sekaligus; kalau yang dimaksud harga rata-rata
+ * realisasi, kolom ketiga itu tidak menambah informasi apa pun atas dua yang
+ * lain. Jadi maksudnya ambigu, dan CLAUDE.md melarang memilih tafsir diam-diam
+ * — dicatat sebagai pertanyaan terbuka `docs/DECISIONS.md` 2026-09-20, bukan
+ * ditebak. `marginPersen` butuh HPP, yang tidak ada di export mana pun.
  */
 export interface TopSkuSuggestion {
   nama: string;
   gmv: string | null;
+  /** Unit terjual bulan acuan — `null` bila sumbernya tidak memanennya (lihat docblock). */
+  unitTerjual: number | null;
   klik: number | null;
   ctorPersen: number | null;
 }
@@ -2457,7 +2472,11 @@ export async function getBaselinePrefill(
       skuAktif: pdtSkuAktif ?? b.skuAktif,
       skuPareto80: pdtSkuPareto80 ?? b.skuPareto80,
       skuSlowMoving: pdtSkuSlowMoving ?? b.skuSlowMoving,
-      topSku: pdtTopSku ?? b.topSku,
+      // Jalur payload Riset Awal tidak punya jumlah unit di skemanya (lihat
+      // docblock `TopSkuSuggestion`), jadi `unitTerjual` dieja `null` DI SINI
+      // alih-alih dititipkan ke `SectionBTopSku` — bentuk payload di `@cdps/core`
+      // tetap menggambarkan apa yang payload-nya sungguh bawa.
+      topSku: pdtTopSku ?? b.topSku.map((s) => ({ ...s, unitTerjual: null })),
       jumlahKampanyeAktif: pdtRingkasIklan?.jumlahKampanyeAktif ?? b.jumlahKampanyeAktif,
       // G3-06 (sesi 43) — fakta menang atas payload, pola `??` yang SAMA dipakai
       // seluruh field PDT di blok ini. Fallback-nya tetap jalur lama: mesin
@@ -4171,7 +4190,14 @@ function skuSlowMovingDariFakta(rows: readonly { gmv: number | null }[]): number
 
 /** B-3.3 — Top 5 SKU by GMV, dari baris `pdt_fact_sku_period` bulan acuan (G3-03). */
 function topSkuDariFakta(
-  rows: readonly { namaProduk: string | null; platformProductId: string | null; gmv: number | null; klik: number | null; ctor: number | null }[],
+  rows: readonly {
+    namaProduk: string | null;
+    platformProductId: string | null;
+    gmv: number | null;
+    produkTerjual: number | null;
+    klik: number | null;
+    ctor: number | null;
+  }[],
 ): TopSkuSuggestion[] {
   return rows
     .filter((r): r is typeof r & { gmv: number } => r.gmv !== null)
@@ -4180,6 +4206,9 @@ function topSkuDariFakta(
     .map((r) => ({
       nama: r.namaProduk ?? r.platformProductId ?? '',
       gmv: String(r.gmv),
+      // Diteruskan apa adanya — `null` tetap `null` (absen ≠ nol, aturan yang
+      // sama dipakai seluruh peringkas fakta di berkas ini).
+      unitTerjual: r.produkTerjual,
       klik: r.klik,
       ctorPersen: r.ctor === null ? null : Math.round(r.ctor * 10000) / 100,
     }));

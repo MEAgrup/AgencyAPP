@@ -226,7 +226,7 @@ const TERUKUR = {
   trafik_luar_persen: 30,
   sku_listed: 120,
   sku_aktif: 44,
-  top_sku: [{ nama: 'Serum A', gmv: '25000000', klik: 3400, ctor_persen: 8.1 }],
+  top_sku: [{ nama: 'Serum A', gmv: '25000000', unit_terjual: null, klik: 3400, ctor_persen: 8.1 }],
   affiliate_aktif_30hari: 37,
   gmv_affiliate: '15000000',
   gmv_affiliate_persen: 15,
@@ -266,10 +266,35 @@ describe('mergeBaselinePrefill — B3 (Section B terisi dari satu upload)', () =
     expect(ch.trafik_affiliate_persen).toBe('');
   });
 
-  it('B-3.3 hero SKU: name + GMV seeded, unit/harga/margin left blank', () => {
+  it('B-3.3 hero SKU TikTok: nama + GMV tersemai, unit kosong (basis `net` tidak memanennya)', () => {
     const [ch] = mergeBaselinePrefill([blank('TikTok Shop')], prefill(TERUKUR));
     expect(ch.top_sku).toEqual([
       { nama: 'Serum A', gmv: '25000000', unit_terjual: '', harga_jual: '', margin_persen: '' },
+    ]);
+  });
+
+  // Laporan pemilik 2026-09-20: "B-3.3 bagian unit terjual dan harga masih
+  // kosong". Unit terjual MEMANG ada sumbernya untuk Shopee
+  // (`shopee_ams_produk` memanen 'Produk Terjual' → `pdt_fact_sku_period.
+  // produk_terjual`, 264/264 baris terisi di produksi) — yang salah adalah
+  // pemetaannya, yang membuang kolom itu sebelum sampai ke form.
+  it('B-3.3 hero SKU Shopee: unit terjual IKUT tersemai; harga & margin tetap kosong', () => {
+    const [ch] = mergeBaselinePrefill(
+      [blank('Shopee')],
+      prefill({
+        ...TERUKUR,
+        channel: 'Shopee',
+        top_sku: [
+          { nama: 'SH-A', gmv: '8000000', unit_terjual: 80, klik: null, ctor_persen: null },
+          // Nol yang SUNGGUHAN dilaporkan sumber tetap '0', bukan sel kosong —
+          // beda arti dari TikTok yang memang tidak punya kolomnya.
+          { nama: 'SH-C', gmv: '0', unit_terjual: 0, klik: null, ctor_persen: null },
+        ],
+      }),
+    );
+    expect(ch.top_sku).toEqual([
+      { nama: 'SH-A', gmv: '8000000', unit_terjual: '80', harga_jual: '', margin_persen: '' },
+      { nama: 'SH-C', gmv: '0', unit_terjual: '0', harga_jual: '', margin_persen: '' },
     ]);
   });
 

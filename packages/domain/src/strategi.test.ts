@@ -4482,10 +4482,12 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       expect(tt.skuPareto80).toBe(2);
       expect(tt.skuSlowMoving).toBe(1);
       expect(tt.topSku).toEqual([
-        { nama: 'Serum A', gmv: '7000000', klik: 500, ctorPersen: 4.5 },
-        { nama: 'Toner B', gmv: '2000000', klik: 300, ctorPersen: 3 },
-        { nama: 'Cream C', gmv: '1000000', klik: 100, ctorPersen: null },
-        { nama: 'Sabun D', gmv: '0', klik: 20, ctorPersen: null },
+        // `unitTerjual` null di SELURUH baris TikTok: basis `net` ditulis
+        // `tt_product_analytics`, yang memang tidak memanen `produk_terjual`.
+        { nama: 'Serum A', gmv: '7000000', unitTerjual: null, klik: 500, ctorPersen: 4.5 },
+        { nama: 'Toner B', gmv: '2000000', unitTerjual: null, klik: 300, ctorPersen: 3 },
+        { nama: 'Cream C', gmv: '1000000', unitTerjual: null, klik: 100, ctorPersen: null },
+        { nama: 'Sabun D', gmv: '0', unitTerjual: null, klik: 20, ctorPersen: null },
       ]);
 
       // Shopee has zero PDT batches — falls back to its own manual-baseline
@@ -4559,9 +4561,11 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       expect(sh.skuPareto80).toBe(1);
       expect(sh.skuSlowMoving).toBe(1);
       expect(sh.topSku).toEqual([
-        { nama: 'SH-A', gmv: '8000000', klik: null, ctorPersen: null },
-        { nama: 'SH-B', gmv: '2000000', klik: null, ctorPersen: null },
-        { nama: 'SH-C', gmv: '0', klik: null, ctorPersen: null },
+        // `unitTerjual` inilah laporan pemilik 2026-09-20: `produk_terjual`
+        // sudah ada di baris fakta (80/20/0 di atas) tapi dibuang pemetaannya.
+        { nama: 'SH-A', gmv: '8000000', unitTerjual: 80, klik: null, ctorPersen: null },
+        { nama: 'SH-B', gmv: '2000000', unitTerjual: 20, klik: null, ctorPersen: null },
+        { nama: 'SH-C', gmv: '0', unitTerjual: 0, klik: null, ctorPersen: null },
       ]);
     } finally {
       await sql`delete from pdt_fact_sku_period where client_platform_id = ${shopeeId}`;
@@ -4837,7 +4841,9 @@ describeDb('getBaselinePrefill — B3: the §4.4 figures the payload already car
     // B-3
     expect(tt.skuListed).toBe(120);
     expect(tt.skuAktif).toBe(44);
-    expect(tt.topSku).toEqual([{ nama: 'Serum A', gmv: '25000000', klik: 3_400, ctorPersen: 8.1 }]);
+    expect(tt.topSku).toEqual([
+      { nama: 'Serum A', gmv: '25000000', unitTerjual: null, klik: 3_400, ctorPersen: 8.1 },
+    ]);
     // B-6
     expect(tt.affiliateAktif30Hari).toBe(37);
     expect(tt.gmvAffiliate).toBe('15000000');
