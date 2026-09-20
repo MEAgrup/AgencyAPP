@@ -133,6 +133,7 @@ import {
   getStrategi,
   getStrategiPrefill,
   inheritedKonteksOf,
+  mergeKonteksPrefill,
   INHERITED_KONTEKS_FIELDS,
   openStrategiRevision,
   raiseStrategiSanggahan,
@@ -299,7 +300,20 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
       // Advisory Interview→Strategi handoff (RAB-09) — never blocks the form, so
       // a failure here must not fail the load. Null when there is no interview.
       getStrategiPrefill(id)
-        .then(setPrefill)
+        .then((p) => {
+          setPrefill(p);
+          // A-2 (model bisnis) + A-3 (margin kotor) ikut disemai ke draft, pola
+          // yang sama dengan baseline prefill tepat di bawah ini: isi bila
+          // kosong, jangan pernah timpa. Sebelum ini `prefill` hanya dipakai
+          // untuk lima cermin read-only, jadi dua field yang JAWABANNYA SUDAH
+          // ADA di Interview tetap harus diketik ulang AM (QA pemilik
+          // 2026-09-20).
+          if (p) {
+            setDrafts((cur) =>
+              cur === null ? cur : { ...cur, konteks: mergeKonteksPrefill(cur.konteks, p) },
+            );
+          }
+        })
         .catch(() => setPrefill(null));
       // RAB-11/RAB-12 — Section B baseline from riset awal. RAB-19 "warisi yang
       // bersumber saja": on top of the reference panel, the sourced fields are
@@ -849,6 +863,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                     detail={detail}
                     draft={drafts.konteks}
                     inherited={inheritedKonteksOf(prefill)}
+                    prefill={prefill}
                     onChange={(p) => patch('konteks', { ...drafts.konteks, ...p })}
                     disabled={!editable}
                   />

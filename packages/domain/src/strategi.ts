@@ -300,9 +300,33 @@ export type RiskLevel = (typeof RISK_LEVELS)[number];
 // --- Section A vocabulary (A-05). Every list below mirrors a CHECK in
 // supabase/migrations/20260806065000_m6a_section_a.sql. ---
 
-/** A-2 — produsen / brand owner / distributor / reseller. */
-export const BUSINESS_MODELS = ['produsen', 'brand_owner', 'distributor', 'reseller'] as const;
+/**
+ * A-2 — model bisnis. A2-MODEL-BISNIS-6: kosakata ini SENGAJA sama persis
+ * dengan Interview `B1-4` (`MODEL_BISNIS` di packages/core/src/interview.ts),
+ * supaya pemetaan `B1-4 → A-2` di `PREFILL_MAPPING` bisa 1:1 tanpa
+ * menghilangkan informasi. Sebelumnya A-2 hanya punya empat nilai, jadi
+ * `importir_langsung` dan `distributor_resmi` dua-duanya harus dipaksa jadi
+ * `distributor` dan `dropship` tidak punya padanan sama sekali — itulah kenapa
+ * AM mengetik ulang A-2 secara manual (ketokan pemilik 2026-09-20,
+ * docs/DECISIONS.md "A2-MODEL-BISNIS-6").
+ *
+ * `distributor` adalah nilai WARISAN kosakata lama. Ia tetap diterima supaya
+ * baris Strategi lama tidak perlu ditulis ulang (aturan rumah #3), tapi TIDAK
+ * ditawarkan lagi di form — `BUSINESS_MODELS_PILIHAN` yang dipakai UI.
+ */
+export const BUSINESS_MODELS = [
+  'produsen',
+  'brand_owner',
+  'importir_langsung',
+  'distributor_resmi',
+  'distributor',
+  'reseller',
+  'dropship',
+] as const;
 export type BusinessModel = (typeof BUSINESS_MODELS)[number];
+
+/** Nilai A-2 yang ditawarkan di form — `distributor` warisan dikecualikan. */
+export const BUSINESS_MODELS_PILIHAN = BUSINESS_MODELS.filter((m) => m !== 'distributor');
 
 /** A-4 — price position vs competitors. */
 export const PRICE_POSITIONS = ['premium', 'mid', 'budget', 'price_fighter'] as const;

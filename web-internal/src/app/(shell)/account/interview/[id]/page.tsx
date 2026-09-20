@@ -55,7 +55,7 @@ import {
   HAMBATAN_LABELS,
   INTERVIEW_STATUS,
   VERDICT_LABELS,
-  availableTransitions,
+  interviewAksi,
   formatDurasiMenit,
   getInterview,
   getKelolaKlienTimeline,
@@ -300,6 +300,26 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
     [load],
   );
 
+  /**
+   * IV-LABEL-AKSI — satu tombol bisa mewakili lebih dari satu transisi
+   * ("Selesaikan" dari Draft Isian = `→ Diajukan` lalu `→ Selesai`). Dijalankan
+   * BERURUTAN dan berhenti di kegagalan pertama: `transitionInterview` melempar,
+   * `act` menangkapnya, jadi langkah kedua tidak pernah jalan di atas langkah
+   * pertama yang gagal. Interview-nya lalu tertinggal di status antara, yang
+   * memang keadaan sah — AM tinggal menekan tombol yang muncul berikutnya.
+   *
+   * Alasan hanya dilampirkan ke transisi yang memang memintanya (pembatalan);
+   * rantai jalur utama tidak pernah butuh alasan.
+   */
+  const jalankanRantai = useCallback(
+    async (rantai: readonly string[], alasan: string | null) => {
+      for (const ke of rantai) {
+        await transitionInterview(id, ke, alasan ?? undefined);
+      }
+    },
+    [id],
+  );
+
   const toggleSection = (key: string) =>
     setOpen((s) => {
       const next = new Set(s);
@@ -356,7 +376,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   // Before the first load resolves the step, show the interview tab rather than
   // an empty page — `tab` is only null for that one render.
   const activeTab: Tab = tab ?? 'interview';
-  const transitions = availableTransitions(iv.status, canLead);
+  const transitions = interviewAksi(iv.status, canLead);
   const scheduleEditable =
     canWrite && ['Belum Dijadwalkan', 'Terjadwal', 'Dijadwalkan Ulang'].includes(iv.status);
   const estimasiIssues = estimasiTanpaDasar(draft);
@@ -687,7 +707,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                 <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                   {transitions.map((t) =>
                     t.requireReason ? (
-                      <div key={t.to} className="row" style={{ gap: 6 }}>
+                      <div key={t.label} className="row" style={{ gap: 6 }}>
                         <input
                           placeholder="Alasan pembatalan (wajib)"
                           value={cancelReason}
@@ -698,21 +718,23 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                           type="button"
                           className="btn btnDanger btnSm"
                           disabled={acting || cancelReason.trim() === ''}
-                          onClick={() => act(() => transitionInterview(id, t.to, cancelReason.trim()))}
+                          onClick={() =>
+                            act(() => jalankanRantai(t.rantai, cancelReason.trim()))
+                          }
                         >
-                          {t.to}
+                          {t.label}
                         </button>
                       </div>
                     ) : (
                       <button
-                        key={t.to}
+                        key={t.label}
                         type="button"
-                        className="btn btnSecondary btnSm"
+                        className={`btn btnSm ${t.utama ? 'btnPrimary' : 'btnSecondary'}`}
                         disabled={acting || (dirty && editable)}
-                        title={dirty && editable ? 'Simpan isian dulu' : undefined}
-                        onClick={() => act(() => transitionInterview(id, t.to))}
+                        title={dirty && editable ? 'Simpan isian dulu' : (t.judul ?? undefined)}
+                        onClick={() => act(() => jalankanRantai(t.rantai, null))}
                       >
-                        {t.to}
+                        {t.label}
                       </button>
                     ),
                   )}

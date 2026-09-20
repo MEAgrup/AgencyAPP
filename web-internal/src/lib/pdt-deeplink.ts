@@ -22,6 +22,11 @@
 /** Nama parameter — satu tempat, supaya penulis tautan dan pembacanya tak bisa berbeda. */
 export const PARAM_KLIEN = 'client';
 export const PARAM_PLATFORM = 'platform';
+/** Ke mana AM kembali sesudah batch tersimpan (G1-KEMBALI). */
+export const PARAM_KEMBALI = 'dari';
+
+/** Papan Account & Service — tujuan kembali baku, selalu ditawarkan. */
+export const ACCOUNT_BOARD_PATH = '/account';
 
 /** Halaman tujuan (G1-09 sub-langkah 3). */
 export const PDT_UPLOAD_PATH = '/account/pdt/upload';
@@ -34,14 +39,52 @@ export const PDT_UPLOAD_PATH = '/account/pdt/upload';
  * pemanggil (mis. Section B Strategi) sering tahu kliennya tapi belum tahu toko
  * mana yang dimaksud AM. Halaman tujuan akan meminta AM memilih tokonya.
  */
-export function pdtUploadHref(clientId: string, clientPlatformId?: number | null): string {
+export function pdtUploadHref(
+  clientId: string,
+  clientPlatformId?: number | null,
+  kembali?: string | null,
+): string {
   const id = clientId.trim();
   if (id === '') return PDT_UPLOAD_PATH;
   const q = new URLSearchParams({ [PARAM_KLIEN]: id });
   if (typeof clientPlatformId === 'number' && Number.isInteger(clientPlatformId) && clientPlatformId > 0) {
     q.set(PARAM_PLATFORM, String(clientPlatformId));
   }
+  // `dari` hanya ikut kalau ia memang jalur internal yang aman — divalidasi
+  // dengan fungsi yang SAMA dengan pembacanya, supaya penulis tautan tidak bisa
+  // menghasilkan nilai yang nanti diam-diam dibuang.
+  const aman = kembali === undefined ? null : jalurKembaliAman(kembali);
+  if (aman !== null) q.set(PARAM_KEMBALI, aman);
   return `${PDT_UPLOAD_PATH}?${q.toString()}`;
+}
+
+/**
+ * Jalur kembali yang boleh dipakai, atau `null`.
+ *
+ * Ini gerbang open-redirect, bukan sekadar rapi-rapi: nilainya datang dari
+ * query string, yang siapa pun bisa susun. Yang diterima HANYA jalur internal
+ * absolut — satu garis miring di depan, bukan dua.
+ *
+ * Yang ditolak dan kenapa:
+ * - `//evil.test/x` — protocol-relative, browser membacanya sebagai host LAIN.
+ * - `https://evil.test` (atau skema apa pun) — jelas eksternal.
+ * - `/\evil.test` — sebagian browser memperlakukan `\` seperti `/`, jadi ini
+ *   protocol-relative yang menyamar.
+ * - jalur dengan karakter kontrol/spasi — bisa dipakai menyelundupkan `\n`
+ *   ke header atau mengelabui pemeriksaan awalan.
+ */
+export function jalurKembaliAman(raw: string | null | undefined): string | null {
+  const v = (raw ?? '').trim();
+  if (v === '') return null;
+  if (!v.startsWith('/')) return null;
+  if (v.startsWith('//') || v.startsWith('/\\')) return null;
+  if (/[\u0000-\u001f\u007f\s\\]/.test(v)) return null;
+  return v;
+}
+
+/** `?dari=` → jalur kembali internal yang aman, atau `null`. */
+export function bacaParamKembali(get: (k: string) => string | null): string | null {
+  return jalurKembaliAman(get(PARAM_KEMBALI));
 }
 
 /** `?client=` → ID klien, atau `''` bila tak ada/kosong. Nilainya TIDAK divalidasi di sini — lihat `butuhOpsiBayanganKlien`. */

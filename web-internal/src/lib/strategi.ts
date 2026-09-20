@@ -243,12 +243,52 @@ export const CHANNELS = [
 /** B-0.2 — `Belum Aktif` skips the historical baseline (Rule 4). */
 export const CHANNEL_STATES = ['Eksisting', 'Belum Aktif'] as const;
 
+/**
+ * A-2 — cermin `BUSINESS_MODELS` di packages/domain/src/strategi.ts, yang sejak
+ * A2-MODEL-BISNIS-6 memakai kosakata yang SAMA dengan Interview `B1-4`. Urutan
+ * di sini adalah urutan yang dilihat AM di dropdown.
+ *
+ * `distributor` (nilai warisan kosakata 4-nilai lama) sengaja TIDAK ada di
+ * daftar ini: ia masih sah di DB supaya baris lama tidak perlu ditulis ulang,
+ * tapi tidak ditawarkan lagi. `modelBisnisPilihan()` di bawah yang menambahkan
+ * kembali nilai warisan itu HANYA bila Strategi yang sedang dibuka memang
+ * menyimpannya — kalau tidak, dropdown akan menampilkan nilai kosong dan
+ * menghapus jawaban AM diam-diam begitu ia menyimpan.
+ */
 export const BUSINESS_MODELS = [
   'produsen',
   'brand_owner',
-  'distributor',
+  'importir_langsung',
+  'distributor_resmi',
   'reseller',
+  'dropship',
 ] as const;
+
+/** Nilai A-2 warisan: sah dibaca, tidak ditawarkan kecuali memang tersimpan. */
+export const BUSINESS_MODEL_WARISAN = 'distributor';
+
+/** Label BI A-2 — sama persis dengan pilihan Interview B1-4 (MODEL_BISNIS_OPTIONS). */
+export const BUSINESS_MODEL_LABEL: Record<string, string> = {
+  produsen: 'Produsen / pabrik sendiri',
+  brand_owner: 'Brand owner',
+  importir_langsung: 'Importir langsung',
+  distributor_resmi: 'Distributor resmi',
+  distributor: 'Distributor (nilai lama)',
+  reseller: 'Reseller',
+  dropship: 'Dropship',
+};
+
+/**
+ * Pilihan A-2 untuk satu Strategi: enam nilai baku, plus nilai warisan bila
+ * Strategi ini memang sedang menyimpannya. Tanpa cabang kedua itu, membuka
+ * Strategi lama ber-`distributor` menampilkan dropdown kosong, dan simpan
+ * berikutnya akan mengosongkan A-2 tanpa AM sadar.
+ */
+export function modelBisnisPilihan(tersimpan: string | null | undefined): readonly string[] {
+  return tersimpan === BUSINESS_MODEL_WARISAN
+    ? [...BUSINESS_MODELS, BUSINESS_MODEL_WARISAN]
+    : BUSINESS_MODELS;
+}
 
 export const PRICE_POSITIONS = ['premium', 'mid', 'budget', 'price_fighter'] as const;
 
@@ -404,7 +444,15 @@ export interface StrategiKompetitor {
   estimasi_penjualan_bulan: string;
 }
 
-export type BusinessModel = 'produsen' | 'brand_owner' | 'distributor' | 'reseller';
+export type BusinessModel =
+  | 'produsen'
+  | 'brand_owner'
+  | 'importir_langsung'
+  | 'distributor_resmi'
+  /** Warisan kosakata 4-nilai lama — dibaca, tidak ditawarkan lagi. */
+  | 'distributor'
+  | 'reseller'
+  | 'dropship';
 export type PricePosition = 'premium' | 'mid' | 'budget' | 'price_fighter';
 export type StockCapacity = 'ready_stock' | 'produksi_per_order';
 export type ClientAsset =
@@ -1615,4 +1663,99 @@ export interface StrategiDiff {
 
 export function getStrategiDiff(id: string): Promise<StrategiDiff> {
   return api.get<StrategiDiff>(`/strategi/${id}/diff`);
+}
+
+// ---------------------------------------------------------------------------
+// Interview → Section A prefill (A2-MODEL-BISNIS-6 / A3-MARGIN-KOTOR)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bentuk minimal draft Section A yang prefill ini sentuh. Sengaja BUKAN
+ * `KonteksDraft` utuh (yang tinggal di SectionA.tsx): helper ini hanya boleh
+ * menyentuh dua field, dan mengetiknya sesempit ini membuat itu terbaca dari
+ * tipenya, bukan dari komentar.
+ */
+export interface KonteksPrefillTarget {
+  model_bisnis: string;
+  margin_kotor_persen: string;
+}
+
+/**
+ * mergeKonteksPrefill mengisi A-2 (model bisnis) dan A-3 (margin kotor %) dari
+ * jawaban Interview — dua field yang dilaporkan pemilik masih harus diketik
+ * ulang padahal Interview sudah menanyakannya (QA 2026-09-20, CLI-202609-0021).
+ *
+ * Sumbernya sudah ada di `PREFILL_MAPPING` sejak RAB-09 (`B1-4 → A-2`,
+ * `B2-8 → A-3`); yang hilang selama ini adalah PEMAKAINYA di layar Strategi.
+ * `inheritedKonteksOf` hanya memproyeksikan lima field cermin read-only
+ * (A-1/A-5/A-8/A-10/A-12) dan tidak pernah menyentuh dua ini.
+ *
+ * ## Kenapa mengisi, bukan mengunci
+ *
+ * Kelima field cermin itu READ-ONLY karena Interview adalah satu-satunya
+ * sumbernya. A-2 dan A-3 beda: keduanya boleh dikoreksi AM di Strategi (A-3
+ * khususnya — margin hero SKU bisa berubah sesudah Interview). Jadi polanya
+ * "usulan → konfirmasi" seperti B-1: isi bila kosong, tampilkan badge asalnya,
+ * biarkan bisa diubah.
+ *
+ * ## Tidak pernah menimpa
+ *
+ * Field yang sudah ada isinya TIDAK disentuh. Ini aturan yang sama dengan
+ * `mergeBaselinePrefill` dan `strategi-baseline-inherit`, dan alasannya sama:
+ * prefill datang ASINKRON sesudah halaman dimuat, jadi menimpa berarti
+ * menghapus apa yang baru saja diketik AM dalam detik-detik itu.
+ *
+ * Nilai A-2 yang tidak dikenal (mis. kosakata Interview bertambah lagi tanpa
+ * migrasi Strategi) DILEWATI, bukan dipaksa masuk — kalau tidak, dropdown-nya
+ * menampilkan pilihan kosong dan simpan berikutnya menulis nilai yang ditolak
+ * CHECK di DB.
+ */
+export function mergeKonteksPrefill<T extends KonteksPrefillTarget>(
+  draft: T,
+  prefill: StrategiPrefill | null,
+): T {
+  if (!prefill) return draft;
+  const nilai = (sf: string): string | null => {
+    const found = prefill.items.find((it) => it.strategi_field === sf)?.nilai ?? null;
+    return found !== null && found.trim() !== '' ? found.trim() : null;
+  };
+
+  const patch: Partial<KonteksPrefillTarget> = {};
+
+  if (draft.model_bisnis.trim() === '') {
+    const a2 = nilai('A-2');
+    // A2-MODEL-BISNIS-6 membuat kosakata kedua sisi identik, jadi ini pencocokan
+    // 1:1 — penjagaan di bawah ada untuk kalau salah satu sisi bergeser lagi.
+    if (a2 !== null && (BUSINESS_MODELS as readonly string[]).includes(a2)) {
+      patch.model_bisnis = a2;
+    }
+  }
+
+  if (draft.margin_kotor_persen.trim() === '') {
+    const a3 = nilai('A-3');
+    // B2-8 disimpan sebagai persen (`tipe: 'persen'`), satuan yang sama dengan
+    // A-3 — tidak ada konversi. Nilai non-numerik dilewati, bukan ditulis apa
+    // adanya: input A-3 bertipe number dan akan menolaknya tanpa pesan.
+    if (a3 !== null && Number.isFinite(Number(a3))) {
+      patch.margin_kotor_persen = a3;
+    }
+  }
+
+  return Object.keys(patch).length === 0 ? draft : { ...draft, ...patch };
+}
+
+/** Field Section A mana yang nilainya datang dari Interview (untuk badge). */
+export function konteksPrefillTerisi(
+  draft: KonteksPrefillTarget,
+  prefill: StrategiPrefill | null,
+): { a2: boolean; a3: boolean } {
+  if (!prefill) return { a2: false, a3: false };
+  const cocok = (sf: string, v: string): boolean => {
+    const src = prefill.items.find((it) => it.strategi_field === sf)?.nilai ?? null;
+    return src !== null && src.trim() !== '' && src.trim() === v.trim();
+  };
+  return {
+    a2: draft.model_bisnis.trim() !== '' && cocok('A-2', draft.model_bisnis),
+    a3: draft.margin_kotor_persen.trim() !== '' && cocok('A-3', draft.margin_kotor_persen),
+  };
 }

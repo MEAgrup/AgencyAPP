@@ -491,3 +491,73 @@ export const HAMBATAN_LABELS: Record<string, string> = {
   rasio_target_terlalu_tinggi: 'Rasio target terlalu tinggi (> 5x)',
   daya_tahan_budget_terlalu_pendek: 'Daya tahan budget terlalu pendek (≤ 1 bulan)',
 };
+
+// ---------------------------------------------------------------------------
+// Aksi alur status yang DILIHAT AM (IV-LABEL-AKSI, ketokan pemilik 2026-09-20)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sampai 2026-09-20 kartu "Alur status" merender nama status mentah sebagai
+ * teks tombol (`{t.to}`), jadi AM melihat "Draft Isian", "Diajukan", "Selesai"
+ * — kata benda yang menjawab "saya akan ada di mana", bukan "saya sedang
+ * melakukan apa". Pemilik meminta tombolnya jadi kata kerja, dan dua langkah
+ * terakhir jalur utama digabung jadi satu tombol "Selesaikan".
+ *
+ * Yang berubah HANYA yang dilihat AM. Mesin status (#19), edge-nya, dan baris
+ * auditnya tidak disentuh: "Selesaikan" dari `Draft Isian` tetap menjalankan
+ * DUA transisi berurutan (`→ Diajukan`, lalu `→ Selesai`), jadi jejak auditnya
+ * tetap tiga langkah dan `diajukan_pada` tetap ter-stamp. Menggabungkannya
+ * jadi satu edge baru akan menghapus jangkar waktu langkah 2→3 yang dipakai
+ * metrik lead time (STATE_MACHINES §6f).
+ */
+export interface InterviewAksi {
+  /** Transisi yang dijalankan tombol ini, BERURUTAN. Panjang 1 untuk aksi biasa. */
+  rantai: readonly string[];
+  label: string;
+  /** Judul tooltip — menjelaskan rantai ganda, `null` bila tidak perlu. */
+  judul: string | null;
+  requireLead: boolean;
+  requireReason: boolean;
+  /** Jalur utama (tombol primer) vs pengecualian (sekunder/danger). */
+  utama: boolean;
+}
+
+/** Label kata kerja per status tujuan, untuk aksi satu langkah. */
+const AKSI_LABEL: Record<string, string> = {
+  'Draft Isian': 'Simpan',
+  Diajukan: 'Ajukan',
+  Selesai: 'Selesaikan',
+  'Selesai Dengan Catatan': 'Selesaikan dengan catatan',
+  'Butuh Data Klien': 'Tandai butuh data klien',
+  Dikembalikan: 'Kembalikan ke AM',
+  Dibatalkan: 'Batalkan',
+};
+
+/** Status tujuan yang termasuk jalur utama (tombol primer). */
+const AKSI_UTAMA = new Set(['Draft Isian', 'Diajukan', 'Selesai']);
+
+/**
+ * interviewAksi memproyeksikan `availableTransitions` ke tombol yang dilihat AM.
+ *
+ * Satu penggabungan, dan hanya satu: dari `Draft Isian`, `→ Diajukan` diganti
+ * rantai `Diajukan → Selesai` berlabel "Selesaikan". Penggabungan itu hanya
+ * dipasang kalau edge kedua memang ADA dan tidak butuh peran lead — kalau
+ * `INTERVIEW_EDGES` berubah, tombolnya jatuh kembali jadi "Ajukan" satu langkah
+ * alih-alih menjanjikan aksi yang akan ditolak server di tengah jalan.
+ */
+export function interviewAksi(status: string, canLead: boolean): InterviewAksi[] {
+  const bisaLangsungSelesai = INTERVIEW_EDGES.some(
+    (e) => e.from === 'Diajukan' && e.to === 'Selesai' && !e.requireLead,
+  );
+  return availableTransitions(status, canLead).map((e) => {
+    const gabung = status === 'Draft Isian' && e.to === 'Diajukan' && bisaLangsungSelesai;
+    return {
+      rantai: gabung ? ['Diajukan', 'Selesai'] : [e.to],
+      label: gabung ? 'Selesaikan' : (AKSI_LABEL[e.to] ?? e.to),
+      judul: gabung ? 'Mengajukan lalu menyelesaikan interview ini dalam satu langkah.' : null,
+      requireLead: e.requireLead,
+      requireReason: e.requireReason,
+      utama: AKSI_UTAMA.has(e.to),
+    };
+  });
+}

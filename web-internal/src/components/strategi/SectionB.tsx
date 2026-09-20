@@ -765,7 +765,53 @@ export default function SectionB({
   // never fill Section B at all (and C/D, which gate per channel, stayed blocked).
   const channels = draft;
 
+  /**
+   * Channel yang SUDAH dianalisa Riset Awal tapi belum ada blok-nya di draft.
+   *
+   * Sebelum ini tidak ada yang membaca daftar ini: `addChannel` mengambil
+   * `CHANNELS[0]` yang belum terpakai (jadi selalu "Shopee", walau Riset Awal
+   * cuma menganalisa TikTok Shop), dan keadaan kosong cuma menampilkan
+   * "Belum ada channel" — padahal tepat di atasnya panel "Dari Riset Awal"
+   * sedang memampang dua kanal beserta GMV-nya. Itu yang dilaporkan pemilik
+   * saat menguji CLI-202609-0021: "sudah ada 2 channel tapi tertulis minimal
+   * pilih 1 channel".
+   */
+  const belumDitambah = (baselinePrefill?.channels ?? []).filter(
+    (sg) =>
+      !channels.some(
+        (c) =>
+          c.channel === sg.channel &&
+          (sg.channel !== 'Lainnya' || (c.channel_lain ?? '') === (sg.channel_lain ?? '')),
+      ),
+  );
+
+  /** Satu blok channel baru, sudah tersemai dari usulan Riset Awal-nya. */
+  const dariRisetAwal = (sg: StrategiChannelBaselineSuggestion): ChannelDraft => {
+    const baru = blankChannel(sg.channel);
+    // `Lainnya` dibedakan oleh `channel_lain`; tanpa disalin, `mergeBaselinePrefill`
+    // tidak akan mengenali blok ini sebagai milik usulan tadi dan blok-nya lahir
+    // kosong — persis bug yang seed ini ada untuk menghindarinya.
+    const cocok = sg.channel === 'Lainnya' ? { ...baru, channel_lain: sg.channel_lain ?? '' } : baru;
+    return baselinePrefill ? mergeBaselinePrefill([cocok], baselinePrefill)[0] : cocok;
+  };
+
+  /** Tambahkan SEMUA channel hasil Riset Awal yang belum ada blok-nya. */
+  const tambahSemuaDariRisetAwal = () => {
+    if (belumDitambah.length === 0) return;
+    onChange([...channels, ...belumDitambah.map(dariRisetAwal)]);
+    setActiveIdx(channels.length);
+  };
+
   const addChannel = () => {
+    // Riset Awal duluan: kanal yang memang dikerjakan klien ini sudah diketahui,
+    // jadi menawarkan `CHANNELS[0]` di atasnya berarti AM harus mengganti
+    // dropdown-nya setiap kali — dan blok yang salah kanal lahir tanpa satu pun
+    // angka PDT.
+    if (belumDitambah.length > 0) {
+      onChange([...channels, dariRisetAwal(belumDitambah[0])]);
+      setActiveIdx(channels.length);
+      return;
+    }
     const used = new Set(channels.map((c) => c.channel));
     // Offer the first channel not yet used; `Lainnya` is always allowed (it is
     // disambiguated by `channel_lain`), so it is the fallback when all are taken.
@@ -795,16 +841,43 @@ export default function SectionB({
   };
 
   if (channels.length === 0) {
+    const namaUsulan = belumDitambah
+      .map((sg) => (sg.channel === 'Lainnya' ? (sg.channel_lain ?? 'Lainnya') : sg.channel))
+      .join(', ');
     return (
       <div className="stack">
-        <div className="alert alertInfo" style={{ fontSize: 13 }}>
-          Belum ada channel. Tambahkan channel yang dikerjakan pada kontrak ini untuk mulai
-          mengisi baseline — Section C dan D memerlukan minimal satu channel.
-        </div>
+        {belumDitambah.length > 0 ? (
+          <div className="alert alertInfo" style={{ fontSize: 13 }}>
+            Riset Awal sudah menganalisa <strong>{belumDitambah.length} channel</strong> untuk klien
+            ini ({namaUsulan}), tapi Strategi ini belum punya blok baseline-nya. Tambahkan sekarang
+            supaya angka yang sudah dibaca PDT langsung masuk — Section C dan D memerlukan minimal
+            satu channel.
+          </div>
+        ) : (
+          <div className="alert alertInfo" style={{ fontSize: 13 }}>
+            Belum ada channel. Tambahkan channel yang dikerjakan pada kontrak ini untuk mulai
+            mengisi baseline — Section C dan D memerlukan minimal satu channel.
+          </div>
+        )}
         {!disabled && (
-          <button type="button" className="btn btnPrimary btnSm" onClick={addChannel}>
-            Tambah channel
-          </button>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            {belumDitambah.length > 0 && (
+              <button
+                type="button"
+                className="btn btnPrimary btnSm"
+                onClick={tambahSemuaDariRisetAwal}
+              >
+                Tambah {belumDitambah.length} channel dari Riset Awal
+              </button>
+            )}
+            <button
+              type="button"
+              className={`btn btnSm ${belumDitambah.length > 0 ? 'btnSecondary' : 'btnPrimary'}`}
+              onClick={addChannel}
+            >
+              Tambah channel
+            </button>
+          </div>
         )}
       </div>
     );

@@ -67,6 +67,8 @@ import {
   siapkanUploadBatchPdt,
 } from '@/lib/pdt';
 import {
+  ACCOUNT_BOARD_PATH,
+  bacaParamKembali,
   bacaParamKlien,
   bacaParamPlatform,
   opsiKlienPdt,
@@ -141,6 +143,10 @@ function UploadPdtWorkspace() {
   const sp = useSearchParams();
   const [klienDiminta] = useState(() => bacaParamKlien((k) => sp.get(k)));
   const [platformDiminta] = useState(() => bacaParamPlatform((k) => sp.get(k)));
+  // G1-KEMBALI — dari mana AM datang. Dibekukan sekali dengan alasan yang sama
+  // dengan dua parameter di atas: URL-nya tidak berubah saat AM bekerja, jadi
+  // membacanya ulang tiap render hanya menambah kesempatan gagal.
+  const [jalurKembali] = useState(() => bacaParamKembali((k) => sp.get(k)));
   // Sekali pakai: sesudah daftar toko klien itu dimuat sekali, parameternya
   // habis. Tanpa ini, AM yang mengganti toko lalu kembali ke klien semula akan
   // dilempar balik ke toko yang ada di URL.
@@ -604,6 +610,31 @@ function UploadPdtWorkspace() {
                     {commitResult.alasan_ditolak && (
                       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>{commitResult.alasan_ditolak}</p>
                     )}
+                    {/* G1-KEMBALI — sesudah batch tersimpan, kerjanya di halaman
+                        ini SELESAI. Sebelum ini tidak ada satu pun jalan keluar
+                        di kartu hasil: AM harus menebak lewat menu samping atau
+                        tombol back browser (yang membawanya balik ke form unggah
+                        yang sudah terpakai). Papan Account & Service selalu
+                        ditawarkan; tautan kedua muncul hanya kalau AM memang
+                        datang dari suatu halaman lewat `?dari=`. */}
+                    <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                      <Link href={ACCOUNT_BOARD_PATH} className="btn btnPrimary btnSm">
+                        ← Kembali ke Account &amp; Service
+                      </Link>
+                      {jalurKembali !== null && jalurKembali !== ACCOUNT_BOARD_PATH && (
+                        <Link href={jalurKembali} className="btn btnSecondary btnSm">
+                          ← Kembali ke halaman sebelumnya
+                        </Link>
+                      )}
+                      {selectedClient && (
+                        <Link
+                          href={`/clients/${encodeURIComponent(selectedClient.id)}`}
+                          className="btn btnGhost btnSm"
+                        >
+                          Detail Klien →
+                        </Link>
+                      )}
+                    </div>
                     {commitResult.status === 'identitas_belum_terikat' && (
                       <div style={{ marginTop: 8 }}>
                         <p className="muted" style={{ fontSize: 12 }}>
