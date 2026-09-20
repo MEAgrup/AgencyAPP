@@ -921,6 +921,111 @@ export function ekstrakBarisSkuMasterShopeeParentSku(
 }
 
 /**
+ * Satu baris fakta per PRODUK INDUK dari `shopee_parent_sku`, SEBELUM
+ * `client_platform_id`/`periode`/`batch_id`/`parser_versi` (pemanggil yang
+ * melengkapi, pola sama fungsi lain di paket ini). Satu baris berkas membawa
+ * DUA basis sekaligus (`dibuat` + `siap_dikirim`) — file-nya memang berkolom
+ * ganda — jadi pemanggil menulis DUA baris `pdt_fact_sku_period` dari satu
+ * objek ini, bukan satu.
+ */
+export interface PdtBarisSkuPeriodShopeeParentSku {
+  platformProductId: string;
+  /** Tampilan UI saja (Rule 20) — kolom `'Produk'`. */
+  namaProduk: string | null;
+  gmvDibuat: number | null;
+  gmvSiapDikirim: number | null;
+  /** JUMLAH UNIT, bukan jumlah pesanan — lihat docblock fungsi. */
+  produkTerjualDibuat: number | null;
+  produkTerjualSiapDikirim: number | null;
+  pesananDibuat: number | null;
+  pesananSiapDikirim: number | null;
+  dilihat: number | null;
+  klik: number | null;
+}
+
+/**
+ * Ekstrak fakta per-produk dari `shopee_parent_sku` (B33-PARENT-SKU,
+ * `docs/DECISIONS.md` 2026-09-20). Modul ini sebelumnya HANYA memberi makan
+ * `pdt_sku_master` (identitas, lihat fungsi di atas) — padahal berkas yang
+ * sama membawa performa per produk: nama, GMV dua basis, unit terjual dua
+ * basis, pesanan dua basis, dilihat dan klik.
+ *
+ * **`'Produk (Pesanan …)'` adalah JUMLAH UNIT, bukan pesanan.** Dibuktikan
+ * ke header asli Fim Motor, bukan disimpulkan dari namanya: satu produk
+ * mencatat `Pesanan Siap Dikirim` 1.798 dan `Produk (Pesanan Siap Dikirim)`
+ * 2.586 — satu pesanan memuat beberapa unit, jadi keduanya kolom yang
+ * berbeda dan keduanya ditulis ke kolom skema yang berbeda pula
+ * (`pesanan` vs `produk_terjual`).
+ *
+ * **Baris "parent" SAJA** (`'Kode Variasi' === '-'`), alasan yang SAMA
+ * PERSIS dengan `sumShopeeParentSkuGmv` (`rekonsiliasi.ts`,
+ * G1-07-SHOPEE-DOBEL-HITUNG): berkasnya HIERARKIS — satu baris parent per
+ * produk (total produk) diikuti satu baris per varian, dan kolom angkanya
+ * terisi di KEDUA jenis baris. Di sana menjumlah semua baris melahirkan
+ * ≈1,87× angka shop-level; di SINI akibatnya lebih keras lagi — baris varian
+ * berbagi `Kode Produk` yang sama dengan parent-nya, jadi menulisnya berarti
+ * beberapa baris dengan kunci `(client_platform_id, platform_product_id,
+ * periode, basis)` yang identik ⇒ `uq_pdt_fact_sku_period_produk` menolak
+ * seluruh commit.
+ *
+ * Karena itu penjaganya DUA lapis, bukan satu: filter `Kode Variasi` (bila
+ * kolomnya ada) DAN dedup `platformProductId` ambil-yang-PERTAMA (baris
+ * parent selalu mendahului varian-varian-nya di berkas hierarkis ini).
+ * Lapis kedua menutup kasus kolom `'Kode Variasi'` tidak ditemukan — di
+ * rekonsiliasi kasus itu boleh jatuh ke "jumlah semua baris" karena
+ * akibatnya cuma delta yang terlihat, sedangkan di sini akibatnya commit
+ * yang mati.
+ *
+ * Angka: `parsePdtAngka(v)` TANPA `raw` — ekspor Seller Center, konvensi
+ * yang SAMA dipakai `sumShopeeParentSkuGmv` atas berkas yang sama persis.
+ * Baris ber-`Kode Produk` kosong dilewati.
+ */
+export function ekstrakBarisFaktaSkuShopeeParentSku(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisSkuPeriodShopeeParentSku[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iKodeProduk = idx('Kode Produk');
+  const iKodeVariasi = idx('Kode Variasi');
+  const iNama = idx('Produk');
+  const iGmvDibuat = idx('Total Penjualan (Pesanan Dibuat) (IDR)');
+  const iGmvSiap = idx('Penjualan (Pesanan Siap Dikirim) (IDR)');
+  const iUnitDibuat = idx('Produk (Pesanan Dibuat)');
+  const iUnitSiap = idx('Produk (Pesanan Siap Dikirim)');
+  const iPesananDibuat = idx('Pesanan Dibuat');
+  const iPesananSiap = idx('Pesanan Siap Dikirim');
+  const iDilihat = idx('Jumlah Produk Dilihat');
+  const iKlik = idx('Produk Diklik');
+
+  const angka = (row: readonly unknown[] | undefined, i: number): number | null =>
+    i === -1 ? null : parsePdtAngka(row?.[i]);
+
+  const byProduk = new Map<string, PdtBarisSkuPeriodShopeeParentSku>();
+  for (const row of aoa.slice(barisHeader)) {
+    const platformProductId = iKodeProduk === -1 ? '' : String(row?.[iKodeProduk] ?? '').trim();
+    if (platformProductId === '') continue;
+    // Lapis 1 — lewati baris varian bila kolomnya ada (lihat docblock).
+    if (iKodeVariasi !== -1 && norm(row?.[iKodeVariasi]) !== '-') continue;
+    // Lapis 2 — baris PERTAMA per produk menang; kemunculan berikutnya dibuang.
+    if (byProduk.has(platformProductId)) continue;
+    byProduk.set(platformProductId, {
+      platformProductId,
+      namaProduk: iNama === -1 ? null : (String(row?.[iNama] ?? '').trim() || null),
+      gmvDibuat: angka(row, iGmvDibuat),
+      gmvSiapDikirim: angka(row, iGmvSiap),
+      produkTerjualDibuat: angka(row, iUnitDibuat),
+      produkTerjualSiapDikirim: angka(row, iUnitSiap),
+      pesananDibuat: angka(row, iPesananDibuat),
+      pesananSiapDikirim: angka(row, iPesananSiap),
+      dilihat: angka(row, iDilihat),
+      klik: angka(row, iKlik),
+    });
+  }
+  return [...byProduk.values()];
+}
+
+/**
  * Ekstrak master SKU dari `tt_orders` (`Semua Pesanan`, Rule 18 separuh
  * TikTok). **Deviasi sadar dari Rule 18 harfiah** (dicatat
  * `docs/DECISIONS.md`): PRD minta `tt_orders` DIGABUNG

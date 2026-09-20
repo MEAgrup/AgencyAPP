@@ -4572,7 +4572,11 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
   // kosong justru karena Shopee-nya nol batch. Jalur Shopee ber-fakta tidak
   // pernah dijalankan sama sekali. Karena itu tes ini ada, dan sengaja memakai
   // 'dibayar': basis yang writer sungguhan pakai.
-  it('G3-03 (Shopee): fakta SKU basis `dibayar` — yang writer Shopee sungguhan tulis — sampai ke B-3.2/B-3.3/B-3.4', async () => {
+  // ⟳ B33-PARENT-SKU: tes ini sekarang menguji jalur CADANGAN. Toko yang cuma
+  // punya `shopee_ams_produk` (batch lama, atau ekspor tanpa `parentskudetail`)
+  // tetap dapat B-3.2/B-3.3/B-3.4 dari irisan afiliasi basis `dibayar` —
+  // bukan kolom kosong. Jalur UTAMA-nya ada di tes berikutnya.
+  it('G3-03 (Shopee): tanpa fakta parent-SKU, jatuh ke basis `dibayar` (irisan afiliasi) — bukan kosong', async () => {
     const serviceId = await seedService();
     const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
       select client_id from services where id = ${serviceId}`;
@@ -4621,6 +4625,69 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
         { nama: 'SH-B', gmv: '2000000', unitTerjual: 20, klik: null, ctorPersen: null },
         { nama: 'SH-C', gmv: '0', unitTerjual: 0, klik: null, ctorPersen: null },
       ]);
+    } finally {
+      await sql`delete from pdt_fact_sku_period where client_platform_id = ${shopeeId}`;
+      await sql`delete from pdt_sku_master where client_platform_id = ${shopeeId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${shopeeId}`;
+    }
+  });
+
+  // Laporan pemilik 2026-09-20: "B-3.3 unit terjual masih kosong, data ini ada
+  // di data parent sku detail". Benar — dan lebih dalam dari kolom yang kosong:
+  // satu-satunya penulis SKU Shopee saat itu (`shopee_ams_produk`) adalah
+  // laporan AMS, yaitu irisan AFILIASI, bukan toko keseluruhan. Sejak
+  // B33-PARENT-SKU, `shopee_parent_sku` menulis fakta toko-penuh di basis
+  // `dibuat`+`siap_dikirim`, dan B-3.3 membaca `siap_dikirim` — basis yang SAMA
+  // dengan B-1, supaya Σ Top SKU menggulung ke GMV bulanan yang sama.
+  it('G3-03 (Shopee): fakta parent-SKU basis `siap_dikirim` MENANG atas irisan afiliasi `dibayar`', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { shopeeId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJul = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+        status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${shopeeId}, 'shopee', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
+      returning id`;
+
+    await sql`
+      insert into pdt_sku_master (client_platform_id, platform_product_id, status_listing)
+      values (${shopeeId}, 'SH-A', 'aktif'),
+             (${shopeeId}, 'SH-B', 'aktif'),
+             (${shopeeId}, 'SH-C', 'nonaktif')`;
+
+    try {
+      // Irisan afiliasi: angka KECIL, tanpa nama, tanpa unit yang benar.
+      // Kalau ia yang menang, assertion di bawah gagal — itulah gunanya.
+      await sql`
+        insert into pdt_fact_sku_period (sku_id, client_platform_id, platform_product_id, periode, basis,
+          batch_id, parser_versi, gmv, produk_terjual)
+        values (null, ${shopeeId}, 'SH-A', '2026-07-01', 'dibayar', ${batchJul[0].id}, 1, '500000.00', 7)`;
+
+      // Fakta toko-penuh dari `parentskudetail` — nama produk IKUT, unit IKUT.
+      await sql`
+        insert into pdt_fact_sku_period (sku_id, client_platform_id, platform_product_id, nama_produk,
+          periode, basis, batch_id, parser_versi, gmv, produk_terjual, pesanan, impresi, klik)
+        values (null, ${shopeeId}, 'SH-A', 'Cover Body Vario', '2026-07-01', 'siap_dikirim', ${batchJul[0].id}, 1, '8000000.00', 2586, 1798, 1383429, 76100),
+               (null, ${shopeeId}, 'SH-B', 'Tameng Body Beat', '2026-07-01', 'siap_dikirim', ${batchJul[0].id}, 1, '2000000.00', 640, 500, 900000, 40000),
+               (null, ${shopeeId}, 'SH-C', 'Spakbor Nouvo', '2026-07-01', 'siap_dikirim', ${batchJul[0].id}, 1, '0.00', 0, 0, 1000, 10)`;
+
+      const st = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), st.id);
+      const sh = prefill!.channels.find((c) => c.clientPlatformId === shopeeId)!;
+
+      expect(sh.skuPareto80).toBe(1);
+      expect(sh.skuSlowMoving).toBe(1);
+      expect(sh.topSku).toEqual([
+        // Nama produk SUNGGUHAN, bukan ID mentah — `parentskudetail` membawanya.
+        { nama: 'Cover Body Vario', gmv: '8000000', unitTerjual: 2586, klik: 76100, ctorPersen: null },
+        { nama: 'Tameng Body Beat', gmv: '2000000', unitTerjual: 640, klik: 40000, ctorPersen: null },
+        { nama: 'Spakbor Nouvo', gmv: '0', unitTerjual: 0, klik: 10, ctorPersen: null },
+      ]);
+      // Penjaga eksplisit: angka afiliasi (500rb / 7 unit) TIDAK boleh muncul.
+      expect(sh.topSku.some((t) => t.gmv === '500000' || t.unitTerjual === 7)).toBe(false);
     } finally {
       await sql`delete from pdt_fact_sku_period where client_platform_id = ${shopeeId}`;
       await sql`delete from pdt_sku_master where client_platform_id = ${shopeeId}`;

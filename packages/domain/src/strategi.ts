@@ -2263,7 +2263,23 @@ export async function getBaselinePrefill(
     // TikTok TETAP 'net' dan itu disengaja: hanya `tt_product_analytics` yang
     // menulis `nama_produk`, sedangkan `tt_orders` ('dibayar') tidak — memindah
     // TikTok ke 'dibayar' akan menukar nama produk jadi ID mentah di B-3.3.
-    const basisSkuPeriode = channel === 'TikTok Shop' ? 'net' : 'dibayar';
+    //
+    // ⟳ B33-PARENT-SKU (2026-09-20) — Shopee TIDAK lagi 'dibayar'. Premis di
+    // atas ("nol penulis 'siap_dikirim'") benar SAAT ITU, tapi ia menutupi
+    // pertanyaan yang lebih dalam: SATU-SATUNYA penulis Shopee waktu itu adalah
+    // `shopee_ams_produk`, yaitu laporan performa produk AMS — **irisan
+    // AFILIASI**, bukan toko keseluruhan. Memakainya untuk B-3.3 berarti "Top
+    // SKU" toko diambil dari penjualan yang kebetulan lewat afiliator saja
+    // (Rp476 juta dari Rp1,5 miliar pada `CLI-202609-0020`), tanpa nama produk
+    // dan tanpa nomor yang bisa dicocokkan AM ke laporan Shopee-nya sendiri.
+    //
+    // `shopee_parent_sku` (`parentskudetail.xlsx`) sekarang menulis fakta
+    // per-produk toko-penuh di basis 'dibuat' dan 'siap_dikirim' (lihat
+    // `pdt.ts`). 'siap_dikirim' yang dibaca — basis yang SAMA dengan
+    // `basisShopDaily` di atas — supaya Σ Top SKU menggulung ke angka GMV
+    // bulanan B-1 yang sama persis (Rp1.515.002.476, kesetaraan yang sudah
+    // dibuktikan G1-07-SHOPEE-DOBEL-HITUNG ke sample asli).
+    const basisSkuPeriode = channel === 'TikTok Shop' ? 'net' : basisShopDaily;
     const periodeVerified = await pdtPrefill.bacaPeriodeTerverifikasiTerbaru(sql, clientPlatformIdNum, 6);
 
     // G3-02..G3-06 (G3-REFERENCE-PERIODE opsi (B)) — periode acuan Section B3
@@ -2353,7 +2369,17 @@ export async function getBaselinePrefill(
         pdtSkuListed = jumlahSku.skuListed;
         pdtSkuAktif = jumlahSku.skuAktif;
       }
-      const faktaSku = await pdtPrefill.bacaFaktaSkuPeriode(sql, clientPlatformIdNum, periodeReferensiPdtSaran, basisSkuPeriode);
+      let faktaSku = await pdtPrefill.bacaFaktaSkuPeriode(sql, clientPlatformIdNum, periodeReferensiPdtSaran, basisSkuPeriode);
+      // Jatuh ke 'dibayar' (irisan afiliasi `shopee_ams_produk`) HANYA bila
+      // toko ini belum punya fakta parent-SKU sama sekali — batch lama yang
+      // di-commit sebelum B33-PARENT-SKU, atau ekspor yang tidak membawa
+      // `parentskudetail`. Irisan afiliasi lebih baik daripada kolom kosong,
+      // tapi ia bukan pilihan pertama: angkanya tidak cocok dengan B-1 dan
+      // tidak membawa nama produk. Reparse batch (G1-11) menaikkannya ke
+      // jalur penuh tanpa perlu unggah ulang.
+      if (faktaSku.length === 0 && channel !== 'TikTok Shop') {
+        faktaSku = await pdtPrefill.bacaFaktaSkuPeriode(sql, clientPlatformIdNum, periodeReferensiPdtSaran, 'dibayar');
+      }
       if (faktaSku.length > 0) {
         pdtSkuPareto80 = skuPareto80DariFakta(faktaSku);
         pdtSkuSlowMoving = skuSlowMovingDariFakta(faktaSku);

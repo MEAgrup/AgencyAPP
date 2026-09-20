@@ -2987,6 +2987,8 @@ interface FactSkuPeriodRow {
   sku_id: number | null;
   client_platform_id: number;
   platform_product_id: string | null;
+  /** Tampilan UI saja (Rule 20) — diisi `tt_product_analytics` dan, sejak B33-PARENT-SKU, `shopee_parent_sku`. */
+  nama_produk: string | null;
   periode: string | Date;
   basis: string;
   batch_id: number;
@@ -3082,6 +3084,168 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEDELAPAN) — sho
       shopeeAmsProdukBerkas('ams-produk.csv', [['PRD-1', 'Produk A', '1000000', '5']]),
     ];
     const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    expect(persiapan.status).toBe('ditolak');
+    expect(await loadFactSkuPeriod(cpId)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitUploadBatch (B33-PARENT-SKU, 2026-09-20) — shopee_parent_sku →
+// pdt_fact_sku_period. Berkas yang SAMA yang sudah lama mengisi
+// `pdt_sku_master` (modul KETIGA di atas) ternyata juga membawa performa per
+// produk. Laporan pemilik: "B-3.3 unit terjual masih kosong, data ini ada di
+// data parent sku detail."
+// ---------------------------------------------------------------------------
+/**
+ * Header modul `shopee_parent_sku` LENGKAP: sembilan kolom WAJIB (tanpa
+ * salah satunya berkas jadi `gagal` dan nol fakta lahir — itulah yang
+ * membedakan helper ini dari `HEADER_PARENT_SKU` yang dipakai tes
+ * `pdt_sku_master`) plus lima kolom B33-PARENT-SKU yang opsional.
+ */
+const HEADER_PARENT_SKU_FAKTA = [
+  'Kode Produk', 'Kode Variasi', 'SKU Induk',
+  'Total Penjualan (Pesanan Dibuat) (IDR)', 'Penjualan (Pesanan Siap Dikirim) (IDR)',
+  'Jumlah Produk Dilihat', 'Produk Diklik',
+  'Tingkat Konversi (Pesanan yang Dibuat)', 'Tingkat Pesanan Berulang (Pesanan Dibuat)',
+  'Pengunjung Produk (Kunjungan)',
+  // Lima kolom B33-PARENT-SKU.
+  'Produk', 'Pesanan Dibuat', 'Pesanan Siap Dikirim',
+  'Produk (Pesanan Dibuat)', 'Produk (Pesanan Siap Dikirim)',
+];
+
+/**
+ * Satu baris = satu produk, dipetakan lewat NAMA kolom (bukan posisi) supaya
+ * menambah kolom ke header tidak diam-diam menggeser angka tes.
+ * `Kode Variasi` default `'-'` = baris PARENT, bentuk yang sama dengan
+ * `parentskudetail.xlsx` asli.
+ */
+function parentSkuFaktaBerkas(
+  nama: string,
+  baris: readonly Readonly<Record<string, string>>[],
+  header: readonly string[] = HEADER_PARENT_SKU_FAKTA,
+): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    [...header],
+    ...baris.map((b) => header.map((h) => b[h] ?? (h === 'Kode Variasi' ? '-' : '0'))),
+  ];
+  return {
+    nama, sha256: `sha-parentsku-fakta-${nama}`, bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'shopee_parent_sku', ambiguous: false, matches: ['shopee_parent_sku'],
+  };
+}
+
+const PRODUK_VARIO = {
+  'Kode Produk': '22571212550',
+  'Produk': 'Cover Body Vario',
+  'Total Penjualan (Pesanan Dibuat) (IDR)': '189.344.344',
+  'Penjualan (Pesanan Siap Dikirim) (IDR)': '175.749.606',
+  'Jumlah Produk Dilihat': '1383429',
+  'Produk Diklik': '76100',
+  'Pesanan Dibuat': '1908',
+  'Pesanan Siap Dikirim': '1798',
+  'Produk (Pesanan Dibuat)': '2785',
+  'Produk (Pesanan Siap Dikirim)': '2586',
+};
+
+describeDb('commitUploadBatch (B33-PARENT-SKU) — shopee_parent_sku → pdt_fact_sku_period', () => {
+  async function fixture(shopId: string | null = '938284780'): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'Shopee', shopId);
+  }
+
+  it('satu produk ⇒ DUA baris fakta (dibuat + siap_dikirim), nama & unit terjual ikut', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'), // identitas+periode
+      parentSkuFaktaBerkas('parentskudetail.xlsx', [PRODUK_VARIO]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactSkuPeriod(cpId);
+    expect(rows).toHaveLength(2);
+
+    const dibuat = rows.find((r) => r.basis === 'dibuat')!;
+    const siap = rows.find((r) => r.basis === 'siap_dikirim')!;
+
+    // Nama produk mendarat — inilah yang membuat B-3.3 berhenti menampilkan ID.
+    expect(dibuat.nama_produk).toBe('Cover Body Vario');
+    expect(siap.nama_produk).toBe('Cover Body Vario');
+    expect(dibuat).toMatchObject({
+      sku_id: null, platform_product_id: '22571212550', batch_id: persiapan.batchId,
+      produk_terjual: 2785, pesanan: 1908, impresi: 1383429, klik: 76100,
+    });
+    expect(siap).toMatchObject({ produk_terjual: 2586, pesanan: 1798 });
+    // Titik = RIBUAN (Seller Center), bukan desimal.
+    expect(Number(dibuat.gmv)).toBe(189344344);
+    expect(Number(siap.gmv)).toBe(175749606);
+  });
+
+  it('baris VARIAN tidak melahirkan baris fakta kedua — kunci unik per produk selamat', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      parentSkuFaktaBerkas('parentskudetail.xlsx', [
+        PRODUK_VARIO,
+        // Varian milik produk yang SAMA — `Kode Variasi` terisi.
+        {
+          ...PRODUK_VARIO,
+          'Kode Variasi': '195500017909',
+          'Total Penjualan (Pesanan Dibuat) (IDR)': '1.355.292',
+          'Produk (Pesanan Dibuat)': '50',
+        },
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactSkuPeriod(cpId);
+    // DUA (satu per basis), bukan empat — dan angkanya angka PARENT.
+    expect(rows).toHaveLength(2);
+    expect(Number(rows.find((r) => r.basis === 'dibuat')!.gmv)).toBe(189344344);
+  });
+
+  it('nol tabrakan dengan shopee_ams_produk — basis `dibayar` hidup berdampingan', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      parentSkuFaktaBerkas('parentskudetail.xlsx', [
+        { 'Kode Produk': 'PRD-1', 'Produk': 'Produk A', 'Total Penjualan (Pesanan Dibuat) (IDR)': '1.000.000' },
+      ]),
+      shopeeAmsProdukBerkas('ams-produk.csv', [['PRD-1', 'Produk A', '250000', '2']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactSkuPeriod(cpId);
+    expect(rows.map((r) => r.basis).sort()).toEqual(['dibayar', 'dibuat', 'siap_dikirim']);
+  });
+
+  it('commit ULANG ⇒ baris lama diganti, produk yang hilang ikut terhapus', async () => {
+    const cpId = await fixture();
+    await commitUploadBatch(sql, ownerActor(), cpId, [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      parentSkuFaktaBerkas('p1.xlsx', [
+        { 'Kode Produk': 'PRD-1', 'Produk': 'Produk A', 'Total Penjualan (Pesanan Dibuat) (IDR)': '1.000.000' },
+        { 'Kode Produk': 'PRD-2', 'Produk': 'Produk B', 'Total Penjualan (Pesanan Dibuat) (IDR)': '500.000' },
+      ]),
+    ], []);
+    expect(await loadFactSkuPeriod(cpId)).toHaveLength(4);
+
+    await commitUploadBatch(sql, ownerActor(), cpId, [
+      shopeeAdsCpcBerkas('ads-2.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      parentSkuFaktaBerkas('p2.xlsx', [
+        { 'Kode Produk': 'PRD-1', 'Produk': 'Produk A', 'Total Penjualan (Pesanan Dibuat) (IDR)': '1.500.000' },
+      ]),
+    ], []);
+    const rows = await loadFactSkuPeriod(cpId);
+    expect(rows).toHaveLength(2); // PRD-2 hilang dari batch baru ⇒ ikut terhapus
+    expect(rows.every((r) => r.platform_product_id === 'PRD-1')).toBe(true);
+  });
+
+  it("identitas 'tolak' ⇒ NOL baris fakta ditulis", async () => {
+    const cpId = await fixture('SHOP-LAIN');
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [
+      shopeeAdsCpcBerkas('ads.xlsx', '938284780', '01/07/2026 - 31/07/2026'),
+      parentSkuFaktaBerkas('parentskudetail.xlsx', [
+        { 'Kode Produk': 'PRD-1', 'Produk': 'Produk A', 'Total Penjualan (Pesanan Dibuat) (IDR)': '1.000.000' },
+      ]),
+    ], []);
     expect(persiapan.status).toBe('ditolak');
     expect(await loadFactSkuPeriod(cpId)).toHaveLength(0);
   });

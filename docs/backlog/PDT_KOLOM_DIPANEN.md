@@ -305,6 +305,16 @@ Bucket 2 (derived-add — `report/shopee/metrik.ts:250` `pengunjung_produk`, sum
 | Kolom | Konsumen | Dampak bila hilang |
 |---|---|---|
 | `Pengunjung Produk (Kunjungan)` (alias: `pengunjung produk`) | -- konsumen: dim product_performance(0.14), sumbu X 4-kuadran Shopee (`report/shopee/metrik.ts:747-749` `computeQuadrants`) | sumbu traffic kuadran kolaps → dimensi 0.14 tak bisa dihitung |
+| `Produk` | -- konsumen: pdt_fact_sku_period.nama_produk (TAMPILAN UI saja, Rule 20) — **DITAMBAHKAN 2026-09-20, B33-PARENT-SKU** | B-3.3 Top SKU menampilkan `platform_product_id` mentah, bukan nama produk |
+| `Produk (Pesanan Dibuat)` / `Produk (Pesanan Siap Dikirim)` | -- konsumen: pdt_fact_sku_period.produk_terjual per basis — **UNIT terjual**, B-3.3 kolom "unit terjual" + turunan harga rata-rata (B33-HARGA-JUAL) | B-3.3 unit terjual & harga jual kosong (laporan pemilik 2026-09-20) |
+| `Pesanan Dibuat` / `Pesanan Siap Dikirim` | -- konsumen: pdt_fact_sku_period.pesanan per basis — jumlah PESANAN, **bukan** unit (sample asli: 1.798 pesanan memuat 2.586 unit pada produk yang sama) | dim conversion tak punya penyebut pesanan per-SKU |
+
+> **Kelima kolom di atas OPSIONAL dengan sengaja** (migrasi `20261123010000`).
+> Modul ini `wajib: true`: kolom WAJIB yang hilang menjatuhkan berkas ke `gagal`,
+> membuangnya dari `terparse`, dan ikut menggagalkan pasangan rekonsiliasi Shopee
+> seluruh batch — menukar satu kolom B-3.3 yang kosong dengan pintu upload yang
+> tertutup. Hilang ⇒ `sebagian`: berkasnya TETAP dipakai, hanya fakta per-SKU-nya
+> yang tidak lahir. Lihat `docs/DECISIONS.md` 2026-09-20 B33-PARENT-SKU.
 
 ### 2.3 `shopee_ads_cpc` — `Data+Keseluruhan+Iklan+Shopee-*.csv` (header baris 8)
 > **Dikoreksi sesi 19 (docs/DECISIONS.md 2026-09-14 modul KEENAM) terhadap sample EKSPOR ASLI
