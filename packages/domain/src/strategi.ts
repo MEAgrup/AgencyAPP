@@ -1962,6 +1962,18 @@ export interface BaselineMonthSuggestion {
   adSpend: string | null;
   roas: number | null;
   acos: number | null;
+  /**
+   * B1-BATAL-TIKTOK (`docs/DECISIONS.md` 2026-09-20, ketokan pemilik) — kolom
+   * B-1 keempat yang selama ini selalu diketik AM. Σ`pesanan_dibatalkan` ÷
+   * Σ penyebut bulan itu, dalam persen 2 desimal.
+   *
+   * Basisnya BUKAN `basisShopDaily`: TikTok `'net'`, Shopee `'dibuat'` — "dari
+   * pesanan yang MASUK, berapa persen batal" (lihat `bacaFaktaBatalBulan`).
+   *
+   * `null` kalau bulan itu tidak punya satu pun baris ber-`pesanan_dibatalkan`
+   * — aturan "absen ≠ nol" yang sama dengan `adSpend`/`roas`/`acos` di atas.
+   */
+  persenBatal: number | null;
 }
 
 /**
@@ -2258,6 +2270,12 @@ export async function getBaselinePrefill(
     // SAMA yang sudah dipakai `bacaKpiShopDaily` untuk "KPI ringkas laporan"
     // (`pdt.ts`, Rule 16) — angka penjualan headline, bukan kanal/ads.
     const basisShopDaily = channel === 'TikTok Shop' ? 'net' : 'siap_dikirim';
+    // B1-BATAL-TIKTOK — basis `% batal` SENGAJA berbeda dari `basisShopDaily`
+    // untuk Shopee: GMV B-1 dibaca dari `siap_dikirim`, tapi "% batal" berarti
+    // "dari pesanan yang MASUK, berapa persen batal" — populasi `dibuat`.
+    // Bukan basis karangan: migrasi `20261105010000` dan `rakitInputSkorShopee`
+    // sudah memakai `dibuat` untuk metrik yang sama.
+    const basisBatal = channel === 'TikTok Shop' ? 'net' : 'dibuat';
     // G3-03-BASIS-SKU — basis SKU-level BUKAN basis shop-daily, dan menyamakan
     // keduanya membuat B-3.2/B-3.3/B-3.4 KOSONG PERMANEN di Shopee.
     //
@@ -2443,6 +2461,8 @@ export async function getBaselinePrefill(
               // memberi makan field `roas`/`adSpend` channel + `tipeKampanye`,
               // bukan baris tabel bulanan ini.
               const iklan = ringkasIklanBulan(await pdtPrefill.bacaFaktaAds(sql, clientPlatformIdNum, p.periodeAwalBulan));
+              // B1-BATAL-TIKTOK — basis SENDIRI (lihat `basisBatal` di atas).
+              const batal = await pdtPrefill.bacaFaktaBatalBulan(sql, clientPlatformIdNum, p.periodeAwalBulan, basisBatal);
               const d = new Date(`${p.periodeAwalBulan}T00:00:00Z`);
               return {
                 monthIndex: i + 1,
@@ -2452,6 +2472,7 @@ export async function getBaselinePrefill(
                 adSpend: iklan.adSpend,
                 roas: iklan.roas,
                 acos: iklan.acos,
+                persenBatal: batal?.persen ?? null,
               };
             }),
           )
@@ -2465,6 +2486,7 @@ export async function getBaselinePrefill(
             adSpend: null,
             roas: null,
             acos: null,
+            persenBatal: null,
           }));
 
     const mix = payload.gmv_mix ?? null;

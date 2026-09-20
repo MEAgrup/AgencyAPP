@@ -1598,6 +1598,48 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     }
   }
 
+  // B1-BATAL-TIKTOK (`docs/DECISIONS.md` 2026-09-20, ketokan pemilik) — `tt_orders` →
+  // `pdt_fact_shop_daily`, PENULIS KEDUA ke tabel yang sama. Sampai sekarang setiap
+  // baris `pdt_fact_shop_daily` lahir dari SATU berkas; di sini satu berkas menambal
+  // dua kolom pada baris yang sudah ditulis berkas LAIN (`tt_shop_analytics`), dan
+  // itulah keputusan arsitektur yang ditunda sehari dan diketok pemilik hari ini.
+  //
+  // Tiga hal yang membuatnya tetap aman:
+  //
+  //  1. `UPDATE`, BUKAN `INSERT ... ON CONFLICT`. Hari yang tidak punya baris `'net'`
+  //     dari batch ini dibiarkan apa adanya. Meng-`insert` baris baru berarti mengarang
+  //     `gmv = 0, pesanan = 0` (dua kolom NOT NULL) untuk hari yang `tt_shop_analytics`
+  //     sendiri tidak laporkan — kebohongan yang jauh lebih mahal daripada satu sel
+  //     `% batal` yang kosong.
+  //  2. `batch_id` mengunci sasarannya ke baris yang BARU SAJA ditulis blok
+  //     `tt_shop_analytics` di transaksi yang sama, jadi pembilang dan barisnya selalu
+  //     satu periode — bukan menyentuh baris tetangga dari batch bulan lain.
+  //  3. Ia menulis `pesanan_penyebut_batal`, TIDAK PERNAH `pesanan`. Kolom `pesanan`
+  //     milik `tt_shop_analytics` dan dibaca B-1 (`jumlahPesanan`) serta rekonsiliasi
+  //     Rule 13-14; menimpanya akan melahirkan sumber kebenaran kedua untuk kolom yang
+  //     sama. Kenapa penyebutnya perlu kolom sendiri — dan bukan `pesanan` — ada di
+  //     docblock `ekstrakBarisBatalHarianTtOrders` (`@cdps/core` `pdt/fakta.ts`):
+  //     143 vs 169 vs 119 di berkas asli yang sama.
+  //
+  // URUTAN PENTING: blok ini WAJIB berada sesudah blok `berkasShopStatsTiktok` di atas,
+  // yang melahirkan baris basis `'net'` yang di-`UPDATE` di sini. Dipindah ke atasnya,
+  // ia akan meng-`UPDATE` nol baris tanpa error apa pun — gagal diam-diam, kelas bug
+  // yang sama dengan `Order Status === 'completed'` yang baru saja dibereskan.
+  if (berkasTtOrders.length > 0) {
+    for (const b of berkasTtOrders) {
+      for (const baris of pdt.ekstrakBarisBatalHarianTtOrders(b.aoa, b.barisHeader)) {
+        await tx`
+          update pdt_fact_shop_daily
+             set pesanan_dibatalkan = ${baris.pesananDibatalkan},
+                 pesanan_penyebut_batal = ${baris.pesanan}
+           where client_platform_id = ${clientPlatformId}
+             and tanggal = ${baris.tanggal}::date
+             and basis = 'net'
+             and batch_id = ${id}`;
+      }
+    }
+  }
+
   // G2-01-KUADRAN-SKU langkah 1 — `tt_product_analytics` → `pdt_fact_sku_period` (lihat
   // docblock `ekstrakBarisTtProductAnalytics`, `@cdps/core` `pdt/fakta.ts`). `sku_id` SELALU
   // NULL (level produk-induk, sama keputusan pemilik `G1-09-2BII-ADS-CPC-SKU` dipakai

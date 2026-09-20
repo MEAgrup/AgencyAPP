@@ -9,6 +9,7 @@ import {
   parseRentangTanggalTiktok,
   parseTanggalId,
   parseTanggalIdStrip,
+  parseTanggalIdWaktu,
   parseTanggalIso,
   resolvePeriodeBatch,
   validasiIdentitasShopee,
@@ -30,6 +31,32 @@ describe('parseTanggalId', () => {
   it('menolak bentuk yang bukan tanggal', () => {
     expect(parseTanggalId('bukan tanggal')).toBeNull();
     expect(parseTanggalId('')).toBeNull();
+  });
+});
+
+describe('parseTanggalIdWaktu (B1-BATAL-TIKTOK — kolom Created Time tt_orders)', () => {
+  it('mem-parse bentuk PERSIS ekspor asli: "DD/MM/YYYY HH:MM:SS" + tab di belakang', () => {
+    expect(parseTanggalIdWaktu('31/07/2026 20:29:25\t')).toBe('2026-07-31');
+    expect(parseTanggalIdWaktu('01/07/2026 00:00:01')).toBe('2026-07-01');
+  });
+
+  it('menerima tanggal polos tanpa jam — berperilaku persis parseTanggalId', () => {
+    expect(parseTanggalIdWaktu('01/07/2026')).toBe('2026-07-01');
+  });
+
+  it('validasi kalender TIDAK dilonggarkan oleh adanya jam', () => {
+    expect(parseTanggalIdWaktu('31/02/2026 08:00:00')).toBeNull();
+    expect(parseTanggalIdWaktu('13/13/2026 08:00:00')).toBeNull();
+  });
+
+  it('menolak sel kosong dan penanda "-" (G1-03: absen bukan tanggal)', () => {
+    expect(parseTanggalIdWaktu('')).toBeNull();
+    expect(parseTanggalIdWaktu('   ')).toBeNull();
+    expect(parseTanggalIdWaktu('-')).toBeNull();
+  });
+
+  it('TIDAK menggeser hari — jam malam tetap di tanggal yang sama (nol konversi zona waktu)', () => {
+    expect(parseTanggalIdWaktu('31/07/2026 23:59:59')).toBe('2026-07-31');
   });
 });
 

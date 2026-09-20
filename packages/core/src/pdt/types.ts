@@ -30,6 +30,12 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  *       di ekspor nyata (`'Completed'`) sehingga ia menulis baris fakta
  *       untuk pertama kalinya. Dua-duanya mengubah hasil baris fakta dari
  *       berkas yang SAMA.
+ *   4 — B1-BATAL-TIKTOK (`docs/DECISIONS.md` 2026-09-20, ketokan pemilik):
+ *       `tt_orders` memanen `'Created Time'` dan mulai menulis
+ *       `pdt_fact_shop_daily.pesanan_dibatalkan` + `pesanan_penyebut_batal`
+ *       basis `'net'` — kolom yang sebelum ini 0/31 hari terisi untuk setiap
+ *       toko TikTok. Berkas yang SAMA karena itu melahirkan baris fakta yang
+ *       berbeda, syarat kenaikan di paragraf atas.
  *
  * Kenaikan ini BUKAN kosmetik: `planPdtReparseTick` memilih batch lewat
  * `parser_versi < PDT_PARSER_VERSI`, jadi selama angkanya tetap 1 predikat
@@ -38,7 +44,7 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  * backlog begitu ia naik"). Menambah writer tanpa menaikkan angka ini =
  * fitur yang hanya berlaku untuk batch yang diunggah sesudahnya.
  */
-export const PDT_PARSER_VERSI = 3;
+export const PDT_PARSER_VERSI = 4;
 
 /**
  * Satu grup AND/NOT: seluruh `must` harus muncul (cocok substring, tanpa

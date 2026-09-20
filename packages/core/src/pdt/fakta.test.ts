@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ekstrakBarisBatalHarianTtOrders,
   ekstrakBarisFaktaSkuTtOrders,
   ekstrakBarisKreatorShopeeAmsAfiliasi,
   ekstrakBarisKreatorTtTransactionCreator,
@@ -566,8 +567,16 @@ describe('ekstrakBarisSkuMasterShopeeParentSku', () => {
 const HEADER_TT_ORDERS = [
   'Order ID', 'SKU ID', 'Seller SKU', 'Product Name', 'Variation', 'Quantity',
   'SKU Unit Original Price', 'SKU Subtotal After Discount', 'Order Status', 'Paid Time',
-  'Product Category', 'Creator Handle',
+  // `'Created Time'` (kolom ke-13) ditambahkan B1-BATAL-TIKTOK. Baris fixture
+  // lama sengaja TIDAK diperpanjang: `ekstrakBarisFaktaSkuTtOrders` tidak
+  // membacanya, jadi sel yang hilang membuktikan sekaligus bahwa kolom baru ini
+  // tidak mengganggu ekstraktor lama.
+  'Product Category', 'Creator Handle', 'Created Time',
 ];
+
+/** Satu baris `tt_orders` lengkap 13 kolom — hanya untuk tes `% batal`. */
+const barisTtOrders = (orderId: string, status: string, dibuat: string, skuId = 'SKU-1') =>
+  [orderId, skuId, 'SLR-1', 'X', 'Y', '1', '10.000', '10.000', status, '', 'Kat', '', dibuat];
 
 describe('ekstrakBarisSkuMasterTtOrders', () => {
   it('memetakan SKU ID/Seller SKU/Product Name/Variation/Product Category/harga — platformVariationId SELALU string kosong (nol id level-produk-induk terverifikasi)', () => {
@@ -742,6 +751,114 @@ describe('ekstrakBarisFaktaSkuTtOrders (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR)', () 
         { platformProductId: 'SKU-1', gmv: 117000, pesananSku: 117, produkTerjual: 117, gmvDariKreator: 0 },
       ]);
     });
+  });
+});
+
+// B1-BATAL-TIKTOK (`docs/DECISIONS.md` 2026-09-20, ketokan pemilik). Angka-angka
+// di bawah dibaca LANGSUNG dari ekspor asli `Semua pesanan-2026-08-10-15_50.csv`
+// (Avitaskin Juli 2026, berkas yang SAMA dengan batch produksi #7): 171 baris,
+// 169 `Order ID` unik, 50 di antaranya `Dibatalkan` ⇒ 29,59%.
+describe('ekstrakBarisBatalHarianTtOrders (B1-BATAL-TIKTOK)', () => {
+  it('menghitung pembilang DAN penyebut dari berkas yang sama — satu hari', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      barisTtOrders('O1', 'Selesai', '01/07/2026 08:00:00'),
+      barisTtOrders('O2', 'Dibatalkan', '01/07/2026 09:30:00'),
+      barisTtOrders('O3', 'Dikirim', '01/07/2026 10:00:00'),
+    ];
+    expect(ekstrakBarisBatalHarianTtOrders(aoa, 1)).toEqual([
+      { tanggal: '2026-07-01', pesanan: 3, pesananDibatalkan: 1 },
+    ]);
+  });
+
+  it('DEDUP per `Order ID` — satu pesanan tiga SKU tetap SATU pesanan', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      barisTtOrders('O1', 'Dibatalkan', '02/07/2026 08:00:00', 'SKU-1'),
+      barisTtOrders('O1', 'Dibatalkan', '02/07/2026 08:00:00', 'SKU-2'),
+      barisTtOrders('O1', 'Dibatalkan', '02/07/2026 08:00:00', 'SKU-3'),
+      barisTtOrders('O2', 'Selesai', '02/07/2026 09:00:00'),
+    ];
+    // Tanpa dedup ini akan berbunyi 4 pesanan / 3 batal = 75%; yang benar 2/1 = 50%.
+    expect(ekstrakBarisBatalHarianTtOrders(aoa, 1)).toEqual([
+      { tanggal: '2026-07-02', pesanan: 2, pesananDibatalkan: 1 },
+    ]);
+  });
+
+  it('atribusi `Created Time`, BUKAN `Cancelled Time` — jam dibuang, tab di ekspor asli ikut terpangkas', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      // Bentuk persis ekspor aslinya: "DD/MM/YYYY HH:MM:SS" + tab di belakang.
+      barisTtOrders('O1', 'Dibatalkan', '31/07/2026 20:29:25\t'),
+    ];
+    expect(ekstrakBarisBatalHarianTtOrders(aoa, 1)).toEqual([
+      { tanggal: '2026-07-31', pesanan: 1, pesananDibatalkan: 1 },
+    ]);
+  });
+
+  it('hari TANPA pembatalan tetap melahirkan baris ber-0 — nol yang DIKETAHUI, beda dari hari yang tidak ada di berkas', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      barisTtOrders('O1', 'Selesai', '03/07/2026 08:00:00'),
+      barisTtOrders('O2', 'Dibatalkan', '04/07/2026 08:00:00'),
+    ];
+    expect(ekstrakBarisBatalHarianTtOrders(aoa, 1)).toEqual([
+      { tanggal: '2026-07-03', pesanan: 1, pesananDibatalkan: 0 },
+      { tanggal: '2026-07-04', pesanan: 1, pesananDibatalkan: 1 },
+    ]);
+  });
+
+  it('`Dibatalkan`/`Cancelled`/`Canceled` sama-sama dihitung — ekspor mengikuti bahasa akun', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      barisTtOrders('O1', 'Dibatalkan', '05/07/2026 08:00:00'),
+      barisTtOrders('O2', 'Cancelled', '05/07/2026 09:00:00'),
+      barisTtOrders('O3', ' CANCELED ', '05/07/2026 10:00:00'),
+      barisTtOrders('O4', 'Selesai', '05/07/2026 11:00:00'),
+    ];
+    expect(ekstrakBarisBatalHarianTtOrders(aoa, 1)).toEqual([
+      { tanggal: '2026-07-05', pesanan: 4, pesananDibatalkan: 3 },
+    ]);
+  });
+
+  it('kolom `Created Time` HILANG (ekspor lama) ⇒ nol baris, BUKAN nol pembatalan', () => {
+    const headerTanpaTanggal = HEADER_TT_ORDERS.slice(0, 12);
+    const aoa = [headerTanpaTanggal, barisTtOrders('O1', 'Dibatalkan', '06/07/2026 08:00:00')];
+    expect(ekstrakBarisBatalHarianTtOrders(aoa, 1)).toEqual([]);
+  });
+
+  it('baris ber-`Created Time` tak terparse dilewati — tidak menyumbang ke penyebut', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      barisTtOrders('O1', 'Selesai', '07/07/2026 08:00:00'),
+      barisTtOrders('O2', 'Dibatalkan', '-'),
+      barisTtOrders('O3', 'Dibatalkan', '31/02/2026 08:00:00'), // kalender tidak valid
+    ];
+    expect(ekstrakBarisBatalHarianTtOrders(aoa, 1)).toEqual([
+      { tanggal: '2026-07-07', pesanan: 1, pesananDibatalkan: 0 },
+    ]);
+  });
+
+  it('komposisi ASLI berkas produksi: 169 pesanan unik, 50 batal ⇒ 29,59%', () => {
+    let n = 0;
+    const banyak = (jumlah: number, status: string) =>
+      Array.from({ length: jumlah }, () => barisTtOrders('O' + ++n, status, '10/07/2026 08:00:00'));
+    const aoa = [HEADER_TT_ORDERS, ...banyak(115, 'Selesai'), ...banyak(50, 'Dibatalkan'), ...banyak(4, 'Dikirim')];
+    const [hari] = ekstrakBarisBatalHarianTtOrders(aoa, 1);
+    expect(hari).toEqual({ tanggal: '2026-07-10', pesanan: 169, pesananDibatalkan: 50 });
+    expect(Math.round((hari.pesananDibatalkan / hari.pesanan) * 10000) / 100).toBe(29.59);
+  });
+
+  it('hasil terurut menaik per tanggal', () => {
+    const aoa = [
+      HEADER_TT_ORDERS,
+      barisTtOrders('O1', 'Selesai', '09/07/2026 08:00:00'),
+      barisTtOrders('O2', 'Selesai', '02/07/2026 08:00:00'),
+      barisTtOrders('O3', 'Selesai', '20/07/2026 08:00:00'),
+    ];
+    expect(ekstrakBarisBatalHarianTtOrders(aoa, 1).map((b) => b.tanggal)).toEqual([
+      '2026-07-02', '2026-07-09', '2026-07-20',
+    ]);
   });
 });
 

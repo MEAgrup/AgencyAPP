@@ -982,6 +982,8 @@ export interface StrategiBaselineMonthSuggestion {
   ad_spend: string | null;
   roas: number | null;
   acos: number | null;
+  /** B1-BATAL-TIKTOK — Σ pesanan dibatalkan ÷ Σ penyebut bulan itu, dalam persen. */
+  persen_batal: number | null;
 }
 
 // RAB-12 — attribution WITHIN the TikTok Shop platform, shown as a rincian under

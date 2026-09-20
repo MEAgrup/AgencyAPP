@@ -202,7 +202,7 @@
 import { WIB_OFFSET_HOURS } from '../tz';
 import { parsePdtAngka } from './angka';
 import { PDT_KOLOM_ALIAS } from './modules';
-import { parseRentangTanggalTiktok, parseTanggalId, parseTanggalIdStrip } from './identitas';
+import { parseRentangTanggalTiktok, parseTanggalId, parseTanggalIdStrip, parseTanggalIdWaktu } from './identitas';
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
 
@@ -1190,6 +1190,102 @@ export function ekstrakBarisFaktaSkuTtOrders(
   }
 
   return [...byProduk.entries()].map(([platformProductId, acc]) => ({ platformProductId, ...acc }));
+}
+
+/**
+ * Satu HARI `tt_orders`, dilihat dari sudut pandang PEMBATALAN — bahan
+ * `pdt_fact_shop_daily.pesanan_dibatalkan` + `pesanan_penyebut_batal`
+ * (B1-BATAL-TIKTOK, `docs/DECISIONS.md` 2026-09-20). `tanggal` sudah
+ * `"YYYY-MM-DD"`; `client_platform_id`/`batch_id`/`basis` dilengkapi pemanggil,
+ * pola sama `PdtBarisShopDailyTiktok`.
+ */
+export interface PdtBarisBatalHarianTtOrders {
+  tanggal: string;
+  /** Cacah PESANAN UNIK berstatus batal yang DIBUAT pada hari itu. */
+  pesananDibatalkan: number;
+  /** Cacah PESANAN UNIK (status apa pun) yang DIBUAT pada hari itu — penyebutnya. */
+  pesanan: number;
+}
+
+/**
+ * Ekstrak `% Batal` TikTok dari `tt_orders` (B1-BATAL-TIKTOK — ketokan pemilik
+ * 2026-09-20 atas pertanyaan terbuka yang dicatat sehari sebelumnya).
+ *
+ * **Kenapa fungsi ini membawa PENYEBUTNYA SENDIRI.** Godaan yang jelas adalah
+ * menulis pembilangnya saja dan memakai `pdt_fact_shop_daily.pesanan` (milik
+ * `tt_shop_analytics`) sebagai penyebut. Itu SALAH, dan dibuktikan ke berkas
+ * asli Avitaskin Juli 2026 — kedua berkas ada di ZIP yang sama:
+ *
+ * ```
+ *   Shop Analytics "Pesanan" Juli ....... 143
+ *   tt_orders, Order ID unik, dibuat Juli 169   (115 Selesai, 50 Dibatalkan, 4 Dikirim)
+ *   tt_orders, non-batal ................ 119
+ * ```
+ *
+ * 143 bukan 169 dan bukan 119, dan selisih HARIANNYA berayun dua arah
+ * (01/07 `+3`, 20/07 `-3`) — jadi `Pesanan` versi Shop Analytics bukan sekadar
+ * "169 dikurangi yang batal": ia populasi lain dengan atribusi tanggal lain.
+ * Memakainya sebagai penyebut akan melahirkan `% batal` harian yang keliru dan
+ * satu angka bulanan yang kebetulan-kebetulan saja dekat (50/143 = 34,97%
+ * vs 50/169 = **29,59%** yang sebenarnya). Pembilang dan penyebut karena itu
+ * HARUS datang dari berkas yang sama — itulah alasan kolom
+ * `pesanan_penyebut_batal` lahir, bukan kenyamanan.
+ *
+ * **Atribusi tanggal = `Created Time`, BUKAN `Cancelled Time`.** Yang diukur
+ * B-1 adalah "dari pesanan yang MASUK hari itu, berapa persen batal" — satu
+ * populasi, satu hari. `Cancelled Time` akan mencampur populasi (pesanan Juni
+ * yang batal di Juli) dan, di berkas ini, memindahkan 4 pesanan Juli ke
+ * Agustus karena batalnya terjadi setelah periode berakhir.
+ *
+ * **Dedup per `Order ID`.** `tt_orders` adalah data level BARIS PESANAN — satu
+ * pesanan dengan tiga SKU muncul tiga kali. Tanpa dedup, pesanan multi-SKU
+ * terhitung berkali-kali dan rasionya bergeser ke arah pesanan yang keranjangnya
+ * besar. Di berkas asli: 171 baris ⇒ 169 pesanan unik.
+ *
+ * Status batal dicocokkan lewat `STATUS_BATAL` (Indonesia + Inggris, alasan sama
+ * `STATUS_SELESAI` di atas: ekspor Seller Center mengikuti bahasa akun). Hari
+ * yang tidak punya satu pun pesanan di berkas TIDAK melahirkan baris sama sekali
+ * — `null` di DB berarti "tidak tahu", dan menulis `0` untuk hari yang memang
+ * tak ada datanya adalah persis asumsi "absen = nol" yang G1-03 hindari. Hari
+ * yang PUNYA pesanan tapi nol yang batal melahirkan baris ber-`pesananDibatalkan
+ * = 0` — itu nol yang sungguhan diketahui.
+ */
+const STATUS_BATAL = new Set(['dibatalkan', 'cancelled', 'canceled']);
+
+export function ekstrakBarisBatalHarianTtOrders(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisBatalHarianTtOrders[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iOrderId = idx('Order ID');
+  const iStatus = idx('Order Status');
+  const iDibuat = idx('Created Time');
+  // Tanpa salah satu dari ketiganya tidak ada yang bisa dihitung — kembalikan
+  // kosong supaya penulis melewatkannya, BUKAN menulis nol.
+  if (iOrderId === -1 || iStatus === -1 || iDibuat === -1) return [];
+
+  const perPesanan = new Map<string, { tanggal: string; batal: boolean }>();
+  for (const row of aoa.slice(barisHeader)) {
+    const orderId = String(row?.[iOrderId] ?? '').trim();
+    if (orderId === '') continue;
+    if (perPesanan.has(orderId)) continue; // baris ke-2 dst pesanan yang sama
+    const tanggal = parseTanggalIdWaktu(String(row?.[iDibuat] ?? ''));
+    if (tanggal === null) continue;
+    perPesanan.set(orderId, { tanggal, batal: STATUS_BATAL.has(norm(row?.[iStatus])) });
+  }
+
+  const perHari = new Map<string, { pesanan: number; pesananDibatalkan: number }>();
+  for (const { tanggal, batal } of perPesanan.values()) {
+    const acc = perHari.get(tanggal) ?? { pesanan: 0, pesananDibatalkan: 0 };
+    acc.pesanan += 1;
+    if (batal) acc.pesananDibatalkan += 1;
+    perHari.set(tanggal, acc);
+  }
+
+  return [...perHari.entries()]
+    .map(([tanggal, acc]) => ({ tanggal, ...acc }))
+    .sort((a, b) => (a.tanggal < b.tanggal ? -1 : a.tanggal > b.tanggal ? 1 : 0));
 }
 
 /** Satu baris `pdt_fact_creator_period` mentah dari `tt_transaction_creator`, SEBELUM `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang melengkapi, pola sama fungsi lain di paket ini). */

@@ -1209,6 +1209,7 @@ interface FactShopDailyRow {
   pembeli_baru: number | null;
   refund: string | null;
   pesanan_dibatalkan: number | null;
+  pesanan_penyebut_batal: number | null;
 }
 
 async function loadFactShopDaily(clientPlatformId: number): Promise<FactShopDailyRow[]> {
@@ -2538,8 +2539,28 @@ function shopeeParentSkuBerkasMulti(nama: string, baris: readonly [string, strin
 const HEADER_TT_ORDERS = [
   'Order ID', 'SKU ID', 'Seller SKU', 'Product Name', 'Variation', 'Quantity',
   'SKU Unit Original Price', 'SKU Subtotal After Discount', 'Order Status', 'Paid Time',
-  'Product Category', 'Creator Handle',
+  'Product Category', 'Creator Handle', 'Created Time',
 ];
+
+/**
+ * `tt_orders` untuk tes `% batal` (B1-BATAL-TIKTOK) — satu tuple = satu BARIS
+ * pesanan, jadi `orderId` boleh berulang (itu yang membuat dedup teruji).
+ */
+function ttOrdersBatalBerkas(
+  nama: string,
+  baris: readonly [orderId: string, status: string, dibuat: string][],
+): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TT_ORDERS,
+    ...baris.map(([orderId, status, dibuat]) => [
+      orderId, 'SKU-1', 'SLR-1', 'Produk', 'Varian', '1', '0', '10000', status, '', 'Kat', '', dibuat,
+    ]),
+  ];
+  return {
+    nama, sha256: 'sha-ttorders-batal', bytes: 100, ditolakPagar: null, decodeGagal: null,
+    aoa, sheets: null, modulTerdeteksi: 'tt_orders', ambiguous: false, matches: ['tt_orders'],
+  };
+}
 
 /** `tt_orders` (Semua Pesanan) — tidak membawa 'ID Kreator'/periode sendiri (Rule 5 ayat 2: mewarisi dari berkas lain di batch yang sama, sama pola `ttOrdersBerkas` dipasangkan dengan `ttVideoBerkasLengkap` di tes di bawah). */
 function ttOrdersBerkas(nama: string, baris: readonly [string, string, string, string, string, string][]): PdtPreviewBerkasInput {
@@ -2693,6 +2714,117 @@ function ttOrdersFaktaBerkas(
     aoa, sheets: null, modulTerdeteksi: 'tt_orders', ambiguous: false, matches: ['tt_orders'],
   };
 }
+
+// ---------------------------------------------------------------------------
+// B1-BATAL-TIKTOK (`docs/DECISIONS.md` 2026-09-20, ketokan pemilik) — `tt_orders`
+// → `pdt_fact_shop_daily`, PENULIS KEDUA. Satu-satunya tempat di seluruh pipeline
+// di mana satu berkas menambal kolom pada baris yang ditulis berkas LAIN, jadi
+// yang diuji di sini bukan cuma angkanya: juga bahwa ia tidak pernah menyentuh
+// `pesanan` (milik `tt_shop_analytics`) dan tidak pernah melahirkan baris baru.
+// ---------------------------------------------------------------------------
+describeDb('commitUploadBatch (B1-BATAL-TIKTOK) — tt_orders → pdt_fact_shop_daily.pesanan_dibatalkan', () => {
+  async function fixture(): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'TikTok Shop', null, ['kreator-a']);
+  }
+
+  type BarisHarianTt = Parameters<typeof ttShopAnalyticsBerkasDenganHarian>[3][number];
+  const HARIAN_01: BarisHarianTt = ['01/07/2026', '1000000', '10', '9', '10', '-', '10', '1050000', '100', '80', '0.1', '500', '400', '50', '40', '100000'];
+  const HARIAN_02: BarisHarianTt = ['02/07/2026', '600000', '5', '5', '5', '-', '5', '650000', '60', '50', '0.1', '300', '250', '30', '25', '120000'];
+
+  it('menulis pembilang DAN penyebutnya sendiri, per hari, tanpa menyentuh `pesanan`', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkasDenganHarian('shop-analytics.xlsx', 1_600_000, 15, [HARIAN_01, HARIAN_02]),
+      ttOrdersBatalBerkas('pesanan.csv', [
+        ['O1', 'Selesai', '01/07/2026 08:00:00'],
+        ['O2', 'Dibatalkan', '01/07/2026 09:00:00'],
+        ['O3', 'Dibatalkan', '01/07/2026 10:00:00'],
+        ['O4', 'Selesai', '02/07/2026 08:00:00'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactShopDaily(cpId);
+    expect(rows).toHaveLength(2);
+
+    // 01/07: 3 pesanan di `tt_orders`, 2 batal — SEKALIPUN `tt_shop_analytics`
+    // melaporkan `Pesanan = 10` untuk hari yang sama. Dua populasi berbeda,
+    // itulah kenapa penyebutnya kolom sendiri (lihat migrasi 20261125010000).
+    expect(rows[0]).toMatchObject({ pesanan: 10, pesanan_dibatalkan: 2, pesanan_penyebut_batal: 3 });
+    // 02/07: satu pesanan, nol batal — nol yang DIKETAHUI, bukan null.
+    expect(rows[1]).toMatchObject({ pesanan: 5, pesanan_dibatalkan: 0, pesanan_penyebut_batal: 1 });
+  });
+
+  it('DEDUP `Order ID` — pesanan multi-SKU tetap satu pesanan', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkasDenganHarian('shop-analytics.xlsx', 1_000_000, 10, [HARIAN_01]),
+      ttOrdersBatalBerkas('pesanan.csv', [
+        ['O1', 'Dibatalkan', '01/07/2026 08:00:00'],
+        ['O1', 'Dibatalkan', '01/07/2026 08:00:00'],
+        ['O1', 'Dibatalkan', '01/07/2026 08:00:00'],
+        ['O2', 'Selesai', '01/07/2026 09:00:00'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const [row] = await loadFactShopDaily(cpId);
+    // Tanpa dedup: 4 baris ⇒ 3/4 = 75%. Yang benar 1/2 = 50%.
+    expect(row).toMatchObject({ pesanan_dibatalkan: 1, pesanan_penyebut_batal: 2 });
+  });
+
+  it('hari yang TIDAK punya baris `tt_shop_analytics` tidak melahirkan baris baru — `UPDATE`, bukan `INSERT`', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkasDenganHarian('shop-analytics.xlsx', 1_000_000, 10, [HARIAN_01]),
+      ttOrdersBatalBerkas('pesanan.csv', [
+        ['O1', 'Dibatalkan', '01/07/2026 08:00:00'],
+        // 09/07 tidak ada di blok "Data harian" — pembatalannya HILANG dengan
+        // sengaja. Meng-`insert` baris untuknya berarti mengarang gmv=0/pesanan=0.
+        ['O2', 'Dibatalkan', '09/07/2026 08:00:00'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactShopDaily(cpId);
+    expect(rows).toHaveLength(1);
+    expect(ymd(rows[0].tanggal)).toBe('2026-07-01');
+    expect(rows[0]).toMatchObject({ pesanan_dibatalkan: 1, pesanan_penyebut_batal: 1 });
+  });
+
+  it('batch TANPA `tt_orders` ⇒ kedua kolom tetap NULL — absen bukan nol (G1-03)', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkasDenganHarian('shop-analytics.xlsx', 1_000_000, 10, [HARIAN_01]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const [row] = await loadFactShopDaily(cpId);
+    expect(row.pesanan_dibatalkan).toBeNull();
+    expect(row.pesanan_penyebut_batal).toBeNull();
+  });
+
+  it('commit ULANG memperbarui kedua kolom di tempat — bukan menumpuk baris', async () => {
+    const cpId = await fixture();
+    const buat = (statusO2: string) => [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'kreator-a', '01/07/2026 - 31/07/2026'),
+      ttShopAnalyticsBerkasDenganHarian('shop-analytics.xlsx', 1_000_000, 10, [HARIAN_01]),
+      ttOrdersBatalBerkas('pesanan.csv', [
+        ['O1', 'Dibatalkan', '01/07/2026 08:00:00'],
+        ['O2', statusO2, '01/07/2026 09:00:00'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, buat('Dibatalkan'), []);
+    expect((await loadFactShopDaily(cpId))[0]).toMatchObject({ pesanan_dibatalkan: 2, pesanan_penyebut_batal: 2 });
+
+    await commitUploadBatch(sql, ownerActor(), cpId, buat('Selesai'), []);
+    const rows = await loadFactShopDaily(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ pesanan_dibatalkan: 1, pesanan_penyebut_batal: 2 });
+  });
+});
 
 describeDb('commitUploadBatch (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR) — tt_orders → pdt_fact_sku_period', () => {
   async function fixture(akunKontenToko: readonly string[] | null = ['KR-1']): Promise<number> {

@@ -58,6 +58,30 @@ export function parseTanggalId(s: string): string | null {
 }
 
 /**
+ * `"DD/MM/YYYY HH:MM:SS"` → `"YYYY-MM-DD"` (bagian JAM dibuang), atau `null`
+ * bila bagian tanggalnya tidak terparse. Bagian waktu BOLEH tidak ada —
+ * fungsi ini menerima `"DD/MM/YYYY"` polos dan berperilaku persis
+ * `parseTanggalId`.
+ *
+ * Dipakai `ekstrakBarisBatalHarianTtOrders` untuk kolom `Created Time`
+ * (B1-BATAL-TIKTOK). Bentuknya diverifikasi ke ekspor asli
+ * `Semua pesanan-2026-08-10-15_50.csv`: sel-selnya berbunyi
+ * `"31/07/2026 20:29:25\t"` — SLASH seperti `parseTanggalId`, tapi dengan
+ * jam DAN tab di belakang, jadi regex "seluruh sel adalah tanggal" milik
+ * `parseTanggalId` menolaknya mentah-mentah. `trim()` membuang tab-nya,
+ * `split` pada spasi memisahkan jamnya; sisanya didelegasikan supaya hanya
+ * ADA SATU tempat yang memvalidasi kalender (31/02 tetap ditolak).
+ *
+ * Zona waktu TIDAK dikonversi — `Created Time` sudah waktu lokal toko, basis
+ * yang sama dengan baris harian `tt_shop_analytics` yang jadi tetangganya di
+ * `pdt_fact_shop_daily`.
+ */
+export function parseTanggalIdWaktu(s: string): string | null {
+  const tanggalSaja = String(s ?? '').trim().split(/\s+/)[0] ?? '';
+  return parseTanggalId(tanggalSaja);
+}
+
+/**
  * "DD-MM-YYYY" (STRIP, bukan slash) → "YYYY-MM-DD", atau `null` bila bentuk/
  * kalendernya tidak valid. Beda dari `parseTanggalId` (Shopee preamble
  * `Date Range`, SLASH) — sesi 34, verifikasi sample asli "Shopee - Fim
