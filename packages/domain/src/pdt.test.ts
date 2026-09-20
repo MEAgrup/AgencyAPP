@@ -1457,7 +1457,7 @@ describeDb('commitUploadBatch (G2-01-SHOPEE-KESEHATAN-WRITER) — shopee_kesehat
     const rows = await loadFactKesehatanPenalti(cpId);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
-      client_platform_id: cpId, batch_id: persiapan.batchId, parser_versi: 1,
+      client_platform_id: cpId, batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI,
       deskripsi: 'Kualitas produk buruk', durasi: '30 hari',
     });
     expect(Number(rows[0].poin)).toBe(2);
@@ -1554,7 +1554,7 @@ describeDb('commitUploadBatch (G3-02a) — shopee_chat → pdt_fact_layanan_chat
     const rows = await loadFactLayananChat(cpId);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      client_platform_id: cpId, batch_id: persiapan.batchId, parser_versi: 1,
+      client_platform_id: cpId, batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI,
       pengunjung: 1234, chat_masuk: 200, chat_dibalas: 180, waktu_respon_detik: 95, total_pesanan: 50,
     });
     expect(Number(rows[0].csat_persen)).toBe(4.8);
@@ -1671,7 +1671,7 @@ describeDb('commitUploadBatch (G4-03 aksi 4) — shopee_diskon/shopee_flash_sale
     expect(rows.every((r) => r.jenis === 'diskon')).toBe(true);
     // CHECK DB: diskon tidak pernah punya kolom funnel tampilan.
     expect(rows.every((r) => r.produk_dilihat === null && r.produk_diklik === null)).toBe(true);
-    expect(rows[0]).toMatchObject({ client_platform_id: cpId, batch_id: persiapan.batchId, parser_versi: 1, pesanan_dibuat: 118 });
+    expect(rows[0]).toMatchObject({ client_platform_id: cpId, batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI, pesanan_dibuat: 118 });
     expect(Number(rows[0].penjualan_dibuat)).toBe(10559000);
   });
 
@@ -1961,7 +1961,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii) — baris fakta shopee_a
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       sumber: 'shopee_ads_live', kampanye_id: 'AD-1', sku_id: null, content_id: null,
-      batch_id: persiapan.batchId, parser_versi: 1, tayangan: 1000, klik: null, pesanan_sku: 20,
+      batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI, tayangan: 1000, klik: null, pesanan_sku: 20,
     });
     expect(ymd(rows[0].periode)).toBe('2026-07-01'); // hari pertama BULAN (05/07 dibulatkan ke awal bulan), bukan tanggal preamble apa adanya
     expect(Number(rows[0].biaya)).toBe(150000);
@@ -2033,7 +2033,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEENAM) — baris 
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       sumber: 'shopee_ads_cpc', kampanye_id: 'Iklan Produk A', platform_product_id: 'PRD-1', sku_id: null, content_id: null,
-      batch_id: persiapan.batchId, parser_versi: 1, tayangan: 447740, klik: 21428, pesanan_sku: 616,
+      batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI, tayangan: 447740, klik: 21428, pesanan_sku: 616,
     });
     expect(Number(rows[0].biaya)).toBe(10628677);
     expect(Number(rows[0].gmv)).toBe(105473414);
@@ -2114,7 +2114,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KETUJUH) — baris
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       sumber: 'shopee_ads_search', kampanye_id: 'Iklan toko by MEA :: Semua', sku_id: null, content_id: null,
-      batch_id: persiapan.batchId, parser_versi: 1, tayangan: 3, klik: 20677, pesanan_sku: 330,
+      batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI, tayangan: 3, klik: 20677, pesanan_sku: 330,
     });
     expect(Number(rows[0].biaya)).toBe(6200000);
     expect(Number(rows[0].gmv)).toBe(32480316);
@@ -2233,7 +2233,7 @@ describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_product → pd
       // selalu membawa 'Impresi iklan produk'/'Jumlah klik iklan produk' (wajib
       // sejak `G1-09-2BII-TTADS-SAMPLE`), default '0' untuk baris di luar fokus.
       sumber: 'tt_ads_product', kampanye_id: 'CAM-1', platform_product_id: null, sku_id: null, content_id: null,
-      batch_id: persiapan.batchId, parser_versi: 1, tayangan: 0, klik: 0, pesanan_sku: 5,
+      batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI, tayangan: 0, klik: 0, pesanan_sku: 5,
     });
     expect(Number(rows[0].biaya)).toBe(100000);
     expect(Number(rows[0].gmv)).toBe(400000);
@@ -2392,7 +2392,7 @@ describeDb('commitUploadBatch (G2-01-KUADRAN-SKU langkah 1) — baris fakta tt_p
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       sku_id: null, client_platform_id: cpId, platform_product_id: 'PRD-1', basis: 'net',
-      batch_id: persiapan.batchId, parser_versi: 1, pesanan_sku: 50, impresi: 10000, klik: 500,
+      batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI, pesanan_sku: 50, impresi: 10000, klik: 500,
       produk_terjual: null, pesanan: null,
     });
     expect(Number(rows[0].gmv)).toBe(1000000);
@@ -2449,7 +2449,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul kedua) — baris f
     const rows = await loadFactContent(cpId);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
-      platform_content_id: 'V1', jenis: 'video', batch_id: persiapan.batchId, parser_versi: 1,
+      platform_content_id: 'V1', jenis: 'video', batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI,
       creator_platform_id: 'KR-1', creator_handle: 'Kreator', is_akun_toko: true,
       waktu_posting: null, sku_id: null, vv: 1000, likes: 50, komentar: null, dibagikan: 5, klik_produk: 10,
     });
@@ -2716,7 +2716,7 @@ describeDb('commitUploadBatch (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR) — tt_orders 
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       sku_id: null, client_platform_id: cpId, platform_product_id: 'SKU-1', basis: 'dibayar',
-      batch_id: persiapan.batchId, parser_versi: 1, pesanan_sku: 3,
+      batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI, pesanan_sku: 3,
     });
     expect(Number(rows[0].gmv)).toBe(143000);
     expect(Number(rows[0].gmv_dari_kreator)).toBe(0);
@@ -2851,7 +2851,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEEMPAT) — tt_tr
     const rows = await loadFactCreatorPeriod(cpId);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
-      creator_handle: 'Kreator A', batch_id: persiapan.batchId, parser_versi: 1,
+      creator_handle: 'Kreator A', batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI,
       pesanan_teratribusi: 10, jumlah_live: 2, jumlah_video: 3,
       gmv_live: null, gmv_video: null, sampel_terkirim: null,
     });
@@ -3047,7 +3047,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KEDELAPAN) — sho
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       sku_id: null, client_platform_id: cpId, platform_product_id: '22571212550', basis: 'dibayar',
-      batch_id: persiapan.batchId, parser_versi: 1, produk_terjual: 0, pesanan: 95,
+      batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI, produk_terjual: 0, pesanan: 95,
     });
     expect(Number(rows[0].gmv)).toBe(54587884);
     expect(rows[1].platform_product_id).toBe('PRD-2');
@@ -3288,7 +3288,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KESEMBILAN) — sh
     const rows = await loadFactContent(cpId);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
-      platform_content_id: '202607031521', jenis: 'live', batch_id: persiapan.batchId, parser_versi: 1,
+      platform_content_id: '202607031521', jenis: 'live', batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI,
       creator_platform_id: null, creator_handle: null, is_akun_toko: true, sku_id: null, vv: 1234,
     });
     expect(rows[0].waktu_posting).not.toBeNull();
@@ -3980,12 +3980,12 @@ describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
     expect(rows).toHaveLength(1); // BUKAN 2 — replace-on-recommit, bukan duplikat
     expect(Number(rows[0].gmv)).toBe(2500000);
     expect(Number(rows[0].biaya)).toBe(175000);
-    expect(rows[0].parser_versi).toBe(1);
+    expect(rows[0].parser_versi).toBe(pdtCore.PDT_PARSER_VERSI);
     expect(rows[0].batch_id).toBe(persiapan.batchId); // batch id SAMA — bukan batch baru
 
     const batchRow = await sql<{ parser_versi: number; status: string }[]>`
       select parser_versi, status from pdt_upload_batch where id = ${persiapan.batchId}`;
-    expect(batchRow[0].parser_versi).toBe(1);
+    expect(batchRow[0].parser_versi).toBe(pdtCore.PDT_PARSER_VERSI);
     expect(batchRow[0].status).toBe(persiapan.status); // hasil recompute SAMA (pasangan shop_stats+parent_sku tetap tidak ada)
 
     const audit = await sql<{ before_json: { parser_versi: number; status: string }; after_json: { parser_versi: number; jumlah_berkas_terparse: number; status: string } }[]>`
@@ -3993,7 +3993,7 @@ describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
        where entity_type = 'pdt_upload_batch' and entity_id = ${String(persiapan.batchId)} and action = 'pdt_reparse'
        order by id desc limit 1`;
     expect(audit[0]?.before_json).toMatchObject({ parser_versi: 0, status: 'parsing' });
-    expect(audit[0]?.after_json).toMatchObject({ parser_versi: 1, jumlah_berkas_terparse: 1, status: 'parsing' });
+    expect(audit[0]?.after_json).toMatchObject({ parser_versi: pdtCore.PDT_PARSER_VERSI, jumlah_berkas_terparse: 1, status: 'parsing' });
   });
 
   it('AM override dari commit ASLI dipertahankan otomatis pada reparse (dibaca dari pdt_file, bukan parameter)', async () => {
@@ -4067,6 +4067,28 @@ describeDb('reparsePdtBatch / planPdtReparseTick (G1-11 — Flow D)', () => {
     expect(rencana.kandidat.map((k) => k.batchId)).not.toContain(takBerpaket);
     expect(rencana.perluUploadUlang.map((s) => s.batchId)).toContain(purgedBatch);
     expect(rencana.perluUploadUlang.map((s) => s.batchId)).not.toContain(kandidatBatch);
+  });
+
+  // B33-PARENT-SKU (`docs/DECISIONS.md` 2026-09-20) — PR #476 menambah writer
+  // `shopee_parent_sku` → `pdt_fact_sku_period` TANPA menaikkan
+  // `PDT_PARSER_VERSI`. Akibatnya predikat `parser_versi < PDT_PARSER_VERSI`
+  // tetap KOSONG: batch produksi yang sudah ada (seluruhnya `parser_versi = 1`)
+  // tidak akan pernah memanen writer itu, dan fiturnya diam-diam hanya berlaku
+  // untuk unggahan BARU.
+  //
+  // Tes ini mengunci angka 1 secara HARFIAH dengan sengaja — ia mewakili batch
+  // yang sudah berdiri di produksi hari ini, bukan "versi saat ini". Menaikkan
+  // `PDT_PARSER_VERSI` lagi kelak tetap membuatnya hijau; MENURUNKANNYA kembali
+  // ke 1 membuatnya merah, yang memang yang kita inginkan.
+  it('batch berversi 1 (seluruh batch produksi hari ini) ADALAH kandidat reparse — penjaga B33-PARENT-SKU', async () => {
+    const { cpId } = await fixture();
+    const batchId = (await commitUploadBatch(sql, ownerActor(), cpId, [
+      shopeeAdsCpcBerkasLengkap('ads-cpc.csv', '938284780', '01/07/2026 - 31/07/2026', [['Iklan A', 'PRD-1', '100', '10', '2', '2000000', '150000']]),
+    ], [])).batchId;
+    await sql`update pdt_upload_batch set parser_versi = 1, raw_path = 'CLI-1/1/2026-07-31/z.zip' where id = ${batchId}`;
+
+    const rencana = await planPdtReparseTick(sql);
+    expect(rencana.kandidat.map((k) => k.batchId)).toContain(batchId);
   });
 
   describe('G1-11-REPARSE-RECOMPUTE-STATUS — identitas+rekonsiliasi DI-RECOMPUTE (keputusan pemilik, docs/DECISIONS.md 2026-09-16)', () => {
