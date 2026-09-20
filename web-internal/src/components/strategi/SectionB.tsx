@@ -18,7 +18,7 @@
 
 import { useState } from 'react';
 import RepeatList from './RepeatList';
-import { SELALU_MANUAL, ringkasBaseline } from '@/lib/strategi-baseline-inherit';
+import { SELALU_MANUAL, mergeBaselinePrefill, ringkasBaseline } from '@/lib/strategi-baseline-inherit';
 import {
   CAMPAIGN_TYPES,
   CHANNEL_STATES,
@@ -744,7 +744,22 @@ export default function SectionB({
     // Offer the first channel not yet used; `Lainnya` is always allowed (it is
     // disambiguated by `channel_lain`), so it is the fallback when all are taken.
     const pick = CHANNELS.find((c) => c === 'Lainnya' || !used.has(c)) ?? 'Lainnya';
-    onChange([...channels, blankChannel(pick)]);
+    // G3-SEED-ON-ADD — a channel added AFTER the page loaded must be seeded too.
+    // The page merges the baseline prefill exactly once, when `load()` resolves,
+    // over the channels that existed at that moment. A fresh Strategi has NONE
+    // (`createStrategi` seeds no channel), so that merge ran over an empty list
+    // and the row the AM adds a second later was born blank — every PDT figure
+    // the server had already computed (SKU, kampanye, afiliasi, video/live,
+    // chat) silently discarded, and the AM met the submit gate with a wall of
+    // "[data baseline channel belum lengkap]". Seeding HERE, at the moment the
+    // row appears, is what makes the PDT path work on the FIRST save instead of
+    // only after a reload.
+    //
+    // Deliberately the same `mergeBaselinePrefill` the page uses — one rule, so
+    // "only empty fields, never clobber" cannot drift between the two callers.
+    const baru = blankChannel(pick);
+    const seeded = baselinePrefill ? mergeBaselinePrefill([baru], baselinePrefill)[0] : baru;
+    onChange([...channels, seeded]);
     setActiveIdx(channels.length);
   };
 
