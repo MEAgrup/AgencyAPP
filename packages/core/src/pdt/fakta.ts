@@ -1096,7 +1096,10 @@ function tambahAngka(a: number, b: number): number {
 export interface PdtBarisFaktaSkuTtOrders {
   platformProductId: string;
   gmv: number;
+  /** Cacah BARIS PESANAN untuk SKU ini — bukan Σ`Quantity` (lihat docblock). */
   pesananSku: number;
+  /** Σ`Quantity` — UNIT terjual (B33-TIKTOK-UNIT). */
+  produkTerjual: number;
   gmvDariKreator: number;
 }
 
@@ -1109,17 +1112,35 @@ export interface PdtBarisFaktaSkuTtOrders {
  * jadi fungsi ini SATU-SATUNYA yang menjumlahkan lintas-baris (`Map` per
  * `SKU ID`), bukan memetakan 1:1.
  *
- * **`basis = 'dibayar'`**: hanya baris ber-`Order Status` **`Completed`**
- * (dinormalisasi lower-case+trim) yang dihitung — baris status lain (mis.
- * `Unpaid`/`Cancelled`/`Shipped`) DILEWATI SELURUHNYA, tidak menyumbang 0 ke
- * agregat maupun ke `gmv`/`pesanan_sku`/`gmv_dari_kreator`. ⚠️ **Belum
- * diverifikasi ke sample `tt_orders` asli** (dicatat eksplisit di tiket dan
- * `docs/DECISIONS.md`) — literal `'Completed'` diambil dari SATU-SATUNYA
- * nilai yang muncul di fixture repo ini sejauh ini (`fakta.test.ts`,
- * `detect.test.ts`, termasuk baris tersamar `576…`/`17123…` yang tampak
- * berasal dari export asli), bukan dikonfirmasi langsung ke tim PDT.
+ * **`basis = 'dibayar'`**: hanya baris berstatus SELESAI yang dihitung — baris
+ * status lain (dibatalkan, dikirim, belum bayar) DILEWATI SELURUHNYA, tidak
+ * menyumbang 0 ke agregat maupun ke `gmv`/`pesanan_sku`/`produk_terjual`/
+ * `gmv_dari_kreator`. Keputusan "hanya yang selesai" TIDAK berubah sejak
+ * `PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR`; yang berubah label yang dicocokkan.
  *
- * `gmv` = Σ `SKU Subtotal After Discount`, `pesananSku` = Σ `Quantity`,
+ * **DIVERIFIKASI 2026-09-20 ke ekspor asli** (B33-TT-ORDERS-STATUS,
+ * `docs/DECISIONS.md`). Versi sebelumnya mencocokkan literal TUNGGAL
+ * `'Completed'` dan menandai dirinya sendiri "⚠️ belum diverifikasi ke
+ * sample asli". Peringatan itu terbukti: `Semua pesanan-2026-08-10-15_50.csv`
+ * (Avitaskin, Juli 2026, berkas yang SAMA dengan batch produksi #7) memuat
+ * TIGA nilai — `Selesai` (117 baris), `Dibatalkan` (50), `Dikirim` (4) — dan
+ * **tidak pernah `Completed`**. Akibatnya 171 dari 171 baris terbuang dan
+ * modul ini menulis NOL baris fakta, diam-diam, sejak dibangun.
+ *
+ * Bukti bahwa berkasnya memang berisi data (bukan ekspor kosong):
+ * `ekstrakBarisSkuMasterTtOrders` membaca berkas dan kolom kunci yang SAMA
+ * tanpa filter status, dan menghasilkan 16 baris di produksi.
+ *
+ * `STATUS_SELESAI` memuat ejaan Indonesia DAN Inggris: ekspor Seller Center
+ * mengikuti bahasa akun, jadi satu toko berbahasa Inggris harus tetap
+ * terbaca. Menambah ejaan baru ke Set itu aman; memasukkan status yang BELUM
+ * selesai (`Dikirim`/`Shipped`) tidak — itu mengubah arti basis `dibayar`.
+ *
+ * `gmv` = Σ `SKU Subtotal After Discount`, `produkTerjual` = Σ `Quantity`
+ * (UNIT — sebelum B33-TIKTOK-UNIT angka ini ditulis ke kolom `pesanan_sku`,
+ * yang artinya PESANAN; dua hal berbeda, jebakan yang sama persis dengan
+ * `'Produk (…)'` vs `'Pesanan (…)'` di `shopee_parent_sku`), `pesananSku` =
+ * cacah BARIS pesanan untuk SKU itu,
  * `gmvDariKreator` = Σ `SKU Subtotal After Discount` UNTUK baris yang
  * `Creator Handle`-nya terisi (sinyal afiliasi PX, kolom sudah ada sejak
  * G1-01) — kolom skema `numeric`, jadi ini jumlah GMV, bukan cacah baris.
@@ -1127,6 +1148,14 @@ export interface PdtBarisFaktaSkuTtOrders {
  * `ekstrakBarisSkuMasterTtOrders`. Baris ber-`SKU ID` kosong dilewati (bukan
  * baris data sungguhan, sama pola modul lain di paket ini).
  */
+/**
+ * Label `Order Status` yang berarti SELESAI, dinormalisasi lower-case+trim.
+ * Ekspor Seller Center mengikuti bahasa akun, jadi kedua ejaan hidup
+ * berdampingan; `'selesai'` diverifikasi ke ekspor asli 2026-09-20, `'completed'`
+ * dipertahankan supaya toko berbahasa Inggris dan ekspor lama tetap terbaca.
+ */
+const STATUS_SELESAI = new Set(['selesai', 'completed']);
+
 export function ekstrakBarisFaktaSkuTtOrders(
   aoa: readonly (readonly unknown[])[],
   barisHeader: number,
@@ -1139,20 +1168,23 @@ export function ekstrakBarisFaktaSkuTtOrders(
   const iStatus = idx('Order Status');
   const iCreator = idx('Creator Handle');
 
-  const byProduk = new Map<string, { gmv: number; pesananSku: number; gmvDariKreator: number }>();
+  const byProduk = new Map<string, { gmv: number; pesananSku: number; produkTerjual: number; gmvDariKreator: number }>();
   for (const row of aoa.slice(barisHeader)) {
     const platformProductId = iSkuId === -1 ? '' : String(row?.[iSkuId] ?? '').trim();
     if (platformProductId === '') continue;
     const status = iStatus === -1 ? '' : norm(row?.[iStatus]);
-    if (status !== 'completed') continue;
+    if (!STATUS_SELESAI.has(status)) continue;
 
     const subtotal = iSubtotal === -1 ? 0 : parsePdtAngka(row?.[iSubtotal]);
     const qty = iQuantity === -1 ? 0 : parsePdtAngka(row?.[iQuantity]);
     const creatorHandle = iCreator === -1 ? '' : String(row?.[iCreator] ?? '').trim();
 
-    const acc = byProduk.get(platformProductId) ?? { gmv: 0, pesananSku: 0, gmvDariKreator: 0 };
+    const acc = byProduk.get(platformProductId) ?? { gmv: 0, pesananSku: 0, produkTerjual: 0, gmvDariKreator: 0 };
     acc.gmv = tambahAngka(acc.gmv, subtotal);
-    acc.pesananSku = tambahAngka(acc.pesananSku, qty);
+    // Satu baris = satu baris pesanan untuk SKU ini; `Quantity` = unit DI DALAM
+    // baris itu. Memisahkan keduanya adalah inti B33-TIKTOK-UNIT.
+    acc.pesananSku += 1;
+    acc.produkTerjual = tambahAngka(acc.produkTerjual, qty);
     if (creatorHandle !== '') acc.gmvDariKreator = tambahAngka(acc.gmvDariKreator, subtotal);
     byProduk.set(platformProductId, acc);
   }
@@ -1663,6 +1695,8 @@ export function ekstrakBarisShopDailyShopee(aoa: readonly (readonly unknown[])[]
 export interface PdtBarisSkuPeriodTtProductAnalytics {
   platformProductId: string;
   namaProduk: string | null;
+  /** `'Produk terjual'` — UNIT, bukan pesanan (B33-TIKTOK-UNIT). Lihat docblock. */
+  produkTerjual: number | null;
   gmv: number | null;
   gmvDariKreator: number | null;
   gmvVideoPenjual: number | null;
@@ -1694,11 +1728,19 @@ export interface PdtBarisSkuPeriodTtProductAnalytics {
  * berkas ini.
  *
  * Rule 8 whitelist `modules.ts` (`tt_product_analytics.kolomDipanen`):
- * `'Produk terjual'`/`'Status daftar produk'`/`'AOV'` TIDAK dipetakan ke
- * kolom manapun di sini — `'Produk terjual'` TIDAK dipanen modul ini sama
- * sekali (beda dari `shopee_ams_produk`, jadi `produk_terjual` TETAP `null`
- * di `pdt_fact_sku_period` untuk baris TikTok, bukan celah — kolomnya memang
- * tidak pernah masuk whitelist); `'Status daftar produk'` tidak punya kolom
+ * `'Status daftar produk'`/`'AOV'` TIDAK dipetakan ke kolom manapun di sini.
+ *
+ * **`'Produk terjual'` DIPETAKAN sejak B33-TIKTOK-UNIT** (`docs/DECISIONS.md`
+ * 2026-09-20) — paragraf ini dulu berbunyi "TIDAK dipanen modul ini sama
+ * sekali ... bukan celah, kolomnya memang tidak pernah masuk whitelist". Itu
+ * KELIRU: kolomnya ADA di berkas nyata, kolom ke-22 di bawah kelompok
+ * `'Semua'`, dan `header.findIndex` (kecocokan PERTAMA) mengambilnya persis
+ * seperti kolom lain di fungsi ini. Dibaca langsung dari
+ * `product_list_20260701.xlsx`: 58/27/12 untuk tiga produk teratas, selalu
+ * ≥ `'Pesanan SKU'` (57/27/12) — hubungan yang memang harus berlaku antara
+ * UNIT dan PESANAN, dan yang membedakan kolom ini dari `'Pesanan SKU'` yang
+ * sudah dipetakan. Akibat celah itu B-3.3 Top SKU TikTok menampilkan unit
+ * terjual kosong di setiap toko; `'Status daftar produk'` tidak punya kolom
  * skema padanan; `'AOV'` tidak punya kolom skema padanan (sama pola
  * `Estimasi Komisi(Rp)`/`ROI` di `shopee_ams_produk`). **`'Nama'` DIPETAKAN
  * sejak `G2-01-KUADRAN-SKU` (lanjutan, bagian laporan "produk")** — disalin
@@ -1725,6 +1767,7 @@ export function ekstrakBarisTtProductAnalytics(
   const iGmvVideo = idx('GMV dari video penjual');
   const iGmvLive = idx('GMV dari LIVE penjual');
   const iPesananSku = idx('Pesanan SKU');
+  const iProdukTerjual = idx('Produk terjual');
   const iImpresi = idx('Impresi produk');
   const iKlik = idx('Klik produk');
   const iCtr = idx('CTR'); // kolom `CTR` polos MEMANG ada di berkas nyata — bukan salah eja
@@ -1742,6 +1785,7 @@ export function ekstrakBarisTtProductAnalytics(
       gmvVideoPenjual: iGmvVideo === -1 ? null : parsePdtAngka(row?.[iGmvVideo]),
       gmvLivePenjual: iGmvLive === -1 ? null : parsePdtAngka(row?.[iGmvLive]),
       pesananSku: iPesananSku === -1 ? null : parsePdtAngka(row?.[iPesananSku]),
+      produkTerjual: iProdukTerjual === -1 ? null : parsePdtAngka(row?.[iProdukTerjual]),
       impresi: iImpresi === -1 ? null : parsePdtAngka(row?.[iImpresi]),
       klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik]),
       ctr: iCtr === -1 ? null : parsePdtAngka(row?.[iCtr]),

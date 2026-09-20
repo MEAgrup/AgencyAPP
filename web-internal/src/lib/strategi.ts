@@ -978,6 +978,10 @@ export interface StrategiBaselineMonthSuggestion {
   label: string | null;
   gmv: string | null;
   jumlah_pesanan: number | null;
+  /** B1-IKLAN-PER-BULAN — Σ`pdt_fact_ads.biaya` bulan itu, ROAS, dan ACOS %. */
+  ad_spend: string | null;
+  roas: number | null;
+  acos: number | null;
 }
 
 // RAB-12 — attribution WITHIN the TikTok Shop platform, shown as a rincian under

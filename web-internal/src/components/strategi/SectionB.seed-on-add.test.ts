@@ -51,7 +51,7 @@ function prefillShopee(): StrategiBaselinePrefill {
         roas: 3.2,
         ad_spend: '1284330288',
         aov: '119762',
-        baseline_bulan: [{ month_index: 1, label: 'Jul 2026', gmv: '1515002476', jumlah_pesanan: 12801 }],
+        baseline_bulan: [{ month_index: 1, label: 'Jul 2026', gmv: '1515002476', jumlah_pesanan: 12801, ad_spend: null, roas: null, acos: null }],
         gmv_mix: null,
         payload_schema: 'cdps.baseline.shopee.v1',
         payload_terbaca: true,

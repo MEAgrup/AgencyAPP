@@ -2701,7 +2701,7 @@ describeDb('commitUploadBatch (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR) — tt_orders 
     return insertClientPlatform(clientId, 'TikTok Shop', null, akunKontenToko);
   }
 
-  it('menjumlah gmv/pesanan_sku lintas baris ber-SKU sama, sku_id NULL, basis="dibayar"', async () => {
+  it('menjumlah gmv lintas baris ber-SKU sama; produk_terjual = Σ Quantity dan pesanan_sku = cacah baris (B33-TIKTOK-UNIT), sku_id NULL, basis="dibayar"', async () => {
     const cpId = await fixture();
     const berkas = [
       ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
@@ -2716,15 +2716,18 @@ describeDb('commitUploadBatch (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR) — tt_orders 
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       sku_id: null, client_platform_id: cpId, platform_product_id: 'SKU-1', basis: 'dibayar',
-      batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI, pesanan_sku: 3,
+      batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI,
+      // Dua baris pesanan, tiga unit — sebelum B33-TIKTOK-UNIT keduanya `3`.
+      pesanan_sku: 2, produk_terjual: 3,
     });
     expect(Number(rows[0].gmv)).toBe(143000);
     expect(Number(rows[0].gmv_dari_kreator)).toBe(0);
     expect(rows[1].platform_product_id).toBe('SKU-2');
     expect(Number(rows[1].gmv)).toBe(40000);
+    expect(rows[1]).toMatchObject({ pesanan_sku: 1, produk_terjual: 3 });
   });
 
-  it('Order Status selain Completed dilewati SELURUHNYA — tidak menyumbang 0 ke agregat', async () => {
+  it('Order Status selain SELESAI dilewati SELURUHNYA — tidak menyumbang 0 ke agregat', async () => {
     const cpId = await fixture();
     const berkas = [
       ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
@@ -2738,7 +2741,7 @@ describeDb('commitUploadBatch (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR) — tt_orders 
     const rows = await loadFactSkuPeriod(cpId);
     expect(rows).toHaveLength(1);
     expect(Number(rows[0].gmv)).toBe(10000);
-    expect(rows[0].pesanan_sku).toBe(1);
+    expect(rows[0]).toMatchObject({ pesanan_sku: 1, produk_terjual: 1 });
   });
 
   it('gmv_dari_kreator = Σ gmv HANYA baris ber-Creator Handle terisi', async () => {

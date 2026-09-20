@@ -22,7 +22,7 @@
  * depend on run history (the trap HANDOFF_M6ABC_SESI1 §5 warns about).
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { ident, interview as iv, permission, visibility } from '@cdps/core';
+import { ident, interview as iv, pdt as pdtCore, permission, visibility } from '@cdps/core';
 import * as interview from './interview';
 import { createClient, type Sql } from '@cdps/db';
 import {
@@ -4347,9 +4347,12 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       const s = await createStrategi(sql, am(), serviceId, HEADER);
       const prefill = await getBaselinePrefill(sql, am(), s.id);
       const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+      // B1-IKLAN-PER-BULAN: `adSpend`/`roas`/`acos` ikut dibawa tiap baris.
+      // Fixture ini nol baris `pdt_fact_ads`, jadi ketiganya `null` — BUKAN `0`.
+      // Toko yang tidak beriklan tidak boleh tampak "beriklan Rp0".
       expect(tt.baselineBulan).toEqual([
-        { monthIndex: 1, label: 'Jun 2026', gmv: '40000000', jumlahPesanan: 400 },
-        { monthIndex: 2, label: 'Jul 2026', gmv: '50000000', jumlahPesanan: 500 },
+        { monthIndex: 1, label: 'Jun 2026', gmv: '40000000', jumlahPesanan: 400, adSpend: null, roas: null, acos: null },
+        { monthIndex: 2, label: 'Jul 2026', gmv: '50000000', jumlahPesanan: 500, adSpend: null, roas: null, acos: null },
       ]);
 
       // Shopee has zero PDT batches — untouched, still falls back to its own
@@ -4359,6 +4362,64 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       expect(sh.baselineBulan).toEqual([]);
     } finally {
       // Clean up before the shared afterEach deletes client_platforms (FK, no cascade).
+      await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
+
+  // B1-IKLAN-PER-BULAN (`docs/DECISIONS.md` 2026-09-20) — QA pemilik atas PDT
+  // TikTok Shop: "B-1 % Batal / Ad Spend / ROAS / ACOS — apa bisa diisi dari
+  // PDT?". Tiga dari empat bisa, dan datanya sudah lengkap sejak batch pertama
+  // (produksi: 2.093 baris `pdt_fact_ads`, Rp6.540.940). Yang kurang cuma
+  // pembacanya: `BaselineMonthSuggestion` hanya membawa gmv + jumlahPesanan.
+  it('B1-IKLAN-PER-BULAN: adSpend/roas/acos dihitung PER BULAN dari pdt_fact_ads — bukan agregat bulan acuan yang disalin ke semua baris', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batch = async (mulai: string, selesai: string) =>
+      (await sql<{ id: number }[]>`
+        insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+          status, parser_versi, retensi_sampai, dibuat_oleh)
+        values (${clientId}, ${tiktokId}, 'tiktok', ${mulai}::date, ${selesai}::date, 'verified',
+                ${pdtCore.PDT_PARSER_VERSI}, '2099-01-01', 'ZZ-AM')
+        returning id`)[0].id;
+    const batchJun = await batch('2026-06-01', '2026-06-30');
+    const batchJul = await batch('2026-07-01', '2026-07-31');
+
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan)
+      values (${tiktokId}, '2026-06-15', 'net', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '40000000.00', 400),
+             (${tiktokId}, '2026-07-15', 'net', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '50000000.00', 500)`;
+
+    // Dua bulan dengan angka iklan yang SENGAJA berbeda jauh — kalau kode
+    // menyalin agregat bulan acuan ke setiap baris, kedua baris akan kembar
+    // dan tes ini merah.
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
+      values (${tiktokId}, 'tt_ads_product', 'K-JUN-1', '2026-06-01'::date, ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, 1000000, 4000000),
+             (${tiktokId}, 'tt_ads_product', 'K-JUN-2', '2026-06-01'::date, ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, 1000000, 4000000),
+             (${tiktokId}, 'tt_ads_product', 'K-JUL-1', '2026-07-01'::date, ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, 5000000, 10000000)`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+
+      // Juni: biaya 2jt, gmv 8jt ⇒ ROAS 4,00 · ACOS 25,00%
+      expect(tt.baselineBulan[0]).toMatchObject({ label: 'Jun 2026', adSpend: '2000000', roas: 4, acos: 25 });
+      // Juli: biaya 5jt, gmv 10jt ⇒ ROAS 2,00 · ACOS 50,00%
+      expect(tt.baselineBulan[1]).toMatchObject({ label: 'Jul 2026', adSpend: '5000000', roas: 2, acos: 50 });
+
+      // ACOS adalah kebalikan ROAS dihitung dari Σ yang SAMA — keduanya tidak
+      // akan pernah saling bertentangan.
+      for (const m of tt.baselineBulan) {
+        expect(Math.round((m.roas! * m.acos!) * 100) / 100).toBe(100);
+      }
+    } finally {
+      await sql`delete from pdt_fact_ads where client_platform_id = ${tiktokId}`;
       await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
       await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
     }
@@ -4520,11 +4581,12 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     // sebagai 0 (bukan baris fakta sama sekali, beda dengan D yang gmv=0 tegas).
     await sql`
       insert into pdt_fact_sku_period (sku_id, client_platform_id, periode, basis, batch_id, parser_versi,
-        nama_produk, gmv, klik, ctor)
-      values (${skuA.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Serum A', '7000000.00', 500, '0.045'),
-             (${skuB.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Toner B', '2000000.00', 300, '0.030'),
-             (${skuC.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Cream C', '1000000.00', 100, null),
-             (${skuD.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Sabun D', '0.00', 20, null)`;
+        nama_produk, gmv, produk_terjual, klik, ctor)
+      values (${skuA.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Serum A', '7000000.00', 58, 500, '0.045'),
+             (${skuB.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Toner B', '2000000.00', 27, 300, '0.030'),
+             (${skuC.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Cream C', '1000000.00', 12, 100, null),
+             -- Nol TEGAS, bukan null: SKU ini memang nol unit menurut sumbernya.
+             (${skuD.id}, ${tiktokId}, '2026-07-01', 'net', ${batchJul[0].id}, 1, 'Sabun D', '0.00', 0, 20, null)`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);
@@ -4535,13 +4597,18 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       expect(tt.skuAktif).toBe(4);
       expect(tt.skuPareto80).toBe(2);
       expect(tt.skuSlowMoving).toBe(1);
+      // B33-TIKTOK-UNIT — baris-baris ini dulu meng-assert `unitTerjual: null`
+      // untuk SELURUH TikTok, dengan komentar "`tt_product_analytics` memang
+      // tidak memanen `produk_terjual`". Ternyata kolomnya ADA di berkas nyata
+      // (kolom ke-22, grup `'Semua'`), hanya tidak pernah masuk whitelist —
+      // jadi yang dulu dikunci sebagai perilaku benar sebenarnya cacat.
       expect(tt.topSku).toEqual([
-        // `unitTerjual` null di SELURUH baris TikTok: basis `net` ditulis
-        // `tt_product_analytics`, yang memang tidak memanen `produk_terjual`.
-        { nama: 'Serum A', gmv: '7000000', unitTerjual: null, klik: 500, ctorPersen: 4.5 },
-        { nama: 'Toner B', gmv: '2000000', unitTerjual: null, klik: 300, ctorPersen: 3 },
-        { nama: 'Cream C', gmv: '1000000', unitTerjual: null, klik: 100, ctorPersen: null },
-        { nama: 'Sabun D', gmv: '0', unitTerjual: null, klik: 20, ctorPersen: null },
+        { nama: 'Serum A', gmv: '7000000', unitTerjual: 58, klik: 500, ctorPersen: 4.5 },
+        { nama: 'Toner B', gmv: '2000000', unitTerjual: 27, klik: 300, ctorPersen: 3 },
+        { nama: 'Cream C', gmv: '1000000', unitTerjual: 12, klik: 100, ctorPersen: null },
+        // Nol yang SUNGGUHAN dilaporkan sumber tetap `0`, tidak dinaikkan jadi
+        // sel kosong — absen ≠ nol, aturan yang sama di seluruh peringkas fakta.
+        { nama: 'Sabun D', gmv: '0', unitTerjual: 0, klik: 20, ctorPersen: null },
       ]);
 
       // Shopee has zero PDT batches — falls back to its own manual-baseline

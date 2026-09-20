@@ -110,9 +110,9 @@ function prefill(over: Partial<StrategiBaselinePrefill['channels'][number]>): St
         // 1-based, exactly as the server emits (getBaselinePrefill: `i + 1`) and
         // as the DB stores it (`ck_strbl_month` BETWEEN 1 AND 6). Month 1 = oldest.
         baseline_bulan: [
-          { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900 },
-          { month_index: 2, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820 },
-          { month_index: 3, label: 'M-3', gmv: '180000000', jumlah_pesanan: 2050 },
+          { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900, ad_spend: null, roas: null, acos: null },
+          { month_index: 2, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820, ad_spend: null, roas: null, acos: null },
+          { month_index: 3, label: 'M-3', gmv: '180000000', jumlah_pesanan: 2050, ad_spend: null, roas: null, acos: null },
         ],
         gmv_mix: null,
         // B3 — defaults are the HONEST empty payload: schema known, nothing
@@ -173,11 +173,43 @@ describe('mergeBaselinePrefill (RAB-19 warisi yang bersumber saja)', () => {
     // value here would be rejected on save with `[data tidak lengkap …]`.
     expect(ch.baseline.map((m) => m.month_index)).toEqual([1, 2, 3]);
     expect(ch.baseline[2]).toMatchObject({ gmv: '180000000', jumlah_pesanan: '2050' });
-    // The non-sourced per-month cells stay blank — Riset Awal has no per-month
-    // figure for them; the AM fills these.
+    // `% batal` tetap kosong — ia agregat PERIODE di payload, bukan angka per
+    // bulan; diisi di blok terpisah, hanya untuk bulan acuan.
     expect(ch.baseline[0].persen_batal).toBe('');
+    // B1-IKLAN-PER-BULAN — fixture ini nol angka iklan (`ad_spend: null` dst),
+    // jadi selnya tetap kosong. Yang dikunci di sini: `null` dari server
+    // menjadi sel KOSONG, bukan string `"null"` atau `"0"`.
     expect(ch.baseline[0].ad_spend).toBe('');
     expect(ch.baseline[0].roas).toBe('');
+    expect(ch.baseline[0].acos).toBe('');
+  });
+
+  // B1-IKLAN-PER-BULAN (`docs/DECISIONS.md` 2026-09-20) — tiga kolom iklan B-1
+  // sekarang punya sumber (`pdt_fact_ads` per bulan). Aturan yang berlaku untuk
+  // gmv/jumlah_pesanan berlaku sama persis untuk ketiganya.
+  it('mengisi ad_spend/roas/acos per bulan dari prefill — dan TIDAK PERNAH menimpa angka yang sudah AM ketik', () => {
+    const p = prefill({});
+    p.channels[0].baseline_bulan = [
+      { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900, ad_spend: '2000000', roas: 4, acos: 25 },
+      { month_index: 2, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820, ad_spend: '5000000', roas: 2, acos: 50 },
+      { month_index: 3, label: 'M-3', gmv: '180000000', jumlah_pesanan: 2050, ad_spend: null, roas: null, acos: null },
+    ];
+
+    const draft = blank('TikTok Shop');
+    draft.periode_baseline_bulan = '3';
+    // AM sudah mengetik ACOS bulan ke-2 dengan angka yang BEDA dari prefill.
+    draft.baseline = [
+      { month_index: 1, gmv: '', jumlah_pesanan: '', persen_batal: '', ad_spend: '', roas: '', acos: '' },
+      { month_index: 2, gmv: '', jumlah_pesanan: '', persen_batal: '', ad_spend: '', roas: '', acos: '37.5' },
+      { month_index: 3, gmv: '', jumlah_pesanan: '', persen_batal: '', ad_spend: '', roas: '', acos: '' },
+    ];
+
+    const [ch] = mergeBaselinePrefill([draft], p);
+    expect(ch.baseline[0]).toMatchObject({ ad_spend: '2000000', roas: '4', acos: '25' });
+    // Ketikan AM menang; prefill `50` TIDAK mendarat.
+    expect(ch.baseline[1]).toMatchObject({ ad_spend: '5000000', roas: '2', acos: '37.5' });
+    // Bulan tanpa data iklan tetap kosong — bukan `0`, bukan `"null"`.
+    expect(ch.baseline[2]).toMatchObject({ ad_spend: '', roas: '', acos: '' });
   });
 
   it('never clobbers a value the AM already entered', () => {
@@ -350,8 +382,8 @@ describe('mergeBaselinePrefill — B3 (Section B terisi dari satu upload)', () =
       prefill({
         ...TERUKUR,
         baseline_bulan: [
-          { month_index: 1, label: 'Jul 2026', gmv: '90000000', jumlah_pesanan: 900 },
-          { month_index: 2, label: 'Agu 2026', gmv: '100000000', jumlah_pesanan: 1000 },
+          { month_index: 1, label: 'Jul 2026', gmv: '90000000', jumlah_pesanan: 900, ad_spend: null, roas: null, acos: null },
+          { month_index: 2, label: 'Agu 2026', gmv: '100000000', jumlah_pesanan: 1000, ad_spend: null, roas: null, acos: null },
         ],
         periode_baseline_bulan: 2,
       }),
