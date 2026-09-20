@@ -323,11 +323,31 @@ describeDb('bacaPeriodeTerverifikasiTerbaru (G3-01, dipakai G3-07)', () => {
     await insertBatchPeriode(clientId, cpId, 'shopee', '2026-08-01', '2026-08-31', 'ditolak');
 
     const hasil = await bacaPeriodeTerverifikasiTerbaru(sql, cpId, 6);
+    // `tanggalUnggah` = tanggal `dibuat_pada` batch (Asia/Jakarta), dipakai
+    // `getBaselinePrefill` sebagai fallback B-0.6 "tanggal ambil data". Fixture
+    // ini tidak mengatur `dibuat_pada`, jadi urutannya yang di-assert persis di
+    // sini; nilainya diuji terhadap sumbernya sendiri di tes berikutnya.
     expect(hasil).toEqual([
-      { periodeAwalBulan: '2026-05-01', batchId: batchMei, parserVersi: 1 },
-      { periodeAwalBulan: '2026-06-01', batchId: batchJun, parserVersi: 1 },
-      { periodeAwalBulan: '2026-07-01', batchId: batchJul, parserVersi: 1 },
+      { periodeAwalBulan: '2026-05-01', batchId: batchMei, parserVersi: 1, tanggalUnggah: expect.any(String) },
+      { periodeAwalBulan: '2026-06-01', batchId: batchJun, parserVersi: 1, tanggalUnggah: expect.any(String) },
+      { periodeAwalBulan: '2026-07-01', batchId: batchJul, parserVersi: 1, tanggalUnggah: expect.any(String) },
     ]);
+  });
+
+  it('membawa `tanggalUnggah` dari `dibuat_pada` batch (fallback B-0.6 tanggal ambil data)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const batchJul = await insertBatchPeriode(clientId, cpId, 'shopee', '2026-07-01', '2026-07-31', 'verified');
+
+    // Dibandingkan ke SUMBERNYA, bukan ke tanggal yang ditulis tangan di tes:
+    // tanggal hard-coded akan pecah tiap kali CI melintasi tengah malam WIB.
+    const [{ tgl }] = await sql<{ tgl: string }[]>`
+      select (dibuat_pada at time zone 'Asia/Jakarta')::date::text as tgl
+        from pdt_upload_batch where id = ${batchJul}`;
+    const [hasil] = await bacaPeriodeTerverifikasiTerbaru(sql, cpId, 6);
+    expect(hasil.tanggalUnggah).toBe(tgl);
+    expect(hasil.tanggalUnggah).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('membatasi ke `limit` batch TERBARU (bukan tertua) saat lebih banyak tersedia', async () => {
@@ -340,8 +360,8 @@ describeDb('bacaPeriodeTerverifikasiTerbaru (G3-01, dipakai G3-07)', () => {
 
     const hasil = await bacaPeriodeTerverifikasiTerbaru(sql, cpId, 2);
     expect(hasil).toEqual([
-      { periodeAwalBulan: '2026-06-01', batchId: batchJun, parserVersi: 1 },
-      { periodeAwalBulan: '2026-07-01', batchId: batchJul, parserVersi: 1 },
+      { periodeAwalBulan: '2026-06-01', batchId: batchJun, parserVersi: 1, tanggalUnggah: expect.any(String) },
+      { periodeAwalBulan: '2026-07-01', batchId: batchJul, parserVersi: 1, tanggalUnggah: expect.any(String) },
     ]);
   });
 
