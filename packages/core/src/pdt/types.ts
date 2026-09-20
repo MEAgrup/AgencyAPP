@@ -16,8 +16,23 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  * per-modul — `pdt_parser_modul.versi` sudah memegang versi PER MODUL).
  * Naik hanya saat pipeline (deteksi/parse/identitas/periode) berubah dengan
  * cara yang mengubah hasil baris fakta — bukan setiap commit kode.
+ *
+ * Riwayat:
+ *   1 — G1-09 sub-langkah 2a, pipeline awal.
+ *   2 — B33-PARENT-SKU (PR #476, `docs/DECISIONS.md` 2026-09-20):
+ *       `shopee_parent_sku` mulai memanen lima kolom baru DAN menulis
+ *       `pdt_fact_sku_period` basis `dibuat`+`siap_dikirim`. Berkas yang
+ *       SAMA karena itu melahirkan baris fakta yang BERBEDA sebelum dan
+ *       sesudahnya — persis syarat kenaikan di paragraf atas.
+ *
+ * Kenaikan ini BUKAN kosmetik: `planPdtReparseTick` memilih batch lewat
+ * `parser_versi < PDT_PARSER_VERSI`, jadi selama angkanya tetap 1 predikat
+ * itu KOSONG dan tidak satu pun batch lama pernah memanen writer baru
+ * (keputusan G1-11: "nol biaya pada hari biasa ... otomatis memproses
+ * backlog begitu ia naik"). Menambah writer tanpa menaikkan angka ini =
+ * fitur yang hanya berlaku untuk batch yang diunggah sesudahnya.
  */
-export const PDT_PARSER_VERSI = 1;
+export const PDT_PARSER_VERSI = 2;
 
 /**
  * Satu grup AND/NOT: seluruh `must` harus muncul (cocok substring, tanpa
