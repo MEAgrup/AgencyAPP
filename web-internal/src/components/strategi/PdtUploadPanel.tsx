@@ -62,6 +62,7 @@
  */
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { pdtUploadHref } from '@/lib/pdt-deeplink';
 import type { StrategiBaselinePrefill } from '@/lib/strategi';
 
@@ -76,6 +77,12 @@ export default function PdtUploadPanel({
   prefill: StrategiBaselinePrefill | null;
 }) {
   const channels = prefill?.channels ?? [];
+  // G1-KEMBALI — halaman Upload PDT adalah jalan sehala: begitu batch tersimpan,
+  // AM harus menebak jalan pulang. Kita titipkan halaman Strategi ini sebagai
+  // `?dari=`, jadi kartu hasil di sana bisa menawarkan tautan balik yang tepat.
+  // `usePathname()` (bukan URL penuh) sudah cukup dan otomatis aman: ia selalu
+  // jalur internal, dan `pdtUploadHref` tetap memvalidasinya sekali lagi.
+  const kembali = usePathname();
 
   return (
     <section
@@ -95,7 +102,7 @@ export default function PdtUploadPanel({
         </span>
         <span style={{ flex: 1 }} />
         {channels.length === 0 && (
-          <Link href={pdtUploadHref(clientId)} className="btn btnGhost btnSm">
+          <Link href={pdtUploadHref(clientId, null, kembali)} className="btn btnGhost btnSm">
             Buka Upload PDT
           </Link>
         )}
@@ -134,7 +141,7 @@ export default function PdtUploadPanel({
           {channels.map((c) => (
             <Link
               key={c.client_platform_id}
-              href={pdtUploadHref(clientId, c.client_platform_id)}
+              href={pdtUploadHref(clientId, c.client_platform_id, kembali)}
               className="btn btnGhost btnSm"
             >
               Upload PDT — {c.platform}

@@ -32,8 +32,10 @@ import RepeatList from './RepeatList';
 import {
   ACCESS_KINDS,
   ACCESS_STATES,
-  BUSINESS_MODELS,
+  BUSINESS_MODEL_LABEL,
   PRICE_POSITIONS,
+  konteksPrefillTerisi,
+  modelBisnisPilihan,
   STOCK_CAPACITIES,
   type AccessChannel,
   type AccessKind,
@@ -43,6 +45,7 @@ import {
   type InheritedKonteks,
   type PricePosition,
   type StockCapacity,
+  type StrategiPrefill,
   type StrategiAkses,
   type StrategiAksesBody,
   type StrategiDecisionMaker,
@@ -192,12 +195,30 @@ export function aksesDraftToBody(akses: AksesDraft[]): StrategiAksesBody[] {
 
 // ---- Labels ---------------------------------------------------------------
 
-const BUSINESS_MODEL_LABELS: Record<BusinessModel, string> = {
-  produsen: 'Produsen',
-  brand_owner: 'Brand Owner',
-  distributor: 'Distributor',
-  reseller: 'Reseller',
-};
+/**
+ * A2-MODEL-BISNIS-6 — label A-2 tidak lagi ditulis ulang di sini. Ia memakai
+ * `BUSINESS_MODEL_LABEL` bersama supaya teks yang dilihat AM di Strategi sama
+ * persis dengan pilihan yang ia jawab di Interview (`MODEL_BISNIS_OPTIONS`);
+ * dua daftar label terpisah untuk satu enum adalah cara paling cepat membuat
+ * "Distributor resmi" di satu layar jadi "Distributor" di layar berikutnya.
+ */
+
+/**
+ * Badge "terisi dari Interview" untuk A-2/A-3. Sengaja BEDA dari cermin
+ * read-only A-1/A-5/A-8/A-10/A-12: dua field ini tetap bisa diubah AM, jadi
+ * badge-nya menjelaskan ASAL nilai, bukan larangan mengubah.
+ */
+function BadgeDariInterview() {
+  return (
+    <span
+      className="badge badge-gray"
+      style={{ fontWeight: 400, fontSize: 11, marginLeft: 6 }}
+      title="Nilai diambil dari jawaban Interview. Boleh diubah di sini — perubahan tidak dikirim balik ke Interview."
+    >
+      terisi dari Interview
+    </span>
+  );
+}
 
 const PRICE_POSITION_LABELS: Record<PricePosition, string> = {
   premium: 'Premium',
@@ -291,6 +312,7 @@ export default function SectionA({
   detail,
   draft,
   inherited,
+  prefill,
   onChange,
   disabled,
 }: {
@@ -298,6 +320,13 @@ export default function SectionA({
   draft: KonteksDraft;
   /** Read-only A-1/A-5/A-8/A-10/A-12 values inherited from the Interview (§3.A). */
   inherited: InheritedKonteks;
+  /**
+   * Usulan Interview mentah — dipakai HANYA untuk membadge A-2/A-3 yang
+   * nilainya memang datang dari sana. Pengisiannya sendiri terjadi di halaman
+   * (`mergeKonteksPrefill`), bukan di sini: komponen ini tidak boleh menulis ke
+   * draft sebagai efek samping render.
+   */
+  prefill: StrategiPrefill | null;
   onChange: (patch: Partial<KonteksDraft>) => void;
   disabled: boolean;
 }) {
@@ -369,6 +398,8 @@ export default function SectionA({
   // menghitung berapa yang masih kosong. Dua daftar terpisah akan lepas sinkron
   // diam-diam — badge "belum diisi" lalu berbohong.
   const cermin = CERMIN_INTERVIEW.map((c) => ({ ...c, value: nilaiCermin[c.kode] }));
+  // A-2/A-3: apakah nilai yang sekarang terpampang memang berasal dari Interview.
+  const dariInterview = konteksPrefillTerisi(draft, prefill);
   const kosongCermin = cermin.filter((c) => !c.value || c.value.trim() === '').length;
 
   return (
@@ -413,15 +444,17 @@ export default function SectionA({
         <div className="cardHeader">A-2 / A-4 · Model Bisnis &amp; Posisi Harga</div>
         <div className="formRow">
           <label className="field">
-            <span className="muted" style={{ fontSize: 12 }}>Model bisnis (A-2)</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Model bisnis (A-2){dariInterview.a2 && <BadgeDariInterview />}
+            </span>
             <select
               value={draft.model_bisnis}
               disabled={disabled}
               onChange={(e) => onChange({ model_bisnis: e.target.value as BusinessModel })}
             >
               <option value="">— pilih —</option>
-              {BUSINESS_MODELS.map((v) => (
-                <option key={v} value={v}>{BUSINESS_MODEL_LABELS[v]}</option>
+              {modelBisnisPilihan(draft.model_bisnis).map((v) => (
+                <option key={v} value={v}>{BUSINESS_MODEL_LABEL[v] ?? v}</option>
               ))}
             </select>
           </label>
@@ -448,6 +481,7 @@ export default function SectionA({
         </span>
         <span className="muted" style={{ fontSize: 12, display: 'block' }}>
           Margin kotor rata-rata hero SKU (%). Hanya terlihat internal.
+          {dariInterview.a3 && <BadgeDariInterview />}
         </span>
         <input
           type="number"

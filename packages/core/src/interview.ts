@@ -1059,7 +1059,18 @@ export const PREFILL_MAPPING: readonly PrefillEntry[] = [
   { interviewField: 'B2-1', strategiField: 'A-1' },
   { interviewField: 'B1-4', strategiField: 'A-2' },
   { interviewField: 'B2-8', strategiField: 'A-3', catatan: 'margin KOTOR (not net)' },
-  { interviewField: 'B3-2', strategiField: 'A-4' },
+  // A-4 (posisi harga) SENGAJA tidak ada di sini. Sampai 2026-09-20 baris ini
+  // berbunyi `{ interviewField: 'B3-2', strategiField: 'A-4' }` — menunjuk field
+  // key yang TIDAK PERNAH ADA di katalog Interview, jadi `resolveStrategiPrefill`
+  // selalu melewatinya (`answers.get('B3-2')` selalu undefined) dan A-4 tidak
+  // pernah terisi. Field harga yang benar-benar ditanyakan adalah `B3-3` "Ruang
+  // harga" (masih_ada_ruang / terbatas / tidak_ada) — itu HEADROOM harga, konsep
+  // yang berbeda dari `posisi_harga` Strategi (premium / mid / budget /
+  // price_fighter), jadi memetakannya ke A-4 akan mengarang jawaban.
+  //
+  // Ketokan pemilik 2026-09-20: A-4 tetap diisi manual di Strategi dan baris
+  // matinya dicabut, supaya tidak ada lagi yang mengira A-4 seharusnya otomatis.
+  // docs/DECISIONS.md "A4-POSISI-HARGA-MANUAL".
   { interviewField: 'B3-1', strategiField: 'A-5' },
   { interviewField: 'B2-12', strategiField: 'A-6' },
   { interviewField: 'B2-14', strategiField: 'A-7' },

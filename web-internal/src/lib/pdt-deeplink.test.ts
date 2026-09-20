@@ -25,6 +25,8 @@ import {
   labelKlienPdt,
   opsiKlienPdt,
   pdtUploadHref,
+  jalurKembaliAman,
+  bacaParamKembali,
   platformDipakai,
   type PdtClientRow,
 } from './pdt-deeplink';
@@ -196,5 +198,90 @@ describe('tautan STRG → Upload PDT benar-benar terpasang di kedua ujung', () =
     expect(src).toContain('opsiKlienPdt');
     // `useSearchParams` menuntut batas <Suspense> saat prerender.
     expect(src).toContain('<Suspense');
+  });
+});
+
+describe('jalurKembaliAman (G1-KEMBALI — gerbang open-redirect)', () => {
+  it('menerima jalur internal absolut', () => {
+    expect(jalurKembaliAman('/account')).toBe('/account');
+    expect(jalurKembaliAman('/account/strategi/STRG-202609-0008')).toBe(
+      '/account/strategi/STRG-202609-0008',
+    );
+  });
+
+  it('menerima jalur internal dengan query dan fragment', () => {
+    expect(jalurKembaliAman('/account/strategi/STRG-1?tab=B#b1')).toBe(
+      '/account/strategi/STRG-1?tab=B#b1',
+    );
+  });
+
+  it('memangkas spasi di tepi sebelum memutuskan', () => {
+    expect(jalurKembaliAman('  /account  ')).toBe('/account');
+  });
+
+  it('menolak kosong / null / undefined', () => {
+    expect(jalurKembaliAman('')).toBeNull();
+    expect(jalurKembaliAman('   ')).toBeNull();
+    expect(jalurKembaliAman(null)).toBeNull();
+    expect(jalurKembaliAman(undefined)).toBeNull();
+  });
+
+  it('menolak protocol-relative — browser membacanya sebagai host lain', () => {
+    expect(jalurKembaliAman('//evil.test/x')).toBeNull();
+  });
+
+  it('menolak backslash yang menyamar jadi protocol-relative', () => {
+    expect(jalurKembaliAman('/\\evil.test')).toBeNull();
+  });
+
+  it('menolak URL absolut apa pun skemanya', () => {
+    expect(jalurKembaliAman('https://evil.test')).toBeNull();
+    expect(jalurKembaliAman('javascript:alert(1)')).toBeNull();
+  });
+
+  it('menolak jalur relatif (tidak diawali garis miring)', () => {
+    expect(jalurKembaliAman('account')).toBeNull();
+    expect(jalurKembaliAman('../account')).toBeNull();
+  });
+
+  it('menolak karakter kontrol dan spasi di tengah', () => {
+    expect(jalurKembaliAman('/account\nSet-Cookie: x=1')).toBeNull();
+    expect(jalurKembaliAman('/account /x')).toBeNull();
+  });
+});
+
+describe('pdtUploadHref — parameter dari', () => {
+  it('menyertakan dari bila jalurnya aman', () => {
+    expect(pdtUploadHref('CLI-202609-0021', 59, '/account/strategi/STRG-1')).toBe(
+      '/account/pdt/upload?client=CLI-202609-0021&platform=59&dari=%2Faccount%2Fstrategi%2FSTRG-1',
+    );
+  });
+
+  it('membuang dari yang tidak aman, bukan meneruskannya', () => {
+    expect(pdtUploadHref('CLI-202609-0021', null, '//evil.test')).toBe(
+      '/account/pdt/upload?client=CLI-202609-0021',
+    );
+  });
+
+  it('tanpa argumen dari, tautannya sama persis seperti sebelumnya', () => {
+    expect(pdtUploadHref('CLI-202609-0021', 59)).toBe(
+      '/account/pdt/upload?client=CLI-202609-0021&platform=59',
+    );
+  });
+});
+
+describe('bacaParamKembali', () => {
+  it('membaca lewat gerbang yang sama', () => {
+    const q = new URLSearchParams({ dari: '/account' });
+    expect(bacaParamKembali((k) => q.get(k))).toBe('/account');
+  });
+
+  it('null bila parameternya tidak aman', () => {
+    const q = new URLSearchParams({ dari: 'https://evil.test' });
+    expect(bacaParamKembali((k) => q.get(k))).toBeNull();
+  });
+
+  it('null bila parameternya tidak ada', () => {
+    expect(bacaParamKembali(() => null)).toBeNull();
   });
 });
