@@ -154,7 +154,7 @@ Design note: **D-8 (asumsi target) is deliberately shareable.** The assumptions 
 |---|---|---|---|
 | B-3.1 | Total SKU listed / SKU aktif berjualan | Number × 2 | W |
 | B-3.2 | Berapa SKU yang menyumbang 80% GMV? (Pareto) | Number | W |
-| B-3.3 | Top 5 SKU: nama, GMV, unit terjual, harga jual, margin % | Repeatable struct (5) | W |
+| B-3.3 | Top 5 SKU: nama, GMV, unit terjual, harga jual, margin % — **⟳ revisi 2026-09-20 (DECISIONS B33-HARGA-JUAL): `harga jual` dibaca sebagai harga RATA-RATA REALISASI dan kini TURUNAN read-only = `GMV ÷ unit terjual`, dihitung server, bukan lagi ketikan AM. Bagi-nol → `—`. `nama`/`GMV`/`unit terjual` terisi otomatis dari PDT bila ada; `margin %` tetap manual (butuh HPP).** | Repeatable struct (5) | W |
 | B-3.4 | Jumlah SKU slow-moving / nol penjualan 60 hari | Number | W |
 | B-3.5 | SKU dengan stok kritis / sering habis | Repeatable text | O |
 | B-3.6 | Kualitas listing (%) — **⟳ revisi 2026-08-24 (DECISIONS): kini TURUNAN read-only = `SKU aktif ÷ SKU terdaftar × 100`, dihitung server, bukan lagi observasi manual "SKU dengan foto & deskripsi layak". Bagi-nol → `—`.** | Auto | A |

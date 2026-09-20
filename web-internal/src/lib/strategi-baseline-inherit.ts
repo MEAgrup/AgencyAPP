@@ -166,10 +166,14 @@ function mergeSectionBFigures(
   // angka yang sudah ada, bukan menahan tebakan. `txt` menjaga `null` (TikTok
   // basis `net`, jalur payload Riset Awal) tetap jadi sel kosong.
   //
-  // `harga_jual` dan `margin_persen` TETAP kosong: margin butuh HPP yang tidak
-  // ada di export mana pun, dan maksud "harga jual" B-3.3 masih pertanyaan
-  // terbuka (`docs/DECISIONS.md` 2026-09-20) — angka yang masuk akal di tempat
-  // yang salah lebih berbahaya daripada sel kosong yang AM lihat dan isi.
+  // `harga_jual` dibiarkan '' DENGAN SENGAJA meski ia kini terisi: sejak ketokan
+  // pemilik 2026-09-20 (DECISIONS B33-HARGA-JUAL opsi (a)) ia TURUNAN read-only
+  // = GMV ÷ unit terjual, dihitung form saat render dan dihitung ULANG server
+  // saat simpan (`computeHargaRataRata`). Menyemainya di sini akan melahirkan
+  // sumber kebenaran KEDUA yang bisa menyimpang dari rumusnya — jadi yang
+  // disemai cukup dua masukannya (`gmv` + `unit_terjual`), dan turunannya
+  // mengikuti sendiri. `margin_persen` tetap kosong: ia butuh HPP, yang tidak
+  // ada di export mana pun dan hanya klien yang tahu.
   if (next.top_sku.length === 0 && s.top_sku.length > 0) {
     next.top_sku = s.top_sku.map((t) => ({
       nama: t.nama,
@@ -257,7 +261,7 @@ const FIELD_BERSUMBER: readonly [
  * two apart will wait for an auto-fill that is never coming.
  */
 export const SELALU_MANUAL: readonly string[] = [
-  'B-3.3 harga jual & margin % per SKU (HPP tidak ada di export mana pun; "harga jual" sendiri masih pertanyaan terbuka PRD)',
+  'B-3.3 margin % per SKU (butuh HPP — tidak ada di export mana pun, hanya klien yang tahu)',
   'B-4.1/B-4.3 rating, jumlah ulasan, % pesanan terlambat (tidak ada export-nya di platform mana pun)',
   'B-5.1/B-5.2 belanja iklan & ROAS per bulan (payload hanya punya agregat periode)',
   'B-6.3 komisi open & target',

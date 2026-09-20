@@ -153,6 +153,7 @@ import {
   syncAiOptimizerSkuRevision,
   targetKey,
   trenBaseline,
+  computeHargaRataRata,
   updateHeader,
   type ChannelInput,
 } from './strategi';
@@ -209,6 +210,32 @@ describe('permission predicates (§7)', () => {
 describe('targetKey', () => {
   it('is the shape D-9 mappings are stored in', () => {
     expect(targetKey('gmv', 'Shopee', 3)).toBe('gmv:Shopee:3');
+  });
+});
+
+describe('computeHargaRataRata — B-3.3 harga rata-rata realisasi', () => {
+  it('membagi GMV dengan unit terjual dan membulatkan ke 2 desimal', () => {
+    expect(computeHargaRataRata('52000000.00', 610)).toBe('85245.90');
+    expect(computeHargaRataRata('8000000', 80)).toBe('100000.00');
+  });
+
+  it('penyebut nol/absen ⇒ null, bukan error dan bukan 0 (house rule #7)', () => {
+    expect(computeHargaRataRata('8000000', 0)).toBeNull();
+    expect(computeHargaRataRata('8000000', null)).toBeNull();
+    expect(computeHargaRataRata('8000000', undefined)).toBeNull();
+    // Unit negatif tidak bermakna — diperlakukan sama seperti nol.
+    expect(computeHargaRataRata('8000000', -5)).toBeNull();
+  });
+
+  it('GMV kosong/absen/bukan angka ⇒ null', () => {
+    expect(computeHargaRataRata('', 80)).toBeNull();
+    expect(computeHargaRataRata('   ', 80)).toBeNull();
+    expect(computeHargaRataRata(null, 80)).toBeNull();
+    expect(computeHargaRataRata('abc', 80)).toBeNull();
+  });
+
+  it('GMV nol adalah fakta yang sah (SKU nol omzet), bukan data hilang', () => {
+    expect(computeHargaRataRata('0', 80)).toBe('0.00');
   });
 });
 
@@ -873,6 +900,33 @@ describeDb('Section B — Rules 4, 5 and 5a', () => {
       { ...SHOPEE, skuListed: 0, skuAktif: 0, skuPareto80: 0 },
     ]);
     expect(zeroListed.channels[0].listingLayakPersen).toBeNull();
+  });
+
+  // Ketokan pemilik 2026-09-20 (DECISIONS B33-HARGA-JUAL opsi (a)): harga jual
+  // B-3.3 = harga RATA-RATA REALISASI, GMV ÷ unit terjual. Karena ia terhitung,
+  // ia tidak boleh lagi diketik — house rule #4, pola yang SAMA dengan B-3.6 di
+  // atas. Tes ini mengunci "bukan dari wire", bukan sekadar "angkanya benar".
+  it('B-3.3 harga jual TURUNAN dari GMV ÷ unit terjual, bukan dari wire', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    // Fixture: gmv 52.000.000, unit 610 ⇒ 85.245,90. Wire membawa 85.000,00 —
+    // sengaja DEKAT tapi BEDA, supaya tes gagal kalau nilai wire yang lolos.
+    const saved = await saveChannels(sql, am(), s.id, [SHOPEE]);
+    expect(saved.channels[0].topSku[0].hargaJual).toBe('85245.90');
+    expect(saved.channels[0].topSku[0].hargaJual).not.toBe('85000.00');
+    // Dua masukannya tersimpan apa adanya — hanya turunannya yang dihitung ulang.
+    expect(saved.channels[0].topSku[0].gmv).toBe('52000000.00');
+    expect(saved.channels[0].topSku[0].unitTerjual).toBe(610);
+  });
+
+  it('B-3.3 harga jual: unit terjual nol tidak meledak dan tidak mengarang harga (house rule #7)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const nol = { ...SHOPEE.topSku![0], unitTerjual: 0, hargaJual: '999999.00' };
+    const saved = await saveChannels(sql, am(), s.id, [{ ...SHOPEE, topSku: [nol] }]);
+    // Kolomnya non-null, jadi tersimpan '0'; yang membacanya menampilkan `—`.
+    // Yang penting: angka wire 999.999 TIDAK lolos jadi "harga" yang dikira fakta.
+    expect(saved.channels[0].topSku[0].hargaJual).toBe('0');
   });
 
   it('a mistyped Section B figure fails with a message that NAMES the field (owner QA 2026-08-24)', async () => {
