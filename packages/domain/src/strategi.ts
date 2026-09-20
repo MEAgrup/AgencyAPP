@@ -2242,10 +2242,22 @@ export async function getBaselinePrefill(
     let pdtChatResponseRatePersen: number | null = null;
     let pdtChatResponseMenit: number | null = null;
     let pdtPeriodeReferensi: string | null = null;
+    // B-0.6 "tanggal ambil data" untuk baseline yang bersumber PDT. Jalur lama
+    // membacanya HANYA dari `riset_awal_sumber_berkas.tanggal_ambil`, dan jalur
+    // PDT tidak pernah mengisi kolom itu (15/15 baris null pada klien uji coba
+    // pertama) — akibatnya B-0.6 memblokir submit dengan "jendela baseline
+    // wajib dilengkapi" untuk SETIAP toko yang baseline-nya datang dari PDT,
+    // selamanya, tanpa cara mengisinya otomatis. Tanggal unggah batch acuan
+    // adalah jawaban yang benar: batch ITULAH sumbernya, dan tanggalnya
+    // immutable + bisa dihitung ulang dari `pdt_upload_batch`.
+    let pdtTanggalAmbilData: string | null = null;
     // G3-05 (gmvAffiliatePersen) butuh GMV toko periode yang sama — dihoist di
     // sini supaya tidak query `bacaFaktaShopDaily` dua kali untuk baris yang sama.
     let pdtGmvTokoBulan: number | null = null;
     if (periodeReferensiPdtSaran !== null) {
+      pdtTanggalAmbilData =
+        periodeReferensiOpsi.find((p) => p.periodeAwalBulan === periodeReferensiPdtSaran)
+          ?.tanggalUnggah ?? null;
       const fakta = await pdtPrefill.bacaFaktaShopDaily(sql, clientPlatformIdNum, periodeReferensiPdtSaran, basisShopDaily);
       if (fakta !== null) {
         const d = new Date(`${periodeReferensiPdtSaran}T00:00:00Z`);
@@ -2392,7 +2404,7 @@ export async function getBaselinePrefill(
       cakupanRiwayat: a.cakupan_riwayat,
       alasanPeriodePendekWajib,
       sumberData: prov && prov.nama.length > 0 ? prov.nama.join(', ') : null,
-      tanggalAmbilData: prov?.tanggal ?? null,
+      tanggalAmbilData: prov?.tanggal ?? pdtTanggalAmbilData,
       lampiran: prov && prov.nama.length > 0 ? prov.nama.join(', ') : null,
       roas: pdtRingkasIklan?.roas ?? numOrNullLoose(payload.iklan?.roas),
       adSpend: pdtRingkasIklan?.adSpend ?? (adSpendNum === null ? null : String(adSpendNum)),

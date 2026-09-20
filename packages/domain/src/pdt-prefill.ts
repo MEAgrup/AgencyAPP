@@ -500,6 +500,14 @@ export async function bacaFaktaLayananChat(
 export interface PdtPeriodeTerverifikasi extends PdtSumberBatch {
   /** Awal bulan (`pdt_upload_batch.periode_mulai`) — dipakai sebagai `periodeAwalBulan` ke pembaca lain di modul ini. */
   periodeAwalBulan: string;
+  /**
+   * Tanggal batch ini diunggah (`pdt_upload_batch.dibuat_pada`, dipotong ke
+   * tanggal). Inilah "tanggal ambil data" untuk baseline yang bersumber PDT:
+   * `riset_awal_sumber_berkas.tanggal_ambil` tidak pernah diisi di jalur PDT,
+   * jadi tanpa ini B-0.6 tidak pernah bisa lengkap otomatis — lihat
+   * `getBaselinePrefill`.
+   */
+  tanggalUnggah: string;
 }
 
 /**
@@ -519,8 +527,11 @@ export async function bacaPeriodeTerverifikasiTerbaru(
   clientPlatformId: number,
   limit: number,
 ): Promise<PdtPeriodeTerverifikasi[]> {
-  const rows = await sql<{ periode_awal_bulan: string; batch_id: number; parser_versi: number }[]>`
-    select periode_mulai::text as periode_awal_bulan, id as batch_id, parser_versi
+  const rows = await sql<
+    { periode_awal_bulan: string; batch_id: number; parser_versi: number; tanggal_unggah: string }[]
+  >`
+    select periode_mulai::text as periode_awal_bulan, id as batch_id, parser_versi,
+           (dibuat_pada at time zone 'Asia/Jakarta')::date::text as tanggal_unggah
       from pdt_upload_batch
      where client_platform_id = ${clientPlatformId}
        and status = 'verified'
@@ -528,7 +539,12 @@ export async function bacaPeriodeTerverifikasiTerbaru(
      limit ${limit}`;
 
   return rows
-    .map((r) => ({ periodeAwalBulan: r.periode_awal_bulan, batchId: r.batch_id, parserVersi: r.parser_versi }))
+    .map((r) => ({
+      periodeAwalBulan: r.periode_awal_bulan,
+      batchId: r.batch_id,
+      parserVersi: r.parser_versi,
+      tanggalUnggah: r.tanggal_unggah,
+    }))
     .reverse();
 }
 
