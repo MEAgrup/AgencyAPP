@@ -1243,8 +1243,10 @@ export default function SectionB({
             {sugg && sugg.baseline_bulan.length > 0 && (
               <>
                 {' '}
-                <strong>GMV &amp; Pesanan</strong> terisi dari Riset Awal — % batal, ad spend, ROAS,
-                dan ACOS tetap diisi manual (Riset Awal hanya kasih angka agregat, bukan per bulan).
+                <strong>GMV &amp; Pesanan</strong> terisi (dan terkunci) dari Riset Awal.{' '}
+                <strong>% Batal, Ad Spend, ROAS, dan ACOS</strong> ikut terisi otomatis per bulan
+                bila PDT punya angkanya (B1-IKLAN-PER-BULAN &amp; B1-BATAL-TIKTOK) — kolomnya tetap
+                bisa diubah, dan nilai yang sudah Anda ketik tidak pernah ditimpa.
               </>
             )}
           </p>
