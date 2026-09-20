@@ -4350,9 +4350,11 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       // B1-IKLAN-PER-BULAN: `adSpend`/`roas`/`acos` ikut dibawa tiap baris.
       // Fixture ini nol baris `pdt_fact_ads`, jadi ketiganya `null` — BUKAN `0`.
       // Toko yang tidak beriklan tidak boleh tampak "beriklan Rp0".
+      // B1-BATAL-TIKTOK: `persenBatal` aturan yang sama — fixture ini nol baris
+      // ber-`pesanan_dibatalkan`, jadi `null`, bukan "0% batal".
       expect(tt.baselineBulan).toEqual([
-        { monthIndex: 1, label: 'Jun 2026', gmv: '40000000', jumlahPesanan: 400, adSpend: null, roas: null, acos: null },
-        { monthIndex: 2, label: 'Jul 2026', gmv: '50000000', jumlahPesanan: 500, adSpend: null, roas: null, acos: null },
+        { monthIndex: 1, label: 'Jun 2026', gmv: '40000000', jumlahPesanan: 400, adSpend: null, roas: null, acos: null, persenBatal: null },
+        { monthIndex: 2, label: 'Jul 2026', gmv: '50000000', jumlahPesanan: 500, adSpend: null, roas: null, acos: null, persenBatal: null },
       ]);
 
       // Shopee has zero PDT batches — untouched, still falls back to its own
@@ -4420,6 +4422,136 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       }
     } finally {
       await sql`delete from pdt_fact_ads where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
+
+  it('B1-BATAL-TIKTOK: persenBatal PER BULAN dari pesanan_dibatalkan ÷ pesanan_penyebut_batal — penyebutnya BUKAN kolom `pesanan`', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batch = async (mulai: string, selesai: string) =>
+      (await sql<{ id: number }[]>`
+        insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+          status, parser_versi, retensi_sampai, dibuat_oleh)
+        values (${clientId}, ${tiktokId}, 'tiktok', ${mulai}::date, ${selesai}::date, 'verified',
+                ${pdtCore.PDT_PARSER_VERSI}, '2099-01-01', 'ZZ-AM')
+        returning id`)[0].id;
+    const batchJun = await batch('2026-06-01', '2026-06-30');
+    const batchJul = await batch('2026-07-01', '2026-07-31');
+
+    // Kolom `pesanan` SENGAJA dibuat jauh berbeda dari `pesanan_penyebut_batal`
+    // — persis seperti berkas asli (Shop Analytics 143 vs tt_orders 169). Kalau
+    // pembaca memakai `pesanan` sebagai penyebut, kedua angka di bawah meleset.
+    //
+    // Juni: dua hari, 50+50 = 100 pesanan versi tt_orders, 10+5 = 15 batal ⇒ 15,00%
+    // Juli: satu hari, 169 pesanan, 50 batal ⇒ 29,59% (komposisi berkas produksi)
+    await sql`
+      insert into pdt_fact_shop_daily
+        (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan,
+         pesanan_dibatalkan, pesanan_penyebut_batal)
+      values (${tiktokId}, '2026-06-15', 'net', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '20000000.00', 900, 10, 50),
+             (${tiktokId}, '2026-06-16', 'net', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '20000000.00', 900,  5, 50),
+             (${tiktokId}, '2026-07-15', 'net', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '50000000.00', 143, 50, 169)`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+
+      // Rasio-dari-jumlah: (10+5) ÷ (50+50), BUKAN rata-rata 20% dan 10%.
+      expect(tt.baselineBulan[0]).toMatchObject({ label: 'Jun 2026', persenBatal: 15 });
+      // 50/169 = 29,585…% ⇒ 29,59. Dengan `pesanan` (143) sebagai penyebut ia
+      // akan berbunyi 34,97 — angka yang salah dan itulah yang dicegah kolom baru.
+      expect(tt.baselineBulan[1]).toMatchObject({ label: 'Jul 2026', persenBatal: 29.59 });
+    } finally {
+      await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
+    }
+  });
+
+  it('B1-BATAL-TIKTOK sisi SHOPEE: % batal dibaca dari basis `dibuat` walau GMV B-1 dari `siap_dikirim`, dan penyebutnya jatuh balik ke kolom `pesanan`', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { shopeeId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batchJul = (
+      await sql<{ id: number }[]>`
+        insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+          status, parser_versi, retensi_sampai, dibuat_oleh)
+        values (${clientId}, ${shopeeId}, 'shopee', '2026-07-01', '2026-07-31', 'verified',
+                ${pdtCore.PDT_PARSER_VERSI}, '2099-01-01', 'ZZ-AM')
+        returning id`
+    )[0].id;
+
+    // DUA basis dari SATU berkas (Rule 16), dengan angka yang sengaja berbeda:
+    //   siap_dikirim — sumber GMV/pesanan B-1 (200 pesanan)
+    //   dibuat       — sumber % batal (250 pesanan, 25 batal ⇒ 10,00%)
+    // `pesanan_penyebut_batal` NULL di kedua baris: Shopee membaca pembilang dan
+    // penyebut dari sheet yang SAMA, jadi `coalesce(...)` jatuh ke `pesanan`.
+    // Kalau pembaca keliru memakai basis `siap_dikirim`, hasilnya 25/200 = 12,5%.
+    await sql`
+      insert into pdt_fact_shop_daily
+        (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan,
+         pesanan_dibatalkan, pesanan_penyebut_batal)
+      values (${shopeeId}, '2026-07-15', 'siap_dikirim', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '80000000.00', 200, 25, null),
+             (${shopeeId}, '2026-07-15', 'dibuat',       ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '90000000.00', 250, 25, null)`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const sh = prefill!.channels.find((c) => c.clientPlatformId === shopeeId)!;
+
+      // GMV/pesanan tetap `siap_dikirim` — tidak ikut pindah basis.
+      expect(sh.baselineBulan[0]).toMatchObject({ label: 'Jul 2026', gmv: '80000000', jumlahPesanan: 200 });
+      // % batal dari `dibuat`: 25/250 = 10,00% (bukan 25/200 = 12,5%).
+      expect(sh.baselineBulan[0].persenBatal).toBe(10);
+    } finally {
+      await sql`delete from pdt_fact_shop_daily where client_platform_id = ${shopeeId}`;
+      await sql`delete from pdt_upload_batch where client_platform_id = ${shopeeId}`;
+    }
+  });
+
+  it('B1-BATAL-TIKTOK: bulan tanpa satu pun pesanan_dibatalkan ⇒ persenBatal null, BUKAN 0% (absen ≠ nol)', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId } = await seedRisetAwalBaseline(interviewId, clientId);
+
+    const batch = async (mulai: string, selesai: string) =>
+      (await sql<{ id: number }[]>`
+        insert into pdt_upload_batch (client_id, client_platform_id, platform, periode_mulai, periode_selesai,
+          status, parser_versi, retensi_sampai, dibuat_oleh)
+        values (${clientId}, ${tiktokId}, 'tiktok', ${mulai}::date, ${selesai}::date, 'verified',
+                ${pdtCore.PDT_PARSER_VERSI}, '2099-01-01', 'ZZ-AM')
+        returning id`)[0].id;
+    const batchJun = await batch('2026-06-01', '2026-06-30');
+    const batchJul = await batch('2026-07-01', '2026-07-31');
+
+    await sql`
+      insert into pdt_fact_shop_daily
+        (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan,
+         pesanan_dibatalkan, pesanan_penyebut_batal)
+      values (${tiktokId}, '2026-06-15', 'net', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '20000000.00', 900, null, null),
+             (${tiktokId}, '2026-07-15', 'net', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '50000000.00', 143,    0,  169)`;
+
+    try {
+      const s = await createStrategi(sql, am(), serviceId, HEADER);
+      const prefill = await getBaselinePrefill(sql, am(), s.id);
+      const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+
+      // Juni: kolomnya tidak pernah terbaca ⇒ `null`. Toko ini TIDAK "0% batal".
+      expect(tt.baselineBulan[0]).toMatchObject({ label: 'Jun 2026', persenBatal: null });
+      // Juli: nol batal yang SUNGGUHAN diketahui ⇒ 0, bukan null.
+      expect(tt.baselineBulan[1]).toMatchObject({ label: 'Jul 2026', persenBatal: 0 });
+    } finally {
       await sql`delete from pdt_fact_shop_daily where client_platform_id = ${tiktokId}`;
       await sql`delete from pdt_upload_batch where client_platform_id = ${tiktokId}`;
     }

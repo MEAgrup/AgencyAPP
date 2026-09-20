@@ -45,8 +45,30 @@ Bucket 1 (derived-keep), dari PRD §7.1:
 | `Product Category` | -- konsumen: pdt_sku_master.kategori_platform [PX] |
 | `Creator Handle` | -- konsumen: atribusi kreator, `is_akun_toko` |
 
-Tidak ada baris bucket 2 untuk modul ini — `tt_orders` sudah kanonik sisi rekonsiliasi TikTok
-(P-01), dan §7 sudah lengkap terhadap konsumen yang diverifikasi.
+Bucket 2 (ditambahkan sesudah §7, konsumen diverifikasi ke berkas asli):
+
+| Kolom | Konsumen |
+|---|---|
+| `Created Time` | -- konsumen: `pdt_fact_shop_daily.pesanan_dibatalkan` + `pesanan_penyebut_batal` basis `net` (B-1 `% Batal`) — **opsional** (G1-08-SEBAGIAN) |
+
+> `Created Time` ditambahkan 2026-09-20 (**B1-BATAL-TIKTOK**, `docs/DECISIONS.md`, ketokan
+> pemilik). Ia satu-satunya kolom tanggal yang dibutuhkan `% Batal` B-1 TikTok: pembilangnya
+> `Order Status = Dibatalkan`, penyebutnya cacah `Order ID` unik pada hari yang sama, dan
+> keduanya diatribusikan ke tanggal pesanan DIBUAT — "dari pesanan yang masuk hari itu,
+> berapa persen batal".
+>
+> `Cancelled Time` ADA di berkas tapi **sengaja tidak dipanen**: dengan atribusi `Created
+> Time` ia nol konsumen, dan memanen kolom tanpa konsumen adalah skema spekulatif (aturan
+> yang sama dipakai migrasi `20261105010000` saat menolak `'Penjualan Dibatalkan'`).
+>
+> Penyebutnya perlu kolom DB sendiri — bukan `pdt_fact_shop_daily.pesanan` — karena `pesanan`
+> milik `tt_shop_analytics` dan populasinya berbeda: pada Avitaskin Juli 2026, Shop Analytics
+> melaporkan **143** pesanan sementara `tt_orders` punya **169** `Order ID` unik yang dibuat
+> bulan itu (119 non-batal), dengan selisih harian yang berayun dua arah. Rinciannya di
+> migrasi `20261125010000`.
+
+Sisa §7 sudah lengkap terhadap konsumen yang diverifikasi; `tt_orders` tetap kanonik sisi
+rekonsiliasi TikTok (P-01).
 
 ### 1.2 `tt_product_analytics` — `product_list_*.xlsx` (176 kolom, header baris 4)
 Bucket 1:

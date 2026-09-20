@@ -110,9 +110,9 @@ function prefill(over: Partial<StrategiBaselinePrefill['channels'][number]>): St
         // 1-based, exactly as the server emits (getBaselinePrefill: `i + 1`) and
         // as the DB stores it (`ck_strbl_month` BETWEEN 1 AND 6). Month 1 = oldest.
         baseline_bulan: [
-          { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900, ad_spend: null, roas: null, acos: null },
-          { month_index: 2, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820, ad_spend: null, roas: null, acos: null },
-          { month_index: 3, label: 'M-3', gmv: '180000000', jumlah_pesanan: 2050, ad_spend: null, roas: null, acos: null },
+          { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900, ad_spend: null, roas: null, acos: null, persen_batal: null },
+          { month_index: 2, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820, ad_spend: null, roas: null, acos: null, persen_batal: null },
+          { month_index: 3, label: 'M-3', gmv: '180000000', jumlah_pesanan: 2050, ad_spend: null, roas: null, acos: null, persen_batal: null },
         ],
         gmv_mix: null,
         // B3 — defaults are the HONEST empty payload: schema known, nothing
@@ -190,9 +190,9 @@ describe('mergeBaselinePrefill (RAB-19 warisi yang bersumber saja)', () => {
   it('mengisi ad_spend/roas/acos per bulan dari prefill — dan TIDAK PERNAH menimpa angka yang sudah AM ketik', () => {
     const p = prefill({});
     p.channels[0].baseline_bulan = [
-      { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900, ad_spend: '2000000', roas: 4, acos: 25 },
-      { month_index: 2, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820, ad_spend: '5000000', roas: 2, acos: 50 },
-      { month_index: 3, label: 'M-3', gmv: '180000000', jumlah_pesanan: 2050, ad_spend: null, roas: null, acos: null },
+      { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900, ad_spend: '2000000', roas: 4, acos: 25, persen_batal: null },
+      { month_index: 2, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820, ad_spend: '5000000', roas: 2, acos: 50, persen_batal: null },
+      { month_index: 3, label: 'M-3', gmv: '180000000', jumlah_pesanan: 2050, ad_spend: null, roas: null, acos: null, persen_batal: null },
     ];
 
     const draft = blank('TikTok Shop');
@@ -210,6 +210,79 @@ describe('mergeBaselinePrefill (RAB-19 warisi yang bersumber saja)', () => {
     expect(ch.baseline[1]).toMatchObject({ ad_spend: '5000000', roas: '2', acos: '37.5' });
     // Bulan tanpa data iklan tetap kosong — bukan `0`, bukan `"null"`.
     expect(ch.baseline[2]).toMatchObject({ ad_spend: '', roas: '', acos: '' });
+  });
+
+  // B1-BATAL-TIKTOK (`docs/DECISIONS.md` 2026-09-20, ketokan pemilik) — kolom
+  // B-1 keempat. Aturan sama; yang khusus di sini: ia PINDAH dari blok agregat
+  // periode (`refund_rate_persen`) ke prefill per bulan, jadi yang diuji juga
+  // urutan menangnya.
+  it('mengisi persen_batal per bulan dari prefill, dan angka PDT menang atas jalur cadangan refund_rate_persen', () => {
+    const p = prefill({});
+    p.channels[0].periode_referensi = 'M-1';
+    p.channels[0].refund_rate_persen = 99;
+    p.channels[0].baseline_bulan = [
+      { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900, ad_spend: null, roas: null, acos: null, persen_batal: 29.59 },
+      { month_index: 2, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820, ad_spend: null, roas: null, acos: null, persen_batal: 0 },
+      { month_index: 3, label: 'M-3', gmv: '180000000', jumlah_pesanan: 2050, ad_spend: null, roas: null, acos: null, persen_batal: null },
+    ];
+
+    const draft = blank('TikTok Shop');
+    draft.periode_baseline_bulan = '3';
+    draft.baseline = [
+      { month_index: 1, gmv: '', jumlah_pesanan: '', persen_batal: '', ad_spend: '', roas: '', acos: '' },
+      { month_index: 2, gmv: '', jumlah_pesanan: '', persen_batal: '', ad_spend: '', roas: '', acos: '' },
+      { month_index: 3, gmv: '', jumlah_pesanan: '', persen_batal: '', ad_spend: '', roas: '', acos: '' },
+    ];
+
+    const [ch] = mergeBaselinePrefill([draft], p);
+    // Bulan ke-1 adalah periode acuan, jadi jalur cadangan `refund_rate_persen`
+    // (99) juga mengincarnya — tapi angka PDT sudah mengisi lebih dulu.
+    expect(ch.baseline[0].persen_batal).toBe('29.59');
+    // Nol yang SUNGGUHAN dilaporkan fakta tetap `"0"`, bukan sel kosong.
+    expect(ch.baseline[1].persen_batal).toBe('0');
+    // `null` ⇒ sel kosong, bukan `"null"` dan bukan `"0"`.
+    expect(ch.baseline[2].persen_batal).toBe('');
+  });
+
+  it('persen_batal: ketikan AM tidak pernah ditimpa angka PDT', () => {
+    const p = prefill({});
+    p.channels[0].baseline_bulan = [
+      { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900, ad_spend: null, roas: null, acos: null, persen_batal: 29.59 },
+    ];
+
+    const draft = blank('TikTok Shop');
+    draft.periode_baseline_bulan = '1';
+    draft.baseline = [
+      { month_index: 1, gmv: '', jumlah_pesanan: '', persen_batal: '12.5', ad_spend: '', roas: '', acos: '' },
+    ];
+
+    const [ch] = mergeBaselinePrefill([draft], p);
+    expect(ch.baseline[0].persen_batal).toBe('12.5');
+  });
+
+  // Jalur cadangan untuk klien TANPA batch PDT verified — `persen_batal` prefill
+  // `null` di setiap bulan, jadi `refund_rate_persen` tetap mengisi bulan acuan
+  // persis seperti sebelum B1-BATAL-TIKTOK. Tanpa tes ini, "memindahkan
+  // persen_batal ke prefill per bulan" bisa diam-diam mematikan jalur lama.
+  it('tanpa angka PDT, jalur cadangan refund_rate_persen tetap mengisi bulan acuan', () => {
+    const p = prefill({});
+    p.channels[0].periode_referensi = 'M-2';
+    p.channels[0].refund_rate_persen = 4.5;
+    p.channels[0].baseline_bulan = [
+      { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900, ad_spend: null, roas: null, acos: null, persen_batal: null },
+      { month_index: 2, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820, ad_spend: null, roas: null, acos: null, persen_batal: null },
+    ];
+
+    const draft = blank('TikTok Shop');
+    draft.periode_baseline_bulan = '2';
+    draft.baseline = [
+      { month_index: 1, gmv: '', jumlah_pesanan: '', persen_batal: '', ad_spend: '', roas: '', acos: '' },
+      { month_index: 2, gmv: '', jumlah_pesanan: '', persen_batal: '', ad_spend: '', roas: '', acos: '' },
+    ];
+
+    const [ch] = mergeBaselinePrefill([draft], p);
+    expect(ch.baseline[0].persen_batal).toBe('');
+    expect(ch.baseline[1].persen_batal).toBe('4.5');
   });
 
   it('never clobbers a value the AM already entered', () => {
@@ -382,8 +455,8 @@ describe('mergeBaselinePrefill — B3 (Section B terisi dari satu upload)', () =
       prefill({
         ...TERUKUR,
         baseline_bulan: [
-          { month_index: 1, label: 'Jul 2026', gmv: '90000000', jumlah_pesanan: 900, ad_spend: null, roas: null, acos: null },
-          { month_index: 2, label: 'Agu 2026', gmv: '100000000', jumlah_pesanan: 1000, ad_spend: null, roas: null, acos: null },
+          { month_index: 1, label: 'Jul 2026', gmv: '90000000', jumlah_pesanan: 900, ad_spend: null, roas: null, acos: null, persen_batal: null },
+          { month_index: 2, label: 'Agu 2026', gmv: '100000000', jumlah_pesanan: 1000, ad_spend: null, roas: null, acos: null, persen_batal: null },
         ],
         periode_baseline_bulan: 2,
       }),

@@ -130,6 +130,72 @@ export async function bacaFaktaShopDaily(
   };
 }
 
+/**
+ * Hasil `bacaFaktaBatalBulan` — `% Batal` B-1 satu bulan (B1-BATAL-TIKTOK,
+ * `docs/DECISIONS.md` 2026-09-20).
+ */
+export interface PdtFaktaBatalBulan {
+  /** Baris harian yang PUNYA angka batal (bukan seluruh hari di bulan itu). */
+  hari: number;
+  pesananDibatalkan: number;
+  /** Σ `coalesce(pesanan_penyebut_batal, pesanan)` atas baris yang sama. */
+  penyebut: number;
+  /** Persen 2 desimal, atau `null` bila penyebutnya nol (aturan rumah #7). */
+  persen: number | null;
+}
+
+/**
+ * `% Batal` satu bulan — rasio-dari-jumlah (Σ dibatalkan ÷ Σ penyebut), pola
+ * yang sama dengan `cr` dan dengan `cancelRate` mesin skor Shopee di
+ * `pdt.ts`; BUKAN rata-rata rasio harian, yang akan memberi bobot sama pada
+ * hari dengan 1 pesanan dan hari dengan 30.
+ *
+ * `basis` WAJIB eksplisit dan BUKAN selalu basis yang sama dengan baris GMV
+ * B-1 (`basisShopDaily`). Untuk Shopee, GMV B-1 memakai `siap_dikirim`
+ * sedangkan `% batal` memakai `'dibuat'` — "dari pesanan yang MASUK, berapa
+ * persen batal". Itu bukan basis baru yang dikarang di sini: migrasi
+ * `20261105010000` sudah menulis "konsumen sesungguhnya hanya basis
+ * ''dibuat''", dan `rakitInputSkorShopee` memang membacanya dari sana.
+ * Persentase batal atas populasi `siap_dikirim` (pesanan yang dibatalkan
+ * SESUDAH siap kirim) adalah metrik lain yang jauh lebih kecil dan bukan yang
+ * ditanyakan B-1.
+ *
+ * Penyebutnya `coalesce(pesanan_penyebut_batal, pesanan)` PER BARIS — lihat
+ * migrasi `20261125010000` untuk kenapa TikTok butuh kolom penyebut sendiri
+ * dan Shopee tidak.
+ *
+ * `null` (bukan objek ber-nol) saat tidak satu pun baris bulan itu membawa
+ * `pesanan_dibatalkan`: absen ≠ nol. Toko yang kolom batalnya tidak pernah
+ * terbaca tidak boleh tampil "0% batal".
+ */
+export async function bacaFaktaBatalBulan(
+  sql: Queryable,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+  basis: 'net' | 'dibuat' | 'siap_dikirim' | 'dibayar',
+): Promise<PdtFaktaBatalBulan | null> {
+  const [row] = await sql<{ hari: number; dibatalkan: string; penyebut: string }[]>`
+    select count(pesanan_dibatalkan)::int as hari,
+           coalesce(sum(pesanan_dibatalkan), 0) as dibatalkan,
+           coalesce(sum(case when pesanan_dibatalkan is not null
+                             then coalesce(pesanan_penyebut_batal, pesanan) end), 0) as penyebut
+      from pdt_fact_shop_daily
+     where client_platform_id = ${clientPlatformId}
+       and basis = ${basis}
+       and tanggal >= ${periodeAwalBulan}::date
+       and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
+  if (!row || row.hari === 0) return null;
+
+  const pesananDibatalkan = Number(row.dibatalkan);
+  const penyebut = Number(row.penyebut);
+  return {
+    hari: row.hari,
+    pesananDibatalkan,
+    penyebut,
+    persen: penyebut === 0 ? null : Math.round((pesananDibatalkan / penyebut) * 10000) / 100,
+  };
+}
+
 export interface PdtFaktaSkuPeriodeBaris extends PdtSumberBatch {
   /** `null` untuk baris level-produk-induk (mis. `tt_product_analytics`) — identitasnya `platformProductId`, bukan varian (G1-09-2BII-ADS-CPC-SKU). */
   skuId: number | null;

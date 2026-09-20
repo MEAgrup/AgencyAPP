@@ -79,8 +79,23 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     kolomDipanen: [
       'Order ID', 'SKU ID', 'Seller SKU', 'Product Name', 'Variation', 'Quantity',
       'SKU Unit Original Price', 'SKU Subtotal After Discount', 'Order Status', 'Paid Time',
-      'Product Category', 'Creator Handle',
+      'Product Category', 'Creator Handle', 'Created Time',
     ],
+    // G1-08-SEBAGIAN: `'Created Time'` DITAMBAHKAN 2026-09-20 (B1-BATAL-TIKTOK,
+    // `docs/DECISIONS.md`) — satu-satunya kolom tanggal yang dibutuhkan `% Batal`
+    // B-1 TikTok (`ekstrakBarisBatalHarianTtOrders`). `'Cancelled Time'` SENGAJA
+    // TIDAK ikut walau ada di berkas: atribusinya `Created Time` (lihat docblock
+    // ekstraktornya), jadi kolom itu nol konsumen — dan memanen kolom tanpa
+    // konsumen adalah skema spekulatif, aturan yang sama dipakai migrasi
+    // `20261105010000` saat menolak `'Penjualan Dibatalkan'`.
+    //
+    // OPSIONAL dengan sengaja, alasan yang persis sama dengan `shopee_parent_sku`
+    // (`20261123010000`) dan `tt_product_analytics` (`20261124010000`): modul ini
+    // `wajib: true`, jadi menaruhnya sebagai WAJIB berarti satu ekspor lama yang
+    // tidak membawanya jatuh ke `parse_status='gagal'`, dibuang dari `terparse`,
+    // dan menutup pintu upload seluruh batch — menukar satu kolom `% batal` yang
+    // kosong dengan toko yang tidak bisa mengunggah apa pun.
+    kolomOpsional: ['Created Time'],
     wajib: true,
   },
   {

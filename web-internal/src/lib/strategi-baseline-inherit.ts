@@ -101,20 +101,37 @@ export function mergeBaselinePrefill(
             : sm?.jumlah_pesanan != null
               ? String(sm.jumlah_pesanan)
               : '',
-          // B1-IKLAN-PER-BULAN — aturan yang SAMA dengan dua baris di atas:
-          // hanya mengisi sel yang masih kosong, tidak pernah menimpa angka
-          // yang sudah AM ketik. `% batal` sengaja TIDAK di sini — ia tetap
-          // agregat periode (lihat blok di bawah), bukan angka per bulan.
+          // B1-IKLAN-PER-BULAN + B1-BATAL-TIKTOK — aturan yang SAMA dengan dua
+          // baris di atas: hanya mengisi sel yang masih kosong, tidak pernah
+          // menimpa angka yang sudah AM ketik.
+          //
+          // `persen_batal` pindah KE SINI (B1-BATAL-TIKTOK, ketokan pemilik
+          // 2026-09-20): ia sekarang angka PER BULAN yang dihitung dari
+          // `pdt_fact_shop_daily`, bukan lagi hanya agregat periode. Blok
+          // `refund_rate_persen` di bawah TETAP ada sebagai jalur cadangan
+          // untuk klien tanpa batch PDT verified — dan karena ia lewat `isi()`
+          // (hanya mengisi yang kosong) sementara blok ini berjalan LEBIH
+          // DULU, angka PDT selalu menang; cadangan itu hanya mengisi sisa.
           ad_spend: existing.ad_spend.trim() ? existing.ad_spend : (sm?.ad_spend ?? ''),
           roas: existing.roas.trim() ? existing.roas : sm?.roas != null ? String(sm.roas) : '',
           acos: existing.acos.trim() ? existing.acos : sm?.acos != null ? String(sm.acos) : '',
+          persen_batal: existing.persen_batal.trim()
+            ? existing.persen_batal
+            : sm?.persen_batal != null
+              ? String(sm.persen_batal)
+              : '',
         };
       });
-      // B-1.4 (% batal) is a PERIOD aggregate in the payload, not a per-month
-      // figure. It is seeded into exactly one row — the month whose label is the
-      // payload's own reference period — and only when that month exists and is
-      // still empty. Spreading it evenly across the window would be inventing a
-      // number for five months the export never described.
+      // JALUR CADANGAN B-1.4 (% batal) untuk klien TANPA batch PDT verified:
+      // `refund_rate_persen` adalah agregat PERIODE di payload Riset Awal, bukan
+      // angka per bulan. Ia diseed ke TEPAT SATU baris — bulan yang label-nya
+      // sama dengan periode acuan payload — dan hanya bila baris itu ada dan
+      // MASIH KOSONG. Menyebarkannya rata ke seluruh jendela sama dengan
+      // mengarang angka untuk lima bulan yang tidak pernah dijelaskan ekspornya.
+      //
+      // Begitu klien punya batch PDT verified, `sm.persen_batal` di atas sudah
+      // mengisi baris itu lebih dulu dan `isi()` di sini tidak melakukan apa-apa
+      // — angka turunan fakta selalu menang atas agregat payload.
       const bulanPeriode = s.periode_referensi
         ? (s.baseline_bulan.find((m) => m.label === s.periode_referensi)?.month_index ?? null)
         : null;
@@ -270,11 +287,13 @@ const FIELD_BERSUMBER: readonly [
 export const SELALU_MANUAL: readonly string[] = [
   'B-3.3 margin % per SKU (butuh HPP — tidak ada di export mana pun, hanya klien yang tahu)',
   'B-4.1/B-4.3 rating, jumlah ulasan, % pesanan terlambat (tidak ada export-nya di platform mana pun)',
-  // B1-IKLAN-PER-BULAN (2026-09-20): belanja iklan, ROAS dan ACOS per bulan TIDAK
-  // lagi selalu manual — ketiganya terisi dari `pdt_fact_ads` per bulan. Yang
-  // tersisa manual hanya toko yang belum punya batch PDT verified sama sekali,
-  // dan itu bukan "selalu manual", itu "belum ada datanya".
-  'B-1 % batal per bulan (Shopee punya; TikTok belum — lihat DECISIONS B1-BATAL-TIKTOK)',
+  // B1-IKLAN-PER-BULAN + B1-BATAL-TIKTOK (2026-09-20): keempat kolom B-1 —
+  // belanja iklan, ROAS, ACOS DAN % batal — tidak lagi manual. Ketiga yang
+  // pertama dari `pdt_fact_ads`, `% batal` dari `pdt_fact_shop_daily` untuk
+  // KEDUA platform (TikTok lewat penulis `tt_orders` yang lahir bersama entri
+  // DECISIONS itu). Yang tersisa manual hanya toko yang belum punya batch PDT
+  // verified sama sekali — dan itu bukan "selalu manual", itu "belum ada
+  // datanya", jadi tempatnya bukan daftar ini.
   'B-6.3 komisi open & target',
   'B-6.5 siapa yang menanggung program sampel',
   'B-7.3/B-7.4 host & studio live',
