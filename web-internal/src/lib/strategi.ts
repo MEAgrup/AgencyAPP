@@ -1487,6 +1487,36 @@ export function getBaselinePrefill(id: string): Promise<StrategiBaselinePrefill 
   return api.get<StrategiBaselinePrefill | null>(`/strategi/${id}/baseline-prefill`);
 }
 
+/**
+ * Satu aksi katalog pilar Section E (`GET /strategi/katalog-pilar`).
+ *
+ * Daftar pilihan editor pilar manual, penerus AM Co-Pilot yang pensiun
+ * 2026-09-21. Tidak ber-`{id}` dan tidak menyentuh Riset Awal: katalognya sama
+ * untuk setiap klien, jadi klien tanpa Riset Awal tetap bisa mengisi E-3…E-10.
+ */
+export interface KatalogPilarAksi {
+  kode: string;
+  pilar: string;
+  /** `strategi_pillar.jenis` yang akan ditulis baris ini. */
+  jenis: string;
+  divisi: string;
+  nama: string;
+  deskripsi: string;
+  jembatan: string;
+  unit: string;
+  arah: string;
+  minggu: number;
+  field_id_bukti: string;
+  quick_win: boolean;
+  platform: string[];
+  /** Keterangan "relevan saat …" — informasi, bukan syarat; AM yang memutuskan. */
+  relevan_saat: string[];
+}
+
+export function getKatalogPilar(): Promise<KatalogPilarAksi[]> {
+  return api.get<{ data: KatalogPilarAksi[] }>('/strategi/katalog-pilar').then((r) => r.data);
+}
+
 export function strategiKekurangan(id: string): Promise<StrategiKekurangan[]> {
   return api.get<StrategiKekurangan[]>(`/strategi/${id}/kekurangan`);
 }

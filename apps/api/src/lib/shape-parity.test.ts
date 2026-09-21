@@ -562,6 +562,7 @@ const WIRE_TO_FE: Record<string, string> = {
   // They are named interfaces rather than anonymous bags precisely so this guard
   // descends into them — a struct typed `Record<string, unknown>[]` is a shape
   // nothing compares.
+  KatalogPilarAksiWire: 'strategi.ts::KatalogPilarAksi',
   StrategiDecisionMakerWire: 'strategi.ts::StrategiDecisionMaker',
   StrategiAksesWire: 'strategi.ts::StrategiAkses',
   StrategiTopSkuWire: 'strategi.ts::StrategiTopSku',

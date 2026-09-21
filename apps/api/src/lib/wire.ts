@@ -9598,3 +9598,48 @@ export function pdtKirimanRingkasToWire(k: pdt.PdtKirimanRingkas): PdtKirimanRin
     menggantikan_kiriman_id: k.menggantikanKirimanId,
   };
 }
+
+// --- Katalog pilar Section E (GET /strategi/katalog-pilar) -----------------
+
+/**
+ * Satu aksi katalog di wire. Daftar pilihan editor pilar manual, penerus jalur
+ * AM Co-Pilot yang pensiun 2026-09-21 — bedanya katalog ini tidak menyentuh
+ * `riset_awal_analisa` sama sekali, jadi klien tanpa Riset Awal tetap bisa
+ * mengisi E-3…E-10.
+ */
+export interface KatalogPilarAksiWire {
+  kode: string;
+  pilar: string;
+  jenis: string;
+  divisi: string;
+  nama: string;
+  deskripsi: string;
+  jembatan: string;
+  unit: string;
+  arah: string;
+  minggu: number;
+  field_id_bukti: string;
+  quick_win: boolean;
+  platform: string[];
+  relevan_saat: string[];
+}
+
+/** camelCase domain → snake_case wire. Nol kunci yang dihilangkan (O43). */
+export function katalogPilarAksiToWire(a: strategi.KatalogPilarAksi): KatalogPilarAksiWire {
+  return {
+    kode: a.kode,
+    pilar: a.pilar,
+    jenis: a.jenis,
+    divisi: a.divisi,
+    nama: a.nama,
+    deskripsi: a.deskripsi,
+    jembatan: a.jembatan,
+    unit: a.unit,
+    arah: a.arah,
+    minggu: a.minggu,
+    field_id_bukti: a.fieldIdBukti,
+    quick_win: a.quickWin,
+    platform: [...a.platform],
+    relevan_saat: [...a.relevanSaat],
+  };
+}

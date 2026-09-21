@@ -152,6 +152,7 @@ import {
   targetKey,
   trenBaseline,
   computeHargaRataRata,
+  listKatalogPilar,
   updateHeader,
   type ChannelInput,
 } from './strategi';
@@ -5661,5 +5662,96 @@ describe('petakanTipeKampanye (G3-06) — teks konfigurasi kampanye → CAMPAIGN
     // Mengklasifikasi darinya = mengarang — persis yang MATERI_IKLAN hindari.
     expect(petakanTipeKampanye('tt_ads_product', 'affiliate_PC_7496001635930573579_1775028391')).toBeNull();
     expect(petakanTipeKampanye('tt_ads_product', 'Bismilah cekout banyak melimpah')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Katalog pilar Section E — daftar pilihan editor pilar manual
+// ---------------------------------------------------------------------------
+
+describeDb('listKatalogPilar — daftar pilihan pilar tanpa Riset Awal', () => {
+  it('menyajikan katalog penuh: 20 aksi, 4 jenis, label lengkap', async () => {
+    const katalog = await listKatalogPilar(sql, am());
+    expect(katalog).toHaveLength(20);
+    expect(new Set(katalog.map((a) => a.jenis))).toEqual(
+      new Set(['konten', 'live', 'affiliate', 'iklan']),
+    );
+    for (const a of katalog) {
+      expect(a.kode, JSON.stringify(a)).not.toBe('');
+      expect(a.nama).not.toBe('');
+      expect(a.deskripsi).not.toBe('');
+      expect(a.jembatan).not.toBe('');
+      expect(a.divisi).not.toBe('');
+      expect(a.platform.length).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * Inilah seluruh alasan endpoint ini ada. Pengisi Section E yang lama (AM
+   * Co-Pilot, impor AM Cockpit) dua-duanya menuntut `riset_awal_analisa`, jadi
+   * klien tanpa Riset Awal terkunci dari E-3…E-10 — laporan pemilik atas
+   * `STRG-202609-0009`. Tes ini memakai aktor tanpa klien sama sekali: kalau
+   * suatu saat seseorang menyambungkan katalog ini ke baseline lagi, ia yang
+   * memerah lebih dulu.
+   */
+  it('TIDAK menyentuh Riset Awal — nol interview, nol klien, tetap penuh', async () => {
+    await sql`delete from riset_awal_analisa`;
+    const katalog = await listKatalogPilar(sql, am());
+    expect(katalog).toHaveLength(20);
+  });
+
+  it('setiap aksi memetakan ke jenis yang sah `ck_strpil_jenis`', async () => {
+    const sah = new Set(['sku', 'harga', 'iklan', 'konten', 'affiliate', 'live', 'retensi', 'operasional', 'tidak_dikerjakan']);
+    for (const a of await listKatalogPilar(sql, am())) {
+      expect(sah.has(a.jenis), `${a.kode} → ${a.jenis}`).toBe(true);
+    }
+  });
+
+  it('urutannya stabil antar pemuatan — layar tidak berganti susunan', async () => {
+    const a = (await listKatalogPilar(sql, am())).map((x) => x.kode);
+    const b = (await listKatalogPilar(sql, am())).map((x) => x.kode);
+    expect(a).toEqual(b);
+    expect(a).toEqual([...a].sort((x, y) => x.localeCompare(y)));
+  });
+
+  it('baris katalog nonaktif tidak disajikan', async () => {
+    await sql`update pdt_usulan_katalog set aktif = false where kode = 'L1'`;
+    try {
+      const kode = (await listKatalogPilar(sql, am())).map((a) => a.kode);
+      expect(kode).not.toContain('L1');
+      expect(kode).toHaveLength(19);
+    } finally {
+      await sql`update pdt_usulan_katalog set aktif = true where kode = 'L1'`;
+    }
+  });
+
+  it('aksi khusus Shopee menyebut platformnya, bukan ketiganya', async () => {
+    // `platform_berlaku` per baris DB ikut terbawa supaya editor bisa menandai
+    // aksi yang tidak berlaku untuk channel yang AM pilih. Union lintas
+    // platform TIDAK boleh meratakannya jadi "berlaku di mana saja".
+    await sql`update pdt_usulan_katalog set platform_berlaku = array['shopee'] where kode = 'D5'`;
+    try {
+      const d5 = (await listKatalogPilar(sql, am())).find((a) => a.kode === 'D5');
+      expect(d5?.platform).toEqual(['shopee']);
+    } finally {
+      await sql`update pdt_usulan_katalog set platform_berlaku = array['tiktok','shopee','meta'] where kode = 'D5'`;
+    }
+  });
+
+  it('keterangan "relevan saat" berbahasa Indonesia, bukan kunci metrik mentah', async () => {
+    const katalog = await listKatalogPilar(sql, am());
+    const semua = katalog.flatMap((a) => a.relevanSaat);
+    expect(semua.length).toBeGreaterThan(0);
+    for (const frasa of semua) {
+      expect(frasa).not.toMatch(/[a-z][A-Z]/); // nol camelCase kunci metrik
+    }
+    const l1 = katalog.find((a) => a.kode === 'L1');
+    expect(l1?.relevanSaat).toEqual(['jam live di bawah benchmark MEA']);
+  });
+
+  it('terbuka untuk setiap aktor yang bisa membuka halaman Strategi — nol data klien di dalamnya', async () => {
+    for (const aktor of [am(), otherAm(), spv(), creativeLead(), director(), od()]) {
+      expect((await listKatalogPilar(sql, aktor)).length).toBe(20);
+    }
   });
 });

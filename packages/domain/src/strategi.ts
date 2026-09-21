@@ -75,7 +75,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { baseline as bl, division, ident, interview as iv, money, notification, permission, satuan, statemachine, visibility } from '@cdps/core';
+import { baseline as bl, division, ident, interview as iv, money, notification, permission, pilarkatalog, satuan, statemachine, visibility } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -8396,4 +8396,150 @@ function transitionError(res: statemachine.TransitionResult & { ok: false }): Er
 function nullIfBlank(s: string | null | undefined): string | null {
   const t = (s ?? '').toString().trim();
   return t === '' ? null : t;
+}
+
+// ---------------------------------------------------------------------------
+// Katalog pilar Section E — daftar pilihan editor pilar manual
+// ---------------------------------------------------------------------------
+
+/**
+ * Satu aksi katalog sebagaimana disajikan ke editor pilar Section E.
+ *
+ * Bentuknya sengaja DATAR dan lengkap: editor merender label ini apa adanya
+ * (aturan rumah #5 — jangan mengarang atau mengubah label BI), lalu menyalin
+ * `jenis`/`divisi`/`aksi` ke baris pilar yang AM simpan. Nol angka klien di
+ * sini — katalog ini sama untuk semua Strategi.
+ */
+export interface KatalogPilarAksi {
+  kode: string;
+  /** Pilar katalog: VIDEO / LIVE / AFFILIATE / ADS. */
+  pilar: string;
+  /** `strategi_pillar.jenis` yang akan ditulis — hasil `PILAR_KE_JENIS`. */
+  jenis: string;
+  /** Divisi PIC bawaan; yang menyemai `plan_row.divisi_pic` lewat `planpillar`. */
+  divisi: string;
+  nama: string;
+  deskripsi: string;
+  /** Metrik yang harus bergerak agar aksi ini disebut berhasil. */
+  jembatan: string;
+  unit: string;
+  /** 'naik' | 'turun'. */
+  arah: string;
+  /** Berapa minggu sebelum hasilnya wajar dinilai. */
+  minggu: number;
+  /** Field Section B yang jadi buktinya. */
+  fieldIdBukti: string;
+  quickWin: boolean;
+  /** Platform PDT tempat aksi ini berlaku ('tiktok' / 'shopee' / 'meta'). */
+  platform: string[];
+  /**
+   * Keterangan "relevan saat …", diturunkan dari `pdt_usulan_katalog.kondisi`.
+   * Sejak AM Co-Pilot pensiun tidak ada yang MENGEVALUASI ini — ia turun
+   * pangkat dari syarat-otomatis jadi keterangan, supaya AM tahu kapan sebuah
+   * aksi biasanya dipakai lalu memutuskan sendiri. Kosong = tanpa keterangan.
+   */
+  relevanSaat: string[];
+}
+
+/** Kunci metrik → frasa BI untuk keterangan "relevan saat …". */
+const METRIK_LABEL: Readonly<Record<string, string>> = {
+  crToko: 'conversion rate toko',
+  videoPostToko: 'jumlah video toko diposting',
+  videoSalesToko: 'video toko yang menjual',
+  videoSalesAff: 'video affiliate yang menjual',
+  gpmToko: 'GPM toko',
+  liveSesi: 'jumlah sesi live',
+  liveJam: 'jam live',
+  liveGmvJam: 'GMV per jam live',
+  liveCtor: 'CTOR live',
+  krSales: 'kreator yang menjual',
+  krKonsen: 'konsentrasi GMV kreator',
+  kreatorBelumPosting: 'kreator terdaftar yang belum posting',
+  sampelTerkirim: 'sampel terkirim',
+  skuSales: 'SKU yang menjual',
+  roas: 'ROAS',
+  adsDep: 'ketergantungan iklan',
+};
+
+const BANDING_LABEL: Readonly<Record<string, string>> = {
+  kurang: 'di bawah',
+  lebih: 'di atas',
+  minimal: 'minimal',
+  samaDengan: 'sama dengan',
+};
+
+/** Satu pemicu katalog → satu frasa BI. Kunci tak dikenal dilewati, bukan ditebak. */
+function relevanSaatDari(aksi: pilarkatalog.AksiKatalog): string[] {
+  const out: string[] = [];
+  for (const p of aksi.pemicu) {
+    const metrik = METRIK_LABEL[p.metrik];
+    const banding = BANDING_LABEL[p.banding];
+    if (!metrik || !banding) continue;
+    const ambang = 'benchmark' in p.ambang ? 'benchmark MEA' : p.ambang.nama;
+    out.push(`${metrik} ${banding} ${ambang}`);
+  }
+  return out;
+}
+
+/**
+ * listKatalogPilar — daftar pilihan aksi untuk editor pilar Section E.
+ *
+ * **Nol ketergantungan pada Riset Awal, dan itulah intinya.** Pengisi Section E
+ * sebelumnya (AM Co-Pilot, impor AM Cockpit) dua-duanya menuntut
+ * `riset_awal_analisa`, sehingga klien tanpa Riset Awal terkunci dari E-3…E-10
+ * sama sekali — laporan pemilik atas `STRG-202609-0009`, dan salah satu alasan
+ * gerbang `PILLAR_MIN` dicabut (`DECISIONS.md` 2026-09-21 E-PILAR-OPSIONAL).
+ * Katalog ini statis: ia sama untuk setiap klien, ada atau tidak ada baseline.
+ *
+ * Metadata label datang dari kode (`@cdps/core` `pilarkatalog.KATALOG`),
+ * `platform_berlaku` + `kondisi` + `aktif` dari `pdt_usulan_katalog` — pembagian
+ * yang sama yang G4-01 tetapkan, tidak diubah di sini.
+ *
+ * Gabungannya diambil LINTAS platform (union), bukan per platform seperti dulu:
+ * editor ini tidak tahu channel mana yang akan AM pilih untuk sebuah baris, dan
+ * menyaring di server akan menyembunyikan aksi yang sah. Platform tiap aksi
+ * ikut dikirim supaya editor bisa menandainya.
+ *
+ * Gerbangnya: aktor mana pun yang boleh membuka halaman Strategi. Katalog ini
+ * nol data klien — ia daftar aksi milik MEA sendiri — jadi tak ada row-scope
+ * yang bisa bocor lewat sini.
+ */
+export async function listKatalogPilar(
+  sql: Queryable,
+  _actor: Actor,
+): Promise<KatalogPilarAksi[]> {
+  const rows = await pdt.listAksiKatalogAktif(sql);
+  // Union lintas platform: satu aksi muncul SEKALI, membawa daftar platform
+  // tempat ia berlaku. `gabungKatalogDb` menyaring per platform, jadi tiga
+  // panggilan digabung di sini — bukan tiga daftar terpisah yang editor harus
+  // satukan sendiri.
+  const byKode = new Map<string, { aksi: pilarkatalog.AksiKatalog; platform: string[] }>();
+  for (const platform of ['tiktok', 'shopee', 'meta'] as const) {
+    for (const aksi of pilarkatalog.gabungKatalogDb(rows, platform)) {
+      const existing = byKode.get(aksi.kode);
+      if (existing) existing.platform.push(platform);
+      else byKode.set(aksi.kode, { aksi, platform: [platform] });
+    }
+  }
+  return [...byKode.values()]
+    .map(({ aksi, platform }) => ({
+      kode: aksi.kode,
+      pilar: aksi.pilar,
+      jenis: pilarkatalog.PILAR_KE_JENIS[aksi.pilar],
+      divisi: aksi.divisi,
+      nama: aksi.nama,
+      deskripsi: aksi.deskripsi,
+      jembatan: aksi.jembatan,
+      unit: aksi.unit,
+      arah: aksi.arah,
+      minggu: aksi.minggu,
+      fieldIdBukti: aksi.fieldIdBukti,
+      quickWin: aksi.quickWin,
+      platform,
+      relevanSaat: relevanSaatDari(aksi),
+    }))
+    // Urut mengikuti katalog kode (V…, L…, A…, D…) supaya urutan di layar
+    // stabil antar pemuatan — `Map` menjaga urutan sisip, dan sisipnya sudah
+    // mengikuti urutan `KATALOG`.
+    .sort((a, b) => a.kode.localeCompare(b.kode));
 }
