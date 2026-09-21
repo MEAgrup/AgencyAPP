@@ -138,6 +138,12 @@ export default function SectionE({
   onApplyPillars: (pillars: CockpitPillarBody[]) => Promise<void>;
   disabled: boolean;
 }) {
+  // Hanya pilar E-3…E-10. E-11 disimpan sebagai pilar berjenis `tidak_dikerjakan`
+  // dan sudah punya editornya sendiri di bawah, jadi ia tidak diulang di sini.
+  // (Pemisahan ini murni soal tampilan. Gerbang `PILLAR_MIN` yang dulu menghitung
+  // KEDUANYA lewat `count(*)` tanpa filter sudah dicabut — E-PILAR-OPSIONAL.)
+  const pilarInti = detail.pillars.filter((p) => p.jenis !== 'tidak_dikerjakan');
+
   return (
     <div className="stack">
       {/* B4 — E-3…E-10 disusun di server dari Riset Awal. Ditaruh di ATAS E-1
@@ -278,36 +284,62 @@ export default function SectionE({
         />
       </label>
 
-      {/* Pillar summary (E-3…E-10) ---------------------------------------- */}
-      {detail.pillars.filter((p) => p.jenis !== 'tidak_dikerjakan').length > 0 && (
-        <div className="card">
-          <div className="cardHeader">E-3…E-10 · Pilar Strategi</div>
-          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-            Editor pilar detail (SKU, Harga, Iklan, Konten, Affiliate, Live, Retensi, Operasional)
-            tersedia di versi berikutnya. Pilar yang sudah tersimpan:
-          </p>
-          <table style={{ fontSize: 13 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left' }}>Jenis</th>
-                <th style={{ textAlign: 'left' }}>Channel</th>
-                <th style={{ textAlign: 'left' }}>Aksi / ringkasan</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.pillars
-                .filter((p) => p.jenis !== 'tidak_dikerjakan')
-                .map((p) => (
+      {/* Pillar (E-3…E-10) -------------------------------------------------- */}
+      {/*
+        E-PILAR-KOSONG-TERLIHAT + E-PILAR-OPSIONAL — kartu ini dulu HANYA dirender
+        saat sudah ada pilar (`…length > 0 &&`), sehingga keadaan kosong tidak
+        menampilkan apa pun sementara gerbang submit menolak dengan menyebut
+        E-3…E-10 (laporan pemilik 2026-09-21 atas STRG-202609-0009).
+
+        Gerbangnya kini dicabut (pilar = opsional), jadi kosong bukan lagi error.
+        Kartunya tetap selalu dirender, tapi nadanya INFORMATIF: ia menjelaskan apa
+        yang hilang kalau pilar dibiarkan kosong (Plan periode 1 lahir tanpa baris
+        kerja) dan menunjuk tombol pengisinya — tanpa menuduh AM menahan apa pun.
+      */}
+      <div className="card">
+        <div className="cardHeader">E-3…E-10 · Pilar Strategi</div>
+        {pilarInti.length === 0 ? (
+          <div className="alert alertInfo" style={{ fontSize: 13 }}>
+            <b>Belum ada pilar. Ini opsional — Strategi tetap bisa diajukan dan disetujui.</b>
+            <br />
+            Yang Anda lewatkan kalau dibiarkan kosong: saat Plan disetujui, baris kerja
+            periode 1 <b>tidak lahir otomatis</b>. Pilar <i>konten</i>, <i>iklan</i>,{' '}
+            <i>affiliate</i>, <i>live</i>, dan <i>operasional</i> masing-masing menyemai satu
+            baris Plan ke divisinya. Tanpa pilar, AM mengetik baris-baris itu sendiri di
+            halaman Plan — hasil akhirnya sama, kerjanya lebih panjang.
+            <br />
+            Kalau mau diisi: tekan <b>“Susun draft dari AM Co-Pilot”</b> di kartu paling atas
+            seksi ini. Tombol itu menyusun usulan dari analisa Riset Awal klien ini — Anda
+            tinggal mencabut yang tidak relevan lalu simpan. Jalur lainnya: impor JSON dari
+            tool AM Cockpit.
+          </div>
+        ) : (
+          <>
+            <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+              Editor pilar detail (SKU, Harga, Iklan, Konten, Affiliate, Live, Retensi, Operasional)
+              tersedia di versi berikutnya. Pilar yang sudah tersimpan:
+            </p>
+            <table style={{ fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Jenis</th>
+                  <th style={{ textAlign: 'left' }}>Channel</th>
+                  <th style={{ textAlign: 'left' }}>Aksi / ringkasan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pilarInti.map((p) => (
                   <tr key={p.id}>
                     <td>{p.jenis}</td>
                     <td>{p.channel ?? '—'}</td>
                     <td style={{ maxWidth: 300 }}>{p.aksi}</td>
                   </tr>
                 ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
     </div>
   );
 }

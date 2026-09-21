@@ -58,7 +58,6 @@ import {
   MSG_LEADING_INDICATOR_MAX,
   MSG_LEADING_INDICATOR_REQUIRED,
   MSG_NOT_PLAN_GATED,
-  MSG_PILLAR_MIN,
   MSG_PRASYARAT_KLIEN_REQUIRED,
   MSG_QUICK_WIN_MIN,
   MSG_REVIEW_NOTES_REQUIRED,
@@ -2636,19 +2635,24 @@ describeDb('Section C — A-07 (Diagnosa & Akar Masalah)', () => {
     expect(pesan).not.toContain(MSG_RISK_MIN);
   });
 
-  it('checkCompleteness — flags E-3..E-10 when no Section E pillar is recorded', async () => {
+  // E-PILAR-OPSIONAL (2026-09-21) — kedua tes ini dulu mengunci gerbang
+  // `PILLAR_MIN`. Gerbangnya dicabut atas ketokan pemilik, jadi keduanya dibalik:
+  // yang dikunci sekarang adalah TIDAK adanya temuan E-3..E-10, supaya
+  // menghidupkannya kembali diam-diam langsung memerahkan suite.
+  it('checkCompleteness — zero Section E pillars does NOT block submit', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
-    const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
-    expect(pesan).toContain(MSG_PILLAR_MIN);
+    const temuan = await checkCompleteness(sql, s.id);
+    expect(temuan.map((m) => m.kode)).not.toContain('E-3..E-10');
+    expect(temuan.map((m) => m.pesan).join(' ')).not.toContain('pilar Strategi Section E');
   });
 
-  it('checkCompleteness — one Section E pillar satisfies E-3..E-10, even with no channel set', async () => {
+  it('checkCompleteness — pillars stay writable and still raise no E-3..E-10 finding', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     await savePillars(sql, am(), s.id, [{ jenis: 'tidak_dikerjakan', aksi: 'tanpa reshoot foto di M1' }]);
-    const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
-    expect(pesan).not.toContain(MSG_PILLAR_MIN);
+    const temuan = await checkCompleteness(sql, s.id);
+    expect(temuan.map((m) => m.kode)).not.toContain('E-3..E-10');
   });
 
   it('checkCompleteness — flags C-6 when risiko struktural is empty', async () => {
