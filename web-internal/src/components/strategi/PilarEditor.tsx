@@ -30,16 +30,36 @@
  * `savePillars` melempar galat Postgres tak terpetakan — AM melihatnya sebagai
  * "internal server error". Label pilar tinggal di `detail`.
  *
- * ## Yang sengaja BELUM ada
+ * ## Vendor live (E-8 / Rule 18)
  *
- * Field vendor live (`vendor_id`, `slot_jam`, `tarif`, `target_gmv_per_jam`,
- * E-8/Rule 18) butuh daftar vendor terpilih dan aturan biayanya sendiri; ia
- * bukan "satu kolom lagi" dan tidak dikarang di sini. Baris `live` tetap bisa
- * dibuat, vendornya diisi lewat jalur vendor tersendiri.
+ * Baris berjenis `live` membawa empat kolom tambahan: `vendor_id`, `slot_jam`,
+ * `tarif`, `target_gmv_per_jam`. Daftarnya dari `GET /vendors?jenis_layanan=
+ * live_stream` — endpoint yang docblock-nya sendiri sudah menyebut dirinya
+ * "the E-8 / F-4 picker", jadi tidak ada daftar vendor kedua yang dibuat di sini.
+ *
+ * **Rule 18 ditegakkan di tiga lapis, dan ketiganya sengaja ada.** Vendor hanya
+ * boleh menempel pada pilar `live` — itu yang menjaga jam vendor tidak pernah
+ * tercampur ke beban divisi internal (F-5). Lapisnya: CHECK
+ * `ck_strpil_vendor_live` di DB, `savePillars` di domain, dan editor ini yang
+ * hanya merender kolomnya pada baris `live`. Editor adalah lapis TERLEMAH dari
+ * ketiganya dan tidak boleh diandalkan sendirian; ia ada supaya AM tidak
+ * menabrak dua lapis di bawahnya dan menerima pesan generik.
+ *
+ * Tarif di-prefill dari vendor yang dipilih, tapi tetap bisa diubah: `tarif` di
+ * `strategi_pillar` adalah angka yang disepakati UNTUK Strategi ini, bukan
+ * salinan kartu harga vendor. Vendor `bagi_hasil` tidak punya tarif rupiah sama
+ * sekali (`ck_vendor_tarif_pair`), jadi persennya ditampilkan sebagai konteks
+ * dan kolom tarif dibiarkan kosong — bukan diisi angka yang tak pernah ditagih.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getKatalogPilar, type KatalogPilarAksi, type StrategiDetail } from '@/lib/strategi';
+import {
+  getKatalogPilar,
+  listVendors,
+  type KatalogPilarAksi,
+  type StrategiDetail,
+  type Vendor,
+} from '@/lib/strategi';
 import { blankPilar, type PilarBody } from '@/lib/strategi-pilar';
 import { errorMessage } from '@/lib/api';
 
@@ -142,6 +162,8 @@ export default function PilarEditor({
 }) {
   const [katalog, setKatalog] = useState<KatalogPilarAksi[] | null>(null);
   const [katalogError, setKatalogError] = useState<string | null>(null);
+  const [vendors, setVendors] = useState<Vendor[] | null>(null);
+  const [vendorError, setVendorError] = useState<string | null>(null);
   const [rows, setRows] = useState<Baris[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -154,6 +176,24 @@ export default function PilarEditor({
       .catch((err) => { if (alive) setKatalogError(errorMessage(err)); });
     return () => { alive = false; };
   }, []);
+
+  /** Ada baris `live` di antrean? Itu yang memutuskan daftar vendor perlu dimuat. */
+  const adaBarisLive = rows.some((r) => r.jenis === 'live');
+
+  /**
+   * Vendor dimuat MALAS — hanya saat baris `live` pertama muncul, dan hanya
+   * sekali. AM yang tidak pernah menambah pilar live tidak membayar satu
+   * request pun, dan Rule 18 memastikan itu bukan kasus langka: sebagian besar
+   * Strategi tidak memakai vendor live sama sekali.
+   */
+  useEffect(() => {
+    if (!adaBarisLive || vendors !== null || vendorError !== null) return;
+    let alive = true;
+    listVendors({ jenis: 'live_stream' })
+      .then((v) => { if (alive) setVendors(v); })
+      .catch((err) => { if (alive) setVendorError(errorMessage(err)); });
+    return () => { alive = false; };
+  }, [adaBarisLive, vendors, vendorError]);
 
   /** Channel yang Strategi ini deklarasikan di Section B — pilihan dropdown. */
   const channels = useMemo(
@@ -216,7 +256,19 @@ export default function PilarEditor({
     [rows],
   );
 
+  /** Baris bermasalah, per kunci render — dipakai menandai barisnya DAN menahan simpan. */
+  const masalah = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const r of rows) {
+      if (r.aksi.trim() === '') continue;
+      const m = masalahBaris(tanpaKunci(r));
+      if (m) out.set(r._key, m);
+    }
+    return out;
+  }, [rows]);
+
   const simpan = useCallback(async () => {
+    if (masalah.size > 0) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -228,7 +280,7 @@ export default function PilarEditor({
     } finally {
       setSaving(false);
     }
-  }, [onApplyPillars, siapKirim]);
+  }, [masalah, onApplyPillars, siapKirim]);
 
   const perPilar = useMemo(() => {
     const out = new Map<string, KatalogPilarAksi[]>();
@@ -445,6 +497,73 @@ export default function PilarEditor({
                   </div>
                 )}
 
+                {r.jenis === 'live' && (
+                  <>
+                    {vendorError && (
+                      <div className="alert alertError" style={{ fontSize: 12 }}>
+                        Daftar vendor gagal dimuat: {vendorError}. Baris live tetap bisa disimpan
+                        tanpa vendor (dikerjakan tim internal).
+                      </div>
+                    )}
+                    <div className="formRow">
+                      <label className="field" style={{ flex: 2 }}>
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          Vendor live (E-8) — kosongkan kalau dikerjakan tim internal
+                        </span>
+                        <select
+                          value={r.vendor_id ?? ''}
+                          disabled={disabled || vendors === null}
+                          onChange={(e) => patchRow(r._key, pilihVendor(vendors, e.target.value))}
+                        >
+                          <option value="">
+                            {vendors === null && !vendorError ? 'Memuat vendor…' : '— internal, tanpa vendor —'}
+                          </option>
+                          {(vendors ?? []).map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.nama_vendor} · {v.skema_biaya}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span className="muted" style={{ fontSize: 12 }}>Slot jam / periode</span>
+                        <input
+                          inputMode="decimal"
+                          placeholder="mis. 36"
+                          value={r.slot_jam === null ? '' : String(r.slot_jam)}
+                          disabled={disabled}
+                          onChange={(e) => patchRow(r._key, { slot_jam: angkaAtauNull(e.target.value) })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="muted" style={{ fontSize: 12 }}>Tarif (Rp)</span>
+                        <input
+                          inputMode="decimal"
+                          placeholder="mis. 350000"
+                          value={r.tarif ?? ''}
+                          disabled={disabled}
+                          onChange={(e) => patchRow(r._key, { tarif: e.target.value || null })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="muted" style={{ fontSize: 12 }}>Target GMV / jam (Rp)</span>
+                        <input
+                          inputMode="decimal"
+                          placeholder="mis. 1000000"
+                          value={r.target_gmv_per_jam ?? ''}
+                          disabled={disabled}
+                          onChange={(e) => patchRow(r._key, { target_gmv_per_jam: e.target.value || null })}
+                        />
+                      </label>
+                    </div>
+                    {catatanVendor(vendors, r.vendor_id) && (
+                      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                        {catatanVendor(vendors, r.vendor_id)}
+                      </p>
+                    )}
+                  </>
+                )}
+
                 {r.jenis === 'konten' && (
                   <label className="field" style={{ display: 'block' }}>
                     <span className="muted" style={{ fontSize: 12 }}>
@@ -463,6 +582,10 @@ export default function PilarEditor({
                   </label>
                 )}
 
+                {masalah.get(r._key) && (
+                  <div className="alert alertError" style={{ fontSize: 12 }}>{masalah.get(r._key)}</div>
+                )}
+
                 <div className="row" style={{ justifyContent: 'flex-end' }}>
                   <button type="button" className="btn" disabled={disabled} onClick={() => hapusRow(r._key)}>
                     Hapus baris
@@ -477,11 +600,16 @@ export default function PilarEditor({
             <button
               type="button"
               className="btnPrimary"
-              disabled={disabled || saving || siapKirim.length === 0}
+              disabled={disabled || saving || siapKirim.length === 0 || masalah.size > 0}
               onClick={simpan}
             >
               {saving ? 'Menyimpan…' : `Simpan ${siapKirim.length} pilar`}
             </button>
+            {masalah.size > 0 && (
+              <span className="muted" style={{ fontSize: 12 }}>
+                {masalah.size} baris perlu dibetulkan dulu.
+              </span>
+            )}
             {siapKirim.length < rows.length && (
               <span className="muted" style={{ fontSize: 12 }}>
                 {rows.length - siapKirim.length} baris tanpa aksi akan dilewati.
@@ -496,6 +624,80 @@ export default function PilarEditor({
       )}
     </div>
   );
+}
+
+/** Input angka → `slot_jam` (number | null). Kosong/bukan angka = null, bukan 0. */
+export function angkaAtauNull(teks: string): number | null {
+  const t = teks.trim();
+  if (t === '') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Memilih vendor → tambalan baris: `vendor_id` plus tarif yang di-prefill.
+ *
+ * Prefill hanya untuk skema berbasis rupiah (`per_jam`, `per_sesi`, `retainer`).
+ * Vendor `bagi_hasil` TIDAK punya tarif rupiah sama sekali — `ck_vendor_tarif_pair`
+ * memastikan `tarif` null dan hanya `bagi_hasil_persen` yang terisi — jadi
+ * menyalin apa pun ke kolom tarif akan melahirkan angka yang tak pernah
+ * ditagihkan siapa pun, persis yang CHECK itu cegah di sisi vendor.
+ *
+ * Tarif yang sudah AM ketik TIDAK ditimpa: prefill adalah saran, sama seperti
+ * seluruh jalur usulan→konfirmasi di modul ini.
+ */
+export function pilihVendor(
+  vendors: readonly Vendor[] | null,
+  vendorId: string,
+): Partial<PilarBody> {
+  if (vendorId === '') return { vendor_id: null };
+  const v = (vendors ?? []).find((x) => x.id === vendorId);
+  if (!v || v.skema_biaya === 'bagi_hasil' || v.tarif === null) return { vendor_id: vendorId };
+  return { vendor_id: vendorId, tarif: v.tarif };
+}
+
+/** Konteks skema biaya vendor terpilih — terutama persen bagi hasil, yang tak punya kolom. */
+export function catatanVendor(
+  vendors: readonly Vendor[] | null,
+  vendorId: string | null,
+): string | null {
+  if (vendorId === null) return null;
+  const v = (vendors ?? []).find((x) => x.id === vendorId);
+  if (!v) return null;
+  if (v.skema_biaya === 'bagi_hasil') {
+    return `Skema ${v.nama_vendor}: bagi hasil ${v.bagi_hasil_persen ?? '—'}% — tidak ada tarif rupiah, kolom Tarif boleh dikosongkan.`;
+  }
+  return `Skema ${v.nama_vendor}: ${v.skema_biaya}, tarif kartu harga Rp ${v.tarif ?? '—'}. Tarif di atas boleh berbeda — itu angka yang disepakati untuk Strategi ini.`;
+}
+
+/**
+ * Alasan `savePillars` akan menolak satu baris — dalam bahasa yang menyebut
+ * kolomnya, bukan pesan generik.
+ *
+ * Server menolak SELURUH set dengan satu `[data tidak lengkap, silahkan lengkapi
+ * semua pertanyaan wajib!]`, yang benar sebagai kontrak tapi tidak memberi tahu
+ * AM baris mana dari dua puluh yang salah. Fungsi ini mencerminkan ketiga
+ * pemeriksaan `savePillars` supaya kesalahannya terbaca di baris yang
+ * menyebabkannya, sebelum satu request pun dikirim.
+ *
+ * **Ini cermin, bukan gerbang.** Penegakan yang sesungguhnya tetap di DB
+ * (CHECK) dan domain; kalau ketiganya berbeda suatu saat, yang di sinilah yang
+ * salah. Karena itu ia mengembalikan alasan, bukan melempar.
+ */
+export function masalahBaris(r: PilarBody): string | null {
+  if (r.vendor_id !== null && r.jenis !== 'live') {
+    return 'Vendor hanya boleh pada pilar live (Rule 18).';
+  }
+  if (r.floor_price !== null && r.floor_price.trim() !== '') {
+    if (r.jenis !== 'harga') return 'Floor price hanya boleh pada pilar harga (E-4).';
+    if ((r.sku ?? '').trim() === '') return 'Floor price butuh SKU — validasi Brief membandingkannya per SKU.';
+  }
+  const promo = r.harga_promo === null || r.harga_promo.trim() === '' ? null : Number(r.harga_promo);
+  const floor = r.floor_price === null || r.floor_price.trim() === '' ? null : Number(r.floor_price);
+  if (promo !== null && floor !== null && Number.isFinite(promo) && Number.isFinite(floor) && promo < floor) {
+    return 'Harga promo di bawah floor price — Strategi tidak boleh mengusulkan harga di bawah floor-nya sendiri.';
+  }
+  return null;
 }
 
 /** `detail.angle_video` → teks textarea (satu angle per baris). */
