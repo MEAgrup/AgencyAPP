@@ -469,8 +469,11 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
           kondisi_stop_scope: n.kondisi_stop_scope || null,
         });
         // E-11 (tidak_dikerjakan) is stored as pillars. Preserve the non-E-11
-        // pillars (E-3…E-10) which have their own editor (not yet wired); replace
-        // only the tidak_dikerjakan slice.
+        // pillars (E-3…E-10), which have their own editor — `PilarEditor`,
+        // saving through `applyPilar` below; replace only the
+        // tidak_dikerjakan slice. The two paths write the same table and must
+        // not clobber each other: this one keeps every non-E-11 row, and
+        // `mergePilar` keeps every E-11 row.
         const keepPillars = detail.pillars
           .filter((p) => p.jenis !== 'tidak_dikerjakan');
         const tdPillars = drafts.sectionE.tidak_dikerjakan
