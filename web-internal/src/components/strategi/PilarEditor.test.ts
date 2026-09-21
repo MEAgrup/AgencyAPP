@@ -193,11 +193,29 @@ describe('pilihVendor', () => {
     });
   });
 
-  it('vendor bagi_hasil TIDAK men-prefill tarif — ia tak punya tarif rupiah', () => {
+  it('vendor bagi_hasil MENGOSONGKAN tarif — ia tak punya tarif rupiah', () => {
     // `ck_vendor_tarif_pair`: bagi_hasil memakai persen dan HANYA persen.
     // Menyalin apa pun ke kolom tarif melahirkan angka yang tak pernah ditagih.
     const v = vendor({ skema_biaya: 'bagi_hasil', tarif: null, bagi_hasil_persen: 15 });
-    expect(pilihVendor([v], v.id)).toEqual({ vendor_id: v.id });
+    expect(pilihVendor([v], v.id)).toEqual({ vendor_id: v.id, tarif: null });
+  });
+
+  it('pindah dari vendor per_jam ke bagi_hasil membuang tarif yang tadi ter-prefill', () => {
+    // Regresi dari uji browser 2026-09-21: memilih vendor per_jam mengisi
+    // 350.000, lalu berpindah ke vendor bagi_hasil MENINGGALKAN angka itu di
+    // baris — tarif rupiah pada vendor yang tak pernah menagih rupiah. Versi
+    // lama lolos karena ia hanya memeriksa bahwa prefill tidak terjadi, dan
+    // "tidak menyentuh kolom" memang memenuhi itu.
+    const perJam = vendor();
+    const bagiHasil = vendor({
+      id: 'VND-202609-0009', skema_biaya: 'bagi_hasil', tarif: null, bagi_hasil_persen: 12.5,
+    });
+    const baris: PilarBody = { ...blankPilar('live', 1), ...pilihVendor([perJam, bagiHasil], perJam.id) };
+    expect(baris.tarif).toBe('350000.00');
+
+    const setelahPindah: PilarBody = { ...baris, ...pilihVendor([perJam, bagiHasil], bagiHasil.id) };
+    expect(setelahPindah.vendor_id).toBe(bagiHasil.id);
+    expect(setelahPindah.tarif).toBeNull();
   });
 
   it('mengosongkan pilihan melepas vendor, tanpa menyentuh tarif yang sudah diketik', () => {

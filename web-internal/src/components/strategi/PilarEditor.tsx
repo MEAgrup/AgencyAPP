@@ -652,7 +652,17 @@ export function pilihVendor(
 ): Partial<PilarBody> {
   if (vendorId === '') return { vendor_id: null };
   const v = (vendors ?? []).find((x) => x.id === vendorId);
-  if (!v || v.skema_biaya === 'bagi_hasil' || v.tarif === null) return { vendor_id: vendorId };
+  if (!v) return { vendor_id: vendorId };
+  // `bagi_hasil` tidak punya tarif rupiah sama sekali (`ck_vendor_tarif_pair`),
+  // jadi kolomnya DIKOSONGKAN — bukan sekadar "tidak di-prefill". Bedanya baru
+  // terlihat saat AM berganti pikiran: pilih vendor per_jam dulu (tarif terisi
+  // 350.000), lalu pindah ke vendor bagi_hasil. Kalau hanya "tidak menimpa",
+  // angka 350.000 itu tertinggal pada vendor yang tak pernah menagih rupiah —
+  // persis kombinasi yang CHECK di atas cegah di sisi `vendors`. Ditemukan
+  // lewat uji browser; unit test lama hanya memeriksa bahwa prefill tidak
+  // TERJADI, dan baris kosong memang lolos uji itu.
+  if (v.skema_biaya === 'bagi_hasil') return { vendor_id: vendorId, tarif: null };
+  if (v.tarif === null) return { vendor_id: vendorId };
   return { vendor_id: vendorId, tarif: v.tarif };
 }
 
