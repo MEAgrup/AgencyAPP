@@ -3,11 +3,25 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + kanal + iklan + live + video + produk + afiliasi + tahap +
- * skor + insight per toko klien, dibaca lewat `GET /account/pdt/laporan`. v1
- * SENGAJA sempit (sepuluh dari dua belas seksi mesin laporan lama — lihat
- * docblock `packages/core/src/pdt/laporan.ts`): belum ada tokopedia/
- * ads_manager.
+ * KPI ringkas + harian + kanal + iklan + live + video + produk + afiliasi +
+ * tahap + skor + insight per toko klien, dibaca lewat
+ * `GET /account/pdt/laporan`.
+ *
+ * **Grafik (2026-09-21).** Feedback pemilik: laporan PDT "masih kurang
+ * detail" dibanding mesin HTML lama, "lengkapi … termasuk grafik dan chart".
+ * Lima grafik ditambahkan lewat `@/components/PdtChart` (SVG inline, nol
+ * dependensi — alasannya di docblock `@/lib/chart-geom`): garis tren harian,
+ * donat kontribusi kanal, batang omzet-vs-biaya per sumber iklan, gelembung
+ * matriks produk, dan batang skor per dimensi. Semua menggambar angka yang
+ * SUDAH final dari payload — nol agregasi di sisi FE.
+ *
+ * **Masih kurang dibanding mesin HTML lama** (bukan lupa, belum dibangun):
+ * Voucher & Promo dan Layanan & Kesehatan Toko (fakta sudah ada di
+ * `pdt_fact_promo`/`pdt_fact_layanan_chat`/`pdt_fact_kesehatan_penalti`,
+ * bagian laporannya belum), kuadran produk sisi Shopee, daftar Top 10
+ * kreator dan Top 10 sesi live (payload baru membawa ringkasannya), rincian
+ * iklan per kampanye, serta Tokopedia/ads_manager yang memang nol sumber
+ * data.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
  * via `AskUserQuestion`, 2026-09-16): TikTok lengkap (Live/Video/Kartu
@@ -127,6 +141,7 @@ import {
   riwayatKirimanPdt,
 } from '@/lib/pdt';
 import { formatIDR } from '@/lib/money';
+import { GrafikBatang, GrafikDonat, GrafikGaris, GrafikGelembung, GrafikSkor } from '@/components/PdtChart';
 
 
 /** Label kuadran produk — SAMA persis `report/render.ts` `KUADRAN_META` (mesin lama), bukan istilah baru. */
@@ -605,6 +620,49 @@ export default function LaporanPdtPage() {
             )}
           </section>
 
+          {laporan.harian && (
+            <section className="card">
+              <h2>Tren Harian</h2>
+              <p className="muted" style={{ fontSize: 12 }}>
+                GMV per hari · {laporan.harian.hari_terisi} hari terisi
+                {laporan.harian.gmv_rata_harian !== null && <> · rata-rata {formatIDR(laporan.harian.gmv_rata_harian)}/hari</>}
+              </p>
+              <div style={{ marginTop: 12 }}>
+                <GrafikGaris
+                  judul="Tren GMV harian"
+                  titik={laporan.harian.titik.map((t) => ({ label: t.tanggal, nilai: t.gmv }))}
+                  acuan={
+                    laporan.harian.gmv_rata_harian === null
+                      ? null
+                      : { nilai: laporan.harian.gmv_rata_harian, label: 'rata-rata' }
+                  }
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 12 }}>
+                {laporan.harian.gmv_tertinggi && (
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 'bold' }}>{formatIDR(laporan.harian.gmv_tertinggi.gmv)}</div>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      Hari tertinggi · {laporan.harian.gmv_tertinggi.tanggal}
+                    </p>
+                  </div>
+                )}
+                {laporan.harian.gmv_terendah && (
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 'bold' }}>{formatIDR(laporan.harian.gmv_terendah.gmv)}</div>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      Hari terendah · {laporan.harian.gmv_terendah.tanggal}
+                    </p>
+                  </div>
+                )}
+              </div>
+              <p className="muted" style={{ fontSize: 11, marginTop: 12 }}>
+                Hari yang berkasnya tidak memuat data TIDAK digambar sebagai nol — garisnya terputus di situ.
+                Jumlah GMV harian di grafik ini sama dengan GMV di KPI Ringkas (basis dan sumber barisnya sama).
+              </p>
+            </section>
+          )}
+
           <section className="card">
             <h2>Kanal (Sumber GMV)</h2>
             <p className="muted" style={{ fontSize: 12 }}>
@@ -622,15 +680,12 @@ export default function LaporanPdtPage() {
             {laporan.kanal.gmv_total === null ? (
               <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Belum ada data untuk periode ini.</p>
             ) : (
-              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
-                {laporan.kanal.items.map((item) => (
-                  <div key={item.kode}>
-                    <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(item.gmv)}</div>
-                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                      {item.label} ({formatPercent(item.persen)})
-                    </p>
-                  </div>
-                ))}
+              <div style={{ marginTop: 12 }}>
+                <GrafikDonat
+                  judul="Kontribusi GMV per kanal"
+                  bagian={laporan.kanal.items.map((item) => ({ label: item.label, nilai: item.gmv }))}
+                  tengah={null}
+                />
               </div>
             )}
           </section>
@@ -658,6 +713,15 @@ export default function LaporanPdtPage() {
                   <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>ROAS</p>
                 </div>
               </div>
+              {laporan.iklan.items.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <GrafikBatang
+                    judul="Omzet vs biaya iklan per sumber"
+                    seri={['GMV', 'Biaya']}
+                    kelompok={laporan.iklan.items.map((item) => ({ label: item.label, nilai: [item.gmv, item.biaya] }))}
+                  />
+                </div>
+              )}
               <table style={{ marginTop: 16, width: '100%', fontSize: 13 }}>
                 <thead>
                   <tr>
@@ -775,6 +839,22 @@ export default function LaporanPdtPage() {
                     </div>
                   ))}
               </div>
+              {laporan.produk.top_aksi.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <GrafikGelembung
+                    judul="Matriks produk: trafik vs konversi, luas gelembung = GMV"
+                    labelX="Klik"
+                    labelY="CVR"
+                    produk={laporan.produk.top_aksi.map((x) => ({
+                      label: x.nama_produk ?? x.platform_product_id ?? '—',
+                      x: x.klik,
+                      y: x.cvr,
+                      ukuran: x.gmv,
+                      kuadran: x.kuadran,
+                    }))}
+                  />
+                </div>
+              )}
               {laporan.produk.top_aksi.length > 0 && (
                 <>
                   <h3 style={{ fontSize: 14, marginTop: 16 }}>Top Produk by GMV (Bintang/Bocor Traffic/Hidden Gem)</h3>
@@ -971,6 +1051,15 @@ export default function LaporanPdtPage() {
             <div style={{ fontSize: 32, fontWeight: 'bold', marginBottom: 16 }}>
               {laporan.skor.total !== null ? laporan.skor.total.toFixed(1) : '—'}
             </div>
+
+            {laporan.skor.dimensi.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <GrafikSkor
+                  judul="Skor per dimensi"
+                  dimensi={laporan.skor.dimensi.map((d) => ({ label: d.label, nilai: d.nilai, disertakan: d.disertakan }))}
+                />
+              </div>
+            )}
 
             {laporan.skor.dimensi.length > 0 && (
               <div className="table-wrap">

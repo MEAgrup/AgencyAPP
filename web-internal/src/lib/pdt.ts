@@ -196,6 +196,30 @@ export interface PdtLaporanSkor {
   dimensi: PdtLaporanDimensi[];
 }
 
+// Bagian "harian" (tren GMV per hari), 2026-09-21 — §2 di KEDUA laporan HTML
+// lama dan satu-satunya bagian keduanya yang PDT belum punya sama sekali.
+// `null` (whole object) = nol baris `pdt_fact_shop_daily` di periode ini.
+// `titik` HANYA memuat hari yang benar-benar ada barisnya: hari yang absen
+// TIDAK diisi nol (Rule 12 — "berkas tidak memuat hari itu" bukan "toko tidak
+// jualan hari itu"), jadi grafik garisnya boleh berlubang dan `hari_terisi`
+// menyebut cakupan sebenarnya. Σ `titik[].gmv` SELALU = `kpi.gmv`: keduanya
+// membaca baris yang sama dengan basis yang sama.
+export interface PdtLaporanHarianTitik {
+  tanggal: string;
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  cvr: number | null;
+}
+
+export interface PdtLaporanHarian {
+  titik: PdtLaporanHarianTitik[];
+  hari_terisi: number;
+  gmv_tertinggi: PdtLaporanHarianTitik | null;
+  gmv_terendah: PdtLaporanHarianTitik | null;
+  gmv_rata_harian: number | null;
+}
+
 // G2-01 lanjutan — bagian "kanal" (sumber GMV), 2026-09-16. TikTok penuh
 // (Live/Video/Kartu Produk & Shop Tab); Shopee SELALU `lengkap: false`
 // (shopee_ads + affiliate saja — voucher/chat/meta_cpas/shopee_video belum
@@ -385,6 +409,7 @@ export interface PdtLaporan {
   periode_awal_bulan: string;
   generated_at: string;
   kpi: PdtLaporanKpi;
+  harian: PdtLaporanHarian | null;
   kanal: PdtLaporanKanal;
   iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;

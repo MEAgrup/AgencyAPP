@@ -9351,6 +9351,29 @@ export interface PdtLaporanProdukWire {
   top_aksi: PdtLaporanProdukItemWire[];
 }
 
+export interface PdtLaporanHarianTitikWire {
+  tanggal: string;
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  cvr: number | null;
+}
+
+/**
+ * `null` = nol baris `pdt_fact_shop_daily` di periode ini (bukan objek kosong).
+ * `titik` HANYA memuat hari yang benar-benar ada barisnya — hari yang absen
+ * TIDAK diisi nol (Rule 12), jadi grafik garisnya boleh berlubang dan
+ * `hari_terisi` menyebut cakupan sebenarnya. Lihat docblock
+ * `pdt.PdtLaporanHarian`, `@cdps/core`.
+ */
+export interface PdtLaporanHarianWire {
+  titik: PdtLaporanHarianTitikWire[];
+  hari_terisi: number;
+  gmv_tertinggi: PdtLaporanHarianTitikWire | null;
+  gmv_terendah: PdtLaporanHarianTitikWire | null;
+  gmv_rata_harian: number | null;
+}
+
 export interface PdtLaporanWire {
   schema: string;
   platform: string;
@@ -9358,6 +9381,7 @@ export interface PdtLaporanWire {
   periode_awal_bulan: string;
   generated_at: string;
   kpi: PdtLaporanKpiWire;
+  harian: PdtLaporanHarianWire | null;
   kanal: PdtLaporanKanalWire;
   iklan: PdtLaporanIklanWire | null;
   live: PdtLaporanLiveWire | null;
@@ -9369,6 +9393,21 @@ export interface PdtLaporanWire {
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
   insight: PdtLaporanInsightWire;
+}
+
+function pdtLaporanHarianTitikToWire(t: pdtCore.PdtLaporanHarianTitik): PdtLaporanHarianTitikWire {
+  return { tanggal: t.tanggal, gmv: t.gmv, pesanan: t.pesanan, pengunjung: t.pengunjung, cvr: t.cvr };
+}
+
+function pdtLaporanHarianToWire(h: pdtCore.PdtLaporanHarian | null): PdtLaporanHarianWire | null {
+  if (h == null) return null;
+  return {
+    titik: h.titik.map(pdtLaporanHarianTitikToWire),
+    hari_terisi: h.hariTerisi,
+    gmv_tertinggi: h.gmvTertinggi == null ? null : pdtLaporanHarianTitikToWire(h.gmvTertinggi),
+    gmv_terendah: h.gmvTerendah == null ? null : pdtLaporanHarianTitikToWire(h.gmvTerendah),
+    gmv_rata_harian: h.gmvRataHarian,
+  };
 }
 
 function pdtLaporanSkorToWire(s: pdtCore.PdtSkorHasilTiktok | pdtCore.PdtSkorHasilShopee): PdtLaporanSkorWire {
@@ -9500,6 +9539,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     periode_awal_bulan: l.periodeAwalBulan,
     generated_at: l.generatedAt,
     kpi: { ...l.kpi },
+    harian: pdtLaporanHarianToWire(l.harian),
     kanal: pdtLaporanKanalToWire(l.kanal),
     iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
@@ -9521,6 +9561,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     periode_awal_bulan: l.periodeAwalBulan,
     generated_at: l.generatedAt,
     kpi: { ...l.kpi },
+    harian: pdtLaporanHarianToWire(l.harian),
     kanal: pdtLaporanKanalToWire(l.kanal),
     iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),

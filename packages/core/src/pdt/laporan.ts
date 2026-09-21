@@ -103,6 +103,95 @@ export function bangunKpiRingkas(input: PdtLaporanKpiInput | null): PdtLaporanKp
 }
 
 /**
+ * Bagian "harian" (tren GMV per hari) — bagian §2 di KEDUA laporan HTML lama
+ * ("2. Tren GMV Harian" Shopee, "2. Tren Harian" TikTok), dan satu-satunya
+ * bagian di keduanya yang PDT belum punya sama sekali sampai hari ini
+ * (feedback pemilik 2026-09-21: "hasilnya masih kurang detail … lengkapi
+ * termasuk grafik dan chart").
+ *
+ * Sumbernya `pdt_fact_shop_daily` — tabel yang SUDAH diisi kedua platform
+ * (`tt_shop_analytics`, `shopee_shop_stats`) dan sudah dibaca bagian "kpi",
+ * hanya saja di sana ia langsung di-`sum()` jadi satu angka bulanan. Bagian
+ * ini membaca baris HARIANNYA apa adanya — nol tabel baru, nol modul parser
+ * baru, nol migrasi.
+ *
+ * **Hari yang tidak ada barisnya TIDAK diisi nol.** Ini bukan kelalaian:
+ * "toko tidak jualan hari itu" dan "berkas tidak memuat hari itu" adalah dua
+ * hal berbeda, dan Rule 12 melarang yang kedua menyamar jadi yang pertama.
+ * `titik` hanya memuat hari yang benar-benar ada barisnya (terurut tanggal),
+ * dan `hariTerisi` menyebut jumlahnya supaya pembaca laporan tahu grafiknya
+ * menutup berapa hari dari bulan itu. Konsekuensinya grafik garis bisa punya
+ * jeda — itu INFORMASI, bukan cacat render.
+ *
+ * Basis per platform mengikuti bagian "kpi" (pemanggil yang memilih, sama
+ * seperti `bacaKpiShopDaily`/`bacaKpiTiktokNet`): TikTok `'net'` dengan GMV
+ * yang SUDAH dikurangi refund (Rule 15), Shopee `'siap_dikirim'` (Rule 16).
+ * Menjumlahkan `titik[].gmv` HARUS menghasilkan `kpi.gmv` — keduanya membaca
+ * baris yang sama dengan basis yang sama.
+ */
+export interface PdtLaporanHarianInputBaris {
+  /** `YYYY-MM-DD`. */
+  tanggal: string;
+  /** TikTok: sudah GMV−refund (Rule 15) — pemanggil yang menetralkan, sama seperti `bacaKpiTiktokNet`. */
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+}
+
+/** `null` = nol baris `pdt_fact_shop_daily` di periode ini (bukan array kosong) — bagian "harian" seluruhnya `null`. */
+export type PdtLaporanHarianInput = readonly PdtLaporanHarianInputBaris[] | null;
+
+export interface PdtLaporanHarianTitik {
+  tanggal: string;
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  /** pesanan ÷ pengunjung HARI ITU — `null` bila pengunjung tidak diketahui atau 0 (aturan rumah #7: bagi-nol jadi `—`, bukan galat). */
+  cvr: number | null;
+}
+
+export interface PdtLaporanHarian {
+  /** Terurut tanggal menaik. HANYA hari yang benar-benar ada barisnya — lihat docblock. */
+  titik: PdtLaporanHarianTitik[];
+  /** Jumlah hari yang benar-benar terisi (= `titik.length`), dinamai eksplisit supaya pembaca laporan tidak menyangka grafiknya menutup sebulan penuh. */
+  hariTerisi: number;
+  /** Hari ber-GMV tertinggi/terendah di antara hari yang GMV-nya DIKETAHUI (`gmv != null`) — `null` bila nol hari begitu. */
+  gmvTertinggi: PdtLaporanHarianTitik | null;
+  gmvTerendah: PdtLaporanHarianTitik | null;
+  /** Σ gmv ÷ `hariTerisi` — rata-rata atas hari yang ADA datanya, BUKAN atas jumlah hari kalender bulan itu. */
+  gmvRataHarian: number | null;
+}
+
+/**
+ * Rakit `PdtLaporanHarian` dari baris harian mentah. `null`/array kosong ⇒
+ * `null` (nol dasar untuk digambar sama sekali), konsisten dengan
+ * `bangunLaporanLive`/`bangunLaporanVideo`.
+ */
+export function bangunLaporanHarian(input: PdtLaporanHarianInput): PdtLaporanHarian | null {
+  if (input == null || input.length === 0) return null;
+
+  const titik: PdtLaporanHarianTitik[] = [...input]
+    .sort((a, b) => (a.tanggal < b.tanggal ? -1 : a.tanggal > b.tanggal ? 1 : 0))
+    .map((b) => ({
+      tanggal: b.tanggal,
+      gmv: bulat(b.gmv),
+      pesanan: bulat(b.pesanan),
+      pengunjung: bulat(b.pengunjung),
+      cvr: b.pesanan == null || b.pengunjung == null || b.pengunjung === 0 ? null : persen5(b.pesanan / b.pengunjung),
+    }));
+
+  const berGmv = titik.filter((t) => t.gmv != null);
+  const totalGmv = berGmv.reduce((a, t) => a + (t.gmv as number), 0);
+  return {
+    titik,
+    hariTerisi: titik.length,
+    gmvTertinggi: berGmv.length === 0 ? null : berGmv.reduce((a, t) => ((t.gmv as number) > (a.gmv as number) ? t : a)),
+    gmvTerendah: berGmv.length === 0 ? null : berGmv.reduce((a, t) => ((t.gmv as number) < (a.gmv as number) ? t : a)),
+    gmvRataHarian: berGmv.length === 0 ? null : bulat(totalGmv / berGmv.length),
+  };
+}
+
+/**
  * Bagian "kanal" (sumber GMV) — bagian KEDUA dari sebelas yang tadinya di
  * luar cakupan v1 (lihat docblock berkas). Keputusan pemilik via
  * `AskUserQuestion`: TikTok DAN Shopee dibangun SEKALIGUS, meski TIDAK
@@ -1018,6 +1107,8 @@ export interface PdtLaporanTiktok {
   periodeAwalBulan: string;
   generatedAt: string;
   kpi: PdtLaporanKpiRingkas;
+  /** `null` = nol baris `pdt_fact_shop_daily` di periode ini. */
+  harian: PdtLaporanHarian | null;
   kanal: PdtLaporanKanal;
   iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
@@ -1037,6 +1128,8 @@ export interface PdtLaporanShopee {
   periodeAwalBulan: string;
   generatedAt: string;
   kpi: PdtLaporanKpiRingkas;
+  /** `null` = nol baris `pdt_fact_shop_daily` di periode ini. */
+  harian: PdtLaporanHarian | null;
   kanal: PdtLaporanKanal;
   iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
@@ -1055,6 +1148,7 @@ export interface PdtLaporanTiktokOptions {
   periodeAwalBulan: string;
   generatedAt: string;
   kpi: PdtLaporanKpiInput | null;
+  harian: PdtLaporanHarianInput;
   kanal: PdtLaporanKanalInputTiktok | null;
   iklan: PdtLaporanIklanInputTiktok | null;
   live: PdtLaporanLiveInput | null;
@@ -1073,6 +1167,7 @@ export interface PdtLaporanShopeeOptions {
   periodeAwalBulan: string;
   generatedAt: string;
   kpi: PdtLaporanKpiInput | null;
+  harian: PdtLaporanHarianInput;
   kanal: PdtLaporanKanalInputShopee | null;
   iklan: PdtLaporanIklanInputShopee | null;
   live: PdtLaporanLiveInput | null;
@@ -1098,6 +1193,7 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
     periodeAwalBulan: opts.periodeAwalBulan,
     generatedAt: opts.generatedAt,
     kpi,
+    harian: bangunLaporanHarian(opts.harian),
     kanal,
     iklan,
     live,
@@ -1128,6 +1224,7 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
     periodeAwalBulan: opts.periodeAwalBulan,
     generatedAt: opts.generatedAt,
     kpi,
+    harian: bangunLaporanHarian(opts.harian),
     kanal,
     iklan,
     live,

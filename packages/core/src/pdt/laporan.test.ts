@@ -6,6 +6,7 @@ import {
   bangunKanalTiktok,
   bangunKpiRingkas,
   bangunLaporanAfiliasi,
+  bangunLaporanHarian,
   bangunLaporanInsight,
   bangunLaporanLive,
   bangunLaporanProduk,
@@ -72,6 +73,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       periodeAwalBulan: '2026-07-01',
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000 },
+      harian: null,
       kanal: null,
       iklan: null,
       live: null,
@@ -90,6 +92,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       periodeAwalBulan: '2026-07-01',
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000, cvr: 0.02 },
+      harian: null,
       kanal: { gmvTotal: null, items: [], lengkap: true },
       iklan: null,
       live: null,
@@ -171,7 +174,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
     const skor = computeSkorTiktok(INPUT_KOSONG_TIKTOK, BENCH_KOSONG);
     const hasil = bangunLaporanTiktok({
       clientPlatformId: 1, periodeAwalBulan: '2026-07-01', generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: null, kanal: null, iklan: null, live: null, video: null, produk: null, afiliasi: null, tahap: TAHAP_INPUT_KOSONG, skor, benchmarkVersi: 1,
+      kpi: null, harian: null, kanal: null, iklan: null, live: null, video: null, produk: null, afiliasi: null, tahap: TAHAP_INPUT_KOSONG, skor, benchmarkVersi: 1,
       benchTiktok: BENCH_KOSONG,
     });
     expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
@@ -192,6 +195,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       periodeAwalBulan: '2026-07-01',
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500 },
+      harian: null,
       kanal: null,
       iklan: null,
       live: null,
@@ -206,6 +210,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       periodeAwalBulan: '2026-07-01',
       generatedAt: '2026-08-01T00:00:00.000Z',
       kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500, cvr: 0.02 },
+      harian: null,
       kanal: { gmvTotal: null, items: [], lengkap: false },
       iklan: null,
       live: null,
@@ -769,5 +774,70 @@ describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16,
 
     const shopee = bangunLaporanInsight(dasar({ platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1 }, benchTiktok: null, skor }));
     expect(shopee.indikator).toEqual([{ nama: 'Target Skor Performa', target: '≥8/10 (kini 7,0/10)' }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bagian "harian" (tren GMV per hari) — §2 di KEDUA laporan HTML lama, bagian
+// terakhir dari keduanya yang PDT belum punya (feedback pemilik 2026-09-21).
+// ---------------------------------------------------------------------------
+describe('bangunLaporanHarian', () => {
+  const hari = (tanggal: string, gmv: number | null, pesanan: number | null = null, pengunjung: number | null = null) =>
+    ({ tanggal, gmv, pesanan, pengunjung });
+
+  it('nol baris ⇒ null (bukan objek kosong yang menggambar grafik hampa)', () => {
+    expect(bangunLaporanHarian(null)).toBeNull();
+    expect(bangunLaporanHarian([])).toBeNull();
+  });
+
+  it('mengurutkan titik menaik per tanggal apa pun urutan masukannya', () => {
+    const h = bangunLaporanHarian([hari('2026-07-03', 300), hari('2026-07-01', 100), hari('2026-07-02', 200)]);
+    expect(h?.titik.map((t) => t.tanggal)).toEqual(['2026-07-01', '2026-07-02', '2026-07-03']);
+  });
+
+  it('hari yang TIDAK ada barisnya tidak diisi nol — `hariTerisi` menyebut cakupan sebenarnya (Rule 12)', () => {
+    // Tiga baris di bulan 31 hari: grafiknya memang berlubang, dan itu informasi.
+    const h = bangunLaporanHarian([hari('2026-07-01', 100), hari('2026-07-15', 200), hari('2026-07-31', 300)]);
+    expect(h?.hariTerisi).toBe(3);
+    expect(h?.titik).toHaveLength(3);
+    expect(h?.titik.map((t) => t.tanggal)).not.toContain('2026-07-02');
+  });
+
+  it('cvr per hari = pesanan ÷ pengunjung hari itu; pengunjung 0/tidak diketahui ⇒ null, bukan galat', () => {
+    const h = bangunLaporanHarian([
+      hari('2026-07-01', 100, 10, 500),
+      hari('2026-07-02', 100, 10, 0),
+      hari('2026-07-03', 100, 10, null),
+    ]);
+    expect(h?.titik[0].cvr).toBe(0.02);
+    expect(h?.titik[1].cvr).toBeNull();
+    expect(h?.titik[2].cvr).toBeNull();
+  });
+
+  it('tertinggi/terendah/rata-rata dihitung HANYA atas hari yang GMV-nya diketahui', () => {
+    const h = bangunLaporanHarian([
+      hari('2026-07-01', 100), hari('2026-07-02', null), hari('2026-07-03', 500), hari('2026-07-04', 300),
+    ]);
+    expect(h?.gmvTertinggi?.tanggal).toBe('2026-07-03');
+    expect(h?.gmvTerendah?.tanggal).toBe('2026-07-01');
+    // (100+500+300)/3 = 300 — hari ber-GMV null TIDAK ikut jadi penyebut.
+    expect(h?.gmvRataHarian).toBe(300);
+    // ...tapi ia tetap muncul sebagai titik, supaya lubangnya terlihat di grafik.
+    expect(h?.hariTerisi).toBe(4);
+  });
+
+  it('seluruh GMV null ⇒ tertinggi/terendah/rata-rata null, titik tetap ada', () => {
+    const h = bangunLaporanHarian([hari('2026-07-01', null), hari('2026-07-02', null)]);
+    expect(h?.gmvTertinggi).toBeNull();
+    expect(h?.gmvTerendah).toBeNull();
+    expect(h?.gmvRataHarian).toBeNull();
+    expect(h?.hariTerisi).toBe(2);
+  });
+
+  it('Σ titik[].gmv === kpi.gmv — keduanya membaca baris yang sama dengan basis yang sama', () => {
+    const baris = [hari('2026-07-01', 1_000_000, 10, 100), hari('2026-07-02', 2_500_000, 20, 200)];
+    const h = bangunLaporanHarian(baris);
+    const kpi = bangunKpiRingkas({ gmv: 3_500_000, pesanan: 30, pengunjung: 300 });
+    expect(h?.titik.reduce((a, t) => a + (t.gmv ?? 0), 0)).toBe(kpi.gmv);
   });
 });

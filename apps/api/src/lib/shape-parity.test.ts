@@ -799,6 +799,9 @@ const WIRE_TO_FE: Record<string, string> = {
   PdtLaporanKpiWire: 'pdt.ts::PdtLaporanKpi',
   PdtLaporanSkorWire: 'pdt.ts::PdtLaporanSkor',
   PdtLaporanDimensiWire: 'pdt.ts::PdtLaporanDimensi',
+  // PDT — bagian "harian" (tren GMV per hari, 2026-09-21).
+  PdtLaporanHarianWire: 'pdt.ts::PdtLaporanHarian',
+  PdtLaporanHarianTitikWire: 'pdt.ts::PdtLaporanHarianTitik',
   // PDT G2-01 lanjutan — bagian "kanal" (2026-09-16).
   PdtLaporanKanalWire: 'pdt.ts::PdtLaporanKanal',
   PdtLaporanKanalItemWire: 'pdt.ts::PdtLaporanKanalItem',
