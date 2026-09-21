@@ -501,7 +501,7 @@ export function recordTrackerAfter(
  * from it (`nav.ts` header note). An empty list is the honest answer there.
  *
  * The single source of truth for both the page guard and the nav gate. One
- * predicate, no drift — the same posture `embedded-tools.ts` takes.
+ * predicate, no drift.
  */
 export function canUseSkuScreener(role: Role | null): boolean {
   if (!role) return false;

@@ -88,7 +88,6 @@ import {
   PILLAR_KINDS,
   getBaselinePrefill,
   petakanTipeKampanye,
-  susunPilarUsulan,
   getStrategi,
   getStrategiPrefill,
   listStrategiForService,
@@ -5242,78 +5241,6 @@ describeDb('getBaselinePrefill — B3: the §4.4 figures the payload already car
     const [{ count }] = await sql<{ count: string }[]>`
       select count(*)::text as count from strategi_channel where strategi_id = ${s.id}`;
     expect(count).toBe('0');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// B4 — susunPilarUsulan (AM Co-Pilot mengisi Section E dari server)
-// ---------------------------------------------------------------------------
-
-describeDb('susunPilarUsulan — Section E disusun server-side (B4)', () => {
-  async function seeded() {
-    const serviceId = await seedService();
-    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
-      select client_id from services where id = ${serviceId}`;
-    const { interviewId } = await seedScoredInterview(clientId);
-    const ids = await seedRisetAwalBaseline(interviewId, clientId);
-    const s = await createStrategi(sql, am(), serviceId, HEADER);
-    return { serviceId, clientId, interviewId, strategiId: s.id, ...ids };
-  }
-
-  it('proposes one set of pillars per analysed platform, resolved from the same interview', async () => {
-    const { interviewId, strategiId, tiktokId, shopeeId } = await seeded();
-    const u = await susunPilarUsulan(sql, am(), strategiId);
-    expect(u).not.toBeNull();
-    // The SAME interview `getBaselinePrefill` resolves — one helper, no drift.
-    expect(u!.interviewId).toBe(interviewId);
-    expect(u!.channels.map((c) => c.clientPlatformId).sort()).toEqual([tiktokId, shopeeId].sort());
-    const tt = u!.channels.find((c) => c.clientPlatformId === tiktokId)!;
-    expect(tt.channel).toBe('TikTok Shop');
-    expect(tt.usulan.payloadTerbaca).toBe(true);
-  });
-
-  it('every proposed pillar carries a jenis from PILLAR_KINDS and a channel from D1', async () => {
-    const { strategiId } = await seeded();
-    const u = await susunPilarUsulan(sql, am(), strategiId);
-    for (const c of u!.channels) {
-      expect(['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Website', 'Lainnya']).toContain(c.channel);
-      for (const p of c.usulan.pilar) {
-        expect(PILLAR_KINDS).toContain(p.jenis);
-        expect(p.aksi.length).toBeGreaterThan(0);
-      }
-    }
-  });
-
-  it('a manual baseline proposes nothing and says why — never a guessed pillar', async () => {
-    const { strategiId, shopeeId } = await seeded();
-    const u = await susunPilarUsulan(sql, am(), strategiId);
-    const sh = u!.channels.find((c) => c.clientPlatformId === shopeeId)!;
-    expect(sh.usulan.payloadTerbaca).toBe(false);
-    expect(sh.usulan.pilar).toEqual([]);
-    expect(sh.usulan.catatan.join(' ')).toContain('tidak memuat blok analisa');
-  });
-
-  it('is suggestion-only: reading it writes no strategi_pillar row', async () => {
-    const { strategiId } = await seeded();
-    await susunPilarUsulan(sql, am(), strategiId);
-    const [{ count }] = await sql<{ count: string }[]>`
-      select count(*)::text as count from strategi_pillar where strategi_id = ${strategiId}`;
-    expect(count).toBe('0');
-  });
-
-  it('returns null when the client has no riset awal analysis', async () => {
-    const serviceId = await seedService();
-    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
-      select client_id from services where id = ${serviceId}`;
-    await seedScoredInterview(clientId);
-    const s = await createStrategi(sql, am(), serviceId, HEADER);
-    expect(await susunPilarUsulan(sql, am(), s.id)).toBeNull();
-  });
-
-  it('refuses a non-owner AM — the same read gate as getStrategi / getBaselinePrefill', async () => {
-    const serviceId = await seedService();
-    const s = await createStrategi(sql, am(), serviceId, HEADER);
-    await expect(susunPilarUsulan(sql, otherAm(), s.id)).rejects.toThrow(ForbiddenError);
   });
 });
 

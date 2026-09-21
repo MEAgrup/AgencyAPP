@@ -20,7 +20,7 @@
  * TikTok (G2-01-KUADRAN-SKU langkah 2, benchmark `quad_klik`/`quad_cvr`).
  * `verdict.ts` untuk mesin verdict Shopee (G4-03 Tahap 1, Rule 26-32 Flow C)
  * — katalog aksi BARU membaca `pdt_fact_*` langsung, terpisah dari
- * `copilot.ts` (katalog lama, payload baseline).
+ * `pilarkatalog.ts` (katalog lama, payload baseline).
  */
 export * from './types';
 export * from './modules';

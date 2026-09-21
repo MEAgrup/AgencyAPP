@@ -170,8 +170,9 @@ describe('tautan STRG → Upload PDT benar-benar terpasang di kedua ujung', () =
 
     const blokA = src.slice(iA, iB);
     expect(blokA, 'PdtUploadPanel tidak ada di blok render Section A').toContain('<PdtUploadPanel');
-    // Tetangganya, dan alasan posisinya: keduanya sumber, keduanya di Section A.
-    expect(blokA).toContain('<VideoFactoryImportPanel');
+    // Tetangganya dulu `<VideoFactoryImportPanel>` (AM Baseline), yang pensiun
+    // 2026-09-21 ("PENSIUN-AMTOOLS"). PDT kini satu-satunya sumber unggahan di
+    // Section A — yang dipaku tinggal posisinya, bukan tetangganya.
     expect(src.slice(iB), 'PdtUploadPanel masih tertinggal di Section B').not.toContain('<PdtUploadPanel');
 
     // `{baselinePrefill && <PdtUploadPanel …>}` akan menyembunyikan panel tepat

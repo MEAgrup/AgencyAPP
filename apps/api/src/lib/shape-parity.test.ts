@@ -558,12 +558,6 @@ const WIRE_TO_FE: Record<string, string> = {
   StrategiGmvMixRincianWire: 'strategi.ts::StrategiGmvMixRincian',
   StrategiTopSkuSuggestionWire: 'strategi.ts::StrategiTopSkuSuggestion',
   StrategiTopKreatorSuggestionWire: 'strategi.ts::StrategiTopKreatorSuggestion',
-  StrategiCopilotAngleWire: 'strategi.ts::StrategiCopilotAngle',
-  StrategiCopilotAturanTerkunciWire: 'strategi.ts::StrategiCopilotAturanTerkunci',
-  StrategiCopilotAksiWire: 'strategi.ts::StrategiCopilotAksi',
-  StrategiCopilotPilarWire: 'strategi.ts::StrategiCopilotPilar',
-  StrategiCopilotChannelWire: 'strategi.ts::StrategiCopilotChannel',
-  StrategiCopilotUsulanWire: 'strategi.ts::StrategiCopilotUsulan',
   // A-05 Section A + A-15/A-16, and the repeatable structs A-06 stores as jsonb.
   // They are named interfaces rather than anonymous bags precisely so this guard
   // descends into them — a struct typed `Record<string, unknown>[]` is a shape

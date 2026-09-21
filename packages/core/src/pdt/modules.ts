@@ -158,7 +158,7 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
       'Creator name', 'GMV dari kreator', 'AOV', 'CTOR', 'Pesanan teratribusi', 'Tayangan video',
       'Video', 'Siaran LIVE', 'Perkiraan komisi',
     ],
-    // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.4 — dibutuhkan copilot A1/A2 +
+    // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.4 — dibutuhkan katalog A1/A2 +
     // PX Flow D commission_pct, bukan gerbang PDT sendiri. Hilang ⇒ 'sebagian', bukan 'gagal'.
     kolomOpsional: ['Video', 'Siaran LIVE', 'Perkiraan komisi'],
     wajib: true,
@@ -193,7 +193,7 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     barisHeaderHint: 3, // Rule 7
     kolomDipanen: ['ID Kreator', 'Waktu Live', 'Durasi', 'GMV dari LIVE (Rp)', 'Produk Terjual', 'Penonton', 'CTOR', 'Kreator'],
     // G1-08-SEBAGIAN: Bucket 2 PDT_KOLOM_DIPANEN.md §1.6 — dibutuhkan report.dim_live(0.22)/
-    // copilot L3/pemisah toko-vs-afiliasi, bukan gerbang PDT sendiri. Hilang ⇒ 'sebagian'.
+    // katalog L3/pemisah toko-vs-afiliasi, bukan gerbang PDT sendiri. Hilang ⇒ 'sebagian'.
     kolomOpsional: ['Penonton', 'CTOR', 'Kreator'],
     wajib: true,
   },

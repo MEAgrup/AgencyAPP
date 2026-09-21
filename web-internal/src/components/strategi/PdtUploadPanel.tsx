@@ -3,11 +3,11 @@
 /**
  * Panel "Isi dari PDT" — jembatan Strategi → `/account/pdt/upload`.
  *
- * **Tinggal di Section A**, bersama `InterviewPrefillPanel`,
- * `VideoFactoryImportPanel` dan (di Section C/E) `CockpitImportPanel`, walau
- * field yang diisinya ada di Section B. Itu bukan kelalaian: Section A adalah
- * tempat berkumpulnya SUMBER, dan Video Factory sudah dipindah ke sana lebih
- * dulu atas alasan yang sama (owner QA STRG-202608-0001). Menaruh satu sumber
+ * **Tinggal di Section A**, bersama `InterviewPrefillPanel`, walau field yang
+ * diisinya ada di Section B. Itu bukan kelalaian: Section A adalah tempat
+ * berkumpulnya SUMBER, dan AM Baseline (Video Factory) sudah dipindah ke sana
+ * lebih dulu atas alasan yang sama (owner QA STRG-202608-0001) sebelum ia
+ * dipensiunkan 2026-09-21. Menaruh satu sumber
  * sendirian di Section B membuat AM menemukannya SESUDAH ia terlanjur mengetik
  * baseline dengan tangan — terlambat, karena PDT butuh unggah + batch
  * `verified` + muat ulang, bukan tempel seketika. Keputusan pemilik
@@ -18,8 +18,8 @@
  * Section B punya DUA sumber angka, dan sampai sekarang hanya satu yang
  * kelihatan dari halaman ini:
  *
- *  - **Riset Awal / Video Factory** — AM menempel hasil analisa export.
- *    Terlihat: `BaselinePrefillPanel` dan `VideoFactoryImportPanel`.
+ *  - **Riset Awal** — angka yang server turunkan sendiri dari export yang
+ *    diunggah ke CDPS. Terlihat: `BaselinePrefillPanel`.
  *  - **PDT (Pusat Data Toko)** — batch export yang sudah `verified` mengisi
  *    field B3 (refund rate, pengunjung/bulan, conversion rate, poin penalti)
  *    dari `pdt_fact_*`, dengan selektor "Periode acuan PDT (B-0.7a)".

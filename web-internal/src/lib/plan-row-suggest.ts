@@ -12,11 +12,11 @@
  *
  * QA (2026-08-26): on `/account/plan/{id}`, picking a Strategi pillar (PC-3)
  * for a new Plan row only recorded the link — the pillar's own `aksi`/`target`
- * (e.g. "30 video, jembatan Video bertayangan / bulan" from AM Co-Pilot, or
- * free text the AM typed straight into Section E) never reached the row, so
+ * (e.g. "30 video, jembatan Video bertayangan / bulan", typed by the AM in the
+ * Section E pillar editor) never reached the row, so
  * the AM re-typed exactly what Section E already had. This is a pure
  * suggestion adapter (RAB-19 usulan→konfirmasi pattern, same shape as
- * `strategi-video-factory.ts`/`strategi-baseline-inherit.ts`): the caller
+ * `strategi-baseline-inherit.ts`): the caller
  * only applies a suggested field when the AM's own field is still empty, and
  * divisi PIC is set from a closed, unambiguous subset of pillar jenis — `sku`
  * / `harga` / `retensi` have no single owning division and are left for the
@@ -79,7 +79,8 @@ export function parseTargetKuota(
 
 /**
  * Cermin `planpillar.angleVideoDariDetail` — `detail.angle_video` (ditulis AM
- * Co-Pilot, `strategi-copilot.ts`) jadi satu baris `instruksi_brief`, yang
+ * pilar konten, diketik AM di editor pilar Section E) jadi satu baris
+ * `instruksi_brief`, yang
  * `brief-inherit` sambung ke `instructions` Brief Creative. Sampai UAT
  * Gelombang B §10 butir 7 (2026-09-07) kunci itu ditulis dan tak pernah dibaca:
  * angle-nya berhenti di Section E. `null` = kolomnya tetap kosong.

@@ -22,6 +22,7 @@
 import { createHmac } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type Sql } from '@cdps/db';
+import { pilarkatalog } from '@cdps/core';
 
 import { POST as baselineSubmit, GET as baselineGet } from '../app/api/v1/interview/[id]/baseline/route';
 import { POST as baselineConfirm } from '../app/api/v1/interview/[id]/baseline/confirm/route';
@@ -851,116 +852,101 @@ dDb('UAT §10 butir 4 — klien lama: 4 field lama saja, halaman MENGATAKAN payl
 });
 
 // ---------------------------------------------------------------------------
-// §10 butir 5 — Section E otomatis + angle video, TANPA export/paste/file
+// §10 butir 5 — Section E diisi editor pilar MANUAL dari katalog
+//
+// Butir ini dulu menguji AM Co-Pilot yang menyusun Section E sendiri dari
+// `riset_awal_analisa.payload`. Co-Pilot pensiun 2026-09-21 (DECISIONS
+// "PENSIUN-AMTOOLS") dan endpoint-nya kini 410; pengisi Section E adalah AM,
+// yang memilih aksi dari katalog `@cdps/core` `pilarkatalog`.
+//
+// Yang TIDAK ikut pensiun dan karena itu tetap diuji di sini: `detail.angle_video`
+// → `plan_row.instruksi_brief` → Brief (lihat `planpillar.angleVideoDariDetail`,
+// dan tes Brief di butir 7 yang membacanya). Dulu angle-nya diperingkat mesin
+// dari export video; sekarang AM yang mengetiknya di editor. Jalurnya sama
+// persis — yang berubah hanya siapa yang mengisi.
 // ---------------------------------------------------------------------------
-interface CopilotAksiWire {
-  kode: string; pilar: string; divisi: string; jenis: string; nama: string;
-  target: string; jembatan: string; unit: string; arah: string; minggu_terlihat: number;
-  field_id_bukti: string; quick_win: boolean; alasan: string;
-  angle: { judul: string; akun: string | null; gmv: number | null; gpm: number | null; vv: number | null; ringkas: string }[];
-}
-interface CopilotChannelWire {
-  client_platform_id: number; platform: string; channel: string; channel_lain: string | null;
-  metode_baseline: string; payload_schema: string | null; payload_terbaca: boolean;
-  periode_referensi: string | null; benchmark_versi: number | null; catatan: string[];
-  pilar: { urutan: number; pilar: string; label: string; jenis: string; divisi: string; skor_baseline: number | null; aksi: CopilotAksiWire[] }[];
-}
-interface CopilotWire { interview_id: string; channels: CopilotChannelWire[] }
 
-let usulan: CopilotWire;
+/** Angle video yang AM ketik di editor pilar, untuk aksi konten V3. */
+const ANGLE_DIKETIK_AM = ['Racun skincare #serum #glowing — konversi tertinggi bulan lalu'];
 
-dDb('UAT §10 butir 5 — AM Co-Pilot mengisi Section E dari server', () => {
-  it('daftar pilar muncul tanpa export/tempel — GET /strategi/{id}/copilot', async () => {
-    const res = await copilotGet(get(`/strategi/${strategiId}/copilot`, amToken), ctx(strategiId));
-    expect(res.status).toBe(200);
-    usulan = await body<CopilotWire>(res);
-    expect(usulan).not.toBeNull();
-    expect(usulan.channels.length).toBe(2);
-    const semuaAksi = usulan.channels.flatMap((c) => c.pilar.flatMap((p) => p.aksi));
-    expect(semuaAksi.length).toBeGreaterThan(0);
-    // Setiap aksi menyebut jembatan + buktinya — bukan saran generik.
-    for (const a of semuaAksi) {
+dDb('UAT §10 butir 5 — Section E diisi editor pilar manual', () => {
+  it('endpoint AM Co-Pilot sudah pensiun — 410 Gone, dengan jalan keluarnya', async () => {
+    const res = await copilotGet();
+    expect(res.status).toBe(410);
+    const err = await body<{ error: string }>(res);
+    expect(err.error).toContain('AM Co-Pilot sudah tidak dipakai');
+    expect(err.error).toContain('Section E');
+  });
+
+  it('katalog pilar tersedia tanpa Riset Awal — 4 pilar, 20 aksi, semua berlabel', () => {
+    expect(pilarkatalog.KATALOG).toHaveLength(20);
+    for (const a of pilarkatalog.KATALOG) {
       expect(a.kode).not.toBe('');
-      expect(a.jenis).not.toBe('');
-      expect(a.target).not.toBe('');
+      expect(a.nama).not.toBe('');
+      expect(pilarkatalog.PILAR_KE_JENIS[a.pilar]).not.toBe('');
     }
   });
 
-  it('pilar konten membawa angle video yang SUDAH perform, dengan angka aslinya', async () => {
-    const tt = usulan.channels.find((c) => c.channel === 'TikTok Shop')!;
-    const konten = tt.pilar.filter((p) => p.jenis === 'konten').flatMap((p) => p.aksi);
-    expect(konten.length).toBeGreaterThan(0);
-    const beranggle = konten.filter((a) => a.angle.length > 0);
-    expect(beranggle.length, 'tak satu pun aksi konten membawa angle video').toBeGreaterThan(0);
-    const angle = beranggle[0].angle[0];
-    // Judulnya benar-benar dari export video toko yang diunggah di butir 1.
-    expect(['Racun skincare #serum #glowing', 'Before after 14 hari #serum', 'Tutorial layering #skincare'])
-      .toContain(angle.judul);
-    expect(angle.gmv ?? 0).toBeGreaterThan(0);
-    expect(angle.vv ?? 0).toBeGreaterThan(0);
-    expect(angle.ringkas).not.toBe('');
-  });
-
-  it('centang → simpan: E-3…E-10 terisi (PUT /strategi/{id}/pillars)', async () => {
+  it('AM memilih dari katalog → simpan: E-3…E-10 terisi (PUT /strategi/{id}/pillars)', async () => {
     const res = await pillarsPut(put(`/strategi/${strategiId}/pillars`, amToken, {
-      pillars: pilarDariCopilot(usulan),
+      pillars: pilarDariKatalog(),
     }), ctx(strategiId));
     expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
     const d = await body<{ pillars: { jenis: string; aksi: string; target: string; detail: Record<string, unknown> }[] }>(res);
     expect(d.pillars.length, JSON.stringify(d.pillars.map((x) => x.jenis))).toBeGreaterThan(0);
-    // Provenance: tiap baris menyebut asalnya. Angle video hanya melekat pada
-    // aksi konten yang MEMANG punya video ber-penjualan (aksi konten lain, mis.
-    // "naikkan jumlah posting", tak punya angle — dan itu benar).
+    // Provenance: tiap baris menyebut asalnya (katalog + kode aksi), supaya
+    // baris Plan turunannya bisa dilacak balik ke pilihan AM.
     const konten = d.pillars.filter((p) => p.jenis === 'konten');
     expect(konten.length).toBeGreaterThan(0);
-    for (const p of konten) expect(Array.isArray(p.detail.angle_video)).toBe(true);
-    const berangle = konten.filter((p) => (p.detail.angle_video as string[]).length > 0);
-    expect(berangle.length, 'tak satu pun pilar konten tersimpan membawa angle video').toBeGreaterThan(0);
-    expect((berangle[0].detail.angle_video as string[])[0]).toMatch(/\S/);
+    for (const p of konten) expect(p.detail.sumber).toBe('cdps.pilarkatalog.v1');
+    // Angle video yang AM ketik harus tersimpan apa adanya — inilah yang nanti
+    // sampai ke Creative lewat instruksi Brief.
+    const berangle = konten.filter((p) => ((p.detail.angle_video as string[] | undefined) ?? []).length > 0);
+    expect(berangle.length, 'angle video yang diketik AM tidak tersimpan').toBeGreaterThan(0);
+    expect((berangle[0].detail.angle_video as string[])[0]).toBe(ANGLE_DIKETIK_AM[0]);
   });
 });
 
 /**
- * Cermin `buildCopilotPillars` (web-internal/src/lib/strategi-copilot.ts) —
- * bentuk baris yang browser kirim setelah AM mencentang SEMUA aksi. `peran`
- * selalu null (enum peran SKU tertutup; label pilar masuk `detail.pilar`).
+ * Bentuk baris yang browser kirim setelah AM memilih aksi di editor pilar
+ * Section E. `peran` selalu null (enum peran SKU tertutup; label pilar masuk
+ * `detail.pilar`).
+ *
+ * Aksinya diambil dari `pilarkatalog.KATALOG` yang SEBENARNYA, bukan daftar
+ * yang ditulis ulang di sini — kalau katalognya berubah, jahitan katalog →
+ * Section E → Plan ini yang memerah lebih dulu.
  *
  * DUA pilar tambahan diketik AM sendiri, sama seperti di layar: satu `harga`
  * dan satu `sku` (butir 6 menuntut keduanya muncul di panel "menunggu divisi"),
  * plus satu `tidak_dikerjakan` yang digerbangkan §Yang Tidak Dikerjakan.
  */
-function pilarDariCopilot(u: CopilotWire): Record<string, unknown>[] {
+function pilarDariKatalog(): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   let urutan = 1;
-  for (const c of u.channels) {
-    const label = c.channel === 'Lainnya' && c.channel_lain ? c.channel_lain : c.channel;
-    for (const p of c.pilar) {
-      for (const a of p.aksi) {
-        out.push({
-          jenis: a.jenis,
-          channel: label.slice(0, 32),
-          urutan: urutan++,
-          sku: null,
-          peran: null,
-          aksi: `${a.kode} ${a.nama}`,
-          target: a.target,
-          detail: {
-            sumber: 'cdps.cockpit.copilot.v1',
-            kode_aksi: a.kode,
-            field_id_bukti: a.field_id_bukti,
-            pilar: p.label,
-            jembatan: a.jembatan,
-            unit: a.unit,
-            arah: a.arah,
-            minggu_terlihat: a.minggu_terlihat,
-            alasan: a.alasan,
-            angle_video: a.angle.map((g) => g.ringkas),
-            periode_referensi: c.periode_referensi,
-            benchmark_versi: c.benchmark_versi,
-          },
-        });
-      }
-    }
+  for (const a of pilarkatalog.KATALOG) {
+    const jenis = pilarkatalog.PILAR_KE_JENIS[a.pilar];
+    out.push({
+      jenis,
+      channel: 'TikTok Shop',
+      urutan: urutan++,
+      sku: null,
+      peran: null,
+      aksi: `${a.kode} ${a.nama}`,
+      target: `jembatan ${a.jembatan} (${a.unit}, harus ${a.arah}) dalam ${a.minggu} minggu`,
+      detail: {
+        sumber: 'cdps.pilarkatalog.v1',
+        kode_aksi: a.kode,
+        field_id_bukti: a.fieldIdBukti,
+        pilar: a.pilar,
+        jembatan: a.jembatan,
+        unit: a.unit,
+        arah: a.arah,
+        minggu_terlihat: a.minggu,
+        // Diketik AM, hanya pada aksi konten yang ia punya angle-nya — aksi
+        // konten lain (mis. "naikkan kuota video") tak punya, dan itu benar.
+        angle_video: a.kode === 'V3' ? ANGLE_DIKETIK_AM : [],
+      },
+    });
   }
   out.push({
     jenis: 'harga', channel: 'TikTok Shop', urutan: urutan++, sku: 'SERUM-30',
@@ -1041,12 +1027,12 @@ function channelLengkap(c: PrefillChannelWire): Record<string, unknown> {
 }
 
 /** Pilar Section E + kuota yang AM ketik (satu angka per baris — handoff §2.3). */
-function pilarDenganKuota(u: CopilotWire): Record<string, unknown>[] {
+function pilarDenganKuota(): Record<string, unknown>[] {
   const KUOTA: Record<string, string> = {
     konten: '40 video, ', iklan: '12 kampanye, ', affiliate: '30 kreator, ',
     live: '36 jam, ', operasional: '10 listing, ',
   };
-  return pilarDariCopilot(u).map((p) => {
+  return pilarDariKatalog().map((p) => {
     const prefix = KUOTA[String(p.jenis)];
     if (!prefix) return p;
     return { ...p, target: `${prefix}${String(p.target)}` };
@@ -1188,7 +1174,7 @@ dDb('UAT §10 butir 6 — Strategi lengkap → approve → baris Plan periode 1 
 
     // Pilar Section E + satu angka kuota per baris (yang tersisa untuk AM).
     expect((await pillarsPut(put(`/strategi/${strategiId}/pillars`, amToken, {
-      pillars: pilarDenganKuota(usulan),
+      pillars: pilarDenganKuota(),
     }), ctx(strategiId))).status).toBe(200);
 
     const sisa = await body<KekuranganWire[]>(
@@ -1289,8 +1275,8 @@ dDb('UAT §10 butir 7 — aktifkan periode → Berikan Brief (satu klik)', () =>
 
   it('Brief pilar konten membawa angle video dari Section E', async () => {
     // Brief yang berasal dari pilar konten yang MEMANG punya angle — bukan
-    // sembarang pilar konten (aksi konten tanpa video ber-penjualan tak punya
-    // angle, dan itu benar).
+    // sembarang pilar konten (aksi konten yang AM tak isi angle-nya tak punya,
+    // dan itu benar).
     const konten = await sql<{ id: string; detail: { angle_video?: string[] } }[]>`
       select b.id, p.detail
         from briefs b
@@ -1303,8 +1289,8 @@ dDb('UAT §10 butir 7 — aktifkan periode → Berikan Brief (satu klik)', () =>
     const res = await briefGet(get(`/briefs/${konten[0].id}`, amToken), ctx(konten[0].id));
     expect(res.status).toBe(200);
     const b = await body<BriefWire>(res);
-    // Angle video yang dibawa Co-Pilot ke Section E harus sampai ke Creative:
-    // judul video yang SUDAH perform, apa adanya dari export butir 1.
+    // Angle video yang AM ketik di Section E harus sampai ke Creative apa
+    // adanya — jalur `detail.angle_video` → `instruksi_brief` → Brief.
     const contoh = (konten[0].detail.angle_video ?? [])[0];
     expect(contoh).toBeTruthy();
     expect(b.instructions, `instructions Brief tidak memuat angle "${contoh}"`).toContain(contoh);

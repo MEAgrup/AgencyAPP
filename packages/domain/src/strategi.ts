@@ -75,7 +75,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { baseline as bl, copilot as cp, division, ident, interview as iv, money, notification, permission, satuan, statemachine, visibility } from '@cdps/core';
+import { baseline as bl, division, ident, interview as iv, money, notification, permission, satuan, statemachine, visibility } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -738,7 +738,7 @@ export const MSG_PRIORITAS_INVALID = '[prioritas channel tidak dikenal]';
  *     2026-09-06). Sudah `return` saat nol pilar, jadi Plan lahir kosong dan AM
  *     mengetik barisnya sendiri; tidak ada yang rusak.
  *   - `brief-inherit.ts` — `strategi_pillar_id` sebagai asal baris (PC-3).
- *   - `copilot.ts` / `planpillar.ts` / `livestream.ts` — usulan & pemetaan.
+ *   - `pilarkatalog.ts` / `planpillar.ts` / `livestream.ts` — katalog & pemetaan.
  *
  * CATATAN untuk siapa pun yang menghidupkan gerbang ini lagi: hitungannya dulu
  * `count(*)` TANPA filter jenis, jadi satu baris `tidak_dikerjakan` (E-11) pun
@@ -2622,105 +2622,6 @@ export async function getBaselinePrefill(
       gmvLive: pdtRingkasLive?.gmvLive ?? b.gmvLive,
     };
   }));
-
-  return { interviewId: chosen.id, channels };
-}
-
-// ---------------------------------------------------------------------------
-// B4 — AM Co-Pilot mengisi Section E dari server
-// ---------------------------------------------------------------------------
-
-/**
- * Usulan pilar untuk SATU platform yang dianalisa. `channel` sudah dipetakan ke
- * taksonomi D1 supaya baris pilar yang disimpan nanti punya `channel` yang sama
- * dengan Section B — pilar tanpa channel adalah pilar yang tidak bisa dilacak
- * balik ke baseline-nya.
- */
-export interface CopilotChannelUsulan {
-  clientPlatformId: number;
-  platform: string;
-  channel: Channel;
-  channelLain: string | null;
-  metodeBaseline: string;
-  usulan: cp.UsulanCopilot;
-}
-
-export interface StrategiCopilotUsulan {
-  interviewId: string;
-  channels: CopilotChannelUsulan[];
-}
-
-/**
- * susunPilarUsulan — Section E disusun di server, tanpa export/tempel JSON.
- *
- * Sampai sekarang satu-satunya jalan mengisi E-3…E-10 adalah: ekspor JSON dari
- * halaman Strategi → buka `/tools/am-copilot` → centang aksi → tempel JSON hasil
- * kembali (`CockpitImportPanel`). Tiga salin-tempel manual untuk data yang server
- * sudah punya di `riset_awal_analisa.payload` — dan akibatnya Section E kosong di
- * hampir semua Strategi (`DECISIONS.md` 2026-09-02), yang mematikan pewarisan
- * pilar ke baris Plan.
- *
- * Karena AM Co-Pilot **bukan AI** melainkan mesin aturan deterministik, seluruh
- * logikanya bisa dijalankan di sini (`@cdps/core` copilot). Fungsi ini hanya
- * merangkai: gerbang baca, resolusi interview, lalu satu panggilan ke engine per
- * platform yang dianalisa.
- *
- * Bacaannya SENGAJA meniru `getBaselinePrefill` persis — `db()` + gerbang domain,
- * bukan `readAsActor`. Dua endpoint bersaudara di halaman yang sama dengan dua
- * jalur baca berbeda adalah drift yang baru terasa saat salah satunya diubah.
- * Interview-nya pun diresolusi lewat `latestScoredInterview`, helper yang sama
- * dengan `getStrategiPrefill` / `getBaselinePrefill`.
- *
- * USULAN saja: tidak ada baris `strategi_pillar` yang ditulis di sini. AM
- * mencentang di Section E dan `savePillars` yang menulis — gerbangnya tetap
- * submit → approve (mesin #15), tidak ada gerbang kedua.
- */
-export async function susunPilarUsulan(
-  sql: Queryable,
-  actor: Actor,
-  id: string,
-): Promise<StrategiCopilotUsulan | null> {
-  const head = await loadStrategiRow(sql, id);
-  const ownerAm = await ownerAmOfContract(sql, head.contractId);
-  if (!canReadStrategi(actor, ownerAm)) {
-    throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
-  }
-
-  const chosen = await latestScoredInterview(sql, actor, head.clientId);
-  if (!chosen) return null;
-
-  const analisa = await sql<
-    {
-      client_platform_id: string;
-      platform: string;
-      metode_baseline: string;
-      payload: Record<string, unknown> | null;
-    }[]
-  >`
-    select client_platform_id, platform, metode_baseline, payload
-      from riset_awal_analisa
-     where interview_id = ${chosen.id}
-     order by client_platform_id`;
-  if (analisa.length === 0) return null;
-
-  // G4-01 — katalog aksi dari `pdt_usulan_katalog` (bukan `cp.KATALOG` hardcoded), satu
-  // pembacaan dipakai ulang untuk seluruh channel Strategi ini (Rule 26). Channel platform
-  // yang PDT tidak dukung (Tokopedia/Lazada/Blibli, `platformKeVokabPdt` null) mendapat
-  // katalog kosong — `cp.susunUsulan` tetap jalan, nol aksi tersusun, bukan error.
-  const katalogRows = await pdt.listAksiKatalogAktif(sql);
-  const channels: CopilotChannelUsulan[] = analisa.map((a) => {
-    const { channel, channelLain } = platformToChannel(a.platform);
-    const vokabPdt = pdt.platformKeVokabPdt(a.platform);
-    const katalog = vokabPdt ? cp.gabungKatalogDb(katalogRows, vokabPdt) : [];
-    return {
-      clientPlatformId: Number(a.client_platform_id),
-      platform: a.platform,
-      channel,
-      channelLain,
-      metodeBaseline: a.metode_baseline,
-      usulan: cp.susunUsulan(a.payload, katalog),
-    };
-  });
 
   return { interviewId: chosen.id, channels };
 }

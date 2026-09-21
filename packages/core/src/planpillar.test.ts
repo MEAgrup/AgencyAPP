@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import * as copilot from './copilot';
+import * as pilarkatalog from './pilarkatalog';
 import * as division from './division';
 import * as plantask from './plantask';
 import {
@@ -300,17 +300,22 @@ describe('seedRowFromPillar', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Jahitan B4 → B5 — pilar dari AM Co-Pilot SERVER-SIDE, bukan dari tool HTML
+// Jahitan katalog pilar → baris Plan (B5)
 // ---------------------------------------------------------------------------
 
 /**
- * Dua jalur mengisi Section E dan **bentuk `target`-nya berbeda**, jadi jahitan
- * ini wajib dipaku dari kedua sisi:
+ * Dulu blok ini menguji jahitan B4→B5: pilar yang `copilot.susunUsulan`
+ * hasilkan dari payload baseline. Mesin itu dicabut bersama pensiunnya AM
+ * Co-Pilot (DECISIONS 2026-09-21 "PENSIUN-AMTOOLS"), tapi **jahitannya tetap
+ * ada dan tetap perlu dipaku** — hanya pengisinya yang berganti: sekarang AM
+ * yang memilih aksi dari `pilarkatalog.KATALOG` lewat editor manual Section E.
  *
- *  - tool HTML (`buildCockpitPillars`) menulis `"30 video, jembatan …"` — diawali
- *    angka, jadi `parseTargetKuota` membacanya dan barisnya disemai penuh;
- *  - Co-Pilot server-side (`copilot.susunUsulan`, B4) menulis
- *    `"jembatan Median VV video toko: 10,0 VV → 12,5 VV dalam 3 minggu"` —
+ * Yang dijaga tetap sama, karena bentuk `target` yang dua macam itu belum
+ * berubah:
+ *
+ *  - target diawali angka (`"30 video, jembatan …"`) ⇒ `parseTargetKuota`
+ *    membacanya, baris disemai penuh;
+ *  - target berbentuk jembatan (`"jembatan Median VV video toko: … "`) ⇒
  *    **tidak** diawali angka.
  *
  * Yang kedua HARUS jatuh ke `butuh_kuota`, dan itu **benar, bukan bug**: `kuota`
@@ -319,43 +324,40 @@ describe('seedRowFromPillar', () => {
  * (median VV 12.500) adalah angka yang BERBEDA; menyemainya sebagai kuota akan
  * melahirkan baris kerja yang menuntut 12.500 unit pekerjaan.
  *
- * Tes ini memakai `copilot` yang SEBENARNYA, bukan string yang ditulis ulang di
- * sini — kalau salah satu sisi mengubah format `target`, jahitan ini yang
- * memerah lebih dulu, bukan seorang AM yang menemukan Plan-nya kosong.
+ * Tes ini memakai `pilarkatalog.KATALOG` yang SEBENARNYA, bukan daftar aksi yang
+ * ditulis ulang di sini — kalau katalognya menambah pilar yang belum punya
+ * divisi bawaan, jahitan ini yang memerah lebih dulu, bukan seorang AM yang
+ * menemukan Plan-nya kosong.
  */
-describe('jahitan B4→B5 — pilar usulan AM Co-Pilot server-side', () => {
-  const BENCH = {
-    cr: 2, refund: 5, vidPostToko: 20, vidSalesToko: 25, vidSalesAff: 20, gpmToko: 30_000,
-    liveSesi: 12, liveJam: 40, liveGmvJam: 1_000_000, liveCtor: 3, krSales: 30, krKonsen: 40,
-    skuSales: 40, roas: 4, adsDep: 30, spikeFlag: 2,
-  };
-  const usulan = copilot.susunUsulan({
-    benchmark_dipakai: BENCH,
-    video: { toko: { diposting_periode: 8, rate: 0.1, gpm_median: 11_000 } },
-    skor: { pilar: { video: 21 } },
-  }, copilot.KATALOG);
-  const aksi = usulan.pilar.flatMap((x) => x.aksi);
+describe('jahitan katalog pilar → baris Plan', () => {
+  /** Bentuk `target` jembatan, sebagaimana editor manual menawarkannya. */
+  const targetJembatan = (a: pilarkatalog.AksiKatalog): string =>
+    `jembatan ${a.jembatan} (${a.unit}, harus ${a.arah}) dalam ${a.minggu} minggu`;
 
-  it('Co-Pilot memang menghasilkan pilar konten untuk toko ini', () => {
-    expect(aksi.length).toBeGreaterThan(0);
-    expect(usulan.pilar[0].jenis).toBe('konten');
+  /** Aksi katalog pilar `konten` — cukup satu jenis untuk memaku jahitannya. */
+  const aksiKonten = pilarkatalog.KATALOG.filter(
+    (a) => pilarkatalog.PILAR_KE_JENIS[a.pilar] === 'konten',
+  );
+
+  it('katalog memang punya aksi konten untuk dipetakan', () => {
+    expect(aksiKonten.length).toBeGreaterThan(0);
   });
 
   it('divisi PIC-nya diturunkan otomatis — konten → Creative', () => {
-    expect(PILAR_TO_DIVISI[usulan.pilar[0].jenis]).toBe('Creative');
+    expect(PILAR_TO_DIVISI.konten).toBe('Creative');
   });
 
   it('target jembatan TIDAK dibaca sebagai kuota — baris tidak disemai, alasannya butuh_kuota', () => {
-    for (const a of aksi) {
+    for (const a of aksiKonten) {
       const hasil = seedRowFromPillar(
-        { id: 1, jenis: a.jenis, channel: 'TikTok Shop', aksi: `${a.kode} ${a.nama}`, target: a.target, sku: null },
+        { id: 1, jenis: 'konten', channel: 'TikTok Shop', aksi: `${a.kode} ${a.nama}`, target: targetJembatan(a), sku: null },
         ['TikTok Shop'],
       );
       // `HasilSemai` adalah union ber-diskriminan: menyempitkannya lewat `if`
       // (bukan hanya `expect`) adalah yang membuat `tsc --noEmit` ikut menjaga
       // cabang ini — `expect` saja lolos tes tapi gagal typecheck.
       expect(hasil.disemai).toBe(false);
-      if (hasil.disemai) throw new Error('pilar Co-Pilot seharusnya tidak disemai otomatis');
+      if (hasil.disemai) throw new Error('target jembatan seharusnya tidak disemai otomatis');
       expect(hasil.alasan).toContain('butuh_kuota');
       // Divisi dan channel-nya SUDAH terisi, jadi yang tersisa untuk AM benar-benar
       // hanya satu angka — bukan tiga kolom kosong.
@@ -368,17 +370,18 @@ describe('jahitan B4→B5 — pilar usulan AM Co-Pilot server-side', () => {
   });
 
   it('target jembatan tetap terbawa sebagai hasil_diharapkan (PC-11), tidak hilang', () => {
-    const a = aksi[0];
+    const a = aksiKonten[0];
+    const target = targetJembatan(a);
     const hasil = seedRowFromPillar(
-      { id: 7, jenis: a.jenis, channel: 'TikTok Shop', aksi: `${a.kode} ${a.nama}`, target: a.target, sku: null },
+      { id: 7, jenis: 'konten', channel: 'TikTok Shop', aksi: `${a.kode} ${a.nama}`, target, sku: null },
       ['TikTok Shop'],
     );
-    if (hasil.disemai) throw new Error('pilar Co-Pilot seharusnya tidak disemai otomatis');
-    expect(hasil.usulan.hasilDiharapkan).toBe(a.target);
+    if (hasil.disemai) throw new Error('target jembatan seharusnya tidak disemai otomatis');
+    expect(hasil.usulan.hasilDiharapkan).toBe(target);
     expect(hasil.usulan.strategiPillarId).toBe(7);
   });
 
-  it('bentuk tool HTML ("30 video, jembatan …") tetap disemai penuh — jalur itu tidak ikut rusak', () => {
+  it('target diawali angka ("30 video, jembatan …") tetap disemai penuh — jalur itu tidak ikut rusak', () => {
     const hasil = seedRowFromPillar(
       { id: 2, jenis: 'konten', channel: 'TikTok Shop', aksi: 'V2 Naikkan kuota video', target: '30 video, jembatan Video bertayangan / bulan', sku: null },
       ['TikTok Shop'],
@@ -390,56 +393,11 @@ describe('jahitan B4→B5 — pilar usulan AM Co-Pilot server-side', () => {
     }
   });
 
-  it('semua jenis pilar yang Co-Pilot bisa hasilkan punya divisi bawaan — nol butuh_divisi', () => {
-    // Katalog Co-Pilot hanya 4 pilar; keempatnya harus ada di PILAR_TO_DIVISI,
-    // kalau tidak setiap usulan akan menuntut AM memilih divisi tanpa alasan.
-    for (const jenis of Object.values(copilot.PILAR_KE_JENIS)) {
+  it('semua jenis pilar di katalog punya divisi bawaan — nol butuh_divisi', () => {
+    // Katalog hanya 4 pilar; keempatnya harus ada di PILAR_TO_DIVISI, kalau
+    // tidak setiap pilihan AM akan menuntut ia memilih divisi tanpa alasan.
+    for (const jenis of Object.values(pilarkatalog.PILAR_KE_JENIS)) {
       expect(PILAR_TO_DIVISI[jenis]).toBeTruthy();
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// angle_video → instruksi_brief (UAT Gelombang B §10 butir 7, 2026-09-07)
-// ---------------------------------------------------------------------------
-describe('angleVideoDariDetail', () => {
-  it('merangkai angle jadi satu baris instruksi', () => {
-    expect(
-      angleVideoDariDetail({ angle_video: ['A — GPM Rp. 120.000,00', 'B — GPM Rp. 90.000,00'] }),
-    ).toBe('Angle video yang sudah perform (Section E): A — GPM Rp. 120.000,00 | B — GPM Rp. 90.000,00');
-  });
-
-  it('null untuk detail tanpa angle — kolomnya tetap kosong, bukan kalimat kosong', () => {
-    for (const kosong of [null, undefined, 42, 'x', {}, { angle_video: [] }, { angle_video: ['', '  '] }, { angle_video: 'bukan array' }]) {
-      expect(angleVideoDariDetail(kosong)).toBeNull();
-    }
-  });
-
-  it('membuang entri kosong tapi mempertahankan yang terisi', () => {
-    expect(angleVideoDariDetail({ angle_video: ['', 'A', '  '] })).toContain('A');
-  });
-});
-
-describe('seedRowFromPillar — angle video ikut ke baris kerja', () => {
-  const DETAIL = { angle_video: ['Racun skincare — GPM Rp. 250.000,00'] };
-
-  it('baris yang disemai membawa angle-nya ke instruksiBrief', () => {
-    const h = seedRowFromPillar(pillar({ detail: DETAIL }), ['TikTok Shop']);
-    expect(h.disemai).toBe(true);
-    if (!h.disemai) return;
-    expect(h.row.instruksiBrief).toContain('Racun skincare');
-  });
-
-  it('pilar yang TIDAK disemai tetap mengusulkan angle-nya (panel Plan memakainya)', () => {
-    const h = seedRowFromPillar(pillar({ jenis: 'sku', detail: DETAIL }), ['TikTok Shop']);
-    expect(h.disemai).toBe(false);
-    if (h.disemai) return;
-    expect(h.alasan).toContain('butuh_divisi');
-    expect(h.usulan.instruksiBrief).toContain('Racun skincare');
-  });
-
-  it('pilar tanpa angle: instruksiBrief null, bukan string kosong', () => {
-    const h = seedRowFromPillar(pillar(), ['TikTok Shop']);
-    expect(h.disemai && h.row.instruksiBrief).toBeNull();
   });
 });
