@@ -5334,146 +5334,6 @@ export function strategiPrefillToWire(p: strategi.StrategiPrefill): StrategiPref
   };
 }
 
-// --- B4: AM Co-Pilot usulan Section E (GET /strategi/{id}/copilot) ---------
-
-export interface StrategiCopilotAngleWire {
-  judul: string;
-  akun: string | null;
-  gmv: number | null;
-  gpm: number | null;
-  vv: number | null;
-  tuntas: number | null;
-  ctr: number | null;
-  ringkas: string;
-}
-
-export interface StrategiCopilotAturanTerkunciWire {
-  nilai: number;
-  label: string;
-  sudah_terlampaui: boolean;
-}
-
-export interface StrategiCopilotAksiWire {
-  kode: string;
-  pilar: string;
-  divisi: string;
-  jenis: string;
-  nama: string;
-  deskripsi: string;
-  jembatan: string;
-  unit: string;
-  arah: string;
-  minggu_terlihat: number;
-  field_id_bukti: string;
-  quick_win: boolean;
-  nilai_sekarang: number | null;
-  target_hitung: number | null;
-  aturan_terkunci: StrategiCopilotAturanTerkunciWire | null;
-  alasan: string;
-  target: string;
-  angle: StrategiCopilotAngleWire[];
-  catatan: string | null;
-}
-
-export interface StrategiCopilotPilarWire {
-  urutan: number;
-  pilar: string;
-  label: string;
-  jenis: string;
-  divisi: string;
-  skor_baseline: number | null;
-  aksi: StrategiCopilotAksiWire[];
-}
-
-export interface StrategiCopilotChannelWire {
-  client_platform_id: number;
-  platform: string;
-  channel: string;
-  channel_lain: string | null;
-  metode_baseline: string;
-  payload_schema: string | null;
-  payload_terbaca: boolean;
-  periode_referensi: string | null;
-  benchmark_versi: number | null;
-  catatan: string[];
-  pilar: StrategiCopilotPilarWire[];
-}
-
-export interface StrategiCopilotUsulanWire {
-  interview_id: string;
-  channels: StrategiCopilotChannelWire[];
-}
-
-/**
- * The Co-Pilot proposal, camelCase domain → snake_case wire. Explicit `null`
- * everywhere, never an omitted key (O43): a page that reads `nilai_sekarang`
- * and gets `undefined` renders "—" for a figure the server actually had.
- */
-export function strategiCopilotUsulanToWire(
-  u: strategi.StrategiCopilotUsulan,
-): StrategiCopilotUsulanWire {
-  return {
-    interview_id: u.interviewId,
-    channels: u.channels.map((c) => ({
-      client_platform_id: c.clientPlatformId,
-      platform: c.platform,
-      channel: c.channel,
-      channel_lain: c.channelLain ?? null,
-      metode_baseline: c.metodeBaseline,
-      payload_schema: c.usulan.schema ?? null,
-      payload_terbaca: c.usulan.payloadTerbaca,
-      periode_referensi: c.usulan.periodeReferensi ?? null,
-      benchmark_versi: c.usulan.benchmarkVersi ?? null,
-      catatan: [...c.usulan.catatan],
-      pilar: c.usulan.pilar.map((p) => ({
-        urutan: p.urutan,
-        pilar: p.pilar,
-        label: p.label,
-        jenis: p.jenis,
-        divisi: p.divisi,
-        skor_baseline: p.skorBaseline ?? null,
-        aksi: p.aksi.map((a) => ({
-          kode: a.kode,
-          pilar: a.pilar,
-          divisi: a.divisi,
-          jenis: a.jenis,
-          nama: a.nama,
-          deskripsi: a.deskripsi,
-          jembatan: a.jembatan,
-          unit: a.unit,
-          arah: a.arah,
-          minggu_terlihat: a.mingguTerlihat,
-          field_id_bukti: a.fieldIdBukti,
-          quick_win: a.quickWin,
-          nilai_sekarang: a.nilaiSekarang ?? null,
-          target_hitung: a.targetHitung ?? null,
-          aturan_terkunci:
-            a.aturanTerkunci === null
-              ? null
-              : {
-                  nilai: a.aturanTerkunci.nilai,
-                  label: a.aturanTerkunci.label,
-                  sudah_terlampaui: a.aturanTerkunci.sudahTerlampaui,
-                },
-          alasan: a.alasan,
-          target: a.target,
-          angle: a.angle.map((g) => ({
-            judul: g.judul,
-            akun: g.akun ?? null,
-            gmv: g.gmv ?? null,
-            gpm: g.gpm ?? null,
-            vv: g.vv ?? null,
-            tuntas: g.tuntas ?? null,
-            ctr: g.ctr ?? null,
-            ringkas: g.ringkas,
-          })),
-          catatan: a.catatan ?? null,
-        })),
-      })),
-    })),
-  };
-}
-
 // --- Riset awal baseline → Section B channel prefill (RAB-11 / RAB-12) ------
 
 export interface StrategiBaselineMonthSuggestionWire {
@@ -9736,5 +9596,50 @@ export function pdtKirimanRingkasToWire(k: pdt.PdtKirimanRingkas): PdtKirimanRin
     dikirim_pada: k.dikirimPada,
     dikirim_oleh: k.dikirimOleh,
     menggantikan_kiriman_id: k.menggantikanKirimanId,
+  };
+}
+
+// --- Katalog pilar Section E (GET /strategi/katalog-pilar) -----------------
+
+/**
+ * Satu aksi katalog di wire. Daftar pilihan editor pilar manual, penerus jalur
+ * AM Co-Pilot yang pensiun 2026-09-21 — bedanya katalog ini tidak menyentuh
+ * `riset_awal_analisa` sama sekali, jadi klien tanpa Riset Awal tetap bisa
+ * mengisi E-3…E-10.
+ */
+export interface KatalogPilarAksiWire {
+  kode: string;
+  pilar: string;
+  jenis: string;
+  divisi: string;
+  nama: string;
+  deskripsi: string;
+  jembatan: string;
+  unit: string;
+  arah: string;
+  minggu: number;
+  field_id_bukti: string;
+  quick_win: boolean;
+  platform: string[];
+  relevan_saat: string[];
+}
+
+/** camelCase domain → snake_case wire. Nol kunci yang dihilangkan (O43). */
+export function katalogPilarAksiToWire(a: strategi.KatalogPilarAksi): KatalogPilarAksiWire {
+  return {
+    kode: a.kode,
+    pilar: a.pilar,
+    jenis: a.jenis,
+    divisi: a.divisi,
+    nama: a.nama,
+    deskripsi: a.deskripsi,
+    jembatan: a.jembatan,
+    unit: a.unit,
+    arah: a.arah,
+    minggu: a.minggu,
+    field_id_bukti: a.fieldIdBukti,
+    quick_win: a.quickWin,
+    platform: [...a.platform],
+    relevan_saat: [...a.relevanSaat],
   };
 }

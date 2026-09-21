@@ -31,10 +31,10 @@
  *   needs its consequence).
  */
 
-import CopilotPanel from './CopilotPanel';
+import PilarEditor from './PilarEditor';
 import RepeatList from './RepeatList';
 import { PRIORITAS_LABELS, type StrategiDetail } from '@/lib/strategi';
-import type { CockpitPillarBody } from '@/lib/strategi-cockpit-import';
+import type { PilarBody } from '@/lib/strategi-pilar';
 
 // ---- Draft types ----------------------------------------------------------
 
@@ -134,8 +134,8 @@ export default function SectionE({
   onNarasi: (patch: Partial<NarasiDraft>) => void;
   onTidakDikerjakan: (rows: OutOfScopeDraft[]) => void;
   onKetergantungan: (rows: KetergantunganDraft[]) => void;
-  /** B4 — same save path CockpitImportPanel uses (saveStrategiPillars + merge). */
-  onApplyPillars: (pillars: CockpitPillarBody[]) => Promise<void>;
+  /** Simpan pilar: `saveStrategiPillars` + `mergePilar` di halaman induk. */
+  onApplyPillars: (pillars: PilarBody[]) => Promise<void>;
   disabled: boolean;
 }) {
   // Hanya pilar E-3…E-10. E-11 disimpan sebagai pilar berjenis `tidak_dikerjakan`
@@ -146,14 +146,6 @@ export default function SectionE({
 
   return (
     <div className="stack">
-      {/* B4 — E-3…E-10 disusun di server dari Riset Awal. Ditaruh di ATAS E-1
-          karena inilah yang mengisi bagian Section E yang selama ini kosong;
-          E-1 (growth thesis) ditulis AM setelah membaca pilar yang diusulkan. */}
-      <CopilotPanel
-        strategiId={detail.id}
-        onApplyPillars={onApplyPillars}
-        disabled={disabled}
-      />
       {/* E-1 --------------------------------------------------------------- */}
       <label className="field" style={{ display: 'block' }}>
         <span style={{ fontWeight: 600 }}>E-1 · Growth Thesis</span>
@@ -294,7 +286,13 @@ export default function SectionE({
         Gerbangnya kini dicabut (pilar = opsional), jadi kosong bukan lagi error.
         Kartunya tetap selalu dirender, tapi nadanya INFORMATIF: ia menjelaskan apa
         yang hilang kalau pilar dibiarkan kosong (Plan periode 1 lahir tanpa baris
-        kerja) dan menunjuk tombol pengisinya — tanpa menuduh AM menahan apa pun.
+        kerja) — tanpa menuduh AM menahan apa pun.
+
+        PENSIUN-AMTOOLS (2026-09-21): kalimat terakhirnya dulu menunjuk tombol
+        "Susun draft dari AM Co-Pilot". Tombol itu dan tool di baliknya sudah
+        dicabut; penggantinya `PilarEditor` tepat di bawah kartu ini — editor
+        manual yang katalognya TIDAK butuh Riset Awal, jadi klien tanpa Riset
+        Awal pun bisa mengisi E-3…E-10.
       */}
       <div className="card">
         <div className="cardHeader">E-3…E-10 · Pilar Strategi</div>
@@ -308,16 +306,14 @@ export default function SectionE({
             baris Plan ke divisinya. Tanpa pilar, AM mengetik baris-baris itu sendiri di
             halaman Plan — hasil akhirnya sama, kerjanya lebih panjang.
             <br />
-            Kalau mau diisi: tekan <b>“Susun draft dari AM Co-Pilot”</b> di kartu paling atas
-            seksi ini. Tombol itu menyusun usulan dari analisa Riset Awal klien ini — Anda
-            tinggal mencabut yang tidak relevan lalu simpan. Jalur lainnya: impor JSON dari
-            tool AM Cockpit.
+            Kalau mau diisi: pakai <b>&ldquo;Pilih pilar&rdquo;</b> tepat di bawah kartu ini.
           </div>
         ) : (
           <>
             <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-              Editor pilar detail (SKU, Harga, Iklan, Konten, Affiliate, Live, Retensi, Operasional)
-              tersedia di versi berikutnya. Pilar yang sudah tersimpan:
+              Pilar yang sudah tersimpan. Menambah atau mengganti: pakai
+              &ldquo;Pilih pilar&rdquo; tepat di bawah — memilih aksi yang sama untuk channel yang
+              sama memperbarui barisnya di tempat, bukan menggandakan.
             </p>
             <table style={{ fontSize: 13 }}>
               <thead>
@@ -340,6 +336,11 @@ export default function SectionE({
           </>
         )}
       </div>
+
+      {/* Editor pilar manual — pengganti AM Co-Pilot (PENSIUN-AMTOOLS).
+          Ditaruh SESUDAH kartu di atas supaya AM membaca dulu apa yang ada dan
+          apa yang hilang kalau kosong, baru memilih. */}
+      <PilarEditor detail={detail} onApplyPillars={onApplyPillars} disabled={disabled} />
     </div>
   );
 }

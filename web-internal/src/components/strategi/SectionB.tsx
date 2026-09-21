@@ -559,7 +559,7 @@ export function channelDraftToBody(ch: ChannelDraft) {
 /**
  * Which baseline months are worth sending to `saveStrategiBaseline` — every
  * month with at least one figure typed, whether by the AM or by a prefill
- * tool (Riset Awal, AM Baseline / Video Factory, MEA AM Cockpit). A month
+ * source (Riset Awal, PDT). A month
  * left completely untouched is excluded — sending it would fabricate a "GMV
  * = 0" data point for a month nobody looked at.
  *
@@ -570,10 +570,10 @@ export function channelDraftToBody(ch: ChannelDraft) {
  * the server as `0`, same as if the AM had typed it.
  *
  * The bug this replaced: filtering on `every` field non-blank meant a month
- * the AM Baseline tool could only partially derive (e.g. `gmv` +
- * `jumlah_pesanan` from a TikTok Shop export — `ad_spend`/`roas`/`acos` are
- * Ads figures the tool has no export for, "field N/A ... tetap manual",
- * `strategi-video-factory.ts`) was silently dropped from every save. The row
+ * a prefill source could only partially derive (e.g. `gmv` + `jumlah_pesanan`
+ * from a TikTok Shop export — `ad_spend`/`roas`/`acos` are Ads figures no
+ * export carries, so they stay manual) was silently dropped from every save.
+ * The row
  * never reached `strategi_baseline_bulan`, so `detail.channels[].baseline`
  * stayed empty and D-2's "Hitung stretch dari Baseline" (`strategi-target.ts`
  * `computeBaselineStretchTargets`) had nothing to compute from — the AM saw

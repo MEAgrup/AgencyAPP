@@ -166,8 +166,6 @@ import {
 import InterviewPrefillPanel from '@/components/strategi/InterviewPrefillPanel';
 import BaselinePrefillPanel from '@/components/strategi/BaselinePrefillPanel';
 import PdtUploadPanel from '@/components/strategi/PdtUploadPanel';
-import VideoFactoryImportPanel from '@/components/strategi/VideoFactoryImportPanel';
-import CockpitImportPanel from '@/components/strategi/CockpitImportPanel';
 import PlanPeriodsPanel from '@/components/strategi/PlanPeriodsPanel';
 import {
   assumptionsToBody,
@@ -177,7 +175,7 @@ import {
   suggestedBaselineGmv,
   supportRowsToBody,
 } from '@/lib/strategi-target';
-import { mergeCockpitPillars, type CockpitPillarBody } from '@/lib/strategi-cockpit-import';
+import { mergePilar, type PilarBody } from '@/lib/strategi-pilar';
 
 /** All sections are now wired (A-13 + A-13b complete). */
 // Sections that have a UI. J is read-only (no form) but still "wired": it has a
@@ -409,12 +407,12 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
           // DECISIONS.md): a month left COMPLETELY untouched is held back
           // rather than sent — the submit gate reports it as `B-1/<channel>`
           // and the AM finishes it later. A month with at least one figure
-          // typed (by hand, or by a prefill tool — Riset Awal, AM Baseline /
-          // Video Factory, MEA AM Cockpit) IS sent: `baselineDraftToBody`
+          // typed (by hand, or by a prefill source — Riset Awal, PDT) IS sent:
+          // `baselineDraftToBody`
           // already defaults every blank field to `0` on the wire, and Rule 5
           // (`saveBaseline`) accepts that `0` as a real answer, same as if the
           // AM had typed it. Gating on "every field filled" (the previous
-          // bug) silently dropped any month a prefill tool could only
+          // bug) silently dropped any month a prefill source could only
           // partially derive — e.g. `gmv` + `jumlah_pesanan` from a TikTok
           // Shop export, with no `ad_spend`/`roas`/`acos` to offer — so the
           // row never reached the server and D-2's "Hitung stretch dari
@@ -666,19 +664,21 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
   );
 
   /**
-   * Section E pilar (E-3…E-10) has no draft editor yet (SectionE.tsx), so
-   * unlike every other Cockpit import target this writes straight to the
-   * server rather than patching `drafts`. Deliberately NOT routed through
-   * `act()`: that swallows its error into the page-level banner and always
-   * resolves, which would make `CockpitImportPanel` report "tersimpan" on a
-   * failed save. This rethrows instead, so the panel's own inline error
-   * (right next to the button that caused it) tells the truth.
+   * Simpan pilar Section E (E-3…E-10) dari editor pilar manual. Berbeda dari
+   * seksi lain, ini menulis LANGSUNG ke server alih-alih menambal `drafts`:
+   * pilar disimpan lewat endpointnya sendiri (`PUT /strategi/{id}/pillars`,
+   * replace-set), bukan ikut tombol Simpan seksi.
+   *
+   * Sengaja TIDAK lewat `act()`: fungsi itu menelan galat ke banner halaman dan
+   * selalu resolve, sehingga editor akan melaporkan "tersimpan" pada simpan yang
+   * gagal. Di sini galatnya dilempar ulang, supaya galat inline editor — tepat
+   * di sebelah tombol yang menyebabkannya — mengatakan yang sebenarnya.
    */
-  const applyCockpitPillars = useCallback(
-    async (pillars: CockpitPillarBody[]) => {
+  const applyPilar = useCallback(
+    async (pillars: PilarBody[]) => {
       if (!detail) return;
       try {
-        const next = await saveStrategiPillars(id, mergeCockpitPillars(detail.pillars, pillars));
+        const next = await saveStrategiPillars(id, mergePilar(detail.pillars, pillars));
         setDetail(next);
         setKekurangan(await strategiKekurangan(id));
       } catch (err) {
@@ -836,20 +836,12 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                       }}
                     />
                   )}
-                  {/* Owner QA (STRG-202608-0001): "Tempel dari Video Factory" fills
-                      Section B fields, but the AM opens it while still on Section A
-                      (before channels exist) — moved here so it can be applied first,
-                      before switching to Section B to review the result. */}
-                  <VideoFactoryImportPanel
-                    channels={drafts.channels}
-                    onApply={(channels) => patch('channels', channels)}
-                    disabled={!editable}
-                  />
                   {/* Pintu masuk PDT — di Section A, bukan Section B, atas
-                      keputusan pemilik 2026-09-19. Alasannya sama persis dengan
-                      Video Factory tepat di atas: ini SUMBER yang mengisi Section
-                      B, dan seluruh sumber lain (Interview, Video Factory, AM
-                      Co-Pilot) sudah berkumpul di Section A. Menaruh satu sumber
+                      keputusan pemilik 2026-09-19. Alasannya: ini SUMBER yang
+                      mengisi Section B, dan sumber lain (Interview) sudah ada di
+                      Section A. Sejak AM Baseline & AM Co-Pilot pensiun
+                      (2026-09-21) PDT adalah satu-satunya sumber unggahan yang
+                      tersisa di sini. Menaruh satu sumber
                       sendirian di Section B membuat AM baru menemukannya SESUDAH
                       ia terlanjur mengetik baseline dengan tangan — terlambat,
                       karena PDT butuh unggah + batch verified + muat ulang.
@@ -882,18 +874,6 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
               )}
               {active === 'C' && (
                 <>
-                  <CockpitImportPanel
-                    diagnosa={drafts.diagnosa}
-                    onDiagnosa={(next) => patch('diagnosa', next)}
-                    kpi={drafts.kpi}
-                    onKpi={(next) => patch('kpi', next)}
-                    targets={drafts.targets}
-                    onTargets={(next) => patch('targets', next)}
-                    narasi={drafts.sectionE.narasi}
-                    onNarasi={(next) => patch('sectionE', { ...drafts.sectionE, narasi: next })}
-                    onApplyPillars={applyCockpitPillars}
-                    disabled={!editable}
-                  />
                   <SectionC
                     detail={detail}
                     draft={drafts.diagnosa}
@@ -940,7 +920,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                   onKetergantungan={(rows: KetergantunganDraft[]) =>
                     patch('sectionE', { ...drafts.sectionE, ketergantungan: rows })
                   }
-                  onApplyPillars={applyCockpitPillars}
+                  onApplyPillars={applyPilar}
                   disabled={!editable}
                 />
               )}

@@ -1487,87 +1487,34 @@ export function getBaselinePrefill(id: string): Promise<StrategiBaselinePrefill 
   return api.get<StrategiBaselinePrefill | null>(`/strategi/${id}/baseline-prefill`);
 }
 
-// B4 — AM Co-Pilot usulan Section E (GET /strategi/{id}/copilot). Suggestions
-// only: nothing is saved until the AM ticks rows and `saveStrategiPillars` runs.
-export interface StrategiCopilotAngle {
-  judul: string;
-  akun: string | null;
-  gmv: number | null;
-  gpm: number | null;
-  vv: number | null;
-  tuntas: number | null;
-  ctr: number | null;
-  /** One BI line built from the real figures — identical on every recompute. */
-  ringkas: string;
-}
-
-export interface StrategiCopilotAturanTerkunci {
-  nilai: number;
-  label: string;
-  sudah_terlampaui: boolean;
-}
-
-export interface StrategiCopilotAksi {
+/**
+ * Satu aksi katalog pilar Section E (`GET /strategi/katalog-pilar`).
+ *
+ * Daftar pilihan editor pilar manual, penerus AM Co-Pilot yang pensiun
+ * 2026-09-21. Tidak ber-`{id}` dan tidak menyentuh Riset Awal: katalognya sama
+ * untuk setiap klien, jadi klien tanpa Riset Awal tetap bisa mengisi E-3…E-10.
+ */
+export interface KatalogPilarAksi {
   kode: string;
   pilar: string;
-  divisi: string;
-  /** `strategi_pillar.jenis`. */
+  /** `strategi_pillar.jenis` yang akan ditulis baris ini. */
   jenis: string;
+  divisi: string;
   nama: string;
   deskripsi: string;
   jembatan: string;
   unit: string;
   arah: string;
-  minggu_terlihat: number;
+  minggu: number;
   field_id_bukti: string;
   quick_win: boolean;
-  nilai_sekarang: number | null;
-  target_hitung: number | null;
-  aturan_terkunci: StrategiCopilotAturanTerkunci | null;
-  /** Why this action was proposed, from the real numbers + the benchmark used. */
-  alasan: string;
-  /** Ready for `strategi_pillar.target`. */
-  target: string;
-  /** V3 only — the angles already proven to sell. Empty otherwise. */
-  angle: StrategiCopilotAngle[];
-  catatan: string | null;
+  platform: string[];
+  /** Keterangan "relevan saat …" — informasi, bukan syarat; AM yang memutuskan. */
+  relevan_saat: string[];
 }
 
-export interface StrategiCopilotPilar {
-  urutan: number;
-  pilar: string;
-  /** Grouping label. Goes into `detail`, NEVER `peran` (`ck_strpil_peran`). */
-  label: string;
-  jenis: string;
-  divisi: string;
-  skor_baseline: number | null;
-  aksi: StrategiCopilotAksi[];
-}
-
-export interface StrategiCopilotChannel {
-  client_platform_id: number;
-  platform: string;
-  channel: string;
-  channel_lain: string | null;
-  metode_baseline: string;
-  payload_schema: string | null;
-  payload_terbaca: boolean;
-  periode_referensi: string | null;
-  benchmark_versi: number | null;
-  /** BI sentences naming what could NOT be proposed, and why. */
-  catatan: string[];
-  pilar: StrategiCopilotPilar[];
-}
-
-export interface StrategiCopilotUsulan {
-  interview_id: string;
-  channels: StrategiCopilotChannel[];
-}
-
-/** B4 — the Section E draft the AM Co-Pilot rules propose, computed server-side.
- *  `null` when the client has no scored interview / no analysis rows. */
-export function getStrategiCopilot(id: string): Promise<StrategiCopilotUsulan | null> {
-  return api.get<StrategiCopilotUsulan | null>(`/strategi/${id}/copilot`);
+export function getKatalogPilar(): Promise<KatalogPilarAksi[]> {
+  return api.get<{ data: KatalogPilarAksi[] }>('/strategi/katalog-pilar').then((r) => r.data);
 }
 
 export function strategiKekurangan(id: string): Promise<StrategiKekurangan[]> {

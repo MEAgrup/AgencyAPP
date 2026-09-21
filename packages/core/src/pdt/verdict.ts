@@ -2,16 +2,16 @@
  * Mesin verdict PDT — G4-03 Tahap 1 (`docs/backlog/PDT_BACKLOG.md` G4-03,
  * PRD §3.6 Rule 26-32, Flow C "Usulan & evaluasi").
  *
- * Beda dari `../copilot.ts` (katalog 20 aksi lama, G4-01): modul itu membaca
+ * Beda dari `../pilarkatalog.ts` (katalog 20 aksi lama, G4-01): modul itu membaca
  * `MetrikKunci` dari payload `riset_awal_analisa` (baseline snapshot).
  * Modul INI membaca fakta `pdt_fact_*` langsung per `client_platform_id` +
  * periode (Flow C langkah 1: "mesin menjalankan katalog aksi terhadap fakta +
  * benchmark") — kosakata metrik BERBEDA (`roasShopee`/`acosShopee`, bukan
  * `MetrikKunci`), jadi sengaja TIDAK memakai ulang `evaluasiPemicu`/
- * `gabungKatalogDb` dari `copilot.ts`.
+ * `gabungKatalogDb` dari `pilarkatalog.ts`.
  *
  * Murni: nol akses DB, nol tahu aktor. Pembaca fakta ada di
- * `@cdps/domain` `pdt-verdict.ts` (pola sama pemisahan `copilot.ts`/
+ * `@cdps/domain` `pdt-verdict.ts` (pola sama pemisahan `pilarkatalog.ts`/
  * `strategi.ts`).
  *
  * Ambang di-port apa adanya dari `report_benchmark_shopee` (lihat migrasi

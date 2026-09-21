@@ -22,7 +22,6 @@
  * reach a record through a notification (e.g. the SPV Account who must vote on a
  * `[Bermasalah]` transaction, M5-OA-5, without owning the Finance queue).
  */
-import { EMBEDDED_TOOLS } from './embedded-tools';
 import { canUseSkuScreener } from './skuscreener';
 import { canUseAdsScanner } from './adsscanner';
 import type { Role } from './types';
@@ -322,46 +321,33 @@ const DELIVERY: NavNode[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// MEA AI TOOLS — daftar alat bantu HTML self-contained yang di-embed via iframe
-// (`@/lib/embedded-tools` + `/tools/[slug]`). Ini BUKAN halaman ber-data CDPS:
-// tidak ada panggilan API di dalamnya, jadi tidak ada gerbang server untuk
-// di-mirror — `access` pada tiap entri `EMBEDDED_TOOLS` adalah SATU-SATUNYA
-// tempat akses ditegakkan, dipakai bersama oleh menu ini dan guard halaman
-// `/tools/[slug]`. Lihat DECISIONS.md 2026-08-21 "Embed alat HTML AM di CDPS"
-// dan 2026-09-04 (rename grup + visibilitas per divisi).
+// MEA AI TOOLS — alat bantu kerja divisi.
+//
+// Grup ini dulu berisi DUA alat HTML self-contained yang di-embed lewat iframe
+// (`/tools/[slug]`): "AM - baseline riset" (MEA Video Factory) dan "AM Co-Pilot"
+// (MEA AM Cockpit). Keduanya **dipensiunkan** 2026-09-21 (`docs/DECISIONS.md`
+// "PENSIUN-AMTOOLS") berikut registry `embedded-tools.ts`, halaman
+// `/tools/[slug]`, dan asetnya di `public/tools/`. Jangan menghidupkannya lagi
+// tanpa ketokan baru — pensiunnya disengaja, bukan kelalaian.
+//
+// Yang tersisa adalah dua alat Ads, halaman React ber-API biasa.
 //
 // ⚠️ Berbeda dari sisa tabel ini, di grup ini setiap baris WAJIB bergerbang:
 // judul grup hanya muncul untuk divisi yang benar-benar punya akses (`visibleNav`
 // membuang seksi yang kosong), jadi satu baris tanpa `access` akan membocorkan
 // judul grup ke SEMUA divisi. Dikunci oleh tes di `nav.test.ts`.
-//
-// Menambah alat: taruh `.html` di `public/tools/`, daftarkan di
-// `embedded-tools.ts` (berikut predikat aksesnya), lalu tambahkan satu baris di
-// sini yang memakai predikat itu — jangan salin ulang predikatnya.
 // ---------------------------------------------------------------------------
 const MEA_AI_TOOLS: NavNode[] = [
-  // "AM - baseline riset" (MEA Video Factory): AM memakai tab Baseline (turunkan
-  // CDPS Section B dari export TikTok Shop) + Papan; CC / Leader Video memakai
-  // Tracker & Export sheet. Gate = divisi Creative & Account Service, PLUS layer
-  // read-everywhere (Director full / OD read-only, Role Matrix §4).
-  { href: '/tools/video-factory', label: 'AM - baseline riset', access: EMBEDDED_TOOLS['video-factory'].access },
-  // "AM Co-Pilot" (MEA AM Cockpit): diagnosa bottleneck + rancang pilar dari
-  // export Strategi, keluarkan draft/JSON siap tempel ke Section C/D/E. Sama
-  // audiens & predikat dengan "AM - baseline riset" di atas.
-  { href: '/tools/am-copilot', label: 'AM Co-Pilot', access: EMBEDDED_TOOLS['am-copilot'].access },
   // Dua alat Ads, DIPINDAH ke sini dari grup Delivery atas permintaan pemilik
   // 2026-09-06 (DECISIONS.md) — mencabut keputusan 2026-09-04 yang menahannya di
   // Delivery "karena keduanya halaman React ber-API, bukan HTML embed". Alasan
   // pencabutannya: pengelompokan itu memakai CARA BANGUN sebagai kriteria,
-  // sedangkan pemilik memakai CARA PAKAI — bagi penggunanya keempat baris di grup
+  // sedangkan pemilik memakai CARA PAKAI — bagi penggunanya semua baris di grup
   // ini sama-sama "alat bantu AI MEA".
   //
-  // Konsekuensi yang disengaja: grup ini tidak lagi berisi HANYA alat HTML
-  // ter-embed, jadi klausa "wajib /tools/*" di `nav.test.ts` dilonggarkan untuk
-  // dua href ini saja. Yang TIDAK dilonggarkan: setiap baris tetap WAJIB
-  // bergerbang (itu yang menjaga judul grup tidak bocor), dan predikatnya tetap
-  // dicocokkan SECARA REFERENSI — `canUseSkuScreener`/`canUseAdsScanner` adalah
-  // predikat yang sama yang dipakai halamannya sendiri, bukan salinan.
+  // Predikatnya dicocokkan SECARA REFERENSI oleh `nav.test.ts` —
+  // `canUseSkuScreener`/`canUseAdsScanner` adalah predikat yang sama yang
+  // dipakai halamannya sendiri, bukan salinan.
   //
   // Href TIDAK berubah (`/ads/screening`, `/ads/scanner`): tautan sudah beredar
   // dan tes anti-regresi memakukannya. Yang berubah hanya label + grup.

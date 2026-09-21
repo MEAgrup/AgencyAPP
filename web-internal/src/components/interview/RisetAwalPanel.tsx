@@ -52,7 +52,6 @@ import {
   type RisetAwalIsian,
   type RisetAwalPlatform,
 } from '@/lib/riset-awal';
-import VideoFactoryBaselineImportPanel from './VideoFactoryBaselineImportPanel';
 
 /** How often the running counter re-renders. Minute precision needs no faster. */
 const TICK_MS = 30_000;
@@ -807,21 +806,16 @@ function ManualForm({
           </>
         )}
       </p>
-      {/* Video Factory hanya bisa membaca export TikTok Shop/Tokopedia (tool tak
-          punya parser platform lain). Di antara platform yang benar-benar manual
-          (tanpa engine sama sekali), cuma Tokopedia (analisa_tipis) yang cocok;
-          untuk Shopee/Lazada/Others panel ini hanya akan menampilkan penolakan
-          channel — disembunyikan, bukan diam-diam gagal. manualOverride (TikTok
-          Shop lewat jalur pintas) juga selalu cocok, karena platform.platform
-          adalah 'TikTok Shop' sungguhan di jalur itu. */}
-      {(platform.metode === 'analisa_tipis' || manualOverride) && (
-        <VideoFactoryBaselineImportPanel
-          platformLabel={platform.platform}
-          fields={m}
-          onApply={setM}
-          disabled={saving}
-        />
-      )}
+      {/* Di sini dulu ada "Tempel dari Video Factory" (AM Baseline), yang
+          mengisi sebagian angka manual di bawah dari export TikTok Shop /
+          Tokopedia. Tool itu pensiun 2026-09-21 (`docs/DECISIONS.md`
+          "PENSIUN-AMTOOLS"), jadi entri manual di bawah sekarang sepenuhnya
+          diketik AM.
+
+          Yang TIDAK hilang: jalur `analisa_lengkap` — unggah export ke CDPS dan
+          server menurunkan angkanya sendiri lewat `baseline.runBaseline()`
+          (`@cdps/core`). Form manual ini memang hanya untuk platform yang tak
+          punya engine (Tokopedia `analisa_tipis`, dan `manual` untuk sisanya). */}
       <div className="grid2">
         {numField('gmv_bulan', 'GMV / bulan (Rp)', 'Rupiah')}
         {numField('order', 'Jumlah order / bulan', '')}

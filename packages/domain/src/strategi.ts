@@ -75,7 +75,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { baseline as bl, copilot as cp, division, ident, interview as iv, money, notification, permission, satuan, statemachine, visibility } from '@cdps/core';
+import { baseline as bl, division, ident, interview as iv, money, notification, permission, pilarkatalog, satuan, statemachine, visibility } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -738,7 +738,7 @@ export const MSG_PRIORITAS_INVALID = '[prioritas channel tidak dikenal]';
  *     2026-09-06). Sudah `return` saat nol pilar, jadi Plan lahir kosong dan AM
  *     mengetik barisnya sendiri; tidak ada yang rusak.
  *   - `brief-inherit.ts` — `strategi_pillar_id` sebagai asal baris (PC-3).
- *   - `copilot.ts` / `planpillar.ts` / `livestream.ts` — usulan & pemetaan.
+ *   - `pilarkatalog.ts` / `planpillar.ts` / `livestream.ts` — katalog & pemetaan.
  *
  * CATATAN untuk siapa pun yang menghidupkan gerbang ini lagi: hitungannya dulu
  * `count(*)` TANPA filter jenis, jadi satu baris `tidak_dikerjakan` (E-11) pun
@@ -2622,105 +2622,6 @@ export async function getBaselinePrefill(
       gmvLive: pdtRingkasLive?.gmvLive ?? b.gmvLive,
     };
   }));
-
-  return { interviewId: chosen.id, channels };
-}
-
-// ---------------------------------------------------------------------------
-// B4 — AM Co-Pilot mengisi Section E dari server
-// ---------------------------------------------------------------------------
-
-/**
- * Usulan pilar untuk SATU platform yang dianalisa. `channel` sudah dipetakan ke
- * taksonomi D1 supaya baris pilar yang disimpan nanti punya `channel` yang sama
- * dengan Section B — pilar tanpa channel adalah pilar yang tidak bisa dilacak
- * balik ke baseline-nya.
- */
-export interface CopilotChannelUsulan {
-  clientPlatformId: number;
-  platform: string;
-  channel: Channel;
-  channelLain: string | null;
-  metodeBaseline: string;
-  usulan: cp.UsulanCopilot;
-}
-
-export interface StrategiCopilotUsulan {
-  interviewId: string;
-  channels: CopilotChannelUsulan[];
-}
-
-/**
- * susunPilarUsulan — Section E disusun di server, tanpa export/tempel JSON.
- *
- * Sampai sekarang satu-satunya jalan mengisi E-3…E-10 adalah: ekspor JSON dari
- * halaman Strategi → buka `/tools/am-copilot` → centang aksi → tempel JSON hasil
- * kembali (`CockpitImportPanel`). Tiga salin-tempel manual untuk data yang server
- * sudah punya di `riset_awal_analisa.payload` — dan akibatnya Section E kosong di
- * hampir semua Strategi (`DECISIONS.md` 2026-09-02), yang mematikan pewarisan
- * pilar ke baris Plan.
- *
- * Karena AM Co-Pilot **bukan AI** melainkan mesin aturan deterministik, seluruh
- * logikanya bisa dijalankan di sini (`@cdps/core` copilot). Fungsi ini hanya
- * merangkai: gerbang baca, resolusi interview, lalu satu panggilan ke engine per
- * platform yang dianalisa.
- *
- * Bacaannya SENGAJA meniru `getBaselinePrefill` persis — `db()` + gerbang domain,
- * bukan `readAsActor`. Dua endpoint bersaudara di halaman yang sama dengan dua
- * jalur baca berbeda adalah drift yang baru terasa saat salah satunya diubah.
- * Interview-nya pun diresolusi lewat `latestScoredInterview`, helper yang sama
- * dengan `getStrategiPrefill` / `getBaselinePrefill`.
- *
- * USULAN saja: tidak ada baris `strategi_pillar` yang ditulis di sini. AM
- * mencentang di Section E dan `savePillars` yang menulis — gerbangnya tetap
- * submit → approve (mesin #15), tidak ada gerbang kedua.
- */
-export async function susunPilarUsulan(
-  sql: Queryable,
-  actor: Actor,
-  id: string,
-): Promise<StrategiCopilotUsulan | null> {
-  const head = await loadStrategiRow(sql, id);
-  const ownerAm = await ownerAmOfContract(sql, head.contractId);
-  if (!canReadStrategi(actor, ownerAm)) {
-    throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
-  }
-
-  const chosen = await latestScoredInterview(sql, actor, head.clientId);
-  if (!chosen) return null;
-
-  const analisa = await sql<
-    {
-      client_platform_id: string;
-      platform: string;
-      metode_baseline: string;
-      payload: Record<string, unknown> | null;
-    }[]
-  >`
-    select client_platform_id, platform, metode_baseline, payload
-      from riset_awal_analisa
-     where interview_id = ${chosen.id}
-     order by client_platform_id`;
-  if (analisa.length === 0) return null;
-
-  // G4-01 — katalog aksi dari `pdt_usulan_katalog` (bukan `cp.KATALOG` hardcoded), satu
-  // pembacaan dipakai ulang untuk seluruh channel Strategi ini (Rule 26). Channel platform
-  // yang PDT tidak dukung (Tokopedia/Lazada/Blibli, `platformKeVokabPdt` null) mendapat
-  // katalog kosong — `cp.susunUsulan` tetap jalan, nol aksi tersusun, bukan error.
-  const katalogRows = await pdt.listAksiKatalogAktif(sql);
-  const channels: CopilotChannelUsulan[] = analisa.map((a) => {
-    const { channel, channelLain } = platformToChannel(a.platform);
-    const vokabPdt = pdt.platformKeVokabPdt(a.platform);
-    const katalog = vokabPdt ? cp.gabungKatalogDb(katalogRows, vokabPdt) : [];
-    return {
-      clientPlatformId: Number(a.client_platform_id),
-      platform: a.platform,
-      channel,
-      channelLain,
-      metodeBaseline: a.metode_baseline,
-      usulan: cp.susunUsulan(a.payload, katalog),
-    };
-  });
 
   return { interviewId: chosen.id, channels };
 }
@@ -8495,4 +8396,150 @@ function transitionError(res: statemachine.TransitionResult & { ok: false }): Er
 function nullIfBlank(s: string | null | undefined): string | null {
   const t = (s ?? '').toString().trim();
   return t === '' ? null : t;
+}
+
+// ---------------------------------------------------------------------------
+// Katalog pilar Section E — daftar pilihan editor pilar manual
+// ---------------------------------------------------------------------------
+
+/**
+ * Satu aksi katalog sebagaimana disajikan ke editor pilar Section E.
+ *
+ * Bentuknya sengaja DATAR dan lengkap: editor merender label ini apa adanya
+ * (aturan rumah #5 — jangan mengarang atau mengubah label BI), lalu menyalin
+ * `jenis`/`divisi`/`aksi` ke baris pilar yang AM simpan. Nol angka klien di
+ * sini — katalog ini sama untuk semua Strategi.
+ */
+export interface KatalogPilarAksi {
+  kode: string;
+  /** Pilar katalog: VIDEO / LIVE / AFFILIATE / ADS. */
+  pilar: string;
+  /** `strategi_pillar.jenis` yang akan ditulis — hasil `PILAR_KE_JENIS`. */
+  jenis: string;
+  /** Divisi PIC bawaan; yang menyemai `plan_row.divisi_pic` lewat `planpillar`. */
+  divisi: string;
+  nama: string;
+  deskripsi: string;
+  /** Metrik yang harus bergerak agar aksi ini disebut berhasil. */
+  jembatan: string;
+  unit: string;
+  /** 'naik' | 'turun'. */
+  arah: string;
+  /** Berapa minggu sebelum hasilnya wajar dinilai. */
+  minggu: number;
+  /** Field Section B yang jadi buktinya. */
+  fieldIdBukti: string;
+  quickWin: boolean;
+  /** Platform PDT tempat aksi ini berlaku ('tiktok' / 'shopee' / 'meta'). */
+  platform: string[];
+  /**
+   * Keterangan "relevan saat …", diturunkan dari `pdt_usulan_katalog.kondisi`.
+   * Sejak AM Co-Pilot pensiun tidak ada yang MENGEVALUASI ini — ia turun
+   * pangkat dari syarat-otomatis jadi keterangan, supaya AM tahu kapan sebuah
+   * aksi biasanya dipakai lalu memutuskan sendiri. Kosong = tanpa keterangan.
+   */
+  relevanSaat: string[];
+}
+
+/** Kunci metrik → frasa BI untuk keterangan "relevan saat …". */
+const METRIK_LABEL: Readonly<Record<string, string>> = {
+  crToko: 'conversion rate toko',
+  videoPostToko: 'jumlah video toko diposting',
+  videoSalesToko: 'video toko yang menjual',
+  videoSalesAff: 'video affiliate yang menjual',
+  gpmToko: 'GPM toko',
+  liveSesi: 'jumlah sesi live',
+  liveJam: 'jam live',
+  liveGmvJam: 'GMV per jam live',
+  liveCtor: 'CTOR live',
+  krSales: 'kreator yang menjual',
+  krKonsen: 'konsentrasi GMV kreator',
+  kreatorBelumPosting: 'kreator terdaftar yang belum posting',
+  sampelTerkirim: 'sampel terkirim',
+  skuSales: 'SKU yang menjual',
+  roas: 'ROAS',
+  adsDep: 'ketergantungan iklan',
+};
+
+const BANDING_LABEL: Readonly<Record<string, string>> = {
+  kurang: 'di bawah',
+  lebih: 'di atas',
+  minimal: 'minimal',
+  samaDengan: 'sama dengan',
+};
+
+/** Satu pemicu katalog → satu frasa BI. Kunci tak dikenal dilewati, bukan ditebak. */
+function relevanSaatDari(aksi: pilarkatalog.AksiKatalog): string[] {
+  const out: string[] = [];
+  for (const p of aksi.pemicu) {
+    const metrik = METRIK_LABEL[p.metrik];
+    const banding = BANDING_LABEL[p.banding];
+    if (!metrik || !banding) continue;
+    const ambang = 'benchmark' in p.ambang ? 'benchmark MEA' : p.ambang.nama;
+    out.push(`${metrik} ${banding} ${ambang}`);
+  }
+  return out;
+}
+
+/**
+ * listKatalogPilar — daftar pilihan aksi untuk editor pilar Section E.
+ *
+ * **Nol ketergantungan pada Riset Awal, dan itulah intinya.** Pengisi Section E
+ * sebelumnya (AM Co-Pilot, impor AM Cockpit) dua-duanya menuntut
+ * `riset_awal_analisa`, sehingga klien tanpa Riset Awal terkunci dari E-3…E-10
+ * sama sekali — laporan pemilik atas `STRG-202609-0009`, dan salah satu alasan
+ * gerbang `PILLAR_MIN` dicabut (`DECISIONS.md` 2026-09-21 E-PILAR-OPSIONAL).
+ * Katalog ini statis: ia sama untuk setiap klien, ada atau tidak ada baseline.
+ *
+ * Metadata label datang dari kode (`@cdps/core` `pilarkatalog.KATALOG`),
+ * `platform_berlaku` + `kondisi` + `aktif` dari `pdt_usulan_katalog` — pembagian
+ * yang sama yang G4-01 tetapkan, tidak diubah di sini.
+ *
+ * Gabungannya diambil LINTAS platform (union), bukan per platform seperti dulu:
+ * editor ini tidak tahu channel mana yang akan AM pilih untuk sebuah baris, dan
+ * menyaring di server akan menyembunyikan aksi yang sah. Platform tiap aksi
+ * ikut dikirim supaya editor bisa menandainya.
+ *
+ * Gerbangnya: aktor mana pun yang boleh membuka halaman Strategi. Katalog ini
+ * nol data klien — ia daftar aksi milik MEA sendiri — jadi tak ada row-scope
+ * yang bisa bocor lewat sini.
+ */
+export async function listKatalogPilar(
+  sql: Queryable,
+  _actor: Actor,
+): Promise<KatalogPilarAksi[]> {
+  const rows = await pdt.listAksiKatalogAktif(sql);
+  // Union lintas platform: satu aksi muncul SEKALI, membawa daftar platform
+  // tempat ia berlaku. `gabungKatalogDb` menyaring per platform, jadi tiga
+  // panggilan digabung di sini — bukan tiga daftar terpisah yang editor harus
+  // satukan sendiri.
+  const byKode = new Map<string, { aksi: pilarkatalog.AksiKatalog; platform: string[] }>();
+  for (const platform of ['tiktok', 'shopee', 'meta'] as const) {
+    for (const aksi of pilarkatalog.gabungKatalogDb(rows, platform)) {
+      const existing = byKode.get(aksi.kode);
+      if (existing) existing.platform.push(platform);
+      else byKode.set(aksi.kode, { aksi, platform: [platform] });
+    }
+  }
+  return [...byKode.values()]
+    .map(({ aksi, platform }) => ({
+      kode: aksi.kode,
+      pilar: aksi.pilar,
+      jenis: pilarkatalog.PILAR_KE_JENIS[aksi.pilar],
+      divisi: aksi.divisi,
+      nama: aksi.nama,
+      deskripsi: aksi.deskripsi,
+      jembatan: aksi.jembatan,
+      unit: aksi.unit,
+      arah: aksi.arah,
+      minggu: aksi.minggu,
+      fieldIdBukti: aksi.fieldIdBukti,
+      quickWin: aksi.quickWin,
+      platform,
+      relevanSaat: relevanSaatDari(aksi),
+    }))
+    // Urut mengikuti katalog kode (V…, L…, A…, D…) supaya urutan di layar
+    // stabil antar pemuatan — `Map` menjaga urutan sisip, dan sisipnya sudah
+    // mengikuti urutan `KATALOG`.
+    .sort((a, b) => a.kode.localeCompare(b.kode));
 }

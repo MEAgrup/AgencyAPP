@@ -14,7 +14,6 @@ import {
   visibleLinks, visibleNav,
   type NavItem, type NavNode,
 } from './nav';
-import { EMBEDDED_TOOLS } from './embedded-tools';
 // Predikat dua halaman Ads yang kini duduk di grup "MEA AI Tools" — di-import
 // supaya pencocokannya BY REFERENCE, bukan salinan (lihat blok grup di bawah).
 import { canUseSkuScreener } from './skuscreener';
@@ -321,17 +320,15 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
     expect(titles).not.toContain('Alat Bantu AM');
   });
 
-  // Dua halaman Ads yang pemilik pindahkan ke grup ini 2026-09-06. Mereka BUKAN
-  // alat HTML ter-embed, jadi mereka adalah satu-satunya pengecualian klausa
-  // "wajib /tools/*" di bawah — dan pengecualiannya DIDAFTAR di sini, bukan
-  // dilonggarkan jadi "apa saja boleh". Predikatnya tetap dicocokkan SECARA
-  // REFERENSI, sama ketatnya dengan alat ter-embed.
+  // Kedua halaman Ads di grup ini, dipindahkan pemilik 2026-09-06. Sejak AM
+  // Baseline & AM Co-Pilot pensiun (2026-09-21, "PENSIUN-AMTOOLS") merekalah
+  // SATU-SATUNYA isi grup ini. Predikatnya dicocokkan SECARA REFERENSI.
   const ADS_PAGES_IN_GROUP: Record<string, (r: Role) => boolean> = {
     '/ads/screening': canUseSkuScreener,
     '/ads/scanner': canUseAdsScanner,
   };
 
-  it('isinya HANYA alat HTML EMBEDDED_TOOLS atau dua halaman Ads terdaftar — predikat by-reference', () => {
+  it('isinya HANYA halaman Ads terdaftar — predikat by-reference', () => {
     const section = NAV_SECTIONS.find((s) => s.title === TITLE);
     expect(section, 'grup MEA AI Tools harus ada di NAV_SECTIONS').toBeDefined();
     expect(section!.items.length).toBeGreaterThan(0);
@@ -339,36 +336,30 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
     expect(section!.items.every((n) => !isSubGroup(n))).toBe(true);
     for (const item of section!.items as NavItem[]) {
       const adsPredicate = ADS_PAGES_IN_GROUP[item.href];
-      if (adsPredicate) {
-        // (b) halaman Ads: predikatnya WAJIB objek fungsi yang sama yang dipakai
-        // halamannya sendiri — salinan akan lolos `toBe` hanya kalau identitasnya
-        // sama, jadi tes ini yang menangkap drift menu-vs-halaman.
-        expect(item.access, `${item.href} harus memakai predikat halamannya sendiri`).toBe(
-          adsPredicate,
-        );
-        continue;
-      }
-      // (a) alat HTML ter-embed: href WAJIB /tools/<slug> dan slug-nya terdaftar.
-      const slug = item.href.replace('/tools/', '');
-      expect(item.href, `${item.href} harus menunjuk /tools/<slug>`).toBe(`/tools/${slug}`);
-      expect(
-        Object.keys(EMBEDDED_TOOLS),
-        `${slug} harus terdaftar di embedded-tools.ts`,
-      ).toContain(slug);
-      // Menu dan guard halaman WAJIB memakai predikat yang sama — kalau ini
-      // berbeda, satu peran bisa melihat menu tapi ditolak halamannya.
-      expect(item.access, `${slug} harus memakai predikat EMBEDDED_TOOLS`).toBe(
-        EMBEDDED_TOOLS[slug].access,
+      // Predikatnya WAJIB objek fungsi yang sama yang dipakai halamannya
+      // sendiri — salinan lolos `toBe` hanya kalau identitasnya sama, jadi tes
+      // ini yang menangkap drift menu-vs-halaman.
+      expect(adsPredicate, `${item.href} bukan baris yang diizinkan di grup ini`).toBeDefined();
+      expect(item.access, `${item.href} harus memakai predikat halamannya sendiri`).toBe(
+        adsPredicate,
       );
     }
   });
 
-  it('keempat baris hadir: dua alat HTML + dua halaman Ads (pindah, bukan disalin)', () => {
+  it('alat HTML ter-embed sudah TIDAK ADA — AM Baseline & AM Co-Pilot pensiun', () => {
+    // Anti-regresi pensiun: registry `embedded-tools.ts`, halaman `/tools/[slug]`
+    // dan asetnya sudah dihapus, jadi satu baris `/tools/*` yang muncul lagi di
+    // sini adalah tautan mati — bukan fitur yang kembali.
+    const semuaHref = NAV_SECTIONS.flatMap((s) =>
+      (s.items as NavNode[]).flatMap((n) => (isSubGroup(n) ? n.items.map((i) => i.href) : [n.href])),
+    );
+    expect(semuaHref.filter((h) => h.startsWith('/tools/'))).toEqual([]);
+  });
+
+  it('dua baris hadir: dua halaman Ads (pindah, bukan disalin)', () => {
     const section = NAV_SECTIONS.find((s) => s.title === TITLE)!;
     const inGroup = (section.items as NavItem[]).map((i) => i.href);
     expect(inGroup).toEqual([
-      '/tools/video-factory',
-      '/tools/am-copilot',
       '/ads/screening',
       '/ads/scanner',
     ]);
@@ -394,17 +385,8 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
     }
   });
 
-  it('judul grup MUNCUL untuk divisi yang punya akses (Account, Creative, Ads) dan layer read-all', () => {
+  it('judul grup MUNCUL untuk Ads dan layer read-all', () => {
     for (const r of [
-      role('Account', 'staff'),
-      role('Account', 'lead'),
-      role('Creative', 'staff'),
-      // Ads masuk daftar ini SEJAK pemilik memindahkan dua alat Ads ke grup ini
-      // (2026-09-06). Divisi Ads tidak punya akses ke dua alat HTML-nya, tapi ia
-      // punya akses ke dua halaman Ads — dan `visibleNav` menampilkan judul grup
-      // begitu SATU baris lolos, jadi ini konsekuensi yang disengaja dari
-      // pemindahan itu, bukan pelebaran akses: baris video-factory/am-copilot
-      // tetap tidak terlihat untuknya (dibuktikan tes berikutnya).
       role('Ads', 'staff'),
       role('Ads', 'lead'),
       role('Sales', 'staff', { director: true }),
@@ -414,9 +396,7 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
     }
   });
 
-  it('Ads melihat HANYA dua halaman Ads di grup ini — bukan alat HTML AM', () => {
-    // Pemindahan 2026-09-06 tidak boleh jadi pintu belakang: judul grup kini
-    // tampil untuk Ads, tapi isinya harus tetap tersaring per baris.
+  it('Ads melihat dua halaman Ads di grup ini', () => {
     for (const level of ['staff', 'lead']) {
       const section = toolsSection(role('Ads', level));
       expect(section, `Ads ${level} harus melihat grup ${TITLE}`).toBeDefined();
@@ -424,6 +404,22 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
         '/ads/screening',
         '/ads/scanner',
       ]);
+    }
+  });
+
+  it('Account & Creative TIDAK lagi melihat grup ini — konsekuensi pensiun, bukan regresi', () => {
+    // Sampai 2026-09-21 keduanya melihat judul grup ini karena dua alat HTML AM
+    // (`/tools/video-factory`, `/tools/am-copilot`) memang milik mereka. Kedua
+    // alat itu pensiun ("PENSIUN-AMTOOLS"), dan sisa isi grup — dua halaman Ads —
+    // bergerbang `canUseSkuScreener`/`canUseAdsScanner` yang Ads-only. Jadi
+    // `visibleNav` membuang seksinya untuk mereka, dan itu BENAR: judul grup
+    // tanpa satu pun baris yang bisa dibuka hanya menjanjikan sesuatu yang tidak
+    // ada. Penggantinya bukan menu, melainkan editor pilar manual di Section E.
+    for (const r of [role('Account', 'staff'), role('Account', 'lead'), role('Creative', 'staff')]) {
+      expect(
+        toolsSection(r),
+        `${r.division}/${r.level} tidak boleh melihat judul grup ${TITLE} lagi`,
+      ).toBeUndefined();
     }
   });
 
@@ -453,54 +449,32 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
   });
 });
 
-describe('visibleNav — Alat (embedded HTML tools)', () => {
-  // "AM - baseline riset" (video-factory). Owner decision 2026-08-21: the tool is
-  // for Team Creative & Account Service, PLUS the read-everywhere layer
-  // (Director full / OD read-only, Role Matrix §4) who may VIEW every division's
-  // pages for oversight/QA.
-  const VF = '/tools/video-factory';
+describe('visibleNav — alat HTML ter-embed sudah pensiun', () => {
+  // Grup ini dulu memuat "AM - baseline riset" (`/tools/video-factory`) dan
+  // "AM Co-Pilot" (`/tools/am-copilot`), keduanya iframe ke HTML di
+  // `public/tools/`. Ketokan pemilik 2026-09-21 ("PENSIUN-AMTOOLS") mencabut
+  // keduanya berikut registry `embedded-tools.ts`, halaman `/tools/[slug]`, dan
+  // asetnya. Yang menggantikannya: editor pilar manual di Section E Strategi.
+  //
+  // Tes per-divisi yang dulu ada di sini (siapa boleh melihat alatnya) ikut
+  // dicabut karena tak ada lagi barisnya. Yang tinggal adalah satu pagar
+  // anti-regresi: tak ada peran mana pun yang boleh melihat `/tools/*` lagi,
+  // karena rutenya sudah tidak ada — barisnya akan jadi tautan mati.
+  const PERAN = [
+    null,
+    role('Account', 'staff'),
+    role('Account', 'lead'),
+    role('Creative', 'staff'),
+    role('Ads', 'staff'),
+    role('Sales', 'staff', { director: true }),
+    role('Sales', 'staff', { od: true }),
+  ];
 
-  it('Account and Creative staff (its two audiences) see it', () => {
-    expect(hrefs(role('Account', 'staff')), 'Account staff should see it').toContain(VF);
-    expect(hrefs(role('Creative', 'staff')), 'Creative staff should see it').toContain(VF);
-    // Any level of those divisions, not just staff.
-    expect(hrefs(role('Account', 'lead'))).toContain(VF);
-  });
-
-  it('the other divisions (without read-all) do not get it in their menu', () => {
-    for (const division of ['Sales', 'Marketing', 'Finance', 'Ads', 'KOL', 'Live Stream']) {
-      expect(hrefs(role(division, 'staff')), `${division} staff must not see it`).not.toContain(VF);
+  it('tak ada peran mana pun yang melihat baris /tools/* — termasuk Director & OD', () => {
+    for (const r of PERAN) {
+      const punyaTools = hrefs(r).filter((h) => h.startsWith('/tools/'));
+      expect(punyaTools, `peran ${JSON.stringify(r)} masih melihat ${punyaTools.join(', ')}`).toEqual([]);
     }
-  });
-
-  it('Director and OD (read-everywhere) see it — even outside Creative/Account', () => {
-    expect(hrefs(role('Sales', 'staff', { director: true })), 'Director must see it (full access)').toContain(VF);
-    expect(hrefs(role('Sales', 'staff', { od: true })), 'OD must see it (read-everywhere)').toContain(VF);
-  });
-
-  it('is hidden while the role is still loading (gated, not universal)', () => {
-    expect(hrefs(null)).not.toContain(VF);
-  });
-
-  // "AM Co-Pilot" (MEA AM Cockpit) — same audience & predicate as video-factory
-  // above, so the same three checks apply.
-  const CP = '/tools/am-copilot';
-
-  it('AM Co-Pilot: Account and Creative staff see it, other divisions do not', () => {
-    expect(hrefs(role('Account', 'staff'))).toContain(CP);
-    expect(hrefs(role('Creative', 'staff'))).toContain(CP);
-    for (const division of ['Sales', 'Marketing', 'Finance', 'Ads', 'KOL', 'Live Stream']) {
-      expect(hrefs(role(division, 'staff')), `${division} staff must not see it`).not.toContain(CP);
-    }
-  });
-
-  it('AM Co-Pilot: Director and OD see it even outside Creative/Account', () => {
-    expect(hrefs(role('Sales', 'staff', { director: true }))).toContain(CP);
-    expect(hrefs(role('Sales', 'staff', { od: true }))).toContain(CP);
-  });
-
-  it('AM Co-Pilot: hidden while the role is still loading', () => {
-    expect(hrefs(null)).not.toContain(CP);
   });
 });
 
@@ -756,7 +730,9 @@ describe('Sidebar IA v3 — struktur 9 grup', () => {
       '/tasks', '/account/rekap', '/account', '/ads', '/creative', '/kol', '/livestream',
       '/tasks?division=AI+Optimizer', '/store-ops',
       '/ads/screening', '/ads/scanner',
-      '/tools/video-factory', '/tools/am-copilot',
+      // '/tools/video-factory' + '/tools/am-copilot' SENGAJA tidak di sini:
+      // keduanya pensiun 2026-09-21 ("PENSIUN-AMTOOLS") berikut rutenya, jadi
+      // "masih terjangkau" tidak lagi berlaku untuk mereka.
       '/finance', '/finance/reminders',
       '/penugasan', '/portal/team', '/performance',
       '/admin/employees', '/admin/role-mappings', '/admin/hari-libur',

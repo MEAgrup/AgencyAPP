@@ -88,7 +88,6 @@ import {
   PILLAR_KINDS,
   getBaselinePrefill,
   petakanTipeKampanye,
-  susunPilarUsulan,
   getStrategi,
   getStrategiPrefill,
   listStrategiForService,
@@ -153,6 +152,7 @@ import {
   targetKey,
   trenBaseline,
   computeHargaRataRata,
+  listKatalogPilar,
   updateHeader,
   type ChannelInput,
 } from './strategi';
@@ -5246,78 +5246,6 @@ describeDb('getBaselinePrefill — B3: the §4.4 figures the payload already car
 });
 
 // ---------------------------------------------------------------------------
-// B4 — susunPilarUsulan (AM Co-Pilot mengisi Section E dari server)
-// ---------------------------------------------------------------------------
-
-describeDb('susunPilarUsulan — Section E disusun server-side (B4)', () => {
-  async function seeded() {
-    const serviceId = await seedService();
-    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
-      select client_id from services where id = ${serviceId}`;
-    const { interviewId } = await seedScoredInterview(clientId);
-    const ids = await seedRisetAwalBaseline(interviewId, clientId);
-    const s = await createStrategi(sql, am(), serviceId, HEADER);
-    return { serviceId, clientId, interviewId, strategiId: s.id, ...ids };
-  }
-
-  it('proposes one set of pillars per analysed platform, resolved from the same interview', async () => {
-    const { interviewId, strategiId, tiktokId, shopeeId } = await seeded();
-    const u = await susunPilarUsulan(sql, am(), strategiId);
-    expect(u).not.toBeNull();
-    // The SAME interview `getBaselinePrefill` resolves — one helper, no drift.
-    expect(u!.interviewId).toBe(interviewId);
-    expect(u!.channels.map((c) => c.clientPlatformId).sort()).toEqual([tiktokId, shopeeId].sort());
-    const tt = u!.channels.find((c) => c.clientPlatformId === tiktokId)!;
-    expect(tt.channel).toBe('TikTok Shop');
-    expect(tt.usulan.payloadTerbaca).toBe(true);
-  });
-
-  it('every proposed pillar carries a jenis from PILLAR_KINDS and a channel from D1', async () => {
-    const { strategiId } = await seeded();
-    const u = await susunPilarUsulan(sql, am(), strategiId);
-    for (const c of u!.channels) {
-      expect(['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Website', 'Lainnya']).toContain(c.channel);
-      for (const p of c.usulan.pilar) {
-        expect(PILLAR_KINDS).toContain(p.jenis);
-        expect(p.aksi.length).toBeGreaterThan(0);
-      }
-    }
-  });
-
-  it('a manual baseline proposes nothing and says why — never a guessed pillar', async () => {
-    const { strategiId, shopeeId } = await seeded();
-    const u = await susunPilarUsulan(sql, am(), strategiId);
-    const sh = u!.channels.find((c) => c.clientPlatformId === shopeeId)!;
-    expect(sh.usulan.payloadTerbaca).toBe(false);
-    expect(sh.usulan.pilar).toEqual([]);
-    expect(sh.usulan.catatan.join(' ')).toContain('tidak memuat blok analisa');
-  });
-
-  it('is suggestion-only: reading it writes no strategi_pillar row', async () => {
-    const { strategiId } = await seeded();
-    await susunPilarUsulan(sql, am(), strategiId);
-    const [{ count }] = await sql<{ count: string }[]>`
-      select count(*)::text as count from strategi_pillar where strategi_id = ${strategiId}`;
-    expect(count).toBe('0');
-  });
-
-  it('returns null when the client has no riset awal analysis', async () => {
-    const serviceId = await seedService();
-    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
-      select client_id from services where id = ${serviceId}`;
-    await seedScoredInterview(clientId);
-    const s = await createStrategi(sql, am(), serviceId, HEADER);
-    expect(await susunPilarUsulan(sql, am(), s.id)).toBeNull();
-  });
-
-  it('refuses a non-owner AM — the same read gate as getStrategi / getBaselinePrefill', async () => {
-    const serviceId = await seedService();
-    const s = await createStrategi(sql, am(), serviceId, HEADER);
-    await expect(susunPilarUsulan(sql, otherAm(), s.id)).rejects.toThrow(ForbiddenError);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // RAB-11 DoD + RAB-13 — the baseline ACC gate is the EXISTING one (machine #15).
 // ---------------------------------------------------------------------------
 describeDb('baseline gate — no second gate (RAB-11 DoD / RAB-13)', () => {
@@ -5734,5 +5662,96 @@ describe('petakanTipeKampanye (G3-06) — teks konfigurasi kampanye → CAMPAIGN
     // Mengklasifikasi darinya = mengarang — persis yang MATERI_IKLAN hindari.
     expect(petakanTipeKampanye('tt_ads_product', 'affiliate_PC_7496001635930573579_1775028391')).toBeNull();
     expect(petakanTipeKampanye('tt_ads_product', 'Bismilah cekout banyak melimpah')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Katalog pilar Section E — daftar pilihan editor pilar manual
+// ---------------------------------------------------------------------------
+
+describeDb('listKatalogPilar — daftar pilihan pilar tanpa Riset Awal', () => {
+  it('menyajikan katalog penuh: 20 aksi, 4 jenis, label lengkap', async () => {
+    const katalog = await listKatalogPilar(sql, am());
+    expect(katalog).toHaveLength(20);
+    expect(new Set(katalog.map((a) => a.jenis))).toEqual(
+      new Set(['konten', 'live', 'affiliate', 'iklan']),
+    );
+    for (const a of katalog) {
+      expect(a.kode, JSON.stringify(a)).not.toBe('');
+      expect(a.nama).not.toBe('');
+      expect(a.deskripsi).not.toBe('');
+      expect(a.jembatan).not.toBe('');
+      expect(a.divisi).not.toBe('');
+      expect(a.platform.length).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * Inilah seluruh alasan endpoint ini ada. Pengisi Section E yang lama (AM
+   * Co-Pilot, impor AM Cockpit) dua-duanya menuntut `riset_awal_analisa`, jadi
+   * klien tanpa Riset Awal terkunci dari E-3…E-10 — laporan pemilik atas
+   * `STRG-202609-0009`. Tes ini memakai aktor tanpa klien sama sekali: kalau
+   * suatu saat seseorang menyambungkan katalog ini ke baseline lagi, ia yang
+   * memerah lebih dulu.
+   */
+  it('TIDAK menyentuh Riset Awal — nol interview, nol klien, tetap penuh', async () => {
+    await sql`delete from riset_awal_analisa`;
+    const katalog = await listKatalogPilar(sql, am());
+    expect(katalog).toHaveLength(20);
+  });
+
+  it('setiap aksi memetakan ke jenis yang sah `ck_strpil_jenis`', async () => {
+    const sah = new Set(['sku', 'harga', 'iklan', 'konten', 'affiliate', 'live', 'retensi', 'operasional', 'tidak_dikerjakan']);
+    for (const a of await listKatalogPilar(sql, am())) {
+      expect(sah.has(a.jenis), `${a.kode} → ${a.jenis}`).toBe(true);
+    }
+  });
+
+  it('urutannya stabil antar pemuatan — layar tidak berganti susunan', async () => {
+    const a = (await listKatalogPilar(sql, am())).map((x) => x.kode);
+    const b = (await listKatalogPilar(sql, am())).map((x) => x.kode);
+    expect(a).toEqual(b);
+    expect(a).toEqual([...a].sort((x, y) => x.localeCompare(y)));
+  });
+
+  it('baris katalog nonaktif tidak disajikan', async () => {
+    await sql`update pdt_usulan_katalog set aktif = false where kode = 'L1'`;
+    try {
+      const kode = (await listKatalogPilar(sql, am())).map((a) => a.kode);
+      expect(kode).not.toContain('L1');
+      expect(kode).toHaveLength(19);
+    } finally {
+      await sql`update pdt_usulan_katalog set aktif = true where kode = 'L1'`;
+    }
+  });
+
+  it('aksi khusus Shopee menyebut platformnya, bukan ketiganya', async () => {
+    // `platform_berlaku` per baris DB ikut terbawa supaya editor bisa menandai
+    // aksi yang tidak berlaku untuk channel yang AM pilih. Union lintas
+    // platform TIDAK boleh meratakannya jadi "berlaku di mana saja".
+    await sql`update pdt_usulan_katalog set platform_berlaku = array['shopee'] where kode = 'D5'`;
+    try {
+      const d5 = (await listKatalogPilar(sql, am())).find((a) => a.kode === 'D5');
+      expect(d5?.platform).toEqual(['shopee']);
+    } finally {
+      await sql`update pdt_usulan_katalog set platform_berlaku = array['tiktok','shopee','meta'] where kode = 'D5'`;
+    }
+  });
+
+  it('keterangan "relevan saat" berbahasa Indonesia, bukan kunci metrik mentah', async () => {
+    const katalog = await listKatalogPilar(sql, am());
+    const semua = katalog.flatMap((a) => a.relevanSaat);
+    expect(semua.length).toBeGreaterThan(0);
+    for (const frasa of semua) {
+      expect(frasa).not.toMatch(/[a-z][A-Z]/); // nol camelCase kunci metrik
+    }
+    const l1 = katalog.find((a) => a.kode === 'L1');
+    expect(l1?.relevanSaat).toEqual(['jam live di bawah benchmark MEA']);
+  });
+
+  it('terbuka untuk setiap aktor yang bisa membuka halaman Strategi — nol data klien di dalamnya', async () => {
+    for (const aktor of [am(), otherAm(), spv(), creativeLead(), director(), od()]) {
+      expect((await listKatalogPilar(sql, aktor)).length).toBe(20);
+    }
   });
 });
