@@ -11,11 +11,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   JENIS_TANPA_KATALOG,
+  angkaAtauNull,
   angleText,
+  catatanVendor,
+  masalahBaris,
   parseAngle,
   pilarDariAksi,
+  pilihVendor,
   targetBawaan,
 } from './PilarEditor';
+import { blankPilar, type PilarBody } from '@/lib/strategi-pilar';
+import type { Vendor } from '@/lib/strategi';
 import { parseTargetKuota, suggestRowFromPillar } from '@/lib/plan-row-suggest';
 import type { KatalogPilarAksi } from '@/lib/strategi';
 
@@ -141,6 +147,134 @@ describe('JENIS_TANPA_KATALOG', () => {
     const dariKatalog = new Set(['konten', 'live', 'affiliate', 'iklan']);
     for (const j of JENIS_TANPA_KATALOG) {
       expect(dariKatalog.has(j.value), `${j.value} sudah ada di katalog`).toBe(false);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vendor live (E-8 / Rule 18)
+// ---------------------------------------------------------------------------
+
+const vendor = (over: Partial<Vendor> = {}): Vendor => ({
+  id: 'VND-202609-0001',
+  nama_vendor: 'PT Live Kita',
+  jenis_layanan: 'live_stream',
+  status: 'Aktif',
+  pic_nama: 'Sari',
+  pic_kontak: '08123',
+  skema_biaya: 'per_jam',
+  tarif: '350000.00',
+  bagi_hasil_persen: null,
+  catatan_kinerja: '',
+  dokumen: [],
+  created_by: 'ZZ-AM',
+  created_at: '2026-09-01T00:00:00Z',
+  ...over,
+});
+
+describe('angkaAtauNull', () => {
+  it('kosong dan bukan-angka jadi null, BUKAN 0', () => {
+    // 0 jam live adalah pernyataan; kolom kosong adalah ketiadaan pernyataan.
+    for (const t of ['', '   ', 'abc']) expect(angkaAtauNull(t)).toBeNull();
+  });
+
+  it('angka terbaca apa adanya, termasuk pecahan', () => {
+    expect(angkaAtauNull('36')).toBe(36);
+    expect(angkaAtauNull(' 7.5 ')).toBe(7.5);
+    expect(angkaAtauNull('0')).toBe(0);
+  });
+});
+
+describe('pilihVendor', () => {
+  it('memilih vendor per_jam ikut men-prefill tarifnya', () => {
+    expect(pilihVendor([vendor()], 'VND-202609-0001')).toEqual({
+      vendor_id: 'VND-202609-0001',
+      tarif: '350000.00',
+    });
+  });
+
+  it('vendor bagi_hasil TIDAK men-prefill tarif — ia tak punya tarif rupiah', () => {
+    // `ck_vendor_tarif_pair`: bagi_hasil memakai persen dan HANYA persen.
+    // Menyalin apa pun ke kolom tarif melahirkan angka yang tak pernah ditagih.
+    const v = vendor({ skema_biaya: 'bagi_hasil', tarif: null, bagi_hasil_persen: 15 });
+    expect(pilihVendor([v], v.id)).toEqual({ vendor_id: v.id });
+  });
+
+  it('mengosongkan pilihan melepas vendor, tanpa menyentuh tarif yang sudah diketik', () => {
+    expect(pilihVendor([vendor()], '')).toEqual({ vendor_id: null });
+  });
+
+  it('id yang tak ada di daftar tetap diset, tarif tidak ditebak', () => {
+    expect(pilihVendor([vendor()], 'VND-LAIN')).toEqual({ vendor_id: 'VND-LAIN' });
+  });
+});
+
+describe('catatanVendor', () => {
+  it('menyebut persen untuk bagi_hasil — satu-satunya tempat angka itu terlihat', () => {
+    const v = vendor({ skema_biaya: 'bagi_hasil', tarif: null, bagi_hasil_persen: 15 });
+    expect(catatanVendor([v], v.id)).toContain('bagi hasil 15%');
+  });
+
+  it('menyebut tarif kartu harga untuk skema rupiah, dan bahwa tarif baris boleh beda', () => {
+    const t = catatanVendor([vendor()], 'VND-202609-0001');
+    expect(t).toContain('350000.00');
+    expect(t).toContain('boleh berbeda');
+  });
+
+  it('tanpa vendor terpilih tidak ada catatan', () => {
+    expect(catatanVendor([vendor()], null)).toBeNull();
+    expect(catatanVendor(null, 'VND-202609-0001')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// masalahBaris — cermin ketiga penolakan `savePillars`
+// ---------------------------------------------------------------------------
+
+describe('masalahBaris', () => {
+  const baris = (over: Partial<PilarBody>): PilarBody => ({
+    ...blankPilar('live', 1), aksi: 'L1 Mulai / tambah jam live', ...over,
+  });
+
+  it('baris live ber-vendor lolos', () => {
+    expect(masalahBaris(baris({ vendor_id: 'VND-202609-0001', slot_jam: 36 }))).toBeNull();
+  });
+
+  it('Rule 18: vendor di luar pilar live ditolak', () => {
+    const m = masalahBaris(baris({ jenis: 'konten', vendor_id: 'VND-202609-0001' }));
+    expect(m).toContain('Rule 18');
+  });
+
+  it('E-4: floor price di luar pilar harga ditolak', () => {
+    expect(masalahBaris(baris({ jenis: 'konten', floor_price: '79000' }))).toContain('pilar harga');
+  });
+
+  it('E-4: floor price tanpa SKU ditolak — Brief membandingkannya per SKU', () => {
+    expect(masalahBaris(baris({ jenis: 'harga', floor_price: '79000' }))).toContain('butuh SKU');
+    expect(masalahBaris(baris({ jenis: 'harga', floor_price: '79000', sku: '  ' }))).toContain('butuh SKU');
+  });
+
+  it('floor price dengan SKU lolos', () => {
+    expect(masalahBaris(baris({ jenis: 'harga', sku: 'SERUM-30', floor_price: '79000' }))).toBeNull();
+  });
+
+  it('Rule 11: harga promo di bawah floor ditolak', () => {
+    const m = masalahBaris(baris({ jenis: 'harga', sku: 'SERUM-30', floor_price: '79000', harga_promo: '75000' }));
+    expect(m).toContain('di bawah floor');
+  });
+
+  it('harga promo sama dengan floor lolos — batasnya inklusif, sama seperti CHECK-nya', () => {
+    expect(masalahBaris(baris({ jenis: 'harga', sku: 'SERUM-30', floor_price: '79000', harga_promo: '79000' }))).toBeNull();
+  });
+
+  it('string kosong diperlakukan sebagai tak diisi, bukan angka nol', () => {
+    // `''` yang dibaca `Number('')` jadi 0 akan memerahkan baris yang benar.
+    expect(masalahBaris(baris({ jenis: 'harga', sku: 'S', floor_price: '', harga_promo: '' }))).toBeNull();
+  });
+
+  it('baris katalog polos apa adanya lolos', () => {
+    for (const jenis of ['konten', 'live', 'affiliate', 'iklan', 'sku', 'retensi', 'operasional']) {
+      expect(masalahBaris(baris({ jenis })), jenis).toBeNull();
     }
   });
 });
