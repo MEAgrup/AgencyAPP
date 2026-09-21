@@ -138,6 +138,12 @@ export default function SectionE({
   onApplyPillars: (pillars: CockpitPillarBody[]) => Promise<void>;
   disabled: boolean;
 }) {
+  // E-PILAR-KOSONG-TERLIHAT — hanya pilar E-3…E-10. E-11 disimpan sebagai pilar
+  // berjenis `tidak_dikerjakan` dan sudah punya editornya sendiri di bawah, jadi
+  // ia tidak boleh ikut dihitung: gerbang pengajuan pun mengecualikannya
+  // (`MSG_PILLAR_MIN`, packages/domain/src/strategi.ts).
+  const pilarInti = detail.pillars.filter((p) => p.jenis !== 'tidak_dikerjakan');
+
   return (
     <div className="stack">
       {/* B4 — E-3…E-10 disusun di server dari Riset Awal. Ditaruh di ATAS E-1
@@ -278,36 +284,59 @@ export default function SectionE({
         />
       </label>
 
-      {/* Pillar summary (E-3…E-10) ---------------------------------------- */}
-      {detail.pillars.filter((p) => p.jenis !== 'tidak_dikerjakan').length > 0 && (
-        <div className="card">
-          <div className="cardHeader">E-3…E-10 · Pilar Strategi</div>
-          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-            Editor pilar detail (SKU, Harga, Iklan, Konten, Affiliate, Live, Retensi, Operasional)
-            tersedia di versi berikutnya. Pilar yang sudah tersimpan:
-          </p>
-          <table style={{ fontSize: 13 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left' }}>Jenis</th>
-                <th style={{ textAlign: 'left' }}>Channel</th>
-                <th style={{ textAlign: 'left' }}>Aksi / ringkasan</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.pillars
-                .filter((p) => p.jenis !== 'tidak_dikerjakan')
-                .map((p) => (
+      {/* Pillar (E-3…E-10) -------------------------------------------------- */}
+      {/*
+        E-PILAR-KOSONG-TERLIHAT — kartu ini dulu HANYA dirender saat sudah ada
+        pilar (`…length > 0 &&`). Akibatnya justru terbalik dari yang dibutuhkan:
+        satu-satunya keadaan yang menahan pengajuan — NOL pilar — adalah satu-
+        satunya keadaan yang tidak menampilkan apa pun. Gerbang submit menyebut
+        `E-3..E-10 [minimal 1 pilar Strategi Section E wajib diisi]`, AM menggulung
+        Section E dari atas ke bawah, dan tidak menemukan satu pun elemen ber-nama
+        E-3…E-10 untuk diperbaiki (laporan pemilik 2026-09-21 atas STRG-202609-0009).
+
+        Sekarang kartunya selalu ada: kosong ⇒ ia MENJELASKAN dirinya sebagai yang
+        kurang dan menunjuk tombol pengisinya; terisi ⇒ ringkasan seperti sebelumnya.
+      */}
+      <div className="card">
+        <div className="cardHeader">E-3…E-10 · Pilar Strategi</div>
+        {pilarInti.length === 0 ? (
+          <div className="alert alertWarning" style={{ fontSize: 13 }}>
+            <b>Belum ada pilar — ini yang menahan pengajuan.</b> Gerbangnya berbunyi{' '}
+            <code>E-3..E-10 [minimal 1 pilar Strategi Section E wajib diisi]</code>, dan pilar
+            adalah satu-satunya isi Section E yang tidak punya kolom ketik di halaman ini.
+            <br />
+            Cara mengisinya: tekan <b>“Susun draft dari AM Co-Pilot”</b> di kartu paling atas
+            seksi ini. Tombol itu menyusun usulan pilar E-3…E-10 dari analisa Riset Awal klien
+            ini — Anda tinggal mencabut yang tidak relevan lalu simpan. Kalau klien belum punya
+            analisa Riset Awal, jalur mundurnya adalah impor JSON dari tool AM Cockpit.
+          </div>
+        ) : (
+          <>
+            <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+              Editor pilar detail (SKU, Harga, Iklan, Konten, Affiliate, Live, Retensi, Operasional)
+              tersedia di versi berikutnya. Pilar yang sudah tersimpan:
+            </p>
+            <table style={{ fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Jenis</th>
+                  <th style={{ textAlign: 'left' }}>Channel</th>
+                  <th style={{ textAlign: 'left' }}>Aksi / ringkasan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pilarInti.map((p) => (
                   <tr key={p.id}>
                     <td>{p.jenis}</td>
                     <td>{p.channel ?? '—'}</td>
                     <td style={{ maxWidth: 300 }}>{p.aksi}</td>
                   </tr>
                 ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
     </div>
   );
 }
