@@ -1046,6 +1046,7 @@ export async function commitUploadBatch(
         `[batch verified untuk toko dan periode ${periode.mulai} s.d. ${periode.selesai} ini sudah ada — coba unggah ulang]`,
       );
     }
+    if (isNumericOutOfRange(e)) throw new ValidationError(PESAN_ANGKA_DI_LUAR_JANGKAUAN);
     throw e;
   }
 
@@ -1069,6 +1070,25 @@ export async function commitUploadBatch(
 function isUniqueViolation(e: unknown): boolean {
   return typeof e === 'object' && e !== null && (e as { code?: string }).code === '23505';
 }
+
+/**
+ * True untuk Postgres numeric-value-out-of-range (SQLSTATE 22003) — satu sel
+ * yang tidak muat di kolom fakta membatalkan SELURUH transaksi commit/reparse.
+ *
+ * Insiden 2026-09-21 (`docs/DECISIONS.md`): `pdt_fact_ads.roas numeric(8,3)`
+ * tumpah pada baris iklan berbiaya nyaris nol, dan AM hanya melihat "internal
+ * server error" — nol petunjuk berkas/kolom mana. Kolomnya sudah dilebarkan
+ * (migrasi `20261127010000`) dan `@cdps/core` `roasTersimpan` memagari ROAS di
+ * sisi kode, jadi jalur ini kini backstop: kalau kolom fakta LAIN kelak tumpah,
+ * yang muncul pesan BI yang bisa dilaporkan, bukan 500 buta.
+ */
+function isNumericOutOfRange(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: string }).code === '22003';
+}
+
+/** Pesan BI bersama `commitUploadBatch`/`reparsePdtBatch` untuk SQLSTATE 22003 (lihat `isNumericOutOfRange`). */
+const PESAN_ANGKA_DI_LUAR_JANGKAUAN =
+  '[ada angka di paket ini yang di luar jangkauan kolom fakta, batch tidak disimpan — laporkan nama toko dan periodenya ke tim teknis]';
 
 interface TulisFaktaModulTerparseInput {
   id: number;
@@ -2652,6 +2672,7 @@ export async function reparsePdtBatch(
         `[reparse menghasilkan batch verified untuk toko dan periode ${batch.periode_mulai} s.d. ${batch.periode_selesai} ini, tapi batch verified lain untuk periode yang sama sudah ada — periksa batch lain sebelum reparse ulang]`,
       );
     }
+    if (isNumericOutOfRange(e)) throw new ValidationError(PESAN_ANGKA_DI_LUAR_JANGKAUAN);
     throw e;
   }
 

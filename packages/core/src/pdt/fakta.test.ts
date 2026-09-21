@@ -74,6 +74,18 @@ describe('ekstrakBarisShopeeAdsLive', () => {
       { kampanyeId: 'AD-1', tayangan: null, pesananSku: null, gmv: null, biaya: 150000, roas: null, tipeKampanyeSumber: null },
     ]);
   });
+
+  // Pagar yang sama berlaku untuk roas yang DIBACA MENTAH dari berkas, bukan hanya yang diturunkan.
+  it('"Efektifitas Iklan" di luar jangkauan kolom (≥ 10^12) ⇒ null; nilai besar yang masih muat tetap disimpan', () => {
+    const aoa = [
+      HEADER,
+      ['Live Sore', 'AD-1', 'Aktif', '1000', '5%', '20', '2000000', '4', '500000'],
+      ['Live Pagi', 'AD-2', 'Aktif', '1000', '5%', '20', '2000000', '0.000001', '2000000000000'],
+    ];
+    const hasil = ekstrakBarisShopeeAdsLive(aoa, 1);
+    expect(hasil[0].roas).toBe(500000);
+    expect(hasil[1].roas).toBeNull();
+  });
 });
 
 const HEADER_TT_ADS_PRODUCT = ['ID Campaign', 'Nama kampanye', 'ID produk', 'ID video', 'Akun TikTok', 'Biaya', 'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor', 'Impresi iklan produk', 'Jumlah klik iklan produk'];
@@ -117,6 +129,22 @@ describe('ekstrakBarisTtAdsProduct', () => {
   it('biaya 0 ⇒ roas null (bukan pembagian oleh nol yang mengarang Infinity)', () => {
     const aoa = [HEADER_TT_ADS_PRODUCT, ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '0', '0', '0', '400000', '0', '0']];
     expect(ekstrakBarisTtAdsProduct(aoa, 1)[0].roas).toBeNull();
+  });
+
+  // Insiden 2026-09-21 (docs/DECISIONS.md): baris berbiaya nyaris nol ⇒ ROAS 500.000,
+  // di atas batas numeric(8,3) lama (10^5) ⇒ SQLSTATE 22003 menjatuhkan SELURUH commit.
+  // Kolomnya kini numeric(15,3): angkanya NYATA dan harus lolos apa adanya.
+  it('biaya nyaris nol ⇒ roas besar TETAP dipertahankan (muat numeric(15,3), bukan lagi tumpah)', () => {
+    const aoa = [HEADER_TT_ADS_PRODUCT, ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '1', '3', '0.33', '500000', '900', '40']];
+    expect(ekstrakBarisTtAdsProduct(aoa, 1)[0].roas).toBe(500000);
+  });
+
+  it('roas di luar jangkauan kolom (≥ 10^12) ⇒ null, bukan angka yang menjatuhkan commit', () => {
+    const aoa = [HEADER_TT_ADS_PRODUCT, ['CAM-1', 'Kampanye A', 'PRD-1', 'VID-1', 'akun', '0.000001', '1', '0', '2000000', '1', '1']];
+    const [baris] = ekstrakBarisTtAdsProduct(aoa, 1);
+    expect(baris.gmv).toBe(2000000); // gmv/biaya sendiri TIDAK disentuh — hanya rasionya yang tak terwakilkan
+    expect(baris.biaya).toBe(0.000001);
+    expect(baris.roas).toBeNull();
   });
 
   it('ID produk/ID video/Akun TikTok/Biaya per pesanan TIDAK diekstrak (nol kolom skema pdt_fact_ads)', () => {

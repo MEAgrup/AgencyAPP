@@ -295,7 +295,7 @@ export function ekstrakBarisShopeeAdsLive(
       pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
-      roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+      roas: iRoas === -1 ? null : roasTersimpan(parsePdtAngka(row?.[iRoas], true)),
       tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
@@ -330,6 +330,33 @@ const bacaTipeKampanyeSumber = (row: readonly unknown[] | undefined, i: number):
 
 const roasTurunan = (gmv: number | null, biaya: number): number | null =>
   gmv == null || biaya === 0 ? null : gmv / biaya;
+
+/**
+ * Batas representasi `pdt_fact_ads.roas` — `numeric(15,3)` sejak migrasi
+ * `20261127010000` (sebelumnya `numeric(8,3)`, yang tumpah pada ROAS ≥ 10^5).
+ * 15 digit presisi dengan skala 3 ⇒ 12 digit di depan koma.
+ */
+const BATAS_ROAS = 1e12;
+
+/**
+ * Pagar terakhir sebelum `roas` menyentuh kolom: nilai yang TIDAK MUAT di
+ * `numeric(15,3)` disimpan `null`, BUKAN dibiarkan menjatuhkan seluruh commit.
+ *
+ * Kenapa ini ada (insiden 2026-09-21, `docs/DECISIONS.md`): satu baris iklan
+ * berbiaya nyaris nol (mis. biaya Rp 1, GMV Rp 500.000 ⇒ ROAS 500.000) membuat
+ * Postgres melempar SQLSTATE 22003 `numeric field overflow` DI TENGAH transaksi
+ * commit — seluruh batch ikut rollback dan AM hanya melihat "internal server
+ * error". Kolomnya kini cukup lebar untuk setiap angka yang mungkin
+ * (biaya terkecil Rp 0,01 × GMV terbesar yang pernah ada masih di bawah 10^12),
+ * jadi pagar ini seharusnya TIDAK PERNAH memicu — ia ada supaya angka aneh
+ * berikutnya jadi satu sel kosong, bukan satu paket yang gagal diunggah.
+ *
+ * `NaN` SENGAJA dilewatkan apa adanya (`Math.abs(NaN) >= BATAS_ROAS` = false):
+ * `numeric` Postgres menerima `NaN`, dan Rule 12 mewajibkan nilai yang gagal
+ * diparse tetap TERLIHAT di hilir alih-alih menyamar jadi angka sah.
+ */
+const roasTersimpan = (v: number | null): number | null =>
+  v == null || v === Infinity || v === -Infinity || Math.abs(v) >= BATAS_ROAS ? null : v;
 
 /**
  * Satu baris `pdt_fact_ads` mentah dari `tt_ads_product`, SEBELUM
@@ -397,7 +424,7 @@ export function ekstrakBarisTtAdsProduct(
       biaya,
       pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
       gmv,
-      roas: roasTurunan(gmv, biaya),
+      roas: roasTersimpan(roasTurunan(gmv, biaya)),
       tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
       klik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik], true),
       tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
@@ -468,7 +495,7 @@ export function ekstrakBarisTtAdsLive(
       biaya,
       pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
       gmv,
-      roas: roasTurunan(gmv, biaya),
+      roas: roasTersimpan(roasTurunan(gmv, biaya)),
       tayangan: iTayangan === -1 ? null : parsePdtAngka(row?.[iTayangan], true),
     });
   }
@@ -1524,7 +1551,7 @@ export function ekstrakBarisShopeeAdsCpc(
       pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
-      roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+      roas: iRoas === -1 ? null : roasTersimpan(parsePdtAngka(row?.[iRoas], true)),
       tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
@@ -1593,7 +1620,7 @@ export function ekstrakBarisShopeeAdsSearch(
       pesananSku: iPesanan === -1 ? null : parsePdtAngka(row?.[iPesanan], true),
       gmv: iGmv === -1 ? null : parsePdtAngka(row?.[iGmv], true),
       biaya: iBiaya === -1 ? 0 : parsePdtAngka(row?.[iBiaya], true),
-      roas: iRoas === -1 ? null : parsePdtAngka(row?.[iRoas], true),
+      roas: iRoas === -1 ? null : roasTersimpan(parsePdtAngka(row?.[iRoas], true)),
       tipeKampanyeSumber: bacaTipeKampanyeSumber(row, iTipe),
     });
   }
