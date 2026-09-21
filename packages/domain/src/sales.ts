@@ -113,6 +113,34 @@ export const MSG_SALESPERSON_DUPLIKAT =
   '[satu salesperson tidak boleh muncul dua kali dalam alokasi]';
 
 /**
+ * Nilai uang yang diketik melampaui daya tampung kolomnya (`numeric(15,2)`,
+ * maksimum Rp. 9.999.999.999.999,99) — hampir selalu kelebihan nol.
+ *
+ * Insiden 2026-09-21 (`docs/DECISIONS.md`): `POST /attempts/{id}/qualify`
+ * membalas 500 `internal server error` 13 kali beruntun dalam tiga menit untuk
+ * `PRSP-202609-0431`, karena `gmv_baseline`/`target_gmv`/`marketing_budget`
+ * dikirim APA ADANYA sebagai string ke Postgres tanpa pernah divalidasi
+ * besarannya, dan `money.parse` sendiri hanya membatasi ke int64 (≈ 10.000×
+ * lebih lebar dari kolomnya). Orangnya tidak punya cara tahu field mana yang
+ * salah.
+ */
+export const MSG_UANG_TERLALU_BESAR = (label: string): string =>
+  `[nilai ${label} terlalu besar, maksimal Rp. 9.999.999.999.999 — periksa kembali jumlah nolnya]`;
+
+/**
+ * Nilai uang yang diketik bukan angka yang bisa diparse. Sama seperti
+ * `MSG_UANG_TERLALU_BESAR` ini menutup jalur 500: string non-angka yang lolos
+ * ke Postgres melempar `SQLSTATE 22P02 invalid input syntax for type numeric`,
+ * bukan pesan yang bisa dibaca pengguna.
+ */
+export const MSG_UANG_TIDAK_SAH = (label: string): string =>
+  `[nilai ${label} bukan angka yang sah]`;
+
+/** Backstop SQLSTATE 22003 untuk `submitQualifiedForm` — lihat `isAngkaKolomTumpah`. */
+export const MSG_ANGKA_KOLOM_TUMPAH =
+  '[ada nilai angka di form ini yang di luar jangkauan kolom, form tidak tersimpan — periksa kembali GMV baseline, target GMV, marketing budget, dan nominal tiap jasa]';
+
+/**
  * F-4 (feedback lapangan 2026-09-14, DECISIONS.md — deviasi PRD M0 §5): a
  * version carrying custom terms (a negotiated price) must say WHY — harga
  * awal, harga setelah nego, dan alasannya sendiri, supaya Head bisa
@@ -557,6 +585,49 @@ function resolveTenor(v: ServiceView, durasiBulan?: number | null): DurasiOption
 }
 
 /**
+ * Batas kolom `numeric(15,2)` untuk angka yang BUKAN uang (`quantity`), dalam
+ * satuan UTUH — `money.MAX_UANG_KOLOM` bersatuan minor (sen).
+ */
+const MAX_ANGKA_KOLOM = money.MAX_UANG_KOLOM / 100n;
+
+/**
+ * Tolak nilai uang yang tidak muat di kolomnya SEBELUM ia sampai ke Postgres.
+ *
+ * Tanpa ini, `numeric(15,2)` yang kelebihan muatan melempar `SQLSTATE 22003`
+ * di tengah transaksi dan naik sebagai 500 `internal server error` — pengguna
+ * tidak diberi tahu field mana yang salah, dan seluruh submit-nya hilang
+ * (insiden qualify 2026-09-21, `docs/DECISIONS.md`). `money.parse` sendiri
+ * TIDAK cukup: batasnya int64, ≈ 10.000× lebih lebar dari kolomnya.
+ */
+function pastikanMuatKolomUang(label: string, m: money.Money): void {
+  if (!money.muatKolomUang(m)) {
+    throw new ValidationError(MSG_UANG_TERLALU_BESAR(label));
+  }
+}
+
+/**
+ * Gerbang untuk nilai uang yang diketik pengguna dan disimpan APA ADANYA
+ * sebagai string DECIMAL (`qualified_forms.gmv_baseline`/`target_gmv`/
+ * `marketing_budget`) — jalur yang tidak pernah melewati `money.parse` sama
+ * sekali sebelum tiket ini, jadi string non-angka pun sampai ke Postgres
+ * (`SQLSTATE 22P02`, juga 500). Kosong DILEWATKAN: wajib/tidaknya field
+ * diputuskan `qualifiedFormValid`, bukan di sini.
+ */
+function validasiUangDiketik(label: string, raw: string | null | undefined): void {
+  const teks = (raw ?? '').trim();
+  if (teks === '') {
+    return;
+  }
+  let m: money.Money;
+  try {
+    m = money.parse(teks);
+  } catch {
+    throw new ValidationError(MSG_UANG_TIDAK_SAH(label));
+  }
+  pastikanMuatKolomUang(label, m);
+}
+
+/**
  * lineFromView resolves an MSL version + the sales-entered quantity / passthrough
  * amount into a ServiceLine (name, unit price, commission rule and calculator
  * params pinned from the version). Passthrough requires a parseable amount > 0;
@@ -577,6 +648,12 @@ export function lineFromView(
     unit: v.unit, mode, quantity, minQty: 0n, inputAmount: 0n, rule,
     durasiBulan: tenor === null ? null : tenor.durasiBulan,
   };
+  // `quantity` mendarat di `qualified_form_services.quantity numeric(15,2)` —
+  // dibatasi di sini, bukan dibiarkan tumpah di dalam transaksi (lihat
+  // `pastikanMuatKolomUang`).
+  if (quantity > MAX_ANGKA_KOLOM || quantity < -MAX_ANGKA_KOLOM) {
+    throw new ValidationError(MSG_UANG_TERLALU_BESAR(`jumlah jasa '${v.name}'`));
+  }
   if (mode === PRICING_MIN_FLOOR || mode === PRICING_BATCH_CEILING) {
     const mq = parseWholeQty(v.minQty);
     if (mq === null) {
@@ -593,6 +670,7 @@ export function lineFromView(
     if (amt <= 0n) {
       throw new IncompleteError();
     }
+    pastikanMuatKolomUang(`nominal jasa '${v.name}'`, amt);
     line.inputAmount = amt;
   }
   return line;
@@ -817,6 +895,12 @@ export async function submitQualifiedForm(
   if (!qualifiedFormValid(form)) {
     throw new IncompleteError();
   }
+  // Ketiganya disimpan APA ADANYA sebagai string DECIMAL di bawah — tanpa
+  // gerbang ini mereka satu-satunya jalur di endpoint ini yang bisa menjatuhkan
+  // seluruh submit jadi 500 (insiden `PRSP-202609-0431`, 2026-09-21).
+  validasiUangDiketik('GMV baseline', form.gmvBaseline);
+  validasiUangDiketik('target GMV', form.targetGmv);
+  validasiUangDiketik('marketing budget', form.marketingBudget);
   if (form.services.length === 0) {
     throw new IncompleteError();
   }
@@ -861,6 +945,11 @@ export async function submitQualifiedForm(
     line: l, subtotal: lineSubtotal(l), platform: platforms[i],
     storeLink: nullString(form.services[i].storeLink),
   }));
+  // `subtotal` DIHITUNG (quantity × harga), jadi ia bisa melampaui kolomnya
+  // walau kedua masukannya sendiri masuk akal — dijaga terpisah dari keduanya.
+  for (const { line: l, subtotal } of pins) {
+    pastikanMuatKolomUang(`total jasa '${l.name}'`, subtotal);
+  }
 
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
@@ -903,7 +992,21 @@ export async function submitQualifiedForm(
     });
 
     return attemptTransition(ex.sm, attemptId, STATUS_QUALIFIED, actor);
+  }).catch((e: unknown) => {
+    // Backstop. Setiap angka yang DIKETIK di endpoint ini sudah dijaga di atas,
+    // jadi jalur ini seharusnya tidak tersentuh — ia ada supaya kolom lain yang
+    // kelak tumpah tetap jadi pesan BI yang bisa dilaporkan, bukan 500 buta
+    // seperti sebelum 2026-09-21. Pola sama `isNumericOutOfRange` di `pdt.ts`.
+    if (isAngkaKolomTumpah(e)) {
+      throw new ValidationError(MSG_ANGKA_KOLOM_TUMPAH);
+    }
+    throw e;
   });
+}
+
+/** True untuk Postgres numeric-value-out-of-range (SQLSTATE 22003) — kembaran `isNumericOutOfRange` di `pdt.ts`. */
+function isAngkaKolomTumpah(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: string }).code === '22003';
 }
 
 // NQ taxonomy (M1-OA-8): seven closed reasons; "[Lainnya ...]" requires free

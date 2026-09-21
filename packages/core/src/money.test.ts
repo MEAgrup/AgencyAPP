@@ -1,6 +1,6 @@
 // Ported 1:1 from archive/backend-go/internal/core/money/money_test.go.
 import { describe, expect, it } from 'vitest';
-import { BadAmountError, decimal, format, mul, parse, percentOf, proRata, type Money } from './money';
+import { BadAmountError, MAX_UANG_KOLOM, decimal, format, mul, muatKolomUang, parse, percentOf, proRata, type Money } from './money';
 
 const rp = (s: string): Money => parse(s);
 
@@ -107,5 +107,31 @@ describe('overflow guards', () => {
     // throw, not silently wrap to a negative amount.
     const base = parse('9999999999999.99');
     expect(() => percentOf(base, 9000000000000000000n, 0)).toThrow(BadAmountError);
+  });
+});
+
+// Insiden 2026-09-21 (docs/DECISIONS.md): `parse` membatasi ke int64 (≈ Rp 92
+// kuadriliun), kolomnya numeric(15,2) (< Rp 10 triliun). Celah di antara
+// keduanya naik sebagai 500 `internal server error` dari dalam transaksi.
+describe('muatKolomUang — batas kolom numeric(15,2)', () => {
+  it('nilai terbesar yang muat DITERIMA', () => {
+    expect(muatKolomUang(parse('9999999999999.99'))).toBe(true);
+    expect(MAX_UANG_KOLOM).toBe(999999999999999n);
+  });
+
+  it('satu sen di atas batas DITOLAK, positif maupun negatif', () => {
+    expect(muatKolomUang(parse('10000000000000.00'))).toBe(false);
+    expect(muatKolomUang(parse('-10000000000000.00'))).toBe(false);
+  });
+
+  it('nilai yang LOLOS parse tapi tidak muat kolom — celah yang menyebabkan 500', () => {
+    const terlaluBesar = parse('100000000000000'); // Rp 100 triliun, kelebihan satu nol
+    expect(() => decimal(terlaluBesar)).not.toThrow(); // parse+decimal diam saja...
+    expect(muatKolomUang(terlaluBesar)).toBe(false); // ...gerbang inilah yang menangkapnya
+  });
+
+  it('nilai wajar tetap lolos', () => {
+    expect(muatKolomUang(parse('10000000.00'))).toBe(true);
+    expect(muatKolomUang(parse('0'))).toBe(true);
   });
 });
