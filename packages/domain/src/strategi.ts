@@ -715,19 +715,35 @@ export const MSG_PRIORITAS_CHANNEL_REQUIRED =
 export const MSG_PRIORITAS_INVALID = '[prioritas channel tidak dikenal]';
 
 /**
- * E-3..E-10: at least one Section E pillar row overall. Without this, PC-3 in
- * Plan (`strategi_pillar_id`) has nothing to reference and every Plan row
- * silently degrades to `Di Luar Strategi` — exactly the symptom reported
- * against STRG-202608-0001 (docs/DECISIONS.md 2026-08-27): a Strategi
- * reached `Disetujui` with zero `strategi_pillar` rows because no minimum
- * was ever gated here, unlike C-5/C-6/C-7/H-1. Checked overall, not per
- * channel — `PillarInput.channel` is optional (a pillar such as `harga` or
- * `tidak_dikerjakan` may span the whole Strategi rather than one channel),
- * so a per-channel floor would misfire against rows that are legitimately
- * channel-agnostic.
+ * Pilar Section E (E-3…E-10) — OPSIONAL sejak 2026-09-21, tidak lagi menggerbang
+ * pengajuan. Keputusan pemilik `E-PILAR-OPSIONAL` (docs/DECISIONS.md).
+ *
+ * Dulu di sini ada `PILLAR_MIN = 1` + `MSG_PILLAR_MIN`, ditambahkan 2026-08-27
+ * setelah `STRG-202608-0001` lolos ke `Disetujui` dengan nol pilar dan dropdown
+ * PC-3 di Plan menyisakan satu opsi "Di Luar Strategi". Dua hal membuat alasan
+ * itu tidak berlaku lagi:
+ *   1. Dropdown PC-3 itu sendiri SUDAH dicabut dari Plan kontrak (2026-09-02),
+ *      berikut trade-off tertulisnya: PG-1 memang kehilangan daya beda di Plan
+ *      kontrak. Gejala yang dulu digerbang di sini sudah tidak punya layar.
+ *   2. Brief tidak pernah bergantung padanya — `brief-inherit.ts` (2026-09-02)
+ *      mewariskan baris `di_luar_strategi` Plan kontrak ke Service kontrak.
+ *      Delivery jalan tanpa satu pun pilar.
+ * Yang tersisa hanyalah gerbang yang menuntut baris yang halaman Strategi tidak
+ * punya kolom ketiknya: satu-satunya jalur pengisi adalah AM Co-Pilot / impor AM
+ * Cockpit, dan keduanya butuh Riset Awal. Klien tanpa itu terkunci permanen.
+ *
+ * TABEL `strategi_pillar` TETAP ADA DAN TETAP DIBACA — ini pencabutan gerbang,
+ * bukan penghapusan fitur. Saat pilar memang diisi, yang memakainya:
+ *   - `plan.ts` `seedRowsFromPillars` — semai baris kerja Plan periode 1 (B5,
+ *     2026-09-06). Sudah `return` saat nol pilar, jadi Plan lahir kosong dan AM
+ *     mengetik barisnya sendiri; tidak ada yang rusak.
+ *   - `brief-inherit.ts` — `strategi_pillar_id` sebagai asal baris (PC-3).
+ *   - `copilot.ts` / `planpillar.ts` / `livestream.ts` — usulan & pemetaan.
+ *
+ * CATATAN untuk siapa pun yang menghidupkan gerbang ini lagi: hitungannya dulu
+ * `count(*)` TANPA filter jenis, jadi satu baris `tidak_dikerjakan` (E-11) pun
+ * meloloskannya — perilaku yang dikunci tes dan mudah disalahbaca.
  */
-export const PILLAR_MIN = 1;
-export const MSG_PILLAR_MIN = `[minimal ${PILLAR_MIN} pilar Strategi Section E wajib diisi]`;
 
 /** E-12. */
 export const MSG_KETERGANTUNGAN_REQUIRED =
@@ -7070,7 +7086,6 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     qwCount,
     riskStrCount,
     preqCount,
-    pillarCount,
     faseCount,
     tanggalBesarCount,
     triggerCount,
@@ -7174,9 +7189,6 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
 
     sql<{ n: number }[]>`
       select count(*)::int as n from strategi_prasyarat_klien where strategi_id = ${id}`,
-
-    sql<{ n: number }[]>`
-      select count(*)::int as n from strategi_pillar where strategi_id = ${id}`,
 
     sql<{ n: number }[]>`
       select count(*)::int as n from strategi_fase where strategi_id = ${id}`,
@@ -7403,10 +7415,11 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     }
   }
 
-  // E-3..E-10: at least PILLAR_MIN pillar rows overall (see MSG_PILLAR_MIN doc comment).
-  if (pillarCount[0].n < PILLAR_MIN) {
-    out.push({ kode: 'E-3..E-10', pesan: MSG_PILLAR_MIN });
-  }
+  // E-3..E-10 (pilar Section E) is NO LONGER a submit requirement — owner
+  // decision 2026-09-21 `E-PILAR-OPSIONAL`, DECISIONS.md. Same shape as the
+  // E-11/E-12 removals above and below: the gate demanded a row the page had no
+  // way to type. See the `Pilar Section E` block near PILLAR_KINDS for the full
+  // reasoning and for what still reads these rows when they DO exist.
 
   // E-12 (ketergantungan klien) is NO LONGER a submit requirement — owner QA
   // decision 2026-08-20 (Fase 2), DECISIONS.md. Same reasoning as E-11: the
