@@ -665,6 +665,12 @@ describeDb('hari libur (integration)', () => {
   });
 
   it('adds, lists, and removes — each write audited', async () => {
+    // Watermarked for the reason `auditWatermark` documents: TANGGAL is a FIXED
+    // date (the working-day test below depends on 2099-12-24 being a Thursday,
+    // so it cannot be randomised per run), `afterEach` drops the hari_libur row
+    // but cannot touch the append-only audit rows, and an unscoped count by
+    // entity_id therefore grows by one every run.
+    const wmAdd = await auditWatermark();
     const added = await addHariLibur(sql, director(), { tanggal: TANGGAL, keterangan: 'Natal (uji)' });
     expect(added.tanggal).toBe(TANGGAL); // civil date, not shifted by timezone
     expect(added.keterangan).toBe('Natal (uji)');
@@ -675,14 +681,17 @@ describeDb('hari libur (integration)', () => {
     // The calendar drives who counts as late, so both directions are logged.
     const auditAdd = await sql<{ n: number }[]>`
       select count(*)::int as n from audit_log
-       where entity_type = 'hari_libur' and entity_id = ${TANGGAL} and action = 'create'`;
+       where id > ${wmAdd} and entity_type = 'hari_libur'
+         and entity_id = ${TANGGAL} and action = 'create'`;
     expect(auditAdd[0].n).toBe(1);
 
+    const wmDel = await auditWatermark();
     await removeHariLibur(sql, director(), TANGGAL);
     expect((await listHariLibur(sql, director())).some((r) => r.tanggal === TANGGAL)).toBe(false);
     const auditDel = await sql<{ n: number }[]>`
       select count(*)::int as n from audit_log
-       where entity_type = 'hari_libur' and entity_id = ${TANGGAL} and action = 'delete'`;
+       where id > ${wmDel} and entity_type = 'hari_libur'
+         and entity_id = ${TANGGAL} and action = 'delete'`;
     expect(auditDel[0].n).toBe(1);
   });
 

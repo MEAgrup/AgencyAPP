@@ -254,6 +254,26 @@ let seq = 0;
 const uniquePhone = (): string => `0815${String(Date.now()).slice(-6)}${String(seq++).padStart(3, '0')}`;
 const uniqueSvc = (): string => `SVC-ZZ-M4-${seq++}`;
 
+/**
+ * Highest `audit_log` / `notifications` id BEFORE the action under test, so a
+ * count can be scoped to "rows this test just wrote".
+ *
+ * WHY THIS IS NEEDED (same reasoning as `auditWatermark` in admin.test.ts).
+ * `audit_log` is append-only by design — house rule #3, enforced by a
+ * `forbid_mutation` trigger that blocks DELETE — so `afterEach` cannot clean
+ * it. The synthetic ids here (`SVC-HOLD-n`, `SVC-CLOSE-n`) come from a
+ * module-level `seq` that RESTARTS at 0 every process, while `afterEach` drops
+ * the `services` rows that used them. The id is therefore reused by the next
+ * run, its service row is gone, but its audit and notification rows are not.
+ * Counting by `entity_id` alone then passes on a freshly rebuilt database and
+ * fails on every run after it (`expected 5 to be 1`) — a phantom failure that
+ * says nothing about the code under test. Scope the count instead.
+ */
+const auditWatermark = async (): Promise<string> =>
+  (await sql<{ max: string }[]>`select coalesce(max(id), 0)::text as max from audit_log`)[0].max;
+const notifWatermark = async (): Promise<string> =>
+  (await sql<{ max: string }[]>`select coalesce(max(id), 0)::text as max from notifications`)[0].max;
+
 /** Close a deal (Budi solo, Lunas) and return the born client id. */
 async function closedClient(): Promise<string> {
   const svc = uniqueSvc();
@@ -544,15 +564,19 @@ describeDb('Hold Service two-step (T-2b / RM-2)', () => {
     const svc = await inExecService(clientId);
     await requestHold(sql, accountStaff(), svc, 'jeda');
     await expect(approveHold(sql, accountStaff(), svc)).rejects.toBeInstanceOf(ForbiddenError);
+    const awm = await auditWatermark();
+    const nwm = await notifWatermark();
     await approveHold(sql, accountLead(), svc);
     expect(await statusOf(svc)).toBe('[On Hold]');
     const audit = await sql<{ n: string }[]>`
-      select count(*) as n from audit_log where entity_id = ${svc} and action = 'service_held'`;
+      select count(*) as n from audit_log
+       where id > ${awm} and entity_id = ${svc} and action = 'service_held'`;
     expect(Number(audit[0].n)).toBe(1);
     // Notif to the owning AM (explicit recipient ZZ-AM) — deterministic.
     const notif = await sql<{ n: string }[]>`
       select count(*) as n from notifications
-       where entity_id = ${svc} and event_type = 'service_held' and recipient_employee_id = 'ZZ-AM'`;
+       where id > ${nwm} and entity_id = ${svc}
+         and event_type = 'service_held' and recipient_employee_id = 'ZZ-AM'`;
     expect(Number(notif[0].n)).toBe(1);
   });
 
@@ -645,6 +669,7 @@ describeDb('Close Service two-step (O75)', () => {
     await expect(requestClosure(sql, budi(), svc, 'tuntas')).rejects.toBeInstanceOf(ForbiddenError);
     await expect(requestClosure(sql, accountStaff(), svc, '   ')).rejects.toBeInstanceOf(IncompleteError);
     // Owning AM (ZZ-AM) requests — zero Briefs is vacuously closeable.
+    const nwm = await notifWatermark();
     await requestClosure(sql, accountStaff(), svc, 'seluruh deliverable selesai');
     expect(await statusOf(svc)).toBe('[Closure Requested]');
     const audit = await sql<{ after_json: { reason: string; status: string } }[]>`
@@ -653,7 +678,8 @@ describeDb('Close Service two-step (O75)', () => {
     expect(audit[0].after_json.reason).toBe('seluruh deliverable selesai');
     const notif = await sql<{ n: string }[]>`
       select count(*) as n from notifications
-       where entity_id = ${svc} and event_type = 'service_closure_requested' and recipient_employee_id = ${CLOSE_DIRECTOR}`;
+       where id > ${nwm} and entity_id = ${svc}
+         and event_type = 'service_closure_requested' and recipient_employee_id = ${CLOSE_DIRECTOR}`;
     expect(Number(notif[0].n)).toBe(1);
   });
 
@@ -676,14 +702,18 @@ describeDb('Close Service two-step (O75)', () => {
     await requestClosure(sql, accountStaff(), svc, 'tuntas');
     // Narrower than Hold: Account Lead is NOT enough here, only Director.
     await expect(approveClosure(sql, accountLead(), svc)).rejects.toBeInstanceOf(ForbiddenError);
+    const awm = await auditWatermark();
+    const nwm = await notifWatermark();
     await approveClosure(sql, director(), svc);
     expect(await statusOf(svc)).toBe('Done');
     const audit = await sql<{ n: string }[]>`
-      select count(*) as n from audit_log where entity_id = ${svc} and action = 'service_closed'`;
+      select count(*) as n from audit_log
+       where id > ${awm} and entity_id = ${svc} and action = 'service_closed'`;
     expect(Number(audit[0].n)).toBe(1);
     const notif = await sql<{ n: string }[]>`
       select count(*) as n from notifications
-       where entity_id = ${svc} and event_type = 'service_closed' and recipient_employee_id = 'ZZ-AM'`;
+       where id > ${nwm} and entity_id = ${svc}
+         and event_type = 'service_closed' and recipient_employee_id = 'ZZ-AM'`;
     expect(Number(notif[0].n)).toBe(1);
   });
 
