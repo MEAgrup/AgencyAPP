@@ -968,6 +968,16 @@ export interface PdtBarisSkuPeriodShopeeParentSku {
   pesananSiapDikirim: number | null;
   dilihat: number | null;
   klik: number | null;
+  /**
+   * `Pengunjung Produk (Kunjungan)` — KUNJUNGAN unik, BUKAN `dilihat`
+   * (`Jumlah Produk Dilihat`, tayangan halaman). Dua kolom berbeda di berkas
+   * yang sama dan jaraknya besar: pada Fim Motor Juli 2026 satu produk yang
+   * sama mencatat 32.949 pengunjung vs 1.383.429 dilihat — 42×. Inilah
+   * sumbu-X kuadran Shopee (`crKuadranShopee`, `kuadran.ts`): memakai
+   * `dilihat` akan meruntuhkan SETIAP CR jauh di bawah ambang 2%/4% dan
+   * melempar seluruh katalog ke `evaluasi`.
+   */
+  pengunjung: number | null;
 }
 
 /**
@@ -1024,6 +1034,7 @@ export function ekstrakBarisFaktaSkuShopeeParentSku(
   const iPesananSiap = idx('Pesanan Siap Dikirim');
   const iDilihat = idx('Jumlah Produk Dilihat');
   const iKlik = idx('Produk Diklik');
+  const iPengunjung = idx('Pengunjung Produk (Kunjungan)');
 
   const angka = (row: readonly unknown[] | undefined, i: number): number | null =>
     i === -1 ? null : parsePdtAngka(row?.[i]);
@@ -1047,6 +1058,7 @@ export function ekstrakBarisFaktaSkuShopeeParentSku(
       pesananSiapDikirim: angka(row, iPesananSiap),
       dilihat: angka(row, iDilihat),
       klik: angka(row, iKlik),
+      pengunjung: angka(row, iPengunjung),
     });
   }
   return [...byProduk.values()];

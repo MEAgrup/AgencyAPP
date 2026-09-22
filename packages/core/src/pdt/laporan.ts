@@ -66,7 +66,15 @@
  */
 
 import { dec, num, pct, rp } from '../baseline/angka';
-import type { PdtKuadranSku } from './kuadran';
+import {
+  ambangRelatifKuadran,
+  klasifikasikanKuadranRelatifTiktok,
+  klasifikasikanKuadranSkuShopee,
+  KLIK_MIN_UJI,
+  PDT_KUADRAN_SHOPEE,
+  type PdtAmbangKuadran,
+  type PdtKuadranSku,
+} from './kuadran';
 import type { PdtDimensiSkorHasil } from './parsestatus';
 import { SKOR_PERHATIAN_MIN, SKOR_SEHAT_MIN, type PdtBenchmarkTiktok, type PdtSkorHasilShopee, type PdtSkorHasilTiktok } from './skor';
 
@@ -556,7 +564,7 @@ export function bangunLaporanVideo(input: PdtLaporanVideoInput | null): PdtLapor
  */
 const TOP_PRODUK_N = 12;
 const KUADRAN_AKSI: readonly PdtKuadranSku[] = ['bintang', 'bocor_traffic', 'hidden_gem'];
-const SEMUA_KUADRAN: readonly PdtKuadranSku[] = ['bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi', 'tidur', 'tidak_tayang'];
+const SEMUA_KUADRAN: readonly PdtKuadranSku[] = ['bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi', 'tidur', 'tidak_tayang', 'no_data'];
 
 export interface PdtLaporanProdukItem {
   namaProduk: string | null;
@@ -582,13 +590,21 @@ export interface PdtLaporanProdukTopItem {
   kuadran: PdtKuadranSku | null;
 }
 
+/** Panel "Mode Relatif" mesin lama — distribusi kedua atas baris yang SAMA, ambangnya percentile katalog periode ini alih-alih benchmark/absolut. */
+export interface PdtLaporanProdukRelatif {
+  distribusi: Record<PdtKuadranSku, PdtLaporanProdukDistribusi>;
+  ambang: PdtAmbangKuadran;
+}
+
 export interface PdtLaporanProduk {
-  /** `null` bila NOL baris periode ini punya kuadran — kasus Shopee, yang tidak punya klasifikator kuadran sama sekali. Distribusi enam-bucket yang seluruhnya nol akan terbaca sebagai "semua produk tidak tayang", padahal artinya "belum pernah diklasifikasi". */
+  /** `null` bila NOL baris periode ini punya kuadran (belum pernah diklasifikasi). Distribusi tujuh-bucket yang seluruhnya nol akan terbaca sebagai "semua produk tidak tayang", padahal artinya lain. */
   distribusi: Record<PdtKuadranSku, PdtLaporanProdukDistribusi> | null;
   /** HANYA tiga kuadran actionable — kosong bila `distribusi` `null`. */
   topAksi: PdtLaporanProdukItem[];
-  /** "Top Produk by GMV" mesin lama — SELURUH produk diurut GMV desc, tidak disaring kuadran. Inilah satu-satunya isi bagian "produk" sisi Shopee. */
+  /** "Top Produk by GMV" mesin lama — SELURUH produk diurut GMV desc, tidak disaring kuadran. */
   top: PdtLaporanProdukTopItem[];
+  /** Panel kedua mesin lama. `null` bila nol baris AKTIF periode ini (`ambang.n === 0`) — percentile atas himpunan kosong tidak berarti apa-apa, dan enam ember nol akan berbohong. */
+  relatif: PdtLaporanProdukRelatif | null;
 }
 
 /** Satu baris `pdt_fact_sku_period` (TikTok, `sku_id is null`, `basis='net'`) mentah untuk bagian laporan "produk". `kuadran` `null` = belum sempat diklasifikasi (struktural tidak seharusnya terjadi bila dipanggil SETELAH `klasifikasiUlangKuadranSkuTiktok` — dikeluarkan dari `distribusi`/`topAksi` bila terjadi, bukan dipaksa masuk salah satu bucket). */
@@ -598,23 +614,77 @@ export interface PdtLaporanProdukInputBaris {
   platformProductId: string | null;
   gmv: number | null;
   klik: number | null;
+  /**
+   * Sumbu-X kuadran platform ini: `klik` untuk TikTok, `pengunjung` untuk
+   * Shopee. Dipisah dari `klik` dengan sengaja — pada Shopee keduanya kolom
+   * berbeda (`Produk Diklik` vs `Pengunjung Produk (Kunjungan)`) dan hanya
+   * yang kedua yang boleh masuk kuadran.
+   */
+  traffic: number | null;
   cvr: number | null;
 }
 
 export type PdtLaporanProdukInput = readonly PdtLaporanProdukInputBaris[] | null;
 
-/** Rakit "produk". `null` (whole object) bila `input` `null` ATAU nol baris — lihat docblock tipe di atas. */
-export function bangunLaporanProduk(input: PdtLaporanProdukInput): PdtLaporanProduk | null {
-  if (input == null || input.length === 0) return null;
-  const berkuadran = input.filter((b): b is PdtLaporanProdukInputBaris & { kuadran: PdtKuadranSku } => b.kuadran != null);
-
-  const distribusi = berkuadran.length === 0 ? null : Object.fromEntries(
+/** Distribusi tujuh-ember dari daftar baris yang SUDAH ber-kuadran. */
+function distribusiKuadran(
+  berkuadran: readonly (PdtLaporanProdukInputBaris & { kuadran: PdtKuadranSku })[],
+): Record<PdtKuadranSku, PdtLaporanProdukDistribusi> {
+  return Object.fromEntries(
     SEMUA_KUADRAN.map((k) => {
       const baris = berkuadran.filter((b) => b.kuadran === k);
       const gmvDiketahui = baris.some((b) => b.gmv != null);
       return [k, { jumlah: baris.length, gmv: gmvDiketahui ? bulat(baris.reduce((a, b) => a + (b.gmv ?? 0), 0)) : null }];
     }),
   ) as Record<PdtKuadranSku, PdtLaporanProdukDistribusi>;
+}
+
+/**
+ * Panel "Mode Relatif" — dihitung di sini, TIDAK disimpan (lihat komentar blok
+ * mode relatif di `kuadran.ts`). Kedua platform memakai percentile p25/p75,
+ * tapi TIGA parameternya berbeda dan perbedaannya diwarisi dari mesin lama,
+ * bukan diseragamkan di sini:
+ *
+ *              ambang uji   percentile CVR        klasifikasi
+ *   TikTok     klik ≥ 10    CVR POSITIF saja      dua band
+ *   Shopee     peng. ≥ 50   SELURUH CR aktif      tiga band + promosi medium
+ *
+ * `null` saat nol baris aktif: percentile atas himpunan kosong bukan angka,
+ * dan mengembalikan tujuh ember nol akan terbaca sebagai "semua produk tidak
+ * tayang" — kekeliruan yang sama yang `distribusi: null` sudah cegah.
+ */
+function bangunLaporanProdukRelatif(
+  input: readonly PdtLaporanProdukInputBaris[],
+  platform: 'tiktok' | 'shopee',
+): PdtLaporanProdukRelatif | null {
+  const minUji = platform === 'tiktok' ? KLIK_MIN_UJI : PDT_KUADRAN_SHOPEE.pengunjungMinUji;
+  const untukAmbang = input.map((b, i) => ({ id: i, traffic: b.traffic, cr: b.cvr }));
+  const ambang = ambangRelatifKuadran(untukAmbang, minUji, platform === 'tiktok');
+  if (ambang.n === 0) return null;
+
+  const hasil = platform === 'tiktok'
+    ? klasifikasikanKuadranRelatifTiktok(untukAmbang, minUji, ambang)
+    // Shopee: fungsi yang SAMA dengan mode absolut, hanya ambangnya ditukar —
+    // `cr` di-rekonstruksi jadi `pesananDibuat` sintetis atas `pengunjung` yang
+    // sama, karena `crKuadranShopee` membaginya kembali persis dengan angka itu.
+    : klasifikasikanKuadranSkuShopee(
+        input.map((b, i) => ({ id: i, pengunjung: b.traffic, pesananDibuat: b.cvr == null || b.traffic == null ? null : b.cvr * b.traffic })),
+        ambang,
+      );
+
+  const berkuadran = hasil.map((h) => ({ ...input[h.id], kuadran: h.kuadran }));
+  return { distribusi: distribusiKuadran(berkuadran), ambang };
+}
+
+/** Rakit "produk". `null` (whole object) bila `input` `null` ATAU nol baris — lihat docblock tipe di atas. */
+export function bangunLaporanProduk(
+  input: PdtLaporanProdukInput,
+  platform: 'tiktok' | 'shopee',
+): PdtLaporanProduk | null {
+  if (input == null || input.length === 0) return null;
+  const berkuadran = input.filter((b): b is PdtLaporanProdukInputBaris & { kuadran: PdtKuadranSku } => b.kuadran != null);
+
+  const distribusi = berkuadran.length === 0 ? null : distribusiKuadran(berkuadran);
 
   const topAksi: PdtLaporanProdukItem[] = berkuadran
     .filter((b) => KUADRAN_AKSI.includes(b.kuadran))
@@ -641,7 +711,7 @@ export function bangunLaporanProduk(input: PdtLaporanProdukInput): PdtLaporanPro
       kuadran: b.kuadran,
     }));
 
-  return { distribusi, topAksi, top };
+  return { distribusi, topAksi, top, relatif: bangunLaporanProdukRelatif(input, platform) };
 }
 
 /**
@@ -873,6 +943,13 @@ export interface PdtLaporanTahapInput {
   klik: number | null;
   cpaInput: { biaya: number; pesanan: number | null } | null;
   affPosting: number | null;
+  /**
+   * Σ `tayangan`/`klik` `pdt_fact_ads` sumber TikTok Ads Manager
+   * (`tt_ads_product` `'Impresi iklan produk'`/`'Jumlah klik iklan produk'`,
+   * `tt_ads_live` `'Tayangan LIVE'`). `null` = nol baris iklan Ads Manager
+   * periode ini, BUKAN nol tayangan.
+   */
+  ttamFunnel: { tayangan: number | null; klik: number | null } | null;
 }
 
 /**
@@ -894,6 +971,9 @@ export function bangunLaporanTahap(
   const aov = kpi.gmv == null || kpi.pesanan == null || kpi.pesanan === 0 ? null : bulat(kpi.gmv / kpi.pesanan);
   const cpa = input.cpaInput == null || input.cpaInput.pesanan == null || input.cpaInput.pesanan === 0
     ? null : bulat(input.cpaInput.biaya / input.cpaInput.pesanan);
+  const tf = input.ttamFunnel;
+  const ttamCtr = tf == null || tf.klik == null || tf.tayangan == null || tf.tayangan === 0
+    ? null : persen5(tf.klik / tf.tayangan);
 
   const belanja: Record<PdtTahapKey, number | null> = {
     awareness: null,
@@ -917,9 +997,13 @@ export function bangunLaporanTahap(
       tm('konten_follower', 'Follower baru dari konten', null, 'angka'),
     ],
     consideration: [
-      tm('sc_impresi', 'Impresi iklan showcase', null, 'angka'),
-      tm('sc_klik', 'Klik ke halaman produk (iklan)', null, 'angka'),
-      tm('sc_ctr', 'CTR showcase', null, 'persen'),
+      // Ketiganya DULU hardcode `null` dengan catatan "modul TikTok Ads Manager
+      // belum dibangun" — keliru: `tt_ads_product`/`tt_ads_live` sudah punya
+      // modul, ekstraktor, dan penulis `pdt_fact_ads` sejak 2026-09-16
+      // (`G1-09-2BII-TTADS-SAMPLE`), dan angkanya memang ada di berkas unggahan.
+      tm('sc_impresi', 'Impresi iklan showcase', input.ttamFunnel?.tayangan ?? null, 'angka'),
+      tm('sc_klik', 'Klik ke halaman produk (iklan)', input.ttamFunnel?.klik ?? null, 'angka'),
+      tm('sc_ctr', 'CTR showcase', ttamCtr, 'persen'),
       tm('sc_atc', 'Add to cart (iklan showcase)', null, 'angka'),
       tm('sc_cost_atc', 'Biaya per add to cart', null, 'rupiah'),
       tm('toko_impresi', 'Impresi produk (toko)', null, 'angka'),
@@ -1799,7 +1883,7 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
   const iklan = bangunIklanTiktok(opts.iklan);
   const afiliasi = bangunLaporanAfiliasi(opts.afiliasi);
   const video = bangunLaporanVideo(opts.video);
-  const produk = bangunLaporanProduk(opts.produk);
+  const produk = bangunLaporanProduk(opts.produk, 'tiktok');
   const kanal = bangunKanalTiktok(opts.kanal);
   const live = bangunLaporanLive(opts.live);
   const tahap = bangunLaporanTahap(opts.tahap, kpi, iklan, afiliasi, video);
@@ -1839,7 +1923,7 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
   const live = bangunLaporanLive(opts.live);
   const video = bangunLaporanVideo(opts.video);
   const afiliasi = bangunLaporanAfiliasi(opts.afiliasi);
-  const produk = bangunLaporanProduk(opts.produk);
+  const produk = bangunLaporanProduk(opts.produk, 'shopee');
   return {
     schema: 'cdps.pdt.laporan.shopee.v1',
     platform: 'shopee',

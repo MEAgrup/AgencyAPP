@@ -322,11 +322,27 @@ export interface PdtLaporanProdukTopItem {
   kuadran: string | null;
 }
 
+/** Ambang kuadran mode relatif — percentile p25/p75 katalog periode ini. */
+export interface PdtLaporanProdukAmbang {
+  traffic_rendah: number | null;
+  traffic_tinggi: number | null;
+  cr_rendah: number | null;
+  cr_tinggi: number | null;
+  n: number;
+}
+
+/** Panel kedua — kuadran yang sama dihitung ulang dengan ambang percentile katalog, bukan benchmark/absolut. `null` bila nol produk aktif periode ini. */
+export interface PdtLaporanProdukRelatif {
+  distribusi: Record<string, PdtLaporanProdukDistribusi>;
+  ambang: PdtLaporanProdukAmbang;
+}
+
 export interface PdtLaporanProduk {
-  /** `null` sisi Shopee — nol klasifikator kuadran, BUKAN "semua produk tidak tayang". */
+  /** Mode TERSIMPAN: benchmark (TikTok) / absolut (Shopee). `null` = nol produk periode ini pernah diklasifikasi, BUKAN "semua produk tidak tayang". */
   distribusi: Record<string, PdtLaporanProdukDistribusi> | null;
   top_aksi: PdtLaporanProdukItem[];
   top: PdtLaporanProdukTopItem[];
+  relatif: PdtLaporanProdukRelatif | null;
 }
 
 // G2-01 lanjutan — bagian "afiliasi" ringkasan, 2026-09-16. KEDUA platform,

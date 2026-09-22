@@ -28,11 +28,20 @@
  *   jadi klaim/biaya/usage-rate-nya tidak ada di fakta manapun.
  * - **Cancel rate & retur** (§9 mesin lama) — `pdt_fact_shop_daily` tidak
  *   punya kolom pembatalan maupun retur.
- * - **Kuadran produk Shopee** — methodology-nya beda total dari TikTok dan
- *   membuat klasifikatornya adalah keputusan mesin SKOR, bukan laporan.
- * - **Tokopedia & TikTok Ads Manager** — nol sumber data sama sekali.
+ * - **Tokopedia** — nol modul parser, nol baris fakta.
  * Ketiganya ditampilkan sebagai catatan eksplisit di halaman, bukan
  * dihilangkan diam-diam atau diisi 0.
+ *
+ * **DIKOREKSI (KUADRAN-SHOPEE):** dua baris yang dulu ada di daftar ini sudah
+ * tidak benar. **Kuadran produk Shopee** kini ADA (algoritma tiga-band mesin
+ * lama, diverifikasi identik ke ekspor asli). **TikTok Ads Manager** TIDAK
+ * pernah "nol sumber data": modul `tt_ads_product`/`tt_ads_live`, ekstraktor,
+ * dan penulis `pdt_fact_ads`-nya sudah ada sejak `G1-09-2BII-TTADS-SAMPLE`
+ * (2026-09-16) dan berkasnya memang ikut di paket unggahan
+ * ("creative data for product campaigns", "livestream data for live
+ * campaigns"). Angkanya sudah lama memberi makan bagian "iklan", "kampanye"
+ * dan CPA "tahap"; yang keliru cuma tiga metrik funnel Consideration yang
+ * di-hardcode `null` — kini terisi dari `tayangan`/`klik` Ads Manager.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
  * via `AskUserQuestion`, 2026-09-16): TikTok lengkap (Live/Video/Kartu
@@ -67,15 +76,22 @@
  * `Σgmv÷Σbiaya`. Seksi disembunyikan seluruhnya saat `iklan` `null` (nol
  * baris iklan seluruh sumber platform ini di periode ini).
  *
- * **Produk** (Portfolio Produk/kuadran, keputusan pemilik via
- * `AskUserQuestion` "G2-01-KUADRAN-SKU (produk)"): TikTok-ONLY — Shopee
- * SELALU `produk: null` (methodology kuadran beda total dari TikTok, belum
- * ada modul PDT sumber data, sama gap "tahap"). Mode BENCHMARK SAJA (bukan
- * "Mode Relatif" mesin lama — ambang tetap lintas bulan, `pdt_benchmark`
- * versi TikTok). `distribusi` — jumlah SKU per kuadran; `top_aksi` — HANYA
- * tiga kuadran actionable (Bintang/Bocor Traffic/Hidden Gem), diurutkan GMV
- * desc, dipotong 12 (angka sama mesin lama). Seksi disembunyikan seluruhnya
- * saat `produk` `null`.
+ * **Produk** (Portfolio Produk/kuadran): KEDUA platform sejak KUADRAN-SHOPEE
+ * (`docs/DECISIONS.md`) — sebelumnya TikTok-only. Dua algoritma yang memang
+ * BERBEDA di mesin lama, bukan satu dengan parameter berbeda: TikTok memakai
+ * klik × CVR dua band versus benchmark `quad_klik`/`quad_cvr`, Shopee memakai
+ * pengunjung produk × CR-pesanan TIGA band (dengan promosi band `medium`)
+ * versus ambang absolut tetap, plus ember ketujuh `no_data` yang TikTok tidak
+ * punya. Keduanya diverifikasi IDENTIK dengan mesin HTML atas ekspor asli
+ * (Fim Motor Shopee, lima klien TikTok).
+ *
+ * `distribusi` — mode TERSIMPAN (benchmark/absolut), ambang tetap lintas bulan
+ * supaya "SKU pindah kuadran" berarti sesuatu (Rule 19). `relatif` — panel
+ * kedua mesin lama, ambang percentile p25/p75 katalog periode ini, dihitung
+ * saat laporan dirakit dan TIDAK PERNAH disimpan. `top_aksi` — HANYA tiga
+ * kuadran actionable (Bintang/Bocor Traffic/Hidden Gem), diurutkan GMV desc,
+ * dipotong 12 (angka sama mesin lama). Seksi disembunyikan seluruhnya saat
+ * `produk` `null`.
  *
  * **Afiliasi** (keputusan pemilik via `AskUserQuestion` KEENAM, 2026-09-16):
  * RINGKASAN saja untuk KEDUA platform, SATU bentuk (nol asimetri platform,
@@ -93,10 +109,11 @@
  * — Shopee SELALU `tahap: null` karena mesin lama Shopee tidak pernah punya
  * konsep buyer-journey sama sekali (bukan gap data seperti "video"), jadi
  * seksi ini disembunyikan TOTAL untuk Shopee, bukan ditampilkan kosong.
- * v1 SENGAJA menerima banyak `null` per metrik (funnel Impresi/ATC, hampir
- * seluruh blok Awareness/Consideration) karena TikTok Ads Manager belum
- * punya modul PDT sama sekali — halaman menampilkan catatan/"—" eksplisit,
- * BUKAN 0 yang mengarang aktivitas. Seksi disembunyikan seluruhnya saat
+ * v1 SENGAJA menerima banyak `null` per metrik (Awareness campaign-level, ATC,
+ * follower berbayar) — bukan karena TikTok Ads Manager tidak punya modul
+ * (ia punya), melainkan karena kolom-kolom ITU tidak ikut dipanen ke
+ * `pdt_fact_ads`. Impresi/klik/CTR showcase SUDAH terisi dari Ads Manager.
+ * Halaman menampilkan catatan/"—" eksplisit, BUKAN 0 yang mengarang aktivitas. Seksi disembunyikan seluruhnya saat
  * `tahap` `null` (nol baris `pdt_fact_shop_daily` basis `net` periode ini).
  *
  * **Insight & Rekomendasi** (keputusan pemilik via `AskUserQuestion` KEDELAPAN
@@ -164,8 +181,11 @@ const KUADRAN_LABEL: Record<string, string> = {
   evaluasi: 'Evaluasi',
   tidur: 'Produk Tidur',
   tidak_tayang: 'Tidak Tayang',
+  // Ember ketujuh, SHOPEE saja — trafik ada tapi CR tak bisa dihitung. TikTok
+  // tidak pernah mengisinya (di sana CVR kosong jatuh ke "Produk Tidur").
+  no_data: 'Data Tak Lengkap',
 };
-const KUADRAN_URUTAN = ['bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi', 'tidur', 'tidak_tayang'];
+const KUADRAN_URUTAN = ['bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi', 'tidur', 'tidak_tayang', 'no_data'];
 
 /**
  * Label sumber iklan untuk bagian "Iklan per Kampanye" — SAMA PERSIS dengan
@@ -988,13 +1008,15 @@ export default function LaporanPdtPage() {
               <h2>Portfolio Produk</h2>
               <p className="muted" style={{ fontSize: 12 }}>
                 {laporan.produk.distribusi
-                  ? 'Mode Benchmark (vs target MEA) — klasifikasi kuadran SKU periode ini'
+                  ? (laporan.platform === 'tiktok'
+                      ? 'Mode Benchmark (vs target MEA) — sumbu klik × CVR'
+                      : 'Mode Absolut (ambang tetap) — sumbu pengunjung produk × CR pesanan')
                   : 'Top produk menurut GMV periode ini'}
               </p>
               {laporan.produk.distribusi && (
                 <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
                   {KUADRAN_URUTAN
-                    .filter((k) => (laporan.produk!.distribusi![k]?.jumlah ?? 0) > 0 || (k !== 'tidur' && k !== 'tidak_tayang'))
+                    .filter((k) => (laporan.produk!.distribusi![k]?.jumlah ?? 0) > 0 || (k !== 'tidur' && k !== 'tidak_tayang' && k !== 'no_data'))
                     .map((k) => (
                       <div key={k}>
                         <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.produk!.distribusi![k]?.jumlah ?? 0)}</div>
@@ -1009,8 +1031,8 @@ export default function LaporanPdtPage() {
                 <div style={{ marginTop: 16 }}>
                   <GrafikGelembung
                     judul="Matriks produk: trafik vs konversi, luas gelembung = GMV"
-                    labelX="Klik"
-                    labelY="CVR"
+                    labelX={laporan.platform === 'tiktok' ? 'Klik' : 'Pengunjung'}
+                    labelY={laporan.platform === 'tiktok' ? 'CVR' : 'CR'}
                     produk={laporan.produk.top_aksi.map((x) => ({
                       label: x.nama_produk ?? x.platform_product_id ?? '—',
                       x: x.klik,
@@ -1086,10 +1108,45 @@ export default function LaporanPdtPage() {
                   </table>
                   {!laporan.produk.distribusi && (
                     <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-                      Kuadran produk belum tersedia untuk Shopee — methodology-nya berbeda dari TikTok (pengunjung/CR, bukan klik/CVR)
-                      dan belum ada klasifikator di sistem. CVR di atas adalah pesanan ÷ pengunjung produk, basis Siap Dikirim.
+                      Kuadran belum terhitung untuk periode ini — biasanya karena paket unggahannya belum di-commit ulang
+                      setelah kolom pengunjung produk mulai dipanen.
                     </p>
                   )}
+                  {laporan.platform !== 'tiktok' && (
+                    <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                      CR di atas adalah pesanan ÷ pengunjung produk (kunjungan), basis Siap Dikirim — penyebut yang sama
+                      yang dipakai kuadran, bukan jumlah produk dilihat.
+                    </p>
+                  )}
+                </>
+              )}
+              {/* Panel kedua mesin lama: "dua sudut pandang — relatif antar produk,
+                  dan versus benchmark ideal". Ambangnya percentile katalog BULAN INI,
+                  jadi ia menjawab "SKU mana yang menonjol di katalog ini" — pertanyaan
+                  yang berbeda dari panel di atas, dan sengaja TIDAK disimpan supaya
+                  perbandingan lintas bulan tetap memakai ambang yang tetap. */}
+              {laporan.produk.relatif && (
+                <>
+                  <h3 style={{ fontSize: 14, marginTop: 20 }}>Mode Relatif (antar produk katalog ini)</h3>
+                  <p className="muted" style={{ fontSize: 12 }}>
+                    Ambang p75 dari {formatCount(laporan.produk.relatif.ambang.n)} produk aktif periode ini ·{' '}
+                    {laporan.platform === 'tiktok' ? 'klik' : 'pengunjung'}{' '}
+                    {formatCount(laporan.produk.relatif.ambang.traffic_tinggi)} ·{' '}
+                    {laporan.platform === 'tiktok' ? 'CVR' : 'CR'}{' '}
+                    {formatPercent(laporan.produk.relatif.ambang.cr_tinggi)}
+                  </p>
+                  <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                    {KUADRAN_URUTAN
+                      .filter((k) => (laporan.produk!.relatif!.distribusi[k]?.jumlah ?? 0) > 0)
+                      .map((k) => (
+                        <div key={`rel-${k}`}>
+                          <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.produk!.relatif!.distribusi[k]?.jumlah ?? 0)}</div>
+                          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                            {KUADRAN_LABEL[k] ?? k} · {formatIDR(laporan.produk!.relatif!.distribusi[k]?.gmv ?? null)}
+                          </p>
+                        </div>
+                      ))}
+                  </div>
                 </>
               )}
             </section>
@@ -1392,8 +1449,9 @@ export default function LaporanPdtPage() {
             <section className="card">
               <h2>Tahap (Buyer Journey)</h2>
               <div className="alert alertWarning" role="status" style={{ marginTop: 8, marginBottom: 8 }}>
-                Belum lengkap — banyak angka Awareness/Consideration bergantung modul TikTok Ads Manager yang
-                belum dibangun (ditandai "—" di bawah, BUKAN nol aktivitas).
+                Belum lengkap — sebagian angka Awareness (impresi/views campaign, follower berbayar) dan Add-to-Cart
+                belum dipanen ke fakta, jadi ditandai &quot;—&quot; di bawah, BUKAN nol aktivitas. Impresi, klik dan CTR
+                showcase sudah terisi dari TikTok Ads Manager.
               </div>
               <table style={{ marginTop: 8, width: '100%', fontSize: 13 }}>
                 <thead>

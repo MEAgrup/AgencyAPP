@@ -1529,7 +1529,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // kesetaraan yang sudah dibuktikan G1-07-SHOPEE-DOBEL-HITUNG ke sample asli
   // (Σ baris parent Siap Dikirim = Rp1.515.002.476 = shop-level PERSIS).
   //
-  // `impresi`/`klik` ditulis pada KEDUA basis: keduanya trafik per produk yang
+  // `impresi`/`klik`/`pengunjung` ditulis pada KEDUA basis: ketiganya trafik per produk yang
   // memang tidak berbasis pesanan, jadi ia sama untuk kedua pandangan. Basis
   // adalah pandangan ALTERNATIF atas periode yang sama, tidak pernah dijumlah
   // silang — jadi ini bukan dobel hitung.
@@ -1554,11 +1554,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
           await tx`
             insert into pdt_fact_sku_period
               (sku_id, client_platform_id, platform_product_id, nama_produk, periode, basis,
-               batch_id, parser_versi, gmv, produk_terjual, pesanan, impresi, klik)
+               batch_id, parser_versi, gmv, produk_terjual, pesanan, impresi, klik, pengunjung)
             values
               (null, ${clientPlatformId}, ${baris.platformProductId}, ${baris.namaProduk},
                ${periodeAwalBulan}::date, ${basis}, ${id}, ${pdt.PDT_PARSER_VERSI},
-               ${gmv}, ${produkTerjual}, ${pesanan}, ${baris.dilihat}, ${baris.klik})`;
+               ${gmv}, ${produkTerjual}, ${pesanan}, ${baris.dilihat}, ${baris.klik}, ${baris.pengunjung})`;
         }
       }
     }
@@ -2723,6 +2723,49 @@ function validasiPeriodeAwalBulan(periodeAwalBulan: string): void {
 }
 
 /**
+ * KUADRAN-SHOPEE — klasifikasi ULANG kuadran seluruh baris
+ * `pdt_fact_sku_period` Shopee (`sku_id is null`, `basis='siap_dikirim'`) untuk
+ * SATU client_platform_id + SATU periode, lalu TULIS kolom `kuadran`. Kembaran
+ * `klasifikasiUlangKuadranSkuTiktok`, dengan tiga perbedaan yang seluruhnya
+ * berasal dari mesin lama, bukan dari selera:
+ *
+ *  1. **Basis `siap_dikirim`, bukan `net`.** Itu basis laporan klien Shopee
+ *     (Rule 16) dan basis yang `bacaProdukShopee` baca — kalau kuadran ditulis
+ *     ke basis `dibuat`, laporan tidak akan pernah melihatnya. Kedua basis
+ *     lahir dari berkas yang sama dengan `pengunjung` yang IDENTIK (trafik
+ *     produk tidak berbasis pesanan), jadi pilihan ini tidak mengubah sumbu-X;
+ *     yang berubah hanya `pesanan` di penyebut CR, dan `siap_dikirim` adalah
+ *     yang klien lihat.
+ *  2. **Nol parameter benchmark.** Ambang kuadran Shopee adalah konstanta
+ *     (`PDT_KUADRAN_SHOPEE`, `@cdps/core`) — asimetri yang SUDAH dicatat
+ *     migrasi `20261031010000`: mesin skor Shopee memang tidak membaca
+ *     `pdt_benchmark` sama sekali.
+ *  3. **Membaca `pengunjung`, bukan `klik`/`ctor`.** Lihat komentar migrasi
+ *     `20261128010000` untuk kenapa dua kolom trafik itu tidak bisa saling
+ *     menggantikan.
+ *
+ * Idempotent, sama seperti kembarannya: hasilnya fungsi murni dari baris fakta
+ * + ambang konstanta, jadi memanggilnya dua kali menulis nilai yang sama.
+ */
+export async function klasifikasiUlangKuadranSkuShopee(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+): Promise<void> {
+  const rows = await sql<{ id: number; pengunjung: number | null; pesanan: number | null }[]>`
+    select id, pengunjung, pesanan from pdt_fact_sku_period
+     where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'siap_dikirim'
+       and periode = ${periodeAwalBulan}::date`;
+  if (rows.length === 0) return;
+  const hasil = pdt.klasifikasikanKuadranSkuShopee(
+    rows.map((r) => ({ id: r.id, pengunjung: r.pengunjung, pesananDibuat: r.pesanan })),
+  );
+  for (const h of hasil) {
+    await sql`update pdt_fact_sku_period set kuadran = ${h.kuadran} where id = ${h.id}`;
+  }
+}
+
+/**
  * Rakit `PdtSkorInputTiktok` dari `pdt_fact_*` untuk SATU client_platform_id +
  * SATU periode (awal bulan, format `YYYY-MM-01`). Dimensi tanpa baris fakta
  * sama sekali ⇒ `null` (Rule 12 ditegakkan di `computeSkorTiktok` yang
@@ -3269,6 +3312,13 @@ export async function hitungSkorShopee(
   clientPlatformId: number,
   periodeAwalBulan: string,
 ): Promise<{ hasil: pdt.PdtSkorHasilShopee }> {
+  // KUADRAN-SHOPEE — kolom `kuadran` ditulis SEBELUM apa pun membacanya, pola
+  // dan alasan yang sama dengan `hitungSkorTiktok` (Rule 4: field turunan,
+  // selalu recomputable, tidak pernah ditulis tangan). `rakitInputSkorShopee`
+  // sendiri belum membacanya — `computeSkorShopee` tidak punya dimensi
+  // Portfolio Produk seperti TikTok — tapi `bacaProdukShopee` (laporan) iya,
+  // dan ia dipanggil SETELAH fungsi ini.
+  await klasifikasiUlangKuadranSkuShopee(sql, clientPlatformId, periodeAwalBulan);
   const input = await rakitInputSkorShopee(sql, clientPlatformId, periodeAwalBulan);
   return { hasil: pdt.computeSkorShopee(input) };
 }
@@ -3653,9 +3703,16 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
          and basis = 'net'
          and tanggal >= ${periodeAwalBulan}::date
          and tanggal < (${periodeAwalBulan}::date + interval '1 month')`,
-    sql<{ n: number; biaya: string; pesanan_n: number; pesanan: string }[]>`
+    // `tayangan`/`klik` ikut dibaca di query yang SAMA (bukan query kelima):
+    // keduanya kolom `pdt_fact_ads` pada baris yang sama persis yang `biaya`/
+    // `pesanan_sku` sudah diambil. `count(...)` per kolom karena `sum()` atas
+    // nol baris non-null tetap 0, dan 0 di funnel berarti "nol tayangan"
+    // sementara yang benar "tidak diketahui" (Rule 12).
+    sql<{ n: number; biaya: string; pesanan_n: number; pesanan: string; tayangan_n: number; tayangan: string; klik_n: number; klik: string }[]>`
       select count(*)::int as n, coalesce(sum(biaya), 0) as biaya,
-             count(pesanan_sku)::int as pesanan_n, coalesce(sum(pesanan_sku), 0) as pesanan
+             count(pesanan_sku)::int as pesanan_n, coalesce(sum(pesanan_sku), 0) as pesanan,
+             count(tayangan)::int as tayangan_n, coalesce(sum(tayangan), 0) as tayangan,
+             count(klik)::int as klik_n, coalesce(sum(klik), 0) as klik
         from pdt_fact_ads
        where client_platform_id = ${clientPlatformId}
          and periode = ${periodeAwalBulan}::date
@@ -3673,6 +3730,10 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
     klik: klikRow.n === 0 ? null : Number(klikRow.klik),
     cpaInput: adsRow.n === 0 ? null : { biaya: Number(adsRow.biaya), pesanan: adsRow.pesanan_n === 0 ? null : Number(adsRow.pesanan) },
     affPosting: affRow.total === 0 ? null : affRow.posting,
+    ttamFunnel: adsRow.n === 0 ? null : {
+      tayangan: adsRow.tayangan_n === 0 ? null : Number(adsRow.tayangan),
+      klik: adsRow.klik_n === 0 ? null : Number(adsRow.klik),
+    },
   };
 }
 
@@ -3702,6 +3763,9 @@ async function bacaProdukTiktok(sql: Sql, clientPlatformId: number, periodeAwalB
       platformProductId: r.platform_product_id,
       gmv: r.gmv == null ? null : Number(r.gmv),
       klik,
+      // Sumbu-X kuadran TikTok = klik (Shopee memakai `pengunjung`) — dua
+      // platform, satu field, karena mode relatif memerlukannya seragam.
+      traffic: klik,
       cvr,
     };
   });
@@ -3921,36 +3985,45 @@ async function bacaKampanye(sql: Sql, clientPlatformId: number, periodeAwalBulan
  * Σ Top Produk menggulung ke angka GMV bulanan yang sama (kesetaraan yang
  * sudah dibuktikan G1-07-SHOPEE-DOBEL-HITUNG ke sample asli).
  *
- * **`kuadran` SELALU `null` di sini, dan itu disengaja.** Kolom itu hanya
- * ditulis `klasifikasiUlangKuadranSkuTiktok`; Shopee tidak punya
- * klasifikator kuadran sama sekali karena methodology-nya beda total
- * (visitor/CR "Bisnis — Produk", bukan klik/CVR "Analitik Produk") dan
- * membuatnya adalah keputusan mesin SKOR, bukan keputusan laporan.
- * `pdt.bangunLaporanProduk` menjawab keadaan itu dengan `distribusi: null`
- * + `top` terisi — daftar Top Produk by GMV, yang justru bagian yang mesin
- * Shopee lama tampilkan ("Top Produk (by GMV Pesanan Dibuat)").
+ * **`kuadran` sekarang TERISI** (KUADRAN-SHOPEE, `docs/DECISIONS.md`).
+ * Sebelumnya `null` permanen dengan catatan "Shopee tidak punya klasifikator
+ * kuadran sama sekali"; sekarang `klasifikasiUlangKuadranSkuShopee` menulisnya
+ * SEBELUM fungsi ini dipanggil (`hitungSkorShopee` di dalam `Promise.all`
+ * `rakitLaporanShopee`, urutan yang dijamin sama seperti sisi TikTok).
  *
- * `cvr` DITURUNKAN `pesanan ÷ impresi` — `impresi` di baris Shopee memuat
- * kolom `dilihat` (pengunjung produk), jadi rasio ini adalah CR
- * pengunjung→pesanan yang sama yang mesin lama cetak, bukan CTOR TikTok.
+ * **`cvr` = `pesanan ÷ pengunjung`, bukan `pesanan ÷ impresi`.** Versi
+ * sebelumnya memakai `impresi` dengan alasan tertulis "`impresi` di baris
+ * Shopee memuat pengunjung produk" — itu KELIRU, dan berkas aslinya
+ * membuktikannya: `impresi` diisi `'Jumlah Produk Dilihat'`
+ * (`ekstrakBarisFaktaSkuShopeeParentSku`), yang pada Fim Motor Juli 2026
+ * bernilai 1.383.429 untuk produk yang `'Pengunjung Produk (Kunjungan)'`-nya
+ * 32.949 — 42× lebih besar. Rasio lama karena itu bukan CR yang mesin lama
+ * cetak melainkan angka ~42× lebih kecil, dan setiap produk terlihat nyaris
+ * tidak closing. `pengunjung` (kolom baru, migrasi `20261128010000`) adalah
+ * penyebut yang benar — `cr_basis = 'pesanan_per_pengunjung'` mesin lama.
+ *
+ * `traffic` = `pengunjung` (sumbu-X kuadran Shopee), sementara `klik` tetap
+ * `'Produk Diklik'` untuk kolom tabel. Dua angka berbeda, dua konsumen
+ * berbeda — mode relatif memakai `traffic`, tampilan memakai `klik`.
  */
 async function bacaProdukShopee(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
   const rows = await sql<{
-    nama_produk: string | null; platform_product_id: string | null;
-    gmv: string | null; impresi: number | null; klik: number | null; pesanan: number | null;
+    nama_produk: string | null; platform_product_id: string | null; kuadran: string | null;
+    gmv: string | null; pengunjung: number | null; klik: number | null; pesanan: number | null;
   }[]>`
-    select nama_produk, platform_product_id, gmv, impresi, klik, pesanan
+    select nama_produk, platform_product_id, kuadran, gmv, pengunjung, klik, pesanan
       from pdt_fact_sku_period
      where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'siap_dikirim'
        and periode = ${periodeAwalBulan}::date`;
   if (rows.length === 0) return null;
   return rows.map((r) => ({
-    kuadran: null,
+    kuadran: r.kuadran as pdt.PdtKuadranSku | null,
     namaProduk: r.nama_produk,
     platformProductId: r.platform_product_id,
     gmv: r.gmv == null ? null : Number(r.gmv),
     klik: r.klik,
-    cvr: r.pesanan == null || r.impresi == null || r.impresi === 0 ? null : r.pesanan / r.impresi,
+    traffic: r.pengunjung,
+    cvr: pdt.crKuadranShopee({ id: 0, pengunjung: r.pengunjung, pesananDibuat: r.pesanan }),
   }));
 }
 

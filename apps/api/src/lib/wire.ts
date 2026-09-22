@@ -9345,11 +9345,32 @@ export interface PdtLaporanProdukDistribusiWire {
   gmv: number | null;
 }
 
-/** `distribusi` `null` untuk Shopee SELALU (nol klasifikator kuadran — lihat docblock `pdt.bangunLaporanProduk`, `@cdps/core`); `top` terisi untuk KEDUA platform. */
+/** Ambang kuadran mode relatif — percentile p25/p75 katalog periode ini. `n` = cacah baris AKTIF yang membentuknya. */
+export interface PdtLaporanProdukAmbangWire {
+  traffic_rendah: number | null;
+  traffic_tinggi: number | null;
+  cr_rendah: number | null;
+  cr_tinggi: number | null;
+  n: number;
+}
+
+/** Panel "Mode Relatif" mesin lama — distribusi kedua atas baris yang SAMA, ambangnya percentile alih-alih benchmark/absolut. `null` bila nol baris aktif periode ini. */
+export interface PdtLaporanProdukRelatifWire {
+  distribusi: Record<string, PdtLaporanProdukDistribusiWire>;
+  ambang: PdtLaporanProdukAmbangWire;
+}
+
+/**
+ * `distribusi` = mode TERSIMPAN (benchmark untuk TikTok, absolut untuk Shopee)
+ * — `null` bila nol baris periode ini pernah diklasifikasi. `relatif` = panel
+ * kedua, dihitung saat laporan dirakit dan TIDAK disimpan. Kedua platform kini
+ * mengisi keduanya (KUADRAN-SHOPEE, `docs/DECISIONS.md`).
+ */
 export interface PdtLaporanProdukWire {
   distribusi: Record<string, PdtLaporanProdukDistribusiWire> | null;
   top_aksi: PdtLaporanProdukItemWire[];
   top: PdtLaporanProdukTopItemWire[];
+  relatif: PdtLaporanProdukRelatifWire | null;
 }
 
 export interface PdtLaporanHarianTitikWire {
@@ -9604,6 +9625,16 @@ function pdtLaporanProdukToWire(p: pdtCore.PdtLaporanProduk | null): PdtLaporanP
     top_aksi: p.topAksi.map((x) => ({
       nama_produk: x.namaProduk, platform_product_id: x.platformProductId, gmv: x.gmv, klik: x.klik, cvr: x.cvr, kuadran: x.kuadran,
     })),
+    relatif: p.relatif == null ? null : {
+      distribusi: p.relatif.distribusi,
+      ambang: {
+        traffic_rendah: p.relatif.ambang.trafficRendah,
+        traffic_tinggi: p.relatif.ambang.trafficTinggi,
+        cr_rendah: p.relatif.ambang.crRendah,
+        cr_tinggi: p.relatif.ambang.crTinggi,
+        n: p.relatif.ambang.n,
+      },
+    },
     top: p.top.map((x) => ({
       nama_produk: x.namaProduk, platform_product_id: x.platformProductId, gmv: x.gmv, klik: x.klik, cvr: x.cvr, kuadran: x.kuadran,
     })),

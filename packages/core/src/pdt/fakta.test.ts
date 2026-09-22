@@ -987,6 +987,14 @@ const HEADER_PARENT_SKU_ASLI = [
   'Jumlah Produk Dilihat', 'Produk Diklik', 'Persentase Klik',
   'Tingkat Konversi Pesanan (Pesanan Dibuat)', 'Tingkat Konversi Pesanan (Pesanan Siap Dikirim)',
   'Pesanan Dibuat', 'Pesanan Siap Dikirim', 'Produk (Pesanan Dibuat)', 'Produk (Pesanan Siap Dikirim)',
+  // Kolom 20-28 berkas asli — dibawa apa adanya supaya `Pengunjung Produk
+  // (Kunjungan)` berada di POSISI aslinya (ke-28), jauh dari `Jumlah Produk
+  // Dilihat` (ke-11). Fixture yang memotongnya di kolom 19 tidak bisa
+  // membuktikan ekstraktor mengambil yang benar.
+  'Total Pembeli (Pesanan Dibuat)', 'Total Pembeli (Pesanan Siap Dikirim)',
+  'Tingkat Konversi (Pesanan yang Dibuat)', 'Tingkat Konversi (Pesanan Siap Dikirim)',
+  'Penjualan per Pesanan (Pesanan Dibuat) (IDR)', 'Penjualan per Pesanan (Pesanan Siap Dikirim) (IDR)',
+  'Produk Unik Dilihat', 'Produk Unik Diklik', 'Pengunjung Produk (Kunjungan)',
 ];
 
 /** Baris parent Fim Motor yang sungguhan, angkanya apa adanya dari berkas. */
@@ -995,6 +1003,7 @@ const BARIS_PARENT_ASLI = [
   'Normal', '-', '-', '-', '-', '-',
   '189.344.344', '175.749.606', '1383429', '76100', '5,50%', '2,51%', '2,36%',
   '1908', '1798', '2785', '2586',
+  '1526', '1461', '4,63%', '4,43%', '99.237', '97.747', '310174', '37894', '32949',
 ];
 
 /** Baris VARIAN milik produk yang sama — inilah yang harus dibuang. */
@@ -1002,10 +1011,11 @@ const BARIS_VARIAN_ASLI = [
   '22571212550', 'Cover Body Kasar Atas Bawah Kolong Samping Tengah Vario 125 150 LED 2015 2016 2017',
   'Normal', '195500017909', 'COVER RADIATOR', 'Normal', 'NR02-B44-358-82AA', '-',
   '1.355.292', '1.192.710', '-', '-', '-', '-', '-', '-', '-', '50', '44',
+  '-', '-', '-', '-', '-', '-', '-', '-', '-',
 ];
 
 describe('ekstrakBarisFaktaSkuShopeeParentSku (B33-PARENT-SKU)', () => {
-  it('memetakan nama, GMV dua basis, UNIT dua basis, pesanan, dilihat, klik', () => {
+  it('memetakan nama, GMV dua basis, UNIT dua basis, pesanan, dilihat, klik, pengunjung', () => {
     expect(ekstrakBarisFaktaSkuShopeeParentSku([HEADER_PARENT_SKU_ASLI, BARIS_PARENT_ASLI], 1)).toEqual([
       {
         platformProductId: '22571212550',
@@ -1021,6 +1031,10 @@ describe('ekstrakBarisFaktaSkuShopeeParentSku (B33-PARENT-SKU)', () => {
         pesananSiapDikirim: 1798,
         dilihat: 1383429,
         klik: 76100,
+        // 32.949 vs 1.383.429 `dilihat` untuk produk yang SAMA — 42×. Inilah
+        // kenapa kuadran Shopee tidak boleh memakai `dilihat` sebagai sumbu-X
+        // (migrasi `20261128010000`).
+        pengunjung: 32949,
       },
     ]);
   });
