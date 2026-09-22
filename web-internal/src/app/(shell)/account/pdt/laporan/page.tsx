@@ -425,6 +425,25 @@ function CatatanInternal({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Banner kelengkapan yang isinya dibaca dari BLOK `kelengkapan` payload
+ * (M20 R2), bukan dari kalimat yang ditulis tangan di sini.
+ *
+ * Sebelum ini teks banner hidup di JSX dan kalimat bermakna sama juga didorong
+ * mesin ke `insight.poin` — dua bentuk satu makna, dan yang lewat `insight`
+ * ikut beku ke `pdt_laporan_kiriman.payload`, jadi ia akan terbit ke klien
+ * begitu permukaan laporan klien dibangun. Satu sumber sekarang, dan sumber
+ * itu bisa dibaca mesin: renderer mode `klien` cukup TIDAK membangun blok ini.
+ *
+ * Nol baris kalau bagiannya lengkap — banner yang tidak punya isi tidak
+ * dirender sama sekali, bukan dirender kosong.
+ */
+function CatatanKelengkapan({ laporan, bagian }: { laporan: PdtLaporan; bagian: string }) {
+  const baris = laporan.kelengkapan?.baris.find((b) => b.bagian === bagian);
+  if (!baris || baris.lengkap) return null;
+  return <CatatanInternal>{baris.alasan}</CatatanInternal>;
+}
+
 export default function LaporanPdtPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsLoading, setClientsLoading] = useState(true);
@@ -826,15 +845,7 @@ export default function LaporanPdtPage() {
             <p className="muted" style={{ fontSize: 12 }}>
               GMV Kotor: {formatIDR(laporan.kanal.gmv_total)}
             </p>
-            {!laporan.kanal.lengkap && (
-              <CatatanInternal>
-                Belum lengkap — {laporan.platform === 'tiktok' ? 'sumber ini' : 'Shopee Ads dan Affiliate saja'}.
-                {laporan.platform !== 'tiktok' && (
-                  <> Voucher, Chat, Meta Ads, dan Video belum diproses PDT — GMV dari sumber itu TIDAK berarti nol,
-                  hanya belum terhitung di sini.</>
-                )}
-              </CatatanInternal>
-            )}
+            <CatatanKelengkapan laporan={laporan} bagian="kanal" />
             {laporan.kanal.gmv_total === null ? (
               <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Belum ada data untuk periode ini.</p>
             ) : (
@@ -851,12 +862,7 @@ export default function LaporanPdtPage() {
           {laporan.iklan && (
             <section className="card">
               <h2>Iklan</h2>
-              {!laporan.iklan.lengkap && (
-                <CatatanInternal>
-                  Belum lengkap — Iklan Toko, Pencarian, dan Live saja. Banner Ads belum diproses PDT — biaya/pendapatan
-                  dari sumber itu TIDAK berarti nol, hanya belum terhitung di sini.
-                </CatatanInternal>
-              )}
+              <CatatanKelengkapan laporan={laporan} bagian="iklan" />
               <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
                 <div>
                   <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.iklan.biaya)}</div>
@@ -1553,11 +1559,7 @@ export default function LaporanPdtPage() {
           {laporan.tahap && (
             <section className="card">
               <h2>Tahap (Buyer Journey)</h2>
-              <CatatanInternal>
-                Belum lengkap — sebagian angka Awareness (impresi/views campaign, follower berbayar) dan Add-to-Cart
-                belum dipanen ke fakta, jadi ditandai &quot;—&quot; di bawah, BUKAN nol aktivitas. Impresi, klik dan CTR
-                showcase sudah terisi dari TikTok Ads Manager.
-              </CatatanInternal>
+              <CatatanKelengkapan laporan={laporan} bagian="tahap" />
               <table style={{ marginTop: 8, width: '100%', fontSize: 13 }}>
                 <thead>
                   <tr>

@@ -1288,13 +1288,9 @@ function poinLaporanInsight(input: PdtLaporanInsightInput): string[] {
     const top = [...kanalTerukur].sort((a, b) => (b.gmv as number) - (a.gmv as number))[0];
     poin.push(`${top.label} jadi kanal terbesar: ${rp(top.gmv)}${top.persen != null ? ` (${pct(top.persen, 1)} dari GMV)` : ''}.`);
   }
-  if (!kanal.lengkap) {
-    poin.push('Catatan: rincian kanal belum lengkap — sebagian sumber GMV belum punya penulis fakta PDT.');
-  }
 
   if (iklan) {
     poin.push(`Iklan: belanja ${rp(iklan.biaya)} → GMV ${rp(iklan.gmv)}${iklan.roas != null ? ` (ROAS ${dec(iklan.roas, 2)}x)` : ''}.`);
-    if (!iklan.lengkap) poin.push('Catatan: rincian iklan belum lengkap — sebagian sumber iklan legacy belum punya modul PDT.');
   }
 
   if (live) {
@@ -1943,6 +1939,8 @@ export interface PdtLaporanTiktok {
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
   insight: PdtLaporanInsight;
+  /** M20 R2 — catatan kelengkapan data. Mode render `klien` TIDAK membangunnya. */
+  kelengkapan: PdtLaporanKelengkapan;
 }
 
 export interface PdtLaporanShopee {
@@ -1975,6 +1973,139 @@ export interface PdtLaporanShopee {
   tahap: PdtLaporanTahap | null;
   skor: PdtSkorHasilShopee;
   insight: PdtLaporanInsight;
+  /** M20 R2 — catatan kelengkapan data. Mode render `klien` TIDAK membangunnya. */
+  kelengkapan: PdtLaporanKelengkapan;
+}
+
+// ---------------------------------------------------------------------------
+// Kelengkapan data (M20 R2) — caveat sebagai DATA, bukan prosa
+// ---------------------------------------------------------------------------
+
+/**
+ * Bagian laporan yang bisa berstatus "belum lengkap".
+ *
+ * Sengaja union sempit, bukan `string`: penambahan bagian baru harus menyentuh
+ * tipe ini, jadi bagian yang lahir tanpa penjelasan kelengkapannya tidak bisa
+ * lolos diam-diam.
+ */
+export type PdtKelengkapanBagian = 'kanal' | 'iklan' | 'tahap';
+
+/**
+ * Satu baris kelengkapan. `alasan` ditulis untuk MATA AM, bukan mata klien —
+ * ia menyebut modul parser, penulis fakta, dan istilah internal.
+ */
+export interface PdtLaporanKelengkapanBaris {
+  bagian: PdtKelengkapanBagian;
+  lengkap: boolean;
+  /** Kalimat penjelas. String kosong kalau `lengkap` — nol kalimat untuk dibaca. */
+  alasan: string;
+  /** Modul parser PDT yang belum punya penulis fakta. Kosong kalau `lengkap`. */
+  modulHilang: string[];
+}
+
+/**
+ * Blok `kelengkapan` — M20 R2.
+ *
+ * ## Kenapa ini ada, dan kenapa ia BUKAN kalimat di `insight.poin`
+ *
+ * Sampai 2026-09-22 kelengkapan hidup sebagai dua kalimat prosa yang didorong
+ * ke `insight.poin` ("Catatan: rincian kanal belum lengkap — …") plus tiga
+ * banner yang teksnya ditulis tangan di JSX halaman internal. Dua bentuk, satu
+ * makna, dan keduanya bocor ke audiens yang salah:
+ *
+ *  - `insight` ikut dibekukan ke `pdt_laporan_kiriman.payload`, jadi begitu
+ *    permukaan laporan klien dibangun, kalimat itu **terbit ke klien**;
+ *  - teks banner yang hidup di JSX tidak bisa dibaca mesin, jadi renderer
+ *    manapun harus menebak ulang mana yang internal.
+ *
+ * Bagi klien kalimat itu beracun: ia terbaca "agensinya sendiri tidak tahu
+ * angkanya", kebalikan dari maksudnya — yang sebenarnya menegakkan Rule 12
+ * (tidak diketahui BUKAN nol).
+ *
+ * Maka kelengkapan pindah ke SINI, sebagai data terstruktur: mode `internal`
+ * merendernya, mode `klien` tidak merendernya sama sekali (bukan CSS, bukan
+ * `display:none` — stringnya tidak dibangun). `insight.poin` kembali murni
+ * narasi performa.
+ *
+ * Ia TIDAK menghilangkan informasinya. Satu-satunya yang berubah adalah siapa
+ * yang boleh membacanya.
+ */
+export interface PdtLaporanKelengkapan {
+  /** `true` kalau SETIAP baris `lengkap`. Jalan pintas untuk penanya "ada yang perlu dijelaskan?". */
+  semuaLengkap: boolean;
+  baris: PdtLaporanKelengkapanBaris[];
+}
+
+/** Modul parser PDT yang belum punya penulis fakta, per celah yang diketahui. */
+const MODUL_KANAL_SHOPEE = ['shopee_voucher', 'shopee_chat', 'meta_ads', 'shopee_video'];
+const MODUL_IKLAN_SHOPEE = ['ads_banner'];
+const MODUL_TAHAP_TIKTOK = [
+  'tt_ads_manager_consideration', 'tt_ads_manager_follows',
+  'tt_ads_manager_showcase', 'tt_ads_manager_videoviews',
+];
+
+export interface PdtLaporanKelengkapanInput {
+  platform: 'tiktok' | 'shopee';
+  kanal: PdtLaporanKanal;
+  iklan: PdtLaporanIklan | null;
+  tahap: PdtLaporanTahap | null;
+}
+
+/**
+ * Rakit blok `kelengkapan` dari bagian yang SUDAH dibangun — nol query, nol
+ * pengetahuan tentang DB.
+ *
+ * Status `tahap` diturunkan dari DATANYA (ada langkah funnel ber-`nilai: null`),
+ * bukan dari daftar platform yang ditulis tangan. Begitu modul Ads Manager
+ * mendarat dan funnel terisi, baris ini jadi `lengkap` **dengan sendirinya** —
+ * tidak ada konstanta yang harus diingat untuk diubah.
+ */
+export function bangunLaporanKelengkapan(input: PdtLaporanKelengkapanInput): PdtLaporanKelengkapan {
+  const baris: PdtLaporanKelengkapanBaris[] = [];
+
+  baris.push(
+    input.kanal.lengkap
+      ? { bagian: 'kanal', lengkap: true, alasan: '', modulHilang: [] }
+      : {
+          bagian: 'kanal',
+          lengkap: false,
+          alasan: input.platform === 'shopee'
+            ? 'Rincian kanal baru memuat Shopee Ads dan Affiliate. Voucher, Chat, Meta Ads, dan Video belum diproses PDT — GMV dari sumber itu TIDAK berarti nol, hanya belum terhitung di sini.'
+            : 'Rincian kanal hanya memuat sumber yang sudah punya penulis fakta PDT. GMV dari sumber lain TIDAK berarti nol, hanya belum terhitung di sini.',
+          modulHilang: input.platform === 'shopee' ? [...MODUL_KANAL_SHOPEE] : [],
+        },
+  );
+
+  if (input.iklan) {
+    baris.push(
+      input.iklan.lengkap
+        ? { bagian: 'iklan', lengkap: true, alasan: '', modulHilang: [] }
+        : {
+            bagian: 'iklan',
+            lengkap: false,
+            alasan: input.platform === 'shopee'
+              ? 'Rincian iklan baru memuat Iklan Toko, Pencarian, dan Live. Banner Ads belum punya modul PDT — biaya/pendapatan dari sumber itu TIDAK berarti nol, hanya belum terhitung di sini.'
+              : 'Sebagian sumber iklan belum punya modul PDT — biaya/pendapatan dari sumber itu TIDAK berarti nol, hanya belum terhitung di sini.',
+            modulHilang: input.platform === 'shopee' ? [...MODUL_IKLAN_SHOPEE] : [],
+          },
+    );
+  }
+
+  if (input.tahap) {
+    const kosong = input.tahap.funnel.filter((f) => f.nilai === null).map((f) => f.label);
+    baris.push(
+      kosong.length === 0
+        ? { bagian: 'tahap', lengkap: true, alasan: '', modulHilang: [] }
+        : {
+            bagian: 'tahap',
+            lengkap: false,
+            alasan: `Langkah funnel berikut belum dipanen ke fakta, jadi ditandai "—", BUKAN nol aktivitas: ${kosong.join(', ')}. Sumbernya ekspor TikTok Ads Manager, yang belum punya modul PDT.`,
+            modulHilang: [...MODUL_TAHAP_TIKTOK],
+          },
+    );
+  }
+
+  return { semuaLengkap: baris.every((b) => b.lengkap), baris };
 }
 
 export interface PdtLaporanTiktokOptions {
@@ -2054,6 +2185,7 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
     insight: bangunLaporanInsight({
       platform: 'tiktok', kpi, kanal, iklan, live, video, afiliasi, tahap, skor: opts.skor, benchTiktok: opts.benchTiktok,
     }),
+    kelengkapan: bangunLaporanKelengkapan({ platform: 'tiktok', kanal, iklan, tahap }),
   };
 }
 
@@ -2090,5 +2222,6 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
     insight: bangunLaporanInsight({
       platform: 'shopee', kpi, kanal, iklan, live, video, afiliasi, tahap: null, skor: opts.skor, benchTiktok: null,
     }),
+    kelengkapan: bangunLaporanKelengkapan({ platform: 'shopee', kanal, iklan, tahap: null }),
   };
 }
