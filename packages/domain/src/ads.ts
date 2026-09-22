@@ -854,7 +854,7 @@ export async function logMetricEntry(sql: Sql, actor: Actor, campaignId: string,
     return writeMetricEntryRow(tx, r, campaignId, now, {
       periodStart: pStart, periodEnd: pEnd, spend, gmv,
       ctr: input.ctr ?? null, cvr: input.cvr ?? null, clicks, impressions, conversions,
-      entryMethod: method, actorEmployeeId: actor.employeeId, auditExtra: null,
+      entryMethod: method, actorEmployeeId: actor.employeeId, auditExtra: null, pdtScope: null,
     });
   });
 }
@@ -877,16 +877,20 @@ async function writeMetricEntryRow(
     entryMethod: string; actorEmployeeId: string;
     /** Extra fields merged into the audit row's `afterJson` — provenance for engine-written entries (SH-06). */
     auditExtra: Record<string, unknown> | null;
+    /** M20 E-03: PDT hapus-tulis-ulang scope tag (`ck_mtr_pdt_scope`) — null/null/null for every non-PDT caller. */
+    pdtScope: { clientPlatformId: number; periode: string } | null;
   },
 ): Promise<MetricEntry> {
   const ex = executors(tx);
   const id = await ex.ident.identNext('MTR', now);
   await tx`
     insert into metric_entries (id, campaign_id, period_start, period_end, spend, gmv, ctr, cvr,
-      clicks, impressions, conversions, entry_method, entered_by, created_by)
+      clicks, impressions, conversions, entry_method, entered_by, created_by,
+      source, pdt_client_platform_id, pdt_periode)
     values (${id}, ${campaignId}, ${args.periodStart}, ${args.periodEnd}, ${money.decimal(args.spend)}, ${money.decimal(args.gmv)},
       ${args.ctr}, ${args.cvr},
-      ${args.clicks}, ${args.impressions}, ${args.conversions}, ${args.entryMethod}, ${args.actorEmployeeId}, ${args.actorEmployeeId})`;
+      ${args.clicks}, ${args.impressions}, ${args.conversions}, ${args.entryMethod}, ${args.actorEmployeeId}, ${args.actorEmployeeId},
+      ${args.pdtScope ? 'pdt' : null}, ${args.pdtScope?.clientPlatformId ?? null}, ${args.pdtScope?.periode ?? null})`;
   // §7 Flow 1: snapshot the linked Assets at this moment (Creative-Swap-safe basis).
   const linked = await currentlyLinkedAssets(tx, campaignId);
   for (const assetId of linked) {
@@ -969,7 +973,7 @@ export async function insertMetricEntryFromReportEngine(
   return writeMetricEntryRow(tx, r, campaignId, now, {
     periodStart: pStart, periodEnd: pEnd, spend, gmv,
     ctr: null, cvr: null, clicks: null, impressions: null, conversions: null,
-    entryMethod: 'File Export', actorEmployeeId, auditExtra,
+    entryMethod: 'File Export', actorEmployeeId, auditExtra, pdtScope: null,
   });
 }
 
@@ -990,6 +994,125 @@ export async function findOverlappingShopeeAdsCampaigns(
        and c.start_date <= ${periodeAkhir} and c.end_date >= ${periodeMulai}
      order by c.id`;
   return rows.map((r) => ({ id: r.id, ownerAm: r.assigned_am_id }));
+}
+
+// ===========================================================================
+// M20 E-03: entri metrik Ads dari laporan PDT (ROAS Attainment)
+// ---------------------------------------------------------------------------
+// PDT's `client_platforms.platform` vocabulary ('Shopee'/'TikTok Shop'/...)
+// is NOT `ad_campaigns.platform` ('Shopee Ads'/'TikTok Shop Ads'/'Social
+// Ads') — this is the crosswalk, owned here since it is this module's own
+// vocabulary. Platforms with no Ads-division equivalent today (Tokopedia,
+// Lazada, Blibli) map to null: structurally moot, not an open question — no
+// `ad_campaigns.platform` value exists for them to match against.
+const PDT_PLATFORM_KE_ADS: Readonly<Record<string, string>> = {
+  Shopee: 'Shopee Ads',
+  'TikTok Shop': 'TikTok Shop Ads',
+};
+
+export function pdtPlatformKeAdsPlatform(clientPlatform: string): string | null {
+  return PDT_PLATFORM_KE_ADS[clientPlatform] ?? null;
+}
+
+/**
+ * findOverlappingAdCampaignsPdt — E-03's candidate set, the same overlap
+ * mechanism as `findOverlappingShopeeAdsCampaigns` (client + platform +
+ * `[Active]` + date-range overlap) generalized to any Ads platform and
+ * scoped to ONE calendar month (`periodeMulaiBulan`) — PDT kiriman are
+ * ALWAYS monthly (Gelombang D), so the period end is computed here rather
+ * than threaded through as a caller-supplied argument.
+ */
+export async function findOverlappingAdCampaignsPdt(
+  sql: Queryable, clientId: string, platform: string, periodeMulaiBulan: string,
+): Promise<{ id: string; ownerAm: string | null }[]> {
+  const rows = await sql<{ id: string; assigned_am_id: string | null }[]>`
+    select c.id, cl.assigned_am_id
+      from ad_campaigns c join clients cl on cl.id = c.client_id
+     where c.client_id = ${clientId} and c.platform = ${platform} and c.status = ${STATUS_ACTIVE}
+       and c.start_date <= (${periodeMulaiBulan}::date + interval '1 month' - interval '1 day')::date
+       and c.end_date >= ${periodeMulaiBulan}::date
+     order by c.id`;
+  return rows.map((r) => ({ id: r.id, ownerAm: r.assigned_am_id }));
+}
+
+/**
+ * insertAdsMetricEntryFromPdt — E-03's engine write, the PDT counterpart to
+ * `insertMetricEntryFromReportEngine` (SH-06): same money invariants
+ * (non-negative, campaign not `[Ended]`), same `writeMetricEntryRow` so
+ * nothing about the shared insert/snapshot/audit/attribution/ROAS-streak
+ * sequence can drift, `entry_method='File Export'` (data extracted from an
+ * uploaded PDT export, same class as SH-06 — not a new value to teach the
+ * FE). The one difference: `pdtScope` tags the row for
+ * `deletePdtAdsMetricEntries`'s later hapus-tulis-ulang (`ck_mtr_pdt_scope`).
+ */
+export async function insertAdsMetricEntryFromPdt(
+  tx: TransactionSql, actorEmployeeId: string, campaignId: string,
+  input: { periodStart: string; periodEnd: string; spend: string; gmv: string },
+  auditExtra: Record<string, unknown>,
+  pdtScope: { clientPlatformId: number; periode: string },
+): Promise<MetricEntry> {
+  const now = new Date();
+  const r = await lockCampaign(tx, campaignId);
+  if (r.status === STATUS_ENDED) {
+    throw new ConflictError(MSG_CAMPAIGN_ENDED);
+  }
+  let spend: money.Money;
+  let gmv: money.Money;
+  try {
+    spend = money.parse(input.spend);
+    gmv = money.parse(input.gmv);
+  } catch {
+    throw new ValidationError(MSG_BAD_AMOUNT);
+  }
+  if (spend < 0n || gmv < 0n) {
+    throw new ValidationError(MSG_NEGATIVE_AMOUNT);
+  }
+  const [pStart, pEnd] = parsePeriod(input.periodStart, input.periodEnd);
+  return writeMetricEntryRow(tx, r, campaignId, now, {
+    periodStart: pStart, periodEnd: pEnd, spend, gmv,
+    ctr: null, cvr: null, clicks: null, impressions: null, conversions: null,
+    entryMethod: 'File Export', actorEmployeeId, auditExtra, pdtScope,
+  });
+}
+
+/**
+ * deletePdtAdsMetricEntries — the "hapus" half of E-03's hapus-tulis-ulang
+ * (owner decision, `docs/DECISIONS.md` M20-E03-ADS-METRIC-ENTRIES). Scoped
+ * STRICTLY to `source='pdt'` rows tagged with this exact
+ * (client_platform_id, periode) — a non-PDT row can never match (
+ * `ck_mtr_pdt_scope` guarantees `source`/`pdt_client_platform_id`/
+ * `pdt_periode` only ever co-occur), so this can never touch a manual or
+ * M14 SH-06 entry.
+ *
+ * `metric_entries` is documented "additive" (migrasi 20260722055644) and
+ * `metric_entry_assets`/`recomputeAssetAttribution` assume every row is
+ * IMMUTABLE (§7 docblock: "a full recompute over immutable rows") — this is
+ * the first delete path this table has ever had. To keep that invariant
+ * true for every OTHER reader, a delete here is never a bare SQL DELETE:
+ * the linked-asset snapshot rows for the doomed entries are removed first
+ * (FK from `metric_entry_assets` to `metric_entries` has no ON DELETE
+ * CASCADE), then every Asset that WAS linked to one of those entries gets
+ * its Attributed GMV recomputed — otherwise a stale higher number would
+ * survive the delete.
+ */
+export async function deletePdtAdsMetricEntries(
+  tx: TransactionSql, clientPlatformId: number, periode: string,
+): Promise<void> {
+  const doomed = await tx<{ id: string }[]>`
+    select id from metric_entries
+     where source = 'pdt' and pdt_client_platform_id = ${clientPlatformId} and pdt_periode = ${periode}::date`;
+  if (doomed.length === 0) return;
+  const doomedIds = doomed.map((d) => d.id);
+
+  const linkedAssets = await tx<{ asset_id: string }[]>`
+    select distinct asset_id from metric_entry_assets where metric_entry_id = any(${doomedIds})`;
+
+  await tx`delete from metric_entry_assets where metric_entry_id = any(${doomedIds})`;
+  await tx`delete from metric_entries where id = any(${doomedIds})`;
+
+  for (const { asset_id: assetId } of linkedAssets) {
+    await recomputeAssetAttribution(tx, assetId);
+  }
 }
 
 /**

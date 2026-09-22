@@ -12,6 +12,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { pdt as pdtCore, permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
+import { createCampaign, type CampaignInput } from './ads';
 
 /** `date` datang dari driver sebagai string ATAU Date tergantung konfigurasi — pola sama `dailyops.ts` `ymd()`. */
 function ymd(v: string | Date): string {
@@ -6741,6 +6742,211 @@ describeDb('M20 Gelombang E — recomputeTotalSalesPdt (R6/R7)', () => {
     expect(rows[0].before_json.total_sales).toBe('0.00');
     expect(rows[0].after_json.source).toBe('pdt');
     expect(Number(rows[0].after_json.total_sales)).toBeCloseTo(15_000_000, 0);
+  });
+});
+
+describeDb('M20 Gelombang E — recomputeAdsMetricEntriesPdt (E-03)', () => {
+  let adsSeq = 0;
+  const adsUid = (p: string): string => `${p}-ZPDT-ADS-${Date.now() % 100000}-${adsSeq++}`;
+  const actorAdsPdt = { employeeId: OWNER_AM, role: permission.makeRole({ division: 'Ads', level: 'staff' }) };
+
+  /** Toko + kampanye Ads `[Active]` overlap [start,end] milik toko itu (service→brief→campaign, pola sama report.shopee.domain.test.ts). */
+  async function seedCampaign(clientId: string, adsPlatform: string, start: string, end: string): Promise<string> {
+    const svc = adsUid('SVC');
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name,
+        standard_price, commission_rule, status, requires_strategy_plan, created_by)
+      values (${svc}, ${clientId}, 'MSV-X', 1, 'Svc', '10000000.00', 'rule', '[In Execution]', false, ${OWNER_AM})`;
+    const brief = adsUid('BRF');
+    await sql`
+      insert into briefs (id, service_id, title, status, assigned_division, deliverable_type,
+        quantity_target, priority, recurring, created_by)
+      values (${brief}, ${svc}, 'Brief Ads', '[In Progress]', 'Ads', 'Campaign', 1, 'High', false, ${OWNER_AM})`;
+    const input: CampaignInput = {
+      platform: adsPlatform, objective: 'Sales', budget: '8000000', startDate: start, endDate: end,
+      targetKpi: 'ROAS ≥ 4x', tipeIklan: 'GMV Max Product',
+    };
+    const c = await createCampaign(sql, actorAdsPdt, brief, input);
+    await sql`update ad_campaigns set status = '[Active]' where id = ${c.id}`;
+    return c.id;
+  }
+
+  /**
+   * Toko baru + satu baris `pdt_fact_ads` (biaya/gmv) untuk (cpId, periodeAwalBulan).
+   * `batchId` dikembalikan supaya sumber KEDUA (uji Σ-gabung) memakai batch
+   * yang SAMA — `uq_pdt_upload_batch_verified` hanya mengizinkan SATU batch
+   * `verified` per (client_platform_id, periode_mulai, periode_selesai).
+   */
+  async function fixtureDenganFactAds(
+    platform: 'TikTok Shop' | 'Shopee', periodeAwalBulan: string, sumber: string, biaya: number, gmv: number,
+  ): Promise<{ clientId: string; cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, platform);
+    const [batch] = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values (${clientId}, ${cpId}, ${platform === 'TikTok Shop' ? 'tiktok' : 'shopee'}, ${periodeAwalBulan}::date,
+        (${periodeAwalBulan}::date + interval '1 month' - interval '1 day')::date, 'verified',
+        ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
+      values (${cpId}, ${sumber}, 'K1', ${periodeAwalBulan}::date, ${batch.id}, ${pdtCore.PDT_PARSER_VERSI}, ${biaya}, ${gmv})`;
+    return { clientId, cpId, batchId: batch.id };
+  }
+
+  async function kirimDanTerbitkanAds(cpId: number, periodeAwalBulan: string): Promise<number> {
+    const d = await kirimLaporanPdt(sql, ownerActor(), cpId, periodeAwalBulan);
+    await terbitkanKiriman(sql, ownerActor(), d.id);
+    return Number(d.id); // bigint-as-string quirk (postgres.js) — sama pola client-portal.test.ts
+  }
+
+  async function pdtMetricEntriesFor(
+    cpId: number, periodeAwalBulan: string,
+  ): Promise<{ campaign_id: string; spend: string; gmv: string; entry_method: string; source: string | null }[]> {
+    return sql<{ campaign_id: string; spend: string; gmv: string; entry_method: string; source: string | null }[]>`
+      select campaign_id, spend, gmv, entry_method, source from metric_entries
+       where pdt_client_platform_id = ${cpId} and pdt_periode = ${periodeAwalBulan}::date
+       order by id`;
+  }
+
+  afterEach(async () => {
+    if (!sql) return;
+    // Anak sebelum induk (client_platforms/clients dibersihkan afterEach global
+    // di luar blok ini) — services→briefs→ad_campaigns→metric_entries semuanya
+    // ditandai OWNER_AM di sini, bukan pola 'ZZ-%' yang dipakai fixture PDT lain.
+    await sql`delete from metric_entry_assets where metric_entry_id in (select id from metric_entries where entered_by = ${OWNER_AM})`;
+    await sql`delete from metric_entries where entered_by = ${OWNER_AM}`;
+    await sql`delete from ad_campaigns where created_by = ${OWNER_AM}`;
+    await sql`delete from briefs where created_by = ${OWNER_AM}`;
+    await sql`delete from services where created_by = ${OWNER_AM}`;
+  });
+
+  it('satu kampanye Shopee Ads aktif overlap → MTR- dapat total penuh, entry_method=File Export, source=pdt', async () => {
+    const { clientId, cpId } = await fixtureDenganFactAds('Shopee', '2026-08-01', 'shopee_ads_cpc', 5_000_000, 40_000_000);
+    const campaign = await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
+    await kirimDanTerbitkanAds(cpId, '2026-08-01');
+
+    const rows = await pdtMetricEntriesFor(cpId, '2026-08-01');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].campaign_id).toBe(campaign);
+    expect(Number(rows[0].spend)).toBeCloseTo(5_000_000, 2);
+    expect(Number(rows[0].gmv)).toBeCloseTo(40_000_000, 2);
+    expect(rows[0].entry_method).toBe('File Export');
+    expect(rows[0].source).toBe('pdt');
+  });
+
+  it('Σ semua sumber ads PDT toko+bulan digabung sebelum di-split (bukan per kampanye_id)', async () => {
+    const { clientId, cpId, batchId } = await fixtureDenganFactAds('Shopee', '2026-08-01', 'shopee_ads_cpc', 3_000_000, 20_000_000);
+    // Sumber KEDUA periode yang sama, batch YANG SAMA (uq_pdt_upload_batch_verified
+    // hanya izinkan satu batch verified per toko+periode) — Σ harus 3jt+2jt=5jt
+    // spend, 20jt+20jt=40jt gmv.
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
+      values (${cpId}, 'shopee_ads_live', 'K2', '2026-08-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 2_000_000, 20_000_000)`;
+    const campaign = await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
+    await kirimDanTerbitkanAds(cpId, '2026-08-01');
+
+    const [row] = await pdtMetricEntriesFor(cpId, '2026-08-01');
+    expect(Number(row.spend)).toBeCloseTo(5_000_000, 2);
+    expect(Number(row.gmv)).toBeCloseTo(40_000_000, 2);
+  });
+
+  it('DUA kampanye overlap → split EVENLY, Σ merekonstruksi total penuh', async () => {
+    const { clientId, cpId } = await fixtureDenganFactAds('Shopee', '2026-08-01', 'shopee_ads_cpc', 5_000_000, 40_000_000);
+    const a = await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
+    const b = await seedCampaign(clientId, 'Shopee Ads', '2026-08-15', '2026-09-15'); // overlap parsial tetap dihitung
+    await kirimDanTerbitkanAds(cpId, '2026-08-01');
+
+    const [ea] = await pdtMetricEntriesFor(cpId, '2026-08-01').then((r) => r.filter((x) => x.campaign_id === a));
+    const [eb] = await pdtMetricEntriesFor(cpId, '2026-08-01').then((r) => r.filter((x) => x.campaign_id === b));
+    expect(Number(ea.spend)).toBeCloseTo(2_500_000, 2);
+    expect(Number(eb.spend)).toBeCloseTo(2_500_000, 2);
+    expect(Number(ea.gmv) + Number(eb.gmv)).toBeCloseTo(40_000_000, 2);
+  });
+
+  it('nol kampanye Ads overlap → nol entri, kiriman tetap terbit normal', async () => {
+    const { cpId } = await fixtureDenganFactAds('Shopee', '2026-08-01', 'shopee_ads_cpc', 5_000_000, 40_000_000);
+    const id = await kirimDanTerbitkanAds(cpId, '2026-08-01');
+    expect(id).toBeGreaterThan(0);
+    expect(await pdtMetricEntriesFor(cpId, '2026-08-01')).toHaveLength(0);
+  });
+
+  it('nol data pdt_fact_ads untuk periode itu → nol entri meski ada kampanye aktif', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
+    await kirimDanTerbitkanAds(cpId, '2026-08-01');
+    expect(await pdtMetricEntriesFor(cpId, '2026-08-01')).toHaveLength(0);
+  });
+
+  it('kampanye [Paused] overlap TIDAK jadi kandidat', async () => {
+    const { clientId, cpId } = await fixtureDenganFactAds('Shopee', '2026-08-01', 'shopee_ads_cpc', 5_000_000, 40_000_000);
+    const paused = await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
+    await sql`update ad_campaigns set status = '[Paused]' where id = ${paused}`;
+    await kirimDanTerbitkanAds(cpId, '2026-08-01');
+    expect(await pdtMetricEntriesFor(cpId, '2026-08-01')).toHaveLength(0);
+  });
+
+  it('platform TikTok Shop memetakan ke ad_campaigns.platform "TikTok Shop Ads"', async () => {
+    const { clientId, cpId } = await fixtureDenganFactAds('TikTok Shop', '2026-08-01', 'tt_ads_product', 1_000_000, 8_000_000);
+    const campaign = await seedCampaign(clientId, 'TikTok Shop Ads', '2026-08-01', '2026-08-31');
+    await kirimDanTerbitkanAds(cpId, '2026-08-01');
+    const [row] = await pdtMetricEntriesFor(cpId, '2026-08-01');
+    expect(row.campaign_id).toBe(campaign);
+    expect(Number(row.spend)).toBeCloseTo(1_000_000, 2);
+  });
+
+  it('R6/E-02: cabutKiriman menghapus entri PDT periode itu, DALAM transaksi yang sama', async () => {
+    const { clientId, cpId } = await fixtureDenganFactAds('Shopee', '2026-08-01', 'shopee_ads_cpc', 5_000_000, 40_000_000);
+    await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
+    const id = await kirimDanTerbitkanAds(cpId, '2026-08-01');
+    expect(await pdtMetricEntriesFor(cpId, '2026-08-01')).toHaveLength(1);
+
+    await cabutKiriman(sql, ownerActor(), id, 'salah data ads');
+    expect(await pdtMetricEntriesFor(cpId, '2026-08-01')).toHaveLength(0);
+  });
+
+  it('terbitkanUlangKiriman menulis ULANG (bukan menumpuk) angka pdt_fact_ads terkini — bukan duplikat generasi lama', async () => {
+    const { clientId, cpId } = await fixtureDenganFactAds('Shopee', '2026-08-01', 'shopee_ads_cpc', 5_000_000, 40_000_000);
+    const campaign = await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
+    const id = await kirimDanTerbitkanAds(cpId, '2026-08-01');
+    expect(Number((await pdtMetricEntriesFor(cpId, '2026-08-01'))[0].spend)).toBeCloseTo(5_000_000, 2);
+
+    await cabutKiriman(sql, ownerActor(), id, 'revisi angka ads');
+    // AM mengoreksi angka pdt_fact_ads periode ini (mis. re-upload) — biaya turun ke 2jt.
+    await sql`update pdt_fact_ads set biaya = 2_000_000 where client_platform_id = ${cpId} and periode = '2026-08-01'::date`;
+    await simpanInsightKiriman(sql, ownerActor(), id, {
+      ringkasan: 'Revisi setelah cabut', poin: ['x'], rekomendasi_tinggi: [],
+      rekomendasi_sedang: [], outlook: 'o', indikator: [],
+    });
+    await terbitkanUlangKiriman(sql, ownerActor(), id);
+
+    const rows = await pdtMetricEntriesFor(cpId, '2026-08-01');
+    expect(rows).toHaveLength(1); // ditulis ULANG, bukan ditumpuk jadi 2
+    expect(rows[0].campaign_id).toBe(campaign);
+    expect(Number(rows[0].spend)).toBeCloseTo(2_000_000, 2);
+  });
+
+  it('menghapus baris metric_entry_assets yang tertaut sebelum menghapus metric_entries (FK tanpa CASCADE)', async () => {
+    const { clientId, cpId } = await fixtureDenganFactAds('Shopee', '2026-08-01', 'shopee_ads_cpc', 5_000_000, 40_000_000);
+    await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
+    const id = await kirimDanTerbitkanAds(cpId, '2026-08-01');
+    expect(await pdtMetricEntriesFor(cpId, '2026-08-01')).toHaveLength(1);
+
+    // Cabut + Terbitkan-Ulang dua kali berturut-turut tidak boleh gagal FK
+    // (baris metric_entry_assets, kalau ada, harus ikut terhapus sebelum baris
+    // metric_entries induknya) — kampanye ini tidak punya Aset tertaut sama
+    // sekali (nol Creative Asset di-seed), jadi ini menguji jalur kosongnya
+    // tidak melempar error, bukan jalur ber-aset (yang butuh fixture M7 penuh).
+    await cabutKiriman(sql, ownerActor(), id, 'coba lagi');
+    await simpanInsightKiriman(sql, ownerActor(), id, {
+      ringkasan: 'r', poin: ['x'], rekomendasi_tinggi: [], rekomendasi_sedang: [], outlook: 'o', indikator: [],
+    });
+    await expect(terbitkanUlangKiriman(sql, ownerActor(), id)).resolves.toBeDefined();
+    expect(await pdtMetricEntriesFor(cpId, '2026-08-01')).toHaveLength(1);
   });
 });
 
