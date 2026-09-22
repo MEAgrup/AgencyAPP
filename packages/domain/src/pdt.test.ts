@@ -6400,6 +6400,20 @@ describeDb('M20 Gelombang C — insight + publikasi laporan PDT', () => {
       on conflict (employee_id) do nothing`;
   });
 
+  // WAJIB dihapus lagi (pola sama `PURGE_DIRECTOR` di atas): `notify_emit` resolver
+  // `leadsOfDivision` membaca employees ⋈ role_mappings (jabatan 'Account Lead',
+  // status_aktif) — baris Lead uji yang tertinggal di DB bersama menjadi PENERIMA KEDUA
+  // untuk setiap event ke lead Account di berkas tes lain yang berjalan sesudah berkas ini
+  // (fileParallelism: false, DB satu). Itulah yang memerahkan CI `db-and-migrations` sejak
+  // PR #497: bridge/livestream/recap.job/strategi "expected 1 got 2", padahal keempatnya
+  // hijau dalam isolasi. Baris anak ber-FK (pdt_laporan_insight.ditulis_oleh,
+  // pdt_laporan_publikasi.diterbitkan_oleh) sudah dibersihkan afterEach global di atas;
+  // notifications/audit_log tidak ber-FK ke employees.
+  afterAll(async () => {
+    if (!sql) return;
+    await sql`delete from employees where employee_id in (${accountLead().employeeId}, ${director().employeeId})`;
+  });
+
   async function fixture(platform: 'TikTok Shop' | 'Shopee' = 'TikTok Shop'): Promise<{ cpId: number; kirimanId: number }> {
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
