@@ -5187,7 +5187,16 @@ describeDb('rakitLaporanTiktok (sesi 34 lanjutan) — KPI basis net (Rule 15, GM
     expect(hasil.platform).toBe('tiktok');
     expect(hasil.clientPlatformId).toBe(cpId);
     expect(hasil.periodeAwalBulan).toBe('2026-07-01');
-    expect(hasil.kpi).toEqual({ gmv: 950_000, pesanan: 40, pengunjung: 2_000, cvr: 0.02 });
+    // barangPerPengunjung/kedalaman null: fixture tidak mengisi produk_diklik, dan
+    // kolom yang absen TIDAK boleh dibaca sebagai 0 (Rule 12).
+    expect(hasil.kpi).toEqual({
+      gmv: 950_000,
+      pesanan: 40,
+      pengunjung: 2_000,
+      cvr: 0.02,
+      barangPerPengunjung: null,
+      kedalaman: null,
+    });
     expect(hasil.benchmarkVersi).toBe(2); // versi 2 (G2-01-KUADRAN-SKU langkah 2, migrasi 20261104010000) sekarang aktif tertinggi
 
     const skorLangsung = await hitungSkorTiktok(sql, cpId, '2026-07-01');
@@ -5200,7 +5209,14 @@ describeDb('rakitLaporanTiktok (sesi 34 lanjutan) — KPI basis net (Rule 15, GM
   it('nol baris basis net ⇒ kpi seluruhnya null (BUKAN 0), insight tetap terisi (ringkasan generik, poin kosong)', async () => {
     const { cpId } = await fixture();
     const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
-    expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+    expect(hasil.kpi).toEqual({
+      gmv: null,
+      pesanan: null,
+      pengunjung: null,
+      cvr: null,
+      barangPerPengunjung: null,
+      kedalaman: null,
+    });
     expect(hasil.insight.ringkasan).toBe('Belum ada data GMV untuk periode ini.');
     expect(hasil.insight.poin).toEqual([]);
   });
@@ -5240,7 +5256,14 @@ describeDb('rakitLaporanShopee (sesi 34 lanjutan) — KPI basis siap_dikirim (Ru
     expect(hasil.schema).toBe('cdps.pdt.laporan.shopee.v1');
     expect(hasil.platform).toBe('shopee');
     // GMV TIDAK dikurangi refund (beda TikTok) — 800_000 apa adanya.
-    expect(hasil.kpi).toEqual({ gmv: 800_000, pesanan: 20, pengunjung: 1_000, cvr: 0.02 });
+    expect(hasil.kpi).toEqual({
+      gmv: 800_000,
+      pesanan: 20,
+      pengunjung: 1_000,
+      cvr: 0.02,
+      barangPerPengunjung: null,
+      kedalaman: null,
+    });
     expect('benchmarkVersi' in hasil).toBe(false);
 
     const skorLangsung = await hitungSkorShopee(sql, cpId, '2026-07-01');
@@ -5253,7 +5276,14 @@ describeDb('rakitLaporanShopee (sesi 34 lanjutan) — KPI basis siap_dikirim (Ru
   it('nol baris basis siap_dikirim ⇒ kpi seluruhnya null (BUKAN 0), insight tetap terisi', async () => {
     const { cpId } = await fixture();
     const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
-    expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+    expect(hasil.kpi).toEqual({
+      gmv: null,
+      pesanan: null,
+      pengunjung: null,
+      cvr: null,
+      barangPerPengunjung: null,
+      kedalaman: null,
+    });
     expect(hasil.insight.ringkasan).toBe('Belum ada data GMV untuk periode ini.');
   });
 
