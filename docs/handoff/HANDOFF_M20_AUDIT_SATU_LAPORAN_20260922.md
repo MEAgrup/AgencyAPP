@@ -112,11 +112,30 @@ dengan "Unduh Klien" milik AM untuk kiriman yang sama.
 
 ---
 
-## 4. Yang perlu ketokan pemilik pada PR Gelombang D
+## 4. Ketokan pemilik sesudah audit (2026-09-22 sore) — SUDAH DIJAWAB
 
-1. **R11.3** — untuk satu toko+periode dengan kiriman revisi (`menggantikan_kiriman_id`) yang
-   keduanya `[Terbit]`, klien melihat **hanya yang terbaru**. Ini tafsir sesi audit atas "1 report";
-   alternatifnya AM wajib **Cabut** yang lama secara manual sebelum menerbitkan revisi. Default
-   yang dipakai plan: otomatis tampil satu (yang terbaru).
-2. `periode_tipe` di DTO portal dikunci `'bulanan'` (kiriman PDT selalu bulanan) — teks kosong-state
-   portal "Laporan mingguan dan bulanan …" ikut disesuaikan.
+Pemilik menjawab di sesi yang sama:
+
+> *"Klien bisa melihat list report yang sudah selesai dari team. Kalau ada
+> perubahan dalam report, misalnya Agustus ada 2 versi, yang dilihat adalah
+> versi terbaru. Tapi kalau klien punya kontrak 3 bulan, dia bisa melihat 3
+> report yang berbeda periode."*
+
+Dimasukkan ke PRD M20 **R11.3** dan plan **D-01a/D-04**:
+
+| Aturan | Pelaksanaan |
+|---|---|
+| "sudah selesai dari team" | status publikasi `[Terbit]` |
+| satu periode = versi terbaru | kandidat = kiriman terakhir per `(toko, periode_mulai)`; kiriman lama tidak terdaftar dan tidak bisa dibuka lewat id; di dalam kiriman, narasi = revisi terpaku |
+| kontrak 3 bulan = 3 laporan | satu baris per (toko, periode), urut periode terbaru dulu |
+| kandidat terbaru dicabut | periode itu kosong bagi klien, tidak jatuh ke versi lama (asumsi sesi audit, dicatat `DECISIONS.md` `M20-R11-VERSI-TERBARU`) |
+
+Pertanyaan yang tersisa untuk PR Gelombang D hanya teknis: `periode_tipe` DTO
+portal dikunci `'bulanan'` (kiriman PDT selalu bulanan) dan teks kosong-state
+portal disesuaikan.
+
+Jawaban untuk pertanyaan pemilik *"apakah koreksi ini mengubah isi halaman M14
+menjadi hasil PDT?"* — **belum.** Sesi ini hanya mengubah dokumen + tes
+penjaga. Halaman Laporan portal masih membaca M14 sampai Gelombang D mendarat;
+saat itu halaman yang SAMA berganti isi ke PDT tanpa halaman baru. Halaman M14
+sisi internal (Direktori Klien) tetap sampai Gelombang G.

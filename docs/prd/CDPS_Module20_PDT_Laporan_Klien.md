@@ -207,13 +207,33 @@ jangan sampai ada 2 report yg bisa dilihat klien."*
    `pdt_laporan_insight`), **bukan** membangun permukaan kedua lalu mencabut
    yang lama belakangan. Tidak ada rentang waktu di mana keduanya hidup
    berdampingan di sisi klien.
-3. Untuk satu toko + satu periode, klien melihat **paling banyak satu**
-   dokumen terbit. Kiriman revisi (`menggantikan_kiriman_id`) yang diterbitkan
-   menggantikan tampilan kiriman yang digantikannya; yang digantikan tidak lagi
-   terdaftar untuk klien walau status publikasinya sendiri belum dicabut.
-   *(Pelaksanaannya di D-01: daftar portal memilih kiriman terbit terbaru per
-   `(client_platform_id, periode_mulai)`; kiriman yang menjadi
-   `menggantikan_kiriman_id` kiriman terbit lain tidak ditampilkan.)*
+3. **Isi daftar klien — diketok pemilik 2026-09-22 (sore):**
+   *"Klien bisa melihat list report yang sudah selesai dari team. Kalau ada
+   perubahan dalam report, misalnya Agustus ada 2 versi, yang dilihat adalah
+   versi terbaru. Tapi kalau klien punya kontrak 3 bulan, dia bisa melihat 3
+   report yang berbeda periode."*
+   - **"Sudah selesai"** = status publikasi `[Terbit]` (R5). Draf dan yang
+     dicabut tidak pernah terdaftar dan tidak bisa dibuka lewat id.
+   - **Satu baris per (toko/platform, periode).** Klien dengan kontrak 3 bulan
+     melihat **3 baris** untuk 3 periode berbeda; klien dengan dua toko (TikTok
+     Shop + Shopee) melihat satu baris per toko per periode. Daftar diurutkan
+     periode terbaru dulu.
+   - **Satu periode = satu versi, yaitu yang TERBARU.** "Versi" di PDT ada di
+     dua lapis, dan keduanya tunduk pada aturan ini: (a) antar-**kiriman** untuk
+     periode yang sama (kiriman revisi ber-`menggantikan_kiriman_id`, atau
+     kiriman ulang periode yang sama): hanya kiriman **terakhir** (`dikirim_pada`
+     terbesar) per `(client_platform_id, periode_mulai)` yang menjadi kandidat;
+     kiriman yang lebih lama **tidak lagi terdaftar dan tidak bisa dibuka** oleh
+     klien lewat id, walau status publikasinya sendiri masih `[Terbit]`; (b) di
+     dalam satu kiriman, narasi yang dibaca adalah revisi **terpaku**
+     `insight_revisi` (R4), bukan revisi terbaru yang belum diterbitkan.
+   - **Kandidat terbaru yang belum/tidak `[Terbit]` ⇒ periode itu KOSONG bagi
+     klien**, bukan jatuh ke versi lama. Cabut berarti "tarik laporan periode
+     ini dari klien"; versi lama yang sudah digantikan tidak pernah muncul
+     kembali dengan sendirinya. Kalau AM ingin klien kembali melihat sesuatu
+     untuk periode itu, AM menerbitkan (ulang) kandidat terbaru.
+   - Klien **tidak** melihat riwayat versi, nomor revisi, atau tanda "direvisi";
+     yang ia lihat hanya dokumen final periode itu.
 4. Ditegakkan di CI, bukan disiplin: `apps/api/src/lib/route-parity.test.ts`
    mengunci himpunan rute portal ber-`report|laporan|pdt` dan himpunan halaman
    `(portal)` ber-`laporan|report|pdt` **persis** dua-dua. PR yang menambah
@@ -369,3 +389,8 @@ jadi biaya menyimpannya nol dan ia jadi bukti riwayat.
   dua) hijau.
 - `packages/domain/src/client-portal.ts` nol rujukan `client_reports` sejak
   Gelombang D.
+- Tes R11.3: satu toko dengan dua kiriman `[Terbit]` untuk Agustus ⇒ daftar
+  klien memuat **satu** baris Agustus (kiriman terbaru), dan id kiriman lama
+  menjawab `[laporan tidak ditemukan]`; satu toko dengan tiga periode terbit ⇒
+  **tiga** baris; kandidat terbaru `[Dicabut]` ⇒ periode itu hilang, bukan
+  jatuh ke kiriman lama.
