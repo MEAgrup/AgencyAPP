@@ -314,13 +314,32 @@ describeDb('GET /pdt/laporan — real DB', () => {
     });
     // Shopee tahap SELALU null — mesin lama Shopee tidak punya konsep buyer-journey sama sekali.
     expect(body.tahap).toBeNull();
-    // "insight" Shopee — kanal DAN iklan belum lengkap ⇒ dua catatan; nol indikator ber-benchTiktok (asimetri asli).
+    // "insight" Shopee — narasi performa SAJA; nol indikator ber-benchTiktok (asimetri asli).
     expect(body.insight.ringkasan).toContain('GMV Rp. 800.000,00 dari 20 pesanan');
-    expect(body.insight.poin).toContain('Catatan: rincian kanal belum lengkap — sebagian sumber GMV belum punya penulis fakta PDT.');
     expect(body.insight.poin).toContain('Iklan: belanja Rp. 100.000,00 → GMV Rp. 300.000,00 (ROAS 3,00x).');
-    expect(body.insight.poin).toContain('Catatan: rincian iklan belum lengkap — sebagian sumber iklan legacy belum punya modul PDT.');
     expect(body.insight.poin).toContain('LIVE: 1 sesi → Rp. 400.000,00.');
     expect(body.insight.poin).toContain('Afiliasi: 1 dari 1 kreator produktif, GMV Rp. 150.000,00.');
     expect(body.insight.indikator.some((i: { nama: string }) => i.nama === 'Target ROAS Iklan (GMV Max)')).toBe(false);
+
+    // M20 R2 — caveat kelengkapan TIDAK BOLEH ada di `insight`. `insight` ikut
+    // beku ke `pdt_laporan_kiriman.payload`, jadi kalimat yang duduk di sana
+    // akan terbit ke klien begitu permukaan laporan klien dibangun. Ia hidup di
+    // blok `kelengkapan`, yang mode render `klien` tidak bangun sama sekali.
+    expect(body.insight.poin.some((t: string) => /belum lengkap/i.test(t))).toBe(false);
+    expect(body.insight.poin.some((t: string) => t.startsWith('Catatan:'))).toBe(false);
+
+    // Toko Shopee ini kanal DAN iklan sama-sama belum lengkap ⇒ dua baris.
+    expect(body.kelengkapan.semua_lengkap).toBe(false);
+    const kelengkapan = Object.fromEntries(
+      body.kelengkapan.baris.map((b: { bagian: string }) => [b.bagian, b]),
+    );
+    expect(kelengkapan.kanal.lengkap).toBe(false);
+    expect(kelengkapan.kanal.modul_hilang).toEqual(['shopee_voucher', 'shopee_chat', 'meta_ads', 'shopee_video']);
+    expect(kelengkapan.kanal.alasan).toContain('TIDAK berarti nol');
+    expect(kelengkapan.iklan.lengkap).toBe(false);
+    expect(kelengkapan.iklan.modul_hilang).toEqual(['ads_banner']);
+    expect(kelengkapan.iklan.alasan).toContain('TIDAK berarti nol');
+    // Shopee `tahap` null ⇒ nol baris tahap: bagian yang tidak ada tidak punya kelengkapan.
+    expect(kelengkapan.tahap).toBeUndefined();
   });
 });
