@@ -12,10 +12,18 @@
  * memakai `db()` (koneksi service-role, sama pola `commitUploadBatch`), BUKAN
  * `readAsActor` — RLS akan mengosongkan `pdt_benchmark` kalau dipakai di sini.
  *
- * **v1 SENGAJA sempit** (keputusan pemilik, `docs/DECISIONS.md`): payload
- * hanya KPI ringkas + skor. Sepuluh bagian mesin laporan lama lainnya (kanal,
- * iklan, live, video, produk, afiliasi, tokopedia, ads_manager, tahap,
- * insight) belum ada di sini.
+ * **Isi payload (per 2026-09-22).** Docblock ini dulu menulis "v1 SENGAJA
+ * sempit: payload hanya KPI ringkas + skor" — itu sudah tidak benar sejak
+ * LAPORAN-GRAFIK-1/LAPORAN-PARITAS-HTML/KUADRAN-SHOPEE/KEDALAMAN-JELAJAH
+ * (`docs/DECISIONS.md`). Yang dikirim sekarang: `kpi` (termasuk kedalaman
+ * jelajah), `harian`, `kanal`, `iklan`, `kampanye`, `live`, `sesi_live`,
+ * `video`, `produk` (kuadran KEDUA platform + mode relatif + funnel per
+ * produk), `afiliasi`, `kreator`, `promo` dan `layanan` (Shopee),
+ * `tahap` (TikTok), `skor`, `insight`.
+ *
+ * Yang MASIH belum ada, dan alasannya ada di `docs/DECISIONS.md`, bukan
+ * "belum sempat": voucher (nol modul parser), cancel rate & retur (nol kolom
+ * di `pdt_fact_shop_daily`), dan Tokopedia (nol modul, nol baris fakta).
  */
 import { pdt } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
