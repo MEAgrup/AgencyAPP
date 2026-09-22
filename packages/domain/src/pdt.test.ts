@@ -38,10 +38,13 @@ import {
   planPdtPurgeTick,
   planPdtReparseTick,
   platformKeVokabPdt,
+  bacaKirimanLaporanPdt,
   bacaLaporanPdt,
   kirimLaporanPdt,
   listBenchmarkVersi,
   listRiwayatBatchPdt,
+  MSG_KIRIMAN_NOT_FOUND,
+  MSG_LAPORAN_FORBIDDEN,
   riwayatKirimanPdt,
   tambahVersiBenchmark,
   previewUploadBatch,
@@ -6293,6 +6296,60 @@ describeDb('riwayatKirimanPdt (Flow B langkah 5) — daftar kiriman satu toko, t
     expect(riwayatB).toHaveLength(2);
     expect(riwayatA.every((r) => r.clientPlatformId === cpA)).toBe(true);
     expect(riwayatB.every((r) => r.clientPlatformId === cpB)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bacaKirimanLaporanPdt (M20 B-03) — snapshot BEKU satu kiriman by id, dasar
+// rute render HTML. Beda dari riwayatKirimanPdt: mengikutkan `laporan`
+// (payload penuh), dan permission-nya canKirimLaporan DITAMBAH OD read-only.
+// ---------------------------------------------------------------------------
+describeDb('bacaKirimanLaporanPdt (M20 B-03) — snapshot beku satu kiriman, dasar render', () => {
+  async function fixture(platform: 'TikTok Shop' | 'Shopee'): Promise<{ cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, platform);
+    return { cpId };
+  }
+
+  it('kiriman_id tidak ada ⇒ NotFoundError, pesan MSG_KIRIMAN_NOT_FOUND', async () => {
+    await expect(bacaKirimanLaporanPdt(sql, ownerActor(), 999_999_999)).rejects.toThrow(MSG_KIRIMAN_NOT_FOUND);
+  });
+
+  it('AM bukan pemilik dan bukan OD ⇒ ForbiddenError, pesan MSG_LAPORAN_FORBIDDEN', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const dikirim = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    await expect(bacaKirimanLaporanPdt(sql, otherAm(), dikirim.id)).rejects.toThrow(MSG_LAPORAN_FORBIDDEN);
+  });
+
+  it('OD (read-only) boleh membaca — PRD M20 §5 "Baca render internal … + OD"', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const dikirim = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    const hasil = await bacaKirimanLaporanPdt(sql, od(), dikirim.id);
+    expect(hasil.id).toBe(dikirim.id);
+    expect(hasil.clientPlatformId).toBe(cpId);
+  });
+
+  it('AM pemilik, Lead, dan Director boleh membaca', async () => {
+    const { cpId } = await fixture('Shopee');
+    const dikirim = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    await expect(bacaKirimanLaporanPdt(sql, ownerActor(), dikirim.id)).resolves.toBeTruthy();
+    await expect(bacaKirimanLaporanPdt(sql, accountLead(), dikirim.id)).resolves.toBeTruthy();
+    await expect(bacaKirimanLaporanPdt(sql, director(), dikirim.id)).resolves.toBeTruthy();
+  });
+
+  it('laporan yang dikembalikan = payload yang dibekukan persis (TikTok)', async () => {
+    const { cpId } = await fixture('TikTok Shop');
+    const dikirim = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    const hasil = await bacaKirimanLaporanPdt(sql, ownerActor(), dikirim.id);
+    expect(hasil.laporan).toEqual(dikirim.laporan);
+  });
+
+  it('laporan yang dikembalikan = payload yang dibekukan persis (Shopee)', async () => {
+    const { cpId } = await fixture('Shopee');
+    const dikirim = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    const hasil = await bacaKirimanLaporanPdt(sql, ownerActor(), dikirim.id);
+    expect(hasil.laporan).toEqual(dikirim.laporan);
   });
 });
 

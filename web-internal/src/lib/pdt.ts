@@ -670,6 +670,15 @@ export async function riwayatKirimanPdt(clientPlatformId: number): Promise<PdtKi
   return res.data;
 }
 
+/** M20 B-03/B-04 — mirror `reportHtmlUrl` (`lib/report.ts`, M14). `<a href>`
+ *  langsung (bukan `api.get`) supaya "Unduh" memicu Save As browser lewat
+ *  Content-Disposition, bukan JSON fetch. */
+export type PdtLaporanRenderMode = 'klien' | 'internal';
+
+export function pdtLaporanHtmlUrl(kirimanId: number, mode: PdtLaporanRenderMode, download = false): string {
+  return `/api/v1/account/pdt/laporan/kiriman/${kirimanId}/html?mode=${mode}${download ? '&download=1' : ''}`;
+}
+
 // G2-02 — admin kalibrasi `pdt_benchmark` (GET/POST /account/pdt/benchmark,
 // Director-only, `pdt.canKelolaBenchmark`). Preseden HURUF PER HURUF
 // `PxEligibilityPolicy`/`listEligibilityPolicy`/`createEligibilityPolicy`

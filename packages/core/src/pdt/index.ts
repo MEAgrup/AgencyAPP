@@ -22,7 +22,9 @@
  * ember `no_data`) — plus ambang relatif percentile keduanya.
  * `verdict.ts` untuk mesin verdict Shopee (G4-03 Tahap 1, Rule 26-32 Flow C)
  * — katalog aksi BARU membaca `pdt_fact_*` langsung, terpisah dari
- * `pilarkatalog.ts` (katalog lama, payload baseline).
+ * `pilarkatalog.ts` (katalog lama, payload baseline). `render.ts` untuk
+ * renderer HTML payload "laporan" (B-01/B-02) — port M14's renderer ke PDT,
+ * satu renderer untuk kedua platform.
  */
 export * from './types';
 export * from './modules';
@@ -39,3 +41,4 @@ export * from './laporan';
 export * from './insight-edit';
 export * from './kuadran';
 export * from './verdict';
+export * from './render';
