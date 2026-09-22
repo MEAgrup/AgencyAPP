@@ -139,3 +139,23 @@ menjadi hasil PDT?"* — **belum.** Sesi ini hanya mengubah dokumen + tes
 penjaga. Halaman Laporan portal masih membaca M14 sampai Gelombang D mendarat;
 saat itu halaman yang SAMA berganti isi ke PDT tanpa halaman baru. Halaman M14
 sisi internal (Direktori Klien) tetap sampai Gelombang G.
+
+---
+
+## 5. Penutupan sesi (2026-09-22 malam) — POSISI UNTUK SESI BERIKUTNYA
+
+Perintah pemilik: *"merge semua PR, jalankan perbaikan, jalankan migrasi."* Dieksekusi:
+
+| Langkah | Hasil |
+|---|---|
+| PR #500 (perbaikan CI `db-and-migrations`) | merge squash `b68c968`; `main` hijau lagi |
+| PR #499 (audit + R11/R11.3 + tes penjaga) | merge squash `32c534b` |
+| Migrasi C-01 → live `CDPS SG` | `apply_migration`, versi live `20260922151204`; 186 tabel / 36 mesin / fungsi, policy, trigger ada |
+| `M20-C01-LIVE` | ✅ ditutup (DECISIONS Decided 2026-09-22 malam) |
+
+**Yang dilanjutkan di chat berikutnya: Gelombang D** — `docs/plan/PLAN_PORT_M14_KE_PDT.md` §3
+Gelombang D (D-01, D-01a, D-02, D-04, D-05; D-00 dan D-03 selesai), aturan di
+`docs/prd/CDPS_Module20_PDT_Laporan_Klien.md` R10 + R11 (termasuk R11.3). Nol blocker.
+Berkas yang akan disentuh: `packages/domain/src/client-portal.ts` (+ tes), `apps/api/src/lib/wire.ts`
+tidak berubah bentuk, `web-client-portal` hanya teks. Tes penjaga R11 di
+`apps/api/src/lib/route-parity.test.ts` wajib tetap hijau.
