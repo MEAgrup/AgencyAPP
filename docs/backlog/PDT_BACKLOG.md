@@ -973,6 +973,16 @@ ber-paket-terpurge muncul di daftar laporan, bukan hilang.
 > `M14-VS-PDT-DUPLIKASI`. Kenyataan live saat audit: `client_reports` 0 baris, `pdt_laporan_kiriman`
 > 0 baris, `pdt_upload_batch` 14 — M14 belum pernah dipakai di produksi, tapi ia tetap satu-satunya
 > jalur pengiriman ke klien yang pernah dibangun, jadi ia dicabut SEKALI di Gelombang G, bukan dicicil.
+>
+> **Update 2026-09-22 sore — posisi M20 + satu koreksi bentuk.** Gelombang A/B/C M20 sudah merge
+> (PR #494/#496/#497): renderer dua mode, rute HTML, `pdt_laporan_insight`/`pdt_laporan_publikasi`,
+> mesin `pdt_laporan`. **Migrasi C-01 belum diterapkan ke live** (`M20-C01-LIVE`, DECISIONS Open).
+> Gelombang D **direvisi**: requirement pemilik "klien hanya melihat 1 bagian report" ⇒ D
+> **mengganti sumber** halaman `/laporan` portal + rute `client-portal/reports*` dari
+> `client_reports` ke `pdt_laporan_*`, bukan membangun halaman "Laporan PDT" kedua (PRD M20 R11,
+> dikunci tes di `route-parity.test.ts`). Jalur portal M14 berhenti dipanggil di D; kode M14 tetap
+> sampai G. Rincian: `docs/plan/PLAN_PORT_M14_KE_PDT.md` §3 Gelombang D dan
+> `docs/handoff/HANDOFF_M20_AUDIT_SATU_LAPORAN_20260922.md`.
 
 ### G2-01 · ⚠️ Membalik invarian `client_reports` yang sedang berjalan (PDT-21)
 Hari ini `client_reports` **adalah** snapshot beku saat **dibuat** (`trg_client_reports_frozen`),
