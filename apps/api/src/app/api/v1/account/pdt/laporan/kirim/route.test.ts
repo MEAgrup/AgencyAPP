@@ -164,7 +164,14 @@ describeDb('POST /pdt/laporan/kirim — real DB', () => {
     expect(body.dikirim_oleh).toBe('ZZ-PDTKIR-AM');
     expect(body.menggantikan_kiriman_id).toBeNull();
     expect(body.laporan.schema).toBe('cdps.pdt.laporan.tiktok.v1');
-    expect(body.laporan.kpi).toEqual({ gmv: 950_000, pesanan: 40, pengunjung: 2_000, cvr: 0.02 });
+    expect(body.laporan.kpi).toEqual({
+      gmv: 950_000,
+      pesanan: 40,
+      pengunjung: 2_000,
+      cvr: 0.02,
+      barang_per_pengunjung: null,
+      kedalaman: null,
+    });
 
     const rows = await sql`select id from pdt_laporan_kiriman where id = ${body.id}`;
     expect(rows).toHaveLength(1);
