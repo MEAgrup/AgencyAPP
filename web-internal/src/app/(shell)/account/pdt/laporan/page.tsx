@@ -166,6 +166,7 @@ import {
   type PdtLaporanKiriman,
   type PdtLaporanRekomendasi,
   type PdtTahapSatuan,
+  pdtLaporanHtmlUrl,
   riwayatKirimanPdt,
 } from '@/lib/pdt';
 import { formatIDR } from '@/lib/money';
@@ -1747,6 +1748,7 @@ export default function LaporanPdtPage() {
                       <th>Dikirim Pada</th>
                       <th>Dikirim Oleh</th>
                       <th>Keterangan</th>
+                      <th>Lihat / Unduh</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1759,6 +1761,18 @@ export default function LaporanPdtPage() {
                           {k.menggantikan_kiriman_id !== null
                             ? `Revisi — menggantikan #${k.menggantikan_kiriman_id}`
                             : 'Kiriman pertama'}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          {/* M20 B-04 — pola sama ReportPanel.tsx (M14): Lihat vs
+                              Unduh bukan sinonim (Lihat buka tab, Unduh memaksa
+                              Save As lewat Content-Disposition), dan Klien vs
+                              Internal harus dua tombol terpisah karena blok
+                              internal (kelengkapan/skor/benchmark) tidak pernah
+                              boleh nyasar ke berkas yang dikira "klien". */}
+                          <a className="btn btnGhost btnSm" href={pdtLaporanHtmlUrl(k.id, 'klien')} target="_blank" rel="noreferrer">Lihat Klien</a>{' '}
+                          <a className="btn btnGhost btnSm" href={pdtLaporanHtmlUrl(k.id, 'klien', true)}>Unduh Klien</a>{' '}
+                          <a className="btn btnGhost btnSm" href={pdtLaporanHtmlUrl(k.id, 'internal')} target="_blank" rel="noreferrer">Lihat Internal</a>{' '}
+                          <a className="btn btnGhost btnSm" href={pdtLaporanHtmlUrl(k.id, 'internal', true)}>Unduh Internal</a>
                         </td>
                       </tr>
                     ))}
