@@ -14,10 +14,12 @@
  * (`pdt_fact_ads` dari `shopee_ads_live`, G1-09 sub-langkah 2b-ii), `skor.ts`
  * untuk mesin skor TikTok+Shopee (G2-01, Rule 21, enam dimensi via
  * `renormalisasiDimensi`), `laporan.ts` untuk payload "laporan" v1 (Rule 21,
- * KPI ringkas + skor — SEBELAS dari duabelas bagian mesin lama masih di luar
- * cakupan, lihat docblock berkas), `insight-edit.ts` untuk validasi draf
- * insight AM (G2-01-INSIGHT-EDIT), `kuadran.ts` untuk klasifikasi kuadran SKU
- * TikTok (G2-01-KUADRAN-SKU langkah 2, benchmark `quad_klik`/`quad_cvr`).
+ * KPI ringkas + kedalaman jelajah + skor + sembilan bagian rincian yang
+ * setara mesin HTML lama, lihat docblock berkas), `insight-edit.ts` untuk
+ * validasi draf insight AM (G2-01-INSIGHT-EDIT), `kuadran.ts` untuk
+ * klasifikasi kuadran SKU DUA platform — TikTok (benchmark
+ * `quad_klik`/`quad_cvr`, dua band) dan Shopee (ambang absolut, tiga band,
+ * ember `no_data`) — plus ambang relatif percentile keduanya.
  * `verdict.ts` untuk mesin verdict Shopee (G4-03 Tahap 1, Rule 26-32 Flow C)
  * — katalog aksi BARU membaca `pdt_fact_*` langsung, terpisah dari
  * `pilarkatalog.ts` (katalog lama, payload baseline).

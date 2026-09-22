@@ -9198,6 +9198,30 @@ export interface PdtLaporanKpiWire {
   pesanan: number | null;
   pengunjung: number | null;
   cvr: number | null;
+  /** Σ produk_diklik ÷ Σ pengunjung — berapa BARANG yang dibuka dalam satu KUNJUNGAN (penyebutnya kunjungan harian, bukan pengunjung unik sebulan; lihat `pdt.KEDALAMAN_DALAM_MIN`). Terisi di KEDUA platform; `null` berarti "tidak diketahui", bukan nol. */
+  barang_per_pengunjung: number | null;
+  /** `'dalam' | 'sedang' | 'dangkal'` — pembacaan `barang_per_pengunjung` terhadap ambang `@cdps/core`. `null` bila angkanya `null`. */
+  kedalaman: string | null;
+}
+
+/**
+ * `l.kpi` di-map EKSPLISIT, bukan di-spread. Sebelum ada
+ * `barangPerPengunjung`/`kedalaman` seluruh field KPI kebetulan satu kata
+ * sehingga `{ ...l.kpi }` lolos; begitu satu field camelCase lahir, spread
+ * mengirim `barangPerPengunjung` ke wire dan FE yang membaca
+ * `barang_per_pengunjung` diam-diam menerima `undefined` — bug kelas O43
+ * (route menjawab 200, angkanya hilang). `wire.ts` adalah SATU-SATUNYA tempat
+ * batas camelCase↔snake_case diterjemahkan, jadi ia diterjemahkan di sini.
+ */
+function pdtLaporanKpiToWire(k: pdtCore.PdtLaporanKpiRingkas): PdtLaporanKpiWire {
+  return {
+    gmv: k.gmv,
+    pesanan: k.pesanan,
+    pengunjung: k.pengunjung,
+    cvr: k.cvr,
+    barang_per_pengunjung: k.barangPerPengunjung,
+    kedalaman: k.kedalaman,
+  };
 }
 
 export interface PdtLaporanDimensiWire {
@@ -9345,10 +9369,194 @@ export interface PdtLaporanProdukDistribusiWire {
   gmv: number | null;
 }
 
-/** `null` (whole object) untuk Shopee SELALU — methodology kuadran beda total dari TikTok, belum ada modul PDT sumber data (lihat docblock `pdt.bangunLaporanProduk`, `@cdps/core`). */
-export interface PdtLaporanProdukWire {
+/** Ambang kuadran mode relatif — percentile p25/p75 katalog periode ini. `n` = cacah baris AKTIF yang membentuknya. */
+export interface PdtLaporanProdukAmbangWire {
+  traffic_rendah: number | null;
+  traffic_tinggi: number | null;
+  cr_rendah: number | null;
+  cr_tinggi: number | null;
+  n: number;
+}
+
+/** Panel "Mode Relatif" mesin lama — distribusi kedua atas baris yang SAMA, ambangnya percentile alih-alih benchmark/absolut. `null` bila nol baris aktif periode ini. */
+export interface PdtLaporanProdukRelatifWire {
   distribusi: Record<string, PdtLaporanProdukDistribusiWire>;
+  ambang: PdtLaporanProdukAmbangWire;
+}
+
+/**
+ * `distribusi` = mode TERSIMPAN (benchmark untuk TikTok, absolut untuk Shopee)
+ * — `null` bila nol baris periode ini pernah diklasifikasi. `relatif` = panel
+ * kedua, dihitung saat laporan dirakit dan TIDAK disimpan. Kedua platform kini
+ * mengisi keduanya (KUADRAN-SHOPEE, `docs/DECISIONS.md`).
+ */
+export interface PdtLaporanProdukWire {
+  distribusi: Record<string, PdtLaporanProdukDistribusiWire> | null;
   top_aksi: PdtLaporanProdukItemWire[];
+  top: PdtLaporanProdukTopItemWire[];
+  relatif: PdtLaporanProdukRelatifWire | null;
+}
+
+export interface PdtLaporanHarianTitikWire {
+  tanggal: string;
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  cvr: number | null;
+}
+
+/**
+ * `null` = nol baris `pdt_fact_shop_daily` di periode ini (bukan objek kosong).
+ * `titik` HANYA memuat hari yang benar-benar ada barisnya — hari yang absen
+ * TIDAK diisi nol (Rule 12), jadi grafik garisnya boleh berlubang dan
+ * `hari_terisi` menyebut cakupan sebenarnya. Lihat docblock
+ * `pdt.PdtLaporanHarian`, `@cdps/core`.
+ */
+export interface PdtLaporanHarianWire {
+  titik: PdtLaporanHarianTitikWire[];
+  hari_terisi: number;
+  gmv_tertinggi: PdtLaporanHarianTitikWire | null;
+  gmv_terendah: PdtLaporanHarianTitikWire | null;
+  gmv_rata_harian: number | null;
+}
+
+/** Satu baris "Top Produk by GMV" — LINTAS kuadran. `kuadran` `null` = belum/tidak terklasifikasi (SELURUH baris Shopee). */
+export interface PdtLaporanProdukTopItemWire {
+  nama_produk: string | null;
+  platform_product_id: string | null;
+  gmv: number | null;
+  klik: number | null;
+  /** Sumbu-X kuadran: klik (TikTok) / kunjungan halaman produk (Shopee). */
+  traffic: number | null;
+  /** Tayangan kartu produk di feed/pencarian — TAHAP FUNNEL DI ATAS `traffic`, bukan versi lain dari angka yang sama. */
+  impresi: number | null;
+  /** `klik ÷ impresi`. */
+  ctr: number | null;
+  cvr: number | null;
+  kuadran: string | null;
+}
+
+export interface PdtLaporanKreatorItemWire {
+  handle: string;
+  gmv: number | null;
+  gmv_live: number | null;
+  gmv_video: number | null;
+  pesanan: number | null;
+  aov: number | null;
+  jumlah_live: number | null;
+  jumlah_video: number | null;
+}
+
+/** Daftar per-kreator di balik ringkasan `afiliasi` — "Top 10 Creator" mesin lama. `null` = nol baris kreator periode ini. */
+export interface PdtLaporanKreatorWire {
+  top: PdtLaporanKreatorItemWire[];
+  total_kreator: number;
+  kontribusi_top: number | null;
+}
+
+export interface PdtLaporanSesiLiveItemWire {
+  platform_content_id: string;
+  creator_handle: string | null;
+  akun_toko: boolean;
+  waktu_posting: string | null;
+  durasi_detik: number | null;
+  vv: number | null;
+  gmv: number | null;
+  gmv_per_jam: number | null;
+  pengikut_baru: number | null;
+  klik_produk: number | null;
+}
+
+/** Daftar per-sesi di balik ringkasan `live` — "Top 10 Sesi" mesin lama. `null` = nol sesi periode ini. */
+export interface PdtLaporanSesiLiveWire {
+  top: PdtLaporanSesiLiveItemWire[];
+  total_sesi: number;
+  kontribusi_top: number | null;
+}
+
+export interface PdtLaporanKampanyeItemWire {
+  sumber: string;
+  kampanye_id: string;
+  biaya: number;
+  gmv: number | null;
+  roas: number | null;
+  tayangan: number | null;
+  klik: number | null;
+  pesanan: number | null;
+  ctr: number | null;
+  cpc: number | null;
+}
+
+/** Daftar per-kampanye di balik ringkasan `iklan` — "Per Kampanye" mesin lama. `null` = nol baris iklan periode ini. */
+export interface PdtLaporanKampanyeWire {
+  top: PdtLaporanKampanyeItemWire[];
+  total_kampanye: number;
+  tanpa_hasil: number;
+  biaya_tanpa_hasil: number | null;
+}
+
+export interface PdtLaporanPromoAngkaWire {
+  penjualan_dibuat: number | null;
+  penjualan_siap_dikirim: number | null;
+  pesanan_dibuat: number | null;
+  pesanan_siap_dikirim: number | null;
+}
+
+export interface PdtLaporanPromoTipeWire extends PdtLaporanPromoAngkaWire {
+  tipe: string;
+}
+
+export interface PdtLaporanPromoFlashSaleWire extends PdtLaporanPromoAngkaWire {
+  produk_dilihat: number | null;
+  produk_diklik: number | null;
+  ctr: number | null;
+  cvr: number | null;
+}
+
+/**
+ * §8 mesin Shopee lama. `null` untuk TikTok SELALU (`pdt_fact_promo` nol
+ * penulis fakta TikTok). `diskon_per_tipe` adalah KOMPONEN yang boleh saling
+ * tumpang tindih — JANGAN dijumlah, `diskon_total` sudah menjawabnya. Kedua
+ * `kontribusi_gmv_*` juga tidak boleh dijumlah (satu produk bisa ikut
+ * keduanya). Lihat docblock `pdt.bangunLaporanPromo`, `@cdps/core`.
+ */
+export interface PdtLaporanPromoWire {
+  diskon_total: PdtLaporanPromoAngkaWire | null;
+  diskon_per_tipe: PdtLaporanPromoTipeWire[];
+  flash_sale: PdtLaporanPromoFlashSaleWire | null;
+  kontribusi_gmv_diskon: number | null;
+  kontribusi_gmv_flash_sale: number | null;
+}
+
+/** Seluruh rasio di sini PECAHAN (0..1) — kolom "%" sumbernya sudah dinormalkan di `@cdps/core`, FE tidak perlu aturan format kedua. */
+export interface PdtLaporanLayananChatWire {
+  baris_sumber: number;
+  pengunjung: number | null;
+  chat_masuk: number | null;
+  chat_dibalas: number | null;
+  response_rate: number | null;
+  waktu_respon_detik: number | null;
+  csat: number | null;
+  total_pesanan: number | null;
+  penjualan: number | null;
+  konversi_chat_dibalas: number | null;
+}
+
+export interface PdtLaporanPenaltiWire {
+  poin: number;
+  deskripsi: string;
+  durasi: string;
+}
+
+/**
+ * §9 mesin Shopee lama. `null` untuk TikTok SELALU. Cancel rate dan retur
+ * mesin lama TIDAK ADA di sini — `pdt_fact_shop_daily` tidak punya kolom
+ * pembatalan/retur sama sekali (lihat docblock `pdt.bangunLaporanLayanan`).
+ */
+export interface PdtLaporanLayananWire {
+  chat: PdtLaporanLayananChatWire | null;
+  poin_penalti_total: number | null;
+  penalti: PdtLaporanPenaltiWire[];
 }
 
 export interface PdtLaporanWire {
@@ -9358,17 +9566,40 @@ export interface PdtLaporanWire {
   periode_awal_bulan: string;
   generated_at: string;
   kpi: PdtLaporanKpiWire;
+  harian: PdtLaporanHarianWire | null;
   kanal: PdtLaporanKanalWire;
   iklan: PdtLaporanIklanWire | null;
   live: PdtLaporanLiveWire | null;
   video: PdtLaporanVideoWire | null;
   produk: PdtLaporanProdukWire | null;
   afiliasi: PdtLaporanAfiliasiWire | null;
+  kreator: PdtLaporanKreatorWire | null;
+  sesi_live: PdtLaporanSesiLiveWire | null;
+  kampanye: PdtLaporanKampanyeWire | null;
+  /** `null` untuk TikTok SELALU. */
+  promo: PdtLaporanPromoWire | null;
+  /** `null` untuk TikTok SELALU. */
+  layanan: PdtLaporanLayananWire | null;
   tahap: PdtLaporanTahapWire | null;
   skor: PdtLaporanSkorWire;
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
   insight: PdtLaporanInsightWire;
+}
+
+function pdtLaporanHarianTitikToWire(t: pdtCore.PdtLaporanHarianTitik): PdtLaporanHarianTitikWire {
+  return { tanggal: t.tanggal, gmv: t.gmv, pesanan: t.pesanan, pengunjung: t.pengunjung, cvr: t.cvr };
+}
+
+function pdtLaporanHarianToWire(h: pdtCore.PdtLaporanHarian | null): PdtLaporanHarianWire | null {
+  if (h == null) return null;
+  return {
+    titik: h.titik.map(pdtLaporanHarianTitikToWire),
+    hari_terisi: h.hariTerisi,
+    gmv_tertinggi: h.gmvTertinggi == null ? null : pdtLaporanHarianTitikToWire(h.gmvTertinggi),
+    gmv_terendah: h.gmvTerendah == null ? null : pdtLaporanHarianTitikToWire(h.gmvTerendah),
+    gmv_rata_harian: h.gmvRataHarian,
+  };
 }
 
 function pdtLaporanSkorToWire(s: pdtCore.PdtSkorHasilTiktok | pdtCore.PdtSkorHasilShopee): PdtLaporanSkorWire {
@@ -9424,6 +9655,102 @@ function pdtLaporanProdukToWire(p: pdtCore.PdtLaporanProduk | null): PdtLaporanP
     top_aksi: p.topAksi.map((x) => ({
       nama_produk: x.namaProduk, platform_product_id: x.platformProductId, gmv: x.gmv, klik: x.klik, cvr: x.cvr, kuadran: x.kuadran,
     })),
+    relatif: p.relatif == null ? null : {
+      distribusi: p.relatif.distribusi,
+      ambang: {
+        traffic_rendah: p.relatif.ambang.trafficRendah,
+        traffic_tinggi: p.relatif.ambang.trafficTinggi,
+        cr_rendah: p.relatif.ambang.crRendah,
+        cr_tinggi: p.relatif.ambang.crTinggi,
+        n: p.relatif.ambang.n,
+      },
+    },
+    top: p.top.map((x) => ({
+      nama_produk: x.namaProduk, platform_product_id: x.platformProductId, gmv: x.gmv, klik: x.klik,
+      traffic: x.traffic, impresi: x.impresi, ctr: x.ctr, cvr: x.cvr, kuadran: x.kuadran,
+    })),
+  };
+}
+
+function pdtLaporanKreatorToWire(k: pdtCore.PdtLaporanKreator | null): PdtLaporanKreatorWire | null {
+  if (k == null) return null;
+  return {
+    top: k.top.map((x) => ({
+      handle: x.handle, gmv: x.gmv, gmv_live: x.gmvLive, gmv_video: x.gmvVideo,
+      pesanan: x.pesanan, aov: x.aov, jumlah_live: x.jumlahLive, jumlah_video: x.jumlahVideo,
+    })),
+    total_kreator: k.totalKreator,
+    kontribusi_top: k.kontribusiTop,
+  };
+}
+
+function pdtLaporanSesiLiveToWire(s: pdtCore.PdtLaporanSesiLive | null): PdtLaporanSesiLiveWire | null {
+  if (s == null) return null;
+  return {
+    top: s.top.map((x) => ({
+      platform_content_id: x.platformContentId, creator_handle: x.creatorHandle, akun_toko: x.akunToko,
+      waktu_posting: x.waktuPosting, durasi_detik: x.durasiDetik, vv: x.vv, gmv: x.gmv,
+      gmv_per_jam: x.gmvPerJam, pengikut_baru: x.pengikutBaru, klik_produk: x.klikProduk,
+    })),
+    total_sesi: s.totalSesi,
+    kontribusi_top: s.kontribusiTop,
+  };
+}
+
+function pdtLaporanKampanyeToWire(k: pdtCore.PdtLaporanKampanye | null): PdtLaporanKampanyeWire | null {
+  if (k == null) return null;
+  return {
+    top: k.top.map((x) => ({
+      sumber: x.sumber, kampanye_id: x.kampanyeId, biaya: x.biaya, gmv: x.gmv, roas: x.roas,
+      tayangan: x.tayangan, klik: x.klik, pesanan: x.pesanan, ctr: x.ctr, cpc: x.cpc,
+    })),
+    total_kampanye: k.totalKampanye,
+    tanpa_hasil: k.tanpaHasil,
+    biaya_tanpa_hasil: k.biayaTanpaHasil,
+  };
+}
+
+const pdtPromoAngkaToWire = (a: pdtCore.PdtLaporanPromoAngka): PdtLaporanPromoAngkaWire => ({
+  penjualan_dibuat: a.penjualanDibuat,
+  penjualan_siap_dikirim: a.penjualanSiapDikirim,
+  pesanan_dibuat: a.pesananDibuat,
+  pesanan_siap_dikirim: a.pesananSiapDikirim,
+});
+
+function pdtLaporanPromoToWire(p: pdtCore.PdtLaporanPromo | null): PdtLaporanPromoWire | null {
+  if (p == null) return null;
+  return {
+    diskon_total: p.diskonTotal == null ? null : pdtPromoAngkaToWire(p.diskonTotal),
+    diskon_per_tipe: p.diskonPerTipe.map((t) => ({ tipe: t.tipe, ...pdtPromoAngkaToWire(t) })),
+    flash_sale: p.flashSale == null ? null : {
+      ...pdtPromoAngkaToWire(p.flashSale),
+      produk_dilihat: p.flashSale.produkDilihat,
+      produk_diklik: p.flashSale.produkDiklik,
+      ctr: p.flashSale.ctr,
+      cvr: p.flashSale.cvr,
+    },
+    kontribusi_gmv_diskon: p.kontribusiGmvDiskon,
+    kontribusi_gmv_flash_sale: p.kontribusiGmvFlashSale,
+  };
+}
+
+function pdtLaporanLayananToWire(l: pdtCore.PdtLaporanLayanan | null): PdtLaporanLayananWire | null {
+  if (l == null) return null;
+  return {
+    chat: l.chat == null ? null : {
+      baris_sumber: l.chat.barisSumber,
+      pengunjung: l.chat.pengunjung,
+      chat_masuk: l.chat.chatMasuk,
+      chat_dibalas: l.chat.chatDibalas,
+      response_rate: l.chat.responseRate,
+      waktu_respon_detik: l.chat.waktuResponDetik,
+      csat: l.chat.csat,
+      total_pesanan: l.chat.totalPesanan,
+      penjualan: l.chat.penjualan,
+      konversi_chat_dibalas: l.chat.konversiChatDibalas,
+    },
+    poin_penalti_total: l.poinPenaltiTotal,
+    penalti: l.penalti.map((p) => ({ poin: p.poin, deskripsi: p.deskripsi, durasi: p.durasi })),
   };
 }
 
@@ -9499,13 +9826,19 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     client_platform_id: l.clientPlatformId,
     periode_awal_bulan: l.periodeAwalBulan,
     generated_at: l.generatedAt,
-    kpi: { ...l.kpi },
+    kpi: pdtLaporanKpiToWire(l.kpi),
+    harian: pdtLaporanHarianToWire(l.harian),
     kanal: pdtLaporanKanalToWire(l.kanal),
     iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
     produk: pdtLaporanProdukToWire(l.produk),
     afiliasi: pdtLaporanAfiliasiToWire(l.afiliasi),
+    kreator: pdtLaporanKreatorToWire(l.kreator),
+    sesi_live: pdtLaporanSesiLiveToWire(l.sesiLive),
+    kampanye: pdtLaporanKampanyeToWire(l.kampanye),
+    promo: null,
+    layanan: null,
     tahap: pdtLaporanTahapToWire(l.tahap),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: l.benchmarkVersi,
@@ -9520,13 +9853,19 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     client_platform_id: l.clientPlatformId,
     periode_awal_bulan: l.periodeAwalBulan,
     generated_at: l.generatedAt,
-    kpi: { ...l.kpi },
+    kpi: pdtLaporanKpiToWire(l.kpi),
+    harian: pdtLaporanHarianToWire(l.harian),
     kanal: pdtLaporanKanalToWire(l.kanal),
     iklan: pdtLaporanIklanToWire(l.iklan),
     live: pdtLaporanLiveToWire(l.live),
     video: pdtLaporanVideoToWire(l.video),
-    produk: null,
+    produk: pdtLaporanProdukToWire(l.produk),
     afiliasi: pdtLaporanAfiliasiToWire(l.afiliasi),
+    kreator: pdtLaporanKreatorToWire(l.kreator),
+    sesi_live: pdtLaporanSesiLiveToWire(l.sesiLive),
+    kampanye: pdtLaporanKampanyeToWire(l.kampanye),
+    promo: pdtLaporanPromoToWire(l.promo),
+    layanan: pdtLaporanLayananToWire(l.layanan),
     tahap: null,
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: null,

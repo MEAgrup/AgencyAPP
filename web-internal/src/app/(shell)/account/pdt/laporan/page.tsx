@@ -3,11 +3,45 @@
 /**
  * Laporan PDT (Pusat Data Toko) — Flow B langkah 1 (PDT-21 Rule 21).
  *
- * KPI ringkas + kanal + iklan + live + video + produk + afiliasi + tahap +
- * skor + insight per toko klien, dibaca lewat `GET /account/pdt/laporan`. v1
- * SENGAJA sempit (sepuluh dari dua belas seksi mesin laporan lama — lihat
- * docblock `packages/core/src/pdt/laporan.ts`): belum ada tokopedia/
- * ads_manager.
+ * KPI ringkas + harian + kanal + iklan + kampanye + live + sesi LIVE + video
+ * + produk + afiliasi + kreator + promo + layanan + tahap + skor + insight
+ * per toko klien, dibaca lewat `GET /account/pdt/laporan`.
+ *
+ * **Grafik (2026-09-21).** Feedback pemilik: laporan PDT "masih kurang
+ * detail" dibanding mesin HTML lama, "lengkapi … termasuk grafik dan chart".
+ * Lima grafik ditambahkan lewat `@/components/PdtChart` (SVG inline, nol
+ * dependensi — alasannya di docblock `@/lib/chart-geom`): garis tren harian,
+ * donat kontribusi kanal, batang omzet-vs-biaya per sumber iklan, gelembung
+ * matriks produk, dan batang skor per dimensi. Semua menggambar angka yang
+ * SUDAH final dari payload — nol agregasi di sisi FE.
+ *
+ * **Paritas mesin HTML lama (2026-09-21 lanjutan).** Permintaan pemilik
+ * "buat semua bagian yg blm ada, supaya hasil akhir sama dengan html lama".
+ * Lima bagian ditambahkan — Iklan per Kampanye, Top Sesi LIVE, Top Kreator,
+ * Promo (Diskon & Flash Sale, §8 Shopee), dan Layanan & Kesehatan Toko (§9
+ * Shopee) — plus tabel "Top Produk by GMV" lintas kuadran yang akhirnya
+ * mengisi bagian Portfolio Produk sisi Shopee, dan indikator Outlook yang
+ * naik dari dua ke empat per platform.
+ *
+ * **Yang TETAP tidak ada, dan alasannya bukan "belum sempat":**
+ * - **Voucher** (bagian dari §8 mesin lama) — PDT nol modul parser voucher,
+ *   jadi klaim/biaya/usage-rate-nya tidak ada di fakta manapun.
+ * - **Cancel rate & retur** (§9 mesin lama) — `pdt_fact_shop_daily` tidak
+ *   punya kolom pembatalan maupun retur.
+ * - **Tokopedia** — nol modul parser, nol baris fakta.
+ * Ketiganya ditampilkan sebagai catatan eksplisit di halaman, bukan
+ * dihilangkan diam-diam atau diisi 0.
+ *
+ * **DIKOREKSI (KUADRAN-SHOPEE):** dua baris yang dulu ada di daftar ini sudah
+ * tidak benar. **Kuadran produk Shopee** kini ADA (algoritma tiga-band mesin
+ * lama, diverifikasi identik ke ekspor asli). **TikTok Ads Manager** TIDAK
+ * pernah "nol sumber data": modul `tt_ads_product`/`tt_ads_live`, ekstraktor,
+ * dan penulis `pdt_fact_ads`-nya sudah ada sejak `G1-09-2BII-TTADS-SAMPLE`
+ * (2026-09-16) dan berkasnya memang ikut di paket unggahan
+ * ("creative data for product campaigns", "livestream data for live
+ * campaigns"). Angkanya sudah lama memberi makan bagian "iklan", "kampanye"
+ * dan CPA "tahap"; yang keliru cuma tiga metrik funnel Consideration yang
+ * di-hardcode `null` — kini terisi dari `tayangan`/`klik` Ads Manager.
  *
  * **Kanal** (sumber GMV) TIDAK simetris antar platform (keputusan pemilik
  * via `AskUserQuestion`, 2026-09-16): TikTok lengkap (Live/Video/Kartu
@@ -42,15 +76,22 @@
  * `Σgmv÷Σbiaya`. Seksi disembunyikan seluruhnya saat `iklan` `null` (nol
  * baris iklan seluruh sumber platform ini di periode ini).
  *
- * **Produk** (Portfolio Produk/kuadran, keputusan pemilik via
- * `AskUserQuestion` "G2-01-KUADRAN-SKU (produk)"): TikTok-ONLY — Shopee
- * SELALU `produk: null` (methodology kuadran beda total dari TikTok, belum
- * ada modul PDT sumber data, sama gap "tahap"). Mode BENCHMARK SAJA (bukan
- * "Mode Relatif" mesin lama — ambang tetap lintas bulan, `pdt_benchmark`
- * versi TikTok). `distribusi` — jumlah SKU per kuadran; `top_aksi` — HANYA
- * tiga kuadran actionable (Bintang/Bocor Traffic/Hidden Gem), diurutkan GMV
- * desc, dipotong 12 (angka sama mesin lama). Seksi disembunyikan seluruhnya
- * saat `produk` `null`.
+ * **Produk** (Portfolio Produk/kuadran): KEDUA platform sejak KUADRAN-SHOPEE
+ * (`docs/DECISIONS.md`) — sebelumnya TikTok-only. Dua algoritma yang memang
+ * BERBEDA di mesin lama, bukan satu dengan parameter berbeda: TikTok memakai
+ * klik × CVR dua band versus benchmark `quad_klik`/`quad_cvr`, Shopee memakai
+ * pengunjung produk × CR-pesanan TIGA band (dengan promosi band `medium`)
+ * versus ambang absolut tetap, plus ember ketujuh `no_data` yang TikTok tidak
+ * punya. Keduanya diverifikasi IDENTIK dengan mesin HTML atas ekspor asli
+ * (Fim Motor Shopee, lima klien TikTok).
+ *
+ * `distribusi` — mode TERSIMPAN (benchmark/absolut), ambang tetap lintas bulan
+ * supaya "SKU pindah kuadran" berarti sesuatu (Rule 19). `relatif` — panel
+ * kedua mesin lama, ambang percentile p25/p75 katalog periode ini, dihitung
+ * saat laporan dirakit dan TIDAK PERNAH disimpan. `top_aksi` — HANYA tiga
+ * kuadran actionable (Bintang/Bocor Traffic/Hidden Gem), diurutkan GMV desc,
+ * dipotong 12 (angka sama mesin lama). Seksi disembunyikan seluruhnya saat
+ * `produk` `null`.
  *
  * **Afiliasi** (keputusan pemilik via `AskUserQuestion` KEENAM, 2026-09-16):
  * RINGKASAN saja untuk KEDUA platform, SATU bentuk (nol asimetri platform,
@@ -68,10 +109,11 @@
  * — Shopee SELALU `tahap: null` karena mesin lama Shopee tidak pernah punya
  * konsep buyer-journey sama sekali (bukan gap data seperti "video"), jadi
  * seksi ini disembunyikan TOTAL untuk Shopee, bukan ditampilkan kosong.
- * v1 SENGAJA menerima banyak `null` per metrik (funnel Impresi/ATC, hampir
- * seluruh blok Awareness/Consideration) karena TikTok Ads Manager belum
- * punya modul PDT sama sekali — halaman menampilkan catatan/"—" eksplisit,
- * BUKAN 0 yang mengarang aktivitas. Seksi disembunyikan seluruhnya saat
+ * v1 SENGAJA menerima banyak `null` per metrik (Awareness campaign-level, ATC,
+ * follower berbayar) — bukan karena TikTok Ads Manager tidak punya modul
+ * (ia punya), melainkan karena kolom-kolom ITU tidak ikut dipanen ke
+ * `pdt_fact_ads`. Impresi/klik/CTR showcase SUDAH terisi dari Ads Manager.
+ * Halaman menampilkan catatan/"—" eksplisit, BUKAN 0 yang mengarang aktivitas. Seksi disembunyikan seluruhnya saat
  * `tahap` `null` (nol baris `pdt_fact_shop_daily` basis `net` periode ini).
  *
  * **Insight & Rekomendasi** (keputusan pemilik via `AskUserQuestion` KEDELAPAN
@@ -127,6 +169,8 @@ import {
   riwayatKirimanPdt,
 } from '@/lib/pdt';
 import { formatIDR } from '@/lib/money';
+import { GrafikBatang, GrafikDonat, GrafikGaris, GrafikGelembung,
+  GrafikPeringkat, GrafikSkor } from '@/components/PdtChart';
 
 
 /** Label kuadran produk — SAMA persis `report/render.ts` `KUADRAN_META` (mesin lama), bukan istilah baru. */
@@ -137,8 +181,62 @@ const KUADRAN_LABEL: Record<string, string> = {
   evaluasi: 'Evaluasi',
   tidur: 'Produk Tidur',
   tidak_tayang: 'Tidak Tayang',
+  // Ember ketujuh, SHOPEE saja — trafik ada tapi CR tak bisa dihitung. TikTok
+  // tidak pernah mengisinya (di sana CVR kosong jatuh ke "Produk Tidur").
+  no_data: 'Data Tak Lengkap',
 };
-const KUADRAN_URUTAN = ['bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi', 'tidur', 'tidak_tayang'];
+const KUADRAN_URUTAN = ['bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi', 'tidur', 'tidak_tayang', 'no_data'];
+
+/** Label & warna kedalaman jelajah — ambangnya ditetapkan `@cdps/core` (`KEDALAMAN_DALAM_MIN`/`KEDALAMAN_DANGKAL_MAKS`), di sini hanya tampilannya. */
+const KEDALAMAN_LABEL: Record<string, string> = {
+  dalam: 'jelajah dalam',
+  sedang: 'jelajah sedang',
+  dangkal: 'jelajah dangkal',
+};
+const KEDALAMAN_WARNA: Record<string, string> = {
+  dalam: '#15803d',
+  sedang: '#b45309',
+  dangkal: '#b91c1c',
+};
+
+/** Angka desimal gaya Indonesia (koma), untuk metrik rasio yang bukan persen dan bukan rupiah. */
+function formatDesimal(v: number | null, digit: number): string {
+  if (v === null || !Number.isFinite(v)) return '—';
+  return v.toLocaleString('id-ID', { minimumFractionDigits: digit, maximumFractionDigits: digit });
+}
+
+/**
+ * Label sumber iklan untuk bagian "Iklan per Kampanye" — SAMA PERSIS dengan
+ * yang dipakai `bangunIklanTiktok`/`bangunIklanShopee` di `@cdps/core`
+ * (payload "iklan" membawa labelnya sendiri; payload "kampanye" hanya
+ * membawa kode `sumber`, jadi label yang sama diulang di sini supaya dua
+ * tabel bertetangga tidak menyebut sumber yang sama dengan dua nama).
+ */
+const SUMBER_IKLAN_LABEL: Record<string, string> = {
+  tt_ads_product: 'Iklan Produk',
+  tt_ads_live: 'Iklan Live',
+  shopee_ads_cpc: 'Iklan Toko (CPC)',
+  shopee_ads_search: 'Iklan Pencarian',
+  shopee_ads_live: 'Iklan Live',
+};
+
+/** Detik → "1j 30m" / "45m" / "20d". Durasi sesi LIVE dibaca sebagai lama siaran, bukan angka detik mentah. */
+function formatDurasi(detik: number | null): string {
+  if (detik == null) return '—';
+  const j = Math.floor(detik / 3600);
+  const m = Math.floor((detik % 3600) / 60);
+  if (j > 0) return m > 0 ? `${j}j ${m}m` : `${j}j`;
+  if (m > 0) return `${m}m`;
+  return `${detik}d`;
+}
+
+/** ISO → "07 Agu 14:30" (waktu lokal pembaca). `null` ⇒ em dash, aturan rumah #7. */
+function formatWaktuSingkat(iso: string | null): string {
+  if (iso == null) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
 
 function formatPercent(v: number | null): string {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -595,7 +693,35 @@ export default function LaporanPdtPage() {
                 <div style={{ fontSize: 24, fontWeight: 'bold' }}>{formatPercent(laporan.kpi.cvr)}</div>
                 <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>CVR</p>
               </div>
+              {/* Kedalaman jelajah — metrik NIAT, bukan trafik. Satu pengunjung
+                  membuka lebih dari satu barang adalah hal yang normal dan justru
+                  bagus; dibaca BERSAMA CVR di sebelahnya, ia menunjuk divisi mana
+                  yang harus bergerak (lihat docblock KEDALAMAN_DALAM_MIN di core). */}
+              {laporan.kpi.barang_per_pengunjung !== null && (
+                <div>
+                  <div style={{ fontSize: 24, fontWeight: 'bold' }}>
+                    {formatDesimal(laporan.kpi.barang_per_pengunjung, 2)}
+                    {laporan.kpi.kedalaman !== null && (
+                      <span style={{ fontSize: 12, fontWeight: 'normal', marginLeft: 6, color: KEDALAMAN_WARNA[laporan.kpi.kedalaman] ?? undefined }}>
+                        {KEDALAMAN_LABEL[laporan.kpi.kedalaman] ?? laporan.kpi.kedalaman}
+                      </span>
+                    )}
+                  </div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Barang dibuka / kunjungan</p>
+                </div>
+              )}
             </div>
+            {laporan.kpi.barang_per_pengunjung !== null && (
+              <p className="muted" style={{ fontSize: 11, marginTop: 12 }}>
+                Satu kunjungan membuka {formatDesimal(laporan.kpi.barang_per_pengunjung, 2)} barang rata-rata. Lebih dari satu
+                adalah hal normal dan justru sinyal bagus — pengunjung masih mau melihat-lihat, entah karena belum
+                menemukan yang pas atau karena tokonya menarik untuk ditelusuri. Baca angka ini{' '}
+                <strong>bersama CVR</strong>: jelajah dalam tapi CVR rendah berarti trafiknya sudah benar dan yang belum
+                meyakinkan ada di produk/harga; jelajah dangkal dengan CVR rendah berarti sebaliknya, targeting dulu
+                yang diperbaiki. Penyebutnya <strong>kunjungan harian</strong>, jadi angka ini lebih kecil daripada
+                angka sejenis di dasbor platform, yang men-dedup pengunjung sepanjang bulan.
+              </p>
+            )}
             {laporan.platform !== 'tiktok' && (
               <p className="muted" style={{ fontSize: 11, marginTop: 16 }}>
                 GMV Shopee = basis Pesanan Siap Dikirim, TANPA potongan refund (Rule 16) — berbeda dari GMV
@@ -604,6 +730,49 @@ export default function LaporanPdtPage() {
               </p>
             )}
           </section>
+
+          {laporan.harian && (
+            <section className="card">
+              <h2>Tren Harian</h2>
+              <p className="muted" style={{ fontSize: 12 }}>
+                GMV per hari · {laporan.harian.hari_terisi} hari terisi
+                {laporan.harian.gmv_rata_harian !== null && <> · rata-rata {formatIDR(laporan.harian.gmv_rata_harian)}/hari</>}
+              </p>
+              <div style={{ marginTop: 12 }}>
+                <GrafikGaris
+                  judul="Tren GMV harian"
+                  titik={laporan.harian.titik.map((t) => ({ label: t.tanggal, nilai: t.gmv }))}
+                  acuan={
+                    laporan.harian.gmv_rata_harian === null
+                      ? null
+                      : { nilai: laporan.harian.gmv_rata_harian, label: 'rata-rata' }
+                  }
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 12 }}>
+                {laporan.harian.gmv_tertinggi && (
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 'bold' }}>{formatIDR(laporan.harian.gmv_tertinggi.gmv)}</div>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      Hari tertinggi · {laporan.harian.gmv_tertinggi.tanggal}
+                    </p>
+                  </div>
+                )}
+                {laporan.harian.gmv_terendah && (
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 'bold' }}>{formatIDR(laporan.harian.gmv_terendah.gmv)}</div>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      Hari terendah · {laporan.harian.gmv_terendah.tanggal}
+                    </p>
+                  </div>
+                )}
+              </div>
+              <p className="muted" style={{ fontSize: 11, marginTop: 12 }}>
+                Hari yang berkasnya tidak memuat data TIDAK digambar sebagai nol — garisnya terputus di situ.
+                Jumlah GMV harian di grafik ini sama dengan GMV di KPI Ringkas (basis dan sumber barisnya sama).
+              </p>
+            </section>
+          )}
 
           <section className="card">
             <h2>Kanal (Sumber GMV)</h2>
@@ -622,15 +791,12 @@ export default function LaporanPdtPage() {
             {laporan.kanal.gmv_total === null ? (
               <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Belum ada data untuk periode ini.</p>
             ) : (
-              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
-                {laporan.kanal.items.map((item) => (
-                  <div key={item.kode}>
-                    <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(item.gmv)}</div>
-                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                      {item.label} ({formatPercent(item.persen)})
-                    </p>
-                  </div>
-                ))}
+              <div style={{ marginTop: 12 }}>
+                <GrafikDonat
+                  judul="Kontribusi GMV per kanal"
+                  bagian={laporan.kanal.items.map((item) => ({ label: item.label, nilai: item.gmv }))}
+                  tengah={null}
+                />
               </div>
             )}
           </section>
@@ -658,6 +824,15 @@ export default function LaporanPdtPage() {
                   <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>ROAS</p>
                 </div>
               </div>
+              {laporan.iklan.items.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <GrafikBatang
+                    judul="Omzet vs biaya iklan per sumber"
+                    seri={['GMV', 'Biaya']}
+                    kelompok={laporan.iklan.items.map((item) => ({ label: item.label, nilai: [item.gmv, item.biaya] }))}
+                  />
+                </div>
+              )}
               <table style={{ marginTop: 16, width: '100%', fontSize: 13 }}>
                 <thead>
                   <tr>
@@ -674,6 +849,64 @@ export default function LaporanPdtPage() {
                       <td style={{ textAlign: 'right' }}>{formatIDR(item.biaya)}</td>
                       <td style={{ textAlign: 'right' }}>{formatIDR(item.gmv)}</td>
                       <td style={{ textAlign: 'right' }}>{formatRoas(item.roas)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+
+          {/* "Per Kampanye" mesin lama — rincian di balik ringkasan per-sumber di
+              atas. Satu kampanye rugi yang tersembunyi di balik rata-rata sumber
+              yang sehat adalah persis anggaran yang harus dimatikan minggu depan. */}
+          {laporan.kampanye && (
+            <section className="card">
+              <h2>Iklan per Kampanye</h2>
+              <p className="muted" style={{ fontSize: 12 }}>
+                {laporan.kampanye.total_kampanye} kampanye periode ini
+                {laporan.kampanye.tanpa_hasil > 0
+                  ? ` · ${laporan.kampanye.tanpa_hasil} tanpa hasil (${formatIDR(laporan.kampanye.biaya_tanpa_hasil)} terbakar)`
+                  : ' · nol kampanye tanpa hasil'}
+                {laporan.kampanye.total_kampanye > laporan.kampanye.top.length
+                  ? ` · ${laporan.kampanye.top.length} terbesar ditampilkan`
+                  : ''}
+              </p>
+              <div style={{ marginTop: 12 }}>
+                <GrafikPeringkat
+                  judul="Belanja iklan per kampanye"
+                  baris={laporan.kampanye.top.map((k) => ({
+                    label: k.kampanye_id,
+                    catatan: SUMBER_IKLAN_LABEL[k.sumber] ?? k.sumber,
+                    nilai: k.biaya,
+                  }))}
+                  format={formatIDR}
+                  warna="#b45309"
+                />
+              </div>
+              <table style={{ marginTop: 12, width: '100%', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left' }}>Kampanye</th>
+                    <th style={{ textAlign: 'left' }}>Sumber</th>
+                    <th style={{ textAlign: 'right' }}>Biaya</th>
+                    <th style={{ textAlign: 'right' }}>Omzet</th>
+                    <th style={{ textAlign: 'right' }}>ROAS</th>
+                    <th style={{ textAlign: 'right' }}>Klik</th>
+                    <th style={{ textAlign: 'right' }}>CTR</th>
+                    <th style={{ textAlign: 'right' }}>CPC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {laporan.kampanye.top.map((k) => (
+                    <tr key={`${k.sumber}-${k.kampanye_id}`}>
+                      <td>{k.kampanye_id}</td>
+                      <td>{SUMBER_IKLAN_LABEL[k.sumber] ?? k.sumber}</td>
+                      <td style={{ textAlign: 'right' }}>{formatIDR(k.biaya)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatIDR(k.gmv)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatRoas(k.roas)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatCount(k.klik)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatPercent(k.ctr)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatIDR(k.cpc)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -714,6 +947,63 @@ export default function LaporanPdtPage() {
               {laporan.platform !== 'tiktok' && (
                 <p className="muted" style={{ fontSize: 11, marginTop: 16 }}>
                   Durasi siaran tidak tersedia dari data Shopee — GMV/Jam tidak bisa dihitung untuk toko ini.
+                </p>
+              )}
+            </section>
+          )}
+
+          {/* "Top 10 Sesi" mesin lama — rincian di balik ringkasan LIVE di atas.
+              Ringkasan menjawab "seberapa sehat LIVE bulan ini", daftar ini
+              menjawab "sesi mana yang bekerja" — yang menentukan jam tayang dan
+              host bulan depan. */}
+          {laporan.sesi_live && (
+            <section className="card">
+              <h2>Top Sesi LIVE</h2>
+              <p className="muted" style={{ fontSize: 12 }}>
+                {laporan.sesi_live.total_sesi} sesi periode ini
+                {laporan.sesi_live.kontribusi_top !== null
+                  ? ` · ${laporan.sesi_live.top.length} teratas menyumbang ${formatPercent(laporan.sesi_live.kontribusi_top)} GMV LIVE`
+                  : ''}
+              </p>
+              <div style={{ marginTop: 12 }}>
+                <GrafikPeringkat
+                  judul="GMV per sesi LIVE"
+                  baris={laporan.sesi_live.top.map((s) => ({
+                    label: formatWaktuSingkat(s.waktu_posting),
+                    catatan: s.akun_toko ? 'toko' : (s.creator_handle ?? 'afiliasi'),
+                    nilai: s.gmv,
+                  }))}
+                  format={formatIDR}
+                  warna="#9333ea"
+                />
+              </div>
+              <table style={{ marginTop: 12, width: '100%', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left' }}>Waktu</th>
+                    <th style={{ textAlign: 'left' }}>Host</th>
+                    <th style={{ textAlign: 'right' }}>Durasi</th>
+                    <th style={{ textAlign: 'right' }}>Penonton</th>
+                    <th style={{ textAlign: 'right' }}>GMV</th>
+                    <th style={{ textAlign: 'right' }}>GMV / jam</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {laporan.sesi_live.top.map((s) => (
+                    <tr key={s.platform_content_id}>
+                      <td>{formatWaktuSingkat(s.waktu_posting)}</td>
+                      <td>{s.akun_toko ? 'Akun toko' : (s.creator_handle ?? 'Afiliasi')}</td>
+                      <td style={{ textAlign: 'right' }}>{formatDurasi(s.durasi_detik)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatCount(s.vv)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatIDR(s.gmv)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatIDR(s.gmv_per_jam)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {laporan.platform !== 'tiktok' && (
+                <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                  Durasi sesi tidak tersedia dari data Shopee, jadi GMV/jam tidak bisa dihitung untuk toko ini.
                 </p>
               )}
             </section>
@@ -762,19 +1052,43 @@ export default function LaporanPdtPage() {
           {laporan.produk && (
             <section className="card">
               <h2>Portfolio Produk</h2>
-              <p className="muted" style={{ fontSize: 12 }}>Mode Benchmark (vs target MEA) — klasifikasi kuadran SKU periode ini</p>
-              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
-                {KUADRAN_URUTAN
-                  .filter((k) => laporan.produk!.distribusi[k]?.jumlah > 0 || (k !== 'tidur' && k !== 'tidak_tayang'))
-                  .map((k) => (
-                    <div key={k}>
-                      <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.produk!.distribusi[k]?.jumlah ?? 0)}</div>
-                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                        {KUADRAN_LABEL[k] ?? k} · {formatIDR(laporan.produk!.distribusi[k]?.gmv ?? null)}
-                      </p>
-                    </div>
-                  ))}
-              </div>
+              <p className="muted" style={{ fontSize: 12 }}>
+                {laporan.produk.distribusi
+                  ? (laporan.platform === 'tiktok'
+                      ? 'Mode Benchmark (vs target MEA) — sumbu klik × CVR'
+                      : 'Mode Absolut (ambang tetap) — sumbu pengunjung produk × CR pesanan')
+                  : 'Top produk menurut GMV periode ini'}
+              </p>
+              {laporan.produk.distribusi && (
+                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                  {KUADRAN_URUTAN
+                    .filter((k) => (laporan.produk!.distribusi![k]?.jumlah ?? 0) > 0 || (k !== 'tidur' && k !== 'tidak_tayang' && k !== 'no_data'))
+                    .map((k) => (
+                      <div key={k}>
+                        <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.produk!.distribusi![k]?.jumlah ?? 0)}</div>
+                        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                          {KUADRAN_LABEL[k] ?? k} · {formatIDR(laporan.produk!.distribusi![k]?.gmv ?? null)}
+                        </p>
+                      </div>
+                    ))}
+                </div>
+              )}
+              {laporan.produk.top_aksi.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <GrafikGelembung
+                    judul="Matriks produk: trafik vs konversi, luas gelembung = GMV"
+                    labelX={laporan.platform === 'tiktok' ? 'Klik' : 'Pengunjung'}
+                    labelY={laporan.platform === 'tiktok' ? 'CVR' : 'CR'}
+                    produk={laporan.produk.top_aksi.map((x) => ({
+                      label: x.nama_produk ?? x.platform_product_id ?? '—',
+                      x: x.klik,
+                      y: x.cvr,
+                      ukuran: x.gmv,
+                      kuadran: x.kuadran,
+                    }))}
+                  />
+                </div>
+              )}
               {laporan.produk.top_aksi.length > 0 && (
                 <>
                   <h3 style={{ fontSize: 14, marginTop: 16 }}>Top Produk by GMV (Bintang/Bocor Traffic/Hidden Gem)</h3>
@@ -800,6 +1114,97 @@ export default function LaporanPdtPage() {
                       ))}
                     </tbody>
                   </table>
+                </>
+              )}
+              {/* "Top Produk by GMV" LINTAS kuadran — satu-satunya isi bagian ini
+                  sisi Shopee (nol klasifikator kuadran), dan pelengkap sisi TikTok
+                  di mana tabel di atas sengaja menyaring tiga kuadran actionable saja. */}
+              {laporan.produk.top.length > 0 && (
+                <>
+                  <h3 style={{ fontSize: 14, marginTop: 16 }}>Top Produk by GMV{laporan.produk.distribusi ? ' (semua kuadran)' : ''}</h3>
+                  <GrafikPeringkat
+                    judul="Top produk menurut GMV"
+                    baris={laporan.produk.top.map((x) => ({
+                      label: x.nama_produk ?? x.platform_product_id ?? '—',
+                      nilai: x.gmv,
+                    }))}
+                    format={formatIDR}
+                  />
+                  <table style={{ marginTop: 12, width: '100%', fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left' }}>Produk</th>
+                        {laporan.produk.distribusi && <th style={{ textAlign: 'left' }}>Kuadran</th>}
+                        <th style={{ textAlign: 'right' }}>Tayang</th>
+                        <th style={{ textAlign: 'right' }}>Klik</th>
+                        <th style={{ textAlign: 'right' }}>CTR</th>
+                        <th style={{ textAlign: 'right' }}>{laporan.platform === 'tiktok' ? 'Klik diuji' : 'Kunjungan'}</th>
+                        <th style={{ textAlign: 'right' }}>{laporan.platform === 'tiktok' ? 'CVR' : 'CR'}</th>
+                        <th style={{ textAlign: 'right' }}>GMV</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {laporan.produk.top.map((x, i) => (
+                        <tr key={`top-${x.platform_product_id ?? i}`}>
+                          <td>{x.nama_produk ?? x.platform_product_id ?? '—'}</td>
+                          {laporan.produk!.distribusi && <td>{x.kuadran == null ? '—' : (KUADRAN_LABEL[x.kuadran] ?? x.kuadran)}</td>}
+                          <td style={{ textAlign: 'right' }}>{formatCount(x.impresi)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatCount(x.klik)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatPercent(x.ctr)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatCount(x.traffic)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatPercent(x.cvr)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatIDR(x.gmv)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!laporan.produk.distribusi && (
+                    <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                      Kuadran belum terhitung untuk periode ini — biasanya karena paket unggahannya belum di-commit ulang
+                      setelah kolom pengunjung produk mulai dipanen.
+                    </p>
+                  )}
+                  <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                    Tabel ini membaca funnel utuh, bukan satu angka: <strong>Tayang</strong> = berapa kali kartu produk
+                    muncul di feed/pencarian, <strong>Klik</strong> = berapa kali dibuka, <strong>CTR</strong> = Klik ÷ Tayang,{' '}
+                    <strong>{laporan.platform === 'tiktok' ? 'Klik diuji' : 'Kunjungan'}</strong> ={' '}
+                    {laporan.platform === 'tiktok'
+                      ? 'klik yang dipakai menguji kuadran'
+                      : 'pengunjung yang benar-benar sampai ke halaman produk'}.
+                    Tayang wajar jauh lebih besar dari {laporan.platform === 'tiktok' ? 'klik' : 'kunjungan'} — itu jarak
+                    antar tahap, bukan dua versi angka yang sama. Tayang besar dengan CTR kecil berarti fotonya/judulnya
+                    yang belum menarik; CTR sehat tapi {laporan.platform === 'tiktok' ? 'CVR' : 'CR'} kecil berarti
+                    halaman produk atau harganya yang belum meyakinkan. Dua masalah berbeda dengan perbaikan berbeda.
+                  </p>
+                </>
+              )}
+              {/* Panel kedua mesin lama: "dua sudut pandang — relatif antar produk,
+                  dan versus benchmark ideal". Ambangnya percentile katalog BULAN INI,
+                  jadi ia menjawab "SKU mana yang menonjol di katalog ini" — pertanyaan
+                  yang berbeda dari panel di atas, dan sengaja TIDAK disimpan supaya
+                  perbandingan lintas bulan tetap memakai ambang yang tetap. */}
+              {laporan.produk.relatif && (
+                <>
+                  <h3 style={{ fontSize: 14, marginTop: 20 }}>Mode Relatif (antar produk katalog ini)</h3>
+                  <p className="muted" style={{ fontSize: 12 }}>
+                    Ambang p75 dari {formatCount(laporan.produk.relatif.ambang.n)} produk aktif periode ini ·{' '}
+                    {laporan.platform === 'tiktok' ? 'klik' : 'pengunjung'}{' '}
+                    {formatCount(laporan.produk.relatif.ambang.traffic_tinggi)} ·{' '}
+                    {laporan.platform === 'tiktok' ? 'CVR' : 'CR'}{' '}
+                    {formatPercent(laporan.produk.relatif.ambang.cr_tinggi)}
+                  </p>
+                  <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                    {KUADRAN_URUTAN
+                      .filter((k) => (laporan.produk!.relatif!.distribusi[k]?.jumlah ?? 0) > 0)
+                      .map((k) => (
+                        <div key={`rel-${k}`}>
+                          <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.produk!.relatif!.distribusi[k]?.jumlah ?? 0)}</div>
+                          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                            {KUADRAN_LABEL[k] ?? k} · {formatIDR(laporan.produk!.relatif!.distribusi[k]?.gmv ?? null)}
+                          </p>
+                        </div>
+                      ))}
+                  </div>
                 </>
               )}
             </section>
@@ -845,12 +1250,266 @@ export default function LaporanPdtPage() {
             </section>
           )}
 
+          {/* "Top 10 Creator" mesin lama — rincian di balik ringkasan Afiliasi di
+              atas. Ringkasan menjawab "seberapa besar afiliasi", daftar ini
+              menjawab "siapa", dan "siapa" adalah satu-satunya yang bisa
+              ditindaklanjuti tim Creator Management. */}
+          {laporan.kreator && (
+            <section className="card">
+              <h2>Top Kreator</h2>
+              <p className="muted" style={{ fontSize: 12 }}>
+                {laporan.kreator.total_kreator} kreator periode ini
+                {laporan.kreator.kontribusi_top !== null
+                  ? ` · ${laporan.kreator.top.length} teratas menyumbang ${formatPercent(laporan.kreator.kontribusi_top)} GMV afiliasi`
+                  : ''}
+              </p>
+              <div style={{ marginTop: 12 }}>
+                <GrafikPeringkat
+                  judul="GMV per kreator"
+                  baris={laporan.kreator.top.map((k) => ({ label: k.handle, nilai: k.gmv }))}
+                  format={formatIDR}
+                  warna="#0f766e"
+                />
+              </div>
+              <table style={{ marginTop: 12, width: '100%', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left' }}>Kreator</th>
+                    <th style={{ textAlign: 'right' }}>GMV</th>
+                    <th style={{ textAlign: 'right' }}>Pesanan</th>
+                    <th style={{ textAlign: 'right' }}>AOV</th>
+                    {laporan.platform === 'tiktok' && <th style={{ textAlign: 'right' }}>Live</th>}
+                    {laporan.platform === 'tiktok' && <th style={{ textAlign: 'right' }}>Video</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {laporan.kreator.top.map((k) => (
+                    <tr key={k.handle}>
+                      <td>{k.handle}</td>
+                      <td style={{ textAlign: 'right' }}>{formatIDR(k.gmv)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatCount(k.pesanan)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatIDR(k.aov)}</td>
+                      {laporan.platform === 'tiktok' && <td style={{ textAlign: 'right' }}>{formatCount(k.jumlah_live)}</td>}
+                      {laporan.platform === 'tiktok' && <td style={{ textAlign: 'right' }}>{formatCount(k.jumlah_video)}</td>}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                Komisi dan ROI komisi per kreator tidak tersedia — kolomnya tidak pernah ada di data kreator PDT.
+              </p>
+            </section>
+          )}
+
+          {/* §8 mesin Shopee lama. Isinya diskon + flash sale, BUKAN voucher:
+              PDT tidak punya modul parser voucher sama sekali, jadi klaim/biaya/
+              usage-rate voucher tidak bisa dihitung ulang dan tidak ditebak. */}
+          {laporan.promo && (
+            <section className="card">
+              <h2>Promo — Diskon &amp; Flash Sale</h2>
+              <p className="muted" style={{ fontSize: 12 }}>Basis Siap Dikirim, sama dengan KPI di atas</p>
+
+              {laporan.promo.diskon_total && (
+                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.promo.diskon_total.penjualan_siap_dikirim)}</div>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Penjualan dari Diskon</p>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.promo.diskon_total.pesanan_siap_dikirim)}</div>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Pesanan dari Diskon</p>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatPercent(laporan.promo.kontribusi_gmv_diskon)}</div>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Kontribusi ke GMV Toko</p>
+                  </div>
+                </div>
+              )}
+
+              {laporan.promo.diskon_per_tipe.length > 0 && (
+                <>
+                  <h3 style={{ fontSize: 14, marginTop: 16 }}>Per Tipe Promosi</h3>
+                  <p className="muted" style={{ fontSize: 11 }}>
+                    Komponen boleh saling tumpang tindih — jangan dijumlahkan; totalnya sudah ada di angka besar di atas.
+                  </p>
+                  <div style={{ marginTop: 8 }}>
+                    <GrafikPeringkat
+                      judul="Penjualan per tipe promosi"
+                      baris={laporan.promo.diskon_per_tipe.map((t) => ({ label: t.tipe, nilai: t.penjualan_siap_dikirim }))}
+                      format={formatIDR}
+                      warna="#be123c"
+                    />
+                  </div>
+                  <table style={{ marginTop: 12, width: '100%', fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left' }}>Tipe</th>
+                        <th style={{ textAlign: 'right' }}>Penjualan</th>
+                        <th style={{ textAlign: 'right' }}>Pesanan</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {laporan.promo.diskon_per_tipe.map((t) => (
+                        <tr key={t.tipe}>
+                          <td>{t.tipe}</td>
+                          <td style={{ textAlign: 'right' }}>{formatIDR(t.penjualan_siap_dikirim)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatCount(t.pesanan_siap_dikirim)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+
+              {laporan.promo.flash_sale && (
+                <>
+                  <h3 style={{ fontSize: 14, marginTop: 16 }}>Flash Sale</h3>
+                  <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatIDR(laporan.promo.flash_sale.penjualan_siap_dikirim)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Penjualan</p>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatCount(laporan.promo.flash_sale.produk_dilihat)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Produk Dilihat</p>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatPercent(laporan.promo.flash_sale.ctr)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>CTR (dilihat → diklik)</p>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatPercent(laporan.promo.flash_sale.cvr)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>CVR (diklik → pesanan)</p>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 20, fontWeight: 'bold' }}>{formatPercent(laporan.promo.kontribusi_gmv_flash_sale)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Kontribusi ke GMV Toko</p>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <p className="muted" style={{ fontSize: 11, marginTop: 16 }}>
+                Voucher tidak termasuk di sini — PDT belum punya modul parser voucher, jadi klaim, biaya, dan usage rate voucher
+                tidak bisa dihitung dari data yang sudah diunggah. Kontribusi diskon dan flash sale juga tidak boleh dijumlahkan:
+                satu produk bisa ikut keduanya di bulan yang sama.
+              </p>
+            </section>
+          )}
+
+          {/* §9 mesin Shopee lama. */}
+          {laporan.layanan && (
+            <section className="card">
+              <h2>Layanan &amp; Kesehatan Toko</h2>
+
+              {laporan.layanan.poin_penalti_total !== null && (
+                <div
+                  style={{
+                    marginTop: 8, padding: 12, borderRadius: 8,
+                    background: laporan.layanan.poin_penalti_total > 0 ? '#fef2f2' : '#f0fdfa',
+                    border: `1px solid ${laporan.layanan.poin_penalti_total > 0 ? '#fecaca' : '#99f6e4'}`,
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', fontSize: 14 }}>
+                    {laporan.layanan.poin_penalti_total > 0
+                      ? `Penalti aktif — ${formatCount(laporan.layanan.poin_penalti_total)} poin`
+                      : '0 poin penalti — kesehatan toko bersih'}
+                  </div>
+                  {laporan.layanan.poin_penalti_total > 0 && (
+                    <>
+                      <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                        Poin penalti menekan traffic organik: produk lebih sulit ditemukan di pencarian dan rekomendasi, dan toko
+                        dibatasi ikut program promosi Shopee selama masa penalti berjalan.
+                      </p>
+                      <table style={{ marginTop: 8, width: '100%', fontSize: 13 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ textAlign: 'left' }}>Pelanggaran</th>
+                            <th style={{ textAlign: 'left' }}>Durasi</th>
+                            <th style={{ textAlign: 'right' }}>Poin</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {laporan.layanan.penalti.map((p, i) => (
+                            <tr key={`${p.deskripsi}-${i}`}>
+                              <td>{p.deskripsi || '—'}</td>
+                              <td>{p.durasi || '—'}</td>
+                              <td style={{ textAlign: 'right' }}>{formatCount(p.poin)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {laporan.layanan.chat && (
+                <>
+                  <h3 style={{ fontSize: 14, marginTop: 16 }}>Performa Chat</h3>
+                  <table style={{ marginTop: 8, width: '100%', fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left' }}>Metrik</th>
+                        <th style={{ textAlign: 'right' }}>Nilai</th>
+                        <th style={{ textAlign: 'right' }}>Target</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>
+                          Tingkat Chat Direspon
+                          <div className="muted" style={{ fontSize: 11 }}>
+                            {formatCount(laporan.layanan.chat.chat_dibalas)} dibalas / {formatCount(laporan.layanan.chat.chat_masuk)} masuk
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{formatPercent(laporan.layanan.chat.response_rate)}</td>
+                        <td style={{ textAlign: 'right' }} className="muted">&gt;95%</td>
+                      </tr>
+                      <tr>
+                        <td>Waktu Respon Rata-rata</td>
+                        <td style={{ textAlign: 'right' }}>{formatDurasi(laporan.layanan.chat.waktu_respon_detik)}</td>
+                        <td style={{ textAlign: 'right' }} className="muted">&lt;1 jam</td>
+                      </tr>
+                      <tr>
+                        <td>CSAT Chat</td>
+                        <td style={{ textAlign: 'right' }}>{formatPercent(laporan.layanan.chat.csat)}</td>
+                        <td style={{ textAlign: 'right' }} className="muted">&gt;85%</td>
+                      </tr>
+                      <tr>
+                        <td>
+                          Konversi dari Chat Dibalas
+                          <div className="muted" style={{ fontSize: 11 }}>
+                            {formatCount(laporan.layanan.chat.total_pesanan)} pesanan · {formatIDR(laporan.layanan.chat.penjualan)}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{formatPercent(laporan.layanan.chat.konversi_chat_dibalas)}</td>
+                        <td style={{ textAlign: 'right' }} className="muted">&gt;20%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  {laporan.layanan.chat.baris_sumber > 1 && (
+                    <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                      Dirangkum dari {laporan.layanan.chat.baris_sumber} berkas Performa Chat — waktu respon dan CSAT adalah rata-rata antar berkas.
+                    </p>
+                  )}
+                </>
+              )}
+
+              <p className="muted" style={{ fontSize: 11, marginTop: 16 }}>
+                Cancel rate dan retur belum bisa ditampilkan — data harian PDT tidak memuat kolom pembatalan maupun retur,
+                dan menampilkan 0% untuk angka yang tidak diketahui akan menyesatkan.
+              </p>
+            </section>
+          )}
+
           {laporan.tahap && (
             <section className="card">
               <h2>Tahap (Buyer Journey)</h2>
               <div className="alert alertWarning" role="status" style={{ marginTop: 8, marginBottom: 8 }}>
-                Belum lengkap — banyak angka Awareness/Consideration bergantung modul TikTok Ads Manager yang
-                belum dibangun (ditandai "—" di bawah, BUKAN nol aktivitas).
+                Belum lengkap — sebagian angka Awareness (impresi/views campaign, follower berbayar) dan Add-to-Cart
+                belum dipanen ke fakta, jadi ditandai &quot;—&quot; di bawah, BUKAN nol aktivitas. Impresi, klik dan CTR
+                showcase sudah terisi dari TikTok Ads Manager.
               </div>
               <table style={{ marginTop: 8, width: '100%', fontSize: 13 }}>
                 <thead>
@@ -971,6 +1630,15 @@ export default function LaporanPdtPage() {
             <div style={{ fontSize: 32, fontWeight: 'bold', marginBottom: 16 }}>
               {laporan.skor.total !== null ? laporan.skor.total.toFixed(1) : '—'}
             </div>
+
+            {laporan.skor.dimensi.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <GrafikSkor
+                  judul="Skor per dimensi"
+                  dimensi={laporan.skor.dimensi.map((d) => ({ label: d.label, nilai: d.nilai, disertakan: d.disertakan }))}
+                />
+              </div>
+            )}
 
             {laporan.skor.dimensi.length > 0 && (
               <div className="table-wrap">

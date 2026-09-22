@@ -31,6 +31,7 @@ import {
   finalizePdtPurgeTick,
   hitungSkorShopee,
   hitungSkorTiktok,
+  klasifikasiUlangKuadranSkuShopee,
   klasifikasiUlangKuadranSkuTiktok,
   markRawStored,
   planPdtOrphanPurgeTick,
@@ -4785,6 +4786,112 @@ describeDb('klasifikasiUlangKuadranSkuTiktok (G2-01-KUADRAN-SKU langkah 2)', () 
 });
 
 // ---------------------------------------------------------------------------
+// klasifikasiUlangKuadranSkuShopee (KUADRAN-SHOPEE) — kembaran blok TikTok di
+// atas, dengan tiga perbedaan yang seluruhnya berasal dari mesin lama: basis
+// `siap_dikirim` (bukan `net`), nol parameter benchmark (ambangnya konstanta
+// `PDT_KUADRAN_SHOPEE`), dan sumbu-X `pengunjung` (bukan `klik`/`ctor`).
+// ---------------------------------------------------------------------------
+describeDb('klasifikasiUlangKuadranSkuShopee (KUADRAN-SHOPEE)', () => {
+  async function fixture(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', 'SHOP-ZPDT-KS');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  async function insertSkuPeriod(
+    cpId: number, batchId: number, platformProductId: string,
+    pengunjung: number | null, pesanan: number | null, basis = 'siap_dikirim', periode = '2026-07-01',
+  ): Promise<void> {
+    await sql`
+      insert into pdt_fact_sku_period
+        (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id, parser_versi, gmv, pengunjung, pesanan)
+      values (null, ${cpId}, ${platformProductId}, ${periode}::date, ${basis}, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 0, ${pengunjung}, ${pesanan})`;
+  }
+
+  async function bacaKuadran(cpId: number): Promise<Record<string, string | null>> {
+    const rows = await sql<{ platform_product_id: string; kuadran: string | null }[]>`
+      select platform_product_id, kuadran from pdt_fact_sku_period
+       where client_platform_id = ${cpId} order by platform_product_id`;
+    return Object.fromEntries(rows.map((r) => [r.platform_product_id, r.kuadran]));
+  }
+
+  it('mengklasifikasi seluruh baris periode ini sekaligus, termasuk ember no_data milik Shopee', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertSkuPeriod(cpId, batchId, 'PRD-BINTANG', 1000, 60);      // CR 6% ≥ 4%, trafik ≥ 500
+    await insertSkuPeriod(cpId, batchId, 'PRD-BOCOR', 1000, 10);        // CR 1%, trafik tinggi
+    await insertSkuPeriod(cpId, batchId, 'PRD-GEM', 120, 8);            // CR 6,7%, trafik rendah
+    await insertSkuPeriod(cpId, batchId, 'PRD-TIDUR', 30, 5);           // pengunjung < 50
+    await insertSkuPeriod(cpId, batchId, 'PRD-TIDAK-TAYANG', 0, null);
+    await insertSkuPeriod(cpId, batchId, 'PRD-NO-DATA', 200, null);     // pengunjung ada, pesanan tak terpanen
+
+    await klasifikasiUlangKuadranSkuShopee(sql, cpId, '2026-07-01');
+
+    expect(await bacaKuadran(cpId)).toEqual({
+      'PRD-BINTANG': 'bintang', 'PRD-BOCOR': 'bocor_traffic', 'PRD-GEM': 'hidden_gem',
+      'PRD-TIDUR': 'tidur', 'PRD-TIDAK-TAYANG': 'tidak_tayang', 'PRD-NO-DATA': 'no_data',
+    });
+  });
+
+  it('memakai `pengunjung`, BUKAN `impresi` — dua kolom trafik yang tidak boleh saling menggantikan', async () => {
+    const { cpId, batchId } = await fixture();
+    // 1.000 pengunjung / 60 pesanan = CR 6% ⇒ bintang. `impresi` diisi angka
+    // 42× lebih besar (rasio nyata Fim Motor); kalau ia yang terbaca, CR jatuh
+    // ke 0,14% dan barisnya jadi bocor_traffic.
+    await sql`
+      insert into pdt_fact_sku_period
+        (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id, parser_versi, gmv, pengunjung, impresi, pesanan)
+      values (null, ${cpId}, 'PRD-1', '2026-07-01'::date, 'siap_dikirim', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 0, 1000, 42000, 60)`;
+
+    await klasifikasiUlangKuadranSkuShopee(sql, cpId, '2026-07-01');
+    expect(await bacaKuadran(cpId)).toEqual({ 'PRD-1': 'bintang' });
+  });
+
+  it('band medium dipromosikan ke high saat sumbu sebelahnya high (perilaku tiga-band Shopee)', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertSkuPeriod(cpId, batchId, 'PRD-MEDIUM-NAIK', 300, 18);  // trafik medium, CR 6% ⇒ bintang
+    await insertSkuPeriod(cpId, batchId, 'PRD-MEDIUM-TURUN', 300, 9);  // trafik medium, CR 3% ⇒ evaluasi
+
+    await klasifikasiUlangKuadranSkuShopee(sql, cpId, '2026-07-01');
+    expect(await bacaKuadran(cpId)).toEqual({
+      'PRD-MEDIUM-NAIK': 'bintang', 'PRD-MEDIUM-TURUN': 'evaluasi',
+    });
+  });
+
+  it('idempotent — panggil ulang menghasilkan kuadran yang sama', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertSkuPeriod(cpId, batchId, 'PRD-1', 1000, 60);
+    await klasifikasiUlangKuadranSkuShopee(sql, cpId, '2026-07-01');
+    await klasifikasiUlangKuadranSkuShopee(sql, cpId, '2026-07-01');
+    expect(await bacaKuadran(cpId)).toEqual({ 'PRD-1': 'bintang' });
+  });
+
+  it('nol baris periode ini ⇒ no-op (bukan error)', async () => {
+    const { cpId } = await fixture();
+    await expect(klasifikasiUlangKuadranSkuShopee(sql, cpId, '2026-07-01')).resolves.toBeUndefined();
+  });
+
+  it('baris di LUAR periode/basis target TIDAK tersentuh — basis `dibuat` lahir dari berkas yang sama', async () => {
+    const { cpId, batchId } = await fixture();
+    await insertSkuPeriod(cpId, batchId, 'PRD-JULI', 1000, 60);
+    await insertSkuPeriod(cpId, batchId, 'PRD-DIBUAT', 1000, 60, 'dibuat');
+    await insertSkuPeriod(cpId, batchId, 'PRD-AGUSTUS', 1000, 60, 'siap_dikirim', '2026-08-01');
+
+    await klasifikasiUlangKuadranSkuShopee(sql, cpId, '2026-07-01');
+    const semua = await bacaKuadran(cpId);
+    expect(semua['PRD-JULI']).toBe('bintang');
+    expect(semua['PRD-DIBUAT']).toBeNull();
+    expect(semua['PRD-AGUSTUS']).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // rakitInputSkorShopee + hitungSkorShopee (sesi 34 lanjutan, G2-01 Shopee) —
 // padanan blok TikTok di atas. Pemetaan sumber pdt_fact_ads ↔ kategori mesin
 // lama (dan pengecualian shopee_ads_live dari agregat CTR) diverifikasi dari
@@ -5080,7 +5187,16 @@ describeDb('rakitLaporanTiktok (sesi 34 lanjutan) — KPI basis net (Rule 15, GM
     expect(hasil.platform).toBe('tiktok');
     expect(hasil.clientPlatformId).toBe(cpId);
     expect(hasil.periodeAwalBulan).toBe('2026-07-01');
-    expect(hasil.kpi).toEqual({ gmv: 950_000, pesanan: 40, pengunjung: 2_000, cvr: 0.02 });
+    // barangPerPengunjung/kedalaman null: fixture tidak mengisi produk_diklik, dan
+    // kolom yang absen TIDAK boleh dibaca sebagai 0 (Rule 12).
+    expect(hasil.kpi).toEqual({
+      gmv: 950_000,
+      pesanan: 40,
+      pengunjung: 2_000,
+      cvr: 0.02,
+      barangPerPengunjung: null,
+      kedalaman: null,
+    });
     expect(hasil.benchmarkVersi).toBe(2); // versi 2 (G2-01-KUADRAN-SKU langkah 2, migrasi 20261104010000) sekarang aktif tertinggi
 
     const skorLangsung = await hitungSkorTiktok(sql, cpId, '2026-07-01');
@@ -5093,7 +5209,14 @@ describeDb('rakitLaporanTiktok (sesi 34 lanjutan) — KPI basis net (Rule 15, GM
   it('nol baris basis net ⇒ kpi seluruhnya null (BUKAN 0), insight tetap terisi (ringkasan generik, poin kosong)', async () => {
     const { cpId } = await fixture();
     const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
-    expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+    expect(hasil.kpi).toEqual({
+      gmv: null,
+      pesanan: null,
+      pengunjung: null,
+      cvr: null,
+      barangPerPengunjung: null,
+      kedalaman: null,
+    });
     expect(hasil.insight.ringkasan).toBe('Belum ada data GMV untuk periode ini.');
     expect(hasil.insight.poin).toEqual([]);
   });
@@ -5133,7 +5256,14 @@ describeDb('rakitLaporanShopee (sesi 34 lanjutan) — KPI basis siap_dikirim (Ru
     expect(hasil.schema).toBe('cdps.pdt.laporan.shopee.v1');
     expect(hasil.platform).toBe('shopee');
     // GMV TIDAK dikurangi refund (beda TikTok) — 800_000 apa adanya.
-    expect(hasil.kpi).toEqual({ gmv: 800_000, pesanan: 20, pengunjung: 1_000, cvr: 0.02 });
+    expect(hasil.kpi).toEqual({
+      gmv: 800_000,
+      pesanan: 20,
+      pengunjung: 1_000,
+      cvr: 0.02,
+      barangPerPengunjung: null,
+      kedalaman: null,
+    });
     expect('benchmarkVersi' in hasil).toBe(false);
 
     const skorLangsung = await hitungSkorShopee(sql, cpId, '2026-07-01');
@@ -5146,7 +5276,14 @@ describeDb('rakitLaporanShopee (sesi 34 lanjutan) — KPI basis siap_dikirim (Ru
   it('nol baris basis siap_dikirim ⇒ kpi seluruhnya null (BUKAN 0), insight tetap terisi', async () => {
     const { cpId } = await fixture();
     const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
-    expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+    expect(hasil.kpi).toEqual({
+      gmv: null,
+      pesanan: null,
+      pengunjung: null,
+      cvr: null,
+      barangPerPengunjung: null,
+      kedalaman: null,
+    });
     expect(hasil.insight.ringkasan).toBe('Belum ada data GMV untuk periode ini.');
   });
 
@@ -5722,9 +5859,9 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "produk" (G2-01-KUADRAN-SKU lan
     await insertSkuPeriod(cpId, batchId, 'PRD-TIDUR', 'Kaos Tidur', 10_000, 5, 0.9, null); // klik < KLIK_MIN_UJI
 
     const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
-    expect(hasil.produk?.distribusi.bintang).toEqual({ jumlah: 1, gmv: 500_000 });
-    expect(hasil.produk?.distribusi.bocor_traffic).toEqual({ jumlah: 1, gmv: 300_000 });
-    expect(hasil.produk?.distribusi.tidur).toEqual({ jumlah: 1, gmv: 10_000 });
+    expect(hasil.produk?.distribusi?.bintang).toEqual({ jumlah: 1, gmv: 500_000 });
+    expect(hasil.produk?.distribusi?.bocor_traffic).toEqual({ jumlah: 1, gmv: 300_000 });
+    expect(hasil.produk?.distribusi?.tidur).toEqual({ jumlah: 1, gmv: 10_000 });
     expect(hasil.produk?.topAksi.map((x) => x.namaProduk)).toEqual(['Kaos Bintang', 'Kaos Bocor']); // tidur dikeluarkan, diurutkan GMV desc
     expect(hasil.produk?.topAksi[0]).toMatchObject({ platformProductId: 'PRD-BINTANG', gmv: 500_000, klik: 200, kuadran: 'bintang' });
   });

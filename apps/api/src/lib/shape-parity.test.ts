@@ -799,6 +799,9 @@ const WIRE_TO_FE: Record<string, string> = {
   PdtLaporanKpiWire: 'pdt.ts::PdtLaporanKpi',
   PdtLaporanSkorWire: 'pdt.ts::PdtLaporanSkor',
   PdtLaporanDimensiWire: 'pdt.ts::PdtLaporanDimensi',
+  // PDT — bagian "harian" (tren GMV per hari, 2026-09-21).
+  PdtLaporanHarianWire: 'pdt.ts::PdtLaporanHarian',
+  PdtLaporanHarianTitikWire: 'pdt.ts::PdtLaporanHarianTitik',
   // PDT G2-01 lanjutan — bagian "kanal" (2026-09-16).
   PdtLaporanKanalWire: 'pdt.ts::PdtLaporanKanal',
   PdtLaporanKanalItemWire: 'pdt.ts::PdtLaporanKanalItem',
@@ -812,7 +815,25 @@ const WIRE_TO_FE: Record<string, string> = {
   // PDT G2-01-KUADRAN-SKU lanjutan — bagian "produk" (TikTok-only, Shopee produk:null permanen).
   PdtLaporanProdukWire: 'pdt.ts::PdtLaporanProduk',
   PdtLaporanProdukItemWire: 'pdt.ts::PdtLaporanProdukItem',
+  // Bagian-bagian paritas mesin HTML lama (2026-09-21) — Top 10 Creator,
+  // Top 10 Sesi, Per Kampanye, §8 Voucher & Promo, §9 Layanan & Kesehatan.
+  PdtLaporanProdukTopItemWire: 'pdt.ts::PdtLaporanProdukTopItem',
+  PdtLaporanKreatorWire: 'pdt.ts::PdtLaporanKreator',
+  PdtLaporanKreatorItemWire: 'pdt.ts::PdtLaporanKreatorItem',
+  PdtLaporanSesiLiveWire: 'pdt.ts::PdtLaporanSesiLive',
+  PdtLaporanSesiLiveItemWire: 'pdt.ts::PdtLaporanSesiLiveItem',
+  PdtLaporanKampanyeWire: 'pdt.ts::PdtLaporanKampanye',
+  PdtLaporanKampanyeItemWire: 'pdt.ts::PdtLaporanKampanyeItem',
+  PdtLaporanPromoWire: 'pdt.ts::PdtLaporanPromo',
+  PdtLaporanPromoAngkaWire: 'pdt.ts::PdtLaporanPromoAngka',
+  PdtLaporanPromoTipeWire: 'pdt.ts::PdtLaporanPromoTipe',
+  PdtLaporanPromoFlashSaleWire: 'pdt.ts::PdtLaporanPromoFlashSale',
+  PdtLaporanLayananWire: 'pdt.ts::PdtLaporanLayanan',
+  PdtLaporanLayananChatWire: 'pdt.ts::PdtLaporanLayananChat',
+  PdtLaporanPenaltiWire: 'pdt.ts::PdtLaporanPenalti',
   PdtLaporanProdukDistribusiWire: 'pdt.ts::PdtLaporanProdukDistribusi',
+  PdtLaporanProdukAmbangWire: 'pdt.ts::PdtLaporanProdukAmbang',
+  PdtLaporanProdukRelatifWire: 'pdt.ts::PdtLaporanProdukRelatif',
   // PDT G2-01 lanjutan — bagian "afiliasi" ringkasan (2026-09-16, kedua platform, satu bentuk).
   PdtLaporanAfiliasiWire: 'pdt.ts::PdtLaporanAfiliasi',
   // PDT G2-01 lanjutan — bagian "tahap" (2026-09-16, TikTok-only, Shopee tahap:null permanen).

@@ -177,7 +177,17 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.platform).toBe('tiktok');
     expect(body.client_platform_id).toBe(cpId);
     expect(body.periode_awal_bulan).toBe('2026-07-01');
-    expect(body.kpi).toEqual({ gmv: 950_000, pesanan: 40, pengunjung: 2_000, cvr: 0.02 });
+    // `barang_per_pengunjung`/`kedalaman` snake_case DAN hadir walau null — kunci
+    // yang HILANG lebih berbahaya daripada null (kelas O43): FE membacanya, dan
+    // fixture ini memang tidak mengisi `produk_diklik` (Rule 12, bukan 0).
+    expect(body.kpi).toEqual({
+      gmv: 950_000,
+      pesanan: 40,
+      pengunjung: 2_000,
+      cvr: 0.02,
+      barang_per_pengunjung: null,
+      kedalaman: null,
+    });
     expect(body.benchmark_versi).toBe(2); // versi 2 aktif tertinggi (G2-01-KUADRAN-SKU langkah 2, migrasi 20261104010000)
     expect(body.skor).toHaveProperty('total');
     expect(body.skor).toHaveProperty('dimensi');
@@ -269,7 +279,14 @@ describeDb('GET /pdt/laporan — real DB', () => {
     const body = await res.json();
     expect(body.schema).toBe('cdps.pdt.laporan.shopee.v1');
     expect(body.platform).toBe('shopee');
-    expect(body.kpi).toEqual({ gmv: 800_000, pesanan: 20, pengunjung: 1_000, cvr: 0.02 });
+    expect(body.kpi).toEqual({
+      gmv: 800_000,
+      pesanan: 20,
+      pengunjung: 1_000,
+      cvr: 0.02,
+      barang_per_pengunjung: null,
+      kedalaman: null,
+    });
     expect('benchmark_versi' in body).toBe(true);
     expect(body.benchmark_versi).toBeNull();
     // Kanal Shopee SELALU lengkap:false (dua dari enam sumber legacy) — nol baris basis 'dibuat'

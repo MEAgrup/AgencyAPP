@@ -38,8 +38,11 @@ import {
   markLost,
   MAX_SERVICES,
   NotFoundError,
+  MSG_ANGKA_KOLOM_TUMPAH,
   MSG_JASA_DUPLIKAT_PLATFORM,
   MSG_MAX_SERVICES,
+  MSG_UANG_TERLALU_BESAR,
+  MSG_UANG_TIDAK_SAH,
   MSG_PLATFORM_DI_LUAR_CHECKLIST,
   MSG_SALESPERSON_DUPLIKAT,
   NotClosableError,
@@ -341,7 +344,10 @@ describe('negotiation gates (no DB)', () => {
 // default never quietly creeps back in.
 describe('F-3: wrong-field messages are specific, never the generic incomplete BI', () => {
   it('each new message differs from bi.INCOMPLETE_DATA and from each other', () => {
-    const messages = [MSG_PLATFORM_DI_LUAR_CHECKLIST, MSG_JASA_DUPLIKAT_PLATFORM, MSG_SALESPERSON_DUPLIKAT];
+    const messages = [
+      MSG_PLATFORM_DI_LUAR_CHECKLIST, MSG_JASA_DUPLIKAT_PLATFORM, MSG_SALESPERSON_DUPLIKAT,
+      MSG_ANGKA_KOLOM_TUMPAH, MSG_UANG_TERLALU_BESAR('target GMV'), MSG_UANG_TIDAK_SAH('target GMV'),
+    ];
     for (const m of messages) {
       expect(m).not.toBe(bi.INCOMPLETE_DATA);
     }
@@ -737,6 +743,90 @@ describeDb('submitQualifiedForm', () => {
       select count(*)::int as n from audit_log
       where entity_id = ${attemptId} and action = 'qualified_form_submit'`;
     expect(audit[0].n).toBe(1);
+  });
+
+  // Insiden 2026-09-21 (docs/DECISIONS.md): `PRSP-202609-0431` gagal 13 kali
+  // beruntun dengan 500 `internal server error` karena angka uang yang diketik
+  // hanya dicek "tidak kosong", lalu ditolak Postgres (SQLSTATE 22003) DI DALAM
+  // transaksi. Semua kasus di bawah harus jadi 400 ber-pesan BI, tanpa menulis
+  // apa pun dan tanpa memindahkan status attempt.
+  // Rp 100 triliun — muat int64 (jadi `money.parse` diam saja), TIDAK muat numeric(15,2).
+  const KELEBIHAN_NOL = '100000000000000';
+  it.each([
+    { nama: 'gmvBaseline', label: 'GMV baseline', timpa: { gmvBaseline: KELEBIHAN_NOL } },
+    { nama: 'targetGmv', label: 'target GMV', timpa: { targetGmv: KELEBIHAN_NOL } },
+    { nama: 'marketingBudget', label: 'marketing budget', timpa: { marketingBudget: KELEBIHAN_NOL } },
+  ])('menolak $nama yang kelebihan nol dengan pesan BI bernama, bukan 500', async ({ nama, label, timpa }) => {
+    const svc = await seedService(`SVC-ZZ-OVF-${nama}`);
+    const attemptId = await contactedAttempt(budi());
+    await expect(
+      submitQualifiedForm(sql, budi(), attemptId, {
+        namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+        kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '50000000', targetGmv: '80000000',
+        services: [{ masterServiceId: svc, quantity: 1 }],
+        ...timpa,
+      }),
+    ).rejects.toThrow(MSG_UANG_TERLALU_BESAR(label));
+
+    const attempt = await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`;
+    expect(attempt[0].status).toBe('Contacted');
+    const form = await sql<{ n: number }[]>`select count(*)::int as n from qualified_forms where attempt_id = ${attemptId}`;
+    expect(form[0].n).toBe(0);
+  });
+
+  it('menolak angka uang yang bukan angka sama sekali (jalur 22P02, juga 500 sebelumnya)', async () => {
+    const svc = await seedService('SVC-ZZ-NAN');
+    const attemptId = await contactedAttempt(budi());
+    await expect(
+      submitQualifiedForm(sql, budi(), attemptId, {
+        namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+        kategori: 'Fashion', platform: 'Shopee', gmvBaseline: 'lima puluh juta', targetGmv: '80000000',
+        services: [{ masterServiceId: svc, quantity: 1 }],
+      }),
+    ).rejects.toThrow(MSG_UANG_TIDAK_SAH('GMV baseline'));
+  });
+
+  it('menolak quantity yang melampaui kolomnya (subtotal-nya pun tidak akan muat)', async () => {
+    const svc = await seedService('SVC-ZZ-QTYOVF');
+    const attemptId = await contactedAttempt(budi());
+    await expect(
+      submitQualifiedForm(sql, budi(), attemptId, {
+        namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+        kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '1', targetGmv: '1',
+        services: [{ masterServiceId: svc, quantity: 1e14 }],
+      }),
+    ).rejects.toThrow(/terlalu besar/);
+    const lines = await sql<{ n: number }[]>`
+      select count(*)::int as n from qualified_form_services where attempt_id = ${attemptId}`;
+    expect(lines[0].n).toBe(0);
+  });
+
+  it('menolak subtotal yang tumpah walau quantity dan harga satuannya sendiri wajar', async () => {
+    // 1.000.000 × Rp 50.000.000 = Rp 5×10^13 — dua masukan yang lolos sendiri-sendiri,
+    // hasil kalinya tidak muat numeric(15,2). Inilah kenapa subtotal dijaga TERPISAH.
+    const svc = await seedService('SVC-ZZ-SUBOVF', '50000000.00');
+    const attemptId = await contactedAttempt(budi());
+    await expect(
+      submitQualifiedForm(sql, budi(), attemptId, {
+        namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+        kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '1', targetGmv: '1',
+        services: [{ masterServiceId: svc, quantity: 1000000 }],
+      }),
+    ).rejects.toThrow(/terlalu besar/);
+    const lines = await sql<{ n: number }[]>`
+      select count(*)::int as n from qualified_form_services where attempt_id = ${attemptId}`;
+    expect(lines[0].n).toBe(0);
+  });
+
+  it('nilai uang yang wajar tetap lolos (gerbang baru tidak memblokir jalur normal)', async () => {
+    const svc = await seedService('SVC-ZZ-WAJAR');
+    const attemptId = await contactedAttempt(budi());
+    const res = await submitQualifiedForm(sql, budi(), attemptId, {
+      namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+      kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '5000000000', targetGmv: '10000000000',
+      marketingBudget: '500000000', services: [{ masterServiceId: svc, quantity: 1 }],
+    });
+    expect(res.ok).toBe(true);
   });
 
   it(`accepts exactly ${MAX_SERVICES} services (the raised cap really is usable)`, async () => {

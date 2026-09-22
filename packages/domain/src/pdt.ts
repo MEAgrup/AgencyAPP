@@ -1529,7 +1529,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // kesetaraan yang sudah dibuktikan G1-07-SHOPEE-DOBEL-HITUNG ke sample asli
   // (Σ baris parent Siap Dikirim = Rp1.515.002.476 = shop-level PERSIS).
   //
-  // `impresi`/`klik` ditulis pada KEDUA basis: keduanya trafik per produk yang
+  // `impresi`/`klik`/`pengunjung` ditulis pada KEDUA basis: ketiganya trafik per produk yang
   // memang tidak berbasis pesanan, jadi ia sama untuk kedua pandangan. Basis
   // adalah pandangan ALTERNATIF atas periode yang sama, tidak pernah dijumlah
   // silang — jadi ini bukan dobel hitung.
@@ -1554,11 +1554,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
           await tx`
             insert into pdt_fact_sku_period
               (sku_id, client_platform_id, platform_product_id, nama_produk, periode, basis,
-               batch_id, parser_versi, gmv, produk_terjual, pesanan, impresi, klik)
+               batch_id, parser_versi, gmv, produk_terjual, pesanan, impresi, klik, pengunjung)
             values
               (null, ${clientPlatformId}, ${baris.platformProductId}, ${baris.namaProduk},
                ${periodeAwalBulan}::date, ${basis}, ${id}, ${pdt.PDT_PARSER_VERSI},
-               ${gmv}, ${produkTerjual}, ${pesanan}, ${baris.dilihat}, ${baris.klik})`;
+               ${gmv}, ${produkTerjual}, ${pesanan}, ${baris.dilihat}, ${baris.klik}, ${baris.pengunjung})`;
         }
       }
     }
@@ -2723,6 +2723,49 @@ function validasiPeriodeAwalBulan(periodeAwalBulan: string): void {
 }
 
 /**
+ * KUADRAN-SHOPEE — klasifikasi ULANG kuadran seluruh baris
+ * `pdt_fact_sku_period` Shopee (`sku_id is null`, `basis='siap_dikirim'`) untuk
+ * SATU client_platform_id + SATU periode, lalu TULIS kolom `kuadran`. Kembaran
+ * `klasifikasiUlangKuadranSkuTiktok`, dengan tiga perbedaan yang seluruhnya
+ * berasal dari mesin lama, bukan dari selera:
+ *
+ *  1. **Basis `siap_dikirim`, bukan `net`.** Itu basis laporan klien Shopee
+ *     (Rule 16) dan basis yang `bacaProdukShopee` baca — kalau kuadran ditulis
+ *     ke basis `dibuat`, laporan tidak akan pernah melihatnya. Kedua basis
+ *     lahir dari berkas yang sama dengan `pengunjung` yang IDENTIK (trafik
+ *     produk tidak berbasis pesanan), jadi pilihan ini tidak mengubah sumbu-X;
+ *     yang berubah hanya `pesanan` di penyebut CR, dan `siap_dikirim` adalah
+ *     yang klien lihat.
+ *  2. **Nol parameter benchmark.** Ambang kuadran Shopee adalah konstanta
+ *     (`PDT_KUADRAN_SHOPEE`, `@cdps/core`) — asimetri yang SUDAH dicatat
+ *     migrasi `20261031010000`: mesin skor Shopee memang tidak membaca
+ *     `pdt_benchmark` sama sekali.
+ *  3. **Membaca `pengunjung`, bukan `klik`/`ctor`.** Lihat komentar migrasi
+ *     `20261128010000` untuk kenapa dua kolom trafik itu tidak bisa saling
+ *     menggantikan.
+ *
+ * Idempotent, sama seperti kembarannya: hasilnya fungsi murni dari baris fakta
+ * + ambang konstanta, jadi memanggilnya dua kali menulis nilai yang sama.
+ */
+export async function klasifikasiUlangKuadranSkuShopee(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+): Promise<void> {
+  const rows = await sql<{ id: number; pengunjung: number | null; pesanan: number | null }[]>`
+    select id, pengunjung, pesanan from pdt_fact_sku_period
+     where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'siap_dikirim'
+       and periode = ${periodeAwalBulan}::date`;
+  if (rows.length === 0) return;
+  const hasil = pdt.klasifikasikanKuadranSkuShopee(
+    rows.map((r) => ({ id: r.id, pengunjung: r.pengunjung, pesananDibuat: r.pesanan })),
+  );
+  for (const h of hasil) {
+    await sql`update pdt_fact_sku_period set kuadran = ${h.kuadran} where id = ${h.id}`;
+  }
+}
+
+/**
  * Rakit `PdtSkorInputTiktok` dari `pdt_fact_*` untuk SATU client_platform_id +
  * SATU periode (awal bulan, format `YYYY-MM-01`). Dimensi tanpa baris fakta
  * sama sekali ⇒ `null` (Rule 12 ditegakkan di `computeSkorTiktok` yang
@@ -3269,6 +3312,13 @@ export async function hitungSkorShopee(
   clientPlatformId: number,
   periodeAwalBulan: string,
 ): Promise<{ hasil: pdt.PdtSkorHasilShopee }> {
+  // KUADRAN-SHOPEE — kolom `kuadran` ditulis SEBELUM apa pun membacanya, pola
+  // dan alasan yang sama dengan `hitungSkorTiktok` (Rule 4: field turunan,
+  // selalu recomputable, tidak pernah ditulis tangan). `rakitInputSkorShopee`
+  // sendiri belum membacanya — `computeSkorShopee` tidak punya dimensi
+  // Portfolio Produk seperti TikTok — tapi `bacaProdukShopee` (laporan) iya,
+  // dan ia dipanggil SETELAH fungsi ini.
+  await klasifikasiUlangKuadranSkuShopee(sql, clientPlatformId, periodeAwalBulan);
   const input = await rakitInputSkorShopee(sql, clientPlatformId, periodeAwalBulan);
   return { hasil: pdt.computeSkorShopee(input) };
 }
@@ -3295,33 +3345,90 @@ export async function hitungSkorShopee(
 // ===========================================================================
 
 async function bacaKpiShopDaily(sql: Sql, clientPlatformId: number, periodeAwalBulan: string, basis: string): Promise<pdt.PdtLaporanKpiInput | null> {
-  const [row] = await sql<{ n: number; gmv: string; pesanan: string; pengunjung: string }[]>`
+  // `produk_diklik` dihitung TERPISAH (`count(...)`) dari `sum(...)`-nya: kolom
+  // ini opsional di sumbernya, dan `sum()` atas nol baris non-null tetap 0 —
+  // 0 berarti "nol barang dibuka" sementara yang benar "tidak diketahui"
+  // (Rule 12). Konsumennya `kpi.barangPerPengunjung` (kedalaman jelajah).
+  const [row] = await sql<{ n: number; gmv: string; pesanan: string; pengunjung: string; diklik_n: number; diklik: string }[]>`
     select count(*)::int as n,
            coalesce(sum(gmv), 0) as gmv,
            coalesce(sum(pesanan), 0) as pesanan,
-           coalesce(sum(pengunjung), 0) as pengunjung
+           coalesce(sum(pengunjung), 0) as pengunjung,
+           count(produk_diklik)::int as diklik_n, coalesce(sum(produk_diklik), 0) as diklik
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = ${basis}
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
-  return row.n === 0 ? null : { gmv: Number(row.gmv), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung) };
+  return row.n === 0 ? null : {
+    gmv: Number(row.gmv), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung),
+    produkDiklik: row.diklik_n === 0 ? null : Number(row.diklik),
+  };
 }
 
 async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKpiInput | null> {
-  const [row] = await sql<{ n: number; gmv: string; refund: string; pesanan: string; pengunjung: string }[]>`
+  const [row] = await sql<{ n: number; gmv: string; refund: string; pesanan: string; pengunjung: string; diklik_n: number; diklik: string }[]>`
     select count(*)::int as n,
            coalesce(sum(gmv), 0) as gmv,
            coalesce(sum(refund), 0) as refund,
            coalesce(sum(pesanan), 0) as pesanan,
-           coalesce(sum(pengunjung), 0) as pengunjung
+           coalesce(sum(pengunjung), 0) as pengunjung,
+           count(produk_diklik)::int as diklik_n, coalesce(sum(produk_diklik), 0) as diklik
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = 'net'
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
   if (row.n === 0) return null;
-  return { gmv: Number(row.gmv) - Number(row.refund), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung) };
+  // `produk_diklik` TERPANEN di kedua platform (`tt_shop_analytics` kolom
+  // 'Klik produk', `shopee_shop_stats` kolom 'Produk Diklik'), jadi kedalaman
+  // jelajah muncul untuk dua-duanya. `count()` terpisah dari `sum()` supaya
+  // nol baris terisi terbaca 'tidak diketahui', bukan 0 palsu (Rule 12).
+  return {
+    gmv: Number(row.gmv) - Number(row.refund), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung),
+    produkDiklik: row.diklik_n === 0 ? null : Number(row.diklik),
+  };
+}
+
+/**
+ * Bagian "harian" (tren GMV per hari) — baris `pdt_fact_shop_daily` APA
+ * ADANYA, tabel yang sama yang `bacaKpiShopDaily`/`bacaKpiTiktokNet` di atas
+ * langsung `sum()` jadi satu angka bulanan. Nol query ke tabel baru.
+ *
+ * `basis` DAN netting refund mengikuti bagian "kpi" platform yang sama
+ * (Shopee `'siap_dikirim'` Rule 16 tanpa netting; TikTok `'net'` Rule 15
+ * dengan `gmv − refund`), supaya Σ titik harian SELALU sama dengan
+ * `kpi.gmv` — kalau keduanya berbeda basis, laporan memuat dua angka GMV
+ * yang sama-sama benar tapi tidak cocok, dan pembacanya tidak punya cara
+ * tahu yang mana yang dimaksud.
+ *
+ * Hari tanpa baris TIDAK diisi nol di sini maupun di `bangunLaporanHarian` —
+ * lihat docblock bagian itu (`@cdps/core` `pdt/laporan.ts`) untuk alasannya.
+ */
+async function bacaHarian(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeAwalBulan: string,
+  basis: string,
+  netkanRefund: boolean,
+): Promise<pdt.PdtLaporanHarianInput> {
+  const rows = await sql<{ tanggal: string; gmv: string | null; refund: string | null; pesanan: number | null; pengunjung: number | null }[]>`
+    select to_char(tanggal, 'YYYY-MM-DD') as tanggal, gmv, refund, pesanan, pengunjung
+      from pdt_fact_shop_daily
+     where client_platform_id = ${clientPlatformId}
+       and basis = ${basis}
+       and tanggal >= ${periodeAwalBulan}::date
+       and tanggal < (${periodeAwalBulan}::date + interval '1 month')
+     order by tanggal`;
+  if (rows.length === 0) return null;
+  return rows.map((r) => ({
+    tanggal: r.tanggal,
+    // `gmv` null = kolomnya memang tidak diketahui hari itu; netting hanya berlaku
+    // bila gmv-nya ADA (null − refund tetap "tidak diketahui", bukan minus refund).
+    gmv: r.gmv == null ? null : Number(r.gmv) - (netkanRefund ? Number(r.refund ?? 0) : 0),
+    pesanan: r.pesanan == null ? null : Number(r.pesanan),
+    pengunjung: r.pengunjung == null ? null : Number(r.pengunjung),
+  }));
 }
 
 /**
@@ -3612,9 +3719,16 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
          and basis = 'net'
          and tanggal >= ${periodeAwalBulan}::date
          and tanggal < (${periodeAwalBulan}::date + interval '1 month')`,
-    sql<{ n: number; biaya: string; pesanan_n: number; pesanan: string }[]>`
+    // `tayangan`/`klik` ikut dibaca di query yang SAMA (bukan query kelima):
+    // keduanya kolom `pdt_fact_ads` pada baris yang sama persis yang `biaya`/
+    // `pesanan_sku` sudah diambil. `count(...)` per kolom karena `sum()` atas
+    // nol baris non-null tetap 0, dan 0 di funnel berarti "nol tayangan"
+    // sementara yang benar "tidak diketahui" (Rule 12).
+    sql<{ n: number; biaya: string; pesanan_n: number; pesanan: string; tayangan_n: number; tayangan: string; klik_n: number; klik: string }[]>`
       select count(*)::int as n, coalesce(sum(biaya), 0) as biaya,
-             count(pesanan_sku)::int as pesanan_n, coalesce(sum(pesanan_sku), 0) as pesanan
+             count(pesanan_sku)::int as pesanan_n, coalesce(sum(pesanan_sku), 0) as pesanan,
+             count(tayangan)::int as tayangan_n, coalesce(sum(tayangan), 0) as tayangan,
+             count(klik)::int as klik_n, coalesce(sum(klik), 0) as klik
         from pdt_fact_ads
        where client_platform_id = ${clientPlatformId}
          and periode = ${periodeAwalBulan}::date
@@ -3632,6 +3746,10 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
     klik: klikRow.n === 0 ? null : Number(klikRow.klik),
     cpaInput: adsRow.n === 0 ? null : { biaya: Number(adsRow.biaya), pesanan: adsRow.pesanan_n === 0 ? null : Number(adsRow.pesanan) },
     affPosting: affRow.total === 0 ? null : affRow.posting,
+    ttamFunnel: adsRow.n === 0 ? null : {
+      tayangan: adsRow.tayangan_n === 0 ? null : Number(adsRow.tayangan),
+      klik: adsRow.klik_n === 0 ? null : Number(adsRow.klik),
+    },
   };
 }
 
@@ -3645,8 +3763,8 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
  * basi/`null` dari klasifikasi periode lain atau belum pernah sama sekali.
  */
 async function bacaProdukTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
-  const rows = await sql<{ kuadran: string | null; nama_produk: string | null; platform_product_id: string | null; gmv: string | null; klik: number | null; ctor: string | null; pesanan_sku: number | null }[]>`
-    select kuadran, nama_produk, platform_product_id, gmv, klik, ctor, pesanan_sku
+  const rows = await sql<{ kuadran: string | null; nama_produk: string | null; platform_product_id: string | null; gmv: string | null; klik: number | null; ctor: string | null; pesanan_sku: number | null; impresi: number | null }[]>`
+    select kuadran, nama_produk, platform_product_id, gmv, klik, ctor, pesanan_sku, impresi
       from pdt_fact_sku_period
      where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'net'
        and periode = ${periodeAwalBulan}::date`;
@@ -3661,12 +3779,273 @@ async function bacaProdukTiktok(sql: Sql, clientPlatformId: number, periodeAwalB
       platformProductId: r.platform_product_id,
       gmv: r.gmv == null ? null : Number(r.gmv),
       klik,
+      // Sumbu-X kuadran TikTok = klik (Shopee memakai `pengunjung`) — dua
+      // platform, satu field, karena mode relatif memerlukannya seragam.
+      traffic: klik,
+      impresi: r.impresi,
       cvr,
     };
   });
 }
 
-/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + kanal + iklan + live + video + produk + afiliasi + tahap + `hitungSkorTiktok`. */
+/**
+ * Bagian "promo" Shopee (§8 mesin lama) — `pdt_fact_promo`, G4-03 aksi 4.
+ *
+ * Baris dibaca APA ADANYA termasuk `tipe_promosi='Semua'`; yang MEMISAHKAN
+ * total dari komponen adalah `pdt.bangunLaporanPromo` (satu tempat, bisa
+ * diuji tanpa DB). Query ini sengaja tidak `sum()` apa pun — menjumlah
+ * baris diskon di SQL adalah persis dobel-hitung yang constraint tabelnya
+ * dibuat untuk mencegah.
+ */
+async function bacaPromo(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanPromoInput> {
+  const rows = await sql<{
+    jenis: string; tipe_promosi: string | null;
+    penjualan_dibuat: string | null; penjualan_siap_dikirim: string | null;
+    pesanan_dibuat: number | null; pesanan_siap_dikirim: number | null;
+    produk_dilihat: number | null; produk_diklik: number | null;
+  }[]>`
+    select jenis, tipe_promosi, penjualan_dibuat, penjualan_siap_dikirim,
+           pesanan_dibuat, pesanan_siap_dikirim, produk_dilihat, produk_diklik
+      from pdt_fact_promo
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date`;
+  if (rows.length === 0) return null;
+  return rows.map((r) => ({
+    jenis: r.jenis as 'diskon' | 'flash_sale',
+    tipePromosi: r.tipe_promosi,
+    penjualanDibuat: r.penjualan_dibuat == null ? null : Number(r.penjualan_dibuat),
+    penjualanSiapDikirim: r.penjualan_siap_dikirim == null ? null : Number(r.penjualan_siap_dikirim),
+    pesananDibuat: r.pesanan_dibuat,
+    pesananSiapDikirim: r.pesanan_siap_dikirim,
+    produkDilihat: r.produk_dilihat,
+    produkDiklik: r.produk_diklik,
+  }));
+}
+
+/**
+ * Bagian "layanan" Shopee (§9 mesin lama) — `pdt_fact_layanan_chat` (G3-02a)
+ * + `pdt_fact_kesehatan_penalti` (G2-01), dua tabel yang sampai hari ini
+ * hanya dibaca `pdt-prefill.ts`/dimensi skor, tidak pernah oleh laporan.
+ *
+ * Hitungan chat DIJUMLAH di SQL; tiga kolom yang di sumbernya sudah berupa
+ * rata-rata (`waktu_respon_detik`, `csat_persen`,
+ * `tingkat_konversi_chat_dibalas`) dirata-rata `avg()` antar baris yang
+ * mengisinya — `avg()` Postgres sudah mengabaikan NULL, jadi baris yang
+ * tidak membawa kolom itu tidak menarik rata-ratanya ke bawah.
+ */
+async function bacaLayanan(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanLayananInput | null> {
+  const [[chatRow], penaltiRows] = await Promise.all([
+    sql<{
+      baris: number;
+      pengunjung_n: number; pengunjung: string;
+      masuk_n: number; masuk: string;
+      dibalas_n: number; dibalas: string;
+      pesanan_n: number; pesanan: string;
+      penjualan_n: number; penjualan: string;
+      respon: string | null; csat: string | null; konversi: string | null;
+    }[]>`
+      select count(*)::int as baris,
+             count(pengunjung)::int as pengunjung_n, coalesce(sum(pengunjung), 0) as pengunjung,
+             count(chat_masuk)::int as masuk_n, coalesce(sum(chat_masuk), 0) as masuk,
+             count(chat_dibalas)::int as dibalas_n, coalesce(sum(chat_dibalas), 0) as dibalas,
+             count(total_pesanan)::int as pesanan_n, coalesce(sum(total_pesanan), 0) as pesanan,
+             count(penjualan)::int as penjualan_n, coalesce(sum(penjualan), 0) as penjualan,
+             avg(waktu_respon_detik) as respon,
+             avg(csat_persen) as csat,
+             avg(tingkat_konversi_chat_dibalas) as konversi
+        from pdt_fact_layanan_chat
+       where client_platform_id = ${clientPlatformId}
+         and periode = ${periodeAwalBulan}::date`,
+    sql<{ poin: string; deskripsi: string; durasi: string }[]>`
+      select poin, deskripsi, durasi
+        from pdt_fact_kesehatan_penalti
+       where client_platform_id = ${clientPlatformId}
+         and periode = ${periodeAwalBulan}::date`,
+  ]);
+
+  const adaChat = (chatRow?.baris ?? 0) > 0;
+  if (!adaChat && penaltiRows.length === 0) return null;
+
+  return {
+    chat: !adaChat ? null : {
+      barisSumber: chatRow.baris,
+      pengunjung: chatRow.pengunjung_n === 0 ? null : Number(chatRow.pengunjung),
+      chatMasuk: chatRow.masuk_n === 0 ? null : Number(chatRow.masuk),
+      chatDibalas: chatRow.dibalas_n === 0 ? null : Number(chatRow.dibalas),
+      waktuResponDetik: chatRow.respon == null ? null : Number(chatRow.respon),
+      csatPersen: chatRow.csat == null ? null : Number(chatRow.csat),
+      totalPesanan: chatRow.pesanan_n === 0 ? null : Number(chatRow.pesanan),
+      penjualan: chatRow.penjualan_n === 0 ? null : Number(chatRow.penjualan),
+      tingkatKonversiChatDibalasPersen: chatRow.konversi == null ? null : Number(chatRow.konversi),
+    },
+    penalti: penaltiRows.map((r) => ({ poin: Number(r.poin), deskripsi: r.deskripsi, durasi: r.durasi })),
+  };
+}
+
+/**
+ * Bagian "kreator" (Top 10 Creator) — `pdt_fact_creator_period`, baris yang
+ * SAMA yang sudah di-`count()`/`sum()` `bacaAfiliasi`. Di sini dibaca
+ * per-baris: ringkasan menjawab "seberapa besar", daftar menjawab "siapa".
+ *
+ * Platform-agnostic seperti `bacaAfiliasi` — Shopee otomatis dapat
+ * `jumlah_live`/`jumlah_video` `null` karena writer-nya tidak mengisi kolom
+ * itu, bukan karena filter platform.
+ *
+ * `order by gmv desc nulls last` + `limit` DI SQL sengaja TIDAK dipakai:
+ * `pdt.bangunLaporanKreator` butuh SELURUH baris untuk menghitung
+ * `kontribusiTop` (Σ top ÷ Σ semua) dan `totalKreator`. Jumlah kreator per
+ * toko per bulan berorde puluhan, bukan puluhan ribu.
+ */
+async function bacaKreator(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKreatorInput> {
+  const rows = await sql<{
+    creator_handle: string; gmv: string | null; gmv_live: string | null; gmv_video: string | null;
+    pesanan_teratribusi: number | null; jumlah_live: number | null; jumlah_video: number | null;
+  }[]>`
+    select creator_handle, gmv, gmv_live, gmv_video, pesanan_teratribusi, jumlah_live, jumlah_video
+      from pdt_fact_creator_period
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date`;
+  if (rows.length === 0) return null;
+  return rows.map((r) => ({
+    handle: r.creator_handle,
+    gmv: r.gmv == null ? null : Number(r.gmv),
+    gmvLive: r.gmv_live == null ? null : Number(r.gmv_live),
+    gmvVideo: r.gmv_video == null ? null : Number(r.gmv_video),
+    pesanan: r.pesanan_teratribusi,
+    jumlahLive: r.jumlah_live,
+    jumlahVideo: r.jumlah_video,
+  }));
+}
+
+/**
+ * Bagian "sesiLive" (Top 10 Sesi) — `pdt_fact_content` `jenis='live'`,
+ * baris yang SAMA yang sudah di-`sum()` `bacaLive`.
+ *
+ * Periodenya disaring lewat `waktu_posting` (kolom waktu satu-satunya yang
+ * tabel ini punya — ia ber-key konten, bukan ber-key periode seperti
+ * `pdt_fact_creator_period`), memakai batas bulan yang SAMA dengan
+ * `bacaLive` supaya kedua bagian tidak pernah menghitung sesi yang berbeda.
+ */
+async function bacaSesiLive(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanSesiLiveInput> {
+  const rows = await sql<{
+    platform_content_id: string; creator_handle: string | null; is_akun_toko: boolean;
+    waktu_posting: Date | string | null; durasi_detik: number | null; vv: number | null;
+    gmv: string | null; pengikut_baru: number | null; klik_produk: number | null;
+  }[]>`
+    select platform_content_id, creator_handle, is_akun_toko, waktu_posting,
+           durasi_detik, vv, gmv, pengikut_baru, klik_produk
+      from pdt_fact_content
+     where client_platform_id = ${clientPlatformId}
+       and jenis = 'live'
+       and waktu_posting >= ${periodeAwalBulan}::date
+       and waktu_posting < (${periodeAwalBulan}::date + interval '1 month')`;
+  if (rows.length === 0) return null;
+  return rows.map((r) => ({
+    platformContentId: r.platform_content_id,
+    creatorHandle: r.creator_handle,
+    akunToko: r.is_akun_toko,
+    waktuPosting: r.waktu_posting == null ? null : new Date(r.waktu_posting).toISOString(),
+    durasiDetik: r.durasi_detik,
+    vv: r.vv,
+    gmv: r.gmv == null ? null : Number(r.gmv),
+    pengikutBaru: r.pengikut_baru,
+    klikProduk: r.klik_produk,
+  }));
+}
+
+/**
+ * Bagian "kampanye" (Per Kampanye) — `pdt_fact_ads` di-`group by` SUMBER +
+ * KAMPANYE, bukan sumber saja seperti `bacaIklanTiktok`/`bacaIklanShopee`.
+ *
+ * Satu kampanye bisa punya BANYAK baris fakta (unique key-nya sampai
+ * `sku_id`/`content_id`), jadi group-by di sini bukan kosmetik — tanpanya
+ * satu kampanye dengan 40 SKU akan tampil 40 kali dan memenuhi seluruh
+ * tabel dengan satu kampanye.
+ *
+ * `roas` kolom TIDAK dibaca — ia diturunkan ulang `Σgmv ÷ Σbiaya` oleh
+ * `pdt.bangunLaporanKampanye` (aturan rumah #4, dan satu-satunya cara yang
+ * benar setelah baris digabung: rata-rata dari rasio bukan rasio dari
+ * jumlah).
+ */
+async function bacaKampanye(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKampanyeInput> {
+  const rows = await sql<{
+    sumber: string; kampanye_id: string; biaya: string;
+    gmv_n: number; gmv: string;
+    tayangan_n: number; tayangan: string;
+    klik_n: number; klik: string;
+    pesanan_n: number; pesanan: string;
+  }[]>`
+    select sumber, kampanye_id, coalesce(sum(biaya), 0) as biaya,
+           count(gmv)::int as gmv_n, coalesce(sum(gmv), 0) as gmv,
+           count(tayangan)::int as tayangan_n, coalesce(sum(tayangan), 0) as tayangan,
+           count(klik)::int as klik_n, coalesce(sum(klik), 0) as klik,
+           count(pesanan_sku)::int as pesanan_n, coalesce(sum(pesanan_sku), 0) as pesanan
+      from pdt_fact_ads
+     where client_platform_id = ${clientPlatformId}
+       and periode = ${periodeAwalBulan}::date
+     group by sumber, kampanye_id`;
+  if (rows.length === 0) return null;
+  return rows.map((r) => ({
+    sumber: r.sumber,
+    kampanyeId: r.kampanye_id,
+    biaya: Number(r.biaya),
+    gmv: r.gmv_n === 0 ? null : Number(r.gmv),
+    tayangan: r.tayangan_n === 0 ? null : Number(r.tayangan),
+    klik: r.klik_n === 0 ? null : Number(r.klik),
+    pesanan: r.pesanan_n === 0 ? null : Number(r.pesanan),
+  }));
+}
+
+/**
+ * Bagian "produk" sisi SHOPEE — `pdt_fact_sku_period` basis
+ * `'siap_dikirim'`, basis yang SAMA dengan KPI Shopee (Rule 16) sehingga
+ * Σ Top Produk menggulung ke angka GMV bulanan yang sama (kesetaraan yang
+ * sudah dibuktikan G1-07-SHOPEE-DOBEL-HITUNG ke sample asli).
+ *
+ * **`kuadran` sekarang TERISI** (KUADRAN-SHOPEE, `docs/DECISIONS.md`).
+ * Sebelumnya `null` permanen dengan catatan "Shopee tidak punya klasifikator
+ * kuadran sama sekali"; sekarang `klasifikasiUlangKuadranSkuShopee` menulisnya
+ * SEBELUM fungsi ini dipanggil (`hitungSkorShopee` di dalam `Promise.all`
+ * `rakitLaporanShopee`, urutan yang dijamin sama seperti sisi TikTok).
+ *
+ * **`cvr` = `pesanan ÷ pengunjung`, bukan `pesanan ÷ impresi`.** Versi
+ * sebelumnya memakai `impresi` dengan alasan tertulis "`impresi` di baris
+ * Shopee memuat pengunjung produk" — itu KELIRU, dan berkas aslinya
+ * membuktikannya: `impresi` diisi `'Jumlah Produk Dilihat'`
+ * (`ekstrakBarisFaktaSkuShopeeParentSku`), yang pada Fim Motor Juli 2026
+ * bernilai 1.383.429 untuk produk yang `'Pengunjung Produk (Kunjungan)'`-nya
+ * 32.949 — 42× lebih besar. Rasio lama karena itu bukan CR yang mesin lama
+ * cetak melainkan angka ~42× lebih kecil, dan setiap produk terlihat nyaris
+ * tidak closing. `pengunjung` (kolom baru, migrasi `20261128010000`) adalah
+ * penyebut yang benar — `cr_basis = 'pesanan_per_pengunjung'` mesin lama.
+ *
+ * `traffic` = `pengunjung` (sumbu-X kuadran Shopee), sementara `klik` tetap
+ * `'Produk Diklik'` untuk kolom tabel. Dua angka berbeda, dua konsumen
+ * berbeda — mode relatif memakai `traffic`, tampilan memakai `klik`.
+ */
+async function bacaProdukShopee(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
+  const rows = await sql<{
+    nama_produk: string | null; platform_product_id: string | null; kuadran: string | null;
+    gmv: string | null; pengunjung: number | null; klik: number | null; pesanan: number | null; impresi: number | null;
+  }[]>`
+    select nama_produk, platform_product_id, kuadran, gmv, pengunjung, klik, pesanan, impresi
+      from pdt_fact_sku_period
+     where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'siap_dikirim'
+       and periode = ${periodeAwalBulan}::date`;
+  if (rows.length === 0) return null;
+  return rows.map((r) => ({
+    kuadran: r.kuadran as pdt.PdtKuadranSku | null,
+    namaProduk: r.nama_produk,
+    platformProductId: r.platform_product_id,
+    gmv: r.gmv == null ? null : Number(r.gmv),
+    klik: r.klik,
+    traffic: r.pengunjung,
+    impresi: r.impresi,
+    cvr: pdt.crKuadranShopee({ id: 0, pengunjung: r.pengunjung, pesananDibuat: r.pesanan }),
+  }));
+}
+
+/** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + harian + kanal + iklan + live + video + produk + afiliasi + tahap + `hitungSkorTiktok`. */
 export async function rakitLaporanTiktok(
   sql: Sql,
   clientPlatformId: number,
@@ -3674,13 +4053,17 @@ export async function rakitLaporanTiktok(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanTiktok> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, kanal, iklan, live, video, afiliasi, tahap, { hasil: skor, benchmarkVersi, bench }] = await Promise.all([
+  const [kpi, harian, kanal, iklan, live, video, afiliasi, kreator, sesiLive, kampanye, tahap, { hasil: skor, benchmarkVersi, bench }] = await Promise.all([
     bacaKpiTiktokNet(sql, clientPlatformId, periodeAwalBulan),
+    bacaHarian(sql, clientPlatformId, periodeAwalBulan, 'net', true),
     bacaKanalTiktok(sql, clientPlatformId, periodeAwalBulan),
     bacaIklanTiktok(sql, clientPlatformId, periodeAwalBulan),
     bacaLive(sql, clientPlatformId, periodeAwalBulan),
     bacaVideo(sql, clientPlatformId, periodeAwalBulan),
     bacaAfiliasi(sql, clientPlatformId, periodeAwalBulan),
+    bacaKreator(sql, clientPlatformId, periodeAwalBulan),
+    bacaSesiLive(sql, clientPlatformId, periodeAwalBulan),
+    bacaKampanye(sql, clientPlatformId, periodeAwalBulan),
     bacaTahapTiktok(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
   ]);
@@ -3689,12 +4072,13 @@ export async function rakitLaporanTiktok(
   // akan lomba (race) dengan tulisan yang belum selesai.
   const produk = await bacaProdukTiktok(sql, clientPlatformId, periodeAwalBulan);
   return pdt.bangunLaporanTiktok({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, iklan, live, video, produk, afiliasi, tahap, skor, benchmarkVersi,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, harian, kanal, iklan, live, video, produk, afiliasi,
+    kreator, sesiLive, kampanye, tahap, skor, benchmarkVersi,
     benchTiktok: bench,
   });
 }
 
-/** Rakit payload laporan Shopee v1: KPI ringkas basis `'siap_dikirim'` (Rule 16) + kanal + iklan + live + video + afiliasi + `hitungSkorShopee`. */
+/** Rakit payload laporan Shopee v1: KPI ringkas basis `'siap_dikirim'` (Rule 16) + harian + kanal + iklan + live + video + afiliasi + `hitungSkorShopee`. */
 export async function rakitLaporanShopee(
   sql: Sql,
   clientPlatformId: number,
@@ -3702,17 +4086,25 @@ export async function rakitLaporanShopee(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanShopee> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, kanal, iklan, live, video, afiliasi, { hasil: skor }] = await Promise.all([
+  const [kpi, harian, kanal, iklan, live, video, produk, afiliasi, kreator, sesiLive, kampanye, promo, layanan, { hasil: skor }] = await Promise.all([
     bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim'),
+    bacaHarian(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim', false),
     bacaKanalShopee(sql, clientPlatformId, periodeAwalBulan),
     bacaIklanShopee(sql, clientPlatformId, periodeAwalBulan),
     bacaLive(sql, clientPlatformId, periodeAwalBulan),
     bacaVideo(sql, clientPlatformId, periodeAwalBulan),
+    bacaProdukShopee(sql, clientPlatformId, periodeAwalBulan),
     bacaAfiliasi(sql, clientPlatformId, periodeAwalBulan),
+    bacaKreator(sql, clientPlatformId, periodeAwalBulan),
+    bacaSesiLive(sql, clientPlatformId, periodeAwalBulan),
+    bacaKampanye(sql, clientPlatformId, periodeAwalBulan),
+    bacaPromo(sql, clientPlatformId, periodeAwalBulan),
+    bacaLayanan(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorShopee(sql, clientPlatformId, periodeAwalBulan),
   ]);
   return pdt.bangunLaporanShopee({
-    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, kanal, iklan, live, video, afiliasi, skor,
+    clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, harian, kanal, iklan, live, video, produk, afiliasi,
+    kreator, sesiLive, kampanye, promo, layanan, skor,
   });
 }
 

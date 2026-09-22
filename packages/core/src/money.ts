@@ -87,6 +87,29 @@ export function parse(s: string): Money {
   return minor;
 }
 
+/**
+ * Nilai absolut TERBESAR yang muat di kolom uang DB (`numeric(15,2)`), dalam
+ * satuan minor: Rp. 9.999.999.999.999,99.
+ *
+ * `parse()` di atas hanya membatasi ke int64 (≈ Rp 92 kuadriliun) supaya
+ * perilakunya sama dengan `Money` int64 Go — jauh LEBIH LEBAR dari kolomnya.
+ * Celah itu nyata: nilai antara 10^13 dan 9,2×10^14 rupiah lolos di TypeScript
+ * lalu ditolak Postgres dengan `SQLSTATE 22003 numeric field overflow` DI DALAM
+ * transaksi, yang muncul ke pengguna sebagai "internal server error" tanpa
+ * petunjuk field mana (insiden qualify `PRSP-202609-0431`, 2026-09-21 —
+ * 13 percobaan beruntun, `docs/DECISIONS.md`).
+ *
+ * Batas ini adalah batas KOLOM, bukan batas bisnis — pemanggil yang mau
+ * memasang plafon lebih ketat (mis. "target GMV tidak mungkin di atas
+ * Rp 1 triliun") memasangnya sendiri di atas ini.
+ */
+export const MAX_UANG_KOLOM: Money = 10n ** 15n - 1n;
+
+/** True bila `m` muat di kolom uang DB `numeric(15,2)` — lihat `MAX_UANG_KOLOM`. */
+export function muatKolomUang(m: Money): boolean {
+  return m <= MAX_UANG_KOLOM && m >= -MAX_UANG_KOLOM;
+}
+
 /** decimal renders Money as a DECIMAL(15,2) string ("9000000.00") for storage. */
 export function decimal(m: Money): string {
   let neg = '';
