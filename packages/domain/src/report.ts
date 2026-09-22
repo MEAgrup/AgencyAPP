@@ -482,11 +482,23 @@ export async function createReport(sql: Sql, actor: Actor, clientId: string, inp
 
     // THE GAP C1 CLOSES HERE: clients.total_sales = Σ latest run-rate per active
     // platform (not just the report that just arrived) + an audit row.
-    await recomputeTotalSales(tx, actor, clientId, reportId, runrate);
+    // M20 E-04: switched off, not deleted — see M14_WRITES_TOTAL_SALES.
+    if (M14_WRITES_TOTAL_SALES) await recomputeTotalSales(tx, actor, clientId, reportId, runrate);
 
     return getReportById(tx, reportId);
   });
 }
+
+/**
+ * M20 E-04 (`docs/DECISIONS.md` `M20-E04-MATIKAN-PENULIS-M14`): PDT
+ * (`pdt.ts::recomputeTotalSalesPdt`, R7) is now the sole writer of
+ * `clients.total_sales` — "two writers for one column is a bug, not
+ * redundancy" (PRD M20 R7). `false` here SWITCHES OFF the two call sites
+ * below without deleting them, so the rollback path stays intact if PDT
+ * cutover is ever reverted (same transition-safety posture as the rest of
+ * M20 — M14's code is kept, not removed, until Gelombang G).
+ */
+const M14_WRITES_TOTAL_SALES = false;
 
 /**
  * Recompute `clients.total_sales` from the LATEST report per active platform.
@@ -495,6 +507,9 @@ export async function createReport(sql: Sql, actor: Actor, clientId: string, inp
  * monthly upload contribute the same unit. Latest = most recent `periode_akhir`
  * (then highest id) per platform — a fresh weekly upload supersedes last week's
  * for that store without touching the other stores' contributions.
+ *
+ * M20 E-04: no longer called (see `M14_WRITES_TOTAL_SALES` above) — kept for
+ * the rollback path, not currently reachable from either report-creation flow.
  */
 async function recomputeTotalSales(tx: TransactionSql, actor: Actor, clientId: string, reportId: number, runrate: number): Promise<void> {
   const before = await tx<{ total_sales: string }[]>`
@@ -683,7 +698,8 @@ export async function createReportShopee(sql: Sql, actor: Actor, clientId: strin
       insert into client_report_publikasi (report_id, status, created_by)
       values (${reportId}, ${STATUS_DRAF}, ${actor.employeeId})`;
 
-    await recomputeTotalSales(tx, actor, clientId, reportId, runrate);
+    // M20 E-04: switched off, not deleted — see M14_WRITES_TOTAL_SALES.
+    if (M14_WRITES_TOTAL_SALES) await recomputeTotalSales(tx, actor, clientId, reportId, runrate);
 
     // SH-06: the report's own combined Ads numbers become an auto Metric Entry
     // — the "no manual upload" path for M6D RM-C. See function doc for the

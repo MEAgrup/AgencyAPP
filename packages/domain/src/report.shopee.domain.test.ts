@@ -405,13 +405,17 @@ describeDb('SHP-1 — gmv_kotor (Pesanan Dibuat) vs gmv_net (Pesanan Dibayar)', 
     expect(d.gmvNet).not.toBeCloseTo(d.gmvKotor, 0);
   });
 
-  it('clients.total_sales follows the PAID figure — that is what Health Score M13 reads', async () => {
+  it('the report\'s own run-rate follows the PAID figure, not the gross one (M20 E-04: total_sales no longer written here)', async () => {
     const client = await seedClient();
     const pid = await seedPlatform(client);
-    await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeTigaFile()]));
-    // 31-day monthly period → run-rate == the period figure, so total_sales is
-    // the paid number, not the gross one.
-    expect(await totalSalesOf(client)).toBeCloseTo(82_000_000, 0);
+    const d = await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeTigaFile()]));
+    // 31-day monthly period → run-rate == the period figure — the paid number,
+    // not the gross one. M20 E-04: clients.total_sales is now written
+    // EXCLUSIVELY by PDT (`pdt.ts::recomputeTotalSalesPdt`, R7);
+    // `report.ts::recomputeTotalSales` is switched off, so `seedClient`'s
+    // seeded 0 stays 0 here — this report's own figure is what changed.
+    expect(d.gmvRunrateBulanan).toBeCloseTo(82_000_000, 0);
+    expect(await totalSalesOf(client)).toBe(0);
   });
 
   it('payload records WHERE the net figure came from', async () => {
