@@ -61,7 +61,6 @@ export async function GET(request: Request): Promise<Response> {
     const wire = laporan.platform === 'tiktok' ? pdtLaporanTiktokToWire(laporan) : pdtLaporanShopeeToWire(laporan);
     const tTotal = performance.now() - t0;
 
-    // eslint-disable-next-line no-console
     console.log(
       `[pdt/laporan] cp=${clientPlatformId} periode=${periode} platform=${laporan.platform}`
       + ` rakit=${tRakit.toFixed(0)}ms total=${tTotal.toFixed(0)}ms`,
