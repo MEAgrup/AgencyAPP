@@ -16,7 +16,9 @@
  *
  * Skipped unless DATABASE_URL is set. Rows namespaced `ZZP-`. "N skip" is not "N pass".
  */
-import { afterEach, afterAll, describe, expect, it } from 'vitest';
+import { afterEach, afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import {
@@ -27,7 +29,7 @@ import {
   PortalForbiddenError, PortalNotFoundError, PortalRateLimitedError, PortalValidationError,
   reportHtml, serviceProgress, submitComplaint,
 } from './client-portal';
-import { createReport, publishReport, saveReportInsight } from './report';
+import { cabutKiriman, kirimLaporanPdt, simpanInsightKiriman, terbitkanKiriman } from './pdt';
 
 // ---------------------------------------------------------------------------
 // Pure units (no DB)
@@ -85,6 +87,22 @@ describe('gabungLabel — the least-finished piece of work wins', () => {
   });
 });
 
+/**
+ * M20 D-01/D-05 — the port's source-level lock. Gelombang D swapped this
+ * module's report source from M14 (`client_reports`) to PDT
+ * (`pdt_laporan_kiriman`); this must stay true so a future edit cannot
+ * quietly reintroduce a SECOND report surface behind these same routes (R11)
+ * by re-adding an M14 fallback. Complements the two route/page-count guards
+ * in `route-parity.test.ts`, which lock the shape from the outside — this
+ * one locks the wiring from the inside.
+ */
+describe('client-portal.ts — nol rujukan client_reports (M20 D-01/D-05)', () => {
+  it('never mentions the M14 client_reports table/module', () => {
+    const src = readFileSync(join(__dirname, 'client-portal.ts'), 'utf8');
+    expect(src).not.toContain('client_reports');
+  });
+});
+
 describe('labelBand — health band wording (M15 Rule 4)', () => {
   it('maps the three bands and nothing else', () => {
     expect(labelBand('Healthy')).toBe(LABEL_ON_TRACK);
@@ -106,22 +124,18 @@ const AM = 'ZZP-AM';
 const RUN = Date.now().toString(36).slice(-6);
 let seq = 0;
 
-const META = 'Ringkasan Toko 2026-08-01 ~ 2026-08-31';
-const SHOP_HEADER = [
-  '', 'GMV', 'GMV dari LIVE kreator', 'Pengunjung', 'Pengembalian dana', 'Pesanan', 'Persentase konversi',
-  'AOV', 'Pembeli', 'Produk terjual', 'Impresi produk', 'Klik produk',
-  'GMV dari LIVE akun tertaut', 'GMV dari video afiliasi', 'GMV dari video akun tertaut',
-];
-const shopAoa = (): unknown[][] => [
-  [META], ['Semua', 'Semua', 'Semua'], SHOP_HEADER,
-  ['Total nilai penjualan', 'Rp100.000.000', 'Rp10.000.000', '50.000', 'Rp5.000.000', '1.000', '2,00%',
-    'Rp100.000', '900', '1.200', '500.000', '20.000', 'Rp8.000.000', 'Rp15.000.000', 'Rp12.000.000'],
-  ['Perubahan persentase', '5,00%', '', '-3,00%', '', '2,00%', '', '', '', '', '', '', '', '', ''],
-  ['01/08/2026', 'Rp3.000.000', '', '', '', '30', '', '', '', '', '', '', '', '', ''],
-];
-const fileFrom = () => ({ filename: 'toko.xlsx', aoa: shopAoa(), sha256: 'b'.repeat(64), ukuranBytes: 4096 });
-
 const actorAm = { employeeId: AM, role: permission.makeRole({ division: 'Account', level: 'staff' }) };
+
+// kirimLaporanPdt menulis pdt_laporan_kiriman.dikirim_oleh (FK employees) — AM harus jadi
+// baris employees sungguhan (pola sama pdt.test.ts OWNER_AM), beda dari clients/
+// client_platforms.created_by yang tidak ber-FK ke employees.
+beforeAll(async () => {
+  if (!sql) return;
+  await sql`
+    insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+    values (${AM}, 'AM Uji Portal', 'zzp-am-portal@mea.co.id', 'Account', 'Account Manager', true, 'SYSTEM')
+    on conflict (employee_id) do nothing`;
+});
 
 interface Fixture { clientId: string; contactId: string; platformId: number }
 
@@ -144,29 +158,48 @@ async function seedKlien(): Promise<Fixture> {
   return { clientId, contactId: ct[0].auth_user_id, platformId: Number(plat[0].id) };
 }
 
-/** A report that has been published to the client, returning its id. */
-async function laporanTerbit(f: Fixture, ringkasan: string): Promise<number> {
-  const d = await createReport(sql, actorAm, f.clientId, {
-    clientPlatformId: f.platformId, periodeTipe: 'bulanan', files: [fileFrom()],
-  });
-  await saveReportInsight(sql, actorAm, d.id, {
+/**
+ * A PDT kiriman that has been published to the client, returning its id.
+ * `bacaLaporanPdt` (inside `kirimLaporanPdt`) tolerates zero fact-table rows
+ * for the client_platform_id+periodeAwalBulan pair (returns nulls/zeros
+ * rather than erroring), so no file-upload fixture is needed — unlike M14's
+ * `createReport`, which required an Excel file.
+ */
+async function laporanTerbit(f: Fixture, ringkasan: string, periodeAwalBulan = '2026-08-01'): Promise<number> {
+  const d = await kirimLaporanPdt(sql, actorAm, f.platformId, periodeAwalBulan);
+  await simpanInsightKiriman(sql, actorAm, d.id, {
     ringkasan, poin: ['poin klien'], rekomendasi_tinggi: [], rekomendasi_sedang: [],
     outlook: 'outlook klien', indikator: [],
   });
-  await publishReport(sql, actorAm, d.id);
-  return d.id;
+  await terbitkanKiriman(sql, actorAm, d.id);
+  // `pdt_laporan_kiriman.id` is bigint — postgres.js returns it as a string at
+  // runtime despite `PdtLaporanKirimanHasil.id`'s `number` type (a pre-existing
+  // quirk throughout pdt.ts, e.g. `riwayatKirimanPdt`). Coerce here so this
+  // fixture's return value actually matches its declared type and compares
+  // cleanly against `PortalReportRow.reportId` (which does `Number(r.id)`).
+  return Number(d.id);
 }
 
 afterEach(async () => {
   if (!sql) return;
-  await sql`alter table client_report_insight disable trigger trg_cri_no_delete`;
+  // pdt_laporan_publikasi/pdt_laporan_insight (M20 Gelombang C) — FK ke
+  // pdt_laporan_kiriman.id TANPA ON DELETE CASCADE, jadi harus dibersihkan
+  // SEBELUM pdt_laporan_kiriman. pdt_laporan_insight menolak DELETE
+  // (append-only, trg_pdt_laporan_insight_frozen) — nonaktifkan triggernya
+  // sementara, pola sama pdt.test.ts.
+  await sql`delete from pdt_laporan_publikasi where kiriman_id in (
+    select id from pdt_laporan_kiriman where client_platform_id in (
+      select id from client_platforms where client_id like 'ZZP-CLI-%'))`;
+  await sql`alter table pdt_laporan_insight disable trigger trg_pdt_laporan_insight_frozen`;
   try {
-    await sql`delete from client_report_insight where report_id in (
-      select id from client_reports where client_id like 'ZZP-CLI-%')`;
-    await sql`delete from client_reports where client_id like 'ZZP-CLI-%'`;
+    await sql`delete from pdt_laporan_insight where kiriman_id in (
+      select id from pdt_laporan_kiriman where client_platform_id in (
+        select id from client_platforms where client_id like 'ZZP-CLI-%'))`;
   } finally {
-    await sql`alter table client_report_insight enable trigger trg_cri_no_delete`;
+    await sql`alter table pdt_laporan_insight enable trigger trg_pdt_laporan_insight_frozen`;
   }
+  await sql`delete from pdt_laporan_kiriman where client_platform_id in (
+    select id from client_platforms where client_id like 'ZZP-CLI-%')`;
   await sql`delete from complaint_rate_limit_attempts where contact_id in (
     select auth_user_id from client_contacts where client_id like 'ZZP-CLI-%')`;
   await sql`delete from complaints where client_id like 'ZZP-CLI-%'`;
@@ -185,24 +218,27 @@ afterEach(async () => {
   await sql`delete from client_platforms where client_id like 'ZZP-CLI-%'`;
   await sql`delete from clients where id like 'ZZP-CLI-%'`;
 });
-afterAll(async () => { if (sql) await sql.end(); });
+afterAll(async () => {
+  if (!sql) return;
+  await sql`delete from employees where employee_id = ${AM}`;
+  await sql.end();
+});
 
 describeDb('laporan — hanya yang [Terbit], hanya milik klien sendiri', () => {
   it('lists only published reports, and never another client’s', async () => {
     const a = await seedKlien();
     const b = await seedKlien();
     const idA = await laporanTerbit(a, 'RINGKASAN KLIEN A');
-    // B's report is created but left in [Draf].
-    const draf = await createReport(sql, actorAm, b.clientId, {
-      clientPlatformId: b.platformId, periodeTipe: 'bulanan', files: [fileFrom()],
-    });
+    // B's kiriman is sent but never published — stays [Draf].
+    const draf = await kirimLaporanPdt(sql, actorAm, b.platformId, '2026-08-01');
 
     const rowsA = await listReports(sql, contact(a.contactId, a.clientId));
     expect(rowsA.map((r) => r.reportId)).toEqual([idA]);
 
     const rowsB = await listReports(sql, contact(b.contactId, b.clientId));
     expect(rowsB).toEqual([]); // the draft is invisible even to its own client
-    expect(draf.publikasi.status).toBe('[Draf]');
+    await expect(reportHtml(sql, contact(b.contactId, b.clientId), draf.id))
+      .rejects.toThrow(PortalNotFoundError);
   });
 
   it('a contact asking DIRECTLY for another client’s report id gets not-found', async () => {
@@ -219,7 +255,7 @@ describeDb('laporan — hanya yang [Terbit], hanya milik klien sendiri', () => {
   it('renders the PINNED revision in klien mode, never a later draft, never internal blocks', async () => {
     const a = await seedKlien();
     const id = await laporanTerbit(a, 'REVISI TERPAKU');
-    await saveReportInsight(sql, actorAm, id, {
+    await simpanInsightKiriman(sql, actorAm, id, {
       ringkasan: 'REVISI BARU BELUM TERBIT', poin: ['x'], rekomendasi_tinggi: [],
       rekomendasi_sedang: [], outlook: 'o', indikator: [],
     });
@@ -232,8 +268,7 @@ describeDb('laporan — hanya yang [Terbit], hanya milik klien sendiri', () => {
   it('a revoked report becomes unreadable', async () => {
     const a = await seedKlien();
     const id = await laporanTerbit(a, 'AKAN DICABUT');
-    const { revokeReport } = await import('./report');
-    await revokeReport(sql, actorAm, id, 'salah berkas');
+    await cabutKiriman(sql, actorAm, id, 'salah berkas');
     await expect(reportHtml(sql, contact(a.contactId, a.clientId), id)).rejects.toThrow(PortalNotFoundError);
     expect(await listReports(sql, contact(a.contactId, a.clientId))).toEqual([]);
   });
@@ -245,6 +280,52 @@ describeDb('laporan — hanya yang [Terbit], hanya milik klien sendiri', () => {
     expect(Object.keys(rows[0]).sort()).toEqual([
       'diterbitkanPada', 'periodeAkhir', 'periodeMulai', 'periodeTipe', 'platform', 'reportId',
     ]);
+  });
+});
+
+// M20 PRD R11.3 (owner decision 2026-09-22): satu baris per (toko, periode) —
+// kandidat = kiriman TERBARU periode itu, ditampilkan HANYA bila publikasinya
+// [Terbit]; kiriman lama periode yang sama tidak terdaftar dan tidak bisa
+// dibuka lewat id sekalipun publikasinya sendiri masih [Terbit]; kandidat
+// terbaru [Draf]/[Dicabut] membuat periode itu KOSONG bagi klien — tidak
+// pernah jatuh balik ke versi lama.
+describeDb('laporan — R11.3 (satu baris per periode, hanya kandidat TERBARU)', () => {
+  it('dua kiriman [Terbit] periode yang sama ⇒ satu baris (yang terbaru); id lama tidak bisa dibuka', async () => {
+    const a = await seedKlien();
+    const idLama = await laporanTerbit(a, 'KIRIMAN LAMA AGUSTUS', '2026-08-01');
+    const idBaru = await laporanTerbit(a, 'KIRIMAN BARU AGUSTUS', '2026-08-01');
+
+    const rows = await listReports(sql, contact(a.contactId, a.clientId));
+    expect(rows.map((r) => r.reportId)).toEqual([idBaru]);
+
+    await expect(reportHtml(sql, contact(a.contactId, a.clientId), idLama))
+      .rejects.toThrow(PortalNotFoundError);
+    await expect(reportHtml(sql, contact(a.contactId, a.clientId), idBaru))
+      .resolves.toContain('KIRIMAN BARU AGUSTUS');
+  });
+
+  it('tiga periode berbeda, semua [Terbit] ⇒ tiga baris, terbaru dulu', async () => {
+    const a = await seedKlien();
+    const idJuni = await laporanTerbit(a, 'JUNI', '2026-06-01');
+    const idJuli = await laporanTerbit(a, 'JULI', '2026-07-01');
+    const idAgustus = await laporanTerbit(a, 'AGUSTUS', '2026-08-01');
+
+    const rows = await listReports(sql, contact(a.contactId, a.clientId));
+    expect(rows.map((r) => r.reportId)).toEqual([idAgustus, idJuli, idJuni]);
+  });
+
+  it('kandidat terbaru [Dicabut] ⇒ periode hilang seluruhnya, TIDAK jatuh balik ke kiriman lama yang masih [Terbit]', async () => {
+    const a = await seedKlien();
+    const idLama = await laporanTerbit(a, 'LAMA MASIH TERBIT', '2026-08-01');
+    const idBaru = await laporanTerbit(a, 'BARU DICABUT', '2026-08-01');
+    await cabutKiriman(sql, actorAm, idBaru, 'revisi salah');
+
+    const rows = await listReports(sql, contact(a.contactId, a.clientId));
+    expect(rows).toEqual([]);
+    await expect(reportHtml(sql, contact(a.contactId, a.clientId), idLama))
+      .rejects.toThrow(PortalNotFoundError);
+    await expect(reportHtml(sql, contact(a.contactId, a.clientId), idBaru))
+      .rejects.toThrow(PortalNotFoundError);
   });
 });
 
