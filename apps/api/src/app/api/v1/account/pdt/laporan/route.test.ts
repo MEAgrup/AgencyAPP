@@ -158,8 +158,8 @@ describeDb('GET /pdt/laporan — real DB', () => {
       insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv, likes, dibagikan, klik_produk)
       values (${cpId}, 'video-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'video', true, 300_000, 5_000, 200, 10, 40)`;
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
-      values (${cpId}, 'tt_ads_product', 'CAM-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 400_000)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+      values (${cpId}, 'tt_ads_product', 'CAM-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 400_000, 'lower')`;
     await sql`
       insert into pdt_fact_creator_period
         (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv, pesanan_teratribusi, jumlah_live, jumlah_video)
@@ -268,8 +268,8 @@ describeDb('GET /pdt/laporan — real DB', () => {
       insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv)
       values (${cpId}, 'live-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 400_000, 1_000)`;
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
-      values (${cpId}, 'shopee_ads_cpc', 'kmp-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 300_000)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+      values (${cpId}, 'shopee_ads_cpc', 'kmp-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 300_000, 'lower')`;
     await sql`
       insert into pdt_fact_creator_period (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv, pesanan_teratribusi)
       values (${cpId}, 'creator-shp', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 150_000, 3)`;

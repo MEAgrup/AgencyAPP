@@ -257,9 +257,9 @@ describeDb('bacaFaktaAds (G3-01) — filter sumber opsional', () => {
     const batchId = await insertBatch(clientId, cpId, 'shopee');
 
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, roas)
-      values (${cpId}, 'shopee_ads_cpc', 'KAMP-1', ${PERIODE}::date, ${batchId}, 1, '50000.00', '2.500'),
-             (${cpId}, 'shopee_ads_search', 'KAMP-2', ${PERIODE}::date, ${batchId}, 1, '30000.00', '1.800')`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, roas, tujuan)
+      values (${cpId}, 'shopee_ads_cpc', 'KAMP-1', ${PERIODE}::date, ${batchId}, 1, '50000.00', '2.500', 'lower'),
+             (${cpId}, 'shopee_ads_search', 'KAMP-2', ${PERIODE}::date, ${batchId}, 1, '30000.00', '1.800', 'lower')`;
 
     const semua = await bacaFaktaAds(sql, cpId, PERIODE);
     expect(semua).toHaveLength(2);

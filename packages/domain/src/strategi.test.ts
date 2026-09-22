@@ -4404,10 +4404,10 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     // menyalin agregat bulan acuan ke setiap baris, kedua baris akan kembar
     // dan tes ini merah.
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
-      values (${tiktokId}, 'tt_ads_product', 'K-JUN-1', '2026-06-01'::date, ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, 1000000, 4000000),
-             (${tiktokId}, 'tt_ads_product', 'K-JUN-2', '2026-06-01'::date, ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, 1000000, 4000000),
-             (${tiktokId}, 'tt_ads_product', 'K-JUL-1', '2026-07-01'::date, ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, 5000000, 10000000)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+      values (${tiktokId}, 'tt_ads_product', 'K-JUN-1', '2026-06-01'::date, ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, 1000000, 4000000, 'lower'),
+             (${tiktokId}, 'tt_ads_product', 'K-JUN-2', '2026-06-01'::date, ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, 1000000, 4000000, 'lower'),
+             (${tiktokId}, 'tt_ads_product', 'K-JUL-1', '2026-07-01'::date, ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, 5000000, 10000000, 'lower')`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);
@@ -5010,10 +5010,10 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     // polos kolom roas (yang akan memberi (4+2)/2=3, angka berbeda).
     await sql`
       insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi,
-        biaya, gmv, roas)
-      values (${tiktokId}, 'shopee_ads_cpc', 'CAMP-1', '2026-07-01', ${batchJul[0].id}, 1, '1000000.00', '4000000.00', '4.0'),
-             (${tiktokId}, 'shopee_ads_live', 'CAMP-2', '2026-07-01', ${batchJul[0].id}, 1, '500000.00', '1000000.00', '2.0'),
-             (${tiktokId}, 'shopee_ads_search', 'CAMP-3', '2026-07-01', ${batchJul[0].id}, 1, '200000.00', null, null)`;
+        biaya, gmv, roas, tujuan)
+      values (${tiktokId}, 'shopee_ads_cpc', 'CAMP-1', '2026-07-01', ${batchJul[0].id}, 1, '1000000.00', '4000000.00', '4.0', 'lower'),
+             (${tiktokId}, 'shopee_ads_live', 'CAMP-2', '2026-07-01', ${batchJul[0].id}, 1, '500000.00', '1000000.00', '2.0', 'lower'),
+             (${tiktokId}, 'shopee_ads_search', 'CAMP-3', '2026-07-01', ${batchJul[0].id}, 1, '200000.00', null, null, 'lower')`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);
@@ -5048,11 +5048,11 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     //  - CAMP-4 TT produk   'Strategi Yang Belum Ada' -> tak terpetakan, tidak menyumbang apa pun
     await sql`
       insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi,
-        biaya, gmv, roas, tipe_kampanye_sumber)
-      values (${tiktokId}, 'shopee_ads_cpc', 'CAMP-1', '2026-07-01', ${batchJul[0].id}, 1, '1000000.00', '4000000.00', '4.0', 'GMV Max ROAS'),
-             (${tiktokId}, 'shopee_ads_live', 'CAMP-2', '2026-07-01', ${batchJul[0].id}, 1, '500000.00', '1000000.00', '2.0', 'Live GMV Max ROAS'),
-             (${tiktokId}, 'shopee_ads_search', 'CAMP-3', '2026-07-01', ${batchJul[0].id}, 1, '200000.00', '400000.00', '2.0', 'Bidding Manual'),
-             (${tiktokId}, 'tt_ads_product', 'CAMP-4', '2026-07-01', ${batchJul[0].id}, 1, '100000.00', '100000.00', '1.0', 'Strategi Yang Belum Ada')`;
+        biaya, gmv, roas, tipe_kampanye_sumber, tujuan)
+      values (${tiktokId}, 'shopee_ads_cpc', 'CAMP-1', '2026-07-01', ${batchJul[0].id}, 1, '1000000.00', '4000000.00', '4.0', 'GMV Max ROAS', 'lower'),
+             (${tiktokId}, 'shopee_ads_live', 'CAMP-2', '2026-07-01', ${batchJul[0].id}, 1, '500000.00', '1000000.00', '2.0', 'Live GMV Max ROAS', 'lower'),
+             (${tiktokId}, 'shopee_ads_search', 'CAMP-3', '2026-07-01', ${batchJul[0].id}, 1, '200000.00', '400000.00', '2.0', 'Bidding Manual', 'lower'),
+             (${tiktokId}, 'tt_ads_product', 'CAMP-4', '2026-07-01', ${batchJul[0].id}, 1, '100000.00', '100000.00', '1.0', 'Strategi Yang Belum Ada', 'lower')`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);
@@ -5087,8 +5087,8 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     // `[]` ketika nol baris terpetakan.
     await sql`
       insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi,
-        biaya, gmv, roas, tipe_kampanye_sumber)
-      values (${tiktokId}, 'shopee_ads_cpc', 'CAMP-1', '2026-07-01', ${batchJul[0].id}, 1, '1000000.00', '4000000.00', '4.0', null)`;
+        biaya, gmv, roas, tipe_kampanye_sumber, tujuan)
+      values (${tiktokId}, 'shopee_ads_cpc', 'CAMP-1', '2026-07-01', ${batchJul[0].id}, 1, '1000000.00', '4000000.00', '4.0', null, 'lower')`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);

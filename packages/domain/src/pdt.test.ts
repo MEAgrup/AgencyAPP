@@ -4365,8 +4365,8 @@ describeDb('rakitInputSkorTiktok (sesi 34) — agregasi pdt_fact_* → PdtSkorIn
     biaya: number, gmv: number | null, pesananSku: number | null,
   ): Promise<void> {
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, pesanan_sku)
-      values (${cpId}, ${sumber}, ${kampanyeId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${biaya}, ${gmv}, ${pesananSku})`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, pesanan_sku, tujuan)
+      values (${cpId}, ${sumber}, ${kampanyeId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${biaya}, ${gmv}, ${pesananSku}, 'lower')`;
   }
 
   async function insertContent(
@@ -4551,8 +4551,8 @@ describeDb('bacaBenchmarkAktifTiktok + hitungSkorTiktok (sesi 34) — benchmark 
     const { cpId, batchId } = await fixture();
     // Satu dimensi saja (Ads) supaya nilai yang diharapkan mudah dihitung ulang secara independen.
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, pesanan_sku)
-      values (${cpId}, 'tt_ads_product', 'K1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100000, 500000, 10)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, pesanan_sku, tujuan)
+      values (${cpId}, 'tt_ads_product', 'K1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100000, 500000, 10, 'lower')`;
 
     const { hasil, benchmarkVersi } = await hitungSkorTiktok(sql, cpId, '2026-07-01');
     expect(benchmarkVersi).toBe(2);
@@ -4949,8 +4949,8 @@ describeDb('rakitInputSkorShopee (sesi 34 lanjutan) — agregasi pdt_fact_* → 
     biaya: number, gmv: number | null, klik: number | null, tayangan: number | null,
   ): Promise<void> {
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, klik, tayangan)
-      values (${cpId}, ${sumber}, ${kampanyeId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${biaya}, ${gmv}, ${klik}, ${tayangan})`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, klik, tayangan, tujuan)
+      values (${cpId}, ${sumber}, ${kampanyeId}, '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${biaya}, ${gmv}, ${klik}, ${tayangan}, 'lower')`;
   }
 
   async function insertDibuat(
@@ -5162,8 +5162,8 @@ describeDb('hitungSkorShopee (sesi 34 lanjutan) — jalur lengkap fakta→skor, 
   it('merakit fakta + computeSkorShopee — total cocok hitungan langsung dari input yang SAMA, nol benchmarkVersi dikembalikan', async () => {
     const { cpId, batchId } = await fixture();
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, klik, tayangan)
-      values (${cpId}, 'shopee_ads_cpc', 'K1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100000, 800000, 200, 10000)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, klik, tayangan, tujuan)
+      values (${cpId}, 'shopee_ads_cpc', 'K1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100000, 800000, 200, 10000, 'lower')`;
 
     const hasilWrapper = await hitungSkorShopee(sql, cpId, '2026-07-01');
     expect('benchmarkVersi' in hasilWrapper).toBe(false);
@@ -5411,9 +5411,9 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "kanal" (2026-09-16)', () => {
       insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
       values (${cpId}, '2026-07-05'::date, 'siap_dikirim', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 999_999, 999, 999)`;
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
-      values (${cpId}, 'shopee_ads_cpc', 'kmp-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 1_000_000),
-             (${cpId}, 'shopee_ads_search', 'kmp-2', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 50_000, 600_000)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+      values (${cpId}, 'shopee_ads_cpc', 'kmp-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 1_000_000, 'lower'),
+             (${cpId}, 'shopee_ads_search', 'kmp-2', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 50_000, 600_000, 'lower')`;
     await sql`
       insert into pdt_fact_creator_period (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv)
       values (${cpId}, 'kreator-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 800_000)`;
@@ -5639,9 +5639,9 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "iklan" (2026-09-16)', () => {
   it('TikTok: tt_ads_product+tt_ads_live keduanya terisi ⇒ dua item, total dijumlah, roas diturunkan, lengkap:true', async () => {
     const { cpId, batchId } = await fixtureTiktok();
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
-      values (${cpId}, 'tt_ads_product', 'CAM-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 400_000),
-             (${cpId}, 'tt_ads_live', 'CAM-2', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 200_000, 1_000_000)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+      values (${cpId}, 'tt_ads_product', 'CAM-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 400_000, 'lower'),
+             (${cpId}, 'tt_ads_live', 'CAM-2', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 200_000, 1_000_000, 'lower')`;
 
     const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
     expect(hasil.iklan).toEqual({
@@ -5665,8 +5665,8 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "iklan" (2026-09-16)', () => {
   it('TikTok: sumber shopee_ads_* di client_platform_id yang sama TIDAK ikut terhitung', async () => {
     const { cpId, batchId } = await fixtureTiktok();
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
-      values (${cpId}, 'shopee_ads_cpc', 'CAM-X', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 999_999, 999_999)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+      values (${cpId}, 'shopee_ads_cpc', 'CAM-X', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 999_999, 999_999, 'lower')`;
     const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
     expect(hasil.iklan).toBeNull();
   });
@@ -5674,10 +5674,10 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "iklan" (2026-09-16)', () => {
   it('Shopee: cpc+search+live terisi ⇒ tiga item, total dijumlah, SELALU lengkap:false', async () => {
     const { cpId, batchId } = await fixtureShopee();
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
-      values (${cpId}, 'shopee_ads_cpc', 'kmp-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 300_000),
-             (${cpId}, 'shopee_ads_search', 'kmp-2', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 50_000, 100_000),
-             (${cpId}, 'shopee_ads_live', 'kmp-3', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 200_000, 1_000_000)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+      values (${cpId}, 'shopee_ads_cpc', 'kmp-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 100_000, 300_000, 'lower'),
+             (${cpId}, 'shopee_ads_search', 'kmp-2', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 50_000, 100_000, 'lower'),
+             (${cpId}, 'shopee_ads_live', 'kmp-3', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 200_000, 1_000_000, 'lower')`;
 
     const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
     expect(hasil.iklan?.lengkap).toBe(false);
@@ -5795,8 +5795,8 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "tahap" (2026-09-16)', () => {
       insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung, produk_diklik)
       values (${cpId}, '2026-07-05'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 10_000_000, 100, 5_000, 2_500)`;
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, pesanan_sku, gmv)
-      values (${cpId}, 'tt_ads_product', 'CAM-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 300_000, 15, 1_500_000)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, pesanan_sku, gmv, tujuan)
+      values (${cpId}, 'tt_ads_product', 'CAM-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 300_000, 15, 1_500_000, 'lower')`;
     await sql`
       insert into pdt_fact_creator_period (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv, pesanan_teratribusi, jumlah_live, jumlah_video)
       values (${cpId}, 'creator-a', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 500_000, 10, 2, 0),
@@ -6779,6 +6779,7 @@ describeDb('M20 Gelombang E — recomputeAdsMetricEntriesPdt (E-03)', () => {
    */
   async function fixtureDenganFactAds(
     platform: 'TikTok Shop' | 'Shopee', periodeAwalBulan: string, sumber: string, biaya: number, gmv: number,
+    tujuan: 'upper' | 'lower' = 'lower',
   ): Promise<{ clientId: string; cpId: number; batchId: number }> {
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
@@ -6791,8 +6792,8 @@ describeDb('M20 Gelombang E — recomputeAdsMetricEntriesPdt (E-03)', () => {
         ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
       returning id`;
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
-      values (${cpId}, ${sumber}, 'K1', ${periodeAwalBulan}::date, ${batch.id}, ${pdtCore.PDT_PARSER_VERSI}, ${biaya}, ${gmv})`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+      values (${cpId}, ${sumber}, 'K1', ${periodeAwalBulan}::date, ${batch.id}, ${pdtCore.PDT_PARSER_VERSI}, ${biaya}, ${gmv}, ${tujuan})`;
     return { clientId, cpId, batchId: batch.id };
   }
 
@@ -6843,14 +6844,40 @@ describeDb('M20 Gelombang E — recomputeAdsMetricEntriesPdt (E-03)', () => {
     // hanya izinkan satu batch verified per toko+periode) — Σ harus 3jt+2jt=5jt
     // spend, 20jt+20jt=40jt gmv.
     await sql`
-      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
-      values (${cpId}, 'shopee_ads_live', 'K2', '2026-08-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 2_000_000, 20_000_000)`;
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+      values (${cpId}, 'shopee_ads_live', 'K2', '2026-08-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 2_000_000, 20_000_000, 'lower')`;
     const campaign = await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
     await kirimDanTerbitkanAds(cpId, '2026-08-01');
 
     const [row] = await pdtMetricEntriesFor(cpId, '2026-08-01');
     expect(Number(row.spend)).toBeCloseTo(5_000_000, 2);
     expect(Number(row.gmv)).toBeCloseTo(40_000_000, 2);
+  });
+
+  it('F-02 guardrail: baris tujuan=upper (TikTok Ads Manager) DIKELUARKAN dari Σ ROAS Attainment', async () => {
+    const { clientId, cpId, batchId } = await fixtureDenganFactAds('Shopee', '2026-08-01', 'shopee_ads_cpc', 3_000_000, 20_000_000, 'lower');
+    // Baris upper-funnel di toko+periode YANG SAMA — mensimulasikan Gelombang F
+    // (TikTok Ads Manager) menulis ke pdt_fact_ads sebelum modulnya sendiri ada;
+    // Σ HARUS tetap 3jt/20jt (hanya baris 'lower'), bukan 8jt/70jt (kedua baris).
+    await sql`
+      insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+      values (${cpId}, 'tt_ads_manager_consideration', 'AWARENESS-1', '2026-08-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 5_000_000, 50_000_000, 'upper')`;
+    const campaign = await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
+    await kirimDanTerbitkanAds(cpId, '2026-08-01');
+
+    const [row] = await pdtMetricEntriesFor(cpId, '2026-08-01');
+    expect(row.campaign_id).toBe(campaign);
+    expect(Number(row.spend)).toBeCloseTo(3_000_000, 2);
+    expect(Number(row.gmv)).toBeCloseTo(20_000_000, 2);
+  });
+
+  it('F-02 guardrail: HANYA baris tujuan=upper di toko+periode → nol entri (gerbang spend/gmv > 0 tidak terpicu oleh upper)', async () => {
+    const { clientId, cpId } = await fixtureDenganFactAds('Shopee', '2026-08-01', 'tt_ads_manager_consideration', 5_000_000, 50_000_000, 'upper');
+    await seedCampaign(clientId, 'Shopee Ads', '2026-08-01', '2026-08-31');
+    await kirimDanTerbitkanAds(cpId, '2026-08-01');
+
+    const rows = await pdtMetricEntriesFor(cpId, '2026-08-01');
+    expect(rows).toHaveLength(0);
   });
 
   it('DUA kampanye overlap → split EVENLY, Σ merekonstruksi total penuh', async () => {

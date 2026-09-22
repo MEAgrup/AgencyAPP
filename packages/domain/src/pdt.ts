@@ -1185,11 +1185,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
           values
             (${clientPlatformId}, 'shopee_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
-             ${baris.tipeKampanyeSumber})`;
+             ${baris.tipeKampanyeSumber}, 'lower')`;
       }
     }
   }
@@ -1213,11 +1213,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, platform_product_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
           values
             (${clientPlatformId}, 'shopee_ads_cpc', ${baris.kampanyeId}, ${baris.platformProductId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
-             ${baris.tipeKampanyeSumber})`;
+             ${baris.tipeKampanyeSumber}, 'lower')`;
       }
     }
   }
@@ -1238,11 +1238,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
           values
             (${clientPlatformId}, 'shopee_ads_search', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
-             ${baris.tipeKampanyeSumber})`;
+             ${baris.tipeKampanyeSumber}, 'lower')`;
       }
     }
   }
@@ -1804,11 +1804,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
           values
             (${clientPlatformId}, 'tt_ads_product', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
-             ${baris.tipeKampanyeSumber})`;
+             ${baris.tipeKampanyeSumber}, 'lower')`;
       }
     }
   }
@@ -1832,11 +1832,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
           values
             (${clientPlatformId}, 'tt_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
-             null)`;
+             null, 'lower')`;
       }
     }
   }
@@ -4853,6 +4853,12 @@ async function recomputeTotalSalesPdt(tx: TransactionSql, actor: Actor, clientId
  * later transition finally recomputes them — a staleness window R7's own
  * rule never has, since `pdt_fact_ads` itself is shared across every
  * revision of a period regardless of which kiriman "wins".
+ *
+ * F-02: aggregate query filters `tujuan = 'lower'` — R9's guardrail
+ * ("belanja Ads Manager tidak masuk ROI GMV Max") enforced here at read time
+ * so a future Gelombang F `tujuan = 'upper'` row (TikTok Ads Manager) never
+ * inflates ROAS Attainment, without this function needing to know the TTAM
+ * `sumber` values by name.
  */
 async function recomputeAdsMetricEntriesPdt(
   tx: TransactionSql, actor: Actor, clientPlatformId: number, clientId: string, platform: string, periodeMulai: string,
@@ -4875,7 +4881,8 @@ async function recomputeAdsMetricEntriesPdt(
     select coalesce(sum(biaya), 0) as spend, coalesce(sum(gmv), 0) as gmv,
            (${periodeMulai}::date + interval '1 month' - interval '1 day')::date::text as periode_akhir
       from pdt_fact_ads
-     where client_platform_id = ${clientPlatformId} and periode = ${periodeMulai}::date`;
+     where client_platform_id = ${clientPlatformId} and periode = ${periodeMulai}::date
+       and tujuan = 'lower'`;
   const spendVal = Number(agg.spend);
   const gmvVal = Number(agg.gmv);
   if (!(spendVal > 0 || gmvVal > 0)) return; // pola sama gerbang SH-06 — nol yang bisa diatribusikan

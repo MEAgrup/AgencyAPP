@@ -74,8 +74,8 @@ async function insertBatch(clientId: string, clientPlatformId: number, periodeMu
 
 async function insertAds(clientPlatformId: number, batchId: number, periode: string, gmv: number, biaya: number): Promise<void> {
   await sql`
-    insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv)
-    values (${clientPlatformId}, 'shopee_ads_cpc', 'KAMP-1', ${periode}::date, ${batchId}, 1, ${biaya}, ${gmv})`;
+    insert into pdt_fact_ads (client_platform_id, sumber, kampanye_id, periode, batch_id, parser_versi, biaya, gmv, tujuan)
+    values (${clientPlatformId}, 'shopee_ads_cpc', 'KAMP-1', ${periode}::date, ${batchId}, 1, ${biaya}, ${gmv}, 'lower')`;
 }
 
 async function insertCreator(clientPlatformId: number, batchId: number, periode: string, creatorHandle: string, gmv: number): Promise<void> {
