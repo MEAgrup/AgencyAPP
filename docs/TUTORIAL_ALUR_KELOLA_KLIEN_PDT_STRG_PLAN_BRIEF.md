@@ -1,48 +1,61 @@
-# Tutorial: Alur Kelola Klien — PDT, Strategi (STRG), Plan & Brief
+# Tutorial: Alur Kelola Klien — Riset Awal, PDT, Strategi (STRG), Plan & Brief
 
 > **Untuk siapa dokumen ini.** Account Manager (AM) dan SPV/Head of Account —
 > alur ini adalah pekerjaan inti divisi **Account** sejak klien diserahkan
 > Sales sampai pekerjaan sampai ke meja divisi eksekusi (Creative, Ads, KOL,
 > Live Stream, AI Optimizer, Store Operation). Bukan untuk developer.
->
-> **Perubahan penting (2026-09-21).** **AM Co-Pilot** dan **AM Baseline**
-> (dua tool HTML terpisah yang dulu diakses lewat menu *"MEA AI Tools"*)
-> **sudah dipensiunkan** — tombolnya dicabut dan tidak akan muncul lagi.
-> Fungsinya sekarang dipegang dua hal:
-> - **PDT (Pusat Data Toko)** — tempat AM mengunggah data toko. Satu upload
->   per toko per periode, dipakai ulang oleh Riset Awal, Strategi, Plan,
->   Brief, laporan klien, dan Product Exchange sekaligus. Ini juga
->   menggantikan Report Engine TikTok dan Report Engine Shopee yang lama.
-> - **Editor Pilar manual** di Section E halaman Strategi — AM memilih
->   sendiri dari katalog 20 aksi (atau mengetik manual untuk empat jenis
->   yang tidak ada di katalog), tanpa perlu Riset Awal lebih dulu seperti
->   yang dituntut AM Co-Pilot dulu.
->
-> Kalau Anda masih mencari menu AM Co-Pilot / AM Baseline / Video Factory:
-> menu itu memang sudah tidak ada. Ini bukan bug — lihat `docs/DECISIONS.md`
-> entri **PENSIUN-AMTOOLS** (2026-09-21) kalau ingin tahu alasannya.
+
+## ⚠️ Dua hal yang sering tertukar — baca dulu sebelum mulai
+
+**"Riset Awal" dan "PDT" adalah DUA sistem yang terpisah, bukan satu.** Ini
+sering disangka satu hal karena namanya mirip-mirip dan sama-sama soal
+"upload data toko". Bedanya:
+
+| | **Riset Awal** (fitur *Baseline Riset Awal*) | **PDT** (Pusat Data Toko) |
+|---|---|---|
+| Fungsinya | Syarat **wajib sebelum Interview** bisa dimulai | Sumber data untuk **Section B Strategi**, laporan periodik, dan Product Exchange |
+| Tempat upload | Di dalam halaman **"Mulai Riset & Interview"** sendiri | Menu terpisah **Upload Data Toko (PDT)** |
+| Dipakai berapa kali | **Sekali** per toko (bisa dikoreksi kalau salah upload) | **Berulang, setiap periode** (bulanan) |
+| Kalau belum diisi | Interview **tidak bisa dimulai** — gerbang server keras | Section B Strategi tetap bisa diisi manual; sebagian field otomatis kalau PDT sudah ada datanya |
+
+**Kenapa perlu ditegaskan:** dulu ada rencana PDT akan "mematikan" Riset
+Awal sepenuhnya. Rencana itu **dibatalkan pemilik 2026-09-19** — Riset Awal
+sengaja **tetap hidup permanen sebagai jaring pengaman**, bukan tahap
+transisi menuju penghapusan. Jadi jangan menunggu PDT "menggantikan" tombol
+Riset Awal — itu tidak akan terjadi kecuali ada ketokan pemilik baru.
+
+**Yang benar-benar sudah pensiun (2026-09-21)** hanya dua *tool* HTML
+terpisah yang dulu diakses lewat menu "MEA AI Tools": **AM Co-Pilot** (kini
+digantikan editor pilar manual di Section E Strategi) dan **AM Baseline /
+Video Factory** (tool iframe lama, bukan fitur Riset Awal yang Anda pakai
+hari ini — tool itu memang tidak pernah menulis apa pun ke server, jadi
+pensiunnya tidak mengurangi apa pun dari alur di bawah). Kalau Anda masih
+mencari menunya: sudah tidak ada, dan itu bukan bug — lihat
+`docs/DECISIONS.md` entri **PENSIUN-AMTOOLS**.
 
 ## Peta alur besar
 
-Dari klien pertama diserahkan Sales sampai pekerjaan mendarat di divisi,
-urutannya begini:
+Dari klien pertama diserahkan Sales sampai pekerjaan mendarat di divisi:
 
 ```
 Sales closing (CLI-/TRX-/SVC-)
         ↓
 Pembayaran pertama masuk → klien rilis ke Account (Anda)
         ↓
-1. Upload Data Toko (PDT)         — data mentah toko
+1. Riset Awal (fitur Baseline Riset Awal) — wajib, sekali per toko
         ↓
-2. Riset & Interview Klien         — Riset Awal (dari PDT) + wawancara
+2. Interview Klien                — wawancara, pakai jawaban Riset Awal
         ↓
-3. Strategi (STRG)                 — Section A–J, termasuk Pilar E-3..E-10
+3. Upload Data Toko (PDT)          — data toko berkala, tiap periode
         ↓
-4. Plan                            — periode kerja, baris per pilar/kanal
+4. Strategi (STRG)                 — Section A–J, sebagian terisi dari
+                                      Interview & PDT, Pilar E-3..E-10 manual
         ↓
-5. Brief (satu klik, warisi semua) — satu Brief per baris Plan per divisi
+5. Plan                            — periode kerja, baris per pilar/kanal
         ↓
-6. Papan Divisi                    — Creative / Ads / KOL / Live Stream /
+6. Brief (satu klik, warisi semua) — satu Brief per baris Plan per divisi
+        ↓
+7. Papan Divisi                    — Creative / Ads / KOL / Live Stream /
                                       AI Optimizer / Store Operation mengerjakan
 ```
 
@@ -62,17 +75,86 @@ uang masuk sudah cukup), klien otomatis **rilis ke Account** dan muncul di:
 
 SPV/Head Account menugaskan AM pemilik lewat tombol **assign/reassign AM**
 di kartu Intake. Sejak saat itu, Service klien berstatus
-**`[Awaiting Onboarding]`** dan menunggu langkah 1–5 di bawah.
+**`[Awaiting Onboarding]`** dan menunggu langkah 1–6 di bawah.
 
 ---
 
-## 1. Upload Data Toko (PDT)
+## 1. Riset Awal — fitur *Baseline Riset Awal*
 
-**Gunanya.** Satu tempat AM mengunggah export data toko (Shopee, TikTok
-Shop, Meta Ads, dll) **satu kali per toko per periode**. Data ini otomatis
-dipakai ulang oleh Riset Awal, Section B Strategi, Plan, laporan klien, dan
-Product Exchange — tidak perlu upload berkas yang sama berkali-kali seperti
-dulu.
+**Gunanya.** Membangun baseline kondisi toko klien (AOV, jumlah SKU, skor
+kondisi toko per platform) dari export data yang Anda unggah, **sebelum**
+Interview boleh dimulai. Ini bukan bagian dari PDT — mesinnya sendiri
+(`baseline.runBaseline()`) dan tabelnya sendiri (`riset_awal_analisa`),
+berjalan di server sejak lama, terpisah dari tool AM Baseline yang sudah
+pensiun.
+
+**Di mana letaknya.** Tombol **"Mulai Riset & Interview"** di halaman
+detail klien (`/clients/{id}`) atau halaman Service
+(`/account/services/{id}`). Membuka halaman ini **langsung memulai jangkar
+waktu** — tidak ada tombol "mulai" terpisah. Langkah Riset Awal adalah
+bagian PERTAMA di halaman itu, sebelum form Interview.
+
+**Cara pakai.**
+1. Untuk setiap toko **aktif** milik klien, unggah export platformnya
+   (satu atau beberapa berkas export dari Seller Center/Creator Center,
+   bukan berkas ZIP PDT). Untuk platform yang belum punya mesin analisa
+   otomatis (misalnya Tokopedia), isi **manual** — tetap sah, tidak
+   memblokir apa pun.
+2. Sistem menghitung baseline dan mengisi sejumlah angka otomatis (usulan).
+   **Konfirmasi setiap angka auto-fill** satu per satu.
+3. Tekan **submit** untuk langkah Riset Awal ini.
+
+**Gerbang wajib.** Interview **tidak bisa dimulai** sebelum:
+- Riset Awal tersubmit, **dan**
+- setiap toko aktif klien punya baseline (analisa otomatis **atau**
+  manual — dua-duanya sah), **dan**
+- setiap angka auto-fill sudah dikonfirmasi.
+
+Kalau salah satu belum terpenuhi, sistem menolak dengan pesan:
+`[riset awal belum selesai — setiap platform aktif wajib punya baseline
+yang terkonfirmasi dan riset awal disubmit sebelum interview dimulai]`.
+
+**Kalau salah upload.** Ada jalur koreksi — submit ulang membuat baseline
+baru yang menggantikan yang lama; baseline lama tidak dihapus, hanya
+ditandai "digantikan". Tidak perlu takut sekali salah upload lalu terkunci
+selamanya.
+
+---
+
+## 2. Interview Klien
+
+**Gunanya.** Melengkapi hal-hal yang **tidak** bisa dibaca dari data toko —
+model bisnis, margin kotor, ruang harga, kesiapan akses, prasyarat klien,
+dll — lewat wawancara terstruktur.
+
+**Di mana letaknya.** Halaman yang sama dengan langkah 1
+(`/clients/{id}` atau `/account/services/{id}`, tombol **"Mulai Riset &
+Interview"**) — begitu Riset Awal tersubmit, form Interview terbuka di
+bawahnya.
+
+**Cara pakai.**
+1. Isi pertanyaan yang muncul. Field yang sudah bisa dibaca dari Riset Awal
+   (misalnya AOV dan jumlah SKU) **sudah otomatis terisi** dan tidak
+   ditanyakan ulang — ini datang dari Riset Awal (langkah 1), **bukan** dari
+   PDT.
+2. Selesaikan interview → sistem menghasilkan **verdict**
+   (`growth_ready` / `bersyarat` / `risiko_tinggi` / `tidak_siap`). Verdict
+   ini **hanya penanda**, bukan gerbang — Strategi tetap bisa dibuat berapa
+   pun verdictnya, sepanjang interview-nya berstatus selesai.
+
+**Siapa yang mengisi.** AM pemilik klien, atau Account lead/SPV/Director.
+Sales tidak melihat isian penuhnya, hanya verdict ringkas.
+
+---
+
+## 3. Upload Data Toko (PDT)
+
+**Gunanya.** Berbeda dari Riset Awal di langkah 1 (yang sekali per toko),
+ini adalah upload **berulang setiap periode** (biasanya bulanan). Datanya
+dipakai ulang oleh Section B Strategi, laporan klien, dan Product Exchange
+— jadi berkas yang sama tidak perlu diunggah dua-tiga kali ke tempat
+berbeda seperti dulu. Ini juga menggantikan Report Engine TikTok dan Report
+Engine Shopee yang lama.
 
 **Di mana letaknya.** Menu **Klien → Upload Data Toko (PDT)**
 (`/account/pdt/upload`). Laporan hasilnya ada di **Klien → Laporan PDT**
@@ -81,7 +163,7 @@ dulu.
 **Cara pakai (alur upload).**
 1. Pilih klien → pilih toko (platform) → pilih periode.
 2. Unggah **satu berkas ZIP** berisi seluruh export platform untuk periode
-   itu — bukan berkas satu-satu lagi.
+   itu.
 3. Sistem mendeteksi modul di dalamnya secara otomatis dan menampilkan tabel
    hasil deteksi (modul apa saja yang terbaca, kolom apa yang dipakai)
    **sebelum** disimpan. Kalau ada yang salah deteksi, Anda bisa
@@ -89,8 +171,9 @@ dulu.
 4. Sistem mengecek identitas toko (ID Toko/ID Kreator harus cocok dengan
    data toko klien) dan periode. Kalau tidak cocok, batch ditolak dan
    sistem menjelaskan sebabnya.
-5. Setelah lolos, sistem menghitung ulang skor per dimensi, kuadran SKU, dan
-   mengisi otomatis form-form hilir (Riset Awal, Section B Strategi, dst).
+5. Setelah lolos (status `verified`), sistem menghitung skor per dimensi,
+   kuadran SKU, dan mengisi otomatis field Section B Strategi yang memang
+   punya sumber di data ini (lihat langkah 4).
 
 **Cara pakai (kirim laporan ke klien).**
 1. Buka **Laporan PDT** untuk periode yang sudah `verified`.
@@ -102,79 +185,50 @@ dulu.
 
 **Catatan.** Batch yang gagal validasi tetap tersimpan berstatus `ditolak`
 dengan keterangan penyebabnya — bisa didiagnosis tanpa upload ulang dari
-awal.
+awal. Upload PDT **tidak** memenuhi gerbang Riset Awal di langkah 1 — dua
+hal itu tetap terpisah.
 
 ---
 
-## 2. Riset & Interview Klien
-
-**Gunanya.** Dua langkah yang harus selesai sebelum Strategi bisa dibuat:
-Riset Awal (baca data dari PDT) dan Interview (wawancara hal yang belum
-terjawab data).
-
-**Di mana letaknya.** Tombol **"Mulai Riset & Interview"** di halaman detail
-klien (`/clients/{id}`) atau halaman Service (`/account/services/{id}`).
-Membuka halaman ini **langsung memulai jangkar waktu** — tidak ada tombol
-"mulai" terpisah.
-
-**Cara pakai.**
-1. **Riset Awal** — pastikan setiap toko **aktif** milik klien sudah punya
-   baseline dari PDT (langkah 1 di atas; platform yang belum punya mesin
-   analisa otomatis, misalnya Tokopedia, tetap bisa diisi manual). Konfirmasi
-   setiap angka auto-fill, lalu submit langkah ini.
-   - **Gerbang wajib:** Interview **tidak bisa dimulai** sebelum Riset Awal
-     tersubmit dan setiap platform aktif punya baseline terkonfirmasi.
-     Pesannya kalau gagal: `[riset awal belum selesai — setiap platform
-     aktif wajib punya baseline yang terkonfirmasi dan riset awal disubmit
-     sebelum interview dimulai]`.
-2. **Interview** — isi hanya pertanyaan yang **belum** terjawab data (model
-   bisnis, margin kotor, ruang harga, kesiapan akses, prasyarat klien, dll).
-   Field yang sudah terisi dari Riset Awal (mis. AOV, jumlah SKU) tidak
-   ditanyakan ulang.
-3. Selesaikan interview → sistem menghasilkan **verdict** (`growth_ready` /
-   `bersyarat` / `risiko_tinggi` / `tidak_siap`). Verdict ini **hanya
-   penanda**, bukan gerbang — Strategi tetap bisa dibuat berapa pun
-   verdictnya, sepanjang interview-nya sudah selesai.
-
-**Siapa yang mengisi.** AM pemilik klien, atau Account lead/SPV/Director.
-Sales tidak melihat isian penuhnya, hanya verdict ringkas.
-
----
-
-## 3. Strategi (STRG)
+## 4. Strategi (STRG)
 
 **Gunanya.** Dokumen strategi resmi per klien: konteks bisnis, baseline,
 diagnosa, target, dan — bagian yang paling sering dipakai sehari-hari —
 **pilar eksekusi** yang nanti diturunkan jadi Plan lalu Brief.
 
 **Di mana letaknya.** Menu **Account & Service** (`/account`) → kartu
-Service yang sudah lolos Riset & Interview akan menawarkan tombol
+Service yang sudah lolos Riset Awal & Interview akan menawarkan tombol
 **"Buat Strategi"**. Halamannya `/account/strategi/{id}`.
 
-**Struktur singkatnya (Section A–J).**
+**Struktur singkatnya (Section A–J) dan asal datanya.**
 
-| Section | Isi |
-|---|---|
-| A | Konteks Klien & Bisnis (sekali per Strategi) — sebagian **otomatis terisi dari Interview** (model bisnis, margin kotor) dengan badge "terisi dari Interview"; posisi harga tetap diisi manual |
-| B | Baseline per Channel — terisi dari PDT, bukan diketik ulang |
-| C | Diagnosa & Akar Masalah |
-| D | Target & KPI |
-| **E** | **Pilar Strategi (E-3…E-10)** — lihat di bawah |
-| F–J | Resource, Kalender, Risiko, Turunan ke Plan, Approval & Versi |
+| Section | Isi | Asal data |
+|---|---|---|
+| A | Konteks Klien & Bisnis (sekali per Strategi) | Sebagian **otomatis dari Interview** (model bisnis, margin kotor) dengan badge "terisi dari Interview"; posisi harga tetap manual |
+| B | Baseline per Channel | **Sebagian** otomatis dari **PDT** (GMV, jumlah pesanan, refund rate, pengunjung, conversion rate, poin penalti kesehatan toko — untuk periode yang Anda upload di langkah 3 dan sudah `verified`); kalau PDT belum punya data periode itu, field ini jatuh balik ke data Riset Awal lama; sisanya tetap manual |
+| C | Diagnosa & Akar Masalah | Manual |
+| D | Target & KPI | Manual (floor dari kontrak, stretch AM-set) |
+| **E** | **Pilar Strategi (E-3…E-10)** | Manual — lihat di bawah |
+| F–J | Resource, Kalender, Risiko, Turunan ke Plan, Approval & Versi | Manual |
+
+Perhatikan: **Section B tidak 100% otomatis** — hanya field yang memang
+punya sumber fakta di PDT yang terisi otomatis dan read-only (dengan tautan
+ke batch sumbernya). Field lain di Section B tetap Anda ketik manual dari
+riset/export sesuai kondisi klien.
 
 **Mengisi Section E (pilar) — cara baru sejak AM Co-Pilot pensiun.**
 1. Buka kartu **"E-3…E-10 · Pilar Strategi"**.
 2. Tekan tombol tambah pilar → **pilih dari katalog 20 aksi** (5 aksi ×
    4 jenis: Video/Konten, Live, Affiliate/KOL, Iklan). Katalog ini murni
-   daftar pilihan statis — tidak butuh Riset Awal seperti AM Co-Pilot dulu,
-   jadi klien **tanpa** Riset Awal lengkap pun tetap bisa diisi pilarnya.
+   daftar pilihan statis — tidak butuh Riset Awal atau PDT untuk dipilih,
+   jadi klien tanpa data lengkap pun tetap bisa diisi pilarnya.
 3. Untuk empat jenis pilar yang **tidak ada** di katalog — **SKU, Harga,
    Retensi, Operasional** — ketik manual lewat baris "ketik-tangan" di
    editor yang sama.
 4. Kartu ini **opsional**, bukan gerbang lagi — Anda boleh mengajukan
    Strategi dengan pilar kosong kalau memang belum ada yang perlu diisi.
    Tapi ingat: **baris Plan periode 1 disemai otomatis dari pilar** (lihat
-   langkah 4) — Strategi tanpa pilar berarti Plan lahir kosong dan Anda
+   langkah 5) — Strategi tanpa pilar berarti Plan lahir kosong dan Anda
    mengetik baris kerja manual satu-satu.
 
 **Approval.**
@@ -186,7 +240,7 @@ terbuka.
 
 ---
 
-## 4. Plan
+## 5. Plan
 
 **Gunanya.** Memecah Strategi jadi periode kerja bulanan dengan baris kerja
 konkret per kanal/pilar — inilah yang nanti diwariskan jadi Brief.
@@ -210,7 +264,7 @@ terbentuk. Bukanya lewat kartu Service di `/account` atau langsung
 
 ---
 
-## 5. Brief — "satu klik, warisi semua"
+## 6. Brief — "satu klik, warisi semua"
 
 **Gunanya.** Meneruskan pekerjaan dari Plan ke divisi eksekusi, tanpa
 mengetik ulang apa yang sudah ditulis di baris Plan.
@@ -239,7 +293,7 @@ sehari-hari sekarang adalah warisan satu-klik dari Plan di atas.
 
 ---
 
-## 6. Papan Divisi — pekerjaan diterima
+## 7. Papan Divisi — pekerjaan diterima
 
 Begitu Brief lahir, ia langsung terlihat di papan divisi tujuan:
 
@@ -265,22 +319,32 @@ internal, atau meneruskan) → `[In Review]` → **AM menyetujui** →
 | Langkah | Menu | URL |
 |---|---|---|
 | 0. Intake klien | Account & Service | `/account` |
-| 1. Upload data toko | Upload Data Toko (PDT) | `/account/pdt/upload` |
-| 1. Laporan toko | Laporan PDT | `/account/pdt/laporan` |
-| 2. Riset & Interview | tombol di halaman Klien/Service | `/clients/{id}`, `/account/services/{id}` |
-| 3. Strategi | (dari kartu Service) | `/account/strategi/{id}` |
-| 3. Approval Strategi | Persetujuan | `/persetujuan` |
-| 4–5. Plan & Brief | (dari kartu Service) | `/account/plan/{id}` |
-| 6. Papan divisi | Creative / Ads / KOL / Live Stream / Store Operation | `/creative`, `/ads`, `/kol`, `/livestream`, `/store-ops` |
+| 1. Riset Awal | tombol di halaman Klien/Service | `/clients/{id}`, `/account/services/{id}` |
+| 2. Interview | (halaman yang sama, lanjutan langkah 1) | `/clients/{id}`, `/account/services/{id}` |
+| 3. Upload data toko | Upload Data Toko (PDT) | `/account/pdt/upload` |
+| 3. Laporan toko | Laporan PDT | `/account/pdt/laporan` |
+| 4. Strategi | (dari kartu Service) | `/account/strategi/{id}` |
+| 4. Approval Strategi | Persetujuan | `/persetujuan` |
+| 5–6. Plan & Brief | (dari kartu Service) | `/account/plan/{id}` |
+| 7. Papan divisi | Creative / Ads / KOL / Live Stream / Store Operation | `/creative`, `/ads`, `/kol`, `/livestream`, `/store-ops` |
 
 ## Aturan penting
 
-- **AM Co-Pilot dan AM Baseline sudah pensiun permanen** (2026-09-21) —
-  jangan mencari tombolnya lagi, dan jangan menyimpan bookmark lama karena
-  akan menampilkan pesan "sudah tidak dipakai, pilih pilar langsung di
-  Section E halaman Strategi".
-- **Riset Awal wajib selesai sebelum Interview dimulai** — bukan bisa
-  dilewati, ini gerbang server.
+- **Riset Awal ≠ PDT.** Riset Awal (langkah 1) wajib sekali per toko dan
+  menggerbang Interview; PDT (langkah 3) berulang tiap periode dan mengisi
+  sebagian Section B Strategi. Upload ke satu sistem **tidak** mengisi
+  sistem yang lain.
+- **Riset Awal wajib selesai sebelum Interview dimulai** — gerbang server
+  keras, bukan bisa dilewati lewat PDT atau cara lain.
+- **Riset Awal tetap ada secara permanen** — ketokan pemilik 2026-09-19
+  membatalkan rencana lama untuk mematikannya begitu PDT matang; PDT jadi
+  sumber utama untuk field yang memang punya datanya, Riset Awal tetap
+  jadi jaring pengaman untuk sisanya.
+- **AM Co-Pilot dan tool AM Baseline/Video Factory sudah pensiun permanen**
+  (2026-09-21) — jangan mencari tombolnya lagi, dan jangan menyimpan
+  bookmark lama karena akan menampilkan pesan "sudah tidak dipakai, pilih
+  pilar langsung di Section E halaman Strategi". Ini **beda** dari Riset
+  Awal di langkah 1, yang tidak terpengaruh keputusan ini.
 - **Section E (pilar) sekarang opsional**, tapi mempengaruhi seberapa
   banyak baris Plan yang tersemai otomatis — mengisinya tetap menghemat
   kerja Anda di langkah Plan.
@@ -292,12 +356,25 @@ internal, atau meneruskan) → `[In Review]` → **AM menyetujui** →
 
 ## Pertanyaan yang mungkin muncul
 
+**Q: Saya sudah upload data toko ke PDT — apakah itu otomatis mengisi
+Riset Awal supaya Interview bisa dimulai?**
+**Tidak.** PDT dan Riset Awal adalah dua sistem yang berbeda dengan tabel
+dan tombol upload masing-masing. Upload ke PDT tidak menyentuh gerbang
+Interview sama sekali — Anda tetap harus menyelesaikan Riset Awal lewat
+tombol "Mulai Riset & Interview" (langkah 1).
+
+**Q: Kalau begitu, apakah suatu saat tombol Riset Awal akan dihapus dan
+digantikan PDT sepenuhnya?**
+Berdasarkan keputusan pemilik yang tercatat (2026-09-19), **tidak** —
+Riset Awal sengaja dipertahankan permanen sebagai jaring pengaman, bukan
+tahap transisi menuju penghapusan. Mengubah ini butuh ketokan pemilik baru.
+
 **Q: Klien saya sudah lama jalan dan tidak punya Riset Awal lengkap — apakah
 Strategi-nya terkunci selamanya?**
-Tidak lagi. Sejak Section E jadi opsional dan katalog pilar manual tidak
-butuh Riset Awal, Anda tetap bisa mengisi pilar dan mengajukan Strategi
-walau Riset Awal-nya tipis. (Interview tetap butuh Riset Awal selesai
-lebih dulu — itu gerbang yang berbeda dan belum berubah.)
+Section E (pilar) tidak lagi terkunci oleh itu — katalog pilar manual tidak
+butuh Riset Awal, jadi Anda tetap bisa mengisi pilar dan mengajukan
+Strategi. Tapi Interview tetap butuh Riset Awal selesai lebih dulu — itu
+gerbang yang berbeda dan tidak berubah oleh perubahan Section E ini.
 
 **Q: Saya sudah upload data toko di PDT bulan lalu — apakah bulan ini harus
 upload ulang semua berkas?**
@@ -314,5 +391,5 @@ ke jalur normal Plan→Brief, bukan jalur koreksi.
 
 **Q: Apakah jalur Brief manual (STR-) masih bisa dipakai?**
 Untuk kasus tertentu masih tersedia, tapi jalur harian yang dipakai
-sekarang adalah warisan satu-klik dari Plan (langkah 5 di atas) — pakai itu
+sekarang adalah warisan satu-klik dari Plan (langkah 6 di atas) — pakai itu
 kecuali ada alasan khusus.
