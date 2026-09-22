@@ -201,116 +201,40 @@ describeDb('createReportShopee — score, store, payload_schema', () => {
   });
 });
 
-describeDb('SH-06 — auto Metric Entry (MTR-) from the report\'s combined Ads numbers', () => {
-  it('no ads file uploaded → no Metric Entry, report still saves', async () => {
+describeDb('SH-06 — auto Metric Entry from Shopee reports (M20 E-03/E-04: disabled, PDT is now the writer)', () => {
+  it('createReportShopee never writes a Metric Entry any more, however many campaigns overlap', async () => {
     const client = await seedClient();
     const pid = await seedPlatform(client);
-    const campaign = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
+    const a = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
+    const b = await activeShopeeAdsCampaign(client, '2026-08-15', '2026-09-15');
     const d = await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeFile()]));
     expect(d.id).toBeGreaterThan(0);
-    expect(await metricEntriesOf(campaign)).toHaveLength(0);
-  });
-
-  it('zero overlapping active campaigns → no Metric Entry (never blocks the report)', async () => {
-    const client = await seedClient();
-    const pid = await seedPlatform(client);
-    // Campaign exists but its period does NOT overlap the report's.
-    const campaign = await activeShopeeAdsCampaign(client, '2026-01-01', '2026-01-31');
-    const d = await createReportShopee(sql, actorAm, client, bulanInput(pid));
-    expect(d.id).toBeGreaterThan(0);
-    expect(await metricEntriesOf(campaign)).toHaveLength(0);
-  });
-
-  it('exactly ONE overlapping active campaign → auto MTR- gets the FULL total, entry_method=File Export', async () => {
-    const client = await seedClient();
-    const pid = await seedPlatform(client);
-    const campaign = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
-    await createReportShopee(sql, actorAm, client, bulanInput(pid));
-    const entries = await metricEntriesOf(campaign);
-    expect(entries).toHaveLength(1);
-    expect(Number(entries[0].spend)).toBeCloseTo(5_000_000, 2);
-    expect(Number(entries[0].gmv)).toBeCloseTo(40_000_000, 2);
-    expect(entries[0].entry_method).toBe('File Export');
-  });
-
-  it('a [Paused] campaign overlapping the period is NOT a candidate', async () => {
-    const client = await seedClient();
-    const pid = await seedPlatform(client);
-    const campaign = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
-    await sql`update ad_campaigns set status = '[Paused]' where id = ${campaign}`;
-    await createReportShopee(sql, actorAm, client, bulanInput(pid));
-    expect(await metricEntriesOf(campaign)).toHaveLength(0);
-  });
-
-  it('TWO overlapping active campaigns → split EVENLY, Σ reconstructs the true total', async () => {
-    const client = await seedClient();
-    const pid = await seedPlatform(client);
-    const a = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
-    const b = await activeShopeeAdsCampaign(client, '2026-08-15', '2026-09-15'); // partial overlap still counts
-    await createReportShopee(sql, actorAm, client, bulanInput(pid));
-    const [ea] = await metricEntriesOf(a);
-    const [eb] = await metricEntriesOf(b);
-    expect(Number(ea.spend)).toBeCloseTo(2_500_000, 2);
-    expect(Number(eb.spend)).toBeCloseTo(2_500_000, 2);
-    expect(Number(ea.gmv)).toBeCloseTo(20_000_000, 2);
-    expect(Number(eb.gmv)).toBeCloseTo(20_000_000, 2);
-    expect(Number(ea.spend) + Number(eb.spend)).toBeCloseTo(5_000_000, 2);
-    expect(Number(ea.gmv) + Number(eb.gmv)).toBeCloseTo(40_000_000, 2);
-  });
-
-  it('THREE-way split floors the remainder rather than inventing a fraction — Σ is at most a few minor units under the true total', async () => {
-    const client = await seedClient();
-    const pid = await seedPlatform(client);
-    const ids = await Promise.all([
-      activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31'),
-      activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31'),
-      activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31'),
-    ]);
-    await createReportShopee(sql, actorAm, client, bulanInput(pid));
-    let sumSpend = 0, sumGmv = 0;
-    for (const id of ids) {
-      const [e] = await metricEntriesOf(id);
-      sumSpend += Number(e.spend);
-      sumGmv += Number(e.gmv);
-    }
-    // 5.000.000 / 3 and 40.000.000 / 3 do not divide evenly — floor at the
-    // minor-unit level, never over-allocate. Off by at most a few cents.
-    expect(sumSpend).toBeLessThanOrEqual(5_000_000);
-    expect(sumSpend).toBeGreaterThan(5_000_000 - 1);
-    expect(sumGmv).toBeLessThanOrEqual(40_000_000);
-    expect(sumGmv).toBeGreaterThan(40_000_000 - 1);
-  });
-
-  it('AM excludes one campaign → the excluded one gets nothing, the rest gets the FULL total (not re-split)', async () => {
-    const client = await seedClient();
-    const pid = await seedPlatform(client);
-    const keep = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
-    const excluded = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
-    await createReportShopee(sql, actorAm, client, bulanInput(pid, undefined, [excluded]));
-    expect(await metricEntriesOf(excluded)).toHaveLength(0);
-    const [e] = await metricEntriesOf(keep);
-    expect(Number(e.spend)).toBeCloseTo(5_000_000, 2);
-    expect(Number(e.gmv)).toBeCloseTo(40_000_000, 2);
-  });
-
-  it('AM excludes ALL overlapping campaigns → no Metric Entry at all', async () => {
-    const client = await seedClient();
-    const pid = await seedPlatform(client);
-    const a = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
-    const b = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
-    await createReportShopee(sql, actorAm, client, bulanInput(pid, undefined, [a, b]));
+    // M20 E-03/E-04: `attributeShopeeAdsMetricEntries` is switched off
+    // (`M14_WRITES_SHOPEE_ADS_METRIC_ENTRIES = false`, `docs/DECISIONS.md`
+    // M20-E03-ADS-METRIC-ENTRIES) — a client still on the M14 report path
+    // simply gets no automatic Metric Entry any more (Ads can still log one
+    // by hand via `logMetricEntry`, unaffected by this flag). PDT-migrated
+    // clients get theirs from `pdt.ts::recomputeAdsMetricEntriesPdt` instead
+    // — same even-split mechanism this function used to run here, ported to
+    // fire from PDT's publish lifecycle rather than report creation.
     expect(await metricEntriesOf(a)).toHaveLength(0);
     expect(await metricEntriesOf(b)).toHaveLength(0);
   });
 
-  it('the auto entry is written even though the report-creating actor is Account division, not Ads (engine write, not an Ads-division action)', async () => {
+  it('the report still saves normally with no ads campaigns at all', async () => {
     const client = await seedClient();
     const pid = await seedPlatform(client);
-    const campaign = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
-    // actorAm is Account/staff — canManageCampaign(actorAm) would be false were
-    // this gated the same way as a manual logMetricEntry call.
-    await createReportShopee(sql, actorAm, client, bulanInput(pid));
-    expect(await metricEntriesOf(campaign)).toHaveLength(1);
+    const d = await createReportShopee(sql, actorAm, client, bulanInput(pid));
+    expect(d.id).toBeGreaterThan(0);
+  });
+
+  it('excludeCampaignIds input is still accepted but has no effect (mechanism off, nothing to exclude from)', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    const a = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
+    const d = await createReportShopee(sql, actorAm, client, bulanInput(pid, undefined, [a]));
+    expect(d.id).toBeGreaterThan(0);
+    expect(await metricEntriesOf(a)).toHaveLength(0);
   });
 });
 

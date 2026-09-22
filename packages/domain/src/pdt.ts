@@ -12,9 +12,10 @@
  * lain — konsisten dengan ketokan PX-M2a (`docs/DECISIONS.md` 2026-09-12).
  */
 import { randomUUID } from 'node:crypto';
-import { notification, pdt, permission, pilarkatalog, statemachine, tz } from '@cdps/core';
+import { money, notification, pdt, permission, pilarkatalog, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
+import * as ads from './ads';
 import * as pdtVerdict from './pdt-verdict';
 
 /**
@@ -4565,12 +4566,15 @@ async function ensureInsightSeed(tx: TransactionSql, kirimanId: number): Promise
 
 async function loadKirimanScope(
   sql: Queryable, kirimanId: number,
-): Promise<{ clientPlatformId: number; clientId: string; ownerAm: string | null }> {
-  const [row] = await sql<{ client_platform_id: number }[]>`
-    select client_platform_id from pdt_laporan_kiriman where id = ${kirimanId}`;
+): Promise<{ clientPlatformId: number; clientId: string; platform: string; periodeMulai: string; ownerAm: string | null }> {
+  const [row] = await sql<{ client_platform_id: number; periode_mulai: string }[]>`
+    select client_platform_id, periode_mulai::text as periode_mulai from pdt_laporan_kiriman where id = ${kirimanId}`;
   if (!row) throw new NotFoundError(MSG_KIRIMAN_NOT_FOUND);
   const cp = await loadClientPlatformUntukPdt(sql, row.client_platform_id);
-  return { clientPlatformId: row.client_platform_id, clientId: cp.client_id, ownerAm: cp.assigned_am_id };
+  return {
+    clientPlatformId: row.client_platform_id, clientId: cp.client_id, platform: cp.platform,
+    periodeMulai: row.periode_mulai, ownerAm: cp.assigned_am_id,
+  };
 }
 
 async function requireCanTulisInsight(sql: Queryable, actor: Actor, kirimanId: number): Promise<void> {
@@ -4808,6 +4812,95 @@ async function recomputeTotalSalesPdt(tx: TransactionSql, actor: Actor, clientId
 }
 
 /**
+ * recomputeAdsMetricEntriesPdt — M20 E-03: PDT's engine write of Metric
+ * Entries (`ads.insertAdsMetricEntryFromPdt`) so ROAS Attainment has a
+ * source for clients whose ad-spend now lives in `pdt_fact_ads` instead of
+ * an uploaded Shopee report. Same mechanism M14's SH-06 already uses
+ * (`report.ts::attributeShopeeAdsMetricEntries`, owner-approved
+ * 2026-09-03): Σ every PDT ads source for this toko+bulan into ONE combined
+ * spend/GMV figure (`pdt_fact_ads.kampanye_id` is often free-text, not a
+ * stable id — no reliable 1:1 crosswalk to `ad_campaigns.id` exists), then
+ * flat EVEN-SPLIT across every `ad_campaigns` row of this client whose
+ * platform (crosswalk `ads.pdtPlatformKeAdsPlatform`) is `[Active]` and
+ * overlaps this calendar month. Owner decision + the "why not per-kampanye
+ * matching" reasoning: `docs/DECISIONS.md` M20-E03-ADS-METRIC-ENTRIES.
+ *
+ * Scoped to ONE (client_platform_id, periode) — unlike `recomputeTotalSalesPdt`
+ * (a rolling total across periods), ROAS Attainment is read PER calendar
+ * month (`health.ts::currentPeriodROAS` filters `period_start between
+ * per.startDate and per.endDate`), so "the truth for period P" is exactly
+ * what this writes, nothing about any other period.
+ *
+ * `pdt_laporan_kiriman` is NOT append-only-per-period like M14's
+ * `client_reports` (AM may Cabut then Terbitkan-Ulang the SAME period
+ * repeatedly, R4/R5) and `metric_entries` has zero uniqueness constraint of
+ * its own — so this ALWAYS starts by deleting whatever PDT previously wrote
+ * for this exact scope (`ads.deletePdtAdsMetricEntries`, owner-approved
+ * hapus-tulis-ulang) and, only if the period has ANY currently-`[Terbit]`
+ * kiriman, writes a fresh generation from today's `pdt_fact_ads` numbers. No
+ * kiriman for this period is currently `[Terbit]` (never sent, or every
+ * candidate is Draf/Dicabut) leaves zero PDT rows for the period — mirrors
+ * `recomputeTotalSalesPdt`'s "R6: zero manual SQL escape hatch".
+ *
+ * Deliberately "ANY terbit", not R11.3's stricter "latest KIRIMAN, no
+ * fallback" — ROAS Attainment is a money/business metric in the SAME
+ * category as `total_sales` (which also doesn't require its winning kiriman
+ * to be the single latest revision overall), not a client-trust/UX concern
+ * like the portal listing. The distinction is load-bearing: with R11.3's
+ * rule, creating a brand-new Draf revision `v2` for a period whose `v1` is
+ * still `[Terbit]` would leave `v1`'s (now-stale, since a plain "kirim"
+ * never calls this function) ad-spend entries stuck in place until SOME
+ * later transition finally recomputes them — a staleness window R7's own
+ * rule never has, since `pdt_fact_ads` itself is shared across every
+ * revision of a period regardless of which kiriman "wins".
+ */
+async function recomputeAdsMetricEntriesPdt(
+  tx: TransactionSql, actor: Actor, clientPlatformId: number, clientId: string, platform: string, periodeMulai: string,
+): Promise<void> {
+  await ads.deletePdtAdsMetricEntries(tx, clientPlatformId, periodeMulai);
+
+  const adsPlatform = ads.pdtPlatformKeAdsPlatform(platform);
+  if (!adsPlatform) return; // nol padanan platform Ads (Tokopedia/Lazada/Blibli) — secara struktur tidak berlaku, bukan pertanyaan terbuka
+
+  const [current] = await tx<{ ada: boolean }[]>`
+    select exists (
+      select 1 from pdt_laporan_kiriman k
+        join pdt_laporan_publikasi pub on pub.kiriman_id = k.id
+       where k.client_platform_id = ${clientPlatformId} and k.periode_mulai = ${periodeMulai}::date
+         and pub.status = ${PDT_LAPORAN_STATES.terbit}
+    ) as ada`;
+  if (!current.ada) return; // nol kiriman terbit untuk periode ini — nol entri PDT
+
+  const [agg] = await tx<{ spend: string; gmv: string; periode_akhir: string }[]>`
+    select coalesce(sum(biaya), 0) as spend, coalesce(sum(gmv), 0) as gmv,
+           (${periodeMulai}::date + interval '1 month' - interval '1 day')::date::text as periode_akhir
+      from pdt_fact_ads
+     where client_platform_id = ${clientPlatformId} and periode = ${periodeMulai}::date`;
+  const spendVal = Number(agg.spend);
+  const gmvVal = Number(agg.gmv);
+  if (!(spendVal > 0 || gmvVal > 0)) return; // pola sama gerbang SH-06 — nol yang bisa diatribusikan
+
+  const candidates = await ads.findOverlappingAdCampaignsPdt(tx, clientId, adsPlatform, periodeMulai);
+  if (candidates.length === 0) return;
+
+  const n = BigInt(candidates.length);
+  const spendShare = money.decimal(money.parse(spendVal.toFixed(2)) / n);
+  const gmvShare = money.decimal(money.parse(gmvVal.toFixed(2)) / n);
+
+  for (const target of candidates) {
+    await ads.insertAdsMetricEntryFromPdt(
+      tx, actor.employeeId, target.id,
+      { periodStart: periodeMulai, periodEnd: agg.periode_akhir, spend: spendShare, gmv: gmvShare },
+      {
+        source: 'pdt', client_platform_id: clientPlatformId, periode: periodeMulai,
+        split_of: candidates.length, split_campaign_ids: candidates.map((c) => c.id),
+      },
+      { clientPlatformId, periode: periodeMulai },
+    );
+  }
+}
+
+/**
  * terbitkanKiriman — publikasi PERTAMA (Flow C, R4/R5): `[Draf]` → `[Terbit]`,
  * paku `insight_revisi` ke revisi TERBARU saat ini. Dipanggil saat status
  * BUKAN `[Draf]` ⇒ `MSG_SUDAH_TERBIT` (arahkan ke `terbitkanUlangKiriman`,
@@ -4815,7 +4908,8 @@ async function recomputeTotalSalesPdt(tx: TransactionSql, actor: Actor, clientId
  * panggilan `sm_transition` supaya pesannya persis PRD §6, bukan
  * `block_message` mesin yang genderik untuk seluruh edge). Menutup dengan
  * `recomputeTotalSalesPdt` (R7) — himpunan kiriman `[Terbit]` toko baru
- * bertambah satu.
+ * bertambah satu — lalu `recomputeAdsMetricEntriesPdt` (E-03, ROAS
+ * Attainment) untuk periode kiriman ini.
  */
 export async function terbitkanKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtLaporanPublikasiRow> {
   await requireCanTulisInsight(sql, actor, kirimanId);
@@ -4835,8 +4929,9 @@ export async function terbitkanKiriman(sql: Sql, actor: Actor, kirimanId: number
          set insight_revisi = ${terbaru}, diterbitkan_pada = now(), diterbitkan_oleh = ${actor.employeeId}, alasan_cabut = null
        where kiriman_id = ${kirimanId}
       returning *`;
-    const { clientId } = await loadKirimanScope(tx, kirimanId);
+    const { clientId, clientPlatformId, platform, periodeMulai } = await loadKirimanScope(tx, kirimanId);
     await recomputeTotalSalesPdt(tx, actor, clientId);
+    await recomputeAdsMetricEntriesPdt(tx, actor, clientPlatformId, clientId, platform, periodeMulai);
     return publikasiRowFromDb(row);
   });
 }
@@ -4848,7 +4943,8 @@ export async function terbitkanKiriman(sql: Sql, actor: Actor, kirimanId: number
  * saat masih `[Terbit]` ⇒ `MSG_SUDAH_TERBIT` (harus Cabut dulu — R4/R5: satu-
  * satunya jalan memindahkan paku sementara status TETAP `[Terbit]` bukan
  * bagian mesin ini; PRD menyatakan "cabut dulu sebelum menerbitkan ulang").
- * Menutup dengan `recomputeTotalSalesPdt` (R7), sama alasan `terbitkanKiriman`.
+ * Menutup dengan `recomputeTotalSalesPdt` (R7) + `recomputeAdsMetricEntriesPdt`
+ * (E-03), sama alasan `terbitkanKiriman`.
  */
 export async function terbitkanUlangKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtLaporanPublikasiRow> {
   await requireCanTulisInsight(sql, actor, kirimanId);
@@ -4870,8 +4966,9 @@ export async function terbitkanUlangKiriman(sql: Sql, actor: Actor, kirimanId: n
          set insight_revisi = ${terbaru}, diterbitkan_pada = now(), diterbitkan_oleh = ${actor.employeeId}, alasan_cabut = null
        where kiriman_id = ${kirimanId}
       returning *`;
-    const { clientId } = await loadKirimanScope(tx, kirimanId);
+    const { clientId, clientPlatformId, platform, periodeMulai } = await loadKirimanScope(tx, kirimanId);
     await recomputeTotalSalesPdt(tx, actor, clientId);
+    await recomputeAdsMetricEntriesPdt(tx, actor, clientPlatformId, clientId, platform, periodeMulai);
     return publikasiRowFromDb(row);
   });
 }
@@ -4881,8 +4978,11 @@ export async function terbitkanUlangKiriman(sql: Sql, actor: Actor, kirimanId: n
  * transaksi yang sama, menutup dengan `recomputeTotalSalesPdt` — himpunan
  * kiriman `[Terbit]` toko baru kehilangan satu, jadi `clients.total_sales`
  * mungkin jatuh ke periode `[Terbit]` sebelumnya toko itu (atau ke 0 kalau
- * tidak ada). "Nol jalan keluar lewat SQL manual" (R6): tidak ada jalur lain
- * yang menulis status `[Dicabut]` selain fungsi ini.
+ * tidak ada) — lalu `recomputeAdsMetricEntriesPdt` (E-03): periode kiriman
+ * ini kehilangan sumber ROAS Attainment-nya (dihapus, nol ditulis ulang,
+ * kiriman ini sudah bukan `[Terbit]` lagi). "Nol jalan keluar lewat SQL
+ * manual" (R6): tidak ada jalur lain yang menulis status `[Dicabut]` selain
+ * fungsi ini.
  *
  * Health Score dan baseline Ads TIDAK ditulis di sini — keduanya membaca
  * `clients.total_sales` live saat dihitung (lihat docblock
@@ -4908,8 +5008,9 @@ export async function cabutKiriman(sql: Sql, actor: Actor, kirimanId: number, al
     await tx`update pdt_laporan_publikasi set alasan_cabut = ${alasanTrim} where kiriman_id = ${kirimanId}`;
     await runPdtLaporanTransition(tx, actor, kirimanId, PDT_LAPORAN_STATES.dicabut);
     const [row] = await tx<PublikasiDbRow[]>`select * from pdt_laporan_publikasi where kiriman_id = ${kirimanId}`;
-    const { clientId } = await loadKirimanScope(tx, kirimanId);
+    const { clientId, clientPlatformId, platform, periodeMulai } = await loadKirimanScope(tx, kirimanId);
     await recomputeTotalSalesPdt(tx, actor, clientId);
+    await recomputeAdsMetricEntriesPdt(tx, actor, clientPlatformId, clientId, platform, periodeMulai);
     return publikasiRowFromDb(row);
   });
 }

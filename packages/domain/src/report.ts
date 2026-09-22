@@ -501,6 +501,19 @@ export async function createReport(sql: Sql, actor: Actor, clientId: string, inp
 const M14_WRITES_TOTAL_SALES = false;
 
 /**
+ * M20 E-03/E-04 (`docs/DECISIONS.md` `M20-E03-ADS-METRIC-ENTRIES`):
+ * `pdt.ts::recomputeAdsMetricEntriesPdt` now ALSO writes Metric Entries for
+ * clients whose ad-spend lives in `pdt_fact_ads` — same class of "two
+ * writers, one signal" bug `M14_WRITES_TOTAL_SALES` already guards against.
+ * Ships in the SAME PR as that writer so there is never a window where a
+ * Shopee client's ROAS Attainment double-counts (both this function AND the
+ * PDT writer attributing spend to the same `ad_campaigns` rows for the same
+ * month). `false` SWITCHES OFF the call site below without deleting it —
+ * same rollback posture as `M14_WRITES_TOTAL_SALES`.
+ */
+const M14_WRITES_SHOPEE_ADS_METRIC_ENTRIES = false;
+
+/**
  * Recompute `clients.total_sales` from the LATEST report per active platform.
  *
  * `gmv_runrate_bulanan` is already normalised to 30 days, so a weekly and a
@@ -704,10 +717,13 @@ export async function createReportShopee(sql: Sql, actor: Actor, clientId: strin
     // SH-06: the report's own combined Ads numbers become an auto Metric Entry
     // — the "no manual upload" path for M6D RM-C. See function doc for the
     // even-split mechanism (confirmed with the owner).
-    await attributeShopeeAdsMetricEntries(
-      tx, actor, clientId, reportId, periodeMulai, periodeAkhir,
-      result.payload.kesehatan.ads, input.excludeCampaignIds ?? [],
-    );
+    // M20 E-03/E-04: switched off, not deleted — see M14_WRITES_SHOPEE_ADS_METRIC_ENTRIES.
+    if (M14_WRITES_SHOPEE_ADS_METRIC_ENTRIES) {
+      await attributeShopeeAdsMetricEntries(
+        tx, actor, clientId, reportId, periodeMulai, periodeAkhir,
+        result.payload.kesehatan.ads, input.excludeCampaignIds ?? [],
+      );
+    }
 
     return getReportById(tx, reportId);
   });
@@ -716,7 +732,15 @@ export async function createReportShopee(sql: Sql, actor: Actor, clientId: strin
 /**
  * attributeShopeeAdsMetricEntries — SH-06's "no manual upload" path for M6D
  * RM-C1/C2/C6 (GMV Eksekusi / ROAS / Ad Spend — all `otomatis`, all read from
- * `metric_entries`). A Shopee report gives ONE combined ads spend/omzet figure
+ * `metric_entries`).
+ *
+ * M20 E-03/E-04: no longer called (see `M14_WRITES_SHOPEE_ADS_METRIC_ENTRIES`
+ * above) — kept for the rollback path. `pdt.ts::recomputeAdsMetricEntriesPdt`
+ * is the PDT-era successor (same even-split mechanism, generalized to any
+ * Ads platform, scoped to `pdt_fact_ads` instead of one report's combined
+ * figure).
+ *
+ * A Shopee report gives ONE combined ads spend/omzet figure
  * (`M.health.ads`, already Σ across ads_toko+ads_produk+ads_banner+ads_live —
  * the file itself cannot say which of the client's several `Shopee Ads`
  * campaigns each rupiah belongs to).
