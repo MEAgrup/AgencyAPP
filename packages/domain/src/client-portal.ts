@@ -13,11 +13,11 @@
  * view, not a permission-trimmed copy of Module 11."*
  *
  * So this module does NOT call `board.clientBoard()` / `health.portfolio()` /
- * `report.listReports()`. Those take an EMPLOYEE actor and return everything an
+ * `pdt.riwayatKirimanPdt()`. Those take an EMPLOYEE actor and return everything an
  * employee may see; reaching for them and deleting fields afterwards is exactly
  * the pattern the spec forbids, because the next field added upstream leaks by
- * default. What IS reused is the pure MAPPING logic (`board.briefTaskUniversal`,
- * `report.renderReportHtml`) — one definition of the rules, a query written for
+ * default. What IS reused is the pure RENDER logic (`board.briefTaskUniversal`,
+ * `pdt.renderLaporanHtml`) — one definition of the rules, a query written for
  * this audience.
  *
  * ## What each surface may show (§4.2 allow-list, transcribed)
@@ -47,7 +47,7 @@
  * RLS repeats the same predicate at the row level (migrasi 20260908010000), so a
  * mistake here is caught there and vice versa.
  */
-import { permission, report, reportShopee } from '@cdps/core';
+import { pdt, permission } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import * as board from './board';
 import {
@@ -164,12 +164,17 @@ export async function logAccess(
 /**
  * One row of the client's report list.
  *
- * Note what is ABSENT and why: `skor`/`skor_label`, `gmv_net`, `gmv_kotor`,
- * `gmv_runrate_bulanan`, `benchmark_versi`, `engine_versi`, `kelengkapan_file`
- * and the file provenance all exist on the report row and none of them belong in
- * a list a client reads. The score DOES appear inside the report body — that
- * page is the client-facing artefact and its `klien` mode is built for exactly
- * this audience — but a listing is navigation, not a scoreboard.
+ * Note what is ABSENT and why: `skor`, `benchmarkVersi`, `kelengkapan` (data
+ * completeness notes) and the fact-table provenance all exist on the frozen
+ * `pdt_laporan_kiriman.payload` and none of them belong in a list a client
+ * reads. The score DOES appear inside the report body — that page is the
+ * client-facing artefact and its `klien` mode is built for exactly this
+ * audience — but a listing is navigation, not a scoreboard.
+ *
+ * Shape UNCHANGED since M14 (M20 D-02): `reportId` is now
+ * `pdt_laporan_kiriman.id`, `periodeTipe` is hardcoded `'bulanan'` (every PDT
+ * kiriman spans exactly one calendar month — the PDT tables carry no such
+ * column at all), and `periodeAkhir` now sources from `periode_selesai`.
  */
 export interface PortalReportRow {
   reportId: number;
@@ -184,76 +189,107 @@ const dateStr = (v: unknown): string =>
   v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
 const isoTs = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
 
-/** Published reports for the session's client, newest period first. */
+/**
+ * List content rule (M20 PRD R11.3, owner decision 2026-09-22): one row per
+ * `(client_platform_id, periode_mulai)`. The CANDIDATE for a period is its
+ * LATEST kiriman (`dikirim_pada` desc, `id` desc as tiebreaker) — expressed
+ * here as "no other kiriman of the same toko+periode was sent later". That
+ * candidate is listed ONLY when its own publikasi is `[Terbit]`; an older
+ * kiriman of the same period is excluded even if ITS publikasi is still
+ * `[Terbit]` (it fails the "no newer kiriman" test), and a `[Draf]`/
+ * `[Dicabut]` candidate makes the whole period disappear — there is
+ * deliberately no fallback to an older Terbit version. Client never sees
+ * revision/version numbers, only the final document for the period.
+ *
+ * `reportHtml` below repeats the identical "no newer kiriman" predicate so a
+ * superseded id can never be opened directly even by a contact who saved its
+ * old URL — the two functions must stay in lockstep on this rule.
+ */
 export async function listReports(sql: Queryable, actor: Actor): Promise<PortalReportRow[]> {
   const scope = contactScope(actor);
   const rows = await sql<Record<string, unknown>[]>`
-    select r.id, r.platform, r.periode_tipe, r.periode_mulai, r.periode_akhir,
-           p.diterbitkan_pada
-      from client_reports r
-      join client_report_publikasi p on p.report_id = r.id
-     where r.client_id = ${scope.clientId}
-       and p.status = ${'[Terbit]'}
-       and p.insight_revisi is not null
-     order by r.periode_akhir desc, r.id desc`;
+    select k.id, cp.platform, k.periode_mulai, k.periode_selesai, pub.diterbitkan_pada
+      from pdt_laporan_kiriman k
+      join client_platforms cp on cp.id = k.client_platform_id
+      join pdt_laporan_publikasi pub on pub.kiriman_id = k.id
+     where cp.client_id = ${scope.clientId}
+       and pub.status = ${'[Terbit]'}
+       and not exists (
+         select 1 from pdt_laporan_kiriman newer
+          where newer.client_platform_id = k.client_platform_id
+            and newer.periode_mulai = k.periode_mulai
+            and (newer.dikirim_pada, newer.id) > (k.dikirim_pada, k.id)
+       )
+     order by k.periode_mulai desc, k.id desc`;
   return rows.map((r) => ({
     reportId: Number(r.id),
     platform: r.platform as string,
-    periodeTipe: r.periode_tipe as string,
+    periodeTipe: 'bulanan',
     periodeMulai: dateStr(r.periode_mulai),
-    periodeAkhir: dateStr(r.periode_akhir),
+    periodeAkhir: dateStr(r.periode_selesai),
     diterbitkanPada: r.diterbitkan_pada == null ? null : isoTs(r.diterbitkan_pada),
   }));
 }
 
 /**
- * The report as a standalone HTML document, `klien` mode, pinned revision.
+ * The report as a standalone HTML document, `klien` mode, pinned revision
+ * (M20 R4: the narrative shown is `pdt_laporan_publikasi.insight_revisi`, the
+ * revision pinned at publish time, never whatever the AM has since drafted).
  *
  * `reportId` comes from the URL, so it is filtered BY the session's client
- * rather than used to find one: a contact asking for another client's report id
- * gets "not found", and the same query cannot be coaxed into returning it.
+ * rather than used to find one: a contact asking for another client's report
+ * id gets "not found", and the same query cannot be coaxed into returning it.
+ * The `not exists` clause is the same R11.3 "still the candidate" predicate
+ * as `listReports` — an id that used to be the newest kiriman of its period
+ * but has since been superseded is not found EITHER, even while its own
+ * publikasi row still reads `[Terbit]` (R11.3: "kiriman lama … TIDAK bisa
+ * dibuka lewat id").
  *
- * The status/pin filter is repeated here even though RLS enforces it, because
- * these reads run as service-role (RLS does not engage) — the predicate must be
- * true in the SQL itself, not merely true somewhere in the system.
+ * The status/pin/candidacy filters are repeated here even though RLS
+ * enforces row ownership, because these reads run as service-role (RLS does
+ * not engage) — every predicate must be true in the SQL itself, not merely
+ * true somewhere else in the system (PRD R5/R10).
+ *
+ * This mirrors `pdt.laporanUntukRenderPdt`'s overlay pattern (freeze the
+ * kiriman, overlay `insight` with the pinned revision, render) but does NOT
+ * call it: that function's gate is `canKirimLaporan`/OD, built for the
+ * employee-facing preview route (B-03) — a client contact must never pass
+ * that gate, and this module's own gate (`contactScope`) is the only one
+ * that may ever run on this path (PRD D-01).
  */
 export async function reportHtml(sql: Queryable, actor: Actor, reportId: number): Promise<string> {
   const scope = contactScope(actor);
   const rows = await sql<Record<string, unknown>[]>`
-    select r.payload, r.payload_schema, i.ringkasan, i.poin, i.rekomendasi_tinggi, i.rekomendasi_sedang,
-           i.outlook, i.indikator, i.tahap_narasi
-      from client_reports r
-      join client_report_publikasi p on p.report_id = r.id
-      join client_report_insight i
-        on i.report_id = r.id and i.revisi = p.insight_revisi
-     where r.id = ${reportId}
-       and r.client_id = ${scope.clientId}
-       and p.status = ${'[Terbit]'}`;
+    select k.payload, i.ringkasan, i.poin, i.rekomendasi_tinggi, i.rekomendasi_sedang, i.outlook, i.indikator
+      from pdt_laporan_kiriman k
+      join client_platforms cp on cp.id = k.client_platform_id
+      join pdt_laporan_publikasi pub on pub.kiriman_id = k.id
+      join pdt_laporan_insight i on i.kiriman_id = k.id and i.revisi = pub.insight_revisi
+     where k.id = ${reportId}
+       and cp.client_id = ${scope.clientId}
+       and pub.status = ${'[Terbit]'}
+       and not exists (
+         select 1 from pdt_laporan_kiriman newer
+          where newer.client_platform_id = k.client_platform_id
+            and newer.periode_mulai = k.periode_mulai
+            and (newer.dikirim_pada, newer.id) > (k.dikirim_pada, k.id)
+       )`;
   if (rows.length === 0) throw new PortalNotFoundError(MSG_REPORT_NOT_FOUND);
   const r = rows[0];
-  const insight: report.PayloadInsight = {
-    ringkasan: r.ringkasan as string,
-    poin: (r.poin ?? []) as string[],
-    rekomendasi_tinggi: (r.rekomendasi_tinggi ?? []) as report.PayloadInsight['rekomendasi_tinggi'],
-    rekomendasi_sedang: (r.rekomendasi_sedang ?? []) as report.PayloadInsight['rekomendasi_sedang'],
-    outlook: r.outlook as string,
-    indikator: (r.indikator ?? []) as report.PayloadInsight['indikator'],
-    // Empty for revisions written before R3 — see `report.rowToInsightRevisi`.
-    tahap_narasi: (r.tahap_narasi ?? []) as report.PayloadInsight['tahap_narasi'],
+  const laporan = {
+    ...(r.payload as pdt.PdtLaporanTiktok | pdt.PdtLaporanShopee),
+    insight: {
+      ringkasan: r.ringkasan as string,
+      poin: (r.poin ?? []) as string[],
+      rekomendasiTinggi: (r.rekomendasi_tinggi ?? []) as pdt.PdtLaporanRekomendasi[],
+      rekomendasiSedang: (r.rekomendasi_sedang ?? []) as pdt.PdtLaporanRekomendasi[],
+      outlook: r.outlook as string,
+      indikator: (r.indikator ?? []) as { nama: string; target: string }[],
+    },
   };
-  // 'klien' is hardcoded, not a parameter: there is no argument a client request
-  // could carry that should ever produce the internal render.
-  //
-  // The SCHEMA dispatch mirrors `report.renderReport` deliberately. Without it
-  // every published Shopee report reached TikTok's renderer, which reads keys
-  // (`kpi.harian`, `kanal.items`) a Shopee payload does not have — so the one
-  // page the client came to the Portal for threw instead of rendering. Rows that
-  // predate the column default to the TikTok engine, exactly as they do
-  // internally.
-  if (r.payload_schema === 'cdps.report.shopee.v1') {
-    return reportShopee.renderReportHtml(r.payload as reportShopee.ShopeeReportPayload, 'klien', insight);
-  }
-  return report.renderReportHtml(r.payload as report.ReportPayload, 'klien', insight);
+  // 'klien' is hardcoded, not a parameter: there is no argument a client
+  // request could carry that should ever produce the internal render.
+  return pdt.renderLaporanHtml(laporan, 'klien');
 }
 
 // ---------------------------------------------------------------------------
