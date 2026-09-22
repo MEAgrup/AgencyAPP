@@ -2723,6 +2723,33 @@ function validasiPeriodeAwalBulan(periodeAwalBulan: string): void {
 }
 
 /**
+ * Tulis kolom `kuadran` untuk BANYAK baris `pdt_fact_sku_period` dalam SATU
+ * pernyataan. Dipakai kedua klasifikator (Shopee dan TikTok).
+ *
+ * **Kenapa ini bukan sekadar rapi-rapi.** Versi sebelumnya mengirim satu
+ * `UPDATE` per produk di dalam `for … await` — artinya satu perjalanan
+ * bolak-balik jaringan per baris. Di serverless Vercel dengan Postgres di
+ * region lain, satu round-trip ~250 ms, jadi katalog Shopee 521 produk
+ * (TEST PDT Store 2, Agustus 2026) memakan >130 detik HANYA untuk menulis
+ * kuadran, dan laporan itu mati di batas 300 detik Vercel dengan 504 —
+ * halaman Laporan PDT berhenti selamanya di "Memuat laporan...".
+ * Biayanya tumbuh linear terhadap ukuran katalog, jadi toko sungguhan yang
+ * lebih besar dari klien tes akan lebih parah, bukan lebih ringan.
+ *
+ * `unnest` dua array sejajar menjadikannya SATU round-trip berapa pun jumlah
+ * barisnya. Nol perubahan semantik: baris yang sama menerima nilai yang sama,
+ * dan fungsinya tetap idempotent.
+ */
+async function tulisKuadranSkuMassal(sql: Sql, hasil: readonly pdt.PdtKuadranSkuHasil[]): Promise<void> {
+  if (hasil.length === 0) return;
+  await sql`
+    update pdt_fact_sku_period f
+       set kuadran = v.kuadran
+      from unnest(${hasil.map((h) => h.id)}::bigint[], ${hasil.map((h) => h.kuadran)}::text[]) as v(id, kuadran)
+     where f.id = v.id`;
+}
+
+/**
  * KUADRAN-SHOPEE — klasifikasi ULANG kuadran seluruh baris
  * `pdt_fact_sku_period` Shopee (`sku_id is null`, `basis='siap_dikirim'`) untuk
  * SATU client_platform_id + SATU periode, lalu TULIS kolom `kuadran`. Kembaran
@@ -2760,9 +2787,7 @@ export async function klasifikasiUlangKuadranSkuShopee(
   const hasil = pdt.klasifikasikanKuadranSkuShopee(
     rows.map((r) => ({ id: r.id, pengunjung: r.pengunjung, pesananDibuat: r.pesanan })),
   );
-  for (const h of hasil) {
-    await sql`update pdt_fact_sku_period set kuadran = ${h.kuadran} where id = ${h.id}`;
-  }
+  await tulisKuadranSkuMassal(sql, hasil);
 }
 
 /**
@@ -2966,9 +2991,7 @@ export async function klasifikasiUlangKuadranSkuTiktok(
     rows.map((r) => ({ id: r.id, klik: r.klik, ctor: r.ctor == null ? null : Number(r.ctor), pesananSku: r.pesanan_sku })),
     bench,
   );
-  for (const h of hasil) {
-    await sql`update pdt_fact_sku_period set kuadran = ${h.kuadran} where id = ${h.id}`;
-  }
+  await tulisKuadranSkuMassal(sql, hasil);
 }
 
 /**
