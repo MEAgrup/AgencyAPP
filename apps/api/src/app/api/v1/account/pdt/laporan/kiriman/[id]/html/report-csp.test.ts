@@ -7,7 +7,6 @@
  * BENAR-BENAR mengirim.
  */
 import { describe, expect, it } from 'vitest';
-import { docassets } from '@cdps/core';
 import { LAPORAN_HTML_CSP } from './route';
 
 const ARAHAN = (): Map<string, string[]> => new Map(
