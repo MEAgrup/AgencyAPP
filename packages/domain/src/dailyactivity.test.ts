@@ -17,7 +17,9 @@ import { createClient, type Sql } from '@cdps/db';
 import { permission } from '@cdps/core';
 import {
   ACTIVITY_TYPES,
+  ConflictError,
   IncompleteError,
+  NotFoundError,
   isKnownType,
   list,
   log,
@@ -140,6 +142,56 @@ describeDb('log', () => {
     });
     await expect(sql`update daily_activities set keterangan = 'edited' where id = ${a.id}`).rejects.toThrow();
     await expect(sql`delete from daily_activities where id = ${a.id}`).rejects.toThrow();
+  });
+});
+
+describeDb('log — F-6b koreksi berantai', () => {
+  it('inserts a NEW row pointing at the predecessor, never mutating it', async () => {
+    const original = await log(sql, budi(), {
+      activityType: 'Meeting Klien', activityDate: '2026-09-14', jamMulai: '09:00', keterangan: 'Salah jam',
+    });
+    const koreksi = await log(sql, budi(), {
+      activityType: 'Meeting Klien', activityDate: '2026-09-14', jamMulai: '10:00', keterangan: 'Jam yang benar',
+      koreksiDari: original.id,
+    });
+    expect(koreksi.koreksiDari).toBe(original.id);
+    expect(koreksi.dikoreksiOleh).toBeNull();
+
+    const rows = await list(sql, { employeeId: BUDI });
+    const orig = rows.find((r) => r.id === original.id)!;
+    const kor = rows.find((r) => r.id === koreksi.id)!;
+    expect(orig.dikoreksiOleh).toBe(koreksi.id);
+    expect(orig.keterangan).toBe('Salah jam'); // never rewritten
+    expect(kor.koreksiDari).toBe(original.id);
+  });
+
+  it('rejects correcting a row that does not exist or is not the actor\'s own', async () => {
+    await expect(log(sql, budi(), {
+      activityType: 'Meeting Klien', activityDate: '2026-09-14', jamMulai: '09:00', keterangan: 'x',
+      koreksiDari: 'DACT-999999-9999',
+    })).rejects.toBeInstanceOf(NotFoundError);
+
+    const leadEntry = await log(sql, salesLead(), {
+      activityType: 'Meeting Internal', activityDate: '2026-09-14', jamMulai: '09:00', keterangan: 'punya lead',
+    });
+    await expect(log(sql, budi(), {
+      activityType: 'Meeting Internal', activityDate: '2026-09-14', jamMulai: '09:00', keterangan: 'coba koreksi punya orang',
+      koreksiDari: leadEntry.id,
+    })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('rejects correcting a row that has already been corrected (chain, not tree)', async () => {
+    const original = await log(sql, budi(), {
+      activityType: 'Training', activityDate: '2026-09-14', jamMulai: '09:00', keterangan: 'v1',
+    });
+    await log(sql, budi(), {
+      activityType: 'Training', activityDate: '2026-09-14', jamMulai: '09:00', keterangan: 'v2',
+      koreksiDari: original.id,
+    });
+    await expect(log(sql, budi(), {
+      activityType: 'Training', activityDate: '2026-09-14', jamMulai: '09:00', keterangan: 'v3 tapi menunjuk v1',
+      koreksiDari: original.id,
+    })).rejects.toBeInstanceOf(ConflictError);
   });
 });
 

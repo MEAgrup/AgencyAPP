@@ -24,6 +24,8 @@ export interface DailyActivity {
   keterangan: string;
   bukti_pelaksanaan: string | null;
   created_at: string; // RFC3339
+  koreksi_dari: string | null; // F-6b
+  dikoreksi_oleh: string | null; // F-6b
 }
 
 export interface LogDailyActivityInput {
@@ -33,6 +35,8 @@ export interface LogDailyActivityInput {
   jam_selesai?: string;
   keterangan: string;
   bukti_pelaksanaan?: string;
+  /** F-6b — id of the actor's own, not-yet-corrected row this replaces. */
+  koreksi_dari?: string;
 }
 
 /** GET /daily-activities?employee_id=&from=&to= → {data: DailyActivity[]}.

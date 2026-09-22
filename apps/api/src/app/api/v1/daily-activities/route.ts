@@ -35,6 +35,7 @@ export async function POST(request: Request): Promise<Response> {
       jam_selesai?: string;
       keterangan?: string;
       bukti_pelaksanaan?: string;
+      koreksi_dari?: string;
     }>(request);
     const activity = await dailyactivity.log(db(), actor, {
       activityType: body.activity_type ?? '',
@@ -43,6 +44,7 @@ export async function POST(request: Request): Promise<Response> {
       jamSelesai: body.jam_selesai,
       keterangan: body.keterangan ?? '',
       buktiPelaksanaan: body.bukti_pelaksanaan,
+      koreksiDari: body.koreksi_dari,
     });
     return json(dailyActivityToWire(activity), 201);
   });

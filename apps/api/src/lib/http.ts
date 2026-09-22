@@ -166,6 +166,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ClientNotFoundError: 404, // client.NotFoundError
   ClientPortalNotFoundError: 404, // clientPortal.PortalNotFoundError
   CreativeNotFoundError: 404, // creative.NotFoundError
+  DailyActivityNotFoundError: 404, // dailyactivity.NotFoundError (F-6b koreksi berantai)
   DailyOpsNotFoundError: 404, // dailyops.NotFoundError (M19)
   FinanceNotFoundError: 404, // finance.NotFoundError
   HealthNotFoundError: 404, // health.NotFoundError
@@ -200,6 +201,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ClientPlatformDuplicateError: 409, // client.PlatformDuplicateError (PX-M2a §4b)
   ContractRequiredError: 409, // finance.ContractRequiredError
   CreativeConflictError: 409, // creative.ConflictError
+  DailyActivityConflictError: 409, // dailyactivity.ConflictError (F-6b — sudah dikoreksi)
   DailyOpsConflictError: 409, // dailyops.ConflictError (M19)
   IntentLockedError: 409, // client.IntentLockedError
   InternalTaskConflictError: 409, // internaltask.ConflictError

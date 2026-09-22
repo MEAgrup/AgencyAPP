@@ -187,6 +187,13 @@ check "tabel public"     "select count(*) from information_schema.tables where t
 check "entity_prefix"    "select count(*) from entity_prefix"    "45"
 check "sm_machines"      "select count(*) from sm_machines"      "35"
 check "notif_events"     "select count(*) from notif_events"     "79"
+# --- F-6b (20261129010000) — koreksi berantai Aktivitas Harian -------------
+# Nol tabel baru ⇒ tabel public TETAP 184. Nol prefix baru (koreksi memakai
+#       ID DACT- yang sudah ada, bukan entitas baru) ⇒ entity_prefix TETAP 45.
+#       Masih log, bukan lifecycle (F-6 tidak berubah) ⇒ sm_machines TETAP 35.
+#       Nol event notifikasi baru ⇒ notif_events TETAP 79. Perubahannya cuma
+#       satu kolom nullable self-referencing (`koreksi_dari`) + satu partial
+#       unique index — lihat komentar migrasi.
 # --- O75 (20261118010000) — Service Closure two-step -----------------------
 # notif_events 76→79: +3 event katalog v19 (service_closure_requested/
 #       service_closed/service_closure_rejected). Edge langsung

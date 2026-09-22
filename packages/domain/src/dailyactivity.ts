@@ -18,10 +18,25 @@
  *     `divisi` yang didenormalisasi saat mencatat), OD/Director penuh. Modul
  *     ini tidak menduplikasi predikat itu — `list` hanya membaca lewat
  *     `readAsActor` dan mempercayai RLS.
+ *
+ * F-6b (interview lapangan 2026-09-22, via Handa Anthy) — "koreksi berantai".
+ * Staff butuh mengoreksi entri yang salah input atau reschedule; meng-UPDATE
+ * baris lama TETAP bukan pilihan (trigger + house rule #3 tidak berubah).
+ * `log()` sekarang menerima `koreksiDari` opsional: mengisinya meng-INSERT
+ * baris BARU yang menunjuk ke baris lama (migrasi 20261129010000), bukan
+ * mengubahnya. Aturannya (ditegakkan di sini, DB `for update` mengunci baris
+ * predecessor supaya dua koreksi yang lomba tidak lolos berdua):
+ *   1. predecessor harus ada dan MILIK actor sendiri (koreksi, seperti
+ *      mencatat, selalu punya-sendiri — tidak ada "koreksi milik orang lain").
+ *   2. predecessor belum pernah dikoreksi (rantai, bukan pohon — koreksi
+ *      kedua harus menunjuk ke koreksi PERTAMA, bukan balik ke baris asli).
+ * Baris yang sudah dikoreksi tidak dihapus/disembunyikan dari log — `list`
+ * mengembalikan `dikoreksiOleh` (computed, house rule #4) supaya FE tahu baris
+ * mana yang masih "berlaku".
  */
 
 import { bi, ident, permission } from '@cdps/core';
-import { executors, type Queryable, type Sql } from '@cdps/db';
+import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 export type Actor = permission.Actor;
 
@@ -48,6 +63,22 @@ export class IncompleteError extends Error {
   }
 }
 
+/** F-6b: `koreksiDari` does not exist, or is not the actor's own row. */
+export class NotFoundError extends Error {
+  constructor() {
+    super('[aktivitas yang ingin dikoreksi tidak ditemukan]');
+    this.name = 'DailyActivityNotFoundError';
+  }
+}
+
+/** F-6b: `koreksiDari` already has a correction — a chain, not a tree. */
+export class ConflictError extends Error {
+  constructor() {
+    super('[aktivitas ini sudah pernah dikoreksi, koreksi versi terbarunya]');
+    this.name = 'DailyActivityConflictError';
+  }
+}
+
 /** One logged daily activity. */
 export interface DailyActivity {
   id: string;
@@ -61,6 +92,10 @@ export interface DailyActivity {
   keterangan: string;
   buktiPelaksanaan: string | null;
   createdAt: Date;
+  /** F-6b: id of the row this one corrects, or null for an original entry. */
+  koreksiDari: string | null;
+  /** F-6b: id of the row that corrects this one, or null if still current. */
+  dikoreksiOleh: string | null;
 }
 
 /** Fields an employee supplies when logging one activity. */
@@ -74,6 +109,8 @@ export interface LogInput {
   jamSelesai?: string;
   keterangan: string;
   buktiPelaksanaan?: string;
+  /** F-6b: id of the actor's own, not-yet-corrected row this entry replaces. */
+  koreksiDari?: string;
 }
 
 /** isKnownType reports whether `t` is in the closed taxonomy. */
@@ -105,6 +142,7 @@ export async function log(
   const jamSelesai = (input.jamSelesai ?? '').trim();
   const keterangan = (input.keterangan ?? '').trim();
   const buktiPelaksanaan = (input.buktiPelaksanaan ?? '').trim();
+  const koreksiDari = (input.koreksiDari ?? '').trim();
 
   if (
     activityType === '' || !isKnownType(activityType) ||
@@ -120,33 +158,60 @@ export async function log(
   }
 
   const divisi = actor.role.division;
-  const ex = executors(sql);
-  const id = await ident.nextId(ex.ident, 'DACT', now);
-  await sql`
-    insert into daily_activities
-      (id, employee_id, divisi, activity_type, activity_date, jam_mulai, jam_selesai,
-       keterangan, bukti_pelaksanaan, created_by)
-    values
-      (${id}, ${actor.employeeId}, ${divisi}, ${activityType}, ${activityDate}, ${jamMulai},
-       ${jamSelesai === '' ? null : jamSelesai}, ${keterangan},
-       ${buktiPelaksanaan === '' ? null : buktiPelaksanaan}, ${actor.employeeId})`;
 
-  const nameRows = await sql<{ nama: string }[]>`
-    select nama from employees where employee_id = ${actor.employeeId}`;
-  return {
-    id, employeeId: actor.employeeId,
-    employeeNama: nameRows.length > 0 ? nameRows[0].nama : actor.employeeId,
-    divisi, activityType, activityDate, jamMulai,
-    jamSelesai: jamSelesai === '' ? null : jamSelesai,
-    keterangan, buktiPelaksanaan: buktiPelaksanaan === '' ? null : buktiPelaksanaan,
-    createdAt: now,
-  };
+  return withTransaction(sql, async (tx) => {
+    if (koreksiDari !== '') {
+      // `for update` locks the predecessor row for the rest of this
+      // transaction — two concurrent corrections of the same row cannot both
+      // see it as "not yet corrected" (the partial unique index on
+      // `koreksi_dari` is the last-resort backstop if they somehow did).
+      const pred = await tx<{ employee_id: string; sudah_dikoreksi: boolean }[]>`
+        select p.employee_id, exists(
+          select 1 from daily_activities c where c.koreksi_dari = p.id
+        ) as sudah_dikoreksi
+        from daily_activities p
+        where p.id = ${koreksiDari}
+        for update`;
+      if (pred.length === 0 || pred[0].employee_id !== actor.employeeId) {
+        throw new NotFoundError();
+      }
+      if (pred[0].sudah_dikoreksi) {
+        throw new ConflictError();
+      }
+    }
+
+    const ex = executors(tx);
+    const id = await ident.nextId(ex.ident, 'DACT', now);
+    await tx`
+      insert into daily_activities
+        (id, employee_id, divisi, activity_type, activity_date, jam_mulai, jam_selesai,
+         keterangan, bukti_pelaksanaan, created_by, koreksi_dari)
+      values
+        (${id}, ${actor.employeeId}, ${divisi}, ${activityType}, ${activityDate}, ${jamMulai},
+         ${jamSelesai === '' ? null : jamSelesai}, ${keterangan},
+         ${buktiPelaksanaan === '' ? null : buktiPelaksanaan}, ${actor.employeeId},
+         ${koreksiDari === '' ? null : koreksiDari})`;
+
+    const nameRows = await tx<{ nama: string }[]>`
+      select nama from employees where employee_id = ${actor.employeeId}`;
+    return {
+      id, employeeId: actor.employeeId,
+      employeeNama: nameRows.length > 0 ? nameRows[0].nama : actor.employeeId,
+      divisi, activityType, activityDate, jamMulai,
+      jamSelesai: jamSelesai === '' ? null : jamSelesai,
+      keterangan, buktiPelaksanaan: buktiPelaksanaan === '' ? null : buktiPelaksanaan,
+      createdAt: now,
+      koreksiDari: koreksiDari === '' ? null : koreksiDari,
+      dikoreksiOleh: null,
+    };
+  });
 }
 
 interface DailyActivityRow {
   id: string; employee_id: string; employee_nama: string; divisi: string;
   activity_type: string; activity_date: string; jam_mulai: string; jam_selesai: string | null;
   keterangan: string; bukti_pelaksanaan: string | null; created_at: Date;
+  koreksi_dari: string | null; dikoreksi_oleh: string | null;
 }
 
 function toDailyActivity(r: DailyActivityRow): DailyActivity {
@@ -154,7 +219,7 @@ function toDailyActivity(r: DailyActivityRow): DailyActivity {
     id: r.id, employeeId: r.employee_id, employeeNama: r.employee_nama, divisi: r.divisi,
     activityType: r.activity_type, activityDate: r.activity_date, jamMulai: r.jam_mulai,
     jamSelesai: r.jam_selesai, keterangan: r.keterangan, buktiPelaksanaan: r.bukti_pelaksanaan,
-    createdAt: r.created_at,
+    createdAt: r.created_at, koreksiDari: r.koreksi_dari, dikoreksiOleh: r.dikoreksi_oleh,
   };
 }
 
@@ -182,7 +247,8 @@ export async function list(sql: Queryable, filter: ListFilter = {}): Promise<Dai
   const rows = await sql<DailyActivityRow[]>`
     select a.id, a.employee_id, private.employee_display_name(a.employee_id) as employee_nama,
            a.divisi, a.activity_type, a.activity_date, a.jam_mulai, a.jam_selesai,
-           a.keterangan, a.bukti_pelaksanaan, a.created_at
+           a.keterangan, a.bukti_pelaksanaan, a.created_at, a.koreksi_dari,
+           (select c.id from daily_activities c where c.koreksi_dari = a.id) as dikoreksi_oleh
     from daily_activities a
     where (${employeeId} = '' or a.employee_id = ${employeeId})
       and (${fromDate}::date is null or a.activity_date >= ${fromDate}::date)
