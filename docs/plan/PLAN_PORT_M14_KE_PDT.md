@@ -13,8 +13,8 @@
 > |---|---|---|
 > | A | ✅ merge | PR #494 (`ae84629`) — blok `kelengkapan`, `insight.poin` bersih |
 > | B | ✅ merge | PR #496 (`9609811`) — `pdt/render.ts` dua mode, rute `kiriman/{id}/html`, 4 tombol |
-> | C | ✅ merge, **⚠️ migrasi C-01 BELUM di live** | PR #497 (`6cc4ce4`). Live `CDPS SG` 2026-09-22: 184 tabel / 35 mesin (repo 186 / 36), `pdt_laporan_insight`, `pdt_laporan_publikasi`, `jwt_owns_pdt_kiriman_am`, mesin `pdt_laporan` **tidak ada**. Lihat §4 `M20-C01-LIVE` |
-> | D | ⏳ berikutnya — **bentuknya DIREVISI di bawah** (ganti sumber, bukan tambah halaman) | requirement pemilik 2026-09-22: klien hanya melihat **satu** laporan |
+> | C | ✅ merge, ✅ migrasi C-01 di live (malam 2026-09-22) | PR #497 (`6cc4ce4`); CI `db-and-migrations` yang merah sejak #497 diperbaiki #500. Live `CDPS SG`: 186 tabel / 36 mesin, versi migrasi `20260922151204` |
+> | D | ⏳ **berikutnya, nol blocker** — bentuk direvisi di bawah (ganti sumber, bukan tambah halaman; R11.3 versi terbaru per periode) | requirement pemilik 2026-09-22 (#499); D-00 selesai |
 > | E, F, G | belum | — |
 
 ---
@@ -121,7 +121,7 @@ Terbitkan.
 
 | Tiket | Isi |
 |---|---|
-| **D-00** | **Prasyarat, bukan kode:** migrasi C-01 (`20261130010000_m20_c01_pdt_laporan_insight_publikasi.sql`) diterapkan ke live `CDPS SG` lewat `apply_migration` **sebelum** PR D di-merge. Tanpa itu, D mengubah halaman Laporan portal dari "kosong" menjadi **500** di live (query D-01 membaca `pdt_laporan_publikasi`). Verifikasi: 186 tabel, 36 mesin, fungsi `jwt_owns_pdt_kiriman_am` ada. |
+| **D-00** | ✅ **SELESAI 2026-09-22 malam.** ~~Prasyarat, bukan kode:~~ migrasi C-01 (`20261130010000_m20_c01_pdt_laporan_insight_publikasi.sql`) diterapkan ke live `CDPS SG` lewat `apply_migration` **sebelum** PR D di-merge. Tanpa itu, D mengubah halaman Laporan portal dari "kosong" menjadi **500** di live (query D-01 membaca `pdt_laporan_publikasi`). Verifikasi: 186 tabel, 36 mesin, fungsi `jwt_owns_pdt_kiriman_am` ada. |
 | **D-01** | `packages/domain/src/client-portal.ts`: `listReports` dan `reportHtml` **berganti sumber** dari `client_reports`+`client_report_publikasi`+`client_report_insight` ke `pdt_laporan_kiriman`+`pdt_laporan_publikasi`+`pdt_laporan_insight`. Predikat klien tetap **di SQL-nya sendiri** (`client_platforms.client_id = scope.clientId`, `status = '[Terbit]'`, revisi = `insight_revisi` terpaku) karena pembacaan portal berjalan service-role. Render lewat `pdtCore.renderLaporanHtml(laporan, 'klien')` dengan `insight` di-overlay revisi terpaku (pola `laporanUntukRenderPdt`, tapi **tanpa** gerbang `canKirimLaporan` — gerbangnya kontak klien). Import `report`/`reportShopee` dari modul ini **dihapus** di PR yang sama; sesudah PR ini, `client-portal.ts` **nol rujukan** `client_reports`. |
 | **D-01a** | **Aturan isi daftar (PRD R11.3, ketokan pemilik 2026-09-22 sore).** Satu baris per `(client_platform_id, periode_mulai)`: kandidatnya kiriman **terakhir** periode itu (`dikirim_pada` terbesar, `distinct on (k.client_platform_id, k.periode_mulai) … order by k.dikirim_pada desc`), lalu **hanya** ditampilkan bila publikasinya `[Terbit]`. Kiriman lama periode yang sama **tidak terdaftar dan tidak bisa dibuka** lewat id (`reportHtml` memakai predikat yang sama, bukan sekadar `status='[Terbit]'` pada id yang diminta). Kandidat terbaru yang `[Draf]`/`[Dicabut]` ⇒ periode itu **kosong** bagi klien, bukan jatuh ke versi lama. Kontrak 3 bulan ⇒ 3 baris berbeda periode; dua toko ⇒ satu baris per toko per periode. Urutan: periode terbaru dulu. |
 | **D-02** | DTO `PortalReportRow` dan wire `portalReportRowToWire` **tidak berubah bentuk** (`report_id` = `pdt_laporan_kiriman.id`, `periode_tipe` = `'bulanan'` karena kiriman PDT selalu bulanan, `platform` dari `client_platforms.platform`, `diterbitkan_pada` dari publikasi). Rute `GET /client-portal/reports` dan `GET /client-portal/reports/{id}/html` **tetap path yang sama**. FE `web-client-portal` **nol halaman baru, nol menu baru**; yang boleh berubah hanya teks kosong-state (`"Laporan mingguan dan bulanan …"` → bulanan) dan judul. |
@@ -203,9 +203,9 @@ laporan berjalan tenang.
 | `M20-M14-BEKU` | apakah M14 dibekukan | ✅ diketok 2026-09-22: **dibekukan** (bugfix kritis saja) sampai G |
 | `M20-PORTAL-KOMPLAIN` | D-03 | ✅ diketok 2026-09-22: pakai pintu komplain M15 apa adanya |
 | `M20-TTAM-SAMPLE` | F-03/F-04/F-05 | ⏳ pemilik akan mengunggah 4 ekspor TikTok Ads Manager nyata; F-01/F-02 tidak diblokir |
-| **`M20-C01-LIVE`** | **D-00 → seluruh Gelombang D** | 🔴 **BARU 2026-09-22:** migrasi C-01 sudah di `main` (#497) tapi **belum diterapkan ke live** `CDPS SG` (184 tabel/35 mesin vs repo 186/36). Deploy produksi API sudah di `6cc4ce4` (#497). Dampak hari ini: tombol *Lihat/Unduh Klien/Internal* dan *Edit Narasi* di Laporan PDT internal **500** begitu ada kiriman (hari ini `pdt_laporan_kiriman` 0 baris, jadi belum ada yang terkena). Tindakan: `apply_migration` berkas `20261130010000`, verifikasi 186/36, catat di `DECISIONS.md`. |
+| ~~`M20-C01-LIVE`~~ | D-00 | ✅ **DITUTUP 2026-09-22 malam:** migrasi `20261130010000` diterapkan ke live `CDPS SG` (versi live `20260922151204`), diverifikasi 186 tabel / 36 mesin / fungsi `jwt_owns_pdt_kiriman_am` ada. D-00 selesai. |
 
-Gelombang D bisa dikodekan sekarang; **merge**-nya menunggu `M20-C01-LIVE`.
+Gelombang D bisa dikodekan **dan di-merge** sekarang — satu-satunya blocker yang tersisa (`M20-TTAM-SAMPLE`) hanya menyentuh Gelombang F.
 
 ---
 

@@ -1,6 +1,6 @@
 # CDPS — Module 20: Permukaan Laporan Klien PDT
 
-**Status:** **AKTIF — Gelombang A, B, C merge 2026-09-22 (PR #494, #496, #497); migrasi C-01 belum di live; Gelombang D berikutnya** (posisi rinci: `docs/plan/PLAN_PORT_M14_KE_PDT.md` header). Lahir dari audit pemilik "report klien vs PDT, fitur serupa tapi double, hanya akan pakai 1" (`docs/DECISIONS.md` baris `M14-VS-PDT-DUPLIKASI`, diketok 2026-09-22). **R11 ditambah 2026-09-22 sore** dari requirement pemilik "klien hanya melihat 1 bagian report, jangan sampai ada 2 report yg bisa dilihat klien".
+**Status:** **AKTIF — Gelombang A, B, C merge 2026-09-22 (PR #494, #496, #497), migrasi C-01 sudah di live; Gelombang D berikutnya dengan nol blocker** (posisi rinci: `docs/plan/PLAN_PORT_M14_KE_PDT.md` header). Lahir dari audit pemilik "report klien vs PDT, fitur serupa tapi double, hanya akan pakai 1" (`docs/DECISIONS.md` baris `M14-VS-PDT-DUPLIKASI`, diketok 2026-09-22). **R11 ditambah 2026-09-22 sore** dari requirement pemilik "klien hanya melihat 1 bagian report, jangan sampai ada 2 report yg bisa dilihat klien".
 **Worked example:** TEST PDT Store 2 (`CLI-202609-0021`) · TikTok Shop · Agustus 2026 — toko yang dipakai pemilik saat menemukan pita kuning "Belum lengkap" (§8)
 **Depends on:** PDT (`CDPS_PDT_Pusat_Data_Toko.md` — lapisan fakta, Rule 21/22/23/24), M13 Client Health Report (konsumen `clients.total_sales`), M15 Client & Team Portal (realm auth klien, pintu komplain), M8 Ads (baseline ROAS)
 **Resolves:** `docs/DECISIONS.md` Open `M14-VS-PDT-DUPLIKASI` · `docs/backlog/PDT_BACKLOG.md` §2 G2 ("Mematikan: Report Engine TikTok & Shopee")
@@ -364,7 +364,7 @@ jadi biaya menyimpannya nol dan ia jadi bukti riwayat.
 | ~~`M20-M14-BEKU`~~ | ✅ diketok 2026-09-22: M14 **dibekukan** (bugfix kritis saja) sampai G | Yohan |
 | `M20-TTAM-SAMPLE` | ⏳ pemilik akan mengunggah 4 ekspor TikTok Ads Manager nyata; F-03/F-04/F-05 menunggu, F-01/F-02 tidak | Yohan / Head of Account |
 | ~~`M20-PORTAL-KOMPLAIN`~~ | ✅ diketok 2026-09-22: pintu komplain M15 apa adanya | Yohan |
-| `M20-C01-LIVE` | 🔴 migrasi C-01 (`20261130010000`) sudah di `main` (#497) tapi **belum diterapkan ke live** `CDPS SG` — prasyarat D-00; lihat `PLAN_PORT_M14_KE_PDT.md` §4 | operator dengan akses `apply_migration` |
+| ~~`M20-C01-LIVE`~~ | ✅ ditutup 2026-09-22 malam: migrasi C-01 diterapkan ke live (versi `20260922151204`), 186 tabel / 36 mesin terverifikasi; D-00 selesai | — |
 
 ---
 
