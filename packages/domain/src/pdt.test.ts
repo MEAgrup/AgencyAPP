@@ -6607,6 +6607,144 @@ describeDb('M20 Gelombang C — insight + publikasi laporan PDT', () => {
 });
 
 // ---------------------------------------------------------------------------
+// M20 Gelombang E (R6/R7, E-01/E-02) — `recomputeTotalSalesPdt`. Fixture
+// menulis LANGSUNG ke `pdt_fact_shop_daily` (pola sama `rakitInputSkorTiktok`
+// di atas) lewat satu batch `verified` stub per toko+periode, supaya
+// `kirimLaporanPdt` membekukan `kpi.gmv` NYATA (bukan `null`) tanpa perlu
+// pipeline unggah/parse penuh.
+// ---------------------------------------------------------------------------
+describeDb('M20 Gelombang E — recomputeTotalSalesPdt (R6/R7)', () => {
+  async function seedShopDaily(
+    cpId: number, clientId: string, platform: 'TikTok Shop' | 'Shopee', periodeAwalBulan: string, gmv: number,
+  ): Promise<void> {
+    const batchRows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, ${platform === 'TikTok Shop' ? 'tiktok' : 'shopee'}, ${periodeAwalBulan}::date,
+         (${periodeAwalBulan}::date + interval '1 month' - interval '1 day')::date, 'verified',
+         ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    const basis = platform === 'TikTok Shop' ? 'net' : 'siap_dikirim';
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, ${periodeAwalBulan}::date, ${basis}, ${batchRows[0].id}, ${pdtCore.PDT_PARSER_VERSI}, ${gmv}, 10, 100)`;
+  }
+
+  /** Satu toko, satu klien baru, kiriman periode itu SUDAH punya `kpi.gmv` nyata siap dikirim. */
+  async function fixtureDenganGmv(
+    platform: 'TikTok Shop' | 'Shopee', periodeAwalBulan: string, gmv: number,
+  ): Promise<{ clientId: string; cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, platform);
+    await seedShopDaily(cpId, clientId, platform, periodeAwalBulan, gmv);
+    return { clientId, cpId };
+  }
+
+  async function kirimDanTerbitkan(cpId: number, periodeAwalBulan: string): Promise<number> {
+    const d = await kirimLaporanPdt(sql, ownerActor(), cpId, periodeAwalBulan);
+    await terbitkanKiriman(sql, ownerActor(), d.id);
+    return d.id;
+  }
+
+  async function totalSalesOf(clientId: string): Promise<number> {
+    const [r] = await sql<{ total_sales: string }[]>`select total_sales from clients where id = ${clientId}`;
+    return Number(r.total_sales);
+  }
+
+  it('terbitkanKiriman menulis clients.total_sales = gmv kiriman itu (satu toko aktif)', async () => {
+    const { clientId, cpId } = await fixtureDenganGmv('TikTok Shop', '2026-07-01', 50_000_000);
+    expect(await totalSalesOf(clientId)).toBe(0); // sebelum terbit
+    await kirimDanTerbitkan(cpId, '2026-07-01');
+    expect(await totalSalesOf(clientId)).toBeCloseTo(50_000_000, 0);
+  });
+
+  it('dua toko aktif satu klien ⇒ total_sales = jumlah kiriman TERBIT masing-masing (Σ per platform)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpTiktok = await insertClientPlatform(clientId, 'TikTok Shop');
+    const cpShopee = await insertClientPlatform(clientId, 'Shopee');
+    await seedShopDaily(cpTiktok, clientId, 'TikTok Shop', '2026-07-01', 30_000_000);
+    await seedShopDaily(cpShopee, clientId, 'Shopee', '2026-07-01', 20_000_000);
+    await kirimDanTerbitkan(cpTiktok, '2026-07-01');
+    await kirimDanTerbitkan(cpShopee, '2026-07-01');
+    expect(await totalSalesOf(clientId)).toBeCloseTo(50_000_000, 0);
+  });
+
+  it('toko yang di-nonaktifkan tidak ikut disumasi pada recompute berikutnya', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpInaktif = await insertClientPlatform(clientId, 'TikTok Shop');
+    await seedShopDaily(cpInaktif, clientId, 'TikTok Shop', '2026-07-01', 99_000_000);
+    await kirimDanTerbitkan(cpInaktif, '2026-07-01');
+    expect(await totalSalesOf(clientId)).toBeCloseTo(99_000_000, 0);
+
+    await sql`update client_platforms set active = false where id = ${cpInaktif}`;
+    const cpAktif = await insertClientPlatform(clientId, 'Shopee');
+    await seedShopDaily(cpAktif, clientId, 'Shopee', '2026-07-01', 10_000_000);
+    await kirimDanTerbitkan(cpAktif, '2026-07-01'); // memicu recompute ULANG
+
+    expect(await totalSalesOf(clientId)).toBeCloseTo(10_000_000, 0); // toko nonaktif tidak ikut lagi
+  });
+
+  it('R6/E-02: cabutKiriman satu-satunya kiriman terbit toko ⇒ kontribusi toko itu jatuh ke 0, DALAM transaksi yang sama', async () => {
+    const { clientId, cpId } = await fixtureDenganGmv('TikTok Shop', '2026-07-01', 40_000_000);
+    const id = await kirimDanTerbitkan(cpId, '2026-07-01');
+    expect(await totalSalesOf(clientId)).toBeCloseTo(40_000_000, 0);
+
+    await cabutKiriman(sql, ownerActor(), id, 'salah data');
+    expect(await totalSalesOf(clientId)).toBe(0);
+  });
+
+  it('R6: cabut kandidat TERBARU ⇒ total_sales jatuh ke periode [Terbit] SEBELUMNYA toko yang sama (beda dari daftar portal R11.3, yang TIDAK PERNAH jatuh balik)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    await seedShopDaily(cpId, clientId, 'TikTok Shop', '2026-06-01', 20_000_000);
+    await seedShopDaily(cpId, clientId, 'TikTok Shop', '2026-07-01', 50_000_000);
+    await kirimDanTerbitkan(cpId, '2026-06-01');
+    const idJuli = await kirimDanTerbitkan(cpId, '2026-07-01');
+    expect(await totalSalesOf(clientId)).toBeCloseTo(50_000_000, 0); // Juli (terbaru) menang
+
+    await cabutKiriman(sql, ownerActor(), idJuli, 'revisi salah');
+    // Uang HARUS mencerminkan kebenaran terbit terbaik yang tersedia — beda
+    // dari daftar laporan klien (R11.3), yang sengaja tidak pernah jatuh balik.
+    expect(await totalSalesOf(clientId)).toBeCloseTo(20_000_000, 0);
+  });
+
+  it('terbitkanUlangKiriman memulihkan kontribusi toko setelah cabut', async () => {
+    const { clientId, cpId } = await fixtureDenganGmv('TikTok Shop', '2026-07-01', 25_000_000);
+    const id = await kirimDanTerbitkan(cpId, '2026-07-01');
+    await cabutKiriman(sql, ownerActor(), id, 'sementara ditarik');
+    expect(await totalSalesOf(clientId)).toBe(0);
+
+    // terbitkanUlangKiriman menolak MSG_TAK_ADA_REVISI kalau nol revisi BARU
+    // sejak paku terakhir (R4/R5) — perlu satu revisi insight baru dulu.
+    await simpanInsightKiriman(sql, ownerActor(), id, {
+      ringkasan: 'Revisi setelah cabut', poin: ['x'], rekomendasi_tinggi: [],
+      rekomendasi_sedang: [], outlook: 'o', indikator: [],
+    });
+    await terbitkanUlangKiriman(sql, ownerActor(), id);
+    expect(await totalSalesOf(clientId)).toBeCloseTo(25_000_000, 0);
+  });
+
+  it('menulis baris audit total_sales_recomputed dengan source pdt (E-01)', async () => {
+    const { clientId, cpId } = await fixtureDenganGmv('TikTok Shop', '2026-07-01', 15_000_000);
+    await kirimDanTerbitkan(cpId, '2026-07-01');
+
+    const rows = await sql<{ before_json: { total_sales: string }; after_json: { total_sales: string; source: string } }[]>`
+      select before_json, after_json from audit_log
+       where entity_type = 'client' and entity_id = ${clientId} and action = 'total_sales_recomputed'
+       order by id desc limit 1`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].before_json.total_sales).toBe('0.00');
+    expect(rows[0].after_json.source).toBe('pdt');
+    expect(Number(rows[0].after_json.total_sales)).toBeCloseTo(15_000_000, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // listRiwayatBatchPdt (G1-09 sub-langkah 3, bullet 4) — riwayat SELURUH batch
 // satu toko (termasuk `ditolak`, Rule 10 diagnosis-tanpa-upload-ulang),
 // terbaru dulu, dengan `paketStatus` turunan (tersedia/kedaluwarsa/legal_hold).

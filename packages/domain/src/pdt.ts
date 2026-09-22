@@ -4563,12 +4563,14 @@ async function ensureInsightSeed(tx: TransactionSql, kirimanId: number): Promise
     on conflict (kiriman_id) do nothing`;
 }
 
-async function loadKirimanScope(sql: Queryable, kirimanId: number): Promise<{ clientPlatformId: number; ownerAm: string | null }> {
+async function loadKirimanScope(
+  sql: Queryable, kirimanId: number,
+): Promise<{ clientPlatformId: number; clientId: string; ownerAm: string | null }> {
   const [row] = await sql<{ client_platform_id: number }[]>`
     select client_platform_id from pdt_laporan_kiriman where id = ${kirimanId}`;
   if (!row) throw new NotFoundError(MSG_KIRIMAN_NOT_FOUND);
   const cp = await loadClientPlatformUntukPdt(sql, row.client_platform_id);
-  return { clientPlatformId: row.client_platform_id, ownerAm: cp.assigned_am_id };
+  return { clientPlatformId: row.client_platform_id, clientId: cp.client_id, ownerAm: cp.assigned_am_id };
 }
 
 async function requireCanTulisInsight(sql: Queryable, actor: Actor, kirimanId: number): Promise<void> {
@@ -4748,12 +4750,72 @@ async function runPdtLaporanTransition(tx: TransactionSql, actor: Actor, kiriman
 }
 
 /**
+ * recomputeTotalSalesPdt — M20 R7: PDT sekarang SATU-SATUNYA penulis
+ * `clients.total_sales` = Σ run-rate bulanan kiriman `[Terbit]` TERAKHIR per
+ * platform aktif. "Dua penulis untuk satu kolom adalah bug, bukan
+ * redundansi" — M14's `report.ts::recomputeTotalSales` dimatikan (E-04) di
+ * saat yang sama ini mendarat, bukan dibiarkan hidup berdampingan.
+ *
+ * Kiriman PDT SELALU `bulanan` (periode_selesai = periode_mulai + 1 bulan −
+ * 1 hari, Gelombang D) — beda dari M14 yang menyetarakan laporan mingguan
+ * ×30/hari (`report.gmvRunRateBulanan`); `kpi.gmv` periode itu sendiri SUDAH
+ * run-rate bulanan, nol skala tambahan (cermin cabang `bulanan` fungsi itu,
+ * yang juga mengembalikan `gmv` apa adanya).
+ *
+ * "Terakhir" = periode TERBARU yang `[Terbit]` per `client_platform_id` —
+ * beda dari kandidat R11.3 (daftar portal klien): DI SINI status non-Terbit
+ * pada periode terbaru memang dimaksud JATUH ke periode `[Terbit]`
+ * sebelumnya (angka uang harus mencerminkan kebenaran terbit terbaik yang
+ * tersedia), bukan membuat kontribusi toko itu hilang — beda kebutuhan dari
+ * daftar laporan klien yang sengaja tidak pernah jatuh balik (kepercayaan/UX,
+ * R11.3), bukan agregat uang.
+ *
+ * Dipanggil DALAM transaksi pemanggil setiap kali himpunan kiriman
+ * `[Terbit]` toko berubah: `terbitkanKiriman`, `terbitkanUlangKiriman`,
+ * `cabutKiriman` (R6 — pencabutan WAJIB memicu ini, nol jalan keluar lewat
+ * SQL manual). Health Score dan "baseline Ads" (`ads.effectiveGmvBaseline`)
+ * TIDAK butuh penulis terpisah: keduanya membaca `clients.total_sales`
+ * LANGSUNG saat dihitung (pratinjau bulan berjalan, snapshot bulan tertutup
+ * BERIKUTNYA), jadi begitu kolom ini benar, keduanya otomatis benar di
+ * bacaan berikutnya. Snapshot Health Score bulan tertutup yang SUDAH terbit
+ * TIDAK ditulis ulang — `client_health_snapshots` append-only, fire-once per
+ * periode (house rule #3); keputusan pemilik `docs/DECISIONS.md`
+ * `M20-R6-HEALTH-SCORE-SNAPSHOT-LAMA`.
+ */
+async function recomputeTotalSalesPdt(tx: TransactionSql, actor: Actor, clientId: string): Promise<void> {
+  const before = await tx<{ total_sales: string }[]>`select total_sales from clients where id = ${clientId}`;
+  const prev = before[0]?.total_sales ?? '0';
+  const agg = await tx<{ total: string }[]>`
+    select coalesce(sum(rr), 0)::numeric(15,2) as total from (
+      select distinct on (k.client_platform_id) coalesce((k.payload -> 'kpi' ->> 'gmv')::numeric, 0) as rr
+        from pdt_laporan_kiriman k
+        join client_platforms cp on cp.id = k.client_platform_id
+        join pdt_laporan_publikasi pub on pub.kiriman_id = k.id
+       where cp.client_id = ${clientId} and cp.active = true and pub.status = ${PDT_LAPORAN_STATES.terbit}
+       order by k.client_platform_id, k.periode_mulai desc, k.dikirim_pada desc, k.id desc
+    ) t`;
+  const total = agg[0].total;
+  await tx`update clients set total_sales = ${total} where id = ${clientId}`;
+  await executors(tx).audit.insertAudit({
+    entityType: 'client',
+    entityId: clientId,
+    actorEmployeeId: actor.employeeId,
+    action: 'total_sales_recomputed',
+    beforeJson: { total_sales: prev },
+    afterJson: { total_sales: total, source: 'pdt' },
+    createdBy: actor.employeeId,
+  });
+}
+
+/**
  * terbitkanKiriman — publikasi PERTAMA (Flow C, R4/R5): `[Draf]` → `[Terbit]`,
  * paku `insight_revisi` ke revisi TERBARU saat ini. Dipanggil saat status
  * BUKAN `[Draf]` ⇒ `MSG_SUDAH_TERBIT` (arahkan ke `terbitkanUlangKiriman`,
  * bukan pesan generik `sm_transition` — pengecekan status di sini MENDAHULUI
  * panggilan `sm_transition` supaya pesannya persis PRD §6, bukan
- * `block_message` mesin yang genderik untuk seluruh edge).
+ * `block_message` mesin yang genderik untuk seluruh edge). Menutup dengan
+ * `recomputeTotalSalesPdt` (R7) — himpunan kiriman `[Terbit]` toko baru
+ * bertambah satu.
  */
 export async function terbitkanKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtLaporanPublikasiRow> {
   await requireCanTulisInsight(sql, actor, kirimanId);
@@ -4773,6 +4835,8 @@ export async function terbitkanKiriman(sql: Sql, actor: Actor, kirimanId: number
          set insight_revisi = ${terbaru}, diterbitkan_pada = now(), diterbitkan_oleh = ${actor.employeeId}, alasan_cabut = null
        where kiriman_id = ${kirimanId}
       returning *`;
+    const { clientId } = await loadKirimanScope(tx, kirimanId);
+    await recomputeTotalSalesPdt(tx, actor, clientId);
     return publikasiRowFromDb(row);
   });
 }
@@ -4784,6 +4848,7 @@ export async function terbitkanKiriman(sql: Sql, actor: Actor, kirimanId: number
  * saat masih `[Terbit]` ⇒ `MSG_SUDAH_TERBIT` (harus Cabut dulu — R4/R5: satu-
  * satunya jalan memindahkan paku sementara status TETAP `[Terbit]` bukan
  * bagian mesin ini; PRD menyatakan "cabut dulu sebelum menerbitkan ulang").
+ * Menutup dengan `recomputeTotalSalesPdt` (R7), sama alasan `terbitkanKiriman`.
  */
 export async function terbitkanUlangKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtLaporanPublikasiRow> {
   await requireCanTulisInsight(sql, actor, kirimanId);
@@ -4805,16 +4870,25 @@ export async function terbitkanUlangKiriman(sql: Sql, actor: Actor, kirimanId: n
          set insight_revisi = ${terbaru}, diterbitkan_pada = now(), diterbitkan_oleh = ${actor.employeeId}, alasan_cabut = null
        where kiriman_id = ${kirimanId}
       returning *`;
+    const { clientId } = await loadKirimanScope(tx, kirimanId);
+    await recomputeTotalSalesPdt(tx, actor, clientId);
     return publikasiRowFromDb(row);
   });
 }
 
 /**
- * cabutKiriman — `[Terbit]` → `[Dicabut]` (R5), alasan WAJIB. R6 (hitung
- * ulang `total_sales`/Health Score/baseline Ads DALAM transaksi yang sama)
- * SENGAJA di luar cakupan fungsi ini — Gelombang E (E-02) belum ship;
- * mekanismenya belum ada sama sekali, sama pola `kirimLaporanPdt` yang
- * mencatat Rule 24 sengaja di luar cakupan saat pertama ditulis.
+ * cabutKiriman — `[Terbit]` → `[Dicabut]` (R5), alasan WAJIB. R6/E-02: DALAM
+ * transaksi yang sama, menutup dengan `recomputeTotalSalesPdt` — himpunan
+ * kiriman `[Terbit]` toko baru kehilangan satu, jadi `clients.total_sales`
+ * mungkin jatuh ke periode `[Terbit]` sebelumnya toko itu (atau ke 0 kalau
+ * tidak ada). "Nol jalan keluar lewat SQL manual" (R6): tidak ada jalur lain
+ * yang menulis status `[Dicabut]` selain fungsi ini.
+ *
+ * Health Score dan baseline Ads TIDAK ditulis di sini — keduanya membaca
+ * `clients.total_sales` live saat dihitung (lihat docblock
+ * `recomputeTotalSalesPdt`); snapshot Health Score bulan tertutup yang sudah
+ * terbit sebelum cabut ini TETAP seperti yang sudah dipublikasikan (keputusan
+ * pemilik, `docs/DECISIONS.md` `M20-R6-HEALTH-SCORE-SNAPSHOT-LAMA`).
  */
 export async function cabutKiriman(sql: Sql, actor: Actor, kirimanId: number, alasan: string): Promise<PdtLaporanPublikasiRow> {
   await requireCanTulisInsight(sql, actor, kirimanId);
@@ -4834,6 +4908,8 @@ export async function cabutKiriman(sql: Sql, actor: Actor, kirimanId: number, al
     await tx`update pdt_laporan_publikasi set alasan_cabut = ${alasanTrim} where kiriman_id = ${kirimanId}`;
     await runPdtLaporanTransition(tx, actor, kirimanId, PDT_LAPORAN_STATES.dicabut);
     const [row] = await tx<PublikasiDbRow[]>`select * from pdt_laporan_publikasi where kiriman_id = ${kirimanId}`;
+    const { clientId } = await loadKirimanScope(tx, kirimanId);
+    await recomputeTotalSalesPdt(tx, actor, clientId);
     return publikasiRowFromDb(row);
   });
 }

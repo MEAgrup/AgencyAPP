@@ -166,8 +166,8 @@ afterEach(async () => {
 });
 afterAll(async () => { if (sql) await sql.end(); });
 
-describeDb('createReport — score, store, and write total_sales', () => {
-  it('a monthly report passes GMV through as the total_sales unit', async () => {
+describeDb('createReport — score and store (M20 E-04: total_sales no longer written here)', () => {
+  it('a monthly report passes GMV through as the report\'s own run-rate unit', async () => {
     const client = await seedClient();
     const pid = await seedPlatform(client);
     const d = await createReport(sql, actorAm, client, {
@@ -181,35 +181,38 @@ describeDb('createReport — score, store, and write total_sales', () => {
     expect(d.rentangDariBerkas).toBe(true);
     // Monthly: run-rate == net GMV (no scaling).
     expect(d.gmvRunrateBulanan).toBeCloseTo(d.gmvNet, 2);
-    // clients.total_sales is written from the report — the gap C1 closes.
-    expect(await totalSalesOf(client)).toBeCloseTo(d.gmvRunrateBulanan, 2);
+    // M20 E-04: clients.total_sales is now written EXCLUSIVELY by PDT
+    // (`pdt.ts::recomputeTotalSalesPdt`, R7) — `report.ts::recomputeTotalSales`
+    // is switched off (`M14_WRITES_TOTAL_SALES = false`), kept for rollback,
+    // not called. `seedClient` seeds 0, so it stays 0 here.
+    expect(await totalSalesOf(client)).toBe(0);
   });
 
-  it('a WEEKLY report writes the 30-day RUN-RATE, not the raw weekly GMV (trap #1)', async () => {
+  it('a WEEKLY report still computes the 30-day RUN-RATE (trap #1), but no longer writes total_sales', async () => {
     const client = await seedClient();
     const pid = await seedPlatform(client);
     const d = await createReport(sql, actorAm, client, {
       clientPlatformId: pid, periodeTipe: 'mingguan', files: [fileFrom('toko.xlsx', shopTtAoa(META_MINGGU))],
     });
     expect(d.hariPeriode).toBe(7);
-    // A weekly upload must NOT drop total_sales ~4x: the run-rate scales the
-    // week up to a month (×30/7 ≈ 4.29). total_sales reads the run-rate.
+    // The report's own run-rate figure is still scaled ×30/7 ≈ 4.29 — only the
+    // WRITE to clients.total_sales moved to PDT (M20 E-04), not this math.
     expect(d.gmvRunrateBulanan).toBeGreaterThan(d.gmvNet * 4);
     expect(d.gmvRunrateBulanan).toBeCloseTo((d.gmvNet * 30) / 7, 0);
-    expect(await totalSalesOf(client)).toBeCloseTo(d.gmvRunrateBulanan, 2);
+    expect(await totalSalesOf(client)).toBe(0);
   });
 
-  it('total_sales = Σ latest run-rate across a client\'s active platforms', async () => {
+  it('total_sales stays untouched by createReport regardless of how many active platforms report (M20 E-04)', async () => {
     const client = await seedClient();
     const a = await seedPlatform(client, 'TikTok Shop');
     const b = await seedPlatform(client, 'Shopee');
-    const da = await createReport(sql, actorAm, client, {
+    await createReport(sql, actorAm, client, {
       clientPlatformId: a, periodeTipe: 'bulanan', files: [fileFrom('toko.xlsx', shopTtAoa())],
     });
-    const db = await createReport(sql, actorAm, client, {
+    await createReport(sql, actorAm, client, {
       clientPlatformId: b, periodeTipe: 'bulanan', files: [fileFrom('toko.xlsx', shopTtAoa())],
     });
-    expect(await totalSalesOf(client)).toBeCloseTo(da.gmvRunrateBulanan + db.gmvRunrateBulanan, 2);
+    expect(await totalSalesOf(client)).toBe(0);
   });
 
   it('re-uploading the same toko × tipe × range is a ConflictError, never a silent overwrite', async () => {

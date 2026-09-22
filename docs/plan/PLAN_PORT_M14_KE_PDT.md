@@ -149,14 +149,16 @@ internal dan penulis `total_sales`.
 
 | Tiket | Isi |
 |---|---|
-| **E-01** | Penulis `clients.total_sales` versi PDT: Σ run-rate bulanan laporan **terbit** terakhir per platform aktif; laporan mingguan diskalakan ke 30 hari sebelum ditulis. Baris audit `total_sales_recomputed` dengan `source: 'pdt'`. |
-| **E-02** | Pencabutan (R6): satu transaksi memicu hitung ulang `total_sales` + Health Score + baseline Ads. Nol jalan keluar lewat SQL manual. |
-| **E-03** | Entri metrik Ads dari laporan PDT (padanan `insertMetricEntryFromReportEngine`) supaya komponen **ROAS Attainment** Health Score punya sumber. |
-| **E-04** | **Matikan** penulis M14 (`recomputeTotalSales` dan penulis entri metrik Shopee) — dimatikan, bukan dihapus, supaya jalur baliknya masih ada. |
-| **E-05** | Tes: mingguan & bulanan menulis satuan yang sama; rollback membatalkan ketiga perhitungan ulang; Health Score bergerak sesuai snapshot. |
+| **E-01** | ✅ SELESAI — `recomputeTotalSalesPdt` di `pdt.ts`: Σ `kpi.gmv` laporan **terbit** terakhir per `client_platform_id` aktif (`DISTINCT ON` per platform, urut `periode_mulai desc, dikirim_pada desc, id desc`). Kiriman PDT **selalu bulanan** (ditetapkan Gelombang D — `periode_selesai = periode_mulai + 1 bulan − 1 hari`), jadi tidak ada jalur mingguan untuk diskalakan; klausa "mingguan diskalakan ke 30 hari" di R7 tidak pernah berlaku untuk PDT. Baris audit `total_sales_recomputed` dengan `source: 'pdt'`. |
+| **E-02** | ✅ SELESAI — `terbitkanKiriman`, `terbitkanUlangKiriman`, `cabutKiriman` masing-masing memanggil `recomputeTotalSalesPdt` di transaksi yang sama. Health Score snapshot **tidak** dihitung ulang untuk bulan yang sudah tertutup/terbit (append-only, house rule #3) — keputusan `docs/DECISIONS.md` `M20-R6-HEALTH-SCORE-SNAPSHOT-LAMA`: snapshot lama dibiarkan, hanya `total_sales` berubah live; Health Score bulan berjalan dan baseline Ads self-correct karena keduanya baca `clients.total_sales` live (`ads.effectiveGmvBaseline` sudah pure function, nol kode baru). |
+| **E-03** | Belum — PR terpisah. Entri metrik Ads dari laporan PDT (padanan `insertMetricEntryFromReportEngine`) supaya komponen **ROAS Attainment** Health Score punya sumber. `ad_campaigns` (M8) belum punya crosswalk ke `pdt_fact_ads.kampanye_id` — akan dicocokkan lewat overlap rentang tanggal+platform, pola yang sama dipakai M14. |
+| **E-04** | Separuh selesai — penulis `total_sales` M14 (`report.recomputeTotalSales`) **dimatikan** lewat flag `M14_WRITES_TOTAL_SALES = false` (dimatikan, bukan dihapus, jalur balik masih ada). Penulis entri metrik Shopee (`attributeShopeeAdsMetricEntries`) **belum** dimatikan — menunggu E-03 supaya tidak ada jendela tanpa sumber ROAS Attainment. |
+| **E-05** | Sebagian — tes `recomputeTotalSalesPdt` (terbit, terbit-ulang, cabut, banyak platform, kandidat bukan-terbit diabaikan) ada di `pdt.test.ts`. Tes rollback tiga-perhitungan-ulang & pergerakan Health Score menunggu E-03 (butuh baseline Ads + ROAS berjalan bersama). |
 
 **Kriteria keluar:** Health Score satu klien nyata bergerak karena laporan PDT,
-dan `clients.total_sales` punya tepat satu penulis.
+dan `clients.total_sales` punya tepat satu penulis. **Belum tercapai sepenuhnya**
+— E-01/E-02/E-04(total_sales) selesai di PR ini; E-03 + separuh E-04 (metrik Shopee)
+menyusul di PR berikutnya sebelum kriteria keluar dianggap lunas.
 
 ---
 
