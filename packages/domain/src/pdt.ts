@@ -4367,6 +4367,51 @@ export async function riwayatKirimanPdt(sql: Sql, actor: Actor, clientPlatformId
   }));
 }
 
+/** M20 §6 — string persis, dipakai ulang dari M14 (`report.ts`), bukan diparafrase. */
+export const MSG_KIRIMAN_NOT_FOUND = '[laporan tidak ditemukan]';
+/** M20 §6 — string persis, dipakai ulang dari M14 (`report.ts`), bukan diparafrase. */
+export const MSG_LAPORAN_FORBIDDEN = '[anda tidak memiliki akses ke data ini]';
+
+/** Satu kiriman beku, siap dirender (B-03). */
+export interface PdtKirimanUntukRender {
+  id: number;
+  clientPlatformId: number;
+  laporan: pdt.PdtLaporanTiktok | pdt.PdtLaporanShopee;
+}
+
+/**
+ * bacaKirimanLaporanPdt — snapshot BEKU satu kiriman by id (M20 B-03, dasar
+ * rute render HTML dua mode). `riwayatKirimanPdt` di atas sengaja TIDAK
+ * mengikutkan `payload` (daftar menjawab "kapan/oleh siapa", bukan "isinya
+ * persis") — inilah fungsi "kebutuhan terpisah" yang disebut docblock itu.
+ *
+ * Permission: `canKirimLaporan` (AM pemilik toko/Lead divisi Account/
+ * Director) DITAMBAH OD read-only (PRD M20 §5 "Baca render `internal`" —
+ * OD hanya baca, tidak pernah kirim/cabut). Ini jalur AM (`web-internal`):
+ * mode `klien` di sini dibaca dengan gerbang YANG SAMA dengan `internal`
+ * (AM boleh mengintip pratinjau klien). Pembatasan mode `klien` yang
+ * SESUNGGUHNYA — klien hanya boleh baca laporan TOKONYA SENDIRI — hidup di
+ * jalur portal terpisah (R10, Gelombang D), bukan di sini.
+ */
+export async function bacaKirimanLaporanPdt(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtKirimanUntukRender> {
+  const [row] = await sql<{ id: number; client_platform_id: number; payload: unknown }[]>`
+    select id, client_platform_id, payload
+      from pdt_laporan_kiriman
+     where id = ${kirimanId}`;
+  if (!row) throw new NotFoundError(MSG_KIRIMAN_NOT_FOUND);
+
+  const cp = await loadClientPlatformUntukPdt(sql, row.client_platform_id);
+  if (!canKirimLaporan(actor, cp.assigned_am_id) && !actor.role.od) {
+    throw new ForbiddenError(MSG_LAPORAN_FORBIDDEN);
+  }
+
+  return {
+    id: row.id,
+    clientPlatformId: row.client_platform_id,
+    laporan: row.payload as pdt.PdtLaporanTiktok | pdt.PdtLaporanShopee,
+  };
+}
+
 // ===========================================================================
 // G4-01 — katalog aksi usulan (`pdt_usulan_katalog`, migrasi `20261109010000`,
 // docs/backlog/PDT_BACKLOG.md G4-01). Murni baca — nol keputusan di sini;
