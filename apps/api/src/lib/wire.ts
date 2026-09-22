@@ -3668,6 +3668,10 @@ export interface DailyActivityWire {
   keterangan: string;
   bukti_pelaksanaan: string | null;
   created_at: string;
+  /** F-6b — id of the row this one corrects, or null for an original entry. */
+  koreksi_dari: string | null;
+  /** F-6b — id of the row that corrects this one, or null if still current. */
+  dikoreksi_oleh: string | null;
 }
 
 /** Maps one daily activity log entry (DACT-). */
@@ -3684,6 +3688,8 @@ export function dailyActivityToWire(a: dailyactivity.DailyActivity): DailyActivi
     keterangan: a.keterangan,
     bukti_pelaksanaan: a.buktiPelaksanaan,
     created_at: a.createdAt.toISOString(),
+    koreksi_dari: a.koreksiDari,
+    dikoreksi_oleh: a.dikoreksiOleh,
   };
 }
 
