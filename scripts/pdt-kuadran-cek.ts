@@ -101,18 +101,54 @@ function samakan(a: Record<string, number>, b: Record<string, number>, kunci: re
   return kunci.every((k) => (a[k] ?? 0) === (b[k] ?? 0));
 }
 
+/**
+ * Verdikt satu pembandingan. TIGA nilai, bukan dua, dan itu pokok soalnya:
+ * beda angka TIDAK otomatis berarti PDT salah.
+ *
+ * Mesin HTML lama membuang baris produk sebelum mengklasifikasi (TikTok:
+ * `if (!nama || nama.length > 160) continue`). Judul produk 160+ karakter itu
+ * NORMAL di marketplace Indonesia, jadi saringan itu menyembunyikan produk
+ * sungguhan — pada Octatrix Juli 2026: 68 dari 396 produk (17% katalog),
+ * membawa 5.362 klik dan Rp 12,15 juta GMV, termasuk satu produk berklik 949.
+ * PDT tidak menirunya, dan itu disengaja.
+ *
+ * Kalau dua keadaan itu dicap sama-sama `✗ BEDA`, tandanya jadi bising dan
+ * orang berhenti membacanya — persis saat tanda itu paling dibutuhkan. Maka
+ * ketika angka berbeda, skrip ini menjalankan PDT SEKALI LAGI atas HANYA baris
+ * yang mesin lama pakai. Cocok ⇒ selisihnya murni pemilihan baris (`setara`,
+ * bukan kegagalan). Masih beda ⇒ klasifikasinya sendiri yang menyimpang, dan
+ * ITU yang menggagalkan exit code.
+ */
+type Verdikt = 'identik' | 'setara' | 'beda';
+
 function cetakBanding(
   judul: string,
   lama: Record<string, number>,
   baru: Record<string, number>,
   kunci: readonly string[],
-): boolean {
-  const identik = samakan(lama, baru, kunci);
+  /** Distribusi PDT atas SUBSET baris yang mesin lama pakai; `null` bila modul ini tidak menyaring. */
+  baruBarisSama: { distribusi: Record<string, number>; dibuang: number; alasan: string } | null = null,
+): Verdikt {
   console.log(`    ${judul}`);
   console.log(`      mesin HTML lama : ${baris(lama, kunci)}`);
   console.log(`      PDT             : ${baris(baru, kunci)}`);
-  console.log(`      ${identik ? '✓ IDENTIK' : '✗ BEDA'}`);
-  return identik;
+  if (samakan(lama, baru, kunci)) {
+    console.log('      ✓ IDENTIK');
+    return 'identik';
+  }
+  if (baruBarisSama && samakan(lama, baruBarisSama.distribusi, kunci)) {
+    console.log(`      PDT (baris sama): ${baris(baruBarisSama.distribusi, kunci)}`);
+    console.log(`      ≈ SETARA — selisihnya HANYA baris yang mesin lama buang:`);
+    console.log(`        ${baruBarisSama.dibuang} produk ${baruBarisSama.alasan}.`);
+    console.log('        Atas baris yang sama, klasifikasinya identik ⇒ PDT tidak menyimpang,');
+    console.log('        ia justru menyertakan produk yang mesin lama sembunyikan.');
+    return 'setara';
+  }
+  if (baruBarisSama) {
+    console.log(`      PDT (baris sama): ${baris(baruBarisSama.distribusi, kunci)}`);
+  }
+  console.log('      ✗ BEDA — klasifikasinya sendiri menyimpang, bukan sekadar pemilihan baris');
+  return 'beda';
 }
 
 function persen(x: number | null): string {
@@ -122,7 +158,7 @@ function persen(x: number | null): string {
 // ---------------------------------------------------------------------------
 // Shopee
 // ---------------------------------------------------------------------------
-function periksaShopee(aoa: Aoa, modul: (typeof pdt.PDT_MODULES)[number]): boolean[] {
+function periksaShopee(aoa: Aoa, modul: (typeof pdt.PDT_MODULES)[number]): Verdikt[] {
   const barisHeader = pdt.temukanBarisHeader(aoa, modul.kolomDipanen, modul.barisHeaderHint);
   const fakta = pdt.ekstrakBarisFaktaSkuShopeeParentSku(aoa, barisHeader);
   const untukKuadran = fakta.map((b, i) => ({ id: i, pengunjung: b.pengunjung, pesananDibuat: b.pesananDibuat }));
@@ -135,7 +171,7 @@ function periksaShopee(aoa: Aoa, modul: (typeof pdt.PDT_MODULES)[number]): boole
   const kunci = reportShopee.ALL_KUADRAN_SHOPEE;
 
   console.log(`    ${fakta.length} baris produk (baris header ke-${barisHeader})`);
-  const ok: boolean[] = [];
+  const ok: Verdikt[] = [];
 
   ok.push(cetakBanding(
     'mode ABSOLUT (ambang tetap 150/500 · 2%/4%)',
@@ -205,7 +241,7 @@ function cetakKedalaman(
 // ---------------------------------------------------------------------------
 // TikTok
 // ---------------------------------------------------------------------------
-function periksaTiktok(aoa: Aoa, modul: (typeof pdt.PDT_MODULES)[number], namaBerkas: string): boolean[] {
+function periksaTiktok(aoa: Aoa, modul: (typeof pdt.PDT_MODULES)[number], namaBerkas: string): Verdikt[] {
   const barisHeader = pdt.temukanBarisHeader(aoa, modul.kolomDipanen, modul.barisHeaderHint);
   const fakta = pdt.ekstrakBarisTtProductAnalytics(aoa, barisHeader);
   const untukKuadran = fakta.map((b, i) => ({
@@ -215,6 +251,17 @@ function periksaTiktok(aoa: Aoa, modul: (typeof pdt.PDT_MODULES)[number], namaBe
     pesananSku: b.pesananSku,
   }));
 
+  // Saringan mesin lama, disalin PERSIS dari `report/metrik.ts` `kuadranProduk`:
+  //   if (!nama || nama.length > 160) continue;
+  // Dipakai HANYA untuk menjelaskan selisih, tidak pernah untuk mengubah angka PDT.
+  const dipakaiMesinLama = (i: number): boolean => {
+    const n = fakta[i].namaProduk;
+    return !!n && n.length <= 160;
+  };
+  const subset = untukKuadran.filter((b) => dipakaiMesinLama(b.id));
+  const dibuang = untukKuadran.length - subset.length;
+  const ALASAN = 'bernama lebih dari 160 karakter — mesin lama membuangnya sebelum mengklasifikasi';
+
   const sheet = baseline.readSheet(aoa as never, namaBerkas);
   const lama = sheet ? report.kuadranProduk(sheet, report.REPORT_BENCH_V1) : null;
   if (!lama) {
@@ -222,8 +269,11 @@ function periksaTiktok(aoa: Aoa, modul: (typeof pdt.PDT_MODULES)[number], namaBe
     return [];
   }
 
-  console.log(`    ${fakta.length} baris produk (baris header ke-${barisHeader})`);
-  const ok: boolean[] = [];
+  console.log(
+    `    ${fakta.length} baris produk (baris header ke-${barisHeader})`
+    + (dibuang > 0 ? ` · mesin lama hanya memakai ${subset.length} (${dibuang} bernama >160 karakter)` : ''),
+  );
+  const ok: Verdikt[] = [];
 
   ok.push(cetakBanding(
     `mode BENCHMARK (quad_klik good=${report.REPORT_BENCH_V1.quad_klik.good} · quad_cvr good=${persen(report.REPORT_BENCH_V1.quad_cvr.good)})`,
@@ -233,6 +283,14 @@ function periksaTiktok(aoa: Aoa, modul: (typeof pdt.PDT_MODULES)[number], namaBe
       quad_cvr: report.REPORT_BENCH_V1.quad_cvr,
     })),
     KUADRAN_TIKTOK,
+    dibuang === 0 ? null : {
+      distribusi: hitung(pdt.klasifikasikanKuadranSkuTiktok(subset, {
+        quad_klik: report.REPORT_BENCH_V1.quad_klik,
+        quad_cvr: report.REPORT_BENCH_V1.quad_cvr,
+      })),
+      dibuang,
+      alasan: ALASAN,
+    },
   ));
 
   const trafficCr = untukKuadran.map((b) => ({
@@ -246,6 +304,18 @@ function periksaTiktok(aoa: Aoa, modul: (typeof pdt.PDT_MODULES)[number], namaBe
     Object.fromEntries(KUADRAN_TIKTOK.map((k) => [k, lama.relatif[k].length])),
     hitung(pdt.klasifikasikanKuadranRelatifTiktok(trafficCr, pdt.KLIK_MIN_UJI, ambang)),
     KUADRAN_TIKTOK,
+    dibuang === 0 ? null : (() => {
+      // Ambang percentile dihitung ULANG atas subset — mesin lama pun menurunkannya
+      // dari baris yang IA pakai, jadi memakai ambang katalog penuh di sini akan
+      // membandingkan dua hal berbeda dan melaporkan "beda" yang palsu.
+      const sub = trafficCr.filter((b) => dipakaiMesinLama(b.id));
+      const ambangSub = pdt.ambangRelatifKuadran(sub, pdt.KLIK_MIN_UJI, true);
+      return {
+        distribusi: hitung(pdt.klasifikasikanKuadranRelatifTiktok(sub, pdt.KLIK_MIN_UJI, ambangSub)),
+        dibuang,
+        alasan: ALASAN,
+      };
+    })(),
   ));
   return ok;
 }
@@ -255,7 +325,7 @@ function periksaTiktok(aoa: Aoa, modul: (typeof pdt.PDT_MODULES)[number], namaBe
 // ---------------------------------------------------------------------------
 const dasar = process.cwd();
 let diperiksa = 0;
-const semuaOk: boolean[] = [];
+const semuaOk: Verdikt[] = [];
 
 for (const file of berkasSemua) {
   let sheets: ReturnType<typeof sheetsDari>;
@@ -296,7 +366,21 @@ for (const file of berkasSemua) {
   }
 }
 
-const gagal = semuaOk.filter((x) => !x).length;
+const identik = semuaOk.filter((x) => x === 'identik').length;
+const setara = semuaOk.filter((x) => x === 'setara').length;
+const gagal = semuaOk.filter((x) => x === 'beda').length;
 console.log(`\n${'-'.repeat(60)}`);
-console.log(`${diperiksa} berkas kuadran diperiksa · ${semuaOk.length} pembandingan · ${gagal} BEDA`);
+console.log(
+  `${diperiksa} berkas kuadran diperiksa · ${semuaOk.length} pembandingan`
+  + ` · ${identik} identik · ${setara} setara · ${gagal} beda`,
+);
+if (setara > 0) {
+  console.log(
+    '  "setara" = angkanya berbeda HANYA karena mesin lama membuang sebagian baris;'
+    + '\n  atas baris yang sama klasifikasinya identik. Itu BUKAN kegagalan.',
+  );
+}
+// Exit code hanya melihat `beda`. Kalau `setara` ikut menggagalkan, skrip ini akan
+// selalu merah di katalog mana pun yang punya judul produk panjang, dan tanda
+// merah yang selalu menyala sama tidak bergunanya dengan tidak ada tanda.
 process.exit(gagal > 0 ? 1 : 0);
