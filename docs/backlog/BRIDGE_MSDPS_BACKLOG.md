@@ -183,3 +183,31 @@ divisi, nol perbaikan DB manual, idempotency terbukti lewat kirim-ganda
 sengaja, dan satu bulan buku ditutup dengan nol rupiah MEAGO di dalamnya.
 Latensi accept diinstrumentasi sejak hari pertama (mengukur, bukan menebak,
 kapan D10 perlu dilebarkan dari lead Account ke semua AM).
+
+---
+
+## ⚠️ Update verifikasi live 2026-09-16 — bagian "Prasyarat go-live" di atas usang
+
+Baris **"Prasyarat go-live"** dan **"Yang MASIH belum terjadi"** di atas
+(§ Bagian A dan § Bagian B) ditulis 2026-09-10/11, **sebelum** data go-live
+benar-benar diisi. Diverifikasi langsung ke `CDPS SG`
+(`egddxfcnrtecheiykhlf`) dan MSDPS (`mvcckptntrvzujqaoxxh`) hari ini —
+tutorial + status lengkap dan terkini ada di
+`docs/handoff/RUNBOOK_BRIDGE_MSDPS_OPERASIONAL.md`. Ringkasnya:
+
+- `external_service_map` **TIDAK lagi kosong** — 5 dari 6 `jenis` sudah
+  dipetakan (Account/Ads/Creative/Store Operation/KOL-Non-Roster ke
+  `MSV-202609-0002..0006`). **Hanya `Live Stream` yang belum dipetakan.**
+- Employee layanan **`SVC-MEAGO-BRIDGE`** ("MEAGO Bridge (layanan)",
+  `mcnmeadigital@gmail.com`) sudah dibuat dan aktif; `MEAGO_BRIDGE_EMPLOYEE_ID`
+  sudah benar di produksi (dibuktikan oleh accept yang berhasil di bawah).
+- **Satu deal pilot sudah berhasil mengalir ujung-ke-ujung**:
+  `DEAL-202609-0078` → `ORD-202609-0001` → `CLI-202609-0017`, `[Diterima]`
+  2026-09-12 06:29 UTC oleh Director. Transaksi Finance-nya `TRX-202609-0001`.
+  Klaim lama "nol deal pilot yang sudah dicoba end-to-end" **tidak lagi
+  benar**.
+
+**Yang benar-benar masih terbuka** (bukan salah baca, ini memang belum
+terjadi): pemetaan `Live Stream`, exit criteria Fase 1 (baru 1 dari 5–10
+deal — `cdps_outbox` sisi MSDPS mengonfirmasi cuma 1 baris `status='sent'`),
+dan UAT browser 3 aktor. Rinciannya + langkah lanjut ada di runbook di atas.
