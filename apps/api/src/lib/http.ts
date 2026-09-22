@@ -214,6 +214,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   MilestoneConflictError: 409, // milestone.ConflictError
   NoOutstandingError: 409, // finance.NoOutstandingError
   NotClosableError: 409, // sales.NotClosableError
+  PdtConflictError: 409, // pdt.ConflictError (M20 Gelombang C — sudah terbit/belum terbit)
   ProductExchangeConflictError: 409, // productexchange.ConflictError (PX-M2a, dicadangkan PX-M2b)
   ReqConflictError: 409, // req.ConflictError
   ScheduleExistsError: 409, // finance.ScheduleExistsError

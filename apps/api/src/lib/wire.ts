@@ -9973,6 +9973,115 @@ export function pdtKirimanRingkasToWire(k: pdt.PdtKirimanRingkas): PdtKirimanRin
   };
 }
 
+// ---------------------------------------------------------------------------
+// M20 Gelombang C — revisi insight + publikasi (`packages/domain/src/pdt.ts`
+// `bacaInsightKiriman`/`simpanInsightKiriman`/dst). `PdtLaporanInsightRowWire`
+// membawa TUJUH bidang (enam narasi + `tahap_narasi`) plus metadata revisi —
+// beda dari `PdtLaporanInsightWire` di atas, yang HANYA enam bidang narasi
+// tertanam di dalam payload laporan beku (nol metadata revisi di sana, nol
+// `tahap_narasi` — payload itu tidak pernah punya field itu).
+// ---------------------------------------------------------------------------
+
+export interface PdtLaporanInsightRowWire {
+  kiriman_id: number;
+  revisi: number;
+  sumber: 'mesin' | 'am';
+  ringkasan: string;
+  poin: string[];
+  rekomendasi_tinggi: PdtLaporanRekomendasiWire[];
+  rekomendasi_sedang: PdtLaporanRekomendasiWire[];
+  outlook: string;
+  indikator: { nama: string; target: string }[];
+  tahap_narasi: string | null;
+  ditulis_oleh: string;
+  ditulis_pada: string;
+}
+
+function pdtRekomendasiToWire(r: pdtCore.PdtLaporanRekomendasi): PdtLaporanRekomendasiWire {
+  return { judul: r.judul, target: r.target, dampak: r.dampak, timeline: r.timeline };
+}
+
+export function pdtLaporanInsightRowToWire(r: pdt.PdtLaporanInsightRow): PdtLaporanInsightRowWire {
+  return {
+    kiriman_id: r.kirimanId,
+    revisi: r.revisi,
+    sumber: r.sumber,
+    ringkasan: r.ringkasan,
+    poin: r.poin,
+    rekomendasi_tinggi: r.rekomendasiTinggi.map(pdtRekomendasiToWire),
+    rekomendasi_sedang: r.rekomendasiSedang.map(pdtRekomendasiToWire),
+    outlook: r.outlook,
+    indikator: r.indikator,
+    tahap_narasi: r.tahapNarasi,
+    ditulis_oleh: r.ditulisOleh,
+    ditulis_pada: r.ditulisPada,
+  };
+}
+
+export interface PdtLaporanPublikasiWire {
+  kiriman_id: number;
+  status: '[Draf]' | '[Terbit]' | '[Dicabut]';
+  insight_revisi: number;
+  diterbitkan_pada: string | null;
+  diterbitkan_oleh: string | null;
+  alasan_cabut: string | null;
+}
+
+export function pdtLaporanPublikasiToWire(p: pdt.PdtLaporanPublikasiRow): PdtLaporanPublikasiWire {
+  return {
+    kiriman_id: p.kirimanId,
+    status: p.status,
+    insight_revisi: p.insightRevisi,
+    diterbitkan_pada: p.diterbitkanPada,
+    diterbitkan_oleh: p.diterbitkanOleh,
+    alasan_cabut: p.alasanCabut,
+  };
+}
+
+/** GET .../insight — gabungan revisi terbaru + status publikasi (layar editor C-04). */
+export interface PdtInsightStateWire {
+  kiriman_id: number;
+  terbaru: PdtLaporanInsightRowWire;
+  publikasi: PdtLaporanPublikasiWire;
+}
+
+export function pdtInsightStateToWire(s: pdt.PdtInsightState): PdtInsightStateWire {
+  return {
+    kiriman_id: s.kirimanId,
+    terbaru: pdtLaporanInsightRowToWire(s.terbaru),
+    publikasi: pdtLaporanPublikasiToWire(s.publikasi),
+  };
+}
+
+/**
+ * PUT .../insight — body draf suntingan C-04, TUJUH bidang (enam narasi sama
+ * persis `PdtInsightDraftBody` di atas + `tahap_narasi`, bidang BARU khusus
+ * Gelombang C). Diteruskan UTUH ke `pdt.simpanInsightKiriman` (pass-through,
+ * pola sama `PdtInsightDraftBody`/`toPdtInsightDraft`) — validasi & pesan BI
+ * `[...]` tugas domain/core, bukan lapisan ini.
+ */
+export interface PdtInsightEditDraftBody {
+  ringkasan?: string;
+  poin?: string[];
+  rekomendasi_tinggi?: PdtLaporanRekomendasiWire[];
+  rekomendasi_sedang?: PdtLaporanRekomendasiWire[];
+  outlook?: string;
+  indikator?: { nama: string; target: string }[];
+  tahap_narasi?: string;
+}
+
+export function toPdtInsightEditDraft(b: PdtInsightEditDraftBody): pdt.PdtInsightEditDraft {
+  return {
+    ringkasan: b.ringkasan,
+    poin: b.poin,
+    rekomendasi_tinggi: b.rekomendasi_tinggi,
+    rekomendasi_sedang: b.rekomendasi_sedang,
+    outlook: b.outlook,
+    indikator: b.indikator,
+    tahap_narasi: b.tahap_narasi,
+  };
+}
+
 // --- Katalog pilar Section E (GET /strategi/katalog-pilar) -----------------
 
 /**
