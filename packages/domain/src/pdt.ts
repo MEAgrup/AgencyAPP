@@ -12,7 +12,7 @@
  * lain — konsisten dengan ketokan PX-M2a (`docs/DECISIONS.md` 2026-09-12).
  */
 import { randomUUID } from 'node:crypto';
-import { notification, pdt, permission, pilarkatalog, tz } from '@cdps/core';
+import { notification, pdt, permission, pilarkatalog, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { ACCOUNT_DIVISION, type Actor } from './account';
 import * as pdtVerdict from './pdt-verdict';
@@ -81,6 +81,14 @@ export class NotFoundError extends Error {
   constructor(message = 'toko klien (client_platform) tidak ditemukan') {
     super(message);
     this.name = 'PdtNotFoundError';
+  }
+}
+
+/** M20 Gelombang C — status publikasi salah (sudah/belum terbit) atau revisi tidak ada. */
+export class ConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PdtConflictError';
   }
 }
 
@@ -4409,6 +4417,477 @@ export async function bacaKirimanLaporanPdt(sql: Sql, actor: Actor, kirimanId: n
     id: row.id,
     clientPlatformId: row.client_platform_id,
     laporan: row.payload as pdt.PdtLaporanTiktok | pdt.PdtLaporanShopee,
+  };
+}
+
+// ===========================================================================
+// M20 Gelombang C (C-02) — revisi insight + publikasi (PRD R3-R5). Dua objek
+// TERPISAH dari `pdt_laporan_kiriman` (yang tetap beku total, R5): revisi
+// narasi (`pdt_laporan_insight`, append-only) dan status publikasi
+// (`pdt_laporan_publikasi`, satu baris per kiriman, status EKSKLUSIF lewat
+// `sm_transition` mesin `pdt_laporan`). Menggantikan keputusan 2026-09-16
+// yang menolak desain ini untuk G2-01-INSIGHT-EDIT — lihat `DECISIONS.md`
+// 2026-09-22 "M20-INSIGHT-REVISI-GANTI-2026-09-16" untuk alasan lengkap.
+//
+// `kirimLaporanPdt(insightDraft)` (G2-01-INSIGHT-EDIT, di atas) TETAP HIDUP —
+// itu jalur mengisi narasi MESIN revisi 0 di saat kirim. Verba-verba di bawah
+// ini adalah jalur BARU: menyunting narasi SETELAH kiriman beku (PDT Rule 23,
+// nol permintaan upload ulang), yang jalur lama tidak bisa menjawab.
+// ===========================================================================
+
+export const MSG_SUDAH_TERBIT = '[laporan sudah diterbitkan — cabut dulu sebelum menerbitkan ulang]';
+export const MSG_BELUM_TERBIT = '[laporan belum diterbitkan]';
+export const MSG_TAK_ADA_REVISI = '[tidak ada revisi insight baru untuk diterbitkan]';
+export const MSG_ALASAN_CABUT_WAJIB = '[alasan pencabutan wajib diisi]';
+export const MSG_INSIGHT_NOT_FOUND = '[insight laporan tidak ditemukan]';
+/** M20 §6 — sama pesan `MSG_LAPORAN_FORBIDDEN`, konstanta terpisah karena PRD §6 mendaftarnya sebagai baris sendiri. */
+export const MSG_FORBIDDEN = MSG_LAPORAN_FORBIDDEN;
+
+const PDT_LAPORAN_MACHINE = 'pdt_laporan';
+const PDT_LAPORAN_STATES = { draf: '[Draf]', terbit: '[Terbit]', dicabut: '[Dicabut]' } as const;
+
+/** Satu revisi narasi (`pdt_laporan_insight`) — bentuk domain camelCase. */
+export interface PdtLaporanInsightRow {
+  kirimanId: number;
+  revisi: number;
+  sumber: 'mesin' | 'am';
+  ringkasan: string;
+  poin: string[];
+  rekomendasiTinggi: pdt.PdtLaporanRekomendasi[];
+  rekomendasiSedang: pdt.PdtLaporanRekomendasi[];
+  outlook: string;
+  indikator: { nama: string; target: string }[];
+  tahapNarasi: string | null;
+  ditulisOleh: string;
+  ditulisPada: string;
+}
+
+/** Status publikasi (`pdt_laporan_publikasi`) — satu baris per kiriman. */
+export interface PdtLaporanPublikasiRow {
+  kirimanId: number;
+  status: '[Draf]' | '[Terbit]' | '[Dicabut]';
+  insightRevisi: number;
+  diterbitkanPada: string | null;
+  diterbitkanOleh: string | null;
+  alasanCabut: string | null;
+}
+
+interface InsightDbRow {
+  kiriman_id: number;
+  revisi: number;
+  sumber: 'mesin' | 'am';
+  ringkasan: string;
+  poin: unknown;
+  rekomendasi_tinggi: unknown;
+  rekomendasi_sedang: unknown;
+  outlook: string;
+  indikator: unknown;
+  tahap_narasi: string | null;
+  ditulis_oleh: string;
+  ditulis_pada: string;
+}
+
+function insightRowFromDb(r: InsightDbRow): PdtLaporanInsightRow {
+  return {
+    kirimanId: r.kiriman_id,
+    revisi: r.revisi,
+    sumber: r.sumber,
+    ringkasan: r.ringkasan,
+    poin: r.poin as string[],
+    rekomendasiTinggi: r.rekomendasi_tinggi as pdt.PdtLaporanRekomendasi[],
+    rekomendasiSedang: r.rekomendasi_sedang as pdt.PdtLaporanRekomendasi[],
+    outlook: r.outlook,
+    indikator: r.indikator as { nama: string; target: string }[],
+    tahapNarasi: r.tahap_narasi,
+    ditulisOleh: r.ditulis_oleh,
+    ditulisPada: r.ditulis_pada,
+  };
+}
+
+interface PublikasiDbRow {
+  kiriman_id: number;
+  status: '[Draf]' | '[Terbit]' | '[Dicabut]';
+  insight_revisi: number;
+  diterbitkan_pada: string | null;
+  diterbitkan_oleh: string | null;
+  alasan_cabut: string | null;
+}
+
+function publikasiRowFromDb(r: PublikasiDbRow): PdtLaporanPublikasiRow {
+  return {
+    kirimanId: r.kiriman_id,
+    status: r.status,
+    insightRevisi: r.insight_revisi,
+    diterbitkanPada: r.diterbitkan_pada,
+    diterbitkanOleh: r.diterbitkan_oleh,
+    alasanCabut: r.alasan_cabut,
+  };
+}
+
+/**
+ * ensureInsightSeed — idempotent: menjamin revisi 0 (mesin, dari
+ * `payload.insight` kiriman beku) dan baris `pdt_laporan_publikasi` `[Draf]`
+ * ada untuk `kirimanId`, TANPA menyentuh `kirimLaporanPdt` yang sudah ship
+ * (kiriman lama, dikirim sebelum Gelombang C, belum pernah punya baris ini).
+ * `ON CONFLICT DO NOTHING` + unique constraint membuatnya aman dipanggil
+ * bersamaan. HARUS dipanggil di dalam transaksi PEMANGGIL, sebelum baris
+ * publikasi dikunci `FOR UPDATE`.
+ */
+async function ensureInsightSeed(tx: TransactionSql, kirimanId: number): Promise<void> {
+  const [kiriman] = await tx<{ payload: { insight?: pdt.PdtLaporanInsight }; dikirim_oleh: string }[]>`
+    select payload, dikirim_oleh from pdt_laporan_kiriman where id = ${kirimanId}`;
+  if (!kiriman) throw new NotFoundError(MSG_KIRIMAN_NOT_FOUND);
+  const insight = kiriman.payload.insight;
+
+  // `ditulis_oleh` ber-FK ke employees — revisi 0 (mesin) tidak punya "penulis"
+  // manusia, jadi dipakai `dikirim_oleh` KIRIMAN (aktor yang menekan Kirim dan
+  // membekukan narasi mesin ini ke payload), bukan literal 'SYSTEM' (yang tidak
+  // pernah ada sebagai baris `employees`, beda dari kolom `created_by` generik
+  // yang tidak ber-FK di tabel lain).
+  await tx`
+    insert into pdt_laporan_insight
+      (kiriman_id, revisi, sumber, ringkasan, poin, rekomendasi_tinggi, rekomendasi_sedang, outlook, indikator, tahap_narasi, ditulis_oleh)
+    values
+      (${kirimanId}, 0, 'mesin', ${insight?.ringkasan ?? ''},
+       ${tx.json((insight?.poin ?? []) as unknown as PdtJsonParam)},
+       ${tx.json((insight?.rekomendasiTinggi ?? []) as unknown as PdtJsonParam)},
+       ${tx.json((insight?.rekomendasiSedang ?? []) as unknown as PdtJsonParam)},
+       ${insight?.outlook ?? ''},
+       ${tx.json((insight?.indikator ?? []) as unknown as PdtJsonParam)},
+       null, ${kiriman.dikirim_oleh})
+    on conflict (kiriman_id, revisi) do nothing`;
+
+  await tx`
+    insert into pdt_laporan_publikasi (kiriman_id, status, insight_revisi)
+    values (${kirimanId}, ${PDT_LAPORAN_STATES.draf}, 0)
+    on conflict (kiriman_id) do nothing`;
+}
+
+async function loadKirimanScope(sql: Queryable, kirimanId: number): Promise<{ clientPlatformId: number; ownerAm: string | null }> {
+  const [row] = await sql<{ client_platform_id: number }[]>`
+    select client_platform_id from pdt_laporan_kiriman where id = ${kirimanId}`;
+  if (!row) throw new NotFoundError(MSG_KIRIMAN_NOT_FOUND);
+  const cp = await loadClientPlatformUntukPdt(sql, row.client_platform_id);
+  return { clientPlatformId: row.client_platform_id, ownerAm: cp.assigned_am_id };
+}
+
+async function requireCanTulisInsight(sql: Queryable, actor: Actor, kirimanId: number): Promise<void> {
+  const { ownerAm } = await loadKirimanScope(sql, kirimanId);
+  if (!canKirimLaporan(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
+}
+
+/** Gabungan state yang dibutuhkan editor FE (C-04) sekaligus: revisi terbaru + status publikasi. */
+export interface PdtInsightState {
+  kirimanId: number;
+  terbaru: PdtLaporanInsightRow;
+  publikasi: PdtLaporanPublikasiRow;
+}
+
+/**
+ * bacaInsightKiriman — revisi TERBARU + status publikasi (C-04 layar editor).
+ * Permission sama `bacaKirimanLaporanPdt`: `canKirimLaporan` DITAMBAH OD
+ * read-only. Lazy-seed (revisi 0 + publikasi `[Draf]`) kalau kiriman ini
+ * belum pernah disentuh Gelombang C — jadi berlaku untuk kiriman LAMA sekalipun.
+ */
+export async function bacaInsightKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtInsightState> {
+  const { ownerAm } = await loadKirimanScope(sql, kirimanId);
+  if (!canKirimLaporan(actor, ownerAm) && !actor.role.od) throw new ForbiddenError(MSG_FORBIDDEN);
+
+  return withTransaction(sql, async (tx) => {
+    await ensureInsightSeed(tx, kirimanId);
+    const [terbaru] = await tx<InsightDbRow[]>`
+      select * from pdt_laporan_insight where kiriman_id = ${kirimanId} order by revisi desc limit 1`;
+    const [publikasi] = await tx<PublikasiDbRow[]>`
+      select * from pdt_laporan_publikasi where kiriman_id = ${kirimanId}`;
+    return { kirimanId, terbaru: insightRowFromDb(terbaru), publikasi: publikasiRowFromDb(publikasi) };
+  });
+}
+
+/** Bentuk wire/UI draf suntingan C-04 — field longgar tipenya, gerbangnya fungsi ini (pola sama `PdtInsightDraft`). */
+export interface PdtInsightEditDraft {
+  ringkasan?: unknown;
+  poin?: unknown;
+  rekomendasi_tinggi?: unknown;
+  rekomendasi_sedang?: unknown;
+  outlook?: unknown;
+  indikator?: unknown;
+  tahap_narasi?: unknown;
+}
+
+const MSG_TAHAP_NARASI_MARKUP = '[teks narasi tahap tidak boleh memuat tanda < atau > — tulis sebagai teks biasa]';
+const TAHAP_NARASI_MAX = pdt.PDT_INSIGHT_MAX.outlook;
+
+function normTahapNarasi(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : '';
+  if (!s) return null;
+  if (s.includes('<') || s.includes('>')) throw new pdt.PdtInsightDraftError(MSG_TAHAP_NARASI_MARKUP);
+  if (s.length > TAHAP_NARASI_MAX) throw new pdt.PdtInsightDraftError(pdt.msgPdtInsightTerlaluPanjang('narasi tahap', TAHAP_NARASI_MAX));
+  return s;
+}
+
+/**
+ * simpanInsightKiriman — AM menyunting narasi SETELAH kirim (R3): menulis
+ * revisi BARU (append-only), `sumber='am'`. Enam bidang bersama
+ * `normalizePdtInsightDraft` yang SUDAH ada (`pdt/insight-edit.ts`,
+ * G2-01-INSIGHT-EDIT — nol duplikasi validasi); `tahap_narasi` (bidang
+ * KETUJUH, khusus C-02, tidak ada di jalur pra-kirim) divalidasi di sini.
+ * TIDAK menyentuh `pdt_laporan_publikasi` — menyimpan aman, hanya
+ * Terbitkan/Terbitkan Ulang yang memindahkan apa yang klien lihat (R4).
+ */
+export async function simpanInsightKiriman(sql: Sql, actor: Actor, kirimanId: number, draft: PdtInsightEditDraft): Promise<PdtLaporanInsightRow> {
+  await requireCanTulisInsight(sql, actor, kirimanId);
+
+  let isi: pdt.PdtLaporanInsight;
+  let tahapNarasi: string | null;
+  try {
+    isi = pdt.normalizePdtInsightDraft(draft);
+    tahapNarasi = normTahapNarasi(draft.tahap_narasi);
+  } catch (err) {
+    if (err instanceof pdt.PdtInsightDraftError) throw new ValidationError(err.message);
+    throw err;
+  }
+
+  return withTransaction(sql, async (tx) => {
+    await ensureInsightSeed(tx, kirimanId);
+    // Postgres menolak FOR UPDATE bersama fungsi agregat (MAX) — kunci baris kiriman
+    // sebagai titik serialisasi (semua penulis insight kiriman yang sama berebut kunci
+    // yang SAMA), baru hitung revisi berikutnya.
+    await tx`select id from pdt_laporan_kiriman where id = ${kirimanId} for update`;
+    const [{ next }] = await tx<{ next: number }[]>`
+      select coalesce(max(revisi), 0) + 1 as next from pdt_laporan_insight where kiriman_id = ${kirimanId}`;
+
+    const [row] = await tx<InsightDbRow[]>`
+      insert into pdt_laporan_insight
+        (kiriman_id, revisi, sumber, ringkasan, poin, rekomendasi_tinggi, rekomendasi_sedang, outlook, indikator, tahap_narasi, ditulis_oleh)
+      values
+        (${kirimanId}, ${next}, 'am', ${isi.ringkasan},
+         ${tx.json(isi.poin as unknown as PdtJsonParam)},
+         ${tx.json(isi.rekomendasiTinggi as unknown as PdtJsonParam)},
+         ${tx.json(isi.rekomendasiSedang as unknown as PdtJsonParam)},
+         ${isi.outlook}, ${tx.json(isi.indikator as unknown as PdtJsonParam)}, ${tahapNarasi}, ${actor.employeeId})
+      returning *`;
+
+    await executors(tx).audit.insertAudit({
+      entityType: 'pdt_laporan_insight',
+      entityId: `${kirimanId}:${next}`,
+      actorEmployeeId: actor.employeeId,
+      action: 'pdt_insight_disunting',
+      beforeJson: null,
+      afterJson: { kiriman_id: kirimanId, revisi: next, sumber: 'am' },
+      createdBy: actor.employeeId,
+    });
+
+    return insightRowFromDb(row);
+  });
+}
+
+/**
+ * resetInsightKiriman — tombol "Reset ke narasi mesin" (C-04): menulis revisi
+ * BARU yang isinya SALINAN revisi 0 (`sumber` tetap `'am'` — `ck_..._revisi_sumber`
+ * menegakkan revisi 0 SELALU `sumber='mesin'`, jadi reset tidak bisa memalsukan
+ * revisi 0 baru). Bukan menghapus suntingan AM — riwayat revisi tetap utuh.
+ */
+export async function resetInsightKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtLaporanInsightRow> {
+  await requireCanTulisInsight(sql, actor, kirimanId);
+
+  return withTransaction(sql, async (tx) => {
+    await ensureInsightSeed(tx, kirimanId);
+    const [mesin] = await tx<InsightDbRow[]>`
+      select * from pdt_laporan_insight where kiriman_id = ${kirimanId} and revisi = 0`;
+    // Postgres menolak FOR UPDATE bersama fungsi agregat (MAX) — lihat catatan sama di `simpanInsightKiriman`.
+    await tx`select id from pdt_laporan_kiriman where id = ${kirimanId} for update`;
+    const [{ next }] = await tx<{ next: number }[]>`
+      select coalesce(max(revisi), 0) + 1 as next from pdt_laporan_insight where kiriman_id = ${kirimanId}`;
+
+    const [row] = await tx<InsightDbRow[]>`
+      insert into pdt_laporan_insight
+        (kiriman_id, revisi, sumber, ringkasan, poin, rekomendasi_tinggi, rekomendasi_sedang, outlook, indikator, tahap_narasi, ditulis_oleh)
+      values
+        (${kirimanId}, ${next}, 'am', ${mesin.ringkasan},
+         ${tx.json(mesin.poin as unknown as PdtJsonParam)},
+         ${tx.json(mesin.rekomendasi_tinggi as unknown as PdtJsonParam)},
+         ${tx.json(mesin.rekomendasi_sedang as unknown as PdtJsonParam)},
+         ${mesin.outlook}, ${tx.json(mesin.indikator as unknown as PdtJsonParam)}, null, ${actor.employeeId})
+      returning *`;
+
+    await executors(tx).audit.insertAudit({
+      entityType: 'pdt_laporan_insight',
+      entityId: `${kirimanId}:${next}`,
+      actorEmployeeId: actor.employeeId,
+      action: 'pdt_insight_direset',
+      beforeJson: null,
+      afterJson: { kiriman_id: kirimanId, revisi: next, sumber: 'am', salin_dari_revisi: 0 },
+      createdBy: actor.employeeId,
+    });
+
+    return insightRowFromDb(row);
+  });
+}
+
+/**
+ * runPdtLaporanTransition — `sm_transition` mesin `pdt_laporan` di dalam
+ * transaksi pemanggil (pola sama `runTransition` di `interview.ts`). Edge
+ * mesin ini NOL `require_lead` (lihat docblock migrasi C-01) — gerbang
+ * siapa-boleh sudah dievaluasi pemanggil (`requireCanTulisInsight`) SEBELUM
+ * fungsi ini dipanggil, jadi `role_denied` seharusnya tidak pernah terjadi
+ * di sini; tetap dipetakan untuk kelengkapan pola.
+ */
+async function runPdtLaporanTransition(tx: TransactionSql, actor: Actor, kirimanId: number, to: string): Promise<void> {
+  const res = await statemachine.transition(executors(tx).sm, {
+    machine: PDT_LAPORAN_MACHINE,
+    entityType: 'pdt_laporan_publikasi',
+    table: 'pdt_laporan_publikasi',
+    idColumn: 'kiriman_id',
+    entityId: String(kirimanId),
+    to,
+    actor,
+  });
+  if (!res.ok) {
+    throw res.code === 'role_denied' ? new ForbiddenError(res.message) : new ConflictError(res.message);
+  }
+}
+
+/**
+ * terbitkanKiriman — publikasi PERTAMA (Flow C, R4/R5): `[Draf]` → `[Terbit]`,
+ * paku `insight_revisi` ke revisi TERBARU saat ini. Dipanggil saat status
+ * BUKAN `[Draf]` ⇒ `MSG_SUDAH_TERBIT` (arahkan ke `terbitkanUlangKiriman`,
+ * bukan pesan generik `sm_transition` — pengecekan status di sini MENDAHULUI
+ * panggilan `sm_transition` supaya pesannya persis PRD §6, bukan
+ * `block_message` mesin yang genderik untuk seluruh edge).
+ */
+export async function terbitkanKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtLaporanPublikasiRow> {
+  await requireCanTulisInsight(sql, actor, kirimanId);
+
+  return withTransaction(sql, async (tx) => {
+    await ensureInsightSeed(tx, kirimanId);
+    const [pub] = await tx<PublikasiDbRow[]>`
+      select * from pdt_laporan_publikasi where kiriman_id = ${kirimanId} for update`;
+    if (pub.status !== PDT_LAPORAN_STATES.draf) throw new ConflictError(MSG_SUDAH_TERBIT);
+
+    const [{ revisi: terbaru }] = await tx<{ revisi: number }[]>`
+      select max(revisi) as revisi from pdt_laporan_insight where kiriman_id = ${kirimanId}`;
+
+    await runPdtLaporanTransition(tx, actor, kirimanId, PDT_LAPORAN_STATES.terbit);
+    const [row] = await tx<PublikasiDbRow[]>`
+      update pdt_laporan_publikasi
+         set insight_revisi = ${terbaru}, diterbitkan_pada = now(), diterbitkan_oleh = ${actor.employeeId}, alasan_cabut = null
+       where kiriman_id = ${kirimanId}
+      returning *`;
+    return publikasiRowFromDb(row);
+  });
+}
+
+/**
+ * terbitkanUlangKiriman — "Terbitkan pembaruan" (R4) SETELAH laporan pernah
+ * dicabut: `[Dicabut]` → `[Terbit]`, paku pindah ke revisi TERBARU. Dipanggil
+ * saat status `[Draf]` (belum pernah terbit sama sekali) ⇒ `MSG_BELUM_TERBIT`;
+ * saat masih `[Terbit]` ⇒ `MSG_SUDAH_TERBIT` (harus Cabut dulu — R4/R5: satu-
+ * satunya jalan memindahkan paku sementara status TETAP `[Terbit]` bukan
+ * bagian mesin ini; PRD menyatakan "cabut dulu sebelum menerbitkan ulang").
+ */
+export async function terbitkanUlangKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtLaporanPublikasiRow> {
+  await requireCanTulisInsight(sql, actor, kirimanId);
+
+  return withTransaction(sql, async (tx) => {
+    await ensureInsightSeed(tx, kirimanId);
+    const [pub] = await tx<PublikasiDbRow[]>`
+      select * from pdt_laporan_publikasi where kiriman_id = ${kirimanId} for update`;
+    if (pub.status === PDT_LAPORAN_STATES.draf) throw new ConflictError(MSG_BELUM_TERBIT);
+    if (pub.status === PDT_LAPORAN_STATES.terbit) throw new ConflictError(MSG_SUDAH_TERBIT);
+
+    const [{ revisi: terbaru }] = await tx<{ revisi: number }[]>`
+      select max(revisi) as revisi from pdt_laporan_insight where kiriman_id = ${kirimanId}`;
+    if (terbaru === pub.insight_revisi) throw new ConflictError(MSG_TAK_ADA_REVISI);
+
+    await runPdtLaporanTransition(tx, actor, kirimanId, PDT_LAPORAN_STATES.terbit);
+    const [row] = await tx<PublikasiDbRow[]>`
+      update pdt_laporan_publikasi
+         set insight_revisi = ${terbaru}, diterbitkan_pada = now(), diterbitkan_oleh = ${actor.employeeId}, alasan_cabut = null
+       where kiriman_id = ${kirimanId}
+      returning *`;
+    return publikasiRowFromDb(row);
+  });
+}
+
+/**
+ * cabutKiriman — `[Terbit]` → `[Dicabut]` (R5), alasan WAJIB. R6 (hitung
+ * ulang `total_sales`/Health Score/baseline Ads DALAM transaksi yang sama)
+ * SENGAJA di luar cakupan fungsi ini — Gelombang E (E-02) belum ship;
+ * mekanismenya belum ada sama sekali, sama pola `kirimLaporanPdt` yang
+ * mencatat Rule 24 sengaja di luar cakupan saat pertama ditulis.
+ */
+export async function cabutKiriman(sql: Sql, actor: Actor, kirimanId: number, alasan: string): Promise<PdtLaporanPublikasiRow> {
+  await requireCanTulisInsight(sql, actor, kirimanId);
+  const alasanTrim = typeof alasan === 'string' ? alasan.trim() : '';
+  if (!alasanTrim) throw new ValidationError(MSG_ALASAN_CABUT_WAJIB);
+
+  return withTransaction(sql, async (tx) => {
+    await ensureInsightSeed(tx, kirimanId);
+    const [pub] = await tx<PublikasiDbRow[]>`
+      select * from pdt_laporan_publikasi where kiriman_id = ${kirimanId} for update`;
+    if (pub.status !== PDT_LAPORAN_STATES.terbit) throw new ConflictError(MSG_BELUM_TERBIT);
+
+    // `alasan_cabut` ditulis SEBELUM transisi: `ck_pdt_laporan_publikasi_alasan_cabut`
+    // menolak status='[Dicabut]' dengan alasan_cabut NULL, dan itu diperiksa PER STATEMENT
+    // (bukan hanya saat commit) — `sm_transition` sendiri hanya meng-UPDATE kolom status,
+    // jadi alasan_cabut harus sudah terisi SEBELUM statement itu berjalan.
+    await tx`update pdt_laporan_publikasi set alasan_cabut = ${alasanTrim} where kiriman_id = ${kirimanId}`;
+    await runPdtLaporanTransition(tx, actor, kirimanId, PDT_LAPORAN_STATES.dicabut);
+    const [row] = await tx<PublikasiDbRow[]>`select * from pdt_laporan_publikasi where kiriman_id = ${kirimanId}`;
+    return publikasiRowFromDb(row);
+  });
+}
+
+/**
+ * insightUntukMode — narasi mana yang dilihat SETIAP mode saat render (R4):
+ * `internal` = revisi TERBARU (pratinjau); `klien` = revisi TERPAKU di
+ * `pdt_laporan_publikasi.insight_revisi` (default 0/mesin sebelum AM
+ * menerbitkan apa pun — bukan gerbang akses, jalur AM B-03 ini tetap
+ * pratinjau; gerbang klien SESUNGGUHNYA ada di portal, R10/Gelombang D).
+ * Nol pemeriksaan permission di sini — pemanggil (`laporanUntukRenderPdt`)
+ * sudah lewat gerbang `bacaKirimanLaporanPdt`.
+ */
+export async function insightUntukMode(sql: Sql, kirimanId: number, mode: pdt.RenderMode): Promise<PdtLaporanInsightRow> {
+  return withTransaction(sql, async (tx) => {
+    await ensureInsightSeed(tx, kirimanId);
+    if (mode === 'internal') {
+      const [row] = await tx<InsightDbRow[]>`
+        select * from pdt_laporan_insight where kiriman_id = ${kirimanId} order by revisi desc limit 1`;
+      return insightRowFromDb(row);
+    }
+    const [pub] = await tx<PublikasiDbRow[]>`select insight_revisi from pdt_laporan_publikasi where kiriman_id = ${kirimanId}`;
+    const [row] = await tx<InsightDbRow[]>`
+      select * from pdt_laporan_insight where kiriman_id = ${kirimanId} and revisi = ${pub.insight_revisi}`;
+    if (!row) throw new NotFoundError(MSG_INSIGHT_NOT_FOUND);
+    return insightRowFromDb(row);
+  });
+}
+
+/**
+ * laporanUntukRenderPdt — komposisi B-03 (`bacaKirimanLaporanPdt`, snapshot
+ * beku APA ADANYA) + C-02 (`insightUntukMode`, narasi per mode): overlay
+ * `laporan.insight` dengan revisi yang tepat SEBELUM `renderLaporanHtml`
+ * dipanggil, supaya poin manual AM terbaca (PRD §8 langkah 5) tanpa
+ * mengubah `bacaKirimanLaporanPdt` yang sudah ship (route B-03 tinggal
+ * mengganti pemanggilan). `tahapNarasi` TIDAK di-overlay — `render.ts` belum
+ * punya slot untuk itu (di luar cakupan C-01..C-05, dicatat di PDT_BACKLOG).
+ */
+export async function laporanUntukRenderPdt(sql: Sql, actor: Actor, kirimanId: number, mode: pdt.RenderMode): Promise<PdtKirimanUntukRender> {
+  const hasil = await bacaKirimanLaporanPdt(sql, actor, kirimanId);
+  const insight = await insightUntukMode(sql, kirimanId, mode);
+  return {
+    ...hasil,
+    laporan: {
+      ...hasil.laporan,
+      insight: {
+        ringkasan: insight.ringkasan,
+        poin: insight.poin,
+        rekomendasiTinggi: insight.rekomendasiTinggi,
+        rekomendasiSedang: insight.rekomendasiSedang,
+        outlook: insight.outlook,
+        indikator: insight.indikator,
+      },
+    },
   };
 }
 

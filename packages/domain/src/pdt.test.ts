@@ -46,6 +46,20 @@ import {
   MSG_KIRIMAN_NOT_FOUND,
   MSG_LAPORAN_FORBIDDEN,
   riwayatKirimanPdt,
+  ConflictError,
+  bacaInsightKiriman,
+  simpanInsightKiriman,
+  resetInsightKiriman,
+  terbitkanKiriman,
+  terbitkanUlangKiriman,
+  cabutKiriman,
+  insightUntukMode,
+  laporanUntukRenderPdt,
+  MSG_SUDAH_TERBIT,
+  MSG_BELUM_TERBIT,
+  MSG_TAK_ADA_REVISI,
+  MSG_ALASAN_CABUT_WAJIB,
+  MSG_INSIGHT_NOT_FOUND,
   tambahVersiBenchmark,
   previewUploadBatch,
   rakitInputSkorShopee,
@@ -207,6 +221,20 @@ afterEach(async () => {
   // pdt_fact_shop_daily (sesi 34, riset G2-01, tt_shop_analytics) — sama alasan (FK ke
   // pdt_upload_batch TANPA ON DELETE CASCADE).
   await sql`delete from pdt_fact_shop_daily where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
+  // pdt_laporan_publikasi/pdt_laporan_insight (M20 Gelombang C) — FK ke pdt_laporan_kiriman.id
+  // TANPA ON DELETE CASCADE, jadi harus dibersihkan SEBELUM pdt_laporan_kiriman di bawah.
+  // pdt_laporan_insight menolak DELETE (append-only, `trg_pdt_laporan_insight_frozen`) —
+  // langkah sama `dailyactivity.test.ts` untuk `daily_activities`: nonaktifkan trigger
+  // sementara, hapus, aktifkan lagi.
+  await sql`delete from pdt_laporan_publikasi where kiriman_id in (
+    select id from pdt_laporan_kiriman where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%'))`;
+  await sql`alter table pdt_laporan_insight disable trigger trg_pdt_laporan_insight_frozen`;
+  try {
+    await sql`delete from pdt_laporan_insight where kiriman_id in (
+      select id from pdt_laporan_kiriman where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%'))`;
+  } finally {
+    await sql`alter table pdt_laporan_insight enable trigger trg_pdt_laporan_insight_frozen`;
+  }
   // pdt_laporan_kiriman (kirimLaporanPdt, Flow B langkah 4) — FK ke client_platforms TANPA
   // ON DELETE CASCADE, sama alasan baris-baris di atas.
   await sql`delete from pdt_laporan_kiriman where client_platform_id in (select id from client_platforms where created_by like 'ZZ-%')`;
@@ -6350,6 +6378,217 @@ describeDb('bacaKirimanLaporanPdt (M20 B-03) — snapshot beku satu kiriman, das
     const dikirim = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
     const hasil = await bacaKirimanLaporanPdt(sql, ownerActor(), dikirim.id);
     expect(hasil.laporan).toEqual(dikirim.laporan);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M20 Gelombang C (C-02/C-05) — revisi insight + publikasi. `DRAFT` bidang
+// minimal yang lolos `normalizePdtInsightDraft` (poin/rekomendasi/indikator
+// non-kosong wajib lengkap — lihat `insight-edit.ts`).
+// ---------------------------------------------------------------------------
+describeDb('M20 Gelombang C — insight + publikasi laporan PDT', () => {
+  // `ditulis_oleh`/`diterbitkan_oleh` ber-FK ke employees — accountLead()/director() (di
+  // luar OWNER_AM) belum pernah jadi baris employees sungguhan di file ini karena tak satu
+  // pun verba SEBELUM Gelombang C menulis kolom ber-FK actor selain pemilik/OD (read-only).
+  beforeAll(async () => {
+    if (!sql) return;
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values
+        (${accountLead().employeeId}, 'Lead Uji Gelombang C', 'zpdt-spv-c@mea.co.id', 'Account', 'Account Lead', true, 'SYSTEM'),
+        (${director().employeeId}, 'Director Uji Gelombang C', 'zpdt-dir-c@mea.co.id', 'Account', 'Director', true, 'SYSTEM')
+      on conflict (employee_id) do nothing`;
+  });
+
+  async function fixture(platform: 'TikTok Shop' | 'Shopee' = 'TikTok Shop'): Promise<{ cpId: number; kirimanId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, platform);
+    const dikirim = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    return { cpId, kirimanId: dikirim.id };
+  }
+
+  const DRAFT = {
+    ringkasan: 'Ringkasan suntingan AM',
+    poin: ['Poin manual pertama'],
+    rekomendasi_tinggi: [{ judul: 'J', target: 'T', dampak: 'D', timeline: 'TL' }],
+    rekomendasi_sedang: [],
+    outlook: 'Outlook suntingan AM',
+    indikator: [{ nama: 'N', target: 'T' }],
+    tahap_narasi: 'Fokus Agustus adalah menstabilkan ROAS',
+  };
+
+  describe('bacaInsightKiriman — lazy-seed revisi 0 + publikasi [Draf]', () => {
+    it('kiriman lama (belum pernah disentuh Gelombang C) di-lazy-seed dari payload.insight', async () => {
+      const { kirimanId } = await fixture();
+      const state = await bacaInsightKiriman(sql, ownerActor(), kirimanId);
+      expect(state.terbaru.revisi).toBe(0);
+      expect(state.terbaru.sumber).toBe('mesin');
+      expect(state.publikasi.status).toBe('[Draf]');
+      expect(state.publikasi.insightRevisi).toBe(0);
+    });
+
+    it('AM lain ⇒ ForbiddenError; OD boleh baca (read-only)', async () => {
+      const { kirimanId } = await fixture();
+      await expect(bacaInsightKiriman(sql, otherAm(), kirimanId)).rejects.toThrow(MSG_LAPORAN_FORBIDDEN);
+      await expect(bacaInsightKiriman(sql, od(), kirimanId)).resolves.toBeTruthy();
+    });
+
+    it('kirimanId tidak ada ⇒ NotFoundError', async () => {
+      await expect(bacaInsightKiriman(sql, ownerActor(), 999_999_999)).rejects.toThrow(MSG_KIRIMAN_NOT_FOUND);
+    });
+  });
+
+  describe('simpanInsightKiriman — revisi baru append-only (R3)', () => {
+    it('menulis revisi 1 sumber am, revisi 0 (mesin) tetap ada', async () => {
+      const { kirimanId } = await fixture();
+      const r1 = await simpanInsightKiriman(sql, ownerActor(), kirimanId, DRAFT);
+      expect(r1.revisi).toBe(1);
+      expect(r1.sumber).toBe('am');
+      expect(r1.tahapNarasi).toBe(DRAFT.tahap_narasi);
+
+      const state = await bacaInsightKiriman(sql, ownerActor(), kirimanId);
+      expect(state.terbaru.revisi).toBe(1);
+      // publikasi TIDAK bergerak — R4: menyimpan aman, hanya Terbitkan yang memindahkan paku.
+      expect(state.publikasi.insightRevisi).toBe(0);
+    });
+
+    it('draf tidak valid ⇒ ValidationError (pesan sama persis normalizePdtInsightDraft)', async () => {
+      const { kirimanId } = await fixture();
+      await expect(simpanInsightKiriman(sql, ownerActor(), kirimanId, { ...DRAFT, ringkasan: '' }))
+        .rejects.toThrow('[ringkasan eksekutif wajib diisi]');
+    });
+
+    it('AM lain ⇒ ForbiddenError; lead/Director Account boleh menyunting', async () => {
+      const { kirimanId } = await fixture();
+      await expect(simpanInsightKiriman(sql, otherAm(), kirimanId, DRAFT)).rejects.toThrow(MSG_LAPORAN_FORBIDDEN);
+      const lead = await simpanInsightKiriman(sql, accountLead(), kirimanId, DRAFT); // revisi 1 (0 = mesin)
+      expect(lead.revisi).toBe(1);
+      const dir = await simpanInsightKiriman(sql, director(), kirimanId, DRAFT); // revisi 2
+      expect(dir.revisi).toBe(2);
+    });
+  });
+
+  it('immutability — UPDATE/DELETE pdt_laporan_insight ditolak trigger', async () => {
+    const { kirimanId } = await fixture();
+    const r1 = await simpanInsightKiriman(sql, ownerActor(), kirimanId, DRAFT);
+    await expect(sql`update pdt_laporan_insight set ringkasan = 'diubah' where kiriman_id = ${kirimanId} and revisi = ${r1.revisi}`)
+      .rejects.toThrow(/append-only/);
+    await expect(sql`delete from pdt_laporan_insight where kiriman_id = ${kirimanId} and revisi = ${r1.revisi}`)
+      .rejects.toThrow(/append-only/);
+  });
+
+  describe('resetInsightKiriman — tombol "Reset ke narasi mesin"', () => {
+    it('menulis revisi baru = salinan revisi 0, sumber tetap am', async () => {
+      const { kirimanId } = await fixture();
+      await simpanInsightKiriman(sql, ownerActor(), kirimanId, DRAFT); // revisi 1, menyimpang dari mesin
+      const reset = await resetInsightKiriman(sql, ownerActor(), kirimanId);
+      expect(reset.revisi).toBe(2);
+      expect(reset.sumber).toBe('am');
+      expect(reset.ringkasan).not.toBe(DRAFT.ringkasan); // = ringkasan mesin (revisi 0), bukan suntingan AM
+    });
+  });
+
+  describe('Flow publikasi — Draf → Terbit ⇄ Dicabut (R4/R5)', () => {
+    it('terbitkanKiriman dari [Draf]: paku ke revisi terbaru, status [Terbit]', async () => {
+      const { kirimanId } = await fixture();
+      await simpanInsightKiriman(sql, ownerActor(), kirimanId, DRAFT);
+      const pub = await terbitkanKiriman(sql, ownerActor(), kirimanId);
+      expect(pub.status).toBe('[Terbit]');
+      expect(pub.insightRevisi).toBe(1);
+      expect(pub.diterbitkanOleh).toBe(OWNER_AM);
+    });
+
+    it('terbitkanKiriman dipanggil lagi saat sudah [Terbit] ⇒ ConflictError MSG_SUDAH_TERBIT', async () => {
+      const { kirimanId } = await fixture();
+      await terbitkanKiriman(sql, ownerActor(), kirimanId);
+      await expect(terbitkanKiriman(sql, ownerActor(), kirimanId)).rejects.toThrow(MSG_SUDAH_TERBIT);
+    });
+
+    it('cabutKiriman tanpa alasan ⇒ ValidationError MSG_ALASAN_CABUT_WAJIB', async () => {
+      const { kirimanId } = await fixture();
+      await terbitkanKiriman(sql, ownerActor(), kirimanId);
+      await expect(cabutKiriman(sql, ownerActor(), kirimanId, '')).rejects.toThrow(MSG_ALASAN_CABUT_WAJIB);
+    });
+
+    it('cabutKiriman saat belum [Terbit] ⇒ ConflictError MSG_BELUM_TERBIT', async () => {
+      const { kirimanId } = await fixture();
+      await expect(cabutKiriman(sql, ownerActor(), kirimanId, 'salah kirim')).rejects.toThrow(MSG_BELUM_TERBIT);
+    });
+
+    it('cabutKiriman: [Terbit] → [Dicabut], alasan tersimpan', async () => {
+      const { kirimanId } = await fixture();
+      await terbitkanKiriman(sql, ownerActor(), kirimanId);
+      const pub = await cabutKiriman(sql, ownerActor(), kirimanId, 'berkas tertukar');
+      expect(pub.status).toBe('[Dicabut]');
+      expect(pub.alasanCabut).toBe('berkas tertukar');
+    });
+
+    it('terbitkanUlangKiriman saat [Draf] (belum pernah terbit) ⇒ ConflictError MSG_BELUM_TERBIT', async () => {
+      const { kirimanId } = await fixture();
+      await expect(terbitkanUlangKiriman(sql, ownerActor(), kirimanId)).rejects.toThrow(MSG_BELUM_TERBIT);
+    });
+
+    it('terbitkanUlangKiriman saat masih [Terbit] ⇒ ConflictError MSG_SUDAH_TERBIT (cabut dulu)', async () => {
+      const { kirimanId } = await fixture();
+      await terbitkanKiriman(sql, ownerActor(), kirimanId);
+      await expect(terbitkanUlangKiriman(sql, ownerActor(), kirimanId)).rejects.toThrow(MSG_SUDAH_TERBIT);
+    });
+
+    it('terbitkanUlangKiriman: [Dicabut] → [Terbit], paku pindah ke revisi terbaru', async () => {
+      const { kirimanId } = await fixture();
+      await terbitkanKiriman(sql, ownerActor(), kirimanId); // paku revisi 0
+      await cabutKiriman(sql, ownerActor(), kirimanId, 'perbaikan angka');
+      await simpanInsightKiriman(sql, ownerActor(), kirimanId, DRAFT); // revisi 1 baru
+
+      const pub = await terbitkanUlangKiriman(sql, ownerActor(), kirimanId);
+      expect(pub.status).toBe('[Terbit]');
+      expect(pub.insightRevisi).toBe(1);
+      expect(pub.alasanCabut).toBeNull();
+    });
+
+    it('terbitkanUlangKiriman tanpa revisi baru sejak paku terakhir ⇒ ConflictError MSG_TAK_ADA_REVISI', async () => {
+      const { kirimanId } = await fixture();
+      await terbitkanKiriman(sql, ownerActor(), kirimanId); // paku revisi 0
+      await cabutKiriman(sql, ownerActor(), kirimanId, 'sementara');
+      // nol simpanInsightKiriman sejak itu — revisi terbaru MASIH 0, sama dengan paku.
+      await expect(terbitkanUlangKiriman(sql, ownerActor(), kirimanId)).rejects.toThrow(MSG_TAK_ADA_REVISI);
+    });
+  });
+
+  describe('insightUntukMode / laporanUntukRenderPdt — R4 paku vs terbaru', () => {
+    it("mode 'internal' selalu revisi TERBARU, walau belum diterbitkan", async () => {
+      const { kirimanId } = await fixture();
+      await simpanInsightKiriman(sql, ownerActor(), kirimanId, DRAFT);
+      const insight = await insightUntukMode(sql, kirimanId, 'internal');
+      expect(insight.revisi).toBe(1);
+      expect(insight.ringkasan).toBe(DRAFT.ringkasan);
+    });
+
+    it("mode 'klien' membaca revisi TERPAKU, bukan yang terbaru", async () => {
+      const { kirimanId } = await fixture();
+      await terbitkanKiriman(sql, ownerActor(), kirimanId); // paku 0 (mesin)
+      await simpanInsightKiriman(sql, ownerActor(), kirimanId, DRAFT); // revisi 1, TIDAK dipublikasikan
+
+      const klien = await insightUntukMode(sql, kirimanId, 'klien');
+      expect(klien.revisi).toBe(0);
+      expect(klien.sumber).toBe('mesin');
+
+      const internal = await insightUntukMode(sql, kirimanId, 'internal');
+      expect(internal.revisi).toBe(1);
+    });
+
+    it('laporanUntukRenderPdt meng-overlay laporan.insight dengan revisi yang tepat per mode', async () => {
+      const { kirimanId } = await fixture();
+      await terbitkanKiriman(sql, ownerActor(), kirimanId);
+      await simpanInsightKiriman(sql, ownerActor(), kirimanId, DRAFT);
+
+      const internal = await laporanUntukRenderPdt(sql, ownerActor(), kirimanId, 'internal');
+      expect(internal.laporan.insight.ringkasan).toBe(DRAFT.ringkasan);
+
+      const klien = await laporanUntukRenderPdt(sql, ownerActor(), kirimanId, 'klien');
+      expect(klien.laporan.insight.ringkasan).not.toBe(DRAFT.ringkasan);
+    });
   });
 });
 

@@ -856,6 +856,11 @@ const WIRE_TO_FE: Record<string, string> = {
   // PDT G2-02 — admin kalibrasi `pdt_benchmark` (GET/POST /account/pdt/benchmark, Director-only).
   PdtBenchmarkVersiWire: 'pdt.ts::PdtBenchmarkVersi',
   PdtBenchBandWire: 'pdt.ts::PdtBenchBand',
+  // M20 Gelombang C — revisi insight + publikasi (GET/PUT/POST .../kiriman/{id}/insight[/reset|terbitkan|...]).
+  PdtLaporanInsightRowWire: 'pdt.ts::PdtLaporanInsightRow',
+  PdtLaporanPublikasiWire: 'pdt.ts::PdtLaporanPublikasi',
+  PdtInsightStateWire: 'pdt.ts::PdtInsightState',
+  PdtInsightEditDraftBody: 'pdt.ts::PdtInsightEditDraft',
 };
 
 /**

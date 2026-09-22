@@ -119,6 +119,19 @@ afterAll(async () => {
 });
 afterEach(async () => {
   if (!sql) return;
+  // pdt_laporan_publikasi/pdt_laporan_insight (M20 Gelombang C) — FK ke pdt_laporan_kiriman.id
+  // TANPA ON DELETE CASCADE, jadi harus dibersihkan SEBELUM pdt_laporan_kiriman di bawah.
+  // pdt_laporan_insight menolak DELETE (append-only trigger) — nonaktifkan sementara, sama
+  // pola `pdt.test.ts`/`dailyactivity.test.ts`.
+  await sql`delete from pdt_laporan_publikasi where kiriman_id in (
+    select id from pdt_laporan_kiriman where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTHTM-%'))`;
+  await sql`alter table pdt_laporan_insight disable trigger trg_pdt_laporan_insight_frozen`;
+  try {
+    await sql`delete from pdt_laporan_insight where kiriman_id in (
+      select id from pdt_laporan_kiriman where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTHTM-%'))`;
+  } finally {
+    await sql`alter table pdt_laporan_insight enable trigger trg_pdt_laporan_insight_frozen`;
+  }
   await sql`delete from pdt_laporan_kiriman where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTHTM-%')`;
   await sql`delete from pdt_fact_shop_daily where client_platform_id in (select id from client_platforms where client_id like 'CLI-PDTHTM-%')`;
   await sql`delete from pdt_upload_batch where client_id like 'CLI-PDTHTM-%'`;

@@ -679,6 +679,78 @@ export function pdtLaporanHtmlUrl(kirimanId: number, mode: PdtLaporanRenderMode,
   return `/api/v1/account/pdt/laporan/kiriman/${kirimanId}/html?mode=${mode}${download ? '&download=1' : ''}`;
 }
 
+// ---------------------------------------------------------------------------
+// M20 Gelombang C — revisi insight + publikasi (C-04 editor). `PdtLaporanInsightRow`
+// membawa TUJUH bidang (enam narasi sama `PdtLaporanInsight` di atas + `tahap_narasi`
+// baru) plus metadata revisi — beda dari `PdtLaporanInsight` yang tertanam di dalam
+// `PdtLaporan` (payload beku, nol metadata revisi, nol `tahap_narasi`).
+// ---------------------------------------------------------------------------
+
+export interface PdtLaporanInsightRow {
+  kiriman_id: number;
+  revisi: number;
+  sumber: 'mesin' | 'am';
+  ringkasan: string;
+  poin: string[];
+  rekomendasi_tinggi: PdtLaporanRekomendasi[];
+  rekomendasi_sedang: PdtLaporanRekomendasi[];
+  outlook: string;
+  indikator: { nama: string; target: string }[];
+  tahap_narasi: string | null;
+  ditulis_oleh: string;
+  ditulis_pada: string;
+}
+
+export interface PdtLaporanPublikasi {
+  kiriman_id: number;
+  status: '[Draf]' | '[Terbit]' | '[Dicabut]';
+  insight_revisi: number;
+  diterbitkan_pada: string | null;
+  diterbitkan_oleh: string | null;
+  alasan_cabut: string | null;
+}
+
+export interface PdtInsightState {
+  kiriman_id: number;
+  terbaru: PdtLaporanInsightRow;
+  publikasi: PdtLaporanPublikasi;
+}
+
+/** Body PUT .../insight — pola sama `PdtInsightDraft` (draf pra-kirim) + `tahap_narasi` baru. */
+export interface PdtInsightEditDraft {
+  ringkasan?: string;
+  poin?: string[];
+  rekomendasi_tinggi?: PdtLaporanRekomendasi[];
+  rekomendasi_sedang?: PdtLaporanRekomendasi[];
+  outlook?: string;
+  indikator?: { nama: string; target: string }[];
+  tahap_narasi?: string;
+}
+
+export function bacaInsightKiriman(kirimanId: number): Promise<PdtInsightState> {
+  return api.get<PdtInsightState>(`/account/pdt/laporan/kiriman/${kirimanId}/insight`);
+}
+
+export function simpanInsightKiriman(kirimanId: number, draft: PdtInsightEditDraft): Promise<PdtLaporanInsightRow> {
+  return api.put<PdtLaporanInsightRow>(`/account/pdt/laporan/kiriman/${kirimanId}/insight`, draft);
+}
+
+export function resetInsightKiriman(kirimanId: number): Promise<PdtLaporanInsightRow> {
+  return api.post<PdtLaporanInsightRow>(`/account/pdt/laporan/kiriman/${kirimanId}/insight/reset`, {});
+}
+
+export function terbitkanKiriman(kirimanId: number): Promise<PdtLaporanPublikasi> {
+  return api.post<PdtLaporanPublikasi>(`/account/pdt/laporan/kiriman/${kirimanId}/terbitkan`, {});
+}
+
+export function terbitkanUlangKiriman(kirimanId: number): Promise<PdtLaporanPublikasi> {
+  return api.post<PdtLaporanPublikasi>(`/account/pdt/laporan/kiriman/${kirimanId}/terbitkan-ulang`, {});
+}
+
+export function cabutKiriman(kirimanId: number, alasan: string): Promise<PdtLaporanPublikasi> {
+  return api.post<PdtLaporanPublikasi>(`/account/pdt/laporan/kiriman/${kirimanId}/cabut`, { alasan });
+}
+
 // G2-02 — admin kalibrasi `pdt_benchmark` (GET/POST /account/pdt/benchmark,
 // Director-only, `pdt.canKelolaBenchmark`). Preseden HURUF PER HURUF
 // `PxEligibilityPolicy`/`listEligibilityPolicy`/`createEligibilityPolicy`

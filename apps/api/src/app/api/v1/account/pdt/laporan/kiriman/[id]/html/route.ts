@@ -58,7 +58,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     const mode: pdtCore.RenderMode = modeRaw;
     const download = params.get('download') === '1';
 
-    const { laporan } = await pdt.bacaKirimanLaporanPdt(db(), actor, kirimanId);
+    const { laporan } = await pdt.laporanUntukRenderPdt(db(), actor, kirimanId, mode);
     const html = pdtCore.renderLaporanHtml(laporan, mode);
     const namaBerkas = pdtCore.namaBerkasLaporan(laporan, mode);
 

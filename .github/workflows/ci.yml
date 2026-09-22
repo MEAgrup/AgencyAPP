@@ -276,11 +276,13 @@ jobs:
       # service_closure_rejected) (76→79) — edge langsung [In Execution]→Done
       # DICABUT, digantikan dua-langkah via [Closure Requested] (mirrors T-2b
       # Hold), sm_machines TETAP 35 (`service` sudah ada sejak awal).
-      - name: Verify migration seed counts (35 machines, 79 events, catalog registry consistent)
+      # M20 Gelombang C-01 (20261130010000): +1 machine `pdt_laporan` (35→36) —
+      # [Draf]→[Terbit]⇄[Dicabut], status publikasi. NOL event notifikasi baru.
+      - name: Verify migration seed counts (36 machines, 79 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 35 then raise exception 'expected 35 machines'; end if;
+               if (select count(*) from sm_machines) <> 36 then raise exception 'expected 36 machines'; end if;
                if (select count(*) from notif_events) <> 79 then raise exception 'expected 79 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
@@ -539,12 +541,14 @@ jobs:
       # (fakta murni, sama kelas — nol prefix/mesin/event baru).
       # G4-03 aksi 4 (20261121010000): 184 = 183 + 1 tabel `pdt_fact_promo`
       # (fakta murni untuk shopee_diskon + shopee_flash_sale, sama kelas).
-      - name: Verify table count (expect 184)
+      # M20 Gelombang C-01 (20261130010000): 186 = 184 + 2 tabel
+      # `pdt_laporan_insight` + `pdt_laporan_publikasi` (R3-R5).
+      - name: Verify table count (expect 186)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 184
+          test "$n" -eq 186
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

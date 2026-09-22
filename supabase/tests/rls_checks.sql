@@ -1374,6 +1374,10 @@ DECLARE
     -- ekspresi policy `TO authenticated` tabel anak PDT yang tidak membawa
     -- client_id langsung (client_platform_id/sku_id/batch_id).
     'jwt_owns_pdt_batch_am', 'jwt_owns_client_platform_am', 'jwt_owns_pdt_sku_am',
+    -- M20 Gelombang C-01 (20261130010000) — pdt_laporan_insight/pdt_laporan_publikasi
+    -- membawa kiriman_id, bukan client_platform_id langsung; menumpang
+    -- jwt_owns_client_platform_am, pola sama jwt_owns_pdt_batch_am.
+    'jwt_owns_pdt_kiriman_am',
     -- KATEGORI KEDUA (ditambahkan 2026-09-04) — bukan predikat policy, tapi
     -- HELPER HITUNG SEMPIT yang dipanggil route di bawah `readAsActor`.
     -- Dibedakan di komentar, bukan di array terpisah, karena ketiga assert di

@@ -183,10 +183,16 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "184"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "186"
 check "entity_prefix"    "select count(*) from entity_prefix"    "45"
-check "sm_machines"      "select count(*) from sm_machines"      "35"
+check "sm_machines"      "select count(*) from sm_machines"      "36"
 check "notif_events"     "select count(*) from notif_events"     "79"
+# --- M20 Gelombang C-01 (20261130010000) — insight + publikasi laporan PDT --
+# 186 = 184 + 2 tabel `pdt_laporan_insight` (append-only, revisi narasi) +
+#       `pdt_laporan_publikasi` (status hidup di sini, R5) ⇒ entity_prefix
+#       TETAP 45 (K-2 PDT, kiriman_id sebagai kunci, nol PREFIX-YYYYMM-NNNN).
+#       +1 mesin `pdt_laporan` ([Draf]→[Terbit]⇄[Dicabut], nol terminal state)
+#       ⇒ sm_machines 35→36. Nol event notifikasi baru ⇒ notif_events TETAP 79.
 # --- F-6b (20261129010000) — koreksi berantai Aktivitas Harian -------------
 # Nol tabel baru ⇒ tabel public TETAP 184. Nol prefix baru (koreksi memakai
 #       ID DACT- yang sudah ada, bukan entitas baru) ⇒ entity_prefix TETAP 45.

@@ -152,7 +152,7 @@
  * Opsi platform disaring ke Shopee/TikTok Shop (PDT-22: Tokopedia/Lazada/
  * Blibli tetap manual) — memilih platform lain hanya akan 400 di server.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { listClients, type Client, type Platform } from '@/lib/clients';
@@ -172,6 +172,7 @@ import {
 import { formatIDR } from '@/lib/money';
 import { GrafikBatang, GrafikDonat, GrafikGaris, GrafikGelembung,
   GrafikPeringkat, GrafikSkor } from '@/components/PdtChart';
+import PdtInsightEditor from '@/components/PdtInsightEditor';
 
 
 /** Label kuadran produk — SAMA persis `report/render.ts` `KUADRAN_META` (mesin lama), bukan istilah baru. */
@@ -468,6 +469,11 @@ export default function LaporanPdtPage() {
 
   const [riwayat, setRiwayat] = useState<PdtKirimanRingkas[]>([]);
   const [riwayatErr, setRiwayatErr] = useState<string | null>(null);
+
+  // C-04 — kiriman mana yang editor narasi/publikasinya sedang terbuka.
+  // Satu per satu (sama pola `openInsight` di `ReportPanel.tsx`, M14): editor
+  // ini tinggi, dan dua terbuka sekaligus mengundang menyunting kiriman yang salah.
+  const [openInsight, setOpenInsight] = useState<number | null>(null);
 
   const loadClients = useCallback(async () => {
     setClientsLoading(true);
@@ -1753,7 +1759,8 @@ export default function LaporanPdtPage() {
                   </thead>
                   <tbody>
                     {riwayat.map((k) => (
-                      <tr key={k.id}>
+                      <Fragment key={k.id}>
+                      <tr>
                         <td>{k.periode_mulai}</td>
                         <td>{formatDateTime(k.dikirim_pada)}</td>
                         <td>{k.dikirim_oleh}</td>
@@ -1772,9 +1779,25 @@ export default function LaporanPdtPage() {
                           <a className="btn btnGhost btnSm" href={pdtLaporanHtmlUrl(k.id, 'klien')} target="_blank" rel="noreferrer">Lihat Klien</a>{' '}
                           <a className="btn btnGhost btnSm" href={pdtLaporanHtmlUrl(k.id, 'klien', true)}>Unduh Klien</a>{' '}
                           <a className="btn btnGhost btnSm" href={pdtLaporanHtmlUrl(k.id, 'internal')} target="_blank" rel="noreferrer">Lihat Internal</a>{' '}
-                          <a className="btn btnGhost btnSm" href={pdtLaporanHtmlUrl(k.id, 'internal', true)}>Unduh Internal</a>
+                          <a className="btn btnGhost btnSm" href={pdtLaporanHtmlUrl(k.id, 'internal', true)}>Unduh Internal</a>{' '}
+                          {/* M20 C-04 — narasi + publikasi kiriman ini (draf/terbit/cabut). */}
+                          <button
+                            type="button"
+                            className="btn btnGhost btnSm"
+                            onClick={() => setOpenInsight((cur) => (cur === k.id ? null : k.id))}
+                          >
+                            {openInsight === k.id ? 'Tutup Narasi' : 'Edit Narasi'}
+                          </button>
                         </td>
                       </tr>
+                      {openInsight === k.id && (
+                        <tr>
+                          <td colSpan={5} style={{ background: 'var(--color-bg)' }}>
+                            <PdtInsightEditor kirimanId={k.id} />
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
