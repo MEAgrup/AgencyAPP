@@ -166,7 +166,7 @@ punya tepat satu penulis. **Tercapai** — E-01 s/d E-05 selesai.
 | Tiket | Isi |
 |---|---|
 | **F-01** | Modul parser `tt_shop_analytics_tokopedia` (tanda tangan kolom `baseline/detect.ts` `shop_tp`), penulis fakta ke `pdt_fact_shop_daily` dengan penanda kanal, bagian laporan Tokopedia. `prod_tp` sengaja **tidak** ikut. |
-| **F-02** | Kolom `tujuan` (upper/lower funnel) di `pdt_fact_ads`, supaya guardrail "belanja Ads Manager tidak masuk ROI GMV Max" ditegakkan di query, bukan cuma di prosa. |
+| **F-02** | ✅ SELESAI — Kolom `tujuan` (upper/lower funnel) di `pdt_fact_ads`, supaya guardrail "belanja Ads Manager tidak masuk ROI GMV Max" ditegakkan di query, bukan cuma di prosa. Migrasi `20261202010000`, ditegakkan di `recomputeAdsMetricEntriesPdt`; `docs/DECISIONS.md` M20-F02-PDT-FACT-ADS-TUJUAN. |
 | **F-03** | Empat modul parser TikTok Ads Manager, tanda tangan diambil apa adanya dari `report/detect.ts` `TTAM_TYPES` — **termasuk penyangkalan kolom funnel Shop pada `ttam_follows`**, tanpa itu ekspor Showcase salah tergolong. Diblokir `M20-TTAM-SAMPLE`. |
 | **F-04** | Bagian laporan `ads_manager` + pengisian `tahap.funnel` Awareness dan Add-to-Cart. |
 | **F-05** | Tes: pita "belum lengkap" pada bagian Tahap **hilang karena datanya ada**, bukan karena disembunyikan. |
