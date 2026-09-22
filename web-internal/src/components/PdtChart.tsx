@@ -316,6 +316,56 @@ export function GrafikSkor({ dimensi, judul }: GrafikSkorProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Batang horizontal berperingkat — Top 10 kreator / Top 10 sesi LIVE /
+// kampanye (2026-09-21, paritas mesin HTML lama)
+// ---------------------------------------------------------------------------
+
+export interface GrafikPeringkatProps {
+  baris: { label: string; nilai: number | null; catatan?: string | null }[];
+  judul: string;
+  /** Pemformat nilai untuk label kanan, mis. `formatIDR`. */
+  format: (v: number | null) => string;
+  /** Warna batang — satu warna untuk seluruh baris (peringkat, bukan kategori). */
+  warna?: string;
+}
+
+/**
+ * Daftar berperingkat: panjang batang SEBANDING nilai terbesar di daftar
+ * (bukan skala absolut), karena yang dibaca di daftar Top-N adalah jarak
+ * antar peringkat, bukan besaran mutlaknya — besaran mutlak sudah tercetak
+ * di label kanan.
+ *
+ * Baris ber-`nilai` `null` TETAP tampil tanpa batang: kreator yang GMV-nya
+ * tidak diketahui bukan kreator yang GMV-nya nol, dan menghapusnya dari
+ * daftar akan membuat "Top 10" berisi sembilan tanpa penjelasan.
+ */
+export function GrafikPeringkat({ baris, judul, format, warna = warnaSeri(0) }: GrafikPeringkatProps) {
+  if (baris.length === 0) return <Kosong tinggi={80} pesan="Belum ada baris untuk periode ini." />;
+  const maks = baris.reduce((a, b) => Math.max(a, b.nilai ?? 0), 0);
+
+  return (
+    <div role="img" aria-label={judul} style={{ display: 'grid', gap: 6 }}>
+      {baris.map((b, i) => (
+        <div key={`${b.label}-${i}`} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 116px', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.label}>
+            {b.label}
+            {b.catatan ? <span className="muted"> · {b.catatan}</span> : null}
+          </span>
+          <div style={{ background: GARIS_BANTU, borderRadius: 3, height: 10, overflow: 'hidden' }}>
+            {b.nilai != null && maks > 0 && (
+              <div style={{ width: `${Math.max(0, Math.min(100, (b.nilai / maks) * 100))}%`, height: '100%', background: warna }} />
+            )}
+          </div>
+          <span style={{ fontSize: 12, textAlign: 'right' }} className={b.nilai == null ? 'muted' : undefined}>
+            {format(b.nilai)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Gelembung — matriks produk 4 kuadran (§5/§7 laporan lama)
 // ---------------------------------------------------------------------------
 
