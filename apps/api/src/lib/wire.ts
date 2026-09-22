@@ -9591,6 +9591,33 @@ export interface PdtLaporanWire {
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
   insight: PdtLaporanInsightWire;
+  /** M20 R2 — catatan kelengkapan data, untuk mata AM. Mode render `klien` tidak membangunnya. */
+  kelengkapan: PdtLaporanKelengkapanWire;
+}
+
+/** M20 R2 — satu baris kelengkapan. `modul_hilang` kosong kalau `lengkap`. */
+export interface PdtLaporanKelengkapanBarisWire {
+  bagian: string;
+  lengkap: boolean;
+  alasan: string;
+  modul_hilang: string[];
+}
+
+export interface PdtLaporanKelengkapanWire {
+  semua_lengkap: boolean;
+  baris: PdtLaporanKelengkapanBarisWire[];
+}
+
+function pdtLaporanKelengkapanToWire(k: pdtCore.PdtLaporanKelengkapan): PdtLaporanKelengkapanWire {
+  return {
+    semua_lengkap: k.semuaLengkap,
+    baris: k.baris.map((b) => ({
+      bagian: b.bagian,
+      lengkap: b.lengkap,
+      alasan: b.alasan,
+      modul_hilang: b.modulHilang,
+    })),
+  };
 }
 
 function pdtLaporanHarianTitikToWire(t: pdtCore.PdtLaporanHarianTitik): PdtLaporanHarianTitikWire {
@@ -9849,6 +9876,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: l.benchmarkVersi,
     insight: pdtLaporanInsightToWire(l.insight),
+    kelengkapan: pdtLaporanKelengkapanToWire(l.kelengkapan),
   };
 }
 
@@ -9876,6 +9904,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: null,
     insight: pdtLaporanInsightToWire(l.insight),
+    kelengkapan: pdtLaporanKelengkapanToWire(l.kelengkapan),
   };
 }
 

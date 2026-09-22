@@ -8,6 +8,7 @@ import {
   bangunLaporanAfiliasi,
   bangunLaporanHarian,
   bangunLaporanInsight,
+  bangunLaporanKelengkapan,
   bangunLaporanKampanye,
   bangunLaporanKreator,
   bangunLaporanLayanan,
@@ -238,6 +239,25 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
           { nama: 'Target GPM Video', target: 'Rp. 10.000,00+ per 1.000 views (kini —)' },
         ],
       },
+      // M20 R2 — caveat kelengkapan hidup DI SINI, bukan sebagai kalimat di
+      // `insight.poin`. Baris `tahap` lahir dari DATANYA (funnel ber-`nilai:
+      // null`), bukan dari daftar platform yang ditulis tangan — begitu modul
+      // Ads Manager mendarat, baris ini jadi `lengkap` dengan sendirinya.
+      kelengkapan: {
+        semuaLengkap: false,
+        baris: [
+          { bagian: 'kanal', lengkap: true, alasan: '', modulHilang: [] },
+          {
+            bagian: 'tahap',
+            lengkap: false,
+            alasan: 'Langkah funnel berikut belum dipanen ke fakta, jadi ditandai "—", BUKAN nol aktivitas: Impresi produk, Klik ke halaman produk, Add to Cart. Sumbernya ekspor TikTok Ads Manager, yang belum punya modul PDT.',
+            modulHilang: [
+              'tt_ads_manager_consideration', 'tt_ads_manager_follows',
+              'tt_ads_manager_showcase', 'tt_ads_manager_videoviews',
+            ],
+          },
+        ],
+      },
     });
   });
 
@@ -303,16 +323,26 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       skor,
       insight: {
         ringkasan: 'GMV Rp. 5.000.000,00 dari 50 pesanan. Skor performa belum bisa dihitung — belum ada dimensi yang punya data periode ini.',
-        poin: [
-          'GMV Rp. 5.000.000,00 dari 50 pesanan (CVR 2,00%).',
-          'Catatan: rincian kanal belum lengkap — sebagian sumber GMV belum punya penulis fakta PDT.',
-        ],
+        // M20 R2: `poin` kembali murni narasi performa — caveat kelengkapan
+        // pindah ke blok `kelengkapan` di bawah.
+        poin: ['GMV Rp. 5.000.000,00 dari 50 pesanan (CVR 2,00%).'],
         rekomendasiTinggi: [],
         rekomendasiSedang: [],
         outlook: 'Target GMV bulan depan: Rp. 5.750.000,00–Rp. 6.500.000,00 (+15–30%). Fokus: tindak lanjuti rekomendasi prioritas tinggi di atas.',
         indikator: [
           { nama: 'Target Pengunjung Toko', target: '3.375 (+35% dari 2.500)' },
           { nama: 'Target CR Toko', target: '3,00% (kini 2,00%)' },
+        ],
+      },
+      kelengkapan: {
+        semuaLengkap: false,
+        baris: [
+          {
+            bagian: 'kanal',
+            lengkap: false,
+            alasan: 'Rincian kanal baru memuat Shopee Ads dan Affiliate. Voucher, Chat, Meta Ads, dan Video belum diproses PDT — GMV dari sumber itu TIDAK berarti nol, hanya belum terhitung di sini.',
+            modulHilang: ['shopee_voucher', 'shopee_chat', 'meta_ads', 'shopee_video'],
+          },
         ],
       },
     });
@@ -922,7 +952,7 @@ describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16,
     expect(hasil.rekomendasiSedang).toEqual([]);
   });
 
-  it('poin merangkum kanal (channel terbesar) + catatan kalau kanal belum lengkap', () => {
+  it('poin merangkum kanal (channel terbesar) dan TIDAK lagi membawa caveat kelengkapan (M20 R2)', () => {
     const hasil = bangunLaporanInsight(dasar({
       kpi: { gmv: 1_000_000, pesanan: 10, pengunjung: 500, cvr: 0.02, barangPerPengunjung: null, kedalaman: null },
       kanal: {
@@ -934,7 +964,11 @@ describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16,
       },
     }));
     expect(hasil.poin).toContain('Kartu Produk & Shop Tab jadi kanal terbesar: Rp. 700.000,00 (70,0% dari GMV).');
-    expect(hasil.poin).toContain('Catatan: rincian kanal belum lengkap — sebagian sumber GMV belum punya penulis fakta PDT.');
+    // M20 R2 — `insight` ikut BEKU ke `pdt_laporan_kiriman.payload`, jadi caveat
+    // yang duduk di sini akan terbit ke klien begitu permukaan klien dibangun.
+    // Ia pindah ke blok `kelengkapan`, yang mode render `klien` tidak bangun.
+    expect(hasil.poin.some((t) => /belum lengkap/i.test(t))).toBe(false);
+    expect(hasil.poin.some((t) => t.startsWith('Catatan:'))).toBe(false);
   });
 
   it('poin merangkum iklan/live/video/afiliasi HANYA saat bagiannya ada (bukan null)', () => {
@@ -1383,5 +1417,69 @@ describe('bangunLaporanProduk — "top" lintas kuadran (Top Produk by GMV, kedua
       kuadran: null, namaProduk: `P-${i}`, platformProductId: String(i), gmv: 1_000 - i, klik: null, traffic: null, impresi: null, cvr: null,
     }));
     expect(bangunLaporanProduk(input, 'tiktok')?.top).toHaveLength(12);
+  });
+});
+
+describe('bangunLaporanKelengkapan (M20 R2 — caveat sebagai DATA, bukan prosa)', () => {
+  const kanalLengkap = { gmvTotal: 1_000_000, items: [], lengkap: true };
+  const kanalBolong = { gmvTotal: 1_000_000, items: [], lengkap: false };
+
+  it('semua bagian lengkap ⇒ semuaLengkap true, dan tiap baris NOL kalimat untuk dibaca', () => {
+    const hasil = bangunLaporanKelengkapan({ platform: 'tiktok', kanal: kanalLengkap, iklan: null, tahap: null });
+    expect(hasil.semuaLengkap).toBe(true);
+    expect(hasil.baris).toEqual([{ bagian: 'kanal', lengkap: true, alasan: '', modulHilang: [] }]);
+  });
+
+  it('kanal Shopee belum lengkap ⇒ alasan menyebut sumber yang hilang + modulHilang terisi', () => {
+    const hasil = bangunLaporanKelengkapan({ platform: 'shopee', kanal: kanalBolong, iklan: null, tahap: null });
+    const kanal = hasil.baris.find((b) => b.bagian === 'kanal');
+    expect(hasil.semuaLengkap).toBe(false);
+    expect(kanal?.lengkap).toBe(false);
+    expect(kanal?.modulHilang).toEqual(['shopee_voucher', 'shopee_chat', 'meta_ads', 'shopee_video']);
+    // Rule 12 ditegakkan DI DALAM kalimatnya: "belum terhitung" bukan "nol".
+    expect(kanal?.alasan).toContain('TIDAK berarti nol');
+  });
+
+  it('iklan null (nol baris periode ini) ⇒ NOL baris iklan — bagian yang tidak ada tidak punya kelengkapan', () => {
+    const hasil = bangunLaporanKelengkapan({ platform: 'shopee', kanal: kanalLengkap, iklan: null, tahap: null });
+    expect(hasil.baris.some((b) => b.bagian === 'iklan')).toBe(false);
+  });
+
+  it('status tahap lahir dari DATANYA: funnel penuh ⇒ lengkap, walau modul Ads Manager belum ada', () => {
+    const tahapPenuh = {
+      fokus: null,
+      belanjaTotal: null,
+      konversiTotal: { nilai: null, band: null, flag: 'kosong' as const },
+      funnel: [
+        { kode: 'impresi', label: 'Impresi produk', nilai: 1_000, lolos: null, lolosDari: null, catatan: null },
+        { kode: 'klik', label: 'Klik ke halaman produk', nilai: 100, lolos: null, lolosDari: null, catatan: null },
+      ],
+      blok: [],
+    };
+    const hasil = bangunLaporanKelengkapan({ platform: 'tiktok', kanal: kanalLengkap, iklan: null, tahap: tahapPenuh as never });
+    expect(hasil.baris.find((b) => b.bagian === 'tahap')).toEqual({
+      bagian: 'tahap', lengkap: true, alasan: '', modulHilang: [],
+    });
+  });
+
+  it('tahap ber-langkah null ⇒ alasan MENYEBUT langkah mana yang kosong, bukan kalimat umum', () => {
+    const tahapBolong = {
+      fokus: null,
+      belanjaTotal: null,
+      konversiTotal: { nilai: null, band: null, flag: 'kosong' as const },
+      funnel: [
+        { kode: 'impresi', label: 'Impresi produk', nilai: null, lolos: null, lolosDari: null, catatan: null },
+        { kode: 'klik', label: 'Klik ke halaman produk', nilai: 100, lolos: null, lolosDari: null, catatan: null },
+        { kode: 'atc', label: 'Add to Cart', nilai: null, lolos: null, lolosDari: null, catatan: null },
+      ],
+      blok: [],
+    };
+    const baris = bangunLaporanKelengkapan({ platform: 'tiktok', kanal: kanalLengkap, iklan: null, tahap: tahapBolong as never })
+      .baris.find((b) => b.bagian === 'tahap');
+    expect(baris?.lengkap).toBe(false);
+    expect(baris?.alasan).toContain('Impresi produk, Add to Cart');
+    expect(baris?.alasan).not.toContain('Klik ke halaman produk');
+    expect(baris?.alasan).toContain('BUKAN nol aktivitas');
+    expect(baris?.modulHilang).toHaveLength(4);
   });
 });

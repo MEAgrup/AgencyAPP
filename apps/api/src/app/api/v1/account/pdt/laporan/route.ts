@@ -47,9 +47,27 @@ export async function GET(request: Request): Promise<Response> {
       throw new BadRequestError('periode is required (YYYY-MM-01)');
     }
 
+    // Pengukur waktu, sengaja permanen. Laporan ini pernah mati di batas 300
+    // detik Vercel (504) dan diagnosanya tertahan lama justru karena log hanya
+    // menyimpan status, bukan durasi — jadi "lambat" tidak bisa dibedakan dari
+    // "lambat di bagian mana". `rakit` mengukur perakitan (seluruh query +
+    // skor + kuadran); selisihnya terhadap `total` adalah auth, serialisasi
+    // dan overhead framework. Satu baris log per permintaan, terbaca di
+    // runtime log Vercel; `Server-Timing` membuat angka yang SAMA terlihat di
+    // tab Network browser tanpa perlu akses log.
+    const t0 = performance.now();
     const laporan = await pdt.bacaLaporanPdt(db(), actor, clientPlatformId, periode);
+    const tRakit = performance.now() - t0;
     const wire = laporan.platform === 'tiktok' ? pdtLaporanTiktokToWire(laporan) : pdtLaporanShopeeToWire(laporan);
+    const tTotal = performance.now() - t0;
 
-    return json(wire);
+    console.log(
+      `[pdt/laporan] cp=${clientPlatformId} periode=${periode} platform=${laporan.platform}`
+      + ` rakit=${tRakit.toFixed(0)}ms total=${tTotal.toFixed(0)}ms`,
+    );
+
+    const res = json(wire);
+    res.headers.set('Server-Timing', `rakit;dur=${tRakit.toFixed(1)}, total;dur=${tTotal.toFixed(1)}`);
+    return res;
   });
 }

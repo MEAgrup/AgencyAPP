@@ -578,6 +578,29 @@ export interface PdtLaporan {
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;
   insight: PdtLaporanInsight;
+  /** M20 R2 — catatan kelengkapan data, untuk mata AM. Mode render `klien` tidak membangunnya. */
+  kelengkapan: PdtLaporanKelengkapan;
+}
+
+/**
+ * M20 R2 — kelengkapan sebagai DATA, bukan kalimat.
+ *
+ * Sebelum ini teks banner ditulis tangan di JSX halaman laporan, dan kalimat
+ * yang sama juga didorong mesin ke `insight.poin` — dua bentuk satu makna, dan
+ * yang lewat `insight` ikut beku ke payload kiriman, jadi ia akan terbit ke
+ * klien begitu permukaan klien dibangun. Sekarang satu sumber, dan sumber itu
+ * bisa dibaca mesin.
+ */
+export interface PdtLaporanKelengkapanBaris {
+  bagian: string;
+  lengkap: boolean;
+  alasan: string;
+  modul_hilang: string[];
+}
+
+export interface PdtLaporanKelengkapan {
+  semua_lengkap: boolean;
+  baris: PdtLaporanKelengkapanBaris[];
 }
 
 /**
