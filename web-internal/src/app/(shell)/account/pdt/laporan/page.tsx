@@ -187,6 +187,24 @@ const KUADRAN_LABEL: Record<string, string> = {
 };
 const KUADRAN_URUTAN = ['bintang', 'hidden_gem', 'bocor_traffic', 'evaluasi', 'tidur', 'tidak_tayang', 'no_data'];
 
+/** Label & warna kedalaman jelajah — ambangnya ditetapkan `@cdps/core` (`KEDALAMAN_DALAM_MIN`/`KEDALAMAN_DANGKAL_MAKS`), di sini hanya tampilannya. */
+const KEDALAMAN_LABEL: Record<string, string> = {
+  dalam: 'jelajah dalam',
+  sedang: 'jelajah sedang',
+  dangkal: 'jelajah dangkal',
+};
+const KEDALAMAN_WARNA: Record<string, string> = {
+  dalam: '#15803d',
+  sedang: '#b45309',
+  dangkal: '#b91c1c',
+};
+
+/** Angka desimal gaya Indonesia (koma), untuk metrik rasio yang bukan persen dan bukan rupiah. */
+function formatDesimal(v: number | null, digit: number): string {
+  if (v === null || !Number.isFinite(v)) return '—';
+  return v.toLocaleString('id-ID', { minimumFractionDigits: digit, maximumFractionDigits: digit });
+}
+
 /**
  * Label sumber iklan untuk bagian "Iklan per Kampanye" — SAMA PERSIS dengan
  * yang dipakai `bangunIklanTiktok`/`bangunIklanShopee` di `@cdps/core`
@@ -675,7 +693,34 @@ export default function LaporanPdtPage() {
                 <div style={{ fontSize: 24, fontWeight: 'bold' }}>{formatPercent(laporan.kpi.cvr)}</div>
                 <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>CVR</p>
               </div>
+              {/* Kedalaman jelajah — metrik NIAT, bukan trafik. Satu pengunjung
+                  membuka lebih dari satu barang adalah hal yang normal dan justru
+                  bagus; dibaca BERSAMA CVR di sebelahnya, ia menunjuk divisi mana
+                  yang harus bergerak (lihat docblock KEDALAMAN_DALAM_MIN di core). */}
+              {laporan.kpi.barang_per_pengunjung !== null && (
+                <div>
+                  <div style={{ fontSize: 24, fontWeight: 'bold' }}>
+                    {formatDesimal(laporan.kpi.barang_per_pengunjung, 2)}
+                    {laporan.kpi.kedalaman !== null && (
+                      <span style={{ fontSize: 12, fontWeight: 'normal', marginLeft: 6, color: KEDALAMAN_WARNA[laporan.kpi.kedalaman] ?? undefined }}>
+                        {KEDALAMAN_LABEL[laporan.kpi.kedalaman] ?? laporan.kpi.kedalaman}
+                      </span>
+                    )}
+                  </div>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Barang dibuka / pengunjung</p>
+                </div>
+              )}
             </div>
+            {laporan.kpi.barang_per_pengunjung !== null && (
+              <p className="muted" style={{ fontSize: 11, marginTop: 12 }}>
+                Satu pengunjung membuka {formatDesimal(laporan.kpi.barang_per_pengunjung, 2)} barang rata-rata. Lebih dari satu
+                adalah hal normal dan justru sinyal bagus — pengunjung masih mau melihat-lihat, entah karena belum
+                menemukan yang pas atau karena tokonya menarik untuk ditelusuri. Baca angka ini{' '}
+                <strong>bersama CVR</strong>: jelajah dalam tapi CVR rendah berarti trafiknya sudah benar dan yang belum
+                meyakinkan ada di produk/harga; jelajah dangkal dengan CVR rendah berarti sebaliknya, targeting dulu
+                yang diperbaiki.
+              </p>
+            )}
             {laporan.platform !== 'tiktok' && (
               <p className="muted" style={{ fontSize: 11, marginTop: 16 }}>
                 GMV Shopee = basis Pesanan Siap Dikirim, TANPA potongan refund (Rule 16) — berbeda dari GMV
@@ -1089,8 +1134,11 @@ export default function LaporanPdtPage() {
                       <tr>
                         <th style={{ textAlign: 'left' }}>Produk</th>
                         {laporan.produk.distribusi && <th style={{ textAlign: 'left' }}>Kuadran</th>}
+                        <th style={{ textAlign: 'right' }}>Tayang</th>
                         <th style={{ textAlign: 'right' }}>Klik</th>
-                        <th style={{ textAlign: 'right' }}>CVR</th>
+                        <th style={{ textAlign: 'right' }}>CTR</th>
+                        <th style={{ textAlign: 'right' }}>{laporan.platform === 'tiktok' ? 'Klik diuji' : 'Kunjungan'}</th>
+                        <th style={{ textAlign: 'right' }}>{laporan.platform === 'tiktok' ? 'CVR' : 'CR'}</th>
                         <th style={{ textAlign: 'right' }}>GMV</th>
                       </tr>
                     </thead>
@@ -1099,7 +1147,10 @@ export default function LaporanPdtPage() {
                         <tr key={`top-${x.platform_product_id ?? i}`}>
                           <td>{x.nama_produk ?? x.platform_product_id ?? '—'}</td>
                           {laporan.produk!.distribusi && <td>{x.kuadran == null ? '—' : (KUADRAN_LABEL[x.kuadran] ?? x.kuadran)}</td>}
+                          <td style={{ textAlign: 'right' }}>{formatCount(x.impresi)}</td>
                           <td style={{ textAlign: 'right' }}>{formatCount(x.klik)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatPercent(x.ctr)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatCount(x.traffic)}</td>
                           <td style={{ textAlign: 'right' }}>{formatPercent(x.cvr)}</td>
                           <td style={{ textAlign: 'right' }}>{formatIDR(x.gmv)}</td>
                         </tr>
@@ -1112,12 +1163,18 @@ export default function LaporanPdtPage() {
                       setelah kolom pengunjung produk mulai dipanen.
                     </p>
                   )}
-                  {laporan.platform !== 'tiktok' && (
-                    <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-                      CR di atas adalah pesanan ÷ pengunjung produk (kunjungan), basis Siap Dikirim — penyebut yang sama
-                      yang dipakai kuadran, bukan jumlah produk dilihat.
-                    </p>
-                  )}
+                  <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                    Tabel ini membaca funnel utuh, bukan satu angka: <strong>Tayang</strong> = berapa kali kartu produk
+                    muncul di feed/pencarian, <strong>Klik</strong> = berapa kali dibuka, <strong>CTR</strong> = Klik ÷ Tayang,{' '}
+                    <strong>{laporan.platform === 'tiktok' ? 'Klik diuji' : 'Kunjungan'}</strong> ={' '}
+                    {laporan.platform === 'tiktok'
+                      ? 'klik yang dipakai menguji kuadran'
+                      : 'pengunjung yang benar-benar sampai ke halaman produk'}.
+                    Tayang wajar jauh lebih besar dari {laporan.platform === 'tiktok' ? 'klik' : 'kunjungan'} — itu jarak
+                    antar tahap, bukan dua versi angka yang sama. Tayang besar dengan CTR kecil berarti fotonya/judulnya
+                    yang belum menarik; CTR sehat tapi {laporan.platform === 'tiktok' ? 'CVR' : 'CR'} kecil berarti
+                    halaman produk atau harganya yang belum meyakinkan. Dua masalah berbeda dengan perbaikan berbeda.
+                  </p>
                 </>
               )}
               {/* Panel kedua mesin lama: "dua sudut pandang — relatif antar produk,

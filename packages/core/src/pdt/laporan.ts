@@ -89,7 +89,42 @@ export interface PdtLaporanKpiInput {
   gmv: number;
   pesanan: number;
   pengunjung: number;
+  /** Σ `produk_diklik` — `null` bila kolomnya tidak terpanen periode ini (Shopee `shopee_shop_stats` membawanya; TikTok tidak). */
+  produkDiklik: number | null;
 }
+
+/**
+ * Berapa BARANG yang dibuka satu pengunjung toko, rata-rata
+ * (`produk_diklik ÷ pengunjung`).
+ *
+ * **Ini metrik NIAT, bukan metrik trafik**, dan pembacaannya datang dari
+ * pemilik (2026-09-22): satu pengunjung membuka lebih dari satu barang adalah
+ * hal yang NORMAL dan justru BAGUS — artinya ia belum menemukan yang pas tapi
+ * masih mau melihat-lihat, atau tokonya cukup menarik untuk ditelusuri. Angka
+ * mendekati 1,00 berarti pengunjung membuka satu barang lalu pergi.
+ *
+ * Ia melengkapi CR, tidak menggantikannya, dan dua-duanya harus dibaca
+ * BERSAMA — itulah gunanya:
+ *
+ *   dalam + CR tinggi  → toko sehat, jangan diutak-atik
+ *   dalam + CR rendah  → traffic-nya berkualitas, MASALAHNYA DI PRODUK/HARGA
+ *                        (pengunjung mau melihat-lihat tapi tidak menemukan
+ *                        alasan membeli) — bukan di iklan
+ *   dangkal + CR tinggi→ pembeli datang sudah tahu mau apa; katalognya belum
+ *                        dimanfaatkan untuk menaikkan basket
+ *   dangkal + CR rendah→ trafiknya memang salah orang; perbaiki targeting dulu,
+ *                        bukan halaman produk
+ *
+ * Ambangnya DIPILIH dari sebaran nyata, bukan bulat-bulat dari udara: Fim
+ * Motor Juli 2026 mencatat 552.545 klik produk atas 361.197 pengunjung =
+ * **1,53 barang per pengunjung**, dan median per-produknya 1,40. `DALAM_MIN`
+ * 1,5 karena itu memisahkan toko yang penjelajahannya di atas rata-rata contoh
+ * nyata, `DANGKAL_MAKS` 1,15 menandai toko yang praktis satu-barang-lalu-pergi.
+ */
+export const KEDALAMAN_DALAM_MIN = 1.5;
+export const KEDALAMAN_DANGKAL_MAKS = 1.15;
+
+export type PdtKedalamanJelajah = 'dalam' | 'sedang' | 'dangkal';
 
 export interface PdtLaporanKpiRingkas {
   gmv: number | null;
@@ -97,16 +132,28 @@ export interface PdtLaporanKpiRingkas {
   pengunjung: number | null;
   /** Σ pesanan / Σ pengunjung periode ini — `null` bila pengunjung tidak diketahui (BUKAN 0 sungguhan, dibedakan pemanggil). */
   cvr: number | null;
+  /** Σ produk_diklik / Σ pengunjung — lihat docblock `KEDALAMAN_DALAM_MIN`. `null` = kolom sumbernya tidak terpanen (TikTok SELALU). */
+  barangPerPengunjung: number | null;
+  /** Pembacaan `barangPerPengunjung` terhadap ambang. `null` bila angkanya `null` — TIDAK PERNAH ditebak 'sedang'. */
+  kedalaman: PdtKedalamanJelajah | null;
 }
 
 /** Rakit `PdtLaporanKpiRingkas` dari agregat mentah. `null` input ⇒ seluruh field `null` (nol baris basis terkait — Rule 12/aturan rumah #7, bukan 0 yang mengarang). */
 export function bangunKpiRingkas(input: PdtLaporanKpiInput | null): PdtLaporanKpiRingkas {
-  if (input == null) return { gmv: null, pesanan: null, pengunjung: null, cvr: null };
+  if (input == null) {
+    return { gmv: null, pesanan: null, pengunjung: null, cvr: null, barangPerPengunjung: null, kedalaman: null };
+  }
+  const barangPerPengunjung = input.produkDiklik == null || input.pengunjung === 0
+    ? null : Math.round((input.produkDiklik / input.pengunjung) * 100) / 100;
   return {
     gmv: bulat(input.gmv),
     pesanan: bulat(input.pesanan),
     pengunjung: bulat(input.pengunjung),
     cvr: input.pengunjung === 0 ? null : persen5(input.pesanan / input.pengunjung),
+    barangPerPengunjung,
+    kedalaman: barangPerPengunjung == null ? null
+      : barangPerPengunjung >= KEDALAMAN_DALAM_MIN ? 'dalam'
+      : barangPerPengunjung <= KEDALAMAN_DANGKAL_MAKS ? 'dangkal' : 'sedang',
   };
 }
 
@@ -580,12 +627,27 @@ export interface PdtLaporanProdukDistribusi {
   gmv: number | null;
 }
 
-/** Satu baris "Top Produk by GMV" — LINTAS kuadran, `kuadran` `null` untuk produk yang belum/tidak terklasifikasi (seluruh baris Shopee, lihat docblock `bangunLaporanProduk`). */
+/**
+ * Satu baris "Top Produk by GMV" — LINTAS kuadran, `kuadran` `null` untuk
+ * produk yang belum/tidak terklasifikasi.
+ *
+ * Membawa funnel LENGKAP per produk, bukan cuma ujungnya: `impresi` (tayangan
+ * kartu) → `ctr` → `traffic` (kunjungan halaman) → `cvr` (pesanan ÷ kunjungan).
+ * Sebelumnya hanya `klik` dan `cvr` yang keluar, sehingga produk beriklan berat
+ * tapi tidak diklik terlihat identik dengan produk yang tidak pernah muncul
+ * sama sekali — dua masalah yang perbaikannya berlawanan.
+ */
 export interface PdtLaporanProdukTopItem {
   namaProduk: string | null;
   platformProductId: string | null;
   gmv: number | null;
   klik: number | null;
+  /** Sumbu-X kuadran: klik (TikTok) / kunjungan halaman produk (Shopee). */
+  traffic: number | null;
+  /** Tayangan kartu produk di feed/pencarian — lihat docblock `PdtLaporanProdukInputBaris.impresi`. */
+  impresi: number | null;
+  /** `klik ÷ impresi` — seberapa sering kartu yang tampil benar-benar dibuka. `null` bila salah satu sisi tidak diketahui. */
+  ctr: number | null;
   cvr: number | null;
   kuadran: PdtKuadranSku | null;
 }
@@ -621,6 +683,16 @@ export interface PdtLaporanProdukInputBaris {
    * yang kedua yang boleh masuk kuadran.
    */
   traffic: number | null;
+  /**
+   * `pdt_fact_sku_period.impresi` — Shopee `'Jumlah Produk Dilihat'`, TikTok
+   * `'Impresi produk'`. Ini TAYANGAN kartu produk di feed/pencarian, BUKAN
+   * kunjungan halaman: dibuktikan ke berkas asli, `klik ÷ impresi` = 5,50%
+   * yang sama persis dengan kolom `'Persentase Klik'` yang Shopee terbitkan
+   * sendiri. Karena itu ia jauh lebih besar dari `traffic` (Fim Motor: 1.383.429
+   * vs 32.949 untuk satu produk yang sama) — itu selisih antar TAHAP FUNNEL,
+   * bukan dua versi angka yang sama.
+   */
+  impresi: number | null;
   cvr: number | null;
 }
 
@@ -707,6 +779,9 @@ export function bangunLaporanProduk(
       platformProductId: b.platformProductId,
       gmv: bulat(b.gmv),
       klik: b.klik,
+      traffic: b.traffic,
+      impresi: b.impresi,
+      ctr: b.impresi == null || b.impresi === 0 || b.klik == null ? null : persen5(b.klik / b.impresi),
       cvr: persen5(b.cvr),
       kuadran: b.kuadran,
     }));
@@ -1133,6 +1208,41 @@ function rekomendasiDariDimensi(dimensi: readonly PdtDimensiSkorHasil[]): { ting
   return { tinggi, sedang };
 }
 
+/**
+ * Satu kalimat yang membaca kedalaman jelajah BERSAMA CR toko.
+ *
+ * Kenapa keduanya, bukan kedalaman saja: "1,53 barang per pengunjung" sendirian
+ * tidak menyuruh siapa pun melakukan apa pun. Dipasangkan dengan CR, ia menunjuk
+ * ke DIVISI yang harus bergerak — penjelajahan dalam tapi CR rendah berarti
+ * traffic-nya sudah benar dan masalahnya di produk/harga, jadi menaikkan budget
+ * iklan justru membakar uang; penjelajahan dangkal dengan CR rendah berarti
+ * sebaliknya.
+ *
+ * `null` bila salah satu sisi tidak diketahui — Rule 12, bukan kalimat yang
+ * mengarang separuh fakta.
+ */
+function bacaanKedalamanJelajah(kpi: PdtLaporanKpiRingkas): string | null {
+  if (kpi.barangPerPengunjung == null || kpi.kedalaman == null) return null;
+  const angka = `Pengunjung membuka ${dec(kpi.barangPerPengunjung, 2)} barang rata-rata`;
+  if (kpi.cvr == null) {
+    return kpi.kedalaman === 'dangkal'
+      ? `${angka} — hampir satu barang lalu pergi; katalog belum sempat dilihat.`
+      : `${angka} — pengunjung menelusuri lebih dari satu barang, tanda niat beli yang sehat.`;
+  }
+  const crSehat = kpi.cvr >= 0.02;
+  if (kpi.kedalaman === 'dalam') {
+    return crSehat
+      ? `${angka} dan CVR ${pct(kpi.cvr, 2)} — pengunjung menelusuri katalog DAN membeli; pola toko yang sehat, jangan diutak-atik.`
+      : `${angka}, tapi CVR baru ${pct(kpi.cvr, 2)} — pengunjungnya berkualitas dan mau melihat-lihat, yang belum meyakinkan ada di PRODUK/HARGA, bukan di iklan. Menambah budget iklan sekarang membakar trafik yang sudah benar.`;
+  }
+  if (kpi.kedalaman === 'dangkal') {
+    return crSehat
+      ? `${angka} dengan CVR ${pct(kpi.cvr, 2)} — pembeli datang sudah tahu mau apa; katalog lain belum dimanfaatkan untuk menaikkan nilai keranjang.`
+      : `${angka} dan CVR baru ${pct(kpi.cvr, 2)} — pengunjung membuka satu barang lalu pergi. Perbaiki dulu ketepatan trafik (targeting/kata kunci), bukan halaman produknya.`;
+  }
+  return `${angka} dengan CVR ${pct(kpi.cvr, 2)} — penjelajahan sedang; masih ada ruang mengarahkan pengunjung ke produk terkait.`;
+}
+
 function poinLaporanInsight(input: PdtLaporanInsightInput): string[] {
   const { kpi, kanal, iklan, live, video, afiliasi, tahap, platform } = input;
   const poin: string[] = [];
@@ -1140,6 +1250,11 @@ function poinLaporanInsight(input: PdtLaporanInsightInput): string[] {
   if (kpi.gmv != null) {
     poin.push(`GMV ${rp(kpi.gmv)}${kpi.pesanan != null ? ` dari ${num(kpi.pesanan)} pesanan` : ''}${kpi.cvr != null ? ` (CVR ${pct(kpi.cvr, 2)})` : ''}.`);
   }
+
+  // Kedalaman jelajah DIBACA BERSAMA CR, tidak sendiri — itulah yang membuatnya
+  // berguna. Lihat tabel empat kombinasi di docblock `KEDALAMAN_DALAM_MIN`.
+  const bacaanKedalaman = bacaanKedalamanJelajah(kpi);
+  if (bacaanKedalaman) poin.push(bacaanKedalaman);
 
   const kanalTerukur = kanal.items.filter((x) => x.gmv != null);
   if (kanalTerukur.length) {

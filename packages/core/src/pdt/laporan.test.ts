@@ -60,17 +60,47 @@ const BENCH_KOSONG = {
 
 describe('bangunKpiRingkas (sesi 34 lanjutan — G2-01 lanjutan, payload laporan v1)', () => {
   it('input null (nol baris basis terkait) ⇒ seluruh field null, BUKAN 0', () => {
-    expect(bangunKpiRingkas(null)).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+    expect(bangunKpiRingkas(null)).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null, barangPerPengunjung: null, kedalaman: null });
   });
 
   it('membulatkan gmv/pesanan/pengunjung, cvr = pesanan/pengunjung dibulatkan 5 desimal', () => {
-    const input: PdtLaporanKpiInput = { gmv: 1_234_567.8, pesanan: 40, pengunjung: 2_000 };
-    expect(bangunKpiRingkas(input)).toEqual({ gmv: 1_234_568, pesanan: 40, pengunjung: 2_000, cvr: 0.02 });
+    const input: PdtLaporanKpiInput = { gmv: 1_234_567.8, pesanan: 40, pengunjung: 2_000, produkDiklik: null };
+    expect(bangunKpiRingkas(input)).toEqual({ gmv: 1_234_568, pesanan: 40, pengunjung: 2_000, cvr: 0.02, barangPerPengunjung: null, kedalaman: null });
   });
 
   it('pengunjung 0 ⇒ cvr null (BUKAN pembagian oleh nol yang mengarang 0/Infinity)', () => {
-    const input: PdtLaporanKpiInput = { gmv: 0, pesanan: 0, pengunjung: 0 };
+    const input: PdtLaporanKpiInput = { gmv: 0, pesanan: 0, pengunjung: 0, produkDiklik: null };
     expect(bangunKpiRingkas(input).cvr).toBeNull();
+  });
+});
+
+describe('kedalaman jelajah (barangPerPengunjung) — metrik NIAT, keputusan pemilik 2026-09-22', () => {
+  const kpi = (pengunjung: number, produkDiklik: number | null, pesanan = 0) =>
+    bangunKpiRingkas({ gmv: 1_000, pesanan, pengunjung, produkDiklik });
+
+  it('barangPerPengunjung = produk_diklik / pengunjung, dibulatkan 2 desimal', () => {
+    // Angka NYATA Fim Motor Juli 2026: 552.545 klik produk atas 361.197 pengunjung.
+    expect(kpi(361_197, 552_545).barangPerPengunjung).toBe(1.53);
+  });
+
+  it('≥1,5 ⇒ dalam; ≤1,15 ⇒ dangkal; di antaranya ⇒ sedang', () => {
+    expect(kpi(100, 150).kedalaman).toBe('dalam');
+    expect(kpi(100, 115).kedalaman).toBe('dangkal');
+    expect(kpi(100, 130).kedalaman).toBe('sedang');
+  });
+
+  it('produk_diklik tidak terpanen (TikTok) ⇒ angka DAN label null — tidak ditebak "sedang"', () => {
+    const k = kpi(1_000, null);
+    expect(k.barangPerPengunjung).toBeNull();
+    expect(k.kedalaman).toBeNull();
+  });
+
+  it('pengunjung 0 ⇒ null, bukan Infinity (aturan rumah #7)', () => {
+    expect(kpi(0, 50).barangPerPengunjung).toBeNull();
+  });
+
+  it('nol baris periode ini ⇒ kedua field null', () => {
+    expect(bangunKpiRingkas(null)).toMatchObject({ barangPerPengunjung: null, kedalaman: null });
   });
 });
 
@@ -81,7 +111,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       clientPlatformId: 42,
       periodeAwalBulan: '2026-07-01',
       generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000 },
+      kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000, produkDiklik: null },
       harian: null,
       kanal: null,
       iklan: null,
@@ -103,7 +133,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       clientPlatformId: 42,
       periodeAwalBulan: '2026-07-01',
       generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000, cvr: 0.02 },
+      kpi: { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000, cvr: 0.02, barangPerPengunjung: null, kedalaman: null },
       harian: null,
       kanal: { gmvTotal: null, items: [], lengkap: true },
       iklan: null,
@@ -196,7 +226,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       kpi: null, harian: null, kanal: null, iklan: null, live: null, video: null, produk: null, afiliasi: null, kreator: null, sesiLive: null, kampanye: null, tahap: TAHAP_INPUT_KOSONG, skor, benchmarkVersi: 1,
       benchTiktok: BENCH_KOSONG,
     });
-    expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null });
+    expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null, barangPerPengunjung: null, kedalaman: null });
     // kpi seluruhnya null ⇒ tahap ikut null (whole object) — nol apa pun untuk direproyeksikan.
     expect(hasil.tahap).toBeNull();
     // insight TIDAK PERNAH null — ringkasan/outlook selalu punya sesuatu untuk dikatakan.
@@ -213,7 +243,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       clientPlatformId: 7,
       periodeAwalBulan: '2026-07-01',
       generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500 },
+      kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500, produkDiklik: null },
       harian: null,
       kanal: null,
       iklan: null,
@@ -234,7 +264,7 @@ describe('bangunLaporanShopee (sesi 34 lanjutan)', () => {
       clientPlatformId: 7,
       periodeAwalBulan: '2026-07-01',
       generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500, cvr: 0.02 },
+      kpi: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_500, cvr: 0.02, barangPerPengunjung: null, kedalaman: null },
       harian: null,
       kanal: { gmvTotal: null, items: [], lengkap: false },
       iklan: null,
@@ -462,8 +492,8 @@ describe('bangunLaporanAfiliasi (G2-01 lanjutan — bagian "afiliasi" ringkasan,
 });
 
 describe('bangunLaporanTahap (G2-01 lanjutan — bagian "tahap", 2026-09-16, TikTok-only)', () => {
-  const KPI_KOSONG: PdtLaporanKpiRingkas = { gmv: null, pesanan: null, pengunjung: null, cvr: null };
-  const KPI_ISI: PdtLaporanKpiRingkas = { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000, cvr: 0.02 };
+  const KPI_KOSONG: PdtLaporanKpiRingkas = { gmv: null, pesanan: null, pengunjung: null, cvr: null, barangPerPengunjung: null, kedalaman: null };
+  const KPI_ISI: PdtLaporanKpiRingkas = { gmv: 10_000_000, pesanan: 100, pengunjung: 5_000, cvr: 0.02, barangPerPengunjung: null, kedalaman: null };
 
   it('kpi seluruhnya null (nol baris basis net) ⇒ null (whole object, BUKAN objek ber-field null)', () => {
     expect(bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_KOSONG, null, null, null)).toBeNull();
@@ -538,7 +568,7 @@ describe('bangunLaporanTahap (G2-01 lanjutan — bagian "tahap", 2026-09-16, Tik
   it('aov diturunkan Σgmv÷Σpesanan (bukan kolom mentah), null saat pesanan 0', () => {
     const hasilIsi = bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_ISI, null, null, null);
     expect(hasilIsi?.blok.find((b) => b.kode === 'conversion')?.metrik.find((m) => m.kode === 'aov')?.nilai).toBe(100_000);
-    const kpiNol: PdtLaporanKpiRingkas = { gmv: 0, pesanan: 0, pengunjung: 0, cvr: null };
+    const kpiNol: PdtLaporanKpiRingkas = { gmv: 0, pesanan: 0, pengunjung: 0, cvr: null, barangPerPengunjung: null, kedalaman: null };
     const hasilNol = bangunLaporanTahap(TAHAP_INPUT_KOSONG, kpiNol, null, null, null);
     expect(hasilNol?.blok.find((b) => b.kode === 'conversion')?.metrik.find((m) => m.kode === 'aov')?.nilai).toBeNull();
   });
@@ -664,10 +694,10 @@ describe('bangunLaporanProduk (G2-01-KUADRAN-SKU lanjutan — bagian "produk", T
 
   it('distribusi menghitung jumlah+Σgmv per KEENAM kuadran', () => {
     const input: PdtLaporanProdukInput = [
-      { kuadran: 'bintang', namaProduk: 'A', platformProductId: '1', gmv: 100, klik: 50, traffic: 50, cvr: 0.1 },
-      { kuadran: 'bintang', namaProduk: 'B', platformProductId: '2', gmv: 200, klik: 60, traffic: 60, cvr: 0.12 },
-      { kuadran: 'tidur', namaProduk: 'C', platformProductId: '3', gmv: 10, klik: 2, traffic: 2, cvr: null },
-      { kuadran: 'tidak_tayang', namaProduk: 'D', platformProductId: '4', gmv: 0, klik: 0, traffic: 0, cvr: null },
+      { kuadran: 'bintang', namaProduk: 'A', platformProductId: '1', gmv: 100, klik: 50, traffic: 50, impresi: null, cvr: 0.1 },
+      { kuadran: 'bintang', namaProduk: 'B', platformProductId: '2', gmv: 200, klik: 60, traffic: 60, impresi: null, cvr: 0.12 },
+      { kuadran: 'tidur', namaProduk: 'C', platformProductId: '3', gmv: 10, klik: 2, traffic: 2, impresi: null, cvr: null },
+      { kuadran: 'tidak_tayang', namaProduk: 'D', platformProductId: '4', gmv: 0, klik: 0, traffic: 0, impresi: null, cvr: null },
     ];
     const hasil = bangunLaporanProduk(input, 'tiktok');
     expect(hasil?.distribusi?.bintang).toEqual({ jumlah: 2, gmv: 300 });
@@ -680,19 +710,19 @@ describe('bangunLaporanProduk (G2-01-KUADRAN-SKU lanjutan — bagian "produk", T
 
   it('distribusi gmv null bila NOL baris kuadran itu punya gmv terisi (tidak diketahui, BUKAN 0)', () => {
     const input: PdtLaporanProdukInput = [
-      { kuadran: 'evaluasi', namaProduk: 'A', platformProductId: '1', gmv: null, klik: 5, traffic: 5, cvr: 0.01 },
+      { kuadran: 'evaluasi', namaProduk: 'A', platformProductId: '1', gmv: null, klik: 5, traffic: 5, impresi: null, cvr: 0.01 },
     ];
     expect(bangunLaporanProduk(input, 'tiktok')?.distribusi?.evaluasi).toEqual({ jumlah: 1, gmv: null });
   });
 
   it('topAksi HANYA bintang/bocor_traffic/hidden_gem — evaluasi/tidur/tidak_tayang dikeluarkan', () => {
     const input: PdtLaporanProdukInput = [
-      { kuadran: 'bintang', namaProduk: 'Bintang', platformProductId: '1', gmv: 500, klik: 100, traffic: 100, cvr: 0.2 },
-      { kuadran: 'bocor_traffic', namaProduk: 'Bocor', platformProductId: '2', gmv: 300, klik: 200, traffic: 200, cvr: 0.01 },
-      { kuadran: 'hidden_gem', namaProduk: 'Gem', platformProductId: '3', gmv: 400, klik: 20, traffic: 20, cvr: 0.3 },
-      { kuadran: 'evaluasi', namaProduk: 'Eval', platformProductId: '4', gmv: 9_000_000, klik: 5, traffic: 5, cvr: 0.02 },
-      { kuadran: 'tidur', namaProduk: 'Tidur', platformProductId: '5', gmv: 9_000_000, klik: 2, traffic: 2, cvr: null },
-      { kuadran: 'tidak_tayang', namaProduk: 'Nol', platformProductId: '6', gmv: 0, klik: 0, traffic: 0, cvr: null },
+      { kuadran: 'bintang', namaProduk: 'Bintang', platformProductId: '1', gmv: 500, klik: 100, traffic: 100, impresi: null, cvr: 0.2 },
+      { kuadran: 'bocor_traffic', namaProduk: 'Bocor', platformProductId: '2', gmv: 300, klik: 200, traffic: 200, impresi: null, cvr: 0.01 },
+      { kuadran: 'hidden_gem', namaProduk: 'Gem', platformProductId: '3', gmv: 400, klik: 20, traffic: 20, impresi: null, cvr: 0.3 },
+      { kuadran: 'evaluasi', namaProduk: 'Eval', platformProductId: '4', gmv: 9_000_000, klik: 5, traffic: 5, impresi: null, cvr: 0.02 },
+      { kuadran: 'tidur', namaProduk: 'Tidur', platformProductId: '5', gmv: 9_000_000, klik: 2, traffic: 2, impresi: null, cvr: null },
+      { kuadran: 'tidak_tayang', namaProduk: 'Nol', platformProductId: '6', gmv: 0, klik: 0, traffic: 0, impresi: null, cvr: null },
     ];
     const hasil = bangunLaporanProduk(input, 'tiktok');
     expect(hasil?.topAksi.map((x) => x.namaProduk)).toEqual(['Bintang', 'Gem', 'Bocor']); // diurutkan GMV desc
@@ -700,7 +730,7 @@ describe('bangunLaporanProduk (G2-01-KUADRAN-SKU lanjutan — bagian "produk", T
 
   it('topAksi dipotong 12 (sama angka mesin lama), sisanya dibuang', () => {
     const input: PdtLaporanProdukInput = Array.from({ length: 20 }, (_, i) => ({
-      kuadran: 'bintang' as const, namaProduk: `SKU-${i}`, platformProductId: String(i), gmv: 1_000 - i, klik: 50, traffic: 50, cvr: 0.1,
+      kuadran: 'bintang' as const, namaProduk: `SKU-${i}`, platformProductId: String(i), gmv: 1_000 - i, klik: 50, traffic: 50, impresi: null, cvr: 0.1,
     }));
     const hasil = bangunLaporanProduk(input, 'tiktok');
     expect(hasil?.topAksi).toHaveLength(12);
@@ -709,7 +739,7 @@ describe('bangunLaporanProduk (G2-01-KUADRAN-SKU lanjutan — bagian "produk", T
 
   it('namaProduk null (baris lama sebelum kolom Nama dipanen) TETAP masuk topAksi', () => {
     const input: PdtLaporanProdukInput = [
-      { kuadran: 'bintang', namaProduk: null, platformProductId: 'PRD-1', gmv: 100, klik: 50, traffic: 50, cvr: 0.1 },
+      { kuadran: 'bintang', namaProduk: null, platformProductId: 'PRD-1', gmv: 100, klik: 50, traffic: 50, impresi: null, cvr: 0.1 },
     ];
     expect(bangunLaporanProduk(input, 'tiktok')?.topAksi).toEqual([
       { namaProduk: null, platformProductId: 'PRD-1', gmv: 100, klik: 50, cvr: 0.1, kuadran: 'bintang' },
@@ -721,7 +751,7 @@ describe('bangunLaporanProduk (G2-01-KUADRAN-SKU lanjutan — bagian "produk", T
   // -------------------------------------------------------------------------
   it('relatif TikTok: dua band, ambang p75 klik/CVR — bukan salinan distribusi benchmark', () => {
     const b = (i: number, klik: number, cvr: number) => ({
-      kuadran: null, namaProduk: `S${i}`, platformProductId: String(i), gmv: 100, klik, traffic: klik, cvr,
+      kuadran: null, namaProduk: `S${i}`, platformProductId: String(i), gmv: 100, klik, traffic: klik, impresi: null, cvr,
     });
     // Empat SKU aktif: klik p75 = 325, CVR positif p75 = 0,0325.
     const hasil = bangunLaporanProduk(
@@ -739,7 +769,7 @@ describe('bangunLaporanProduk (G2-01-KUADRAN-SKU lanjutan — bagian "produk", T
 
   it('relatif Shopee: TIGA band — trafik medium naik ke high saat CR-nya high (perilaku yang TikTok tidak punya)', () => {
     const b = (i: number, peng: number, cr: number) => ({
-      kuadran: null, namaProduk: `S${i}`, platformProductId: String(i), gmv: 100, klik: null, traffic: peng, cvr: cr,
+      kuadran: null, namaProduk: `S${i}`, platformProductId: String(i), gmv: 100, klik: null, traffic: peng, impresi: null, cvr: cr,
     });
     // Ambang percentile: pengunjung p25/p75 = 175/475, CR p25/p75 = 0,0175/0,0475.
     // SKU-3 (300 pengunjung, CR 6%) trafiknya MEDIUM tapi CR-nya high ⇒ bintang.
@@ -753,7 +783,7 @@ describe('bangunLaporanProduk (G2-01-KUADRAN-SKU lanjutan — bagian "produk", T
 
   it('relatif null bila nol baris AKTIF — percentile atas himpunan kosong bukan angka', () => {
     const hasil = bangunLaporanProduk(
-      [{ kuadran: 'tidur', namaProduk: 'A', platformProductId: '1', gmv: 1, klik: 2, traffic: 2, cvr: null }],
+      [{ kuadran: 'tidur', namaProduk: 'A', platformProductId: '1', gmv: 1, klik: 2, traffic: 2, impresi: null, cvr: null }],
       'tiktok',
     );
     expect(hasil?.relatif).toBeNull();
@@ -761,7 +791,7 @@ describe('bangunLaporanProduk (G2-01-KUADRAN-SKU lanjutan — bagian "produk", T
 
   it('relatif Shopee memakai ambang uji 50 pengunjung (bukan 10 klik TikTok) — baris di bawahnya tidak membentuk ambang', () => {
     const b = (i: number, peng: number, cr: number) => ({
-      kuadran: null, namaProduk: `S${i}`, platformProductId: String(i), gmv: 100, klik: null, traffic: peng, cvr: cr,
+      kuadran: null, namaProduk: `S${i}`, platformProductId: String(i), gmv: 100, klik: null, traffic: peng, impresi: null, cvr: cr,
     });
     const input = [b(1, 20, 0.5), b(2, 100, 0.01), b(3, 200, 0.02)];
     expect(bangunLaporanProduk(input, 'shopee')?.relatif?.ambang.n).toBe(2);
@@ -770,8 +800,8 @@ describe('bangunLaporanProduk (G2-01-KUADRAN-SKU lanjutan — bagian "produk", T
 
   it('baris kuadran null (belum sempat diklasifikasi) dikeluarkan dari distribusi+topAksi, bukan dipaksa masuk bucket', () => {
     const input: PdtLaporanProdukInput = [
-      { kuadran: null, namaProduk: 'Belum', platformProductId: '1', gmv: 100, klik: 50, traffic: 50, cvr: 0.1 },
-      { kuadran: 'bintang', namaProduk: 'Sudah', platformProductId: '2', gmv: 200, klik: 60, traffic: 60, cvr: 0.2 },
+      { kuadran: null, namaProduk: 'Belum', platformProductId: '1', gmv: 100, klik: 50, traffic: 50, impresi: null, cvr: 0.1 },
+      { kuadran: 'bintang', namaProduk: 'Sudah', platformProductId: '2', gmv: 200, klik: 60, traffic: 60, impresi: null, cvr: 0.2 },
     ];
     const hasil = bangunLaporanProduk(input, 'tiktok');
     expect(hasil?.topAksi).toHaveLength(1);
@@ -782,7 +812,7 @@ describe('bangunLaporanProduk (G2-01-KUADRAN-SKU lanjutan — bagian "produk", T
 
 describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16, SATU bentuk TikTok+Shopee)', () => {
   const KANAL_KOSONG: PdtLaporanKanal = { gmvTotal: null, items: [], lengkap: true };
-  const KPI_KOSONG: PdtLaporanKpiRingkas = { gmv: null, pesanan: null, pengunjung: null, cvr: null };
+  const KPI_KOSONG: PdtLaporanKpiRingkas = { gmv: null, pesanan: null, pengunjung: null, cvr: null, barangPerPengunjung: null, kedalaman: null };
 
   const dasar = (over: Partial<PdtLaporanInsightInput> = {}): PdtLaporanInsightInput => ({
     platform: 'tiktok',
@@ -803,6 +833,40 @@ describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16,
     expect(hasil.ringkasan).toBe('Belum ada data GMV untuk periode ini.');
     expect(hasil.outlook).toBe('Target GMV bulan depan belum bisa ditentukan — GMV periode ini tidak diketahui.');
     expect(hasil.poin).toEqual([]);
+  });
+
+  // Kedalaman jelajah dibaca BERSAMA CVR — empat kombinasi menunjuk empat
+  // tindakan yang berbeda. Inti keputusan pemilik 2026-09-22.
+  const kpiDepth = (barang: number | null, cvr: number | null): PdtLaporanKpiRingkas =>
+    bangunKpiRingkas(barang == null ? { gmv: 1_000, pesanan: 0, pengunjung: 1_000, produkDiklik: null }
+      : { gmv: 1_000, pesanan: Math.round((cvr ?? 0) * 1_000), pengunjung: 1_000, produkDiklik: Math.round(barang * 1_000) });
+
+  it('jelajah DALAM + CVR rendah ⇒ menunjuk PRODUK/HARGA, dan melarang menambah budget iklan', () => {
+    const poin = bangunLaporanInsight(dasar({ kpi: kpiDepth(1.8, 0.005) })).poin;
+    const baris = poin.find((x) => x.includes('barang rata-rata'));
+    expect(baris).toContain('PRODUK/HARGA');
+    expect(baris).toContain('membakar trafik yang sudah benar');
+  });
+
+  it('jelajah DALAM + CVR sehat ⇒ dibaca sebagai pola sehat, bukan masalah', () => {
+    const baris = bangunLaporanInsight(dasar({ kpi: kpiDepth(1.8, 0.03) })).poin.find((x) => x.includes('barang rata-rata'));
+    expect(baris).toContain('jangan diutak-atik');
+  });
+
+  it('jelajah DANGKAL + CVR rendah ⇒ menunjuk TARGETING, bukan halaman produk', () => {
+    const baris = bangunLaporanInsight(dasar({ kpi: kpiDepth(1.05, 0.005) })).poin.find((x) => x.includes('barang rata-rata'));
+    expect(baris).toContain('targeting');
+    expect(baris).toContain('bukan halaman produknya');
+  });
+
+  it('jelajah DANGKAL + CVR sehat ⇒ menunjuk peluang basket, bukan masalah trafik', () => {
+    const baris = bangunLaporanInsight(dasar({ kpi: kpiDepth(1.05, 0.03) })).poin.find((x) => x.includes('barang rata-rata'));
+    expect(baris).toContain('nilai keranjang');
+  });
+
+  it('barangPerPengunjung null (TikTok) ⇒ NOL kalimat kedalaman, bukan kalimat separuh fakta', () => {
+    const poin = bangunLaporanInsight(dasar({ kpi: kpiDepth(null, null) })).poin;
+    expect(poin.some((x) => x.includes('barang rata-rata'))).toBe(false);
   });
 
   it('dimensi skor nilai < SKOR_PERHATIAN_MIN (6) ⇒ rekomendasi TINGGI', () => {
@@ -838,7 +902,7 @@ describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16,
 
   it('poin merangkum kanal (channel terbesar) + catatan kalau kanal belum lengkap', () => {
     const hasil = bangunLaporanInsight(dasar({
-      kpi: { gmv: 1_000_000, pesanan: 10, pengunjung: 500, cvr: 0.02 },
+      kpi: { gmv: 1_000_000, pesanan: 10, pengunjung: 500, cvr: 0.02, barangPerPengunjung: null, kedalaman: null },
       kanal: {
         gmvTotal: 1_000_000, lengkap: false,
         items: [
@@ -853,7 +917,7 @@ describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16,
 
   it('poin merangkum iklan/live/video/afiliasi HANYA saat bagiannya ada (bukan null)', () => {
     const hasil = bangunLaporanInsight(dasar({
-      kpi: { gmv: 2_000_000, pesanan: 20, pengunjung: 1_000, cvr: 0.02 },
+      kpi: { gmv: 2_000_000, pesanan: 20, pengunjung: 1_000, cvr: 0.02, barangPerPengunjung: null, kedalaman: null },
       iklan: { biaya: 500_000, gmv: 2_000_000, roas: 4, items: [], lengkap: true },
       live: { sesi: 5, gmv: 1_000_000, vv: 10_000, jam: 10, gmvPerSesi: 200_000, gmvPerJam: 100_000 },
       video: { total: 8, gmv: 400_000, vv: 20_000, likes: 100, dibagikan: 10, klikProduk: 50, gmvPerVideo: 50_000, vvPerVideo: 2_500 },
@@ -867,16 +931,16 @@ describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16,
 
   it('tahap.fokus hanya dirangkum untuk platform tiktok (Shopee selalu tahap:null, tapi guard platform tetap eksplisit)', () => {
     const tahap: PdtLaporanTahap = { fokus: 'consideration', funnel: [], konversiTotal: { nilai: null }, belanjaTotal: null, blok: [] };
-    const tiktok = bangunLaporanInsight(dasar({ platform: 'tiktok', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1 }, tahap }));
+    const tiktok = bangunLaporanInsight(dasar({ platform: 'tiktok', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1, barangPerPengunjung: null, kedalaman: null }, tahap }));
     expect(tiktok.poin).toContain('Fokus tahap buyer-journey periode ini: Consideration.');
 
-    const shopee = bangunLaporanInsight(dasar({ platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1 }, tahap }));
+    const shopee = bangunLaporanInsight(dasar({ platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1, barangPerPengunjung: null, kedalaman: null }, tahap }));
     expect(shopee.poin.some((p) => p.includes('Fokus tahap'))).toBe(false);
   });
 
   it('indikator TikTok EMPAT dari benchTiktok (ROAS, GMV/jam LIVE, CVR toko, GPM video) — cermin `leading` mesin lama', () => {
     const skor = { total: 7, label: 'PERLU PERHATIAN' as const, dimensi: [] };
-    const tiktok = bangunLaporanInsight(dasar({ kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1 }, benchTiktok: BENCH_KOSONG, skor }));
+    const tiktok = bangunLaporanInsight(dasar({ kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 1, barangPerPengunjung: null, kedalaman: null }, benchTiktok: BENCH_KOSONG, skor }));
     expect(tiktok.indikator).toEqual([
       { nama: 'Target Skor Performa', target: '≥8/10 (kini 7,0/10)' },
       { nama: 'Target ROAS Iklan (GMV Max)', target: '≥8x (kini —)' },
@@ -889,16 +953,16 @@ describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16,
   it('target CVR toko = max(bench.warn, cvr+0,003) — toko YANG SUDAH di atas ambang tetap diberi target naik', () => {
     const skor = { total: 7, label: 'PERLU PERHATIAN' as const, dimensi: [] };
     // cvr 0,002 ADA DI BAWAH cvr_toko.warn (0,008) ⇒ targetnya ambang bench, bukan 0,005.
-    const rendah = bangunLaporanInsight(dasar({ kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 0.002 }, benchTiktok: BENCH_KOSONG, skor }));
+    const rendah = bangunLaporanInsight(dasar({ kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 0.002, barangPerPengunjung: null, kedalaman: null }, benchTiktok: BENCH_KOSONG, skor }));
     expect(rendah.indikator.find((i) => i.nama === 'Target CVR Toko')?.target).toBe('0,80% (kini 0,20%)');
     // cvr 0,02 SUDAH di atas ambang ⇒ targetnya cvr+0,003, bukan ambang yang sudah dilewati.
-    const tinggi = bangunLaporanInsight(dasar({ kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 0.02 }, benchTiktok: BENCH_KOSONG, skor }));
+    const tinggi = bangunLaporanInsight(dasar({ kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: 0.02, barangPerPengunjung: null, kedalaman: null }, benchTiktok: BENCH_KOSONG, skor }));
     expect(tinggi.indikator.find((i) => i.nama === 'Target CVR Toko')?.target).toBe('2,30% (kini 2,00%)');
   });
 
   it('indikator Shopee: pengunjung +35% dan CR +1 poin persen (pengali SAMA mesin lama), nol bench sama sekali', () => {
     const skor = { total: 7, label: 'PERLU PERHATIAN' as const, dimensi: [] };
-    const shopee = bangunLaporanInsight(dasar({ platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 2_000, cvr: 0.02 }, benchTiktok: null, skor }));
+    const shopee = bangunLaporanInsight(dasar({ platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 2_000, cvr: 0.02, barangPerPengunjung: null, kedalaman: null }, benchTiktok: null, skor }));
     expect(shopee.indikator).toEqual([
       { nama: 'Target Skor Performa', target: '≥8/10 (kini 7,0/10)' },
       { nama: 'Target Pengunjung Toko', target: '2.700 (+35% dari 2.000)' },
@@ -908,11 +972,11 @@ describe('bangunLaporanInsight (G2-01 lanjutan — bagian "insight", 2026-09-16,
 
   it('Shopee nol iklan ⇒ NOL indikator ROAS — mesin lama mengarang baseline 5x untuk toko yang tidak beriklan', () => {
     const skor = { total: 7, label: 'PERLU PERHATIAN' as const, dimensi: [] };
-    const tanpaIklan = bangunLaporanInsight(dasar({ platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: null }, benchTiktok: null, skor, iklan: null }));
+    const tanpaIklan = bangunLaporanInsight(dasar({ platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: null, barangPerPengunjung: null, kedalaman: null }, benchTiktok: null, skor, iklan: null }));
     expect(tanpaIklan.indikator.some((i) => i.nama === 'Target ROAS Iklan')).toBe(false);
 
     const berIklan = bangunLaporanInsight(dasar({
-      platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: null }, benchTiktok: null, skor,
+      platform: 'shopee', kpi: { gmv: 1, pesanan: 1, pengunjung: 1, cvr: null, barangPerPengunjung: null, kedalaman: null }, benchTiktok: null, skor,
       iklan: { biaya: 1_000_000, gmv: 4_000_000, roas: 4, items: [], lengkap: false },
     }));
     expect(berIklan.indikator.find((i) => i.nama === 'Target ROAS Iklan')?.target).toBe('>6,0x (kini 4,00x)');
@@ -979,7 +1043,7 @@ describe('bangunLaporanHarian', () => {
   it('Σ titik[].gmv === kpi.gmv — keduanya membaca baris yang sama dengan basis yang sama', () => {
     const baris = [hari('2026-07-01', 1_000_000, 10, 100), hari('2026-07-02', 2_500_000, 20, 200)];
     const h = bangunLaporanHarian(baris);
-    const kpi = bangunKpiRingkas({ gmv: 3_500_000, pesanan: 30, pengunjung: 300 });
+    const kpi = bangunKpiRingkas({ gmv: 3_500_000, pesanan: 30, pengunjung: 300, produkDiklik: null });
     expect(h?.titik.reduce((a, t) => a + (t.gmv ?? 0), 0)).toBe(kpi.gmv);
   });
 });
@@ -1271,8 +1335,8 @@ describe('bangunLaporanKampanye (Per Kampanye)', () => {
 describe('bangunLaporanProduk — "top" lintas kuadran (Top Produk by GMV, kedua platform)', () => {
   it('top memuat SELURUH produk diurut GMV desc, termasuk kuadran yang dikeluarkan topAksi', () => {
     const input: PdtLaporanProdukInput = [
-      { kuadran: 'bintang', namaProduk: 'Bintang', platformProductId: '1', gmv: 500, klik: 100, traffic: 100, cvr: 0.2 },
-      { kuadran: 'evaluasi', namaProduk: 'Eval', platformProductId: '2', gmv: 9_000, klik: 5, traffic: 5, cvr: 0.02 },
+      { kuadran: 'bintang', namaProduk: 'Bintang', platformProductId: '1', gmv: 500, klik: 100, traffic: 100, impresi: null, cvr: 0.2 },
+      { kuadran: 'evaluasi', namaProduk: 'Eval', platformProductId: '2', gmv: 9_000, klik: 5, traffic: 5, impresi: null, cvr: 0.02 },
     ];
     const h = bangunLaporanProduk(input, 'tiktok');
     expect(h?.top.map((x) => x.namaProduk)).toEqual(['Eval', 'Bintang']);
@@ -1282,8 +1346,8 @@ describe('bangunLaporanProduk — "top" lintas kuadran (Top Produk by GMV, kedua
   // Inilah yang membuat bagian "produk" akhirnya terisi sisi Shopee.
   it('SELURUH baris berkuadran null (kasus Shopee) ⇒ distribusi null tapi top TETAP terisi', () => {
     const input: PdtLaporanProdukInput = [
-      { kuadran: null, namaProduk: 'S1', platformProductId: '1', gmv: 300, klik: 10, traffic: 10, cvr: 0.05 },
-      { kuadran: null, namaProduk: 'S2', platformProductId: '2', gmv: 900, klik: 40, traffic: 40, cvr: 0.03 },
+      { kuadran: null, namaProduk: 'S1', platformProductId: '1', gmv: 300, klik: 10, traffic: 10, impresi: null, cvr: 0.05 },
+      { kuadran: null, namaProduk: 'S2', platformProductId: '2', gmv: 900, klik: 40, traffic: 40, impresi: null, cvr: 0.03 },
     ];
     const h = bangunLaporanProduk(input, 'tiktok');
     expect(h?.distribusi).toBeNull();
@@ -1294,7 +1358,7 @@ describe('bangunLaporanProduk — "top" lintas kuadran (Top Produk by GMV, kedua
 
   it('top dipotong 12, sama angka topAksi/mesin lama', () => {
     const input: PdtLaporanProdukInput = Array.from({ length: 18 }, (_, i) => ({
-      kuadran: null, namaProduk: `P-${i}`, platformProductId: String(i), gmv: 1_000 - i, klik: null, traffic: null, cvr: null,
+      kuadran: null, namaProduk: `P-${i}`, platformProductId: String(i), gmv: 1_000 - i, klik: null, traffic: null, impresi: null, cvr: null,
     }));
     expect(bangunLaporanProduk(input, 'tiktok')?.top).toHaveLength(12);
   });

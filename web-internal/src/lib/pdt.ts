@@ -178,6 +178,10 @@ export interface PdtLaporanKpi {
   pesanan: number | null;
   pengunjung: number | null;
   cvr: number | null;
+  /** Berapa BARANG yang dibuka satu pengunjung, rata-rata. `null` untuk TikTok (kolom sumbernya tidak dipanen) — "tidak diketahui", bukan nol. */
+  barang_per_pengunjung: number | null;
+  /** `'dalam' | 'sedang' | 'dangkal'`, atau `null` bila angkanya `null`. */
+  kedalaman: string | null;
 }
 
 export interface PdtLaporanDimensi {
@@ -314,6 +318,12 @@ export interface PdtLaporanProdukDistribusi {
 
 /** Satu baris "Top Produk by GMV" — LINTAS kuadran. `kuadran` `null` = belum/tidak terklasifikasi (SELURUH baris Shopee). */
 export interface PdtLaporanProdukTopItem {
+  /** Sumbu-X kuadran: klik (TikTok) / kunjungan halaman produk (Shopee). */
+  traffic: number | null;
+  /** Tayangan kartu produk di feed/pencarian — tahap funnel DI ATAS `traffic`. */
+  impresi: number | null;
+  /** `klik ÷ impresi`. */
+  ctr: number | null;
   nama_produk: string | null;
   platform_product_id: string | null;
   gmv: number | null;

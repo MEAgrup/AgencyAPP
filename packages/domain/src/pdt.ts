@@ -3345,33 +3345,47 @@ export async function hitungSkorShopee(
 // ===========================================================================
 
 async function bacaKpiShopDaily(sql: Sql, clientPlatformId: number, periodeAwalBulan: string, basis: string): Promise<pdt.PdtLaporanKpiInput | null> {
-  const [row] = await sql<{ n: number; gmv: string; pesanan: string; pengunjung: string }[]>`
+  // `produk_diklik` dihitung TERPISAH (`count(...)`) dari `sum(...)`-nya: kolom
+  // ini opsional di sumbernya, dan `sum()` atas nol baris non-null tetap 0 —
+  // 0 berarti "nol barang dibuka" sementara yang benar "tidak diketahui"
+  // (Rule 12). Konsumennya `kpi.barangPerPengunjung` (kedalaman jelajah).
+  const [row] = await sql<{ n: number; gmv: string; pesanan: string; pengunjung: string; diklik_n: number; diklik: string }[]>`
     select count(*)::int as n,
            coalesce(sum(gmv), 0) as gmv,
            coalesce(sum(pesanan), 0) as pesanan,
-           coalesce(sum(pengunjung), 0) as pengunjung
+           coalesce(sum(pengunjung), 0) as pengunjung,
+           count(produk_diklik)::int as diklik_n, coalesce(sum(produk_diklik), 0) as diklik
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = ${basis}
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
-  return row.n === 0 ? null : { gmv: Number(row.gmv), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung) };
+  return row.n === 0 ? null : {
+    gmv: Number(row.gmv), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung),
+    produkDiklik: row.diklik_n === 0 ? null : Number(row.diklik),
+  };
 }
 
 async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKpiInput | null> {
-  const [row] = await sql<{ n: number; gmv: string; refund: string; pesanan: string; pengunjung: string }[]>`
+  const [row] = await sql<{ n: number; gmv: string; refund: string; pesanan: string; pengunjung: string; diklik_n: number; diklik: string }[]>`
     select count(*)::int as n,
            coalesce(sum(gmv), 0) as gmv,
            coalesce(sum(refund), 0) as refund,
            coalesce(sum(pesanan), 0) as pesanan,
-           coalesce(sum(pengunjung), 0) as pengunjung
+           coalesce(sum(pengunjung), 0) as pengunjung,
+           count(produk_diklik)::int as diklik_n, coalesce(sum(produk_diklik), 0) as diklik
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = 'net'
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
   if (row.n === 0) return null;
-  return { gmv: Number(row.gmv) - Number(row.refund), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung) };
+  // TikTok: `tt_shop_analytics` tidak memanen `produk_diklik`, jadi nilainya
+  // `null` di sana — kedalaman jelajah otomatis tidak muncul, bukan 0 palsu.
+  return {
+    gmv: Number(row.gmv) - Number(row.refund), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung),
+    produkDiklik: row.diklik_n === 0 ? null : Number(row.diklik),
+  };
 }
 
 /**
@@ -3747,8 +3761,8 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
  * basi/`null` dari klasifikasi periode lain atau belum pernah sama sekali.
  */
 async function bacaProdukTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
-  const rows = await sql<{ kuadran: string | null; nama_produk: string | null; platform_product_id: string | null; gmv: string | null; klik: number | null; ctor: string | null; pesanan_sku: number | null }[]>`
-    select kuadran, nama_produk, platform_product_id, gmv, klik, ctor, pesanan_sku
+  const rows = await sql<{ kuadran: string | null; nama_produk: string | null; platform_product_id: string | null; gmv: string | null; klik: number | null; ctor: string | null; pesanan_sku: number | null; impresi: number | null }[]>`
+    select kuadran, nama_produk, platform_product_id, gmv, klik, ctor, pesanan_sku, impresi
       from pdt_fact_sku_period
      where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'net'
        and periode = ${periodeAwalBulan}::date`;
@@ -3766,6 +3780,7 @@ async function bacaProdukTiktok(sql: Sql, clientPlatformId: number, periodeAwalB
       // Sumbu-X kuadran TikTok = klik (Shopee memakai `pengunjung`) — dua
       // platform, satu field, karena mode relatif memerlukannya seragam.
       traffic: klik,
+      impresi: r.impresi,
       cvr,
     };
   });
@@ -4009,9 +4024,9 @@ async function bacaKampanye(sql: Sql, clientPlatformId: number, periodeAwalBulan
 async function bacaProdukShopee(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
   const rows = await sql<{
     nama_produk: string | null; platform_product_id: string | null; kuadran: string | null;
-    gmv: string | null; pengunjung: number | null; klik: number | null; pesanan: number | null;
+    gmv: string | null; pengunjung: number | null; klik: number | null; pesanan: number | null; impresi: number | null;
   }[]>`
-    select nama_produk, platform_product_id, kuadran, gmv, pengunjung, klik, pesanan
+    select nama_produk, platform_product_id, kuadran, gmv, pengunjung, klik, pesanan, impresi
       from pdt_fact_sku_period
      where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'siap_dikirim'
        and periode = ${periodeAwalBulan}::date`;
@@ -4023,6 +4038,7 @@ async function bacaProdukShopee(sql: Sql, clientPlatformId: number, periodeAwalB
     gmv: r.gmv == null ? null : Number(r.gmv),
     klik: r.klik,
     traffic: r.pengunjung,
+    impresi: r.impresi,
     cvr: pdt.crKuadranShopee({ id: 0, pengunjung: r.pengunjung, pesananDibuat: r.pesanan }),
   }));
 }

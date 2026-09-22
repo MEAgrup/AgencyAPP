@@ -9198,6 +9198,30 @@ export interface PdtLaporanKpiWire {
   pesanan: number | null;
   pengunjung: number | null;
   cvr: number | null;
+  /** Σ produk_diklik ÷ Σ pengunjung — berapa BARANG yang dibuka satu pengunjung. `null` untuk TikTok SELALU (`tt_shop_analytics` tidak memanen kolomnya), dan itu berarti "tidak diketahui", bukan nol. */
+  barang_per_pengunjung: number | null;
+  /** `'dalam' | 'sedang' | 'dangkal'` — pembacaan `barang_per_pengunjung` terhadap ambang `@cdps/core`. `null` bila angkanya `null`. */
+  kedalaman: string | null;
+}
+
+/**
+ * `l.kpi` di-map EKSPLISIT, bukan di-spread. Sebelum ada
+ * `barangPerPengunjung`/`kedalaman` seluruh field KPI kebetulan satu kata
+ * sehingga `{ ...l.kpi }` lolos; begitu satu field camelCase lahir, spread
+ * mengirim `barangPerPengunjung` ke wire dan FE yang membaca
+ * `barang_per_pengunjung` diam-diam menerima `undefined` — bug kelas O43
+ * (route menjawab 200, angkanya hilang). `wire.ts` adalah SATU-SATUNYA tempat
+ * batas camelCase↔snake_case diterjemahkan, jadi ia diterjemahkan di sini.
+ */
+function pdtLaporanKpiToWire(k: pdtCore.PdtLaporanKpiRingkas): PdtLaporanKpiWire {
+  return {
+    gmv: k.gmv,
+    pesanan: k.pesanan,
+    pengunjung: k.pengunjung,
+    cvr: k.cvr,
+    barang_per_pengunjung: k.barangPerPengunjung,
+    kedalaman: k.kedalaman,
+  };
 }
 
 export interface PdtLaporanDimensiWire {
@@ -9402,6 +9426,12 @@ export interface PdtLaporanProdukTopItemWire {
   platform_product_id: string | null;
   gmv: number | null;
   klik: number | null;
+  /** Sumbu-X kuadran: klik (TikTok) / kunjungan halaman produk (Shopee). */
+  traffic: number | null;
+  /** Tayangan kartu produk di feed/pencarian — TAHAP FUNNEL DI ATAS `traffic`, bukan versi lain dari angka yang sama. */
+  impresi: number | null;
+  /** `klik ÷ impresi`. */
+  ctr: number | null;
   cvr: number | null;
   kuadran: string | null;
 }
@@ -9636,7 +9666,8 @@ function pdtLaporanProdukToWire(p: pdtCore.PdtLaporanProduk | null): PdtLaporanP
       },
     },
     top: p.top.map((x) => ({
-      nama_produk: x.namaProduk, platform_product_id: x.platformProductId, gmv: x.gmv, klik: x.klik, cvr: x.cvr, kuadran: x.kuadran,
+      nama_produk: x.namaProduk, platform_product_id: x.platformProductId, gmv: x.gmv, klik: x.klik,
+      traffic: x.traffic, impresi: x.impresi, ctr: x.ctr, cvr: x.cvr, kuadran: x.kuadran,
     })),
   };
 }
@@ -9795,7 +9826,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     client_platform_id: l.clientPlatformId,
     periode_awal_bulan: l.periodeAwalBulan,
     generated_at: l.generatedAt,
-    kpi: { ...l.kpi },
+    kpi: pdtLaporanKpiToWire(l.kpi),
     harian: pdtLaporanHarianToWire(l.harian),
     kanal: pdtLaporanKanalToWire(l.kanal),
     iklan: pdtLaporanIklanToWire(l.iklan),
@@ -9822,7 +9853,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     client_platform_id: l.clientPlatformId,
     periode_awal_bulan: l.periodeAwalBulan,
     generated_at: l.generatedAt,
-    kpi: { ...l.kpi },
+    kpi: pdtLaporanKpiToWire(l.kpi),
     harian: pdtLaporanHarianToWire(l.harian),
     kanal: pdtLaporanKanalToWire(l.kanal),
     iklan: pdtLaporanIklanToWire(l.iklan),
