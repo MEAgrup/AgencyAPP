@@ -962,6 +962,18 @@ ber-paket-terpurge muncul di daftar laporan, bukan hilang.
 
 > Mematikan: **Report Engine TikTok & Shopee**.
 
+> **Update 2026-09-22 — "mematikan" itu punya harga yang belum dibayar.** Audit pemilik ("report
+> klien vs PDT, fitur serupa tapi double") menemukan PDT belum bisa menggantikan M14 di EMPAT titik:
+> nol renderer HTML `klien`/`internal`, nol permukaan portal + state machine publikasi, nol tulisan ke
+> `clients.total_sales`/Health Score/baseline Ads (PDT Rule 24 belum punya mekanisme sama sekali), dan
+> dua bagian yang belum ada modulnya (Tokopedia, TikTok Ads Manager — celah inilah yang melahirkan
+> pita kuning "Belum lengkap" di bagian Tahap). Port-nya sekarang punya PRD sendiri:
+> **`docs/prd/CDPS_Module20_PDT_Laporan_Klien.md`**, rencana eksekusi
+> **`docs/plan/PLAN_PORT_M14_KE_PDT.md`** (gelombang A–G), keputusan `docs/DECISIONS.md` Open
+> `M14-VS-PDT-DUPLIKASI`. Kenyataan live saat audit: `client_reports` 0 baris, `pdt_laporan_kiriman`
+> 0 baris, `pdt_upload_batch` 14 — M14 belum pernah dipakai di produksi, tapi ia tetap satu-satunya
+> jalur pengiriman ke klien yang pernah dibangun, jadi ia dicabut SEKALI di Gelombang G, bukan dicicil.
+
 ### G2-01 · ⚠️ Membalik invarian `client_reports` yang sedang berjalan (PDT-21)
 Hari ini `client_reports` **adalah** snapshot beku saat **dibuat** (`trg_client_reports_frozen`),
 dan ia **penulis tunggal `clients.total_sales`** (gap C1). UAT Fim Motor §7.4 mencatat akibatnya:
