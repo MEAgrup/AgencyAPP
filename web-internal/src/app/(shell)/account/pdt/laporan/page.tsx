@@ -389,6 +389,42 @@ function IndEditor({ value, disabled, onChange }: { value: { nama: string; targe
   );
 }
 
+/**
+ * Banner kelengkapan data — DIPAKAI HANYA DI HALAMAN INTERNAL INI.
+ *
+ * Kenapa penandanya wajib. Halaman ini ada di `web-internal`, dan isinya tidak
+ * sampai ke klien lewat portal: RLS `pdt_laporan_kiriman` hanya memberi SELECT
+ * ke OD/Director, Lead divisi Account, dan AM pemilik toko — nol realm portal
+ * klien, dan `web-client-portal` nol rujukan PDT. Tetapi laporan hari ini sampai
+ * ke klien lewat SCREENSHOT dan share-screen, dan di jalur itu peringatan "belum
+ * lengkap" terbaca klien sebagai "agensinya sendiri tidak tahu angkanya" —
+ * kebalikan dari maksudnya, yang sebenarnya menjaga Rule 12 (tidak diketahui
+ * BUKAN nol).
+ *
+ * Karena itu tiap banner memakai komponen ini, bukan `alert alertWarning`
+ * telanjang: satu tempat untuk mengubah penandanya, dan banner berikutnya tidak
+ * lahir tanpa penanda karena polanya sudah ada.
+ *
+ * Ini TIDAK menggantikan aturan render klien. PDT hari ini memang belum punya
+ * permukaan klien sama sekali (nol renderer HTML, nol route portal —
+ * `kirimLaporanPdt` hanya membekukan JSON), jadi penanda ini menjaga jalur yang
+ * NYATA dipakai hari ini: screenshot dan share-screen. Saat permukaan klien
+ * dibangun (`docs/backlog/PDT_BACKLOG.md` §2 G2 — port renderer `klien`/
+ * `internal` mesin lama M14 ke PDT), banner kelengkapan data dilarang ter-render
+ * di sana sama sekali: penanda ini untuk mata AM, bukan izin menampilkannya ke
+ * klien.
+ */
+function CatatanInternal({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="alert alertWarning" role="status" style={{ marginTop: 8, marginBottom: 8 }}>
+      <strong style={{ display: 'block', marginBottom: 4, textTransform: 'uppercase', fontSize: 11, letterSpacing: '0.04em' }}>
+        Catatan internal — jangan dikirim / ditampilkan ke klien
+      </strong>
+      {children}
+    </div>
+  );
+}
+
 export default function LaporanPdtPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsLoading, setClientsLoading] = useState(true);
@@ -791,13 +827,13 @@ export default function LaporanPdtPage() {
               GMV Kotor: {formatIDR(laporan.kanal.gmv_total)}
             </p>
             {!laporan.kanal.lengkap && (
-              <div className="alert alertWarning" role="status" style={{ marginTop: 8, marginBottom: 8 }}>
+              <CatatanInternal>
                 Belum lengkap — {laporan.platform === 'tiktok' ? 'sumber ini' : 'Shopee Ads dan Affiliate saja'}.
                 {laporan.platform !== 'tiktok' && (
                   <> Voucher, Chat, Meta Ads, dan Video belum diproses PDT — GMV dari sumber itu TIDAK berarti nol,
                   hanya belum terhitung di sini.</>
                 )}
-              </div>
+              </CatatanInternal>
             )}
             {laporan.kanal.gmv_total === null ? (
               <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Belum ada data untuk periode ini.</p>
@@ -816,10 +852,10 @@ export default function LaporanPdtPage() {
             <section className="card">
               <h2>Iklan</h2>
               {!laporan.iklan.lengkap && (
-                <div className="alert alertWarning" role="status" style={{ marginTop: 8, marginBottom: 8 }}>
+                <CatatanInternal>
                   Belum lengkap — Iklan Toko, Pencarian, dan Live saja. Banner Ads belum diproses PDT — biaya/pendapatan
                   dari sumber itu TIDAK berarti nol, hanya belum terhitung di sini.
-                </div>
+                </CatatanInternal>
               )}
               <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
                 <div>
@@ -1517,11 +1553,11 @@ export default function LaporanPdtPage() {
           {laporan.tahap && (
             <section className="card">
               <h2>Tahap (Buyer Journey)</h2>
-              <div className="alert alertWarning" role="status" style={{ marginTop: 8, marginBottom: 8 }}>
+              <CatatanInternal>
                 Belum lengkap — sebagian angka Awareness (impresi/views campaign, follower berbayar) dan Add-to-Cart
                 belum dipanen ke fakta, jadi ditandai &quot;—&quot; di bawah, BUKAN nol aktivitas. Impresi, klik dan CTR
                 showcase sudah terisi dari TikTok Ads Manager.
-              </div>
+              </CatatanInternal>
               <table style={{ marginTop: 8, width: '100%', fontSize: 13 }}>
                 <thead>
                   <tr>
