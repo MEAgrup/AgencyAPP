@@ -115,14 +115,41 @@ export interface PdtLaporanKpiInput {
  *   dangkal + CR rendah→ trafiknya memang salah orang; perbaiki targeting dulu,
  *                        bukan halaman produk
  *
- * Ambangnya DIPILIH dari sebaran nyata, bukan bulat-bulat dari udara: Fim
- * Motor Juli 2026 mencatat 552.545 klik produk atas 361.197 pengunjung =
- * **1,53 barang per pengunjung**, dan median per-produknya 1,40. `DALAM_MIN`
- * 1,5 karena itu memisahkan toko yang penjelajahannya di atas rata-rata contoh
- * nyata, `DANGKAL_MAKS` 1,15 menandai toko yang praktis satu-barang-lalu-pergi.
+ * ## Penyebutnya KUNJUNGAN HARIAN, bukan pengunjung unik sebulan
+ *
+ * Angka ini dihitung Σ`produk_diklik` ÷ Σ`pengunjung` atas baris HARIAN
+ * `pdt_fact_shop_daily` — pengunjung yang datang di lima hari berbeda terhitung
+ * lima kali. Itu disengaja dan bukan cacat: (1) hanya baris harian yang ada di
+ * fakta, ringkasan bulanan platform tidak pernah disimpan; (2) penyebut yang
+ * sama dipakai `cvr`, jadi kedua KPI bisa dibaca berdampingan; dan (3) "berapa
+ * barang dibuka dalam SATU kunjungan" memang pertanyaan yang lebih berguna
+ * untuk menilai toko daripada "berapa sepanjang bulan".
+ *
+ * Bedanya besar, jadi jangan dibandingkan dengan angka di dasbor platform:
+ * Shopee men-dedup pengunjung bulanan, dan pada Fim Motor Juli 2026 baris
+ * ringkasannya menulis 361.197 pengunjung sementara Σ harian 482.408 — klik
+ * yang sama (552.545) karena itu terbaca 1,53 per pengunjung unik tapi
+ * **1,15 per kunjungan**. Yang dipakai laporan ini adalah yang kedua.
+ *
+ * ## Ambang — dari enam toko nyata, pada penyebut yang BENAR
+ *
+ * Kalibrasi pertama memakai 1,53 (penyebut unik-bulanan) padahal laporan
+ * menghitung per-kunjungan; ambangnya karena itu diturunkan ulang dari sebaran
+ * enam toko sample pada penyebut yang sungguh dipakai (Juli 2026):
+ *
+ *   Fim Motor (Shopee) 1,15 · Avitaskin 1,32 · Juragan Acc 1,35
+ *   Octatrix 1,56 · Sajira 1,60 · Evebag 1,78
+ *
+ * `DALAM_MIN` 1,5 memisahkan sepertiga teratas; `DANGKAL_MAKS` 1,20 (bukan
+ * 1,15) supaya batasnya tidak duduk PERSIS di atas satu titik data — pada 1,15
+ * Fim Motor jatuh ke `dangkal` hanya karena pembulatan desimal kedua.
+ *
+ * Enam toko adalah dasar yang tipis dan angka ini akan ditinjau ulang begitu
+ * lebih banyak periode masuk; yang penting ia tidak lagi dikalibrasi ke
+ * penyebut yang berbeda dari yang dihitung.
  */
 export const KEDALAMAN_DALAM_MIN = 1.5;
-export const KEDALAMAN_DANGKAL_MAKS = 1.15;
+export const KEDALAMAN_DANGKAL_MAKS = 1.2;
 
 export type PdtKedalamanJelajah = 'dalam' | 'sedang' | 'dangkal';
 
@@ -132,7 +159,7 @@ export interface PdtLaporanKpiRingkas {
   pengunjung: number | null;
   /** Σ pesanan / Σ pengunjung periode ini — `null` bila pengunjung tidak diketahui (BUKAN 0 sungguhan, dibedakan pemanggil). */
   cvr: number | null;
-  /** Σ produk_diklik / Σ pengunjung — lihat docblock `KEDALAMAN_DALAM_MIN`. `null` = kolom sumbernya tidak terpanen (TikTok SELALU). */
+  /** Σ produk_diklik / Σ pengunjung (basis KUNJUNGAN harian — lihat docblock `KEDALAMAN_DALAM_MIN`). `null` = kolom sumbernya nol baris terisi, bukan 0. */
   barangPerPengunjung: number | null;
   /** Pembacaan `barangPerPengunjung` terhadap ambang. `null` bila angkanya `null` — TIDAK PERNAH ditebak 'sedang'. */
   kedalaman: PdtKedalamanJelajah | null;
@@ -1211,7 +1238,7 @@ function rekomendasiDariDimensi(dimensi: readonly PdtDimensiSkorHasil[]): { ting
 /**
  * Satu kalimat yang membaca kedalaman jelajah BERSAMA CR toko.
  *
- * Kenapa keduanya, bukan kedalaman saja: "1,53 barang per pengunjung" sendirian
+ * Kenapa keduanya, bukan kedalaman saja: "1,60 barang per kunjungan" sendirian
  * tidak menyuruh siapa pun melakukan apa pun. Dipasangkan dengan CR, ia menunjuk
  * ke DIVISI yang harus bergerak — penjelajahan dalam tapi CR rendah berarti
  * traffic-nya sudah benar dan masalahnya di produk/harga, jadi menaikkan budget

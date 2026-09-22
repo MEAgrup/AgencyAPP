@@ -9198,7 +9198,7 @@ export interface PdtLaporanKpiWire {
   pesanan: number | null;
   pengunjung: number | null;
   cvr: number | null;
-  /** Σ produk_diklik ÷ Σ pengunjung — berapa BARANG yang dibuka satu pengunjung. `null` untuk TikTok SELALU (`tt_shop_analytics` tidak memanen kolomnya), dan itu berarti "tidak diketahui", bukan nol. */
+  /** Σ produk_diklik ÷ Σ pengunjung — berapa BARANG yang dibuka dalam satu KUNJUNGAN (penyebutnya kunjungan harian, bukan pengunjung unik sebulan; lihat `pdt.KEDALAMAN_DALAM_MIN`). Terisi di KEDUA platform; `null` berarti "tidak diketahui", bukan nol. */
   barang_per_pengunjung: number | null;
   /** `'dalam' | 'sedang' | 'dangkal'` — pembacaan `barang_per_pengunjung` terhadap ambang `@cdps/core`. `null` bila angkanya `null`. */
   kedalaman: string | null;

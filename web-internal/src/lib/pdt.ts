@@ -178,7 +178,7 @@ export interface PdtLaporanKpi {
   pesanan: number | null;
   pengunjung: number | null;
   cvr: number | null;
-  /** Berapa BARANG yang dibuka satu pengunjung, rata-rata. `null` untuk TikTok (kolom sumbernya tidak dipanen) — "tidak diketahui", bukan nol. */
+  /** Berapa BARANG yang dibuka dalam satu KUNJUNGAN, rata-rata (penyebutnya kunjungan harian, bukan pengunjung unik sebulan). Terisi di kedua platform; `null` = "tidak diketahui", bukan nol. */
   barang_per_pengunjung: number | null;
   /** `'dalam' | 'sedang' | 'dangkal'`, atau `null` bila angkanya `null`. */
   kedalaman: string | null;

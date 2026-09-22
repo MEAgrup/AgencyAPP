@@ -707,18 +707,19 @@ export default function LaporanPdtPage() {
                       </span>
                     )}
                   </div>
-                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Barang dibuka / pengunjung</p>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Barang dibuka / kunjungan</p>
                 </div>
               )}
             </div>
             {laporan.kpi.barang_per_pengunjung !== null && (
               <p className="muted" style={{ fontSize: 11, marginTop: 12 }}>
-                Satu pengunjung membuka {formatDesimal(laporan.kpi.barang_per_pengunjung, 2)} barang rata-rata. Lebih dari satu
+                Satu kunjungan membuka {formatDesimal(laporan.kpi.barang_per_pengunjung, 2)} barang rata-rata. Lebih dari satu
                 adalah hal normal dan justru sinyal bagus — pengunjung masih mau melihat-lihat, entah karena belum
                 menemukan yang pas atau karena tokonya menarik untuk ditelusuri. Baca angka ini{' '}
                 <strong>bersama CVR</strong>: jelajah dalam tapi CVR rendah berarti trafiknya sudah benar dan yang belum
                 meyakinkan ada di produk/harga; jelajah dangkal dengan CVR rendah berarti sebaliknya, targeting dulu
-                yang diperbaiki.
+                yang diperbaiki. Penyebutnya <strong>kunjungan harian</strong>, jadi angka ini lebih kecil daripada
+                angka sejenis di dasbor platform, yang men-dedup pengunjung sepanjang bulan.
               </p>
             )}
             {laporan.platform !== 'tiktok' && (

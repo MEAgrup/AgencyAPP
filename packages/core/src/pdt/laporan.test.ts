@@ -79,17 +79,39 @@ describe('kedalaman jelajah (barangPerPengunjung) — metrik NIAT, keputusan pem
     bangunKpiRingkas({ gmv: 1_000, pesanan, pengunjung, produkDiklik });
 
   it('barangPerPengunjung = produk_diklik / pengunjung, dibulatkan 2 desimal', () => {
-    // Angka NYATA Fim Motor Juli 2026: 552.545 klik produk atas 361.197 pengunjung.
+    // Angka NYATA Fim Motor Juli 2026 pada penyebut yang laporan SUNGGUH pakai:
+    // 552.545 klik produk atas 482.408 KUNJUNGAN (Σ 31 baris harian
+    // `pdt_fact_shop_daily` basis siap_dikirim) = 1,15.
+    expect(kpi(482_408, 552_545).barangPerPengunjung).toBe(1.15);
+    // Penyebut unik-bulanan Shopee (361.197, baris ringkasan berkas — TIDAK
+    // pernah disimpan sebagai fakta) memberi 1,53 atas klik yang sama. Dua
+    // angka berbeda dari satu toko yang sama; ambang dikalibrasi ke yang ATAS.
     expect(kpi(361_197, 552_545).barangPerPengunjung).toBe(1.53);
   });
 
-  it('≥1,5 ⇒ dalam; ≤1,15 ⇒ dangkal; di antaranya ⇒ sedang', () => {
+  it('≥1,5 ⇒ dalam; ≤1,2 ⇒ dangkal; di antaranya ⇒ sedang', () => {
     expect(kpi(100, 150).kedalaman).toBe('dalam');
-    expect(kpi(100, 115).kedalaman).toBe('dangkal');
+    expect(kpi(100, 120).kedalaman).toBe('dangkal');
     expect(kpi(100, 130).kedalaman).toBe('sedang');
   });
 
-  it('produk_diklik tidak terpanen (TikTok) ⇒ angka DAN label null — tidak ditebak "sedang"', () => {
+  it('sebaran enam toko sample Juli 2026 jatuh ke band yang dimaksud', () => {
+    // Penyebut = Σ kunjungan harian, sama dengan yang dihitung laporan.
+    // Diambil dengan `scripts/pdt-kuadran-cek.ts` atas ekspor asli.
+    const toko: readonly [string, number, number, string][] = [
+      ['Fim Motor (Shopee)', 482_408, 552_545, 'dangkal'],
+      ['Avitaskin', 20_627, 27_208, 'sedang'],
+      ['Juragan Acc', 29_020, 39_036, 'sedang'],
+      ['Octatrix', 96_235, 150_124, 'dalam'],
+      ['Sajira', 1_295_821, 2_069_557, 'dalam'],
+      ['Evebag', 15_582, 27_735, 'dalam'],
+    ];
+    for (const [nama, pengunjung, diklik, band] of toko) {
+      expect(`${nama}: ${kpi(pengunjung, diklik).kedalaman}`).toBe(`${nama}: ${band}`);
+    }
+  });
+
+  it('nol baris produk_diklik terisi ⇒ angka DAN label null — tidak ditebak "sedang"', () => {
     const k = kpi(1_000, null);
     expect(k.barangPerPengunjung).toBeNull();
     expect(k.kedalaman).toBeNull();

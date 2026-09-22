@@ -3380,8 +3380,10 @@ async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, periodeAwalB
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
   if (row.n === 0) return null;
-  // TikTok: `tt_shop_analytics` tidak memanen `produk_diklik`, jadi nilainya
-  // `null` di sana — kedalaman jelajah otomatis tidak muncul, bukan 0 palsu.
+  // `produk_diklik` TERPANEN di kedua platform (`tt_shop_analytics` kolom
+  // 'Klik produk', `shopee_shop_stats` kolom 'Produk Diklik'), jadi kedalaman
+  // jelajah muncul untuk dua-duanya. `count()` terpisah dari `sum()` supaya
+  // nol baris terisi terbaca 'tidak diketahui', bukan 0 palsu (Rule 12).
   return {
     gmv: Number(row.gmv) - Number(row.refund), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung),
     produkDiklik: row.diklik_n === 0 ? null : Number(row.diklik),
