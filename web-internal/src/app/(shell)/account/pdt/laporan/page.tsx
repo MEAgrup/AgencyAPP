@@ -152,7 +152,7 @@
  * Opsi platform disaring ke Shopee/TikTok Shop (PDT-22: Tokopedia/Lazada/
  * Blibli tetap manual) — memilih platform lain hanya akan 400 di server.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { listClients, type Client, type Platform } from '@/lib/clients';
@@ -470,23 +470,34 @@ export default function LaporanPdtPage() {
     };
   }, [clientId]);
 
+  // `permintaanKe` menandai permintaan TERBARU. Tanpa penjaga ini, respons
+  // yang datang TERLAMBAT untuk toko/periode yang sudah ditinggalkan akan
+  // menimpa laporan yang sudah tampil — dan kalau yang terlambat itu berakhir
+  // gagal (mis. 504), halaman menampilkan error padahal laporan yang diminta
+  // sekarang sudah berhasil dimuat. Pola `batal` yang sama sudah dipakai efek
+  // daftar platform di atas.
+  const permintaanKe = useRef(0);
+
   const loadLaporan = useCallback(async () => {
     // Ganti toko/periode -> hasil kirim sebelumnya (kalau ada) sudah tidak relevan.
     setKirimErr(null);
     setKirimHasil(null);
     if (platformId === '') return;
+    const seq = ++permintaanKe.current;
     setLoading(true);
     setErr(null);
     try {
       const res = await getPdtLaporan(platformId, monthToPeriode(month));
+      if (seq !== permintaanKe.current) return;
       setLaporan(res);
       setInsightDraft(res.insight);
     } catch (e) {
+      if (seq !== permintaanKe.current) return;
       setLaporan(null);
       setInsightDraft(null);
       setErr(errorMessage(e));
     } finally {
-      setLoading(false);
+      if (seq === permintaanKe.current) setLoading(false);
     }
   }, [platformId, month]);
 
