@@ -1,6 +1,6 @@
 # CDPS — Module 20: Permukaan Laporan Klien PDT
 
-**Status:** **DRAF 2026-09-22 — belum ada tiket yang mendarat.** Lahir dari audit pemilik "report klien vs PDT, fitur serupa tapi double, hanya akan pakai 1" (`docs/DECISIONS.md` baris Open `M14-VS-PDT-DUPLIKASI`).
+**Status:** **AKTIF — Gelombang A, B, C merge 2026-09-22 (PR #494, #496, #497); migrasi C-01 belum di live; Gelombang D berikutnya** (posisi rinci: `docs/plan/PLAN_PORT_M14_KE_PDT.md` header). Lahir dari audit pemilik "report klien vs PDT, fitur serupa tapi double, hanya akan pakai 1" (`docs/DECISIONS.md` baris `M14-VS-PDT-DUPLIKASI`, diketok 2026-09-22). **R11 ditambah 2026-09-22 sore** dari requirement pemilik "klien hanya melihat 1 bagian report, jangan sampai ada 2 report yg bisa dilihat klien".
 **Worked example:** TEST PDT Store 2 (`CLI-202609-0021`) · TikTok Shop · Agustus 2026 — toko yang dipakai pemilik saat menemukan pita kuning "Belum lengkap" (§8)
 **Depends on:** PDT (`CDPS_PDT_Pusat_Data_Toko.md` — lapisan fakta, Rule 21/22/23/24), M13 Client Health Report (konsumen `clients.total_sales`), M15 Client & Team Portal (realm auth klien, pintu komplain), M8 Ads (baseline ROAS)
 **Resolves:** `docs/DECISIONS.md` Open `M14-VS-PDT-DUPLIKASI` · `docs/backlog/PDT_BACKLOG.md` §2 G2 ("Mematikan: Report Engine TikTok & Shopee")
@@ -194,6 +194,57 @@ Pembacaan klien memakai DTO sempit di `packages/domain/src/client-portal.ts`
 `klien` di-**hardcode** pada jalur portal: tidak ada argumen dari permintaan
 klien yang boleh menghasilkan render internal.
 
+### R11 · Klien melihat TEPAT SATU permukaan laporan — juga selama transisi
+Requirement pemilik (2026-09-22): *"klien hanya melihat 1 bagian report,
+jangan sampai ada 2 report yg bisa dilihat klien."*
+
+1. Portal klien punya **satu** menu Laporan, **satu** daftar, **satu** rute
+   daftar (`GET /client-portal/reports`) dan **satu** rute dokumen
+   (`GET /client-portal/reports/{id}/html`). Tidak ada `laporan-pdt`, tidak ada
+   `/client-portal/pdt/**`, tidak ada tab "Laporan Lama / Laporan Baru".
+2. Port ke PDT dilakukan dengan **mengganti sumber** di balik permukaan itu
+   (`client_reports` → `pdt_laporan_kiriman` + `pdt_laporan_publikasi` +
+   `pdt_laporan_insight`), **bukan** membangun permukaan kedua lalu mencabut
+   yang lama belakangan. Tidak ada rentang waktu di mana keduanya hidup
+   berdampingan di sisi klien.
+3. **Isi daftar klien — diketok pemilik 2026-09-22 (sore):**
+   *"Klien bisa melihat list report yang sudah selesai dari team. Kalau ada
+   perubahan dalam report, misalnya Agustus ada 2 versi, yang dilihat adalah
+   versi terbaru. Tapi kalau klien punya kontrak 3 bulan, dia bisa melihat 3
+   report yang berbeda periode."*
+   - **"Sudah selesai"** = status publikasi `[Terbit]` (R5). Draf dan yang
+     dicabut tidak pernah terdaftar dan tidak bisa dibuka lewat id.
+   - **Satu baris per (toko/platform, periode).** Klien dengan kontrak 3 bulan
+     melihat **3 baris** untuk 3 periode berbeda; klien dengan dua toko (TikTok
+     Shop + Shopee) melihat satu baris per toko per periode. Daftar diurutkan
+     periode terbaru dulu.
+   - **Satu periode = satu versi, yaitu yang TERBARU.** "Versi" di PDT ada di
+     dua lapis, dan keduanya tunduk pada aturan ini: (a) antar-**kiriman** untuk
+     periode yang sama (kiriman revisi ber-`menggantikan_kiriman_id`, atau
+     kiriman ulang periode yang sama): hanya kiriman **terakhir** (`dikirim_pada`
+     terbesar) per `(client_platform_id, periode_mulai)` yang menjadi kandidat;
+     kiriman yang lebih lama **tidak lagi terdaftar dan tidak bisa dibuka** oleh
+     klien lewat id, walau status publikasinya sendiri masih `[Terbit]`; (b) di
+     dalam satu kiriman, narasi yang dibaca adalah revisi **terpaku**
+     `insight_revisi` (R4), bukan revisi terbaru yang belum diterbitkan.
+   - **Kandidat terbaru yang belum/tidak `[Terbit]` ⇒ periode itu KOSONG bagi
+     klien**, bukan jatuh ke versi lama. Cabut berarti "tarik laporan periode
+     ini dari klien"; versi lama yang sudah digantikan tidak pernah muncul
+     kembali dengan sendirinya. Kalau AM ingin klien kembali melihat sesuatu
+     untuk periode itu, AM menerbitkan (ulang) kandidat terbaru.
+   - Klien **tidak** melihat riwayat versi, nomor revisi, atau tanda "direvisi";
+     yang ia lihat hanya dokumen final periode itu.
+4. Ditegakkan di CI, bukan disiplin: `apps/api/src/lib/route-parity.test.ts`
+   mengunci himpunan rute portal ber-`report|laporan|pdt` dan himpunan halaman
+   `(portal)` ber-`laporan|report|pdt` **persis** dua-dua. PR yang menambah
+   salah satunya merah.
+
+Konsekuensi pada §9: jalur **portal** M14 berhenti dipanggil di Gelombang D
+(sumbernya diganti), sementara kode M14 sendiri (`report/**`, `ReportPanel`,
+rute `/reports/*`) tetap ada sampai G. Ini bukan "mencabut M14 per tiket" —
+tidak ada satu baris M14 pun yang dihapus di D; yang berubah adalah dari mana
+`client-portal.ts` membaca.
+
 ---
 
 ## 4. Perubahan data model
@@ -275,7 +326,8 @@ Score tanpa penggantinya.
    baris `—` pada funnel (baris ber-`null` tidak dibangun), penomoran bagian
    rapat tanpa lompatan, poin manual AM terbaca.
 6. Kontak klien membuka portal dan melihat dokumen yang **sama persis**, plus
-   pintu komplain.
+   pintu komplain — di menu **Laporan** yang sama seperti sebelum port, bukan
+   di menu baru (R11).
 7. AM sadar satu angka salah karena berkas yang tertukar. AM menekan **Cabut**
    dengan alasan → `clients.total_sales`, Health Score, dan baseline Ads klien
    ini otomatis dihitung ulang (R6). Tidak ada berkas yang diminta ulang.
@@ -293,9 +345,12 @@ benar bersamaan:
 3. `clients.total_sales` punya **tepat satu** penulis. Selama transisi, penulis
    M14 dimatikan lebih dulu (bukan dihapus) supaya jalur baliknya masih ada.
 
-Sesudah itu: rute, halaman Direktori Klien ("Laporan Performa Mingguan/Bulanan"),
+Sesudah itu: rute internal, halaman Direktori Klien ("Laporan Performa Mingguan/Bulanan"),
 `ShopeeReportForm`, dan `ReportPanel` dicabut dalam satu PR, dan
 `route-parity.test.ts` wajib tetap hijau dengan `KNOWN_GAPS` **kosong**.
+Jalur **portal** M14 tidak termasuk daftar itu: sumbernya sudah diganti di
+Gelombang D (R11), sehingga sejak D tidak ada pemanggil portal yang menyentuh
+`client_reports`.
 `client_reports` beserta isinya **tidak dihapus** — ia append-only dan 0 baris,
 jadi biaya menyimpannya nol dan ia jadi bukti riwayat.
 
@@ -305,10 +360,11 @@ jadi biaya menyimpannya nol dan ia jadi bukti riwayat.
 
 | Kode | Pertanyaan | Butuh dari |
 |---|---|---|
-| `M20-URUTAN` | Renderer+publikasi dulu (klien bisa menerima laporan lebih cepat), atau R6/R7 dulu (Health Score hidup lebih cepat)? §7 hanya mengunci bahwa R2 mendahului permukaan klien, bukan urutan antar-gelombang | Yohan |
-| `M20-M14-BEKU` | M14 dibekukan (nol fitur baru, hanya perbaikan bug) sejak modul ini mulai, atau dibiarkan apa adanya sampai dicabut? | Yohan |
-| `M20-TTAM-SAMPLE` | Empat ekspor TikTok Ads Manager nyata dibutuhkan untuk memverifikasi tanda tangan kolom sebelum R9 dikodekan — tanda tangan M14 ada, tapi belum pernah diuji lewat pipeline PDT | Head of Account |
-| `M20-PORTAL-KOMPLAIN` | Pintu komplain M15 dipakai ulang apa adanya, atau butuh kategori komplain khusus laporan? | Yohan |
+| ~~`M20-URUTAN`~~ | ✅ diketok 2026-09-22: A → B → C → D → E → F → G | Yohan |
+| ~~`M20-M14-BEKU`~~ | ✅ diketok 2026-09-22: M14 **dibekukan** (bugfix kritis saja) sampai G | Yohan |
+| `M20-TTAM-SAMPLE` | ⏳ pemilik akan mengunggah 4 ekspor TikTok Ads Manager nyata; F-03/F-04/F-05 menunggu, F-01/F-02 tidak | Yohan / Head of Account |
+| ~~`M20-PORTAL-KOMPLAIN`~~ | ✅ diketok 2026-09-22: pintu komplain M15 apa adanya | Yohan |
+| `M20-C01-LIVE` | 🔴 migrasi C-01 (`20261130010000`) sudah di `main` (#497) tapi **belum diterapkan ke live** `CDPS SG` — prasyarat D-00; lihat `PLAN_PORT_M14_KE_PDT.md` §4 | operator dengan akses `apply_migration` |
 
 ---
 
@@ -328,4 +384,13 @@ jadi biaya menyimpannya nol dan ia jadi bukti riwayat.
   baseline Ads dalam satu transaksi; rollback membatalkan ketiganya.
 - Tes `total_sales`: laporan mingguan dan bulanan menulis SATUAN yang sama.
 - Seed fixture worked example §8 lolos ujung-ke-ujung.
-- `route-parity.test.ts` hijau, `KNOWN_GAPS` kosong.
+- `route-parity.test.ts` hijau, `KNOWN_GAPS` kosong, **dan kedua tes R11**
+  (rute portal ber-laporan persis dua; halaman `(portal)` ber-laporan persis
+  dua) hijau.
+- `packages/domain/src/client-portal.ts` nol rujukan `client_reports` sejak
+  Gelombang D.
+- Tes R11.3: satu toko dengan dua kiriman `[Terbit]` untuk Agustus ⇒ daftar
+  klien memuat **satu** baris Agustus (kiriman terbaru), dan id kiriman lama
+  menjawab `[laporan tidak ditemukan]`; satu toko dengan tiga periode terbit ⇒
+  **tiga** baris; kandidat terbaru `[Dicabut]` ⇒ periode itu hilang, bukan
+  jatuh ke kiriman lama.

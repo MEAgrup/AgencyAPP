@@ -6,6 +6,17 @@
 **Keputusan:** `docs/DECISIONS.md` Open `M14-VS-PDT-DUPLIKASI`
 **Backlog induk:** `docs/backlog/PDT_BACKLOG.md` §2 (G2 — "Mematikan: Report Engine TikTok & Shopee")
 
+> **Posisi 2026-09-22 (audit sesi `claude/audit-pdt-report-plan-df1xkt`,
+> `docs/handoff/HANDOFF_M20_AUDIT_SATU_LAPORAN_20260922.md`):**
+>
+> | Gelombang | Status | Bukti |
+> |---|---|---|
+> | A | ✅ merge | PR #494 (`ae84629`) — blok `kelengkapan`, `insight.poin` bersih |
+> | B | ✅ merge | PR #496 (`9609811`) — `pdt/render.ts` dua mode, rute `kiriman/{id}/html`, 4 tombol |
+> | C | ✅ merge, **⚠️ migrasi C-01 BELUM di live** | PR #497 (`6cc4ce4`). Live `CDPS SG` 2026-09-22: 184 tabel / 35 mesin (repo 186 / 36), `pdt_laporan_insight`, `pdt_laporan_publikasi`, `jwt_owns_pdt_kiriman_am`, mesin `pdt_laporan` **tidak ada**. Lihat §4 `M20-C01-LIVE` |
+> | D | ⏳ berikutnya — **bentuknya DIREVISI di bawah** (ganti sumber, bukan tambah halaman) | requirement pemilik 2026-09-22: klien hanya melihat **satu** laporan |
+> | E, F, G | belum | — |
+
 ---
 
 ## 1. Kenapa ini ada
@@ -36,6 +47,13 @@ Rinciannya, berikut buktinya, ada di PRD §1. Rencana ini hanya menjawab
    syarat PRD §9 benar semuanya.
 5. **PR kecil per klaster Rule/Flow**, pesan commit merujuk pasal PRD
    (mis. "M20 R2 caveat kelengkapan").
+6. **Satu permukaan laporan di portal klien, selamanya — termasuk selama
+   transisi.** Klien tidak pernah melihat dua daftar laporan, dua menu, atau
+   dua dokumen untuk periode yang sama (PRD R11). Gelombang D **mengganti
+   sumber** di balik halaman `/laporan` dan dua rute `client-portal/reports*`
+   yang sudah ada; ia **tidak** menambah halaman, menu, atau rute baru di
+   portal. Dikunci dua tes di `apps/api/src/lib/route-parity.test.ts` (blok
+   `web-client-portal`, "M20 R11").
 
 ---
 
@@ -89,17 +107,41 @@ Terbitkan.
 
 ---
 
-### Gelombang D — Permukaan portal klien  *(R10)*
+### Gelombang D — Permukaan portal klien  *(R10, R11)*  — **DIREVISI 2026-09-22**
+
+> **Yang berubah dari versi 2026-09-22 pagi.** Versi lama berbunyi "daftar +
+> render laporan PDT" dan "halaman `web-client-portal`: daftar laporan +
+> detail". Dibaca literal, itu melahirkan halaman/rute KEDUA di samping
+> `/laporan` (M14) sampai Gelombang G — dan di rentang itu klien bisa melihat
+> dua laporan. Pemilik melarangnya eksplisit: *"klien hanya melihat 1 bagian
+> report, jangan sampai ada 2 report yg bisa dilihat klien."* Maka D
+> **mengganti sumber**, bukan menambah permukaan. Nol data yang hilang: di
+> live `client_reports` 0 baris, `client_report_publikasi` terbit 0, dan M14
+> sudah dibekukan (`M20-M14-BEKU`).
 
 | Tiket | Isi |
 |---|---|
-| **D-01** | `packages/domain/src/client-portal.ts`: daftar + render laporan PDT, DTO sempit allow-list, predikat klien ditulis **di SQL-nya sendiri** (pembacaan portal berjalan service-role, RLS tidak engage). |
-| **D-02** | Halaman `web-client-portal`: daftar laporan + detail (same-origin, bukan iframe lintas-origin). Mode `klien` di-hardcode. |
-| **D-03** | Pintu komplain M15 dipakai ulang (submit-only, nol endpoint GET) — menunggu jawaban `M20-PORTAL-KOMPLAIN`. |
-| **D-04** | Tes: kontak klien toko A tidak bisa membaca laporan toko B; tidak ada argumen permintaan yang bisa menghasilkan render internal. |
+| **D-00** | **Prasyarat, bukan kode:** migrasi C-01 (`20261130010000_m20_c01_pdt_laporan_insight_publikasi.sql`) diterapkan ke live `CDPS SG` lewat `apply_migration` **sebelum** PR D di-merge. Tanpa itu, D mengubah halaman Laporan portal dari "kosong" menjadi **500** di live (query D-01 membaca `pdt_laporan_publikasi`). Verifikasi: 186 tabel, 36 mesin, fungsi `jwt_owns_pdt_kiriman_am` ada. |
+| **D-01** | `packages/domain/src/client-portal.ts`: `listReports` dan `reportHtml` **berganti sumber** dari `client_reports`+`client_report_publikasi`+`client_report_insight` ke `pdt_laporan_kiriman`+`pdt_laporan_publikasi`+`pdt_laporan_insight`. Predikat klien tetap **di SQL-nya sendiri** (`client_platforms.client_id = scope.clientId`, `status = '[Terbit]'`, revisi = `insight_revisi` terpaku) karena pembacaan portal berjalan service-role. Render lewat `pdtCore.renderLaporanHtml(laporan, 'klien')` dengan `insight` di-overlay revisi terpaku (pola `laporanUntukRenderPdt`, tapi **tanpa** gerbang `canKirimLaporan` — gerbangnya kontak klien). Import `report`/`reportShopee` dari modul ini **dihapus** di PR yang sama; sesudah PR ini, `client-portal.ts` **nol rujukan** `client_reports`. |
+| **D-01a** | **Aturan isi daftar (PRD R11.3, ketokan pemilik 2026-09-22 sore).** Satu baris per `(client_platform_id, periode_mulai)`: kandidatnya kiriman **terakhir** periode itu (`dikirim_pada` terbesar, `distinct on (k.client_platform_id, k.periode_mulai) … order by k.dikirim_pada desc`), lalu **hanya** ditampilkan bila publikasinya `[Terbit]`. Kiriman lama periode yang sama **tidak terdaftar dan tidak bisa dibuka** lewat id (`reportHtml` memakai predikat yang sama, bukan sekadar `status='[Terbit]'` pada id yang diminta). Kandidat terbaru yang `[Draf]`/`[Dicabut]` ⇒ periode itu **kosong** bagi klien, bukan jatuh ke versi lama. Kontrak 3 bulan ⇒ 3 baris berbeda periode; dua toko ⇒ satu baris per toko per periode. Urutan: periode terbaru dulu. |
+| **D-02** | DTO `PortalReportRow` dan wire `portalReportRowToWire` **tidak berubah bentuk** (`report_id` = `pdt_laporan_kiriman.id`, `periode_tipe` = `'bulanan'` karena kiriman PDT selalu bulanan, `platform` dari `client_platforms.platform`, `diterbitkan_pada` dari publikasi). Rute `GET /client-portal/reports` dan `GET /client-portal/reports/{id}/html` **tetap path yang sama**. FE `web-client-portal` **nol halaman baru, nol menu baru**; yang boleh berubah hanya teks kosong-state (`"Laporan mingguan dan bulanan …"` → bulanan) dan judul. |
+| **D-03** | Pintu komplain M15 dipakai ulang **apa adanya** (ketokan `M20-PORTAL-KOMPLAIN` 2026-09-22) — nol kode. |
+| **D-04** | Tes: kontak klien toko A tidak bisa membaca kiriman toko B (by id langsung → `[laporan tidak ditemukan]`); `[Draf]` dan `[Dicabut]` tidak terdaftar dan tidak terbaca; render klien membaca revisi **terpaku**, bukan revisi terbaru; string blok internal (`kelengkapan`, catatan dimensi, versi benchmark) **nol** di keluaran; tidak ada argumen permintaan yang bisa menghasilkan render `internal`. **Tes R11.3:** Agustus dua kiriman `[Terbit]` ⇒ daftar **satu** baris Agustus = kiriman terbaru, id kiriman lama → `[laporan tidak ditemukan]`; tiga periode terbit ⇒ **tiga** baris, urut periode terbaru dulu; kandidat terbaru `[Dicabut]` ⇒ Agustus hilang dari daftar (bukan jatuh ke kiriman lama); dua toko satu klien ⇒ satu baris per toko per periode. Fixture tes `client-portal.test.ts` (`laporanTerbit`) dipindahkan dari `createReport`/`publishReport` M14 ke `kirimLaporanPdt`/`terbitkanKiriman`. |
+| **D-05** | **Tes penjaga R11 tetap hijau** (sudah mendarat 2026-09-22 di `route-parity.test.ts`): rute portal ber-`report|laporan|pdt` **persis** dua, halaman `(portal)` ber-`laporan|report|pdt` **persis** dua. Ditambah satu tes sumber: `client-portal.ts` nol kemunculan string `client_reports`. |
 
-**Kriteria keluar:** kontak klien membuka portal dan membaca dokumen yang sama
-persis dengan berkas yang diunduh AM di B-03.
+**Kriteria keluar:** kontak klien membuka menu **Laporan** yang sama seperti hari
+ini dan membaca dokumen yang **sama persis** (byte-identik) dengan berkas
+"Unduh Klien" yang AM unduh di B-03 untuk kiriman yang sama; `grep` di kedua
+berkas nol untuk "belum lengkap"; nav portal tetap **empat** tautan; tes R11
+hijau. Skenario pemilik lolos di UAT: satu klien dengan kontrak 3 bulan dan
+Agustus dua versi ⇒ klien melihat **3 baris** (Jun/Jul/Agu), Agustus berisi
+versi terbaru, versi lama tidak bisa dibuka.
+
+**Yang sengaja TIDAK dilakukan di D:** menghapus `report.renderReportHtml`,
+`ReportPanel.tsx`, rute `/reports/*`, atau tabel `client_reports`. Jalur
+portal M14 **mati** (tidak lagi punya pemanggil dari portal) tapi kodenya tetap
+ada sampai Gelombang G, sesuai prinsip #4 — yang dicabut sekali di G tinggal sisi
+internal dan penulis `total_sales`.
 
 ---
 
@@ -140,7 +182,7 @@ sudah menempuh siklus penuh di live, `total_sales` satu penulis).
 
 | Tiket | Isi |
 |---|---|
-| **G-01** | Cabut rute M14, halaman "Laporan Performa (Mingguan/Bulanan)" di Direktori Klien, `ReportPanel.tsx`, `ShopeeReportForm.tsx`, dan tipe FE-nya — satu PR. |
+| **G-01** | Cabut rute M14 (`/reports/*`, `/clients/{id}/reports*`), halaman "Laporan Performa (Mingguan/Bulanan)" di Direktori Klien, `ReportPanel.tsx`, `ShopeeReportForm.tsx`, dan tipe FE-nya — satu PR. **Jalur portal M14 tidak ada di daftar ini** karena sudah digantikan sumbernya di Gelombang D (R11); G-01 hanya membereskan sisi internal. |
 | **G-02** | `route-parity.test.ts` hijau dengan `KNOWN_GAPS` **kosong**; `shape-parity.test.ts` hijau. |
 | **G-03** | Entri `DECISIONS.md` menutup `M14-VS-PDT-DUPLIKASI`. |
 
@@ -153,16 +195,17 @@ laporan berjalan tenang.
 
 ---
 
-## 4. Yang memblokir, hari ini
+## 4. Yang memblokir, hari ini  *(diperbarui 2026-09-22 sore)*
 
-| Kode | Memblokir | Butuh dari |
+| Kode | Memblokir | Status |
 |---|---|---|
-| `M20-URUTAN` | pemilihan gelombang mana yang jalan lebih dulu sesudah A/B | Yohan |
-| `M20-M14-BEKU` | apakah M14 dibekukan selama port berjalan | Yohan |
-| `M20-TTAM-SAMPLE` | **F-03** — butuh empat ekspor TikTok Ads Manager nyata untuk memverifikasi tanda tangan kolom lewat pipeline PDT | Head of Account |
-| `M20-PORTAL-KOMPLAIN` | **D-03** | Yohan |
+| `M20-URUTAN` | urutan gelombang | ✅ diketok 2026-09-22: A → B → C → D → E → F → G |
+| `M20-M14-BEKU` | apakah M14 dibekukan | ✅ diketok 2026-09-22: **dibekukan** (bugfix kritis saja) sampai G |
+| `M20-PORTAL-KOMPLAIN` | D-03 | ✅ diketok 2026-09-22: pakai pintu komplain M15 apa adanya |
+| `M20-TTAM-SAMPLE` | F-03/F-04/F-05 | ⏳ pemilik akan mengunggah 4 ekspor TikTok Ads Manager nyata; F-01/F-02 tidak diblokir |
+| **`M20-C01-LIVE`** | **D-00 → seluruh Gelombang D** | 🔴 **BARU 2026-09-22:** migrasi C-01 sudah di `main` (#497) tapi **belum diterapkan ke live** `CDPS SG` (184 tabel/35 mesin vs repo 186/36). Deploy produksi API sudah di `6cc4ce4` (#497). Dampak hari ini: tombol *Lihat/Unduh Klien/Internal* dan *Edit Narasi* di Laporan PDT internal **500** begitu ada kiriman (hari ini `pdt_laporan_kiriman` 0 baris, jadi belum ada yang terkena). Tindakan: `apply_migration` berkas `20261130010000`, verifikasi 186/36, catat di `DECISIONS.md`. |
 
-Gelombang A dan B **tidak diblokir apa pun** dan bisa langsung dikerjakan.
+Gelombang D bisa dikodekan sekarang; **merge**-nya menunggu `M20-C01-LIVE`.
 
 ---
 
@@ -175,3 +218,5 @@ Gelombang A dan B **tidak diblokir apa pun** dan bisa langsung dikerjakan.
 | Metrik `null` dihilangkan dari render klien ⇒ klien mengira bagian itu memang tidak ada | Poin manual AM (R3) adalah tempat menjelaskannya; ini keputusan sadar, bukan efek samping |
 | Tanda tangan TTAM ditebak dari kode M14 tanpa sample nyata ⇒ ekspor Showcase salah tergolong `follows` | F-03 diblokir `M20-TTAM-SAMPLE`; penyangkalan kolom funnel Shop ditulis eksplisit di PRD R9 |
 | Migrasi tabrakan prefix versi | `scripts/check-migration-versions.sh` sudah menjaganya; `supabase db push` tetap tidak bisa dipakai di repo ini |
+| Gelombang D lahir sebagai halaman/rute KEDUA di portal ⇒ klien melihat dua laporan selama D→G | Prinsip #6 + PRD R11; dua tes R11 di `route-parity.test.ts` mengunci himpunan rute dan halaman portal **persis** — PR yang menambah `laporan-pdt`/`pdt` di portal merah di CI |
+| D di-merge sebelum C-01 di live ⇒ halaman Laporan portal 500 (regresi dari "kosong") | D-00 prasyarat eksplisit; `M20-C01-LIVE` di §4 |

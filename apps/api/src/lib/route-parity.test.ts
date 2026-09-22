@@ -17,7 +17,8 @@
  * it is a page that does not work.
  */
 import { describe, expect, it } from 'vitest';
-import { apiRoutes, FE_SRC_PORTAL, feCalls, servedBy } from './parity-scan';
+import { join } from 'node:path';
+import { apiRoutes, FE_SRC_PORTAL, feCalls, servedBy, walkFe } from './parity-scan';
 
 /**
  * Endpoints the FE calls that `apps/api` does not serve — the unported remainder
@@ -150,5 +151,44 @@ describe('FE↔API route parity — web-client-portal', () => {
     expect(routes).toContain('GET /client-portal/me');
     expect(routes).toContain('POST /auth/client-portal/forgot-password');
     expect(routes).toContain('POST /auth/client-portal/reset-password');
+  });
+
+  /**
+   * M20 R11 — SATU permukaan laporan untuk klien (requirement pemilik
+   * 2026-09-22: "klien hanya melihat 1 bagian report, jangan sampai ada 2
+   * report yang bisa dilihat klien"; `docs/DECISIONS.md` 2026-09-22
+   * M20-SATU-LAPORAN-PORTAL).
+   *
+   * Gelombang D M20 MENGGANTI sumber di balik dua rute yang sudah ada
+   * (`client_reports` → `pdt_laporan_kiriman`+`pdt_laporan_publikasi`+
+   * `pdt_laporan_insight`), bukan menambah rute ketiga di sampingnya. Rute
+   * portal apa pun yang memuat report/laporan/pdt di luar dua ini berarti
+   * daftar KEDUA lahir — persis yang pemilik larang — jadi himpunannya
+   * dikunci PERSIS, bukan sekadar "mengandung".
+   */
+  it('memberi klien TEPAT SATU permukaan laporan: satu daftar, satu dokumen (M20 R11)', () => {
+    const portalReportRoutes = [...routes]
+      .filter((r) => r.includes('/client-portal/'))
+      .filter((r) => /report|laporan|pdt/i.test(r))
+      .sort();
+    expect(portalReportRoutes).toEqual([
+      'GET /client-portal/reports',
+      'GET /client-portal/reports/{}/html',
+    ]);
+  });
+
+  it('halaman laporan di web-client-portal tepat dua: daftar + detail — nol halaman "Laporan PDT" terpisah (M20 R11)', () => {
+    // Sisi FE dari kunci yang sama: kalau Gelombang D lahir sebagai
+    // `(portal)/laporan-pdt/**` atau `(portal)/pdt/**` di samping
+    // `(portal)/laporan/**`, klien punya dua menu laporan walau rutenya satu.
+    const pages = walkFe(join(FE_SRC_PORTAL, 'app'))
+      .filter((f) => /[\\/]page\.tsx$/.test(f))
+      .filter((f) => /laporan|report|pdt/i.test(f.slice(FE_SRC_PORTAL.length)))
+      .map((f) => f.slice(FE_SRC_PORTAL.length).replace(/\\/g, '/'))
+      .sort();
+    expect(pages).toEqual([
+      '/app/(portal)/laporan/[id]/page.tsx',
+      '/app/(portal)/laporan/page.tsx',
+    ]);
   });
 });
