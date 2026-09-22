@@ -312,9 +312,21 @@ export interface PdtLaporanProdukDistribusi {
   gmv: number | null;
 }
 
+/** Satu baris "Top Produk by GMV" — LINTAS kuadran. `kuadran` `null` = belum/tidak terklasifikasi (SELURUH baris Shopee). */
+export interface PdtLaporanProdukTopItem {
+  nama_produk: string | null;
+  platform_product_id: string | null;
+  gmv: number | null;
+  klik: number | null;
+  cvr: number | null;
+  kuadran: string | null;
+}
+
 export interface PdtLaporanProduk {
-  distribusi: Record<string, PdtLaporanProdukDistribusi>;
+  /** `null` sisi Shopee — nol klasifikator kuadran, BUKAN "semua produk tidak tayang". */
+  distribusi: Record<string, PdtLaporanProdukDistribusi> | null;
   top_aksi: PdtLaporanProdukItem[];
+  top: PdtLaporanProdukTopItem[];
 }
 
 // G2-01 lanjutan — bagian "afiliasi" ringkasan, 2026-09-16. KEDUA platform,
@@ -402,6 +414,119 @@ export interface PdtLaporanInsight {
   indikator: { nama: string; target: string }[];
 }
 
+export interface PdtLaporanKreatorItem {
+  handle: string;
+  gmv: number | null;
+  gmv_live: number | null;
+  gmv_video: number | null;
+  pesanan: number | null;
+  aov: number | null;
+  jumlah_live: number | null;
+  jumlah_video: number | null;
+}
+
+/** Daftar per-kreator di balik ringkasan `afiliasi` — "Top 10 Creator" mesin lama. */
+export interface PdtLaporanKreator {
+  top: PdtLaporanKreatorItem[];
+  total_kreator: number;
+  kontribusi_top: number | null;
+}
+
+export interface PdtLaporanSesiLiveItem {
+  platform_content_id: string;
+  creator_handle: string | null;
+  akun_toko: boolean;
+  waktu_posting: string | null;
+  durasi_detik: number | null;
+  vv: number | null;
+  gmv: number | null;
+  gmv_per_jam: number | null;
+  pengikut_baru: number | null;
+  klik_produk: number | null;
+}
+
+/** Daftar per-sesi di balik ringkasan `live` — "Top 10 Sesi" mesin lama. */
+export interface PdtLaporanSesiLive {
+  top: PdtLaporanSesiLiveItem[];
+  total_sesi: number;
+  kontribusi_top: number | null;
+}
+
+export interface PdtLaporanKampanyeItem {
+  sumber: string;
+  kampanye_id: string;
+  biaya: number;
+  gmv: number | null;
+  roas: number | null;
+  tayangan: number | null;
+  klik: number | null;
+  pesanan: number | null;
+  ctr: number | null;
+  cpc: number | null;
+}
+
+/** Daftar per-kampanye di balik ringkasan `iklan` — "Per Kampanye" mesin lama. */
+export interface PdtLaporanKampanye {
+  top: PdtLaporanKampanyeItem[];
+  total_kampanye: number;
+  tanpa_hasil: number;
+  biaya_tanpa_hasil: number | null;
+}
+
+export interface PdtLaporanPromoAngka {
+  penjualan_dibuat: number | null;
+  penjualan_siap_dikirim: number | null;
+  pesanan_dibuat: number | null;
+  pesanan_siap_dikirim: number | null;
+}
+
+export interface PdtLaporanPromoTipe extends PdtLaporanPromoAngka {
+  tipe: string;
+}
+
+export interface PdtLaporanPromoFlashSale extends PdtLaporanPromoAngka {
+  produk_dilihat: number | null;
+  produk_diklik: number | null;
+  ctr: number | null;
+  cvr: number | null;
+}
+
+/** §8 mesin Shopee lama. `diskon_per_tipe` KOMPONEN yang boleh tumpang tindih — jangan dijumlah; `diskon_total` sudah menjawabnya. */
+export interface PdtLaporanPromo {
+  diskon_total: PdtLaporanPromoAngka | null;
+  diskon_per_tipe: PdtLaporanPromoTipe[];
+  flash_sale: PdtLaporanPromoFlashSale | null;
+  kontribusi_gmv_diskon: number | null;
+  kontribusi_gmv_flash_sale: number | null;
+}
+
+/** Seluruh rasio PECAHAN (0..1) — sudah dinormalkan di server. */
+export interface PdtLaporanLayananChat {
+  baris_sumber: number;
+  pengunjung: number | null;
+  chat_masuk: number | null;
+  chat_dibalas: number | null;
+  response_rate: number | null;
+  waktu_respon_detik: number | null;
+  csat: number | null;
+  total_pesanan: number | null;
+  penjualan: number | null;
+  konversi_chat_dibalas: number | null;
+}
+
+export interface PdtLaporanPenalti {
+  poin: number;
+  deskripsi: string;
+  durasi: string;
+}
+
+/** §9 mesin Shopee lama. Cancel rate/retur TIDAK ada — nol kolom sumbernya di fakta PDT. */
+export interface PdtLaporanLayanan {
+  chat: PdtLaporanLayananChat | null;
+  poin_penalti_total: number | null;
+  penalti: PdtLaporanPenalti[];
+}
+
 export interface PdtLaporan {
   schema: string;
   platform: string;
@@ -416,6 +541,13 @@ export interface PdtLaporan {
   video: PdtLaporanVideo | null;
   produk: PdtLaporanProduk | null;
   afiliasi: PdtLaporanAfiliasi | null;
+  kreator: PdtLaporanKreator | null;
+  sesi_live: PdtLaporanSesiLive | null;
+  kampanye: PdtLaporanKampanye | null;
+  /** `null` untuk TikTok SELALU. */
+  promo: PdtLaporanPromo | null;
+  /** `null` untuk TikTok SELALU. */
+  layanan: PdtLaporanLayanan | null;
   tahap: PdtLaporanTahap | null;
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;

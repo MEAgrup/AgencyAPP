@@ -572,9 +572,23 @@ export interface PdtLaporanProdukDistribusi {
   gmv: number | null;
 }
 
+/** Satu baris "Top Produk by GMV" — LINTAS kuadran, `kuadran` `null` untuk produk yang belum/tidak terklasifikasi (seluruh baris Shopee, lihat docblock `bangunLaporanProduk`). */
+export interface PdtLaporanProdukTopItem {
+  namaProduk: string | null;
+  platformProductId: string | null;
+  gmv: number | null;
+  klik: number | null;
+  cvr: number | null;
+  kuadran: PdtKuadranSku | null;
+}
+
 export interface PdtLaporanProduk {
-  distribusi: Record<PdtKuadranSku, PdtLaporanProdukDistribusi>;
+  /** `null` bila NOL baris periode ini punya kuadran — kasus Shopee, yang tidak punya klasifikator kuadran sama sekali. Distribusi enam-bucket yang seluruhnya nol akan terbaca sebagai "semua produk tidak tayang", padahal artinya "belum pernah diklasifikasi". */
+  distribusi: Record<PdtKuadranSku, PdtLaporanProdukDistribusi> | null;
+  /** HANYA tiga kuadran actionable — kosong bila `distribusi` `null`. */
   topAksi: PdtLaporanProdukItem[];
+  /** "Top Produk by GMV" mesin lama — SELURUH produk diurut GMV desc, tidak disaring kuadran. Inilah satu-satunya isi bagian "produk" sisi Shopee. */
+  top: PdtLaporanProdukTopItem[];
 }
 
 /** Satu baris `pdt_fact_sku_period` (TikTok, `sku_id is null`, `basis='net'`) mentah untuk bagian laporan "produk". `kuadran` `null` = belum sempat diklasifikasi (struktural tidak seharusnya terjadi bila dipanggil SETELAH `klasifikasiUlangKuadranSkuTiktok` — dikeluarkan dari `distribusi`/`topAksi` bila terjadi, bukan dipaksa masuk salah satu bucket). */
@@ -594,7 +608,7 @@ export function bangunLaporanProduk(input: PdtLaporanProdukInput): PdtLaporanPro
   if (input == null || input.length === 0) return null;
   const berkuadran = input.filter((b): b is PdtLaporanProdukInputBaris & { kuadran: PdtKuadranSku } => b.kuadran != null);
 
-  const distribusi = Object.fromEntries(
+  const distribusi = berkuadran.length === 0 ? null : Object.fromEntries(
     SEMUA_KUADRAN.map((k) => {
       const baris = berkuadran.filter((b) => b.kuadran === k);
       const gmvDiketahui = baris.some((b) => b.gmv != null);
@@ -615,7 +629,19 @@ export function bangunLaporanProduk(input: PdtLaporanProdukInput): PdtLaporanPro
       kuadran: b.kuadran,
     }));
 
-  return { distribusi, topAksi };
+  const top: PdtLaporanProdukTopItem[] = [...input]
+    .sort((a, b) => (b.gmv ?? 0) - (a.gmv ?? 0))
+    .slice(0, TOP_PRODUK_N)
+    .map((b) => ({
+      namaProduk: b.namaProduk,
+      platformProductId: b.platformProductId,
+      gmv: bulat(b.gmv),
+      klik: b.klik,
+      cvr: persen5(b.cvr),
+      kuadran: b.kuadran,
+    }));
+
+  return { distribusi, topAksi, top };
 }
 
 /**
@@ -1064,16 +1090,63 @@ function poinLaporanInsight(input: PdtLaporanInsightInput): string[] {
   return poin;
 }
 
+/**
+ * "Leading metrics" bagian Outlook — EMPAT per platform, cermin mesin lama
+ * (`leading` di KEDUA berkas engine), bukan dua seperti v1.
+ *
+ * Targetnya ditarik dari BENCHMARK aktif (TikTok) atau dari angka periode ini
+ * sendiri (Shopee, yang nol benchmark — `computeSkorShopee` memang tidak
+ * menerimanya), memakai pengali yang SAMA PERSIS dengan mesin lama:
+ * pengunjung +35%, CR +1 poin persen, ROAS ads `max(6, roas+0,5)`. Nol
+ * ambang baru ditebak di sini.
+ *
+ * Satu indikator mesin lama SENGAJA TIDAK ADA: "Target Cancel Rate <7%"
+ * (Shopee) — `pdt_fact_shop_daily` tidak punya kolom pembatalan, jadi "kini"
+ * -nya tidak bisa dihitung ulang dari fakta dan targetnya jadi angka yang
+ * menggantung tanpa dasar. Alasan yang sama membuat "% Video Jual" TikTok
+ * diganti "GPM Video" — bench `gpm_video` ADA dan `gmv`/`vv` video ADA,
+ * sedangkan "berapa persen video yang menghasilkan penjualan" butuh baris
+ * per-video yang bagian "video" sudah menjumlah habis.
+ */
 function indikatorLaporanInsight(input: PdtLaporanInsightInput): { nama: string; target: string }[] {
   const arr: { nama: string; target: string }[] = [];
   if (input.skor.total != null) {
     arr.push({ nama: 'Target Skor Performa', target: `≥${SKOR_SEHAT_MIN}/10 (kini ${dec(input.skor.total, 1)}/10)` });
   }
+
   if (input.platform === 'tiktok' && input.benchTiktok) {
     const b = input.benchTiktok;
     arr.push({ nama: 'Target ROAS Iklan (GMV Max)', target: `≥${b.roi_gmvmax.good}x (kini ${input.iklan?.roas != null ? `${dec(input.iklan.roas, 2)}x` : '—'})` });
     arr.push({ nama: 'Target GMV/jam LIVE', target: `${rp(b.gmv_per_jam_live.warn)}+ (kini ${rp(input.live?.gmvPerJam ?? null)})` });
+    const cvrKini = input.kpi.cvr;
+    // Mesin lama: `max(bench.warn, cvr + 0,003)` — toko yang SUDAH di atas
+    // ambang tetap diberi target naik, bukan target yang sudah dilewatinya.
+    const cvrTarget = cvrKini == null ? b.cvr_toko.warn : Math.max(b.cvr_toko.warn, cvrKini + 0.003);
+    arr.push({ nama: 'Target CVR Toko', target: `${pct(cvrTarget, 2)} (kini ${pct(cvrKini, 2)})` });
+    const v = input.video;
+    const gpmKini = v == null || v.gmv == null || v.vv == null || v.vv === 0 ? null : (v.gmv / v.vv) * 1000;
+    arr.push({ nama: 'Target GPM Video', target: `${rp(b.gpm_video.warn)}+ per 1.000 views (kini ${rp(gpmKini)})` });
+    return arr;
   }
+
+  if (input.platform === 'shopee') {
+    const peng = input.kpi.pengunjung;
+    if (peng != null) arr.push({ nama: 'Target Pengunjung Toko', target: `${num(Math.round(peng * 1.35))} (+35% dari ${num(peng)})` });
+    const cvrKini = input.kpi.cvr;
+    if (cvrKini != null) arr.push({ nama: 'Target CR Toko', target: `${pct(cvrKini + 0.01, 2)} (kini ${pct(cvrKini, 2)})` });
+    // Hanya bila toko ini MEMANG beriklan periode ini. Mesin lama memakai
+    // `adsH.roas||5` — yaitu mengarang baseline 5x untuk toko yang nol iklan,
+    // lalu memasang target di atas angka karangan itu. Target untuk kanal yang
+    // tidak dipakai bukan indikator, cuma baris kosong yang menuntut.
+    const roasKini = input.iklan?.roas ?? null;
+    if (input.iklan != null) {
+      arr.push({
+        nama: 'Target ROAS Iklan',
+        target: `>${dec(Math.max(6, (roasKini ?? 5) + 0.5), 1)}x (kini ${roasKini != null ? `${dec(roasKini, 2)}x` : '—'})`,
+      });
+    }
+  }
+
   return arr;
 }
 
@@ -1100,6 +1173,521 @@ export function bangunLaporanInsight(input: PdtLaporanInsightInput): PdtLaporanI
   };
 }
 
+/**
+ * Bagian "promo" (Voucher & Promo) — §8 mesin Shopee lama, dibangun
+ * 2026-09-21 atas feedback pemilik "lengkapi hasil report supaya menyerupai
+ * hasil html".
+ *
+ * **SHOPEE-ONLY.** `pdt_fact_promo` hanya punya penulis fakta
+ * `shopee_diskon`/`shopee_flash_sale` (G4-03 aksi 4); TikTok nol modul promo
+ * terdaftar, jadi `null` PERMANEN di sana — pola sama "tahap" yang
+ * TikTok-only ke arah sebaliknya.
+ *
+ * **Isinya BUKAN voucher.** §8 mesin lama membaca `report.voucher.summary`
+ * (klaim, biaya voucher, usage rate) dari modul `promo_voucher`. PDT TIDAK
+ * PUNYA modul parser voucher sama sekali (nol hasil pencarian di
+ * `modules.ts` selain satu komentar) — jadi biaya/klaim/usage-rate voucher
+ * TIDAK bisa direplikasi dan TIDAK ditebak di sini. Yang PDT panen justru
+ * dua saudaranya yang mesin lama juga punya (`promo_diskon`,
+ * `promo_flashsale`), dan itulah isi bagian ini apa adanya.
+ *
+ * **Baris `tipePromosi='Semua'` adalah TOTAL yang sudah di-dedup Shopee,
+ * bukan salah satu komponen** (lihat docblock `ekstrakBarisPromoDiskonShopee`,
+ * `pdt/fakta.ts`) — ia dipisah jadi `diskonTotal`, dan komponen-komponennya
+ * ('Diskon'/'Paket Diskon'/'Kombo Hemat', yang BOLEH saling tumpang tindih)
+ * jadi `diskonPerTipe`. Menjumlah `diskonPerTipe` untuk mendapatkan total
+ * adalah dobel-hitung; `diskonTotal` sudah menjawabnya.
+ *
+ * **`kontribusiGmv` dipisah per jenis, TIDAK dijumlah.** Satu produk bisa
+ * ikut flash sale DAN berdiskon di bulan yang sama, jadi
+ * `diskonTotal + flashSale` bukan "GMV dari promo" melainkan angka yang
+ * menghitung sebagian pesanan dua kali. Dua rasio terpisah menyatakan apa
+ * yang benar-benar diketahui.
+ */
+export interface PdtLaporanPromoInputBaris {
+  jenis: 'diskon' | 'flash_sale';
+  tipePromosi: string | null;
+  penjualanDibuat: number | null;
+  penjualanSiapDikirim: number | null;
+  pesananDibuat: number | null;
+  pesananSiapDikirim: number | null;
+  produkDilihat: number | null;
+  produkDiklik: number | null;
+}
+
+export type PdtLaporanPromoInput = readonly PdtLaporanPromoInputBaris[] | null;
+
+export interface PdtLaporanPromoAngka {
+  penjualanDibuat: number | null;
+  penjualanSiapDikirim: number | null;
+  pesananDibuat: number | null;
+  pesananSiapDikirim: number | null;
+}
+
+export interface PdtLaporanPromoTipe extends PdtLaporanPromoAngka {
+  tipe: string;
+}
+
+export interface PdtLaporanPromoFlashSale extends PdtLaporanPromoAngka {
+  produkDilihat: number | null;
+  produkDiklik: number | null;
+  /** `produkDiklik ÷ produkDilihat` — `null` bila salah satunya `null` ATAU `produkDilihat` 0. */
+  ctr: number | null;
+  /** `pesananSiapDikirim ÷ produkDiklik` — `null` bila salah satunya `null` ATAU `produkDiklik` 0. */
+  cvr: number | null;
+}
+
+export interface PdtLaporanPromo {
+  /** Baris `Tipe Promosi='Semua'` — total periode yang SUDAH di-dedup Shopee. `null` bila berkas diskon tidak membawanya. */
+  diskonTotal: PdtLaporanPromoAngka | null;
+  /** Komponen yang BOLEH saling tumpang tindih — JANGAN dijumlah (lihat docblock). Urut penjualan siap-dikirim desc. */
+  diskonPerTipe: PdtLaporanPromoTipe[];
+  flashSale: PdtLaporanPromoFlashSale | null;
+  /** `diskonTotal.penjualanSiapDikirim ÷ gmv toko` — basis SAMA dengan KPI Shopee (Rule 16). */
+  kontribusiGmvDiskon: number | null;
+  /** `flashSale.penjualanSiapDikirim ÷ gmv toko`. TIDAK boleh dijumlah dengan yang di atas. */
+  kontribusiGmvFlashSale: number | null;
+}
+
+const angkaPromo = (b: PdtLaporanPromoInputBaris): PdtLaporanPromoAngka => ({
+  penjualanDibuat: bulat(b.penjualanDibuat),
+  penjualanSiapDikirim: bulat(b.penjualanSiapDikirim),
+  pesananDibuat: bulat(b.pesananDibuat),
+  pesananSiapDikirim: bulat(b.pesananSiapDikirim),
+});
+
+/** Rakit "promo". `null` (whole object) bila `input` `null` ATAU nol baris — cermin Rule 12, bukan nol yang mengarang. */
+export function bangunLaporanPromo(input: PdtLaporanPromoInput, gmvToko: number | null): PdtLaporanPromo | null {
+  if (input == null || input.length === 0) return null;
+
+  const diskon = input.filter((b) => b.jenis === 'diskon');
+  const barisTotal = diskon.find((b) => (b.tipePromosi ?? '').trim().toLowerCase() === 'semua') ?? null;
+  const diskonTotal = barisTotal == null ? null : angkaPromo(barisTotal);
+
+  const diskonPerTipe: PdtLaporanPromoTipe[] = diskon
+    .filter((b) => b !== barisTotal && (b.tipePromosi ?? '').trim() !== '')
+    .map((b) => ({ tipe: (b.tipePromosi as string).trim(), ...angkaPromo(b) }))
+    .sort((a, b) => (b.penjualanSiapDikirim ?? 0) - (a.penjualanSiapDikirim ?? 0));
+
+  const barisFs = input.find((b) => b.jenis === 'flash_sale') ?? null;
+  const flashSale: PdtLaporanPromoFlashSale | null = barisFs == null ? null : (() => {
+    const a = angkaPromo(barisFs);
+    const dilihat = bulat(barisFs.produkDilihat);
+    const diklik = bulat(barisFs.produkDiklik);
+    return {
+      ...a,
+      produkDilihat: dilihat,
+      produkDiklik: diklik,
+      ctr: dilihat == null || diklik == null || dilihat === 0 ? null : persen5(diklik / dilihat),
+      cvr: diklik == null || a.pesananSiapDikirim == null || diklik === 0 ? null : persen5(a.pesananSiapDikirim / diklik),
+    };
+  })();
+
+  const kontribusi = (v: number | null): number | null =>
+    v == null || gmvToko == null || gmvToko === 0 ? null : persen5(v / gmvToko);
+
+  return {
+    diskonTotal,
+    diskonPerTipe,
+    flashSale,
+    kontribusiGmvDiskon: kontribusi(diskonTotal?.penjualanSiapDikirim ?? null),
+    kontribusiGmvFlashSale: kontribusi(flashSale?.penjualanSiapDikirim ?? null),
+  };
+}
+
+/**
+ * Bagian "layanan" (Layanan & Kesehatan Toko) — §9 mesin Shopee lama.
+ *
+ * **SHOPEE-ONLY**, alasan sama "promo": `pdt_fact_layanan_chat` (G3-02a) dan
+ * `pdt_fact_kesehatan_penalti` (G2-01) hanya punya penulis fakta Shopee.
+ *
+ * **Cancel rate dan retur SENGAJA TIDAK ADA di sini.** Mesin lama §9
+ * menampilkan keduanya dari `k.batal_pesanan`/`k.retur_pesanan`;
+ * `pdt_fact_shop_daily` TIDAK PERNAH punya kolom pembatalan/retur sama
+ * sekali (skema `20261011010000` §5a) — jadi keduanya tidak bisa dihitung
+ * ulang dari fakta PDT dan TIDAK ditebak. Menampilkan "0%" untuk angka yang
+ * tidak diketahui persis melanggar Rule 12.
+ *
+ * **Satuan persen dinormalkan jadi PECAHAN di sini.** Kolom sumbernya
+ * literal "CSAT %" dan "Tingkat Konversi (Chat Dibalas)" dan disimpan APA
+ * ADANYA (0..100) di `pdt_fact_layanan_chat`; seluruh rasio lain di payload
+ * laporan ini pecahan (`cvr`, `ctr`, `kontribusi`), jadi keduanya dibagi 100
+ * SATU KALI di sini supaya FE punya satu aturan format, bukan dua.
+ *
+ * **`responseRate` DITURUNKAN `chatDibalas ÷ chatMasuk`, bukan dibaca.** Itu
+ * keputusan yang sudah diambil saat tabelnya lahir (docblock
+ * `ekstrakBarisLayananChatShopee`: "disimpan MENTAH, bukan rasio pra-hitung
+ * … pola sama seluruh rasio PDT lain"), dan `tingkatKonversiChatDibalas`
+ * SENGAJA bukan penggantinya — semantiknya beda.
+ *
+ * **Lebih dari satu baris chat** terjadi bila satu batch memuat lebih dari
+ * satu berkas "Performa Chat". Hitungan (`chatMasuk`, `chatDibalas`,
+ * `pengunjung`, `totalPesanan`, `penjualan`) DIJUMLAH; tiga kolom yang sudah
+ * berupa rata-rata/rasio di sumbernya (`waktuResponDetik`, `csat`,
+ * `konversiChatDibalas`) dirata-rata polos antar baris yang mengisinya —
+ * `barisSumber` menyebut berapa baris yang dirangkum supaya pembaca tahu
+ * kapan rata-rata itu berlaku.
+ */
+export interface PdtLaporanLayananChatInput {
+  barisSumber: number;
+  pengunjung: number | null;
+  chatMasuk: number | null;
+  chatDibalas: number | null;
+  waktuResponDetik: number | null;
+  csatPersen: number | null;
+  totalPesanan: number | null;
+  penjualan: number | null;
+  tingkatKonversiChatDibalasPersen: number | null;
+}
+
+export interface PdtLaporanPenaltiInput {
+  poin: number;
+  deskripsi: string;
+  durasi: string;
+}
+
+export interface PdtLaporanLayananInput {
+  chat: PdtLaporanLayananChatInput | null;
+  penalti: readonly PdtLaporanPenaltiInput[];
+}
+
+export interface PdtLaporanLayananChat {
+  /** Berapa baris `pdt_fact_layanan_chat` dirangkum — >1 berarti kolom rasio di bawah adalah rata-rata antar berkas. */
+  barisSumber: number;
+  pengunjung: number | null;
+  chatMasuk: number | null;
+  chatDibalas: number | null;
+  /** `chatDibalas ÷ chatMasuk` — PECAHAN. `null` bila salah satunya `null` ATAU `chatMasuk` 0. */
+  responseRate: number | null;
+  waktuResponDetik: number | null;
+  /** Kolom "CSAT %" ÷ 100 — PECAHAN. */
+  csat: number | null;
+  totalPesanan: number | null;
+  penjualan: number | null;
+  /** Kolom "Tingkat Konversi (Chat Dibalas)" ÷ 100 — PECAHAN. BUKAN `responseRate`. */
+  konversiChatDibalas: number | null;
+}
+
+export interface PdtLaporanPenalti {
+  poin: number;
+  deskripsi: string;
+  durasi: string;
+}
+
+export interface PdtLaporanLayanan {
+  chat: PdtLaporanLayananChat | null;
+  /** Σ poin seluruh penalti aktif periode ini. `0` adalah angka SUNGGUHAN di sini ("toko bersih"), bukan "tidak diketahui" — baris kesehatan toko memang ditulis walau nol penalti. `null` hanya bila nol baris kesehatan sama sekali. */
+  poinPenaltiTotal: number | null;
+  /** Urut poin desc. Kosong = nol penalti aktif (bukan "tidak diketahui"). */
+  penalti: PdtLaporanPenalti[];
+}
+
+/** Rakit "layanan". `null` (whole object) bila nol baris chat DAN nol baris penalti. */
+export function bangunLaporanLayanan(input: PdtLaporanLayananInput | null): PdtLaporanLayanan | null {
+  if (input == null || (input.chat == null && input.penalti.length === 0)) return null;
+
+  const c = input.chat;
+  const pecahanPersen = (v: number | null | undefined): number | null =>
+    v == null || !isFinite(v) ? null : persen5(v / 100);
+
+  const chat: PdtLaporanLayananChat | null = c == null ? null : {
+    barisSumber: c.barisSumber,
+    pengunjung: bulat(c.pengunjung),
+    chatMasuk: bulat(c.chatMasuk),
+    chatDibalas: bulat(c.chatDibalas),
+    responseRate: c.chatMasuk == null || c.chatDibalas == null || c.chatMasuk === 0
+      ? null
+      : persen5(c.chatDibalas / c.chatMasuk),
+    waktuResponDetik: bulat(c.waktuResponDetik),
+    csat: pecahanPersen(c.csatPersen),
+    totalPesanan: bulat(c.totalPesanan),
+    penjualan: bulat(c.penjualan),
+    konversiChatDibalas: pecahanPersen(c.tingkatKonversiChatDibalasPersen),
+  };
+
+  const penalti = [...input.penalti]
+    .sort((a, b) => b.poin - a.poin)
+    .map((p) => ({ poin: p.poin, deskripsi: p.deskripsi, durasi: p.durasi }));
+
+  return {
+    chat,
+    poinPenaltiTotal: input.penalti.length === 0 ? null : bulat(input.penalti.reduce((a, p) => a + p.poin, 0)),
+    penalti,
+  };
+}
+
+/**
+ * Bagian "kreator" (Top 10 Creator) — "Top 10 Creator" §7 mesin Shopee lama
+ * dan "Top Kreator by GMV" mesin TikTok lama.
+ *
+ * Melengkapi bagian "afiliasi" yang SENGAJA ringkasan-saja saat dibangun
+ * (keputusan pemilik KEENAM 2026-09-16, lihat docblock `PdtLaporanAfiliasi`):
+ * ringkasannya menjawab "seberapa besar afiliasi", bagian ini menjawab
+ * "siapa" — dan "siapa" adalah satu-satunya yang bisa ditindaklanjuti tim
+ * Creator Management.
+ *
+ * `komisi`/`roiKomisi` mesin lama TETAP tidak ada — `pdt_fact_creator_period`
+ * tidak pernah punya kolomnya (alasan lengkap di docblock
+ * `PdtLaporanAfiliasi`, tidak diulang di sini). Yang ditambahkan bagian ini
+ * hanyalah kolom yang tabel itu MEMANG punya.
+ *
+ * Platform-agnostic, pola sama "afiliasi"/"live": Shopee otomatis dapat
+ * `jumlahLive`/`jumlahVideo` `null` karena writer-nya tidak mengisi kolom
+ * itu, BUKAN karena filter platform.
+ */
+const TOP_KREATOR_N = 10;
+
+export interface PdtLaporanKreatorInputBaris {
+  handle: string;
+  gmv: number | null;
+  gmvLive: number | null;
+  gmvVideo: number | null;
+  pesanan: number | null;
+  jumlahLive: number | null;
+  jumlahVideo: number | null;
+}
+
+export type PdtLaporanKreatorInput = readonly PdtLaporanKreatorInputBaris[] | null;
+
+export interface PdtLaporanKreatorItem {
+  handle: string;
+  gmv: number | null;
+  gmvLive: number | null;
+  gmvVideo: number | null;
+  pesanan: number | null;
+  /** `gmv ÷ pesanan` — `null` bila salah satunya `null` ATAU `pesanan` 0. */
+  aov: number | null;
+  jumlahLive: number | null;
+  jumlahVideo: number | null;
+}
+
+export interface PdtLaporanKreator {
+  top: PdtLaporanKreatorItem[];
+  /** Berapa kreator SELURUHNYA di periode ini (bukan cuma yang masuk `top`). */
+  totalKreator: number;
+  /** Σ gmv `top` ÷ Σ gmv SELURUH kreator — `null` bila Σ seluruhnya `null`/0. */
+  kontribusiTop: number | null;
+}
+
+/** Rakit "kreator". `null` (whole object) bila `input` `null` ATAU nol baris. */
+export function bangunLaporanKreator(input: PdtLaporanKreatorInput): PdtLaporanKreator | null {
+  if (input == null || input.length === 0) return null;
+
+  const top: PdtLaporanKreatorItem[] = [...input]
+    .sort((a, b) => (b.gmv ?? 0) - (a.gmv ?? 0))
+    .slice(0, TOP_KREATOR_N)
+    .map((b) => {
+      const gmv = bulat(b.gmv);
+      const pesanan = bulat(b.pesanan);
+      return {
+        handle: b.handle,
+        gmv,
+        gmvLive: bulat(b.gmvLive),
+        gmvVideo: bulat(b.gmvVideo),
+        pesanan,
+        aov: gmv == null || pesanan == null || pesanan === 0 ? null : bulat(gmv / pesanan),
+        jumlahLive: bulat(b.jumlahLive),
+        jumlahVideo: bulat(b.jumlahVideo),
+      };
+    });
+
+  const adaGmv = input.some((b) => b.gmv != null);
+  const totalGmv = input.reduce((a, b) => a + (b.gmv ?? 0), 0);
+  const gmvTop = top.reduce((a, b) => a + (b.gmv ?? 0), 0);
+
+  return {
+    top,
+    totalKreator: input.length,
+    kontribusiTop: !adaGmv || totalGmv === 0 ? null : persen5(gmvTop / totalGmv),
+  };
+}
+
+/**
+ * Bagian "sesiLive" (Top 10 Sesi LIVE) — "Top 10 Sesi"/"Top Sesi GMV Max
+ * LIVE" mesin TikTok lama.
+ *
+ * Melengkapi bagian "live" yang ringkasan-saja (sesi, jam, GMV/jam toko):
+ * ringkasannya menjawab "seberapa sehat LIVE bulan ini", bagian ini
+ * menjawab "sesi mana yang bekerja" — yang menentukan jam tayang dan host
+ * bulan depan.
+ *
+ * Sumbernya `pdt_fact_content` `jenis='live'`, baris yang SAMA yang sudah
+ * di-`sum()` bagian "live" — nol tabel baru, nol query mahal baru.
+ *
+ * Platform-agnostic seperti "live": Shopee punya baris sesi tapi
+ * `durasiDetik` kosong permanen (kolom sumbernya tidak ada di
+ * `shopee_live`), jadi `gmvPerJam` otomatis `null` di sana tanpa filter
+ * platform.
+ *
+ * `is_akun_toko` DIBAWA APA ADANYA (`akunToko`) — memisahkan LIVE toko dari
+ * LIVE afiliasi adalah pembacaan yang mesin lama lakukan eksplisit ("LIVE
+ * Affiliate vs LIVE Toko"), dan sesi afiliasi yang menang besar berarti hal
+ * yang sangat berbeda dari sesi toko yang menang besar.
+ */
+const TOP_SESI_LIVE_N = 10;
+
+export interface PdtLaporanSesiLiveInputBaris {
+  platformContentId: string;
+  creatorHandle: string | null;
+  akunToko: boolean;
+  waktuPosting: string | null;
+  durasiDetik: number | null;
+  vv: number | null;
+  gmv: number | null;
+  pengikutBaru: number | null;
+  klikProduk: number | null;
+}
+
+export type PdtLaporanSesiLiveInput = readonly PdtLaporanSesiLiveInputBaris[] | null;
+
+export interface PdtLaporanSesiLiveItem {
+  platformContentId: string;
+  creatorHandle: string | null;
+  akunToko: boolean;
+  waktuPosting: string | null;
+  durasiDetik: number | null;
+  vv: number | null;
+  gmv: number | null;
+  /** `gmv ÷ (durasiDetik/3600)` — `null` bila salah satunya `null` ATAU durasi 0. */
+  gmvPerJam: number | null;
+  pengikutBaru: number | null;
+  klikProduk: number | null;
+}
+
+export interface PdtLaporanSesiLive {
+  top: PdtLaporanSesiLiveItem[];
+  totalSesi: number;
+  /** Σ gmv `top` ÷ Σ gmv SELURUH sesi — `null` bila Σ seluruhnya `null`/0. */
+  kontribusiTop: number | null;
+}
+
+/** Rakit "sesiLive". `null` (whole object) bila `input` `null` ATAU nol baris. */
+export function bangunLaporanSesiLive(input: PdtLaporanSesiLiveInput): PdtLaporanSesiLive | null {
+  if (input == null || input.length === 0) return null;
+
+  const top: PdtLaporanSesiLiveItem[] = [...input]
+    .sort((a, b) => (b.gmv ?? 0) - (a.gmv ?? 0))
+    .slice(0, TOP_SESI_LIVE_N)
+    .map((b) => {
+      const gmv = bulat(b.gmv);
+      const jam = b.durasiDetik == null ? null : b.durasiDetik / 3600;
+      return {
+        platformContentId: b.platformContentId,
+        creatorHandle: b.creatorHandle,
+        akunToko: b.akunToko,
+        waktuPosting: b.waktuPosting,
+        durasiDetik: bulat(b.durasiDetik),
+        vv: bulat(b.vv),
+        gmv,
+        gmvPerJam: gmv == null || jam == null || jam === 0 ? null : bulat(gmv / jam),
+        pengikutBaru: bulat(b.pengikutBaru),
+        klikProduk: bulat(b.klikProduk),
+      };
+    });
+
+  const adaGmv = input.some((b) => b.gmv != null);
+  const totalGmv = input.reduce((a, b) => a + (b.gmv ?? 0), 0);
+  const gmvTop = top.reduce((a, b) => a + (b.gmv ?? 0), 0);
+
+  return {
+    top,
+    totalSesi: input.length,
+    kontribusiTop: !adaGmv || totalGmv === 0 ? null : persen5(gmvTop / totalGmv),
+  };
+}
+
+/**
+ * Bagian "kampanye" (rincian iklan PER KAMPANYE) — "Per Kampanye (Product
+ * Ads)" mesin TikTok lama dan "Rincian per Sumber" yang di mesin Shopee lama
+ * turun sampai baris kampanye.
+ *
+ * Bagian "iklan" yang sudah ada menjumlah seluruh kampanye jadi satu angka
+ * per SUMBER. Itu menjawab "apakah iklan untung", tapi tidak pernah "iklan
+ * yang MANA" — dan satu kampanye rugi yang tersembunyi di balik rata-rata
+ * sumber yang sehat adalah persis anggaran yang harus dimatikan minggu
+ * depan.
+ *
+ * `tanpaHasil` (biaya > 0 DAN GMV ≤ 0 atau tidak diketahui) memakai ambang
+ * yang SAMA dengan dimensi skor Ads TikTok (`PdtSkorInputAdsTiktok`
+ * `biayaTanpaHasil`) — bukan ambang baru yang ditebak di sini.
+ *
+ * Platform-agnostic: `pdt_fact_ads` memuat kelima sumber (`tt_ads_product`,
+ * `tt_ads_live`, `shopee_ads_cpc`, `shopee_ads_search`, `shopee_ads_live`)
+ * dengan bentuk baris yang sama.
+ */
+const TOP_KAMPANYE_N = 15;
+
+export interface PdtLaporanKampanyeInputBaris {
+  sumber: string;
+  kampanyeId: string;
+  biaya: number;
+  gmv: number | null;
+  tayangan: number | null;
+  klik: number | null;
+  pesanan: number | null;
+}
+
+export type PdtLaporanKampanyeInput = readonly PdtLaporanKampanyeInputBaris[] | null;
+
+export interface PdtLaporanKampanyeItem {
+  sumber: string;
+  kampanyeId: string;
+  biaya: number;
+  gmv: number | null;
+  /** `gmv ÷ biaya` — `null` bila `gmv` `null` ATAU `biaya` 0. DITURUNKAN, bukan dibaca kolom `roas` (aturan rumah #4). */
+  roas: number | null;
+  tayangan: number | null;
+  klik: number | null;
+  pesanan: number | null;
+  /** `klik ÷ tayangan` — `null` bila salah satunya `null` ATAU `tayangan` 0. */
+  ctr: number | null;
+  /** `biaya ÷ klik` — `null` bila `klik` `null` ATAU 0. */
+  cpc: number | null;
+}
+
+export interface PdtLaporanKampanye {
+  /** Urut biaya desc — yang paling banyak membakar anggaran dibaca lebih dulu. */
+  top: PdtLaporanKampanyeItem[];
+  totalKampanye: number;
+  /** Kampanye ber-`biaya > 0` yang GMV-nya ≤ 0 atau tidak diketahui. */
+  tanpaHasil: number;
+  /** Σ biaya kampanye `tanpaHasil` — `null` bila nol kampanye seperti itu. */
+  biayaTanpaHasil: number | null;
+}
+
+/** Rakit "kampanye". `null` (whole object) bila `input` `null` ATAU nol baris. */
+export function bangunLaporanKampanye(input: PdtLaporanKampanyeInput): PdtLaporanKampanye | null {
+  if (input == null || input.length === 0) return null;
+
+  const top: PdtLaporanKampanyeItem[] = [...input]
+    .sort((a, b) => b.biaya - a.biaya)
+    .slice(0, TOP_KAMPANYE_N)
+    .map((b) => {
+      const gmv = bulat(b.gmv);
+      return {
+        sumber: b.sumber,
+        kampanyeId: b.kampanyeId,
+        biaya: bulat(b.biaya) as number,
+        gmv,
+        roas: gmv == null || b.biaya === 0 ? null : desimal2(gmv / b.biaya),
+        tayangan: bulat(b.tayangan),
+        klik: bulat(b.klik),
+        pesanan: bulat(b.pesanan),
+        ctr: b.klik == null || b.tayangan == null || b.tayangan === 0 ? null : persen5(b.klik / b.tayangan),
+        cpc: b.klik == null || b.klik === 0 ? null : bulat(b.biaya / b.klik),
+      };
+    });
+
+  const nihil = input.filter((b) => b.biaya > 0 && (b.gmv == null || b.gmv <= 0));
+
+  return {
+    top,
+    totalKampanye: input.length,
+    tanpaHasil: nihil.length,
+    biayaTanpaHasil: nihil.length === 0 ? null : bulat(nihil.reduce((a, b) => a + b.biaya, 0)),
+  };
+}
+
 export interface PdtLaporanTiktok {
   schema: 'cdps.pdt.laporan.tiktok.v1';
   platform: 'tiktok';
@@ -1115,6 +1703,16 @@ export interface PdtLaporanTiktok {
   video: PdtLaporanVideo | null;
   produk: PdtLaporanProduk | null;
   afiliasi: PdtLaporanAfiliasi | null;
+  /** Daftar per-kreator di balik ringkasan `afiliasi`. `null` = nol baris kreator periode ini. */
+  kreator: PdtLaporanKreator | null;
+  /** Daftar per-sesi di balik ringkasan `live`. `null` = nol sesi periode ini. */
+  sesiLive: PdtLaporanSesiLive | null;
+  /** Daftar per-kampanye di balik ringkasan `iklan`. `null` = nol baris iklan periode ini. */
+  kampanye: PdtLaporanKampanye | null;
+  /** SELALU `null` — `pdt_fact_promo` nol penulis fakta TikTok (lihat docblock `bangunLaporanPromo`). */
+  promo: PdtLaporanPromo | null;
+  /** SELALU `null` — `pdt_fact_layanan_chat`/`pdt_fact_kesehatan_penalti` nol penulis fakta TikTok. */
+  layanan: PdtLaporanLayanan | null;
   tahap: PdtLaporanTahap | null;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
@@ -1134,9 +1732,19 @@ export interface PdtLaporanShopee {
   iklan: PdtLaporanIklan | null;
   live: PdtLaporanLive | null;
   video: PdtLaporanVideo | null;
-  /** SELALU `null` — methodology kuadran Shopee beda total dari TikTok, belum ada modul PDT sumber data, lihat docblock `bangunLaporanProduk`. */
+  /** `distribusi` SELALU `null` sisi Shopee (nol klasifikator kuadran); `top` (Top Produk by GMV) terisi dari `pdt_fact_sku_period` basis `siap_dikirim` — lihat docblock `bangunLaporanProduk`. */
   produk: PdtLaporanProduk | null;
   afiliasi: PdtLaporanAfiliasi | null;
+  /** Daftar per-kreator di balik ringkasan `afiliasi`. `null` = nol baris kreator periode ini. */
+  kreator: PdtLaporanKreator | null;
+  /** Daftar per-sesi di balik ringkasan `live`. `null` = nol sesi periode ini. */
+  sesiLive: PdtLaporanSesiLive | null;
+  /** Daftar per-kampanye di balik ringkasan `iklan`. `null` = nol baris iklan periode ini. */
+  kampanye: PdtLaporanKampanye | null;
+  /** §8 mesin lama. `null` = nol baris `pdt_fact_promo` periode ini. */
+  promo: PdtLaporanPromo | null;
+  /** §9 mesin lama. `null` = nol baris chat DAN nol baris kesehatan toko periode ini. */
+  layanan: PdtLaporanLayanan | null;
   /** SELALU `null` — mesin lama Shopee tidak punya konsep buyer-journey sama sekali, lihat docblock `PdtLaporanTahap`. */
   tahap: PdtLaporanTahap | null;
   skor: PdtSkorHasilShopee;
@@ -1155,6 +1763,9 @@ export interface PdtLaporanTiktokOptions {
   video: PdtLaporanVideoInput | null;
   produk: PdtLaporanProdukInput;
   afiliasi: PdtLaporanAfiliasiInput | null;
+  kreator: PdtLaporanKreatorInput;
+  sesiLive: PdtLaporanSesiLiveInput;
+  kampanye: PdtLaporanKampanyeInput;
   tahap: PdtLaporanTahapInput;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
@@ -1172,7 +1783,13 @@ export interface PdtLaporanShopeeOptions {
   iklan: PdtLaporanIklanInputShopee | null;
   live: PdtLaporanLiveInput | null;
   video: PdtLaporanVideoInput | null;
+  produk: PdtLaporanProdukInput;
   afiliasi: PdtLaporanAfiliasiInput | null;
+  kreator: PdtLaporanKreatorInput;
+  sesiLive: PdtLaporanSesiLiveInput;
+  kampanye: PdtLaporanKampanyeInput;
+  promo: PdtLaporanPromoInput;
+  layanan: PdtLaporanLayananInput | null;
   skor: PdtSkorHasilShopee;
 }
 
@@ -1200,6 +1817,11 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
     video,
     produk,
     afiliasi,
+    kreator: bangunLaporanKreator(opts.kreator),
+    sesiLive: bangunLaporanSesiLive(opts.sesiLive),
+    kampanye: bangunLaporanKampanye(opts.kampanye),
+    promo: null,
+    layanan: null,
     tahap,
     skor: opts.skor,
     benchmarkVersi: opts.benchmarkVersi,
@@ -1217,6 +1839,7 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
   const live = bangunLaporanLive(opts.live);
   const video = bangunLaporanVideo(opts.video);
   const afiliasi = bangunLaporanAfiliasi(opts.afiliasi);
+  const produk = bangunLaporanProduk(opts.produk);
   return {
     schema: 'cdps.pdt.laporan.shopee.v1',
     platform: 'shopee',
@@ -1229,8 +1852,13 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
     iklan,
     live,
     video,
-    produk: null,
+    produk,
     afiliasi,
+    kreator: bangunLaporanKreator(opts.kreator),
+    sesiLive: bangunLaporanSesiLive(opts.sesiLive),
+    kampanye: bangunLaporanKampanye(opts.kampanye),
+    promo: bangunLaporanPromo(opts.promo, kpi.gmv),
+    layanan: bangunLaporanLayanan(opts.layanan),
     tahap: null,
     skor: opts.skor,
     insight: bangunLaporanInsight({

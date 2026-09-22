@@ -5722,9 +5722,9 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "produk" (G2-01-KUADRAN-SKU lan
     await insertSkuPeriod(cpId, batchId, 'PRD-TIDUR', 'Kaos Tidur', 10_000, 5, 0.9, null); // klik < KLIK_MIN_UJI
 
     const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
-    expect(hasil.produk?.distribusi.bintang).toEqual({ jumlah: 1, gmv: 500_000 });
-    expect(hasil.produk?.distribusi.bocor_traffic).toEqual({ jumlah: 1, gmv: 300_000 });
-    expect(hasil.produk?.distribusi.tidur).toEqual({ jumlah: 1, gmv: 10_000 });
+    expect(hasil.produk?.distribusi?.bintang).toEqual({ jumlah: 1, gmv: 500_000 });
+    expect(hasil.produk?.distribusi?.bocor_traffic).toEqual({ jumlah: 1, gmv: 300_000 });
+    expect(hasil.produk?.distribusi?.tidur).toEqual({ jumlah: 1, gmv: 10_000 });
     expect(hasil.produk?.topAksi.map((x) => x.namaProduk)).toEqual(['Kaos Bintang', 'Kaos Bocor']); // tidur dikeluarkan, diurutkan GMV desc
     expect(hasil.produk?.topAksi[0]).toMatchObject({ platformProductId: 'PRD-BINTANG', gmv: 500_000, klik: 200, kuadran: 'bintang' });
   });
