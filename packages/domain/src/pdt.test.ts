@@ -1971,6 +1971,7 @@ interface FactAdsRow {
   pesanan_sku: number | null;
   gmv: string | null;
   roas: string | null;
+  hasil: number | null;
 }
 
 async function loadFactAds(clientPlatformId: number): Promise<FactAdsRow[]> {
@@ -2528,23 +2529,33 @@ const HEADER_TTAM_CONSIDERATION = [
   'Secondary source', 'Primary source', 'Attribution source', 'Currency',
 ];
 
+// F-04 (M20-R9-F-04-TAHAP-FUNNEL) — `hasil` (5th tuple element, opsional,
+// default '0') ditulis ke kolom sumber `hasil` modul itu bila header
+// membawanya ('Paid follows' untuk `follows`, 'Adds to cart (Shop)' untuk
+// `showcase`, TIDAK ADA untuk `consideration` — `idxHasil` tetap -1, `hasil`
+// baris tetap 'x' TAPI tidak pernah dibaca karena `kolomHasil: null` di
+// pemanggil). Sebelum F-04 kolom-kolom itu dibiarkan 'x' generik (aman,
+// belum ada consumer) — sejak F-04 'x' tidak lagi valid (`parsePdtAngka('x')`
+// ⇒ NaN ⇒ INSERT integer gagal), jadi harus diisi angka.
 function ttamUpperFunnelBerkas(
   modulKode: 'tt_ads_manager_consideration' | 'tt_ads_manager_follows' | 'tt_ads_manager_showcase',
   header: readonly string[],
   nama: string,
-  baris: readonly [string, string, string, string][],
+  baris: readonly [string, string, string, string, string?][],
 ): PdtPreviewBerkasInput {
   const idxSpend = header.indexOf('Spend');
   const idxImpressions = header.indexOf('Impressions');
   const idxClicks = header.indexOf('Clicks (destination)');
+  const idxHasil = header.indexOf('Paid follows') !== -1 ? header.indexOf('Paid follows') : header.indexOf('Adds to cart (Shop)');
   const aoa: unknown[][] = [
     [...header],
-    ...baris.map(([adName, spend, impressions, clicks]) => {
+    ...baris.map(([adName, spend, impressions, clicks, hasil]) => {
       const row: string[] = header.map(() => 'x');
       row[0] = adName;
       row[idxSpend] = spend;
       row[idxImpressions] = impressions;
       row[idxClicks] = clicks;
+      if (idxHasil !== -1) row[idxHasil] = hasil ?? '0';
       return row;
     }),
   ];
@@ -2566,6 +2577,8 @@ describeDb('commitUploadBatch (F-03 lanjutan/M20 R9) — tt_ads_manager_consider
     expect(rows[0]).toMatchObject({
       kampanye_id: 'Ad name 1', sku_id: null, content_id: null, tayangan: 16962, klik: 721,
       pesanan_sku: null, gmv: null, roas: null, tipe_kampanye_sumber: null, tujuan: 'upper',
+      // F-04 (M20-R9-F-04-TAHAP-FUNNEL) — `hasil` PERMANEN null untuk consideration, nol consumer report.
+      hasil: null,
     });
     expect(Number(rows[0].biaya)).toBe(79389);
   });
@@ -2578,9 +2591,9 @@ describeDb('commitUploadBatch (F-03 lanjutan/M20 R9) — tt_ads_manager_consider
     const berkas = [
       ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
       ttamUpperFunnelBerkas('tt_ads_manager_follows', headerFollows, 'ttam-follows.xlsx', [
-        ['Ad name 1', '9360', '46', '0'],
-        ['Ad name 1', '22253', '113', '0'],
-        ['Total of 2 results', '31613', '159', '0'],
+        ['Ad name 1', '9360', '46', '0', '3'],
+        ['Ad name 1', '22253', '113', '0', '2'],
+        ['Total of 2 results', '31613', '159', '0', '5'],
       ]),
     ];
     await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
@@ -2589,6 +2602,8 @@ describeDb('commitUploadBatch (F-03 lanjutan/M20 R9) — tt_ads_manager_consider
     expect(rows[0].kampanye_id).toBe('Ad name 1');
     expect(Number(rows[0].biaya)).toBe(9360 + 22253);
     expect(rows[0].tayangan).toBe(46 + 113);
+    // F-04 (M20-R9-F-04-TAHAP-FUNNEL) — `hasil` (Paid follows) dijumlahkan sama seperti biaya/tayangan.
+    expect(rows[0].hasil).toBe(3 + 2);
   });
 
   it('tt_ads_manager_showcase: bacaIklanTiktok TIDAK membaca sumber ini (allow-list, bukan deny-list)', async () => {
@@ -2598,12 +2613,13 @@ describeDb('commitUploadBatch (F-03 lanjutan/M20 R9) — tt_ads_manager_consider
     const headerShowcase = ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'Clicks (destination)', 'CPC (destination)', 'Product page views (Shop)', 'Adds to cart (Shop)', 'Add to cart value (Shop)', 'Checkouts initiated (Shop)', 'Checkout initiation value (Shop)', 'Secondary source', 'Primary source', 'Attribution source', 'Currency'];
     const berkas = [
       ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
-      ttamUpperFunnelBerkas('tt_ads_manager_showcase', headerShowcase, 'ttam-showcase.xlsx', [['Ad name 1', '491679', '121988', '9475']]),
+      ttamUpperFunnelBerkas('tt_ads_manager_showcase', headerShowcase, 'ttam-showcase.xlsx', [['Ad name 1', '491679', '121988', '9475', '224']]),
     ];
     await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
     const rows = (await loadFactAds(cpId)).filter((r) => r.sumber === 'tt_ads_manager_showcase');
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ tujuan: 'upper', gmv: null, roas: null });
+    // F-04 (M20-R9-F-04-TAHAP-FUNNEL) — `hasil` (Adds to cart (Shop)) ditulis, konsumen `sc_atc`/funnel `atc`.
+    expect(rows[0]).toMatchObject({ tujuan: 'upper', gmv: null, roas: null, hasil: 224 });
     const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
     expect(hasil.iklan).toBeNull();
   });

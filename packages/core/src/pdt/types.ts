@@ -65,6 +65,13 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  *       sudah "berhasil" ditulis versi 6, tapi dengan baris Total palsu)
  *       butuh angka ini naik supaya `planPdtReparseTick` memproses ulang
  *       dan mengganti baris fakta yang salah.
+ *   8 — F-04 / M20-R9 lanjutan (`docs/DECISIONS.md` M20-R9-F-04-TAHAP-FUNNEL):
+ *       kolom baru `pdt_fact_ads.hasil` mulai dipanen dari KEEMPAT modul TTAM
+ *       (video views/paid follows/add-to-cart — `consideration` PERMANEN
+ *       `null`, nol konsumen report). Batch lama yang sudah menulis baris
+ *       TTAM versi 7 (tanpa `hasil`) butuh angka ini naik supaya
+ *       `planPdtReparseTick` memproses ulang dan mengisi kolom yang
+ *       sebelumnya kosong.
  *
  * Kenaikan ini BUKAN kosmetik: `planPdtReparseTick` memilih batch lewat
  * `parser_versi < PDT_PARSER_VERSI`, jadi selama angkanya tetap 1 predikat
@@ -73,7 +80,7 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  * backlog begitu ia naik"). Menambah writer tanpa menaikkan angka ini =
  * fitur yang hanya berlaku untuk batch yang diunggah sesudahnya.
  */
-export const PDT_PARSER_VERSI = 7;
+export const PDT_PARSER_VERSI = 8;
 
 /**
  * Satu grup AND/NOT: seluruh `must` harus muncul (cocok substring, tanpa

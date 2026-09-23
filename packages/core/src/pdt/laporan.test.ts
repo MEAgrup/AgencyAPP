@@ -46,7 +46,10 @@ import { computeSkorShopee, computeSkorTiktok, type PdtSkorInputShopee, type Pdt
 
 const INPUT_KOSONG_TIKTOK: PdtSkorInputTiktok = { ads: null, live: null, video: null, kartu: null, affiliate: null, produk: null };
 const INPUT_KOSONG_SHOPEE: PdtSkorInputShopee = { ads: null, dibuat: null, produk: null, live: null, kesehatan: null };
-const TAHAP_INPUT_KOSONG: PdtLaporanTahapInput = { tahapFokus: null, klik: null, cpaInput: null, affPosting: null, ttamFunnel: null };
+const TAHAP_INPUT_KOSONG: PdtLaporanTahapInput = {
+  tahapFokus: null, klik: null, cpaInput: null, affPosting: null,
+  videoViews: null, follows: null, showcase: null,
+};
 
 const BENCH_KOSONG = {
   roi_gmvmax: { good: 8, warn: 4 },
@@ -176,7 +179,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
           { kode: 'impresi', label: 'Impresi produk', nilai: null, lolos: null, lolosDari: null, catatan: 'kolom impresi toko belum ada di skema PDT saat ini' },
           { kode: 'klik', label: 'Klik ke halaman produk', nilai: null, lolos: null, lolosDari: null, catatan: 'tidak ada di export Analitik Toko periode ini' },
           { kode: 'pengunjung', label: 'Pengunjung toko', nilai: 5_000, lolos: null, lolosDari: null, catatan: null },
-          { kode: 'atc', label: 'Add to Cart', nilai: null, lolos: null, lolosDari: null, catatan: 'hanya terbaca dari export Ads Manager Showcase — belum dibangun' },
+          { kode: 'atc', label: 'Add to Cart', nilai: null, lolos: null, lolosDari: null, catatan: 'tidak ada di export Ads Manager Showcase periode ini' },
           { kode: 'pesanan', label: 'Pesanan', nilai: 100, lolos: 0.02, lolosDari: 'Pengunjung toko', catatan: null },
         ],
         konversiTotal: { nilai: 0.02 },
@@ -243,8 +246,11 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       },
       // M20 R2 — caveat kelengkapan hidup DI SINI, bukan sebagai kalimat di
       // `insight.poin`. Baris `tahap` lahir dari DATANYA (funnel ber-`nilai:
-      // null`), bukan dari daftar platform yang ditulis tangan — begitu modul
-      // Ads Manager mendarat, baris ini jadi `lengkap` dengan sendirinya.
+      // null`), per-langkah (F-04, M20-R9-F-04-TAHAP-FUNNEL) — `impresi`
+      // PERMANEN null (gap skema toko, bukan Ads Manager) jadi baris ini
+      // TIDAK PERNAH `lengkap: true` sampai gap itu ditutup terpisah;
+      // `modulHilang` hanya menyebut `showcase` (satu-satunya null yang
+      // benar-benar "modul Ads Manager belum diunggah periode ini").
       kelengkapan: {
         semuaLengkap: false,
         baris: [
@@ -252,11 +258,8 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
           {
             bagian: 'tahap',
             lengkap: false,
-            alasan: 'Langkah funnel berikut belum dipanen ke fakta, jadi ditandai "—", BUKAN nol aktivitas: Impresi produk, Klik ke halaman produk, Add to Cart. Sumbernya ekspor TikTok Ads Manager, yang belum punya modul PDT.',
-            modulHilang: [
-              'tt_ads_manager_consideration', 'tt_ads_manager_follows',
-              'tt_ads_manager_showcase', 'tt_ads_manager_videoviews',
-            ],
+            alasan: 'Langkah funnel berikut ditandai "—", BUKAN nol aktivitas: Impresi produk (kolom impresi toko belum ada di skema PDT saat ini); Klik ke halaman produk (tidak ada di export Analitik Toko periode ini); Add to Cart (tidak ada di export Ads Manager Showcase periode ini).',
+            modulHilang: ['tt_ads_manager_showcase'],
           },
         ],
       },
@@ -553,30 +556,82 @@ describe('bangunLaporanTahap (G2-01 lanjutan — bagian "tahap", 2026-09-16, Tik
     expect(bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_KOSONG, null, null, null)).toBeNull();
   });
 
-  // Tiga metrik Consideration ini DULU hardcode `null` dengan catatan "modul
-  // TikTok Ads Manager belum dibangun" — keliru, dan tes ini mengunci
-  // koreksinya.
-  it('impresi/klik/CTR showcase terisi dari TikTok Ads Manager, bukan hardcode null', () => {
-    const input: PdtLaporanTahapInput = { ...TAHAP_INPUT_KOSONG, ttamFunnel: { tayangan: 400_000, klik: 14_000 } };
+  // Tiga metrik Consideration ini DULU (F-03) sumbernya `tt_ads_product`/
+  // `tt_ads_live` (GMV Max — bug, ditutup F-04) — tes ini mengunci koreksi ke
+  // `tt_ads_manager_showcase` yang benar, PLUS `sc_atc`/`sc_cost_atc` (F-04
+  // baru, sebelumnya hardcode null).
+  it('impresi/klik/CTR/atc/cost_atc showcase terisi dari tt_ads_manager_showcase, bukan hardcode null', () => {
+    const input: PdtLaporanTahapInput = { ...TAHAP_INPUT_KOSONG, showcase: { biaya: 700_000, tayangan: 400_000, klik: 14_000, hasil: 350 } };
     const cons = bangunLaporanTahap(input, KPI_ISI, null, null, null)?.blok.find((b) => b.kode === 'consideration');
     const m = (kode: string) => cons?.metrik.find((x) => x.kode === kode)?.nilai;
     expect(m('sc_impresi')).toBe(400_000);
     expect(m('sc_klik')).toBe(14_000);
     expect(m('sc_ctr')).toBeCloseTo(0.035, 5);
+    expect(m('sc_atc')).toBe(350);
+    expect(m('sc_cost_atc')).toBe(2_000);
   });
 
-  it('nol baris iklan Ads Manager ⇒ ketiganya null (tidak diketahui), BUKAN nol tayangan', () => {
+  it('nol baris tt_ads_manager_showcase ⇒ kelimanya null (tidak diketahui), BUKAN nol tayangan', () => {
     const cons = bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_ISI, null, null, null)?.blok.find((b) => b.kode === 'consideration');
     const m = (kode: string) => cons?.metrik.find((x) => x.kode === kode)?.nilai;
     expect(m('sc_impresi')).toBeNull();
     expect(m('sc_klik')).toBeNull();
     expect(m('sc_ctr')).toBeNull();
+    expect(m('sc_atc')).toBeNull();
+    expect(m('sc_cost_atc')).toBeNull();
   });
 
-  it('CTR showcase null bila tayangan nol — pembagian nol tidak pernah jadi error/Infinity (aturan rumah #7)', () => {
-    const input: PdtLaporanTahapInput = { ...TAHAP_INPUT_KOSONG, ttamFunnel: { tayangan: 0, klik: 5 } };
+  it('CTR showcase null bila tayangan nol, cost_atc null bila hasil (atc) nol — pembagian nol tidak pernah jadi error/Infinity (aturan rumah #7)', () => {
+    const input: PdtLaporanTahapInput = { ...TAHAP_INPUT_KOSONG, showcase: { biaya: 100, tayangan: 0, klik: 5, hasil: 0 } };
     const cons = bangunLaporanTahap(input, KPI_ISI, null, null, null)?.blok.find((b) => b.kode === 'consideration');
     expect(cons?.metrik.find((x) => x.kode === 'sc_ctr')?.nilai).toBeNull();
+    expect(cons?.metrik.find((x) => x.kode === 'sc_cost_atc')?.nilai).toBeNull();
+  });
+
+  it('vv_*/fol_* terisi dari tt_ads_manager_videoviews/_follows (F-04) — vv_cpm dari tayangan, vv_per1k dari views, keduanya turunan bukan kolom', () => {
+    const input: PdtLaporanTahapInput = {
+      ...TAHAP_INPUT_KOSONG,
+      videoViews: { biaya: 500_000, tayangan: 200_000, hasil: 25_000 },
+      follows: { biaya: 90_000, hasil: 45 },
+    };
+    const aware = bangunLaporanTahap(input, KPI_ISI, null, null, null)?.blok.find((b) => b.kode === 'awareness');
+    const m = (kode: string) => aware?.metrik.find((x) => x.kode === kode)?.nilai;
+    expect(m('vv_impresi')).toBe(200_000);
+    expect(m('vv_views')).toBe(25_000);
+    expect(m('vv_cpm')).toBe(2_500);
+    expect(m('vv_per1k')).toBe(20_000);
+    expect(m('fol_follows')).toBe(45);
+    expect(m('fol_cost')).toBe(2_000);
+  });
+
+  it('nol baris videoviews/follows ⇒ vv_*/fol_* semua null', () => {
+    const aware = bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_ISI, null, null, null)?.blok.find((b) => b.kode === 'awareness');
+    const m = (kode: string) => aware?.metrik.find((x) => x.kode === kode)?.nilai;
+    expect(m('vv_impresi')).toBeNull();
+    expect(m('vv_views')).toBeNull();
+    expect(m('vv_cpm')).toBeNull();
+    expect(m('vv_per1k')).toBeNull();
+    expect(m('fol_follows')).toBeNull();
+    expect(m('fol_cost')).toBeNull();
+  });
+
+  it('vv_cpm/vv_per1k/fol_cost null saat penyebut (tayangan/hasil) nol — bukan Infinity', () => {
+    const input: PdtLaporanTahapInput = {
+      ...TAHAP_INPUT_KOSONG,
+      videoViews: { biaya: 500_000, tayangan: 0, hasil: 0 },
+      follows: { biaya: 90_000, hasil: 0 },
+    };
+    const aware = bangunLaporanTahap(input, KPI_ISI, null, null, null)?.blok.find((b) => b.kode === 'awareness');
+    const m = (kode: string) => aware?.metrik.find((x) => x.kode === kode)?.nilai;
+    expect(m('vv_cpm')).toBeNull();
+    expect(m('vv_per1k')).toBeNull();
+    expect(m('fol_cost')).toBeNull();
+  });
+
+  it('funnel atc terisi dari showcase.hasil (F-04) — bukan lagi hardcode null', () => {
+    const input: PdtLaporanTahapInput = { ...TAHAP_INPUT_KOSONG, showcase: { biaya: 700_000, tayangan: 400_000, klik: 14_000, hasil: 350 } };
+    const hasil = bangunLaporanTahap(input, KPI_ISI, null, null, null);
+    expect(hasil?.funnel.find((f) => f.kode === 'atc')).toEqual({ kode: 'atc', label: 'Add to Cart', nilai: 350, lolos: expect.any(Number), lolosDari: 'Pengunjung toko', catatan: null });
   });
 
   it('tahapFokus tidak valid (kolom rusak/di luar tiga nilai) ⇒ fokus null, ketiga blok fokus:false', () => {
@@ -611,12 +666,12 @@ describe('bangunLaporanTahap (G2-01 lanjutan — bagian "tahap", 2026-09-16, Tik
     expect(pesanan?.lolosDari).toBe('Pengunjung toko');
   });
 
-  it('impresi/atc SELALU null dengan catatan eksplisit (kolom genuinely tidak ada / butuh ads_manager)', () => {
+  it('impresi SELALU null dengan catatan eksplisit (gap skema toko, F-04 tidak menutupnya); atc null dengan catatan "belum diunggah" saat nol baris showcase', () => {
     const hasil = bangunLaporanTahap(TAHAP_INPUT_KOSONG, KPI_ISI, null, null, null);
     const impresi = hasil?.funnel.find((f) => f.kode === 'impresi');
     const atc = hasil?.funnel.find((f) => f.kode === 'atc');
     expect(impresi).toEqual({ kode: 'impresi', label: 'Impresi produk', nilai: null, lolos: null, lolosDari: null, catatan: 'kolom impresi toko belum ada di skema PDT saat ini' });
-    expect(atc).toEqual({ kode: 'atc', label: 'Add to Cart', nilai: null, lolos: null, lolosDari: null, catatan: 'hanya terbaca dari export Ads Manager Showcase — belum dibangun' });
+    expect(atc).toEqual({ kode: 'atc', label: 'Add to Cart', nilai: null, lolos: null, lolosDari: null, catatan: 'tidak ada di export Ads Manager Showcase periode ini' });
   });
 
   it('aov diturunkan Σgmv÷Σpesanan (bukan kolom mentah), null saat pesanan 0', () => {
@@ -647,7 +702,8 @@ describe('bangunLaporanTahap (G2-01 lanjutan — bagian "tahap", 2026-09-16, Tik
     expect(cons.find((m) => m.kode === 'aff_total')?.nilai).toBe(10);
     expect(aware.find((m) => m.kode === 'konten_n')?.nilai).toBe(20);
     expect(aware.find((m) => m.kode === 'konten_vv')?.nilai).toBe(50_000);
-    // belanja conversion = iklan.biaya (spend GMV Max) — awareness/consideration selalu null (ttam belum dibangun).
+    // belanja conversion = iklan.biaya (spend GMV Max) — awareness/consideration SENGAJA belum dihitung (F-04
+    // scope: hanya metrik individual vv_*/fol_*/sc_*, bukan breakdown belanja per tahap — item terbuka terpisah).
     expect(hasil?.blok.find((b) => b.kode === 'conversion')?.belanja).toBe(300_000);
     expect(hasil?.blok.find((b) => b.kode === 'conversion')?.belanjaPersen).toBe(1);
     expect(hasil?.belanjaTotal).toBe(300_000);
@@ -1464,24 +1520,47 @@ describe('bangunLaporanKelengkapan (M20 R2 — caveat sebagai DATA, bukan prosa)
     });
   });
 
-  it('tahap ber-langkah null ⇒ alasan MENYEBUT langkah mana yang kosong, bukan kalimat umum', () => {
+  // F-04 (M20-R9-F-04-TAHAP-FUNNEL) — alasan dirakit dari `catatan` PER
+  // LANGKAH (bukan satu kalimat generik "Ads Manager belum punya modul"),
+  // dan `modulHilang` hanya menyebut modul yang BENAR-BENAR menyebabkan
+  // langkah itu null (`atc` ⇒ `tt_ads_manager_showcase`) — `impresi` TIDAK
+  // pernah menyumbang `modulHilang` (gap skema toko, bukan Ads Manager).
+  it('tahap ber-langkah null ⇒ alasan MENYEBUT langkah mana yang kosong + catatannya, bukan kalimat umum', () => {
     const tahapBolong = {
       fokus: null,
       belanjaTotal: null,
       konversiTotal: { nilai: null, band: null, flag: 'kosong' as const },
       funnel: [
-        { kode: 'impresi', label: 'Impresi produk', nilai: null, lolos: null, lolosDari: null, catatan: null },
+        { kode: 'impresi', label: 'Impresi produk', nilai: null, lolos: null, lolosDari: null, catatan: 'kolom impresi toko belum ada di skema PDT saat ini' },
         { kode: 'klik', label: 'Klik ke halaman produk', nilai: 100, lolos: null, lolosDari: null, catatan: null },
-        { kode: 'atc', label: 'Add to Cart', nilai: null, lolos: null, lolosDari: null, catatan: null },
+        { kode: 'atc', label: 'Add to Cart', nilai: null, lolos: null, lolosDari: null, catatan: 'tidak ada di export Ads Manager Showcase periode ini' },
       ],
       blok: [],
     };
     const baris = bangunLaporanKelengkapan({ platform: 'tiktok', kanal: kanalLengkap, iklan: null, tahap: tahapBolong as never })
       .baris.find((b) => b.bagian === 'tahap');
     expect(baris?.lengkap).toBe(false);
-    expect(baris?.alasan).toContain('Impresi produk, Add to Cart');
+    expect(baris?.alasan).toContain('Impresi produk (kolom impresi toko belum ada di skema PDT saat ini)');
+    expect(baris?.alasan).toContain('Add to Cart (tidak ada di export Ads Manager Showcase periode ini)');
     expect(baris?.alasan).not.toContain('Klik ke halaman produk');
     expect(baris?.alasan).toContain('BUKAN nol aktivitas');
-    expect(baris?.modulHilang).toHaveLength(4);
+    expect(baris?.modulHilang).toEqual(['tt_ads_manager_showcase']);
+  });
+
+  it('tahap ber-langkah null TANPA atc di antaranya ⇒ modulHilang kosong (impresi/klik bukan tanggung jawab Ads Manager)', () => {
+    const tahapImpresiKosong = {
+      fokus: null,
+      belanjaTotal: null,
+      konversiTotal: { nilai: null, band: null, flag: 'kosong' as const },
+      funnel: [
+        { kode: 'impresi', label: 'Impresi produk', nilai: null, lolos: null, lolosDari: null, catatan: 'kolom impresi toko belum ada di skema PDT saat ini' },
+        { kode: 'atc', label: 'Add to Cart', nilai: 50, lolos: null, lolosDari: null, catatan: null },
+      ],
+      blok: [],
+    };
+    const baris = bangunLaporanKelengkapan({ platform: 'tiktok', kanal: kanalLengkap, iklan: null, tahap: tahapImpresiKosong as never })
+      .baris.find((b) => b.bagian === 'tahap');
+    expect(baris?.lengkap).toBe(false);
+    expect(baris?.modulHilang).toEqual([]);
   });
 });

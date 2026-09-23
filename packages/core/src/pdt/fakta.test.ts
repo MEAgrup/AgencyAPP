@@ -270,14 +270,14 @@ describe('ekstrakBarisTtamVideoViews', () => {
         '2184', 'TikTok account', 'Your own content', '-', 'IDR'],
     ];
     expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([
-      { kampanyeId: 'Ad name2026-08-23 14:13:20', biaya: 2665, tayangan: 2184 },
+      { kampanyeId: 'Ad name2026-08-23 14:13:20', biaya: 2665, tayangan: 2184, videoViews: 178 },
     ]);
   });
 
-  it('hanya kampanyeId/biaya/tayangan — nol kolom lain dipanen (CPM/6-second focused views/dst PERMANEN tidak ada consumer)', () => {
+  it('hanya kampanyeId/biaya/tayangan/videoViews — nol kolom lain dipanen (CPM/dst nol consumer, videoViews DIPANEN sejak F-04)', () => {
     const aoa = [HEADER_TTAM_VIDEOVIEWS, ['Ad A', 'Active', '', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', 'x', 'y', '-', 'IDR']];
     const [baris] = ekstrakBarisTtamVideoViews(aoa, 1);
-    expect(Object.keys(baris).sort()).toEqual(['biaya', 'kampanyeId', 'tayangan']);
+    expect(Object.keys(baris).sort()).toEqual(['biaya', 'kampanyeId', 'tayangan', 'videoViews']);
   });
 
   it('baris dengan Ad name kosong dilewati', () => {
@@ -289,10 +289,10 @@ describe('ekstrakBarisTtamVideoViews', () => {
     expect(ekstrakBarisTtamVideoViews(aoa, 1)).toHaveLength(1);
   });
 
-  it('Spend/Impressions kosong ⇒ biaya 0 / tayangan null (pola sama ekstrakBarisTtAdsLive)', () => {
+  it('Spend/Impressions/videoViews kosong ⇒ biaya 0 / tayangan null / videoViews null (pola sama ekstrakBarisTtAdsLive)', () => {
     const headerMinimal = ['Ad name'];
     const aoa = [headerMinimal, ['Ad A']];
-    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([{ kampanyeId: 'Ad A', biaya: 0, tayangan: null }]);
+    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([{ kampanyeId: 'Ad A', biaya: 0, tayangan: null, videoViews: null }]);
   });
 
   // F-03 lanjutan (M20 R9, 2026-09-23) — kuirk baru dikonfirmasi 9/9 sample
@@ -305,7 +305,7 @@ describe('ekstrakBarisTtamVideoViews', () => {
       ['Ad A', 'Active', '', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', 'x', 'y', '-', 'IDR'],
       ['Total of 1 results', '-', '-', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', '-', '-', '-', 'IDR'],
     ];
-    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([{ kampanyeId: 'Ad A', biaya: 2665, tayangan: 2184 }]);
+    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([{ kampanyeId: 'Ad A', biaya: 2665, tayangan: 2184, videoViews: 178 }]);
   });
 
   it('baris "Total N hasil" (varian Bahasa Indonesia) juga dilewati', () => {
@@ -314,7 +314,7 @@ describe('ekstrakBarisTtamVideoViews', () => {
       ['Ad A', 'Active', '', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', 'x', 'y', '-', 'IDR'],
       ['Total 1 hasil', '-', '-', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', '-', '-', '-', 'IDR'],
     ];
-    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([{ kampanyeId: 'Ad A', biaya: 2665, tayangan: 2184 }]);
+    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([{ kampanyeId: 'Ad A', biaya: 2665, tayangan: 2184, videoViews: 178 }]);
   });
 
   // F-03 lanjutan — `Ad name` TIDAK unik per baris di berkas nyata (redaksi
@@ -331,7 +331,7 @@ describe('ekstrakBarisTtamVideoViews', () => {
       ['Ad name2026-08-12 10:48:18', '', '', '8223', '', '', '', '', '', '', '2000', '', '', '', 'IDR'],
     ];
     expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([
-      { kampanyeId: 'Ad name2026-08-12 10:48:18', biaya: 3952 + 5221 + 8223, tayangan: 900 + 1100 + 2000 },
+      { kampanyeId: 'Ad name2026-08-12 10:48:18', biaya: 3952 + 5221 + 8223, tayangan: 900 + 1100 + 2000, videoViews: 0 },
     ]);
   });
 
@@ -344,7 +344,7 @@ describe('ekstrakBarisTtamVideoViews', () => {
     ];
     const aoa = [headerId, ['Nama Iklan2026-08-05 09:00:00', 'Aktif', '', '30000', '6000', '5500', '4000', '5000', 'Akun TikTok', 'Konten milik sendiri', '-', 'IDR']];
     expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([
-      { kampanyeId: 'Nama Iklan2026-08-05 09:00:00', biaya: 30000, tayangan: 6000 },
+      { kampanyeId: 'Nama Iklan2026-08-05 09:00:00', biaya: 30000, tayangan: 6000, videoViews: 4000 },
     ]);
   });
 });
@@ -380,28 +380,28 @@ describe('ekstrakBarisTtamConsideration/Follows/Showcase — implementasi bersam
         '1401', '0.0826', '721', '114', '0', '0', '1', 'TikTok account', 'Your own content', '-', 'IDR'],
     ];
     expect(ekstrakBarisTtamConsideration(aoa, 1)).toEqual([
-      { kampanyeId: 'Ad name2026-06-29 14:23:06', biaya: 79389, tayangan: 16962, klik: 721 },
+      { kampanyeId: 'Ad name2026-06-29 14:23:06', biaya: 79389, tayangan: 16962, klik: 721, hasil: null },
     ]);
   });
 
-  it('tt_ads_manager_follows: memetakan kampanyeId/biaya/tayangan/klik dari row asli (Gold Pigeon)', () => {
+  it('tt_ads_manager_follows: memetakan kampanyeId/biaya/tayangan/klik/hasil(Paid follows) dari row asli (Gold Pigeon)', () => {
     const aoa = [
       HEADER_TTAM_FOLLOWS,
       ['Ad name2026-08-01 10:00:00', 'Paused', '', '9360', '46', '0', '0', '3', '3', 'TikTok account', 'Your own content', '-', 'IDR'],
     ];
     expect(ekstrakBarisTtamFollows(aoa, 1)).toEqual([
-      { kampanyeId: 'Ad name2026-08-01 10:00:00', biaya: 9360, tayangan: 46, klik: 0 },
+      { kampanyeId: 'Ad name2026-08-01 10:00:00', biaya: 9360, tayangan: 46, klik: 0, hasil: 3 },
     ]);
   });
 
-  it('tt_ads_manager_showcase: memetakan kampanyeId/biaya/tayangan/klik dari row asli (Gold Pigeon)', () => {
+  it('tt_ads_manager_showcase: memetakan kampanyeId/biaya/tayangan/klik/hasil(Adds to cart (Shop)) dari row asli (Gold Pigeon)', () => {
     const aoa = [
       HEADER_TTAM_SHOWCASE,
       ['Ad name2026-06-01 10:00:00', 'Paused', '', '491679', '121988', '9475', '52', '9579', '224',
         '5907228', '1131', '30681365', 'TikTok account', 'Your own content', '-', 'IDR'],
     ];
     expect(ekstrakBarisTtamShowcase(aoa, 1)).toEqual([
-      { kampanyeId: 'Ad name2026-06-01 10:00:00', biaya: 491679, tayangan: 121988, klik: 9475 },
+      { kampanyeId: 'Ad name2026-06-01 10:00:00', biaya: 491679, tayangan: 121988, klik: 9475, hasil: 224 },
     ]);
   });
 
@@ -419,7 +419,7 @@ describe('ekstrakBarisTtamConsideration/Follows/Showcase — implementasi bersam
       ['Ad name2026-08-14 10:58:57', 'Paused', '', '188044', '14395', '833', '226', '701', '56', '1518000', '51', '1403000', 'x', 'y', '-', 'IDR'],
     ];
     expect(ekstrakBarisTtamShowcase(aoa, 1)).toEqual([
-      { kampanyeId: 'Ad name2026-08-14 10:58:57', biaya: 491679 + 188044, tayangan: 121988 + 14395, klik: 9475 + 833 },
+      { kampanyeId: 'Ad name2026-08-14 10:58:57', biaya: 491679 + 188044, tayangan: 121988 + 14395, klik: 9475 + 833, hasil: 224 + 56 },
     ]);
   });
 });
