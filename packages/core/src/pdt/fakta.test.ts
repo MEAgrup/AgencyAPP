@@ -1989,7 +1989,7 @@ describe('invarian alias (sesi 43) — setiap modul ber-alias WAJIB punya ekstra
     // SAH — modul yang kolom ber-aliasnya memang tidak pernah dibaca ekstraktor
     // mana pun (jadi tidak ada yang bisa gagal senyap). Menambah alias untuk
     // modul di luar daftar ini WAJIB disertai `pencariKolom` di ekstraktornya.
-    const DILAYANI_PENCARI_KOLOM = new Set(['shopee_ads_live', 'tt_live', 'tt_product_analytics', 'shopee_kesehatan']);
+    const DILAYANI_PENCARI_KOLOM = new Set(['shopee_ads_live', 'tt_live', 'tt_product_analytics', 'shopee_kesehatan', 'tt_ads_manager_videoviews']);
     const TANPA_KONSUMEN_EKSTRAKTOR = new Set([
       'tt_shop_analytics', // alias 'GMV LIVE penjual'/'GMV tidak langsung dari LIVE penjual' — ekstrakBarisShopDailyTiktok tidak membaca kolom itu
       'shopee_parent_sku', // alias 'Total Penjualan'/'Tingkat Konversi Pesanan'/'repeat order' — ekstrakBarisSkuMasterShopeeParentSku hanya membaca kolom identitas

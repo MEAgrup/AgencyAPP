@@ -1002,4 +1002,19 @@ export const PDT_KOLOM_ALIAS: readonly PdtKolomAliasDef[] = [
   // klik tayang tautan)`. Karena itu kanoniknya TIDAK dikoreksi — menggantinya
   // hanya memindahkan kegagalan dari tiga klien ke dua klien lain.
   { modulKode: 'meta_ads', kolomKanonik: 'CTR Unik (rasio klik tayang tautan)', alias: 'CTR (rasio klik tayang tautan)' },
+
+  // `tt_ads_manager_videoviews` — F-03 lanjutan (2026-09-23) menambahkan
+  // `anyOf` varian Bahasa Indonesia (sample Lano Batik: 'Nama Iklan'/
+  // 'Belanja'/'Impresi') ke TANDA TANGAN, tapi `kolomDipanen` (whitelist
+  // WAJIB, `ekstrakBarisTtamVideoViews` sudah pakai `idxAlias` untuk
+  // membacanya) tetap menulis ejaan EN literal — tanpa alias di sini,
+  // `validasiKolomWajib` GAGAL untuk berkas ID (nol 'Ad name'/'Spend'/
+  // 'Impressions' literal di berkas itu) walau DETEKSI dan EKSTRAKSI
+  // sama-sama sudah benar. Bug laten kelas sama `shopee_ads_cpc`/lima ejaan
+  // — ditutup di sini, PR yang SAMA yang menambahkannya seharusnya sudah
+  // menulis ini (celah ditemukan investigasi lanjutan F-04, bukan sample
+  // baru).
+  { modulKode: 'tt_ads_manager_videoviews', kolomKanonik: 'Ad name', alias: 'Nama Iklan' },
+  { modulKode: 'tt_ads_manager_videoviews', kolomKanonik: 'Spend', alias: 'Belanja' },
+  { modulKode: 'tt_ads_manager_videoviews', kolomKanonik: 'Impressions', alias: 'Impresi' },
 ];
