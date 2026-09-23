@@ -783,6 +783,116 @@ export async function listKatalog(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Outbound push — CDPS→MCN katalog PX (arah balik Flow C, kontrak
+// `docs/BRIDGE_PX_CATALOG_CONTRACT.md`, disalin byte-identik dari `mcnapp`).
+// Dipicu sesudah tiap `evaluateTick` (route `px/evaluate/tick`) — sama seperti
+// `evaluateTick` sendiri, AKTIVASI DITUNDA sampai cron dipasang: sampai saat
+// itu push ini pun hanya berjalan mengikuti tick manual.
+// ---------------------------------------------------------------------------
+
+const AUDIT_ENTITY_CATALOG_PUSH = 'px_catalog_push';
+const VALID_PRICE_SEGMENTS = new Set(['low', 'entry', 'sweet', 'high', 'premium']);
+
+/** sanitizePriceSegment — nilai di luar lima segmen MCN → null (lihat docblock `buildCatalogSnapshot`). Diekspor agar teruji langsung tanpa DB. */
+export function sanitizePriceSegment(value: string | null): string | null {
+  return value && VALID_PRICE_SEGMENTS.has(value) ? value : null;
+}
+
+export interface PxCatalogSnapshotRow {
+  /** bigint di DB — postgres.js mengembalikannya sebagai string (hindari presisi JS number), bukan salah ketik. */
+  clientPlatformId: string;
+  platformProductId: string;
+  namaProduk: string | null;
+  platform: string | null;
+  namaToko: string | null;
+  level2Category: string | null;
+  priceSegment: string | null;
+  sudahAfiliasi: boolean;
+  dihitungPada: Date | null;
+}
+
+export interface PxCatalogSnapshotPayload {
+  snapshotAt: string;
+  source: 'cdps';
+  policyNote: string;
+  rows: PxCatalogSnapshotRow[];
+}
+
+/**
+ * buildCatalogSnapshot — snapshot PENUH `px_catalog_item_v` (SKU verdict
+ * `lolos` pada policy aktif), bentuk baris PERSIS kontrak (9 kolom baris +
+ * `snapshot_at`/`source`/`policy_note` top-level). Kolom `client_id` view
+ * TIDAK ikut — bukan bagian kontrak (kontrak memakai `client_platform_id`,
+ * identitas storefront CDPS, bukan identitas klien). `price_segment` di luar
+ * lima segmen MCN (low/entry/sweet/high/premium) → null: satu baris kotor
+ * tidak boleh menggagalkan 422 seluruh payload di sisi MCN.
+ */
+export async function buildCatalogSnapshot(sql: Queryable): Promise<PxCatalogSnapshotPayload> {
+  const rows = await sql<
+    {
+      client_platform_id: string;
+      platform_product_id: string;
+      nama_produk: string | null;
+      platform: string | null;
+      nama_toko: string | null;
+      level2_category: string | null;
+      price_segment: string | null;
+      sudah_afiliasi: boolean;
+      dihitung_pada: Date | null;
+    }[]
+  >`select client_platform_id, platform_product_id, nama_produk, platform, nama_toko,
+           level2_category, price_segment, sudah_afiliasi, dihitung_pada
+      from px_catalog_item_v
+     order by dihitung_pada desc`;
+
+  const policy = await activeEligibilityPolicy(sql);
+  const policyNote = policy
+    ? `px_catalog_item_v; verdict lolos pada policy aktif v${policy.versi}`
+    : 'px_catalog_item_v; verdict lolos pada policy aktif';
+
+  return {
+    snapshotAt: new Date().toISOString(),
+    source: 'cdps',
+    policyNote,
+    rows: rows.map((r) => ({
+      clientPlatformId: r.client_platform_id,
+      platformProductId: r.platform_product_id,
+      namaProduk: r.nama_produk,
+      platform: r.platform,
+      namaToko: r.nama_toko,
+      level2Category: r.level2_category,
+      priceSegment: sanitizePriceSegment(r.price_segment),
+      sudahAfiliasi: r.sudah_afiliasi,
+      dihitungPada: r.dihitung_pada,
+    })),
+  };
+}
+
+export interface CatalogPushAuditInfo {
+  ok: boolean;
+  status: number;
+  batchKey: string;
+  rowsSent: number;
+  rowsReceived?: number;
+  duplicate?: boolean;
+  error?: string;
+}
+
+/** recordCatalogPush — satu baris audit_log per PERCOBAAN push nyata (house rule #3, immutable history). Hanya dipanggil saat push benar-benar dicoba (env terkonfigurasi) — bukan untuk keadaan "belum diaktifkan". */
+export async function recordCatalogPush(sql: Sql, info: CatalogPushAuditInfo): Promise<void> {
+  const ex = executors(sql);
+  await ex.audit.insertAudit({
+    entityType: AUDIT_ENTITY_CATALOG_PUSH,
+    entityId: info.batchKey,
+    actorEmployeeId: 'SYSTEM',
+    action: 'px_catalog_push',
+    beforeJson: null,
+    afterJson: info,
+    createdBy: 'SYSTEM',
+  });
+}
+
 export interface PxKreatorKosong {
   level2Category: string;
   priceSegment: string;

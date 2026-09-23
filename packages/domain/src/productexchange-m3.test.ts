@@ -18,7 +18,19 @@ import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import type { Actor } from './account';
 import { canKelolaPolicy, canKonfirmasiKategoriSku, canLihatKatalogPx, ContractError, createEligibilityPolicy, ForbiddenError, NotFoundError, ValidationError } from './productexchange';
-import { evaluateTick, intakeCoverage, konfirmasiKategori, listKandidat, listKatalog, listKategoriOptions, listKreatorKosong, recomputeDanEvaluasi } from './productexchange-m3';
+import {
+  buildCatalogSnapshot,
+  evaluateTick,
+  intakeCoverage,
+  konfirmasiKategori,
+  listKandidat,
+  listKatalog,
+  listKategoriOptions,
+  listKreatorKosong,
+  recomputeDanEvaluasi,
+  recordCatalogPush,
+  sanitizePriceSegment,
+} from './productexchange-m3';
 
 // ---------------------------------------------------------------------------
 // Aktor
@@ -30,6 +42,19 @@ const accountLead = (): Actor => ({ employeeId: 'ZPXM3-SPV', role: permission.ma
 const director = (): Actor => ({ employeeId: 'EMP-0008', role: permission.makeRole({ division: 'Account', level: 'staff', director: true }) });
 const od = (): Actor => ({ employeeId: 'ZPXM3-OD', role: permission.makeRole({ division: 'Account', level: 'staff', od: true }) });
 const ads = (): Actor => ({ employeeId: 'EMP-0004', role: permission.makeRole({ division: 'Ads', level: 'staff' }) });
+
+describe('sanitizePriceSegment — kontrak §Non-negotiables #4 (buildCatalogSnapshot)', () => {
+  it('lima segmen MCN diteruskan apa adanya', () => {
+    for (const seg of ['low', 'entry', 'sweet', 'high', 'premium']) {
+      expect(sanitizePriceSegment(seg)).toBe(seg);
+    }
+  });
+  it('nilai di luar lima segmen atau null → null (bukan menggagalkan snapshot)', () => {
+    expect(sanitizePriceSegment('mid')).toBeNull();
+    expect(sanitizePriceSegment('')).toBeNull();
+    expect(sanitizePriceSegment(null)).toBeNull();
+  });
+});
 
 describe('canKonfirmasiKategoriSku — lingkup sama canIsiShopId', () => {
   it('AM pemilik klien sendiri diterima', () => {
@@ -512,5 +537,58 @@ describeDb('listKandidat/listKatalog/listKreatorKosong — scoping izin', () => 
   it('listKatalog menampilkan banner basi saat snapshot terbaru > 10 hari', async () => {
     const hasil = await listKatalog(sql, director());
     expect(hasil.snapshot).toHaveProperty('basi');
+  });
+});
+
+describeDb('buildCatalogSnapshot/recordCatalogPush — arah CDPS→MCN, kontrak BRIDGE_PX_CATALOG_CONTRACT.md', () => {
+  it('baris SKU lolos muncul dengan bentuk PERSIS kontrak (9 kolom), client_id view TIDAK ikut', async () => {
+    const { clientId, platformId } = await seedClient();
+    const batch = await seedVerifiedBatch(clientId, platformId, '2026-07-01', '2026-07-31');
+    await seedFact(platformId, batch, 'ZPXM3-SNAP', '2026-07-01', 250_000_000, 10);
+    await seedHarga(platformId, 'ZPXM3-SNAP', 50_000);
+    // Kategori pra-dikonfirmasi + coverage 'covered' → L2/L3/L4 semua lolos
+    // (pola sama tes "retensi pdt_upload_batch diperpanjang..." di atas).
+    await sql`insert into px_sku_kategori (client_platform_id, platform_product_id, level2_category, dikonfirmasi_oleh)
+               values (${platformId}, 'ZPXM3-SNAP', 'Fashion', ${AM_OWNER})`;
+    await pushCoverage('zpxm3-batch-snap', 'Fashion', 'low', 'covered');
+    await recomputeDanEvaluasi(sql, platformId);
+
+    const snapshot = await buildCatalogSnapshot(sql);
+    expect(snapshot.source).toBe('cdps');
+    expect(snapshot.policyNote).toContain('px_catalog_item_v');
+    expect(new Date(snapshot.snapshotAt).getTime()).not.toBeNaN();
+
+    const row = snapshot.rows.find((r) => r.platformProductId === 'ZPXM3-SNAP');
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({
+      clientPlatformId: String(platformId), // bigint DB → string dari postgres.js
+      platformProductId: 'ZPXM3-SNAP',
+      namaProduk: 'Produk ZPXM3-SNAP',
+      platform: 'TikTok Shop',
+      level2Category: 'Fashion',
+      sudahAfiliasi: false,
+    });
+    expect(['low', 'entry', 'sweet', 'high', 'premium']).toContain(row?.priceSegment);
+    expect(row).not.toHaveProperty('clientId');
+    expect(Object.keys(row ?? {}).sort()).toEqual(
+      [
+        'clientPlatformId', 'platformProductId', 'namaProduk', 'platform', 'namaToko',
+        'level2Category', 'priceSegment', 'sudahAfiliasi', 'dihitungPada',
+      ].sort(),
+    );
+  });
+
+  it('recordCatalogPush menulis satu baris audit_log immutable per percobaan push', async () => {
+    const info = {
+      ok: true, status: 200, batchKey: `zpxm3-audit-${RUN}`, rowsSent: 3, rowsReceived: 3, duplicate: false,
+    };
+    await recordCatalogPush(sql, info);
+    const rows = await sql<{ after_json: unknown; action: string }[]>`
+      select action, after_json from audit_log where entity_type = 'px_catalog_push' and entity_id = ${info.batchKey}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].action).toBe('px_catalog_push');
+    expect(rows[0].after_json).toMatchObject({ batchKey: info.batchKey, rowsSent: 3, ok: true });
+    // Immutable — nol jalur UPDATE/DELETE untuk baris audit_log (house rule #3).
+    await expect(sql`update audit_log set action = 'x' where entity_type = 'px_catalog_push' and entity_id = ${info.batchKey}`).rejects.toThrow();
   });
 });
