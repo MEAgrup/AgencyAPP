@@ -165,7 +165,7 @@ punya tepat satu penulis. **Tercapai** — E-01 s/d E-05 selesai.
 
 | Tiket | Isi |
 |---|---|
-| **F-01** | Modul parser `tt_shop_analytics_tokopedia` (tanda tangan kolom `baseline/detect.ts` `shop_tp`), penulis fakta ke `pdt_fact_shop_daily` dengan penanda kanal, bagian laporan Tokopedia. `prod_tp` sengaja **tidak** ikut. |
+| **F-01** | Modul parser `tt_shop_analytics_tokopedia` (tanda tangan kolom `baseline/detect.ts` `shop_tp`), penulis fakta ke `pdt_fact_shop_daily` dengan penanda kanal, bagian laporan Tokopedia. `prod_tp` sengaja **tidak** ikut. Diblokir `M20-TOKOPEDIA-SAMPLE` — signature deteksi pasti benar, tapi struktur breakdown harian (marker `'Data harian'` ala `tt_shop_analytics`) belum terverifikasi terhadap ekspor Tokopedia asli; pemilik akan mengirim sample. |
 | **F-02** | ✅ SELESAI — Kolom `tujuan` (upper/lower funnel) di `pdt_fact_ads`, supaya guardrail "belanja Ads Manager tidak masuk ROI GMV Max" ditegakkan di query, bukan cuma di prosa. Migrasi `20261202010000`, ditegakkan di `recomputeAdsMetricEntriesPdt`; `docs/DECISIONS.md` M20-F02-PDT-FACT-ADS-TUJUAN. |
 | **F-03** | Empat modul parser TikTok Ads Manager, tanda tangan diambil apa adanya dari `report/detect.ts` `TTAM_TYPES` — **termasuk penyangkalan kolom funnel Shop pada `ttam_follows`**, tanpa itu ekspor Showcase salah tergolong. Diblokir `M20-TTAM-SAMPLE`. |
 | **F-04** | Bagian laporan `ads_manager` + pengisian `tahap.funnel` Awareness dan Add-to-Cart. |
@@ -203,7 +203,8 @@ laporan berjalan tenang.
 | `M20-URUTAN` | urutan gelombang | ✅ diketok 2026-09-22: A → B → C → D → E → F → G |
 | `M20-M14-BEKU` | apakah M14 dibekukan | ✅ diketok 2026-09-22: **dibekukan** (bugfix kritis saja) sampai G |
 | `M20-PORTAL-KOMPLAIN` | D-03 | ✅ diketok 2026-09-22: pakai pintu komplain M15 apa adanya |
-| `M20-TTAM-SAMPLE` | F-03/F-04/F-05 | ⏳ pemilik akan mengunggah 4 ekspor TikTok Ads Manager nyata; F-01/F-02 tidak diblokir |
+| `M20-TTAM-SAMPLE` | F-03/F-04/F-05 | ⏳ pemilik akan mengunggah 4 ekspor TikTok Ads Manager nyata |
+| `M20-TOKOPEDIA-SAMPLE` | F-01 | ⏳ pemilik akan mengunggah 1 ekspor Analitik Toko Tokopedia nyata (breakdown harian belum terverifikasi). F-02 SELESAI, tidak terpengaruh. |
 | ~~`M20-C01-LIVE`~~ | D-00 | ✅ **DITUTUP 2026-09-22 malam:** migrasi `20261130010000` diterapkan ke live `CDPS SG` (versi live `20260922151204`), diverifikasi 186 tabel / 36 mesin / fungsi `jwt_owns_pdt_kiriman_am` ada. D-00 selesai. |
 
 Gelombang D bisa dikodekan **dan di-merge** sekarang — satu-satunya blocker yang tersisa (`M20-TTAM-SAMPLE`) hanya menyentuh Gelombang F.
