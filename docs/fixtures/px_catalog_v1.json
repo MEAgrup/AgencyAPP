@@ -1,0 +1,40 @@
+{
+  "snapshot_at": "2026-09-23T02:14:00Z",
+  "source": "cdps",
+  "policy_note": "px_catalog_item_v; verdict lolos pada policy aktif",
+  "rows": [
+    {
+      "client_platform_id": "CLI-00042",
+      "platform_product_id": "1729384756102",
+      "nama_produk": "Serum Wajah 30ml",
+      "platform": "tiktok",
+      "nama_toko": "Toko Contoh Official",
+      "level2_category": "Kecantikan",
+      "price_segment": "high",
+      "sudah_afiliasi": false,
+      "dihitung_pada": "2026-09-22T18:00:00Z"
+    },
+    {
+      "client_platform_id": "CLI-00042",
+      "platform_product_id": "1729384756118",
+      "nama_produk": "Sabun Cuci Muka 100ml",
+      "platform": "tiktok",
+      "nama_toko": "Toko Contoh Official",
+      "level2_category": "Kecantikan",
+      "price_segment": "entry",
+      "sudah_afiliasi": true,
+      "dihitung_pada": "2026-09-22T18:00:00Z"
+    },
+    {
+      "client_platform_id": "CLI-00087",
+      "platform_product_id": "998877665544",
+      "nama_produk": "Sepatu Lari Pria",
+      "platform": "shopee",
+      "nama_toko": "Toko Olahraga Sejahtera",
+      "level2_category": "Sepatu Pria",
+      "price_segment": "sweet",
+      "sudah_afiliasi": false,
+      "dihitung_pada": "2026-09-21T09:30:00Z"
+    }
+  ]
+}
