@@ -12,6 +12,7 @@ import {
   ekstrakBarisShopeeLive,
   ekstrakBarisShopDailyShopee,
   ekstrakBarisShopDailyTiktok,
+  ekstrakBarisShopDailyTokopedia,
   ekstrakBarisSkuMasterShopeeParentSku,
   ekstrakBarisSkuMasterTtOrders,
   ekstrakBarisKesehatanShopee,
@@ -1369,6 +1370,88 @@ describe('ekstrakBarisShopDailyTiktok (sesi 34 — celah pdt_fact_shop_daily dit
       ['bukan-tanggal', '100', '1', '1', '1', '-', '1', '100', '10', '10', '0.1', '10', '10', '1', '1', '100'],
     ];
     expect(ekstrakBarisShopDailyTiktok(aoa)).toEqual([]);
+  });
+});
+
+const HEADER_SHOP_DAILY_TOKOPEDIA = [
+  'Tanggal', 'GMV', 'Pesanan', 'Pembeli', 'Produk terjual', 'Pengembalian dana', 'Pesanan SKU',
+  'Tayangan halaman', 'Pengunjung', 'Persentase konversi', 'Pendapatan bruto',
+];
+
+/** Bentuk sheet asli "Analitik Toko — Tokopedia" (sample "ultrasleep_tiktok_sellergmax.zip", 2026-09-23) — byte-identik struktur `shopAnalyticsAoa` TikTok, MINUS kolom Impresi/Klik produk/AOV yang Tokopedia tidak pernah punya. */
+function shopAnalyticsTokopediaAoa(dailyRows: readonly unknown[][]): unknown[][] {
+  return [
+    ['Tanggal analisis: 01/08/2026–31/08/2026', 'Tanggal perbandingan: 01/07/2026–31/07/2026'],
+    ['Ringkasan data'],
+    ['', 'GMV', 'Pesanan', 'Pembeli', 'Produk terjual', 'Pengembalian dana', 'Pesanan SKU', 'Tayangan halaman', 'Pengunjung', 'Persentase konversi', 'Pendapatan bruto'],
+    ['Total nilai', '39134878', '144', '144', '166', '123700', '144', '2585', '1689', '0.0852575488454707', '46568606'],
+    ['Perubahan persentase', '-20.76%', '-19.55%', '-19.10%', '-19.81%', '-93.22%', '-20.00%', '-25.85%', '-26.85%', '10.60%', '-22.26%'],
+    [],
+    [],
+    ['Data harian'],
+    HEADER_SHOP_DAILY_TOKOPEDIA,
+    ...dailyRows,
+  ];
+}
+
+describe('ekstrakBarisShopDailyTokopedia (F-01, M20 R8 — sample asli ultrasleep_tiktok_sellergmax.zip, 2026-09-23)', () => {
+  it('memetakan satu baris harian lengkap (angka sample asli UltraSleep, 01/08/2026)', () => {
+    const aoa = shopAnalyticsTokopediaAoa([
+      ['01/08/2026', '1755992', '4', '4', '5', '0', '4', '53', '39', '0.10256410256410256', '1986000'],
+    ]);
+    const [baris] = ekstrakBarisShopDailyTokopedia(aoa);
+    expect(baris.tanggal).toBe('2026-08-01');
+    expect(baris.gmv).toBe(1755992);
+    expect(baris.pesanan).toBe(4);
+    expect(baris.produkTerjual).toBe(5);
+    expect(baris.pengunjung).toBe(39);
+    expect(baris.cr).toBe(0.10256410256410256);
+    expect(baris.pembeli).toBe(4);
+    expect(baris.refund).toBe(0);
+  });
+
+  it('produkDiklik SELALU null — sample Tokopedia tidak pernah punya kolom "Klik produk" (beda nyata dari TikTok)', () => {
+    const aoa = shopAnalyticsTokopediaAoa([
+      ['01/08/2026', '1755992', '4', '4', '5', '0', '4', '53', '39', '0.10256410256410256', '1986000'],
+    ]);
+    expect(ekstrakBarisShopDailyTokopedia(aoa)[0].produkDiklik).toBeNull();
+  });
+
+  it('"Pengembalian dana" nol sungguhan (baris tanpa refund) ⇒ 0, bukan NaN — beda dari TikTok yang memakai "-"', () => {
+    const aoa = shopAnalyticsTokopediaAoa([
+      ['25/08/2026', '256800', '2', '2', '2', '123700', '2', '72', '51', '0.0392156862745098', '331100'],
+    ]);
+    expect(ekstrakBarisShopDailyTokopedia(aoa)[0].refund).toBe(123700);
+  });
+
+  it('tanpa marker "Data harian" ⇒ array kosong (mis. berkas hanya membawa Ringkasan)', () => {
+    const aoa = [
+      ['Tanggal analisis: 01/08/2026–31/08/2026'],
+      ['Ringkasan data'],
+      ['', 'GMV', 'Pesanan'],
+      ['Total nilai', '100', '1'],
+    ];
+    expect(ekstrakBarisShopDailyTokopedia(aoa)).toEqual([]);
+  });
+
+  it('kolom opsional hilang (mis. berkas tanpa "Pembeli") ⇒ null untuk field itu, gmv/pesanan tetap wajib', () => {
+    const aoa = [
+      ['Data harian'],
+      ['Tanggal', 'GMV', 'Pesanan'],
+      ['01/08/2026', '100', '1'],
+    ];
+    expect(ekstrakBarisShopDailyTokopedia(aoa)).toEqual([
+      { tanggal: '2026-08-01', gmv: 100, pesanan: 1, produkTerjual: null, pengunjung: null, produkDiklik: null, cr: null, pembeli: null, refund: null },
+    ]);
+  });
+
+  it('tanggal tak terbaca dilewati (baris ganjil, bukan error)', () => {
+    const aoa = [
+      ['Data harian'],
+      HEADER_SHOP_DAILY_TOKOPEDIA,
+      ['bukan-tanggal', '100', '1', '1', '1', '0', '1', '10', '10', '0.1', '100'],
+    ];
+    expect(ekstrakBarisShopDailyTokopedia(aoa)).toEqual([]);
   });
 });
 

@@ -28,9 +28,22 @@
  *   jadi klaim/biaya/usage-rate-nya tidak ada di fakta manapun.
  * - **Cancel rate & retur** (§9 mesin lama) — `pdt_fact_shop_daily` tidak
  *   punya kolom pembatalan maupun retur.
- * - **Tokopedia** — nol modul parser, nol baris fakta.
- * Ketiganya ditampilkan sebagai catatan eksplisit di halaman, bukan
+ * Keduanya ditampilkan sebagai catatan eksplisit di halaman, bukan
  * dihilangkan diam-diam atau diisi 0.
+ *
+ * **DIKOREKSI (F-01, M20 R8, 2026-09-23):** baris di atas dulu juga menyebut
+ * "Tokopedia — nol modul parser, nol baris fakta"; itu TIDAK LAGI benar.
+ * Sample asli ("ultrasleep_tiktok_sellergmax.zip") membuktikan berkas
+ * "Analitik Toko — Tokopedia" byte-identik struktur TikTok (`Data harian`
+ * marker) — modul `tt_shop_analytics_tokopedia` sekarang menulis
+ * `pdt_fact_shop_daily` (`kanal = 'tokopedia'`). Bagian "Toko Tokopedia" di
+ * bawah TikTok-only (berkas menumpang batch TikTok Shop klien yang sama —
+ * PDT-22 disupersede R8 UNTUK CAKUPAN INI SAJA, lihat docs/DECISIONS.md
+ * M20-TOKOPEDIA-SAMPLE): GMV/pesanan/pengunjung/CVR/produk terjual/pembeli
+ * plus perubahan vs periode sebelumnya (DIHITUNG dari fakta harian dua
+ * bulan, bukan dibaca dari baris "Perubahan persentase" file — beda dari
+ * preseden `mom` TikTok lama, lihat docblock `bangunLaporanTokopedia`
+ * `@cdps/core` `pdt/laporan.ts` untuk alasannya).
  *
  * **DIKOREKSI (KUADRAN-SHOPEE):** dua baris yang dulu ada di daftar ini sudah
  * tidak benar. **Kuadran produk Shopee** kini ADA (algoritma tiga-band mesin
@@ -248,6 +261,12 @@ function formatPercent(v: number | null): string {
 function formatCount(v: number | null): string {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';
   return v.toLocaleString('id-ID');
+}
+
+/** F-01 (M20 R8) — perubahan periode: tanda `+` eksplisit untuk kenaikan (`formatPercent` tidak menambahkannya). */
+function formatDeltaPercent(v: number | null): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—';
+  return `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
 }
 
 function formatBobot(v: number): string {
@@ -865,6 +884,60 @@ export default function LaporanPdtPage() {
               </div>
             )}
           </section>
+
+          {laporan.platform === 'tiktok' && (
+            <section className="card">
+              <h2>Toko Tokopedia</h2>
+              <p className="muted" style={{ fontSize: 12 }}>
+                Berkas Tokopedia (Analitik Toko) menumpang batch TikTok Shop toko ini — PDT-22 tetap berlaku untuk toko yang platform utamanya Tokopedia (lihat docs/DECISIONS.md M20-TOKOPEDIA-SAMPLE).
+              </p>
+              {!laporan.tokopedia ? (
+                <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                  Belum ada data — berkas Tokopedia belum pernah diunggah untuk toko ini, atau nol baris periode ini.
+                </p>
+              ) : (
+                <>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                    GMV: {formatIDR(laporan.tokopedia.gmv)} · {formatCount(laporan.tokopedia.pesanan)} pesanan · {formatCount(laporan.tokopedia.pengunjung)} pengunjung
+                  </p>
+                  <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 18, fontWeight: 'bold' }}>{formatPercent(laporan.tokopedia.cvr)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>CVR</p>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 18, fontWeight: 'bold' }}>{formatCount(laporan.tokopedia.produk_terjual)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Produk Terjual</p>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 18, fontWeight: 'bold' }}>{formatCount(laporan.tokopedia.pembeli)}</div>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Pembeli</p>
+                    </div>
+                  </div>
+                  <table style={{ marginTop: 16, width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left', paddingBottom: 4 }}>Metrik</th>
+                        <th style={{ textAlign: 'right', paddingBottom: 4 }}>Perubahan vs periode sebelumnya</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>GMV</td><td style={{ textAlign: 'right' }}>{formatDeltaPercent(laporan.tokopedia.perubahan.gmv)}</td></tr>
+                      <tr><td>Pesanan</td><td style={{ textAlign: 'right' }}>{formatDeltaPercent(laporan.tokopedia.perubahan.pesanan)}</td></tr>
+                      <tr><td>Pengunjung</td><td style={{ textAlign: 'right' }}>{formatDeltaPercent(laporan.tokopedia.perubahan.pengunjung)}</td></tr>
+                      <tr><td>Produk Terjual</td><td style={{ textAlign: 'right' }}>{formatDeltaPercent(laporan.tokopedia.perubahan.produk_terjual)}</td></tr>
+                      <tr><td>Pembeli</td><td style={{ textAlign: 'right' }}>{formatDeltaPercent(laporan.tokopedia.perubahan.pembeli)}</td></tr>
+                    </tbody>
+                  </table>
+                  {laporan.tokopedia.perubahan.gmv === null && (
+                    <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                      Nol baris Tokopedia periode sebelumnya — perubahan belum bisa dihitung (bukan toko baru, PDT tidak tahu bedanya).
+                    </p>
+                  )}
+                </>
+              )}
+            </section>
+          )}
 
           {laporan.iklan && (
             <section className="card">

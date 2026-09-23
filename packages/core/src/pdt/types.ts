@@ -36,6 +36,13 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  *       basis `'net'` — kolom yang sebelum ini 0/31 hari terisi untuk setiap
  *       toko TikTok. Berkas yang SAMA karena itu melahirkan baris fakta yang
  *       berbeda, syarat kenaikan di paragraf atas.
+ *   5 — F-01 / M20-R8 (`docs/DECISIONS.md` 2026-09-23): modul baru
+ *       `tt_shop_analytics_tokopedia` mulai menulis `pdt_fact_shop_daily`
+ *       (kanal `'tokopedia'`) dari berkas Analitik Toko Tokopedia yang sudah
+ *       lama diterima di dalam batch/ZIP TikTok Shop tapi sebelumnya tidak
+ *       pernah dipanen sama sekali (nol modul cocok). Batch lama yang sudah
+ *       membawa berkas itu baru mendapat baris faktanya kalau angka ini naik
+ *       — syarat kenaikan di paragraf atas.
  *
  * Kenaikan ini BUKAN kosmetik: `planPdtReparseTick` memilih batch lewat
  * `parser_versi < PDT_PARSER_VERSI`, jadi selama angkanya tetap 1 predikat
@@ -44,7 +51,7 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  * backlog begitu ia naik"). Menambah writer tanpa menaikkan angka ini =
  * fitur yang hanya berlaku untuk batch yang diunggah sesudahnya.
  */
-export const PDT_PARSER_VERSI = 4;
+export const PDT_PARSER_VERSI = 5;
 
 /**
  * Satu grup AND/NOT: seluruh `must` harus muncul (cocok substring, tanpa

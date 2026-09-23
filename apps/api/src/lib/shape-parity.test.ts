@@ -841,6 +841,9 @@ const WIRE_TO_FE: Record<string, string> = {
   PdtLaporanFunnelLangkahWire: 'pdt.ts::PdtLaporanFunnelLangkah',
   PdtLaporanTahapBlokWire: 'pdt.ts::PdtLaporanTahapBlok',
   PdtLaporanTahapMetrikWire: 'pdt.ts::PdtLaporanTahapMetrik',
+  // F-01 (M20 R8) — bagian "Tokopedia" (TikTok-only, berkas menumpang batch TikTok Shop).
+  PdtLaporanTokopediaWire: 'pdt.ts::PdtLaporanTokopedia',
+  PdtLaporanTokopediaPerubahanWire: 'pdt.ts::PdtLaporanTokopediaPerubahan',
   // PDT G2-01 lanjutan — bagian "insight" (2026-09-16, kedua platform, satu bentuk).
   PdtLaporanInsightWire: 'pdt.ts::PdtLaporanInsight',
   PdtLaporanRekomendasiWire: 'pdt.ts::PdtLaporanRekomendasi',

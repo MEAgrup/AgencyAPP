@@ -1,5 +1,5 @@
 /**
- * G1-02 — tes `detectPdtModule` terhadap seluruh 26 modul.
+ * G1-02 — tes `detectPdtModule` terhadap seluruh 27 modul.
  *
  * DoD backlog: "deteksi diuji terhadap 28 berkas sample (Fim Motor/Shopee,
  * Avitaskin/TikTok) dengan target nol salah-slot". Berkas mentahnya sendiri
@@ -37,7 +37,7 @@ function expectExactMatch(rows: Aoa, expected: string): void {
   expect(r.ambiguous, `fixture ${expected}`).toBe(false);
 }
 
-describe('detectPdtModule — TikTok (10 modul)', () => {
+describe('detectPdtModule — TikTok (11 modul)', () => {
   it('tt_orders', () => {
     expectExactMatch(
       [
@@ -114,6 +114,20 @@ describe('detectPdtModule — TikTok (10 modul)', () => {
     );
   });
 
+  // F-01 (M20 R8) — sample asli ("ultrasleep_tiktok_sellergmax.zip",
+  // `[bisnis]-Tokopedia && UltraSleep Indonesia.xlsx`, 2026-09-23), baris
+  // "Ringkasan data" (header PERSIS, minus sel pertama kosong — tidak relevan
+  // untuk deteksi berbasis pemindaian sel).
+  it('tt_shop_analytics_tokopedia', () => {
+    expectExactMatch(
+      [
+        ['GMV', 'Pesanan', 'Pembeli', 'Produk terjual', 'Pengembalian dana', 'Pesanan SKU', 'Tayangan halaman', 'Pengunjung', 'Persentase konversi', 'Pendapatan bruto'],
+        ['39134878', '144', '144', '166', '123700', '144', '2585', '1689', '8.53%', '46568606'],
+      ],
+      'tt_shop_analytics_tokopedia',
+    );
+  });
+
   it('tt_ads_product', () => {
     expectExactMatch(
       [
@@ -157,11 +171,11 @@ describe('detectPdtModule — TikTok (10 modul)', () => {
     );
   });
 
-  it('kesepuluh fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
+  it('kesebelas fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
     // Sudah tercakup satu-per-satu di atas (expectExactMatch memaksa matches
-    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 10 sekaligus,
+    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 11 sekaligus,
     // bukan cuma yang paling akhir diuji.
-    expect(TIKTOK).toHaveLength(10);
+    expect(TIKTOK).toHaveLength(11);
   });
 });
 
@@ -386,9 +400,9 @@ describe('detectPdtModule — meta_ads', () => {
 });
 
 describe('detectPdtModule — registry', () => {
-  it('26 modul total, kode unik', () => {
-    expect(PDT_MODULES).toHaveLength(26);
-    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(26);
+  it('27 modul total, kode unik', () => {
+    expect(PDT_MODULES).toHaveLength(27);
+    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(27);
   });
 
   it('sheet kosong tidak pernah cocok ke modul manapun', () => {

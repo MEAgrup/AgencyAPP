@@ -1552,8 +1552,8 @@ INSERT INTO pdt_upload_batch (client_id, client_platform_id, platform, periode_m
 SELECT 'ZPDT-RLS-0001', cp.id, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2026-11-30', 'EMP-0002'
   FROM client_platforms cp WHERE cp.client_id = 'ZPDT-RLS-0001';
 
-INSERT INTO pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan)
-SELECT b.client_platform_id, '2026-07-15', 'net', b.id, 1, 1000000, 3
+INSERT INTO pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan)
+SELECT b.client_platform_id, '2026-07-15', 'net', 'tiktok', b.id, 1, 1000000, 3
   FROM pdt_upload_batch b WHERE b.client_id = 'ZPDT-RLS-0001';
 
 INSERT INTO pdt_parser_modul (kode, platform, nama_tampilan, tanda_tangan_kolom, baris_header_hint)

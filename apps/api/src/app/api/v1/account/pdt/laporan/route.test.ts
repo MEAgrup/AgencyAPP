@@ -149,8 +149,8 @@ describeDb('GET /pdt/laporan — real DB', () => {
       values (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, 'ZZ-PDTLAP-AM')
       returning id`;
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
-      values (${cpId}, '2026-07-05'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1_000_000, 50_000, 40, 2_000)`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'net', 'tiktok', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1_000_000, 50_000, 40, 2_000)`;
     await sql`
       insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv, durasi_detik)
       values (${cpId}, 'live-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 400_000, 1_000, 7_200)`;
@@ -262,8 +262,8 @@ describeDb('GET /pdt/laporan — real DB', () => {
       values (${clientId}, ${cpId}, 'shopee', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, 'ZZ-PDTLAP-AM')
       returning id`;
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
-      values (${cpId}, '2026-07-05'::date, 'siap_dikirim', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 800_000, 50_000, 20, 1_000)`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'siap_dikirim', 'shopee', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 800_000, 50_000, 20, 1_000)`;
     await sql`
       insert into pdt_fact_content (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis, is_akun_toko, gmv, vv)
       values (${cpId}, 'live-1', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 'live', true, 400_000, 1_000)`;

@@ -226,6 +226,38 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     wajib: true,
   },
   {
+    kode: 'tt_shop_analytics_tokopedia',
+    // `platform: 'tiktok'` SENGAJA — bukan platform PDT baru (M20 R8,
+    // `docs/DECISIONS.md` M20-TOKOPEDIA-SAMPLE): PDT-22 ("Tokopedia tetap
+    // manual tanpa mesin parse") disupersede R8 UNTUK CAKUPAN modul ini saja,
+    // dan berkas ini diunggah sebagai BAGIAN dari batch TikTok Shop klien yang
+    // sama (kode `tt_` menandai itu), bukan `client_platform` Tokopedia
+    // tersendiri — `platformKeVokabPdt('Tokopedia')` TETAP `null` (PDT-22
+    // masih berlaku penuh untuk toko yang platform UTAMA-nya Tokopedia).
+    platform: 'tiktok',
+    namaTampilan: 'Tokopedia — Analitik Toko (via TikTok Shop)',
+    // Sample asli ("ultrasleep_tiktok_sellergmax.zip", `[bisnis]-Tokopedia &&
+    // UltraSleep Indonesia.xlsx`, 2026-09-23) TERBUKTI struktur BYTE-IDENTIK
+    // pola `tt_shop_analytics`: "Ringkasan data" (header baris 3) + "Data
+    // harian" (marker, lihat `ekstrakBarisShopDailyTokopedia`, `@cdps/core`
+    // `pdt/fakta.ts`). Tanda tangan LANGSUNG dari R8 (bersumber
+    // `baseline/detect.ts` `shop_tp`): GMV + Pendapatan bruto + Pengunjung,
+    // MENYANGKAL GMV dari LIVE kreator (menolak file TikTok `tt_shop_analytics`
+    // sendiri) dan ID Produk. `prod_tp` (Analitik Produk Tokopedia) SENGAJA
+    // tidak didaftarkan modul terpisah — R8 eksplisit "prod_tp tidak ikut".
+    tandaTanganKolom: { must: ['GMV', 'Pendapatan bruto', 'Pengunjung'], mustNot: ['GMV dari LIVE kreator', 'ID Produk'] },
+    barisHeaderHint: 1,
+    // Sample TIDAK punya 'Klik produk' (kolom itu murni TikTok) — daftar di
+    // bawah adalah TUJUH kolom yang genuinely diekstrak
+    // `ekstrakBarisShopDailyTokopedia`, bukan superset dokumentasi (pola sama
+    // `tt_ads_product`). 'Tanggal' TIDAK didaftar — header "Ringkasan data"
+    // yang dicocokkan `barisHeaderHint` tidak membawanya (sel pertama kosong,
+    // sama TikTok); kolom itu hanya ada di header "Data harian" yang dicari
+    // independen lewat marker (docblock `ekstrakBarisShopDailyTokopedia`).
+    kolomDipanen: ['GMV', 'Pesanan', 'Pembeli', 'Produk terjual', 'Pengembalian dana', 'Pengunjung', 'Persentase konversi'],
+    wajib: true,
+  },
+  {
     kode: 'tt_ads_product',
     platform: 'tiktok',
     namaTampilan: 'TikTok Ads Manager — Product Campaigns',

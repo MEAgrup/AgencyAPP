@@ -9565,6 +9565,25 @@ export interface PdtLaporanLayananWire {
   penalti: PdtLaporanPenaltiWire[];
 }
 
+/** F-01 (M20 R8). */
+export interface PdtLaporanTokopediaPerubahanWire {
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  produk_terjual: number | null;
+  pembeli: number | null;
+}
+
+export interface PdtLaporanTokopediaWire {
+  gmv: number;
+  pesanan: number;
+  pengunjung: number;
+  cvr: number | null;
+  produk_terjual: number | null;
+  pembeli: number | null;
+  perubahan: PdtLaporanTokopediaPerubahanWire;
+}
+
 export interface PdtLaporanWire {
   schema: string;
   platform: string;
@@ -9587,6 +9606,8 @@ export interface PdtLaporanWire {
   /** `null` untuk TikTok SELALU. */
   layanan: PdtLaporanLayananWire | null;
   tahap: PdtLaporanTahapWire | null;
+  /** F-01 (M20 R8) — `null` untuk Shopee SELALU (berkas Tokopedia menumpang batch TikTok Shop). */
+  tokopedia: PdtLaporanTokopediaWire | null;
   skor: PdtLaporanSkorWire;
   /** `null` untuk Shopee (nol benchmark, asimetri asli mesin produksi) — TIDAK PERNAH kunci yang hilang. */
   benchmark_versi: number | null;
@@ -9852,6 +9873,25 @@ function pdtLaporanInsightToWire(i: pdtCore.PdtLaporanInsight): PdtLaporanInsigh
   };
 }
 
+function pdtLaporanTokopediaToWire(t: pdtCore.PdtLaporanTokopedia | null): PdtLaporanTokopediaWire | null {
+  if (t == null) return null;
+  return {
+    gmv: t.gmv,
+    pesanan: t.pesanan,
+    pengunjung: t.pengunjung,
+    cvr: t.cvr,
+    produk_terjual: t.produkTerjual,
+    pembeli: t.pembeli,
+    perubahan: {
+      gmv: t.perubahan.gmv,
+      pesanan: t.perubahan.pesanan,
+      pengunjung: t.perubahan.pengunjung,
+      produk_terjual: t.perubahan.produkTerjual,
+      pembeli: t.perubahan.pembeli,
+    },
+  };
+}
+
 export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanWire {
   return {
     schema: l.schema,
@@ -9873,6 +9913,7 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     promo: null,
     layanan: null,
     tahap: pdtLaporanTahapToWire(l.tahap),
+    tokopedia: pdtLaporanTokopediaToWire(l.tokopedia),
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: l.benchmarkVersi,
     insight: pdtLaporanInsightToWire(l.insight),
@@ -9901,6 +9942,7 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     promo: pdtLaporanPromoToWire(l.promo),
     layanan: pdtLaporanLayananToWire(l.layanan),
     tahap: null,
+    tokopedia: null,
     skor: pdtLaporanSkorToWire(l.skor),
     benchmark_versi: null,
     insight: pdtLaporanInsightToWire(l.insight),
