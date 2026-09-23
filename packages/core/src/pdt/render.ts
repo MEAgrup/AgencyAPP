@@ -176,6 +176,35 @@ function seksiKanal(p: Laporan, mode: RenderMode): string {
 }
 
 // ---------------------------------------------------------------------------
+// Tokopedia (F-01, M20 R8) — TikTok-only, `p.tokopedia` `null` = berkas
+// belum pernah diunggah untuk toko ini (bukan toko tanpa Tokopedia sama
+// sekali — PDT tidak tahu bedanya, sama semua bagian opsional lain).
+// ---------------------------------------------------------------------------
+function seksiTokopedia(p: Laporan, mode: RenderMode): string {
+  if (p.platform !== 'tiktok' || !p.tokopedia) {
+    return mode === 'internal' ? kosong('Berkas Tokopedia (Analitik Toko) tidak diunggah / nol baris periode ini.') : '';
+  }
+  const t = p.tokopedia;
+  const cards = [
+    kpi('GMV', rpPendek(t.gmv), `${num(t.pesanan)} pesanan`),
+    kpi('Pengunjung', num(t.pengunjung)),
+    kartuOpsional(mode, t.cvr, 'CVR', t.cvr == null ? DASH : pct(t.cvr, 2)),
+    kartuOpsional(mode, t.produkTerjual, 'Produk Terjual', t.produkTerjual == null ? DASH : num(t.produkTerjual)),
+    kartuOpsional(mode, t.pembeli, 'Pembeli', t.pembeli == null ? DASH : num(t.pembeli)),
+  ].filter(Boolean);
+  const pr = t.perubahan;
+  const formatDelta = (v: number | null): string => (v == null ? DASH : `${v >= 0 ? '+' : ''}${pct(v, 1)}`);
+  const rows = [
+    ['GMV', pr.gmv], ['Pesanan', pr.pesanan], ['Pengunjung', pr.pengunjung],
+    ['Produk Terjual', pr.produkTerjual], ['Pembeli', pr.pembeli],
+  ].filter(([, v]) => mode === 'internal' || v != null)
+    .map(([label, v]) => `<tr class="border-b last:border-0">${td(esc(label as string))}${td(formatDelta(v as number | null), true)}</tr>`);
+  const tabelPerubahan = rows.length === 0 ? '' : `<div class="mt-4 bg-white rounded-xl border border-slate-100 p-5">
+    <h3 class="font-semibold text-sm text-slate-600 mb-3">Perubahan vs Periode Sebelumnya</h3>${tabel(['Metrik', 'Perubahan'], rows, ['l', 'r'])}</div>`;
+  return `${grid(cards)}${tabelPerubahan}`;
+}
+
+// ---------------------------------------------------------------------------
 // Iklan (+ rincian kampanye)
 // ---------------------------------------------------------------------------
 function seksiIklan(p: Laporan, mode: RenderMode): string {
@@ -435,6 +464,9 @@ function bangunSeksi(p: Laporan, mode: RenderMode): [string, string, IconName][]
   }
 
   add('Sumber GMV', seksiKanal(p, mode), 'fa-diagram-project');
+  if (p.platform === 'tiktok') {
+    add('Toko Tokopedia', seksiTokopedia(p, mode), 'fa-store');
+  }
   add('Iklan', seksiIklan(p, mode), 'fa-bullseye');
   add('Rincian Kampanye', seksiKampanye(p, mode), 'fa-bullhorn');
   add('LIVE Performance', seksiLive(p, mode), 'fa-video');

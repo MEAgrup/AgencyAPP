@@ -120,10 +120,10 @@ describeDb('bacaFaktaShopDaily (G3-01) — agregasi bulanan + sumberBatch', () =
     const batchId = await insertBatch(clientId, cpId, 'shopee');
 
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung, refund)
-      values (${cpId}, '2026-08-01', 'dibuat', ${batchId}, 1, '1000000.00', 10, 500, '50000.00'),
-             (${cpId}, '2026-08-02', 'dibuat', ${batchId}, 1, '2000000.00', 20, null, '0.00'),
-             (${cpId}, '2026-08-01', 'siap_dikirim', ${batchId}, 1, '900000.00', 9, 400, '0.00')`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pengunjung, refund)
+      values (${cpId}, '2026-08-01', 'dibuat', 'shopee', ${batchId}, 1, '1000000.00', 10, 500, '50000.00'),
+             (${cpId}, '2026-08-02', 'dibuat', 'shopee', ${batchId}, 1, '2000000.00', 20, null, '0.00'),
+             (${cpId}, '2026-08-01', 'siap_dikirim', 'shopee', ${batchId}, 1, '900000.00', 9, 400, '0.00')`;
 
     const hasil = await bacaFaktaShopDaily(sql, cpId, PERIODE, 'dibuat');
     expect(hasil).not.toBeNull();
@@ -146,8 +146,8 @@ describeDb('bacaFaktaShopDaily (G3-01) — agregasi bulanan + sumberBatch', () =
     const batchId = await insertBatch(clientId, cpId, 'tiktok');
 
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan)
-      values (${cpId}, '2026-08-05', 'net', ${batchId}, 1, '500000.00', 5)`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan)
+      values (${cpId}, '2026-08-05', 'net', 'tiktok', ${batchId}, 1, '500000.00', 5)`;
 
     const hasil = await bacaFaktaShopDaily(sql, cpId, PERIODE, 'net');
     expect(hasil).not.toBeNull();

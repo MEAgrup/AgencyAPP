@@ -83,6 +83,10 @@ const TIKTOK_FULL_BASE: PdtLaporanTiktokOptions = {
     { sumber: 'tt_ads_live', kampanyeId: 'CMP-2', biaya: 500_000, gmv: 0, tayangan: 50_000, klik: 2_000, pesanan: 0 },
   ],
   tahap: { tahapFokus: 'conversion', klik: 6_000, cpaInput: { biaya: 1_000_000, pesanan: 40 }, affPosting: 6, ttamFunnel: null },
+  tokopedia: {
+    kini: { gmv: 6_000_000, pesanan: 60, pengunjung: 3_000, produkTerjual: 70, pembeli: 58 },
+    sebelumnya: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_800, produkTerjual: 55, pembeli: 48 },
+  },
   skor: computeSkorTiktok(SKOR_INPUT_TIKTOK_PENUH, BENCH),
   benchmarkVersi: 7,
   benchTiktok: BENCH,
@@ -106,6 +110,7 @@ function buildTiktokSebagian(): PdtLaporanTiktok {
     kreator: null,
     sesiLive: null,
     kampanye: null,
+    tokopedia: null,
     skor: computeSkorTiktok(SKOR_INPUT_TIKTOK_KOSONG, BENCH),
   });
 }

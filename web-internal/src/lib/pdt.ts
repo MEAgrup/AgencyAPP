@@ -553,6 +553,25 @@ export interface PdtLaporanLayanan {
   penalti: PdtLaporanPenalti[];
 }
 
+/** F-01 (M20 R8). */
+export interface PdtLaporanTokopediaPerubahan {
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  produk_terjual: number | null;
+  pembeli: number | null;
+}
+
+export interface PdtLaporanTokopedia {
+  gmv: number;
+  pesanan: number;
+  pengunjung: number;
+  cvr: number | null;
+  produk_terjual: number | null;
+  pembeli: number | null;
+  perubahan: PdtLaporanTokopediaPerubahan;
+}
+
 export interface PdtLaporan {
   schema: string;
   platform: string;
@@ -575,6 +594,8 @@ export interface PdtLaporan {
   /** `null` untuk TikTok SELALU. */
   layanan: PdtLaporanLayanan | null;
   tahap: PdtLaporanTahap | null;
+  /** F-01 (M20 R8) — `null` untuk Shopee SELALU. */
+  tokopedia: PdtLaporanTokopedia | null;
   skor: PdtLaporanSkor;
   benchmark_versi: number | null;
   insight: PdtLaporanInsight;

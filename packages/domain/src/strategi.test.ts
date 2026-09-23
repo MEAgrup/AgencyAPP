@@ -4343,9 +4343,9 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
       returning id`;
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan)
-      values (${tiktokId}, '2026-06-15', 'net', ${batchJun[0].id}, 1, '40000000.00', 400),
-             (${tiktokId}, '2026-07-15', 'net', ${batchJul[0].id}, 1, '50000000.00', 500)`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan)
+      values (${tiktokId}, '2026-06-15', 'net', 'tiktok', ${batchJun[0].id}, 1, '40000000.00', 400),
+             (${tiktokId}, '2026-07-15', 'net', 'tiktok', ${batchJul[0].id}, 1, '50000000.00', 500)`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);
@@ -4396,9 +4396,9 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     const batchJul = await batch('2026-07-01', '2026-07-31');
 
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan)
-      values (${tiktokId}, '2026-06-15', 'net', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '40000000.00', 400),
-             (${tiktokId}, '2026-07-15', 'net', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '50000000.00', 500)`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan)
+      values (${tiktokId}, '2026-06-15', 'net', 'tiktok', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '40000000.00', 400),
+             (${tiktokId}, '2026-07-15', 'net', 'tiktok', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '50000000.00', 500)`;
 
     // Dua bulan dengan angka iklan yang SENGAJA berbeda jauh — kalau kode
     // menyalin agregat bulan acuan ke setiap baris, kedua baris akan kembar
@@ -4456,11 +4456,11 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     // Juli: satu hari, 169 pesanan, 50 batal ⇒ 29,59% (komposisi berkas produksi)
     await sql`
       insert into pdt_fact_shop_daily
-        (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan,
+        (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan,
          pesanan_dibatalkan, pesanan_penyebut_batal)
-      values (${tiktokId}, '2026-06-15', 'net', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '20000000.00', 900, 10, 50),
-             (${tiktokId}, '2026-06-16', 'net', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '20000000.00', 900,  5, 50),
-             (${tiktokId}, '2026-07-15', 'net', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '50000000.00', 143, 50, 169)`;
+      values (${tiktokId}, '2026-06-15', 'net', 'tiktok', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '20000000.00', 900, 10, 50),
+             (${tiktokId}, '2026-06-16', 'net', 'tiktok', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '20000000.00', 900,  5, 50),
+             (${tiktokId}, '2026-07-15', 'net', 'tiktok', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '50000000.00', 143, 50, 169)`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);
@@ -4502,10 +4502,10 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     // Kalau pembaca keliru memakai basis `siap_dikirim`, hasilnya 25/200 = 12,5%.
     await sql`
       insert into pdt_fact_shop_daily
-        (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan,
+        (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan,
          pesanan_dibatalkan, pesanan_penyebut_batal)
-      values (${shopeeId}, '2026-07-15', 'siap_dikirim', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '80000000.00', 200, 25, null),
-             (${shopeeId}, '2026-07-15', 'dibuat',       ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '90000000.00', 250, 25, null)`;
+      values (${shopeeId}, '2026-07-15', 'siap_dikirim', 'shopee', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '80000000.00', 200, 25, null),
+             (${shopeeId}, '2026-07-15', 'dibuat',       'shopee', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '90000000.00', 250, 25, null)`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);
@@ -4541,10 +4541,10 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
 
     await sql`
       insert into pdt_fact_shop_daily
-        (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan,
+        (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan,
          pesanan_dibatalkan, pesanan_penyebut_batal)
-      values (${tiktokId}, '2026-06-15', 'net', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '20000000.00', 900, null, null),
-             (${tiktokId}, '2026-07-15', 'net', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '50000000.00', 143,    0,  169)`;
+      values (${tiktokId}, '2026-06-15', 'net', 'tiktok', ${batchJun}, ${pdtCore.PDT_PARSER_VERSI}, '20000000.00', 900, null, null),
+             (${tiktokId}, '2026-07-15', 'net', 'tiktok', ${batchJul}, ${pdtCore.PDT_PARSER_VERSI}, '50000000.00', 143,    0,  169)`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);
@@ -4582,9 +4582,9 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     // July (the LATEST verified period — must win over June by default): 20jt
     // GMV, 1jt refund (5%), 2000 pengunjung, 200 pesanan (CR 10%).
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung, refund)
-      values (${tiktokId}, '2026-06-15', 'net', ${batchJun[0].id}, 1, '10000000.00', 80, 1000, '500000.00'),
-             (${tiktokId}, '2026-07-15', 'net', ${batchJul[0].id}, 1, '20000000.00', 200, 2000, '1000000.00')`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pengunjung, refund)
+      values (${tiktokId}, '2026-06-15', 'net', 'tiktok', ${batchJun[0].id}, 1, '10000000.00', 80, 1000, '500000.00'),
+             (${tiktokId}, '2026-07-15', 'net', 'tiktok', ${batchJul[0].id}, 1, '20000000.00', 200, 2000, '1000000.00')`;
 
     try {
       const s = await createStrategi(sql, am(), serviceId, HEADER);
@@ -4625,9 +4625,9 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
       values (${clientId}, ${tiktokId}, 'tiktok', '2026-07-01', '2026-07-31', 'verified', 1, '2099-01-01', 'ZZ-AM')
       returning id`;
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan, pengunjung, refund)
-      values (${tiktokId}, '2026-06-15', 'net', ${batchJun[0].id}, 1, '10000000.00', 80, 1000, '500000.00'),
-             (${tiktokId}, '2026-07-15', 'net', ${batchJul[0].id}, 1, '20000000.00', 200, 2000, '1000000.00')`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pengunjung, refund)
+      values (${tiktokId}, '2026-06-15', 'net', 'tiktok', ${batchJun[0].id}, 1, '10000000.00', 80, 1000, '500000.00'),
+             (${tiktokId}, '2026-07-15', 'net', 'tiktok', ${batchJul[0].id}, 1, '20000000.00', 200, 2000, '1000000.00')`;
 
     // Shopee: one verified batch with a Kesehatan Toko penalty — poinPenalti IS
     // Shopee-sourced (unlike TikTok, which has no penalty writer at all).
@@ -4957,8 +4957,8 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
 
     // Toko GMV Juli = 10jt (basis 'net') — penyebut gmvAffiliatePersen.
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, pesanan)
-      values (${tiktokId}, '2026-07-15', 'net', ${batchJul[0].id}, 1, '10000000.00', 100)`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan)
+      values (${tiktokId}, '2026-07-15', 'net', 'tiktok', ${batchJul[0].id}, 1, '10000000.00', 100)`;
 
     // 3 kreator: A=3jt/10 sampel, B=1jt/5 sampel, C=gmv belum terpanen (null) —
     // C tetap dihitung ke affiliateAktif30Hari (barisnya ADA) tapi dikeluarkan

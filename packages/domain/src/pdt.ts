@@ -900,6 +900,12 @@ export async function commitUploadBatch(
   // Sesi 34 (riset G2-01) — `tt_shop_analytics` → `pdt_fact_shop_daily` (lihat docblock
   // `ekstrakBarisShopDailyTiktok`, `@cdps/core` `pdt/fakta.ts`).
   const berkasShopStatsTiktok = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_shop_analytics');
+  // F-01 (M20 R8) — `tt_shop_analytics_tokopedia` → `pdt_fact_shop_daily`, `kanal = 'tokopedia'`
+  // (lihat docblock `ekstrakBarisShopDailyTokopedia`, `@cdps/core` `pdt/fakta.ts`). Berkas ini
+  // menumpang batch TikTok Shop yang sama (`identitas.status`/gerbang penerimaan TIDAK
+  // memeriksanya — nol reconciliation Tokopedia, R8 tidak memintanya), jadi filter di sini
+  // SAMA gerbang `identitas.status === 'tolak'` yang dipakai seluruh modul lain.
+  const berkasShopStatsTokopedia = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_shop_analytics_tokopedia');
   // Sesi 34 lanjutan (G1-09-2BII-SHOPDAILY-SHOPEE) — `shopee_shop_stats` → `pdt_fact_shop_daily`,
   // TIGA basis sekaligus lewat `b.sheets` (lihat docblock `ekstrakBarisShopDailyShopee`).
   const berkasShopStatsShopee = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'shopee_shop_stats');
@@ -1015,7 +1021,7 @@ export async function commitUploadBatch(
         id, clientPlatformId, periodeAwalBulan, akunKontenToko: row.akun_konten_toko, now,
         berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
         berkasTtAffiliateVideo, shopIdTersimpan: row.shop_id,
-        berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
+        berkasShopStatsTiktok, berkasShopStatsTokopedia, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
         berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
         berkasShopeeKesehatan, berkasShopeeChat, berkasShopeeDiskon, berkasShopeeFlashSale,
       });
@@ -1115,6 +1121,7 @@ interface TulisFaktaModulTerparseInput {
   berkasShopeeLive: readonly BerkasTerparse[];
   berkasTtLive: readonly BerkasTerparse[];
   berkasShopStatsTiktok: readonly BerkasTerparse[];
+  berkasShopStatsTokopedia: readonly BerkasTerparse[];
   berkasShopStatsShopee: readonly BerkasTerparse[];
   berkasParentSkuUntukMaster: readonly BerkasTerparse[];
   berkasTtOrders: readonly BerkasTerparse[];
@@ -1160,7 +1167,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     id, clientPlatformId, periodeAwalBulan, akunKontenToko, now,
     berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
     berkasTtAffiliateVideo, shopIdTersimpan,
-    berkasShopStatsTiktok, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
+    berkasShopStatsTiktok, berkasShopStatsTokopedia, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
     berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
     berkasShopeeKesehatan, berkasShopeeChat, berkasShopeeDiskon, berkasShopeeFlashSale,
   } = input;
@@ -1383,13 +1390,38 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
       for (const baris of pdt.ekstrakBarisShopDailyTiktok(b.aoa)) {
         await tx`
           insert into pdt_fact_shop_daily
-            (client_platform_id, tanggal, basis, batch_id, parser_versi,
+            (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi,
              gmv, pesanan, produk_terjual, pengunjung, produk_diklik, cr, pembeli, refund)
           values
-            (${clientPlatformId}, ${baris.tanggal}::date, 'net', ${id}, ${pdt.PDT_PARSER_VERSI},
+            (${clientPlatformId}, ${baris.tanggal}::date, 'net', 'tiktok', ${id}, ${pdt.PDT_PARSER_VERSI},
              ${baris.gmv}, ${baris.pesanan}, ${baris.produkTerjual}, ${baris.pengunjung}, ${baris.produkDiklik},
              ${baris.cr}, ${baris.pembeli}, ${baris.refund})
-          on conflict (client_platform_id, tanggal, basis) do update set
+          on conflict (client_platform_id, tanggal, basis, kanal) do update set
+            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+            gmv = excluded.gmv, pesanan = excluded.pesanan, produk_terjual = excluded.produk_terjual,
+            pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
+            pembeli = excluded.pembeli, refund = excluded.refund`;
+      }
+    }
+  }
+
+  // F-01 (M20 R8) — `tt_shop_analytics_tokopedia` → `pdt_fact_shop_daily`, `kanal = 'tokopedia'`,
+  // basis `'net'` (docblock `ekstrakBarisShopDailyTokopedia`, `@cdps/core` `pdt/fakta.ts`, dan
+  // migrasi `20261203010000` untuk kenapa `kanal` ada di kunci unik: berkas ini berbagi
+  // `client_platform_id`+`tanggal`+`basis` yang SAMA dengan `tt_shop_analytics` di atas —
+  // tanpa `kanal`, ON CONFLICT keduanya akan saling menimpa).
+  if (berkasShopStatsTokopedia.length > 0) {
+    for (const b of berkasShopStatsTokopedia) {
+      for (const baris of pdt.ekstrakBarisShopDailyTokopedia(b.aoa)) {
+        await tx`
+          insert into pdt_fact_shop_daily
+            (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi,
+             gmv, pesanan, produk_terjual, pengunjung, produk_diklik, cr, pembeli, refund)
+          values
+            (${clientPlatformId}, ${baris.tanggal}::date, 'net', 'tokopedia', ${id}, ${pdt.PDT_PARSER_VERSI},
+             ${baris.gmv}, ${baris.pesanan}, ${baris.produkTerjual}, ${baris.pengunjung}, ${baris.produkDiklik},
+             ${baris.cr}, ${baris.pembeli}, ${baris.refund})
+          on conflict (client_platform_id, tanggal, basis, kanal) do update set
             batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
             gmv = excluded.gmv, pesanan = excluded.pesanan, produk_terjual = excluded.produk_terjual,
             pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
@@ -1419,13 +1451,13 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         for (const baris of pdt.ekstrakBarisShopDailyShopee(aoaBasis)) {
           await tx`
             insert into pdt_fact_shop_daily
-              (client_platform_id, tanggal, basis, batch_id, parser_versi,
+              (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi,
                gmv, pesanan, pengunjung, produk_diklik, cr, pembeli, pembeli_baru, refund, pesanan_dibatalkan)
             values
-              (${clientPlatformId}, ${baris.tanggal}::date, ${basis}, ${id}, ${pdt.PDT_PARSER_VERSI},
+              (${clientPlatformId}, ${baris.tanggal}::date, ${basis}, 'shopee', ${id}, ${pdt.PDT_PARSER_VERSI},
                ${baris.gmv}, ${baris.pesanan}, ${baris.pengunjung}, ${baris.produkDiklik},
                ${baris.cr}, ${baris.pembeli}, ${baris.pembeliBaru}, ${baris.refund}, ${baris.pesananDibatalkan})
-            on conflict (client_platform_id, tanggal, basis) do update set
+            on conflict (client_platform_id, tanggal, basis, kanal) do update set
               batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
               gmv = excluded.gmv, pesanan = excluded.pesanan,
               pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
@@ -1664,6 +1696,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
            where client_platform_id = ${clientPlatformId}
              and tanggal = ${baris.tanggal}::date
              and basis = 'net'
+             and kanal = 'tiktok'
              and batch_id = ${id}`;
       }
     }
@@ -2628,6 +2661,7 @@ export async function reparsePdtBatch(
         berkasShopeeLive: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_live'),
         berkasTtLive: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_live'),
         berkasShopStatsTiktok: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_shop_analytics'),
+        berkasShopStatsTokopedia: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_shop_analytics_tokopedia'),
         berkasShopStatsShopee: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_shop_stats'),
         berkasParentSkuUntukMaster: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_parent_sku'),
         berkasTtOrders: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_orders'),
@@ -2882,6 +2916,7 @@ export async function rakitInputSkorTiktok(
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = 'net'
+       and kanal = 'tiktok'
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
   const gmvTotalToko = Number(shopRow.gmv);
@@ -3409,6 +3444,7 @@ async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, periodeAwalB
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = 'net'
+       and kanal = 'tiktok'
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
   if (row.n === 0) return null;
@@ -3481,6 +3517,7 @@ async function bacaKanalTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = 'net'
+       and kanal = 'tiktok'
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
   if (shopRow.n === 0) return null;
@@ -3749,6 +3786,7 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
         from pdt_fact_shop_daily
        where client_platform_id = ${clientPlatformId}
          and basis = 'net'
+         and kanal = 'tiktok'
          and tanggal >= ${periodeAwalBulan}::date
          and tanggal < (${periodeAwalBulan}::date + interval '1 month')`,
     // `tayangan`/`klik` ikut dibaca di query yang SAMA (bukan query kelima):
@@ -3783,6 +3821,46 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
       klik: adsRow.klik_n === 0 ? null : Number(adsRow.klik),
     },
   };
+}
+
+/**
+ * Bagian "Tokopedia" (F-01, M20 R8) — Σ `pdt_fact_shop_daily` (`kanal =
+ * 'tokopedia'`, basis `'net'`) untuk periode ini DAN periode sebelumnya
+ * (bulan kalender −1, `make_interval(months => -1)`), dua query paralel.
+ * `null` (whole result) = nol baris periode INI (berkas belum pernah
+ * diunggah toko ini) — `sebelumnya` boleh `null` independen (lihat docblock
+ * `pdt.PdtLaporanTokopediaInput`, `@cdps/core`).
+ */
+async function bacaAgregatTokopedia(
+  sql: Sql, clientPlatformId: number, periodeAwalBulan: string, offsetBulan: number,
+): Promise<pdt.PdtLaporanTokopediaAgregat | null> {
+  const [row] = await sql<{ n: number; gmv: string; pesanan: string; pengunjung: string; terjual_n: number; terjual: string; pembeli_n: number; pembeli: string }[]>`
+    select count(*)::int as n,
+           coalesce(sum(gmv), 0) as gmv,
+           coalesce(sum(pesanan), 0) as pesanan,
+           coalesce(sum(pengunjung), 0) as pengunjung,
+           count(produk_terjual)::int as terjual_n, coalesce(sum(produk_terjual), 0) as terjual,
+           count(pembeli)::int as pembeli_n, coalesce(sum(pembeli), 0) as pembeli
+      from pdt_fact_shop_daily
+     where client_platform_id = ${clientPlatformId}
+       and basis = 'net'
+       and kanal = 'tokopedia'
+       and tanggal >= ${periodeAwalBulan}::date + make_interval(months => ${offsetBulan})
+       and tanggal < ${periodeAwalBulan}::date + make_interval(months => ${offsetBulan}) + interval '1 month'`;
+  if (row.n === 0) return null;
+  return {
+    gmv: Number(row.gmv), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung),
+    produkTerjual: row.terjual_n === 0 ? null : Number(row.terjual),
+    pembeli: row.pembeli_n === 0 ? null : Number(row.pembeli),
+  };
+}
+
+async function bacaTokopedia(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanTokopediaInput | null> {
+  const [kini, sebelumnya] = await Promise.all([
+    bacaAgregatTokopedia(sql, clientPlatformId, periodeAwalBulan, 0),
+    bacaAgregatTokopedia(sql, clientPlatformId, periodeAwalBulan, -1),
+  ]);
+  return kini == null ? null : { kini, sebelumnya };
 }
 
 /**
@@ -4085,7 +4163,7 @@ export async function rakitLaporanTiktok(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanTiktok> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, harian, kanal, iklan, live, video, afiliasi, kreator, sesiLive, kampanye, tahap, { hasil: skor, benchmarkVersi, bench }] = await Promise.all([
+  const [kpi, harian, kanal, iklan, live, video, afiliasi, kreator, sesiLive, kampanye, tahap, tokopedia, { hasil: skor, benchmarkVersi, bench }] = await Promise.all([
     bacaKpiTiktokNet(sql, clientPlatformId, periodeAwalBulan),
     bacaHarian(sql, clientPlatformId, periodeAwalBulan, 'net', true),
     bacaKanalTiktok(sql, clientPlatformId, periodeAwalBulan),
@@ -4097,6 +4175,7 @@ export async function rakitLaporanTiktok(
     bacaSesiLive(sql, clientPlatformId, periodeAwalBulan),
     bacaKampanye(sql, clientPlatformId, periodeAwalBulan),
     bacaTahapTiktok(sql, clientPlatformId, periodeAwalBulan),
+    bacaTokopedia(sql, clientPlatformId, periodeAwalBulan),
     hitungSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
   ]);
   // `produk` DIBACA SETELAH Promise.all di atas — hitungSkorTiktok (bagian dari
@@ -4105,7 +4184,7 @@ export async function rakitLaporanTiktok(
   const produk = await bacaProdukTiktok(sql, clientPlatformId, periodeAwalBulan);
   return pdt.bangunLaporanTiktok({
     clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, harian, kanal, iklan, live, video, produk, afiliasi,
-    kreator, sesiLive, kampanye, tahap, skor, benchmarkVersi,
+    kreator, sesiLive, kampanye, tahap, tokopedia, skor, benchmarkVersi,
     benchTiktok: bench,
   });
 }

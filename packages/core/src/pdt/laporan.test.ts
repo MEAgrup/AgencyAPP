@@ -146,6 +146,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
       sesiLive: null,
       kampanye: null,
       tahap: TAHAP_INPUT_KOSONG,
+      tokopedia: null,
       skor,
       benchmarkVersi: 1,
       benchTiktok: BENCH_KOSONG,
@@ -224,6 +225,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
           },
         ],
       },
+      tokopedia: null,
       skor,
       benchmarkVersi: 1,
       insight: {
@@ -265,7 +267,7 @@ describe('bangunLaporanTiktok (sesi 34 lanjutan)', () => {
     const skor = computeSkorTiktok(INPUT_KOSONG_TIKTOK, BENCH_KOSONG);
     const hasil = bangunLaporanTiktok({
       clientPlatformId: 1, periodeAwalBulan: '2026-07-01', generatedAt: '2026-08-01T00:00:00.000Z',
-      kpi: null, harian: null, kanal: null, iklan: null, live: null, video: null, produk: null, afiliasi: null, kreator: null, sesiLive: null, kampanye: null, tahap: TAHAP_INPUT_KOSONG, skor, benchmarkVersi: 1,
+      kpi: null, harian: null, kanal: null, iklan: null, live: null, video: null, produk: null, afiliasi: null, kreator: null, sesiLive: null, kampanye: null, tahap: TAHAP_INPUT_KOSONG, tokopedia: null, skor, benchmarkVersi: 1,
       benchTiktok: BENCH_KOSONG,
     });
     expect(hasil.kpi).toEqual({ gmv: null, pesanan: null, pengunjung: null, cvr: null, barangPerPengunjung: null, kedalaman: null });

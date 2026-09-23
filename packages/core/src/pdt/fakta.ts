@@ -1724,6 +1724,64 @@ export function ekstrakBarisShopDailyTiktok(aoa: readonly (readonly unknown[])[]
   return hasil;
 }
 
+/**
+ * Ekstrak baris harian `tt_shop_analytics_tokopedia` → `pdt_fact_shop_daily`
+ * (`kanal = 'tokopedia'`, basis `'net'` — Tokopedia satu-basis sama TikTok,
+ * Rule 15/16 tidak membedakan; M20 R8, `docs/DECISIONS.md`
+ * M20-TOKOPEDIA-SAMPLE).
+ *
+ * Sample asli ("ultrasleep_tiktok_sellergmax.zip", `[bisnis]-Tokopedia &&
+ * UltraSleep Indonesia.xlsx`, 2026-09-23) TERBUKTI byte-identik struktur
+ * `ekstrakBarisShopDailyTiktok`: preamble "Ringkasan data" (baris total
+ * periode, sudah dipakai gerbang `validasiKolomWajib` lewat `barisHeaderHint`)
+ * DAN "Data harian" (satu baris per tanggal, header BERULANG persis) di
+ * SATU sheet yang sama — marker `'Data harian'` dicari SENDIRI di `aoa`,
+ * independen dari `barisHeader` modul, pola PERSIS sama fungsi TikTok.
+ *
+ * Return type MENUMPANG `PdtBarisShopDailyTiktok` (bukan interface baru) —
+ * bentuknya byte-identik (delapan field yang sama), dan pemanggil
+ * (`@cdps/domain` `pdt.ts`) sudah punya satu writer generik untuk bentuk itu.
+ * SATU beda nyata dari TikTok: sample Tokopedia TIDAK PERNAH punya kolom
+ * 'Klik produk' (kolom itu murni TikTok, Impresi/Klik produk tak pernah
+ * muncul di ekspor Tokopedia) — `produkDiklik` karena itu SELALU `null` di
+ * sini (`idx('Klik produk') === -1` di setiap baris, bukan diasumsikan 0).
+ */
+export function ekstrakBarisShopDailyTokopedia(aoa: readonly (readonly unknown[])[]): PdtBarisShopDailyTiktok[] {
+  const idxMarker = aoa.findIndex((row) => norm(row?.[0]) === 'data harian');
+  if (idxMarker === -1) return [];
+  const header = aoa[idxMarker + 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iTanggal = idx('Tanggal');
+  const iGmv = idx('GMV');
+  const iPesanan = idx('Pesanan');
+  const iProdukTerjual = idx('Produk terjual');
+  const iPengunjung = idx('Pengunjung');
+  const iKlik = idx('Klik produk');
+  const iCr = idx('Persentase konversi');
+  const iPembeli = idx('Pembeli');
+  const iRefund = idx('Pengembalian dana');
+
+  const hasil: PdtBarisShopDailyTiktok[] = [];
+  for (const row of aoa.slice(idxMarker + 2)) {
+    const tanggalRaw = iTanggal === -1 ? '' : String(row?.[iTanggal] ?? '').trim();
+    if (tanggalRaw === '') continue;
+    const tanggal = parseTanggalId(tanggalRaw);
+    if (tanggal == null) continue;
+    hasil.push({
+      tanggal,
+      gmv: iGmv === -1 ? 0 : parsePdtAngka(row?.[iGmv]),
+      pesanan: iPesanan === -1 ? 0 : parsePdtAngka(row?.[iPesanan]),
+      produkTerjual: iProdukTerjual === -1 ? null : parsePdtAngka(row?.[iProdukTerjual]),
+      pengunjung: iPengunjung === -1 ? null : parsePdtAngka(row?.[iPengunjung]),
+      produkDiklik: iKlik === -1 ? null : parsePdtAngka(row?.[iKlik]),
+      cr: iCr === -1 ? null : parsePdtAngka(row?.[iCr]),
+      pembeli: iPembeli === -1 ? null : parsePdtAngka(row?.[iPembeli]),
+      refund: iRefund === -1 ? null : parsePdtAngka(row?.[iRefund]),
+    });
+  }
+  return hasil;
+}
+
 /** Satu baris `pdt_fact_shop_daily` mentah dari `shopee_shop_stats` (satu basis), SEBELUM `client_platform_id`/`batch_id`/`basis`/`parser_versi` (pemanggil yang melengkapi — `basis` bergantung SHEET mana yang dipanggil, fungsi ini generik untuk ketiganya). */
 export interface PdtBarisShopDailyShopee {
   tanggal: string;

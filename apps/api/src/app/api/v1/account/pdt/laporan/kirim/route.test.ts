@@ -150,8 +150,8 @@ describeDb('POST /pdt/laporan/kirim — real DB', () => {
       values (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, 'ZZ-PDTKIR-AM')
       returning id`;
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
-      values (${cpId}, '2026-07-05'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1_000_000, 50_000, 40, 2_000)`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'net', 'tiktok', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1_000_000, 50_000, 40, 2_000)`;
 
     const res = await POST(req(owner, { client_platform_id: cpId, periode: '2026-07-01' }));
     expect(res.status).toBe(200);
@@ -187,8 +187,8 @@ describeDb('POST /pdt/laporan/kirim — real DB', () => {
       values (${clientId}, ${cpId}, 'tiktok', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, 'ZZ-PDTKIR-AM')
       returning id`;
     await sql`
-      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
-      values (${cpId}, '2026-07-05'::date, 'net', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1_000_000, 50_000, 40, 2_000)`;
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, refund, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'net', 'tiktok', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 1_000_000, 50_000, 40, 2_000)`;
 
     const res = await POST(req(owner, {
       client_platform_id: cpId,

@@ -1910,6 +1910,91 @@ export function bangunLaporanKampanye(input: PdtLaporanKampanyeInput): PdtLapora
   };
 }
 
+// ---------------------------------------------------------------------------
+// Tokopedia (F-01, M20 R8) — TikTok-only: berkas Tokopedia menumpang batch
+// TikTok Shop klien yang sama (`tt_shop_analytics_tokopedia`, `kanal =
+// 'tokopedia'` di `pdt_fact_shop_daily` — docs/DECISIONS.md
+// M20-TOKOPEDIA-SAMPLE, PDT-22 disupersede R8 UNTUK CAKUPAN INI SAJA).
+// `cvr` dihitung `pesanan ÷ pengunjung` SETELAH dijumlah (konvensi sama
+// `bangunKpiRingkas`), BUKAN dibaca dari kolom 'Persentase konversi' file —
+// per-hari `cr` tetap disimpan `pdt_fact_shop_daily` (snapshot harian, sama
+// TikTok) tapi TIDAK aditif untuk periode.
+//
+// `perubahan` ("dan perubahan periode", R8) DIHITUNG dari Σ periode ini vs Σ
+// periode SEBELUMNYA (bulan kalender −1, `pdt_fact_shop_daily` kanal yang
+// sama) — BUKAN dibaca dari baris "Perubahan persentase" file (beda dari
+// preseden M14 `baseline/metrik.ts` `toko().chGmv` yang eksplisit "never
+// recomputed, straight from export"). PDT belum punya SATU pun bagian yang
+// membaca baris file itu (kolom `kolomDipanen` modul ini bahkan tidak
+// mendaftarkannya), dan menyimpan dua sumber kebenaran periode-lalu (file
+// vs fakta harian yang sudah ditulis) untuk satu angka melanggar Rule 4
+// tanpa alasan kuat — pendekatan M14 lahir dari keterbatasan tool lama
+// (nol akses ke bulan sebelumnya di luar apa yang file itu sendiri bawa),
+// bukan kontrak yang wajib diwarisi PDT yang MEMANG punya fakta bulan lalu.
+// ---------------------------------------------------------------------------
+
+/** Agregat `pdt_fact_shop_daily` (`kanal='tokopedia'`, basis `'net'`) untuk SATU bulan kalender — dipakai untuk periode kini maupun periode sebelumnya. */
+export interface PdtLaporanTokopediaAgregat {
+  gmv: number;
+  pesanan: number;
+  pengunjung: number;
+  /** `null` = nol baris ber-`produk_terjual` terisi periode ini (kolom opsional sumbernya). */
+  produkTerjual: number | null;
+  /** `null` = nol baris ber-`pembeli` terisi periode ini. */
+  pembeli: number | null;
+}
+
+/** `sebelumnya` `null` = nol baris periode SEBELUM ini (toko baru mulai terpantau bulan ini, bukan berarti nol aktivitas) — `perubahan` karena itu seluruhnya `null`, bukan dianggap 0%. */
+export interface PdtLaporanTokopediaInput {
+  kini: PdtLaporanTokopediaAgregat;
+  sebelumnya: PdtLaporanTokopediaAgregat | null;
+}
+
+export interface PdtLaporanTokopediaPerubahan {
+  gmv: number | null;
+  pesanan: number | null;
+  pengunjung: number | null;
+  produkTerjual: number | null;
+  pembeli: number | null;
+}
+
+export interface PdtLaporanTokopedia {
+  gmv: number;
+  pesanan: number;
+  pengunjung: number;
+  cvr: number | null;
+  produkTerjual: number | null;
+  pembeli: number | null;
+  perubahan: PdtLaporanTokopediaPerubahan;
+}
+
+/** `null` bila salah satu sisi `null` ATAU penyebutnya 0 — perubahan dari/ke nol tidak terdefinisi sebagai persentase (bukan −100%/+∞ yang menyesatkan). */
+function persenPerubahan(kini: number | null, sebelumnya: number | null): number | null {
+  if (kini == null || sebelumnya == null || sebelumnya === 0) return null;
+  return persen5((kini - sebelumnya) / sebelumnya);
+}
+
+/** Rakit "Tokopedia". `null` (whole object) bila `input` `null` (nol baris `kanal='tokopedia'` periode ini — berkas belum pernah diunggah untuk toko ini). */
+export function bangunLaporanTokopedia(input: PdtLaporanTokopediaInput | null): PdtLaporanTokopedia | null {
+  if (input == null) return null;
+  const { kini, sebelumnya } = input;
+  return {
+    gmv: kini.gmv,
+    pesanan: kini.pesanan,
+    pengunjung: kini.pengunjung,
+    cvr: kini.pengunjung === 0 ? null : persen5(kini.pesanan / kini.pengunjung),
+    produkTerjual: kini.produkTerjual,
+    pembeli: kini.pembeli,
+    perubahan: {
+      gmv: persenPerubahan(kini.gmv, sebelumnya?.gmv ?? null),
+      pesanan: persenPerubahan(kini.pesanan, sebelumnya?.pesanan ?? null),
+      pengunjung: persenPerubahan(kini.pengunjung, sebelumnya?.pengunjung ?? null),
+      produkTerjual: persenPerubahan(kini.produkTerjual, sebelumnya?.produkTerjual ?? null),
+      pembeli: persenPerubahan(kini.pembeli, sebelumnya?.pembeli ?? null),
+    },
+  };
+}
+
 export interface PdtLaporanTiktok {
   schema: 'cdps.pdt.laporan.tiktok.v1';
   platform: 'tiktok';
@@ -1936,6 +2021,8 @@ export interface PdtLaporanTiktok {
   /** SELALU `null` — `pdt_fact_layanan_chat`/`pdt_fact_kesehatan_penalti` nol penulis fakta TikTok. */
   layanan: PdtLaporanLayanan | null;
   tahap: PdtLaporanTahap | null;
+  /** F-01 (M20 R8) — `null` = nol baris Tokopedia periode ini (berkas belum pernah diunggah untuk toko ini). */
+  tokopedia: PdtLaporanTokopedia | null;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
   insight: PdtLaporanInsight;
@@ -2124,6 +2211,8 @@ export interface PdtLaporanTiktokOptions {
   sesiLive: PdtLaporanSesiLiveInput;
   kampanye: PdtLaporanKampanyeInput;
   tahap: PdtLaporanTahapInput;
+  /** F-01 (M20 R8) — `null` = nol baris `pdt_fact_shop_daily` kanal `'tokopedia'` periode ini. */
+  tokopedia: PdtLaporanTokopediaInput | null;
   skor: PdtSkorHasilTiktok;
   benchmarkVersi: number;
   /** Bench aktif yang SAMA dipakai `computeSkorTiktok` — dipakai `indikator` bagian "insight", nol query ulang. */
@@ -2180,6 +2269,7 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
     promo: null,
     layanan: null,
     tahap,
+    tokopedia: bangunLaporanTokopedia(opts.tokopedia),
     skor: opts.skor,
     benchmarkVersi: opts.benchmarkVersi,
     insight: bangunLaporanInsight({
