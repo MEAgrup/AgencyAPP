@@ -22,6 +22,9 @@ import {
   ekstrakBarisTtAdsLive,
   ekstrakBarisTtAdsProduct,
   ekstrakBarisTtAffiliateVideo,
+  ekstrakBarisTtamConsideration,
+  ekstrakBarisTtamFollows,
+  ekstrakBarisTtamShowcase,
   ekstrakBarisTtamVideoViews,
   ekstrakBarisTtLive,
   ekstrakBarisTtProductAnalytics,
@@ -290,6 +293,134 @@ describe('ekstrakBarisTtamVideoViews', () => {
     const headerMinimal = ['Ad name'];
     const aoa = [headerMinimal, ['Ad A']];
     expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([{ kampanyeId: 'Ad A', biaya: 0, tayangan: null }]);
+  });
+
+  // F-03 lanjutan (M20 R9, 2026-09-23) — kuirk baru dikonfirmasi 9/9 sample
+  // asli EMPAT tipe TTAM: baris "Total of N results" sintetis di ekor SETIAP
+  // ekspor (termasuk berkas Ultrasleep yang jadi dasar tes di atas — bug
+  // hidup di versi 6, dikoreksi di sini).
+  it('baris "Total of N results" dilewati (BUKAN kampanye palsu)', () => {
+    const aoa = [
+      HEADER_TTAM_VIDEOVIEWS,
+      ['Ad A', 'Active', '', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', 'x', 'y', '-', 'IDR'],
+      ['Total of 1 results', '-', '-', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', '-', '-', '-', 'IDR'],
+    ];
+    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([{ kampanyeId: 'Ad A', biaya: 2665, tayangan: 2184 }]);
+  });
+
+  it('baris "Total N hasil" (varian Bahasa Indonesia) juga dilewati', () => {
+    const aoa = [
+      HEADER_TTAM_VIDEOVIEWS,
+      ['Ad A', 'Active', '', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', 'x', 'y', '-', 'IDR'],
+      ['Total 1 hasil', '-', '-', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', '-', '-', '-', 'IDR'],
+    ];
+    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([{ kampanyeId: 'Ad A', biaya: 2665, tayangan: 2184 }]);
+  });
+
+  // F-03 lanjutan — `Ad name` TIDAK unik per baris di berkas nyata (redaksi
+  // TikTok: label = 'Ad name' + waktu pembuatan, iklan yang dibuat detik yang
+  // sama bertabrakan labelnya walau metriknya BEDA nyata, dikonfirmasi sample
+  // Cottonella/Gold Pigeon). Duplikat DIJUMLAHKAN, bukan salah satu dibuang —
+  // Rule 4 (tidak boleh mengarang/membuang data mentah) DAN kebutuhan keras
+  // `uq_pdt_fact_ads` (kampanye_id harus unik per baris yang ditulis).
+  it('duplikat Ad name DIJUMLAHKAN (biaya/tayangan), bukan dibuang — cegah pelanggaran uq_pdt_fact_ads', () => {
+    const aoa = [
+      HEADER_TTAM_VIDEOVIEWS,
+      ['Ad name2026-08-12 10:48:18', '', '', '3952', '', '', '', '', '', '', '900', '', '', '', 'IDR'],
+      ['Ad name2026-08-12 10:48:18', '', '', '5221', '', '', '', '', '', '', '1100', '', '', '', 'IDR'],
+      ['Ad name2026-08-12 10:48:18', '', '', '8223', '', '', '', '', '', '', '2000', '', '', '', 'IDR'],
+    ];
+    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([
+      { kampanyeId: 'Ad name2026-08-12 10:48:18', biaya: 3952 + 5221 + 8223, tayangan: 900 + 1100 + 2000 },
+    ]);
+  });
+
+  // Sample asli Lano Batik (2026-09-23) — ekspor BERBAHASA INDONESIA
+  // ('Nama Iklan'/'Belanja'/'Impresi'), dikonfirmasi terhadap berkas nyata.
+  it('varian Bahasa Indonesia — kampanyeId dari Nama Iklan, biaya dari Belanja, tayangan dari Impresi', () => {
+    const headerId = [
+      'Nama Iklan', 'Status utama', 'Status sekunder', 'Belanja', 'Impresi', 'Jangkauan',
+      'Tayangan video', 'CPM', 'Sumber sekunder', 'Sumber utama', 'Sumber atribusi', 'Mata Uang',
+    ];
+    const aoa = [headerId, ['Nama Iklan2026-08-05 09:00:00', 'Aktif', '', '30000', '6000', '5500', '4000', '5000', 'Akun TikTok', 'Konten milik sendiri', '-', 'IDR']];
+    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([
+      { kampanyeId: 'Nama Iklan2026-08-05 09:00:00', biaya: 30000, tayangan: 6000 },
+    ]);
+  });
+});
+
+// F-03 lanjutan (M20 R9, 2026-09-23) — header PERSIS sample asli pemilik
+// (Gold Pigeon, `TTAM Brand Considerations`/`TTAM Follows`/`TTAM Showcase`).
+const HEADER_TTAM_CONSIDERATION = [
+  'Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'CPM',
+  'New consideration size', 'Cost per consideration', 'New consideration rate',
+  '6-second focused views', 'Focused view 6-second view rate (impression)',
+  'Clicks (destination)', 'Paid likes', 'Paid shares', 'Paid comments', 'Paid follows',
+  'Secondary source', 'Primary source', 'Attribution source', 'Currency',
+];
+
+const HEADER_TTAM_FOLLOWS = [
+  'Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'Clicks (destination)',
+  'CPC (destination)', 'Paid follows', 'Results', 'Secondary source', 'Primary source',
+  'Attribution source', 'Currency',
+];
+
+const HEADER_TTAM_SHOWCASE = [
+  'Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'Clicks (destination)',
+  'CPC (destination)', 'Product page views (Shop)', 'Adds to cart (Shop)', 'Add to cart value (Shop)',
+  'Checkouts initiated (Shop)', 'Checkout initiation value (Shop)', 'Secondary source',
+  'Primary source', 'Attribution source', 'Currency',
+];
+
+describe('ekstrakBarisTtamConsideration/Follows/Showcase — implementasi bersama (skema kolom byte-identik dikonfirmasi sample asli)', () => {
+  it('tt_ads_manager_consideration: memetakan kampanyeId/biaya/tayangan/klik dari row asli (Gold Pigeon)', () => {
+    const aoa = [
+      HEADER_TTAM_CONSIDERATION,
+      ['Ad name2026-06-29 14:23:06', 'Paused', '', '79389', '16962', '4680', '396', '200', '0.0233',
+        '1401', '0.0826', '721', '114', '0', '0', '1', 'TikTok account', 'Your own content', '-', 'IDR'],
+    ];
+    expect(ekstrakBarisTtamConsideration(aoa, 1)).toEqual([
+      { kampanyeId: 'Ad name2026-06-29 14:23:06', biaya: 79389, tayangan: 16962, klik: 721 },
+    ]);
+  });
+
+  it('tt_ads_manager_follows: memetakan kampanyeId/biaya/tayangan/klik dari row asli (Gold Pigeon)', () => {
+    const aoa = [
+      HEADER_TTAM_FOLLOWS,
+      ['Ad name2026-08-01 10:00:00', 'Paused', '', '9360', '46', '0', '0', '3', '3', 'TikTok account', 'Your own content', '-', 'IDR'],
+    ];
+    expect(ekstrakBarisTtamFollows(aoa, 1)).toEqual([
+      { kampanyeId: 'Ad name2026-08-01 10:00:00', biaya: 9360, tayangan: 46, klik: 0 },
+    ]);
+  });
+
+  it('tt_ads_manager_showcase: memetakan kampanyeId/biaya/tayangan/klik dari row asli (Gold Pigeon)', () => {
+    const aoa = [
+      HEADER_TTAM_SHOWCASE,
+      ['Ad name2026-06-01 10:00:00', 'Paused', '', '491679', '121988', '9475', '52', '9579', '224',
+        '5907228', '1131', '30681365', 'TikTok account', 'Your own content', '-', 'IDR'],
+    ];
+    expect(ekstrakBarisTtamShowcase(aoa, 1)).toEqual([
+      { kampanyeId: 'Ad name2026-06-01 10:00:00', biaya: 491679, tayangan: 121988, klik: 9475 },
+    ]);
+  });
+
+  it('baris "Total of N results" dilewati untuk ketiganya', () => {
+    const totalRow = ['Total of 1 results', '-', '-', '100', '100', '100', '100', '100', '100', '100', '100', '100', '100', '100', '100', '100', '-', '-', '-', 'IDR'];
+    expect(ekstrakBarisTtamConsideration([HEADER_TTAM_CONSIDERATION, totalRow], 1)).toEqual([]);
+    expect(ekstrakBarisTtamFollows([HEADER_TTAM_FOLLOWS, totalRow.slice(0, HEADER_TTAM_FOLLOWS.length)], 1)).toEqual([]);
+    expect(ekstrakBarisTtamShowcase([HEADER_TTAM_SHOWCASE, totalRow.slice(0, HEADER_TTAM_SHOWCASE.length)], 1)).toEqual([]);
+  });
+
+  it('duplikat Ad name DIJUMLAHKAN (biaya/tayangan/klik) untuk ketiganya (sample Cottonella: duplikat metrik nyata berbeda)', () => {
+    const aoa = [
+      HEADER_TTAM_SHOWCASE,
+      ['Ad name2026-08-14 10:58:57', 'Paused', '', '491679', '121988', '9475', '52', '9579', '224', '5907228', '1131', '30681365', 'x', 'y', '-', 'IDR'],
+      ['Ad name2026-08-14 10:58:57', 'Paused', '', '188044', '14395', '833', '226', '701', '56', '1518000', '51', '1403000', 'x', 'y', '-', 'IDR'],
+    ];
+    expect(ekstrakBarisTtamShowcase(aoa, 1)).toEqual([
+      { kampanyeId: 'Ad name2026-08-14 10:58:57', biaya: 491679 + 188044, tayangan: 121988 + 14395, klik: 9475 + 833 },
+    ]);
   });
 });
 

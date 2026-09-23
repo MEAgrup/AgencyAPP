@@ -2458,6 +2458,124 @@ describeDb('commitUploadBatch (F-03/M20 R9) — baris fakta tt_ads_manager_video
     const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
     expect(hasil.iklan).toBeNull();
   });
+
+  // F-03 lanjutan (M20 R9, 2026-09-23) — regresi end-to-end untuk DUA kuirk
+  // TTAM ditemukan sesudah merge pertama (lihat docblock kuirk `fakta.ts`):
+  // baris "Total of N results" TIDAK boleh jadi kampanye palsu, dan duplikat
+  // Ad name TIDAK boleh melanggar `uq_pdt_fact_ads` (harus DIJUMLAHKAN
+  // sebelum insert, bukan ditulis sebagai baris terpisah).
+  it('baris "Total of N results" dilewati DAN duplikat Ad name dijumlahkan — commit tidak gagal, nol kampanye palsu', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttamVideoViewsBerkas('ttam-videoviews.xlsx', [
+        ['Ad name 1', '2665', '2184'],
+        ['Ad name 1', '1000', '500'],
+        ['Total of 2 results', '3665', '2684'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = (await loadFactAds(cpId)).filter((r) => r.sumber === 'tt_ads_manager_videoviews');
+    expect(rows).toHaveLength(1); // BUKAN 2 (uq_pdt_fact_ads) apalagi 3 (baris Total ikut tertulis)
+    expect(rows[0].kampanye_id).toBe('Ad name 1');
+    expect(Number(rows[0].biaya)).toBe(2665 + 1000);
+    expect(rows[0].tayangan).toBe(2184 + 500);
+  });
+});
+
+// F-03 lanjutan (M20 R9, 2026-09-23) — `tt_ads_manager_consideration`/
+// `_follows`/`_showcase` → `pdt_fact_ads`. Header PERSIS sample asli pemilik
+// (Gold Pigeon) — lihat docblock `ekstrakBarisTtamConsideration`/`_Follows`/
+// `_Showcase`, `@cdps/core` `pdt/fakta.ts`.
+const HEADER_TTAM_CONSIDERATION = [
+  'Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'CPM',
+  'New consideration size', 'Cost per consideration', 'New consideration rate',
+  '6-second focused views', 'Focused view 6-second view rate (impression)',
+  'Clicks (destination)', 'Paid likes', 'Paid shares', 'Paid comments', 'Paid follows',
+  'Secondary source', 'Primary source', 'Attribution source', 'Currency',
+];
+
+function ttamUpperFunnelBerkas(
+  modulKode: 'tt_ads_manager_consideration' | 'tt_ads_manager_follows' | 'tt_ads_manager_showcase',
+  header: readonly string[],
+  nama: string,
+  baris: readonly [string, string, string, string][],
+): PdtPreviewBerkasInput {
+  const idxSpend = header.indexOf('Spend');
+  const idxImpressions = header.indexOf('Impressions');
+  const idxClicks = header.indexOf('Clicks (destination)');
+  const aoa: unknown[][] = [
+    [...header],
+    ...baris.map(([adName, spend, impressions, clicks]) => {
+      const row: string[] = header.map(() => 'x');
+      row[0] = adName;
+      row[idxSpend] = spend;
+      row[idxImpressions] = impressions;
+      row[idxClicks] = clicks;
+      return row;
+    }),
+  ];
+  return { nama, sha256: `sha-${modulKode}`, bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: modulKode, ambiguous: false, matches: [modulKode] };
+}
+
+describeDb('commitUploadBatch (F-03 lanjutan/M20 R9) — tt_ads_manager_consideration/_follows/_showcase → pdt_fact_ads', () => {
+  it('tt_ads_manager_consideration: satu baris per Ad name, klik dari Clicks (destination), tujuan=upper', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttamUpperFunnelBerkas('tt_ads_manager_consideration', HEADER_TTAM_CONSIDERATION, 'ttam-consideration.xlsx', [['Ad name 1', '79389', '16962', '721']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = (await loadFactAds(cpId)).filter((r) => r.sumber === 'tt_ads_manager_consideration');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      kampanye_id: 'Ad name 1', sku_id: null, content_id: null, tayangan: 16962, klik: 721,
+      pesanan_sku: null, gmv: null, roas: null, tipe_kampanye_sumber: null, tujuan: 'upper',
+    });
+    expect(Number(rows[0].biaya)).toBe(79389);
+  });
+
+  it('tt_ads_manager_follows: baris "Total of N results" dilewati, duplikat Ad name dijumlahkan', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const headerFollows = ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'Clicks (destination)', 'CPC (destination)', 'Paid follows', 'Results', 'Secondary source', 'Primary source', 'Attribution source', 'Currency'];
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttamUpperFunnelBerkas('tt_ads_manager_follows', headerFollows, 'ttam-follows.xlsx', [
+        ['Ad name 1', '9360', '46', '0'],
+        ['Ad name 1', '22253', '113', '0'],
+        ['Total of 2 results', '31613', '159', '0'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = (await loadFactAds(cpId)).filter((r) => r.sumber === 'tt_ads_manager_follows');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kampanye_id).toBe('Ad name 1');
+    expect(Number(rows[0].biaya)).toBe(9360 + 22253);
+    expect(rows[0].tayangan).toBe(46 + 113);
+  });
+
+  it('tt_ads_manager_showcase: bacaIklanTiktok TIDAK membaca sumber ini (allow-list, bukan deny-list)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const headerShowcase = ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'Clicks (destination)', 'CPC (destination)', 'Product page views (Shop)', 'Adds to cart (Shop)', 'Add to cart value (Shop)', 'Checkouts initiated (Shop)', 'Checkout initiation value (Shop)', 'Secondary source', 'Primary source', 'Attribution source', 'Currency'];
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttamUpperFunnelBerkas('tt_ads_manager_showcase', headerShowcase, 'ttam-showcase.xlsx', [['Ad name 1', '491679', '121988', '9475']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = (await loadFactAds(cpId)).filter((r) => r.sumber === 'tt_ads_manager_showcase');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ tujuan: 'upper', gmv: null, roas: null });
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.iklan).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 /**
- * G1-02 — tes `detectPdtModule` terhadap seluruh 28 modul.
+ * G1-02 — tes `detectPdtModule` terhadap seluruh 31 modul.
  *
  * DoD backlog: "deteksi diuji terhadap 28 berkas sample (Fim Motor/Shopee,
  * Avitaskin/TikTok) dengan target nol salah-slot". Berkas mentahnya sendiri
@@ -37,7 +37,7 @@ function expectExactMatch(rows: Aoa, expected: string): void {
   expect(r.ambiguous, `fixture ${expected}`).toBe(false);
 }
 
-describe('detectPdtModule — TikTok (12 modul)', () => {
+describe('detectPdtModule — TikTok (15 modul)', () => {
   it('tt_orders', () => {
     expectExactMatch(
       [
@@ -148,12 +148,13 @@ describe('detectPdtModule — TikTok (12 modul)', () => {
     );
   });
 
-  // F-03 (M20 R9, videoviews-only) — sample asli pemilik
-  // (`Ultrasleep_Video_views_TTAM.xlsx`, 2026-09-23), header baris 1 PERSIS.
-  // Signature DIKOREKSI dari dugaan literal PRD ('Video views'+'CPM') — berkas
-  // nyata tidak punya kolom 'Video views' sama sekali, hanya '6-second
-  // focused views' (lihat docblock modul, `modules.ts`).
-  it('tt_ads_manager_videoviews', () => {
+  // F-03 (M20 R9) — sample asli pemilik (`Ultrasleep_Video_views_TTAM.xlsx`,
+  // 2026-09-23), header baris 1 PERSIS. Signature DIKOREKSI dua kali: dari
+  // dugaan literal PRD ('Video views'+'CPM') ke '6-second focused views'
+  // (versi 6), lalu ke `anyOf` tiga varian sekaligus (versi 7) begitu sample
+  // TAMBAHAN membuktikan '6-second focused views' sendiri hanya SATU dari
+  // tiga varian nyata — lihat docblock modul, `modules.ts`.
+  it('tt_ads_manager_videoviews (varian "6-second focused views" — Ultrasleep)', () => {
     expectExactMatch(
       [
         ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'CPM', 'Cost per result',
@@ -165,6 +166,108 @@ describe('detectPdtModule — TikTok (12 modul)', () => {
       ],
       'tt_ads_manager_videoviews',
     );
+  });
+
+  // Sample asli TAMBAHAN (Gold Pigeon, 2026-09-23) — varian MAYORITAS (2/3
+  // sample baru): kolom literal 'Video views', NOL '6-second focused views'.
+  it('tt_ads_manager_videoviews (varian "Video views" — Gold Pigeon, mayoritas)', () => {
+    expectExactMatch(
+      [
+        ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'Reach', 'CPM',
+          'Video views', 'Video views at 50%', 'Secondary source', 'Primary source', 'Attribution source', 'Currency'],
+        ['Ad name2026-05-02 10:00:00', 'Active', '', '50000', '10000', '9000', '5000', '8000', '4000',
+          'TikTok account', 'Your own content', '-', 'IDR'],
+      ],
+      'tt_ads_manager_videoviews',
+    );
+  });
+
+  // Sample asli TAMBAHAN (Lano Batik, 2026-09-23) — ekspor BERBAHASA
+  // INDONESIA sepenuhnya (`'Nama Iklan'`/`'Belanja'`/`'Impresi'`/`'Tayangan
+  // video'`), TAPI `'CPM'` tetap literal Inggris (dikonfirmasi terhadap
+  // berkas nyata, bukan ditebak).
+  it('tt_ads_manager_videoviews (varian Bahasa Indonesia — Lano Batik)', () => {
+    expectExactMatch(
+      [
+        ['Nama Iklan', 'Status utama', 'Status sekunder', 'Belanja', 'Impresi', 'Jangkauan',
+          'Tayangan video', 'CPM', 'Sumber sekunder', 'Sumber utama', 'Sumber atribusi', 'Mata Uang'],
+        ['Nama Iklan2026-08-05 09:00:00', 'Aktif', '', '30000', '6000', '5500', '4000', '5000',
+          'Akun TikTok', 'Konten milik sendiri', '-', 'IDR'],
+      ],
+      'tt_ads_manager_videoviews',
+    );
+  });
+
+  // F-03 lanjutan — sample asli pemilik (Gold Pigeon, `TTAM Brand
+  // Considerations`, 2026-09-23). `'New consideration size'` HANYA milik
+  // modul ini di antara seluruh registry — anchor tunggal.
+  it('tt_ads_manager_consideration', () => {
+    expectExactMatch(
+      [
+        ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'CPM',
+          'New consideration size', 'Cost per consideration', 'New consideration rate',
+          '6-second focused views', 'Focused view 6-second view rate (impression)',
+          'Clicks (destination)', 'Paid likes', 'Paid shares', 'Paid comments', 'Paid follows',
+          'Secondary source', 'Primary source', 'Attribution source', 'Currency'],
+        ['Ad name2026-06-29 14:23:06', 'Paused', '', '79389', '16962', '4680', '396', '200', '0.0233',
+          '1401', '0.0826', '721', '114', '0', '0', '1', 'TikTok account', 'Your own content', '-', 'IDR'],
+      ],
+      'tt_ads_manager_consideration',
+    );
+  });
+
+  // F-03 lanjutan — sample asli pemilik (Gold Pigeon, `TTAM Follows`,
+  // 2026-09-23). `mustNot: 'New consideration size'` menutup tabrakan dengan
+  // `tt_ads_manager_consideration` (yang JUGA punya `'Paid follows'`).
+  it('tt_ads_manager_follows', () => {
+    expectExactMatch(
+      [
+        ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'Clicks (destination)',
+          'CPC (destination)', 'Paid follows', 'Results', 'Secondary source', 'Primary source',
+          'Attribution source', 'Currency'],
+        ['Ad name2026-08-01 10:00:00', 'Paused', '', '9360', '46', '0', '0', '3', '3', 'TikTok account',
+          'Your own content', '-', 'IDR'],
+      ],
+      'tt_ads_manager_follows',
+    );
+  });
+
+  // F-03 lanjutan — sample asli pemilik (Gold Pigeon, `TTAM Showcase`,
+  // 2026-09-23). Kolom funnel `'(Shop)'` TIDAK dipunyai modul TTAM lain.
+  it('tt_ads_manager_showcase', () => {
+    expectExactMatch(
+      [
+        ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions', 'Clicks (destination)',
+          'CPC (destination)', 'Product page views (Shop)', 'Adds to cart (Shop)', 'Add to cart value (Shop)',
+          'Checkouts initiated (Shop)', 'Checkout initiation value (Shop)', 'Secondary source',
+          'Primary source', 'Attribution source', 'Currency'],
+        ['Ad name2026-06-01 10:00:00', 'Paused', '', '491679', '121988', '9475', '52', '9579', '224',
+          '5907228', '1131', '30681365', 'TikTok account', 'Your own content', '-', 'IDR'],
+      ],
+      'tt_ads_manager_showcase',
+    );
+  });
+
+  // Regresi eksplisit — berkas Brand Considerations JUGA punya
+  // 'Spend'+'CPM'+'6-second focused views' (identik anchor lama
+  // `tt_ads_manager_videoviews`), dan JUGA punya 'Paid follows' (anchor
+  // `tt_ads_manager_follows`). Tanpa `mustNot: ['New consideration size']` di
+  // kedua modul lain, berkas ini akan `ambiguous` (cocok tiga modul
+  // sekaligus) — `expectExactMatch` di atas SUDAH menolak itu untuk fixture
+  // consideration sendiri; tes ini menegaskan ALASANNYA eksplisit, supaya
+  // regresi gagal dengan pesan jelas.
+  it('berkas Brand Considerations TIDAK ambigu dengan videoviews/follows', () => {
+    const r = detectPdtModule(
+      [
+        ['Ad name', 'Spend', 'Impressions', 'CPM', 'New consideration size', '6-second focused views',
+          'Clicks (destination)', 'Paid follows'],
+        ['Ad name2026-06-29 14:23:06', '79389', '16962', '4680', '396', '1401', '721', '1'],
+      ],
+      TIKTOK,
+    );
+    expect(r.matches).toEqual(['tt_ads_manager_consideration']);
+    expect(r.matches).not.toContain('tt_ads_manager_videoviews');
+    expect(r.matches).not.toContain('tt_ads_manager_follows');
   });
 
   // M9-OA-4 — header PERSIS sample asli pemilik (ekspor sisi partner/TAP,
@@ -190,11 +293,11 @@ describe('detectPdtModule — TikTok (12 modul)', () => {
     );
   });
 
-  it('kedua belas fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
+  it('kelima belas fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
     // Sudah tercakup satu-per-satu di atas (expectExactMatch memaksa matches
-    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 12 sekaligus,
+    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 15 sekaligus,
     // bukan cuma yang paling akhir diuji.
-    expect(TIKTOK).toHaveLength(12);
+    expect(TIKTOK).toHaveLength(15);
   });
 });
 
@@ -419,9 +522,9 @@ describe('detectPdtModule — meta_ads', () => {
 });
 
 describe('detectPdtModule — registry', () => {
-  it('28 modul total, kode unik', () => {
-    expect(PDT_MODULES).toHaveLength(28);
-    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(28);
+  it('31 modul total, kode unik', () => {
+    expect(PDT_MODULES).toHaveLength(31);
+    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(31);
   });
 
   it('sheet kosong tidak pernah cocok ke modul manapun', () => {

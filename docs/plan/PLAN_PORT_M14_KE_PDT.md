@@ -167,7 +167,7 @@ punya tepat satu penulis. **Tercapai** — E-01 s/d E-05 selesai.
 |---|---|
 | **F-01** | ✅ SELESAI — Modul parser `tt_shop_analytics_tokopedia` (tanda tangan kolom `baseline/detect.ts` `shop_tp`), penulis fakta ke `pdt_fact_shop_daily` dengan penanda kanal (`kanal` varchar, migrasi `20261203010000`), bagian laporan "Toko Tokopedia" (`render.ts::seksiTokopedia`). `prod_tp` sengaja **tidak** ikut. Terverifikasi terhadap sample asli pemilik (Ultrasleep) — struktur byte-identical dengan `tt_shop_analytics`; `docs/DECISIONS.md` M20-R8-F-01-TOKOPEDIA. |
 | **F-02** | ✅ SELESAI — Kolom `tujuan` (upper/lower funnel) di `pdt_fact_ads`, supaya guardrail "belanja Ads Manager tidak masuk ROI GMV Max" ditegakkan di query, bukan cuma di prosa. Migrasi `20261202010000`, ditegakkan di `recomputeAdsMetricEntriesPdt`; `docs/DECISIONS.md` M20-F02-PDT-FACT-ADS-TUJUAN. |
-| **F-03** | 🟡 SEBAGIAN — `tt_ads_manager_videoviews` ✅ SELESAI (2026-09-23), signature DIKOREKSI dari dugaan literal PRD/`report/detect.ts` setelah sample asli membuktikannya salah ('6-second focused views', bukan 'Video views' — `docs/DECISIONS.md` M20-R9-F-03-TTAM-VIDEOVIEWS). Tiga modul sisanya (`tt_ads_manager_consideration`/`follows`/`showcase`, **termasuk penyangkalan kolom funnel Shop pada `ttam_follows`**, tanpa itu ekspor Showcase salah tergolong) tetap diblokir `M20-TTAM-SAMPLE` — sample asli masing-masing belum ada. |
+| **F-03** | ✅ SELESAI (2026-09-23) — KEEMPAT modul parser TTAM dibangun: `tt_ads_manager_videoviews` (signature DIKOREKSI KEDUA KALINYA jadi `anyOf` tiga varian EN/EN/ID sekaligus, setelah sample tambahan membuktikan '6-second focused views' hanya SATU dari tiga varian nyata), `tt_ads_manager_consideration` (anchor `'New consideration size'`), `tt_ads_manager_follows` (anchor `'Paid follows'` + `mustNot` terhadap consideration), `tt_ads_manager_showcase` (anchor `anyOf` kolom funnel Shop). Dua kuirk struktural baru ditemukan+ditutup di SEMUA empat modul sekaligus: baris "Total of N results"/"Total N hasil" sintetis (difilter) dan `Ad name` tidak unik per baris (digabung-jumlah, mencegah pelanggaran `uq_pdt_fact_ads`) — `docs/DECISIONS.md` M20-R9-F-03-EMPAT-TIPE. |
 | **F-04** | Bagian laporan `ads_manager` + pengisian `tahap.funnel` Awareness dan Add-to-Cart. |
 | **F-05** | Tes: pita "belum lengkap" pada bagian Tahap **hilang karena datanya ada**, bukan karena disembunyikan. |
 
@@ -196,18 +196,18 @@ laporan berjalan tenang.
 
 ---
 
-## 4. Yang memblokir, hari ini  *(diperbarui 2026-09-22 sore)*
+## 4. Yang memblokir, hari ini  *(diperbarui 2026-09-23 — `M20-TTAM-SAMPLE` ditutup)*
 
 | Kode | Memblokir | Status |
 |---|---|---|
 | `M20-URUTAN` | urutan gelombang | ✅ diketok 2026-09-22: A → B → C → D → E → F → G |
 | `M20-M14-BEKU` | apakah M14 dibekukan | ✅ diketok 2026-09-22: **dibekukan** (bugfix kritis saja) sampai G |
 | `M20-PORTAL-KOMPLAIN` | D-03 | ✅ diketok 2026-09-22: pakai pintu komplain M15 apa adanya |
-| `M20-TTAM-SAMPLE` | F-03 sisa (consideration/follows/showcase)/F-04/F-05 | ⏳ **investigasi 2026-09-23 menutup SEBAGIAN:** dari dua kandidat di dalam zip (`[ads]-Live`/`[ads]-Product`), KEDUANYA ternyata GMV Max (Seller Center) — bukan TTAM, sudah ditangani `tt_ads_live`/`tt_ads_product`. Satu-satunya sample TTAM asli adalah `Ultrasleep_Video_views_TTAM.xlsx`, sudah dipakai membangun `tt_ads_manager_videoviews` (F-03 SEBAGIAN, `docs/DECISIONS.md` M20-R9-F-03-TTAM-VIDEOVIEWS). **Masih menunggu**: sample asli `tt_ads_manager_consideration`/`follows`/`showcase` — belum ada satu pun. |
+| ~~`M20-TTAM-SAMPLE`~~ | F-03 (seluruhnya)/F-04/F-05 | ✅ **DITUTUP 2026-09-23:** pemilik mengunggah sample asli KEEMPAT tipe TTAM sekaligus (Brand Considerations/Follows/Showcase/Video views, multi-klien). F-03 SELESAI PENUH — `docs/DECISIONS.md` M20-R9-F-03-EMPAT-TIPE. F-04/F-05 sekarang TIDAK DIBLOKIR. |
 | ~~`M20-TOKOPEDIA-SAMPLE`~~ | F-01 | ✅ **DITUTUP 2026-09-23:** sample asli (Ultrasleep) diterima dan diverifikasi, F-01 SELESAI. `docs/DECISIONS.md` M20-R8-F-01-TOKOPEDIA. F-02 SELESAI sebelumnya, tidak terpengaruh. |
 | ~~`M20-C01-LIVE`~~ | D-00 | ✅ **DITUTUP 2026-09-22 malam:** migrasi `20261130010000` diterapkan ke live `CDPS SG` (versi live `20260922151204`), diverifikasi 186 tabel / 36 mesin / fungsi `jwt_owns_pdt_kiriman_am` ada. D-00 selesai. |
 
-Gelombang D sudah selesai dan Gelombang F kini punya F-01/F-02 SELESAI + F-03 SEBAGIAN (videoviews) — satu-satunya blocker yang tersisa (`M20-TTAM-SAMPLE`, kini hanya untuk consideration/follows/showcase) menyentuh sisa F-03/F-04/F-05.
+Gelombang D sudah selesai dan Gelombang F kini punya F-01/F-02/F-03 SELESAI PENUH — nol blocker tersisa di §4, F-04/F-05 siap dikerjakan.
 
 ---
 
@@ -218,7 +218,7 @@ Gelombang D sudah selesai dan Gelombang F kini punya F-01/F-02 SELESAI + F-03 SE
 | Permukaan klien hidup sebelum R2 ⇒ caveat terbit ke klien | Gelombang A adalah gelombang PERTAMA, dan B-05 menguji ketiadaan string internal di keluaran klien |
 | Dua penulis `clients.total_sales` ⇒ Health Score melompat tanpa sebab performa | E-04 mematikan penulis M14 di PR yang sama dengan E-01 |
 | Metrik `null` dihilangkan dari render klien ⇒ klien mengira bagian itu memang tidak ada | Poin manual AM (R3) adalah tempat menjelaskannya; ini keputusan sadar, bukan efek samping |
-| Tanda tangan TTAM ditebak dari kode M14 tanpa sample nyata ⇒ ekspor Showcase salah tergolong `follows` | F-03 diblokir `M20-TTAM-SAMPLE`; penyangkalan kolom funnel Shop ditulis eksplisit di PRD R9 |
+| Tanda tangan TTAM ditebak dari kode M14 tanpa sample nyata ⇒ ekspor Showcase salah tergolong `follows` | ✅ tertutup — F-03 SELESAI terhadap sample asli KEEMPAT tipe; penyangkalan kolom funnel Shop (`showcase`) dan `mustNot` silang (consideration↔follows/videoviews) diverifikasi terhadap berkas nyata, `docs/DECISIONS.md` M20-R9-F-03-EMPAT-TIPE |
 | Migrasi tabrakan prefix versi | `scripts/check-migration-versions.sh` sudah menjaganya; `supabase db push` tetap tidak bisa dipakai di repo ini |
 | Gelombang D lahir sebagai halaman/rute KEDUA di portal ⇒ klien melihat dua laporan selama D→G | Prinsip #6 + PRD R11; dua tes R11 di `route-parity.test.ts` mengunci himpunan rute dan halaman portal **persis** — PR yang menambah `laporan-pdt`/`pdt` di portal merah di CI |
 | D di-merge sebelum C-01 di live ⇒ halaman Laporan portal 500 (regresi dari "kosong") | D-00 prasyarat eksplisit; `M20-C01-LIVE` di §4 |
