@@ -915,9 +915,13 @@ export async function commitUploadBatch(
   // `AskUserQuestion`, docs/DECISIONS.md).
   const berkasTtAdsProduct = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_product');
   const berkasTtAdsLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_live');
-  // F-03 (M20 R9, videoviews-only) — `tt_ads_manager_videoviews` → `pdt_fact_ads`
-  // (lihat docblock `ekstrakBarisTtamVideoViews`, `@cdps/core` `pdt/fakta.ts`).
+  // F-03 (M20 R9) — empat modul TTAM → `pdt_fact_ads` (lihat docblock
+  // `ekstrakBarisTtamVideoViews`/`ekstrakBarisTtamConsideration`/`_Follows`/
+  // `_Showcase`, `@cdps/core` `pdt/fakta.ts`).
   const berkasTtamVideoViews = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_manager_videoviews');
+  const berkasTtamConsideration = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_manager_consideration');
+  const berkasTtamFollows = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_manager_follows');
+  const berkasTtamShowcase = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_manager_showcase');
   // G2-01-KUADRAN-SKU langkah 1 — `tt_product_analytics` → `pdt_fact_sku_period` (lihat
   // docblock `ekstrakBarisTtProductAnalytics`, `@cdps/core` `pdt/fakta.ts`) — sisi TikTok
   // untuk tabel yang sebelumnya hanya diisi Shopee (`shopee_ams_produk`, modul KEDELAPAN).
@@ -1025,7 +1029,8 @@ export async function commitUploadBatch(
         berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
         berkasTtAffiliateVideo, shopIdTersimpan: row.shop_id,
         berkasShopStatsTiktok, berkasShopStatsTokopedia, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
-        berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtamVideoViews, berkasTtProductAnalytics,
+        berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive,
+        berkasTtamVideoViews, berkasTtamConsideration, berkasTtamFollows, berkasTtamShowcase, berkasTtProductAnalytics,
         berkasShopeeKesehatan, berkasShopeeChat, berkasShopeeDiskon, berkasShopeeFlashSale,
       });
 
@@ -1134,6 +1139,9 @@ interface TulisFaktaModulTerparseInput {
   berkasTtAdsProduct: readonly BerkasTerparse[];
   berkasTtAdsLive: readonly BerkasTerparse[];
   berkasTtamVideoViews: readonly BerkasTerparse[];
+  berkasTtamConsideration: readonly BerkasTerparse[];
+  berkasTtamFollows: readonly BerkasTerparse[];
+  berkasTtamShowcase: readonly BerkasTerparse[];
   berkasTtProductAnalytics: readonly BerkasTerparse[];
   berkasShopeeKesehatan: readonly BerkasTerparse[];
   berkasShopeeChat: readonly BerkasTerparse[];
@@ -1172,7 +1180,8 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
     berkasTtAffiliateVideo, shopIdTersimpan,
     berkasShopStatsTiktok, berkasShopStatsTokopedia, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
-    berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtamVideoViews, berkasTtProductAnalytics,
+    berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive,
+    berkasTtamVideoViews, berkasTtamConsideration, berkasTtamFollows, berkasTtamShowcase, berkasTtProductAnalytics,
     berkasShopeeKesehatan, berkasShopeeChat, berkasShopeeDiskon, berkasShopeeFlashSale,
   } = input;
 
@@ -1878,27 +1887,31 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     }
   }
 
-  // F-03 (M20 R9, videoviews-only, 2026-09-23) — `tt_ads_manager_videoviews` →
-  // `pdt_fact_ads`, `tujuan = 'upper'` LITERAL (lihat docblock
-  // `ekstrakBarisTtamVideoViews`, `@cdps/core` `pdt/fakta.ts`, dan F-02
-  // guardrail `docs/DECISIONS.md` M20-F02-PDT-FACT-ADS-TUJUAN — baris ini
-  // otomatis dikeluarkan dari `recomputeAdsMetricEntriesPdt`/ROAS Attainment
-  // GMV Max tanpa kode tambahan di sini, gerbang itu sudah generik terhadap
-  // `tujuan`). `gmv`/`pesanan_sku`/`roas` SELALU null — berkas ini upper-funnel
-  // (video views), nol kolom atribusi penjualan. `sku_id`/`content_id` SELALU
-  // null (sama alasan `tt_ads_product`/`tt_ads_live` — delete-then-insert,
-  // bukan `ON CONFLICT`, karena keduanya bagian kunci unik `uq_pdt_fact_ads`).
-  // `tipe_kampanye_sumber` SELALU null — berkas ini nol kolom konfigurasi
-  // kampanye (sama pola `tt_ads_live`).
+  // F-03 (M20 R9) — EMPAT modul TTAM → `pdt_fact_ads`, `tujuan = 'upper'`
+  // LITERAL untuk keempatnya (lihat docblock `ekstrakBarisTtamVideoViews`/
+  // `ekstrakBarisTtamConsideration`/`_Follows`/`_Showcase`, `@cdps/core`
+  // `pdt/fakta.ts`, dan F-02 guardrail `docs/DECISIONS.md`
+  // M20-F02-PDT-FACT-ADS-TUJUAN — baris ini otomatis dikeluarkan dari
+  // `recomputeAdsMetricEntriesPdt`/ROAS Attainment GMV Max tanpa kode
+  // tambahan di sini, gerbang itu sudah generik terhadap `tujuan`).
+  // `gmv`/`pesanan_sku`/`roas` SELALU null — keempatnya upper-funnel, nol
+  // kolom atribusi penjualan. `sku_id`/`content_id` SELALU null (sama alasan
+  // `tt_ads_product`/`tt_ads_live` — delete-then-insert, bukan `ON
+  // CONFLICT`, karena keduanya bagian kunci unik `uq_pdt_fact_ads`).
+  // `tipe_kampanye_sumber` SELALU null — nol kolom konfigurasi kampanye
+  // (sama pola `tt_ads_live`). `videoviews` nol kolom klik (lihat
+  // `PdtBarisAdsTtamVideoViews`, `fakta.ts`) — `klik` literal `null` di
+  // writer-nya; tiga modul lain (`Clicks (destination)`, sama skema kolom)
+  // MENULIS `baris.klik`.
   //
-  // `bacaIklanTiktok` (bagian "iklan"/GMV Max) TIDAK membaca sumber ini —
-  // query itu `sumber in ('tt_ads_product', 'tt_ads_live')` eksplisit
-  // (allow-list, bukan deny-list), jadi baris videoviews terstruktur aman
-  // dari section itu tanpa guardrail tambahan (diverifikasi sebelum menulis
-  // blok ini). `bacaKampanye` ("Per Kampanye") SENGAJA tidak difilter sumber
-  // sama sekali (docblock fungsi itu) — kampanye videoviews akan tampil di
-  // sana dengan biaya+tayangan terisi, gmv/roas '—' (jujur: kampanye
-  // awareness memang tidak punya GMV terpaut), bukan bug.
+  // `bacaIklanTiktok` (bagian "iklan"/GMV Max) TIDAK membaca EMPAT sumber
+  // ini — query itu `sumber in ('tt_ads_product', 'tt_ads_live')` eksplisit
+  // (allow-list, bukan deny-list), jadi baris TTAM terstruktur aman dari
+  // section itu tanpa guardrail tambahan (diverifikasi sebelum menulis blok
+  // ini). `bacaKampanye` ("Per Kampanye") SENGAJA tidak difilter sumber sama
+  // sekali (docblock fungsi itu) — kampanye TTAM akan tampil di sana dengan
+  // biaya+tayangan(+klik) terisi, gmv/roas '—' (jujur: kampanye awareness
+  // memang tidak punya GMV terpaut), bukan bug.
   if (berkasTtamVideoViews.length > 0) {
     await tx`
       delete from pdt_fact_ads
@@ -1912,6 +1925,60 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
           values
             (${clientPlatformId}, 'tt_ads_manager_videoviews', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, null, null, null,
+             null, 'upper')`;
+      }
+    }
+  }
+
+  if (berkasTtamConsideration.length > 0) {
+    await tx`
+      delete from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_manager_consideration' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasTtamConsideration) {
+      for (const baris of pdt.ekstrakBarisTtamConsideration(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_ads
+            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
+          values
+            (${clientPlatformId}, 'tt_ads_manager_consideration', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, null, null, null,
+             null, 'upper')`;
+      }
+    }
+  }
+
+  if (berkasTtamFollows.length > 0) {
+    await tx`
+      delete from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_manager_follows' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasTtamFollows) {
+      for (const baris of pdt.ekstrakBarisTtamFollows(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_ads
+            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
+          values
+            (${clientPlatformId}, 'tt_ads_manager_follows', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, null, null, null,
+             null, 'upper')`;
+      }
+    }
+  }
+
+  if (berkasTtamShowcase.length > 0) {
+    await tx`
+      delete from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_manager_showcase' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasTtamShowcase) {
+      for (const baris of pdt.ekstrakBarisTtamShowcase(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_ads
+            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
+          values
+            (${clientPlatformId}, 'tt_ads_manager_showcase', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, null, null, null,
              null, 'upper')`;
       }
     }
@@ -2714,6 +2781,9 @@ export async function reparsePdtBatch(
         berkasTtAdsProduct: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_product'),
         berkasTtAdsLive: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_live'),
         berkasTtamVideoViews: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_manager_videoviews'),
+        berkasTtamConsideration: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_manager_consideration'),
+        berkasTtamFollows: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_manager_follows'),
+        berkasTtamShowcase: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_manager_showcase'),
         berkasTtProductAnalytics: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_product_analytics'),
         berkasShopeeKesehatan: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_kesehatan'),
         berkasShopeeChat: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_chat'),

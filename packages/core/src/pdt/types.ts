@@ -49,6 +49,22 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  *       sebelumnya tidak dikenali modul apa pun (nol modul cocok). Sama pola
  *       versi 5 — batch lama yang sudah membawa berkas ini butuh angka ini
  *       naik supaya `planPdtReparseTick` memprosesnya ulang.
+ *   7 — F-03 lanjutan / M20-R9, empat tipe (`docs/DECISIONS.md` 2026-09-23):
+ *       sample asli KEEMPAT tipe TTAM tiba sekaligus, membuktikan tanda
+ *       tangan `tt_ads_manager_videoviews` versi 6 SALAH-ASUMSI (hanya
+ *       menangkap satu dari tiga varian kolom/bahasa nyata) dan DUA kuirk
+ *       struktural baru — baris "Total of N results"/"Total N hasil"
+ *       sintetis (sebelumnya tertulis sebagai kampanye palsu) dan `Ad name`
+ *       tidak unik per baris (sebelumnya berisiko melanggar
+ *       `uq_pdt_fact_ads`, menggagalkan commit untuk berkas nyata
+ *       multi-baris-per-ad). Tanda tangan+ekstraksi `tt_ads_manager_videoviews`
+ *       DIKOREKSI (anyOf tiga varian + filter Total + gabung-jumlah duplikat
+ *       `Ad name`), dan TIGA modul baru lahir (`tt_ads_manager_consideration`/
+ *       `_follows`/`_showcase`), sama-sama pakai filter+gabung yang sama.
+ *       Batch lama yang sudah membawa berkas TTAM apa pun (termasuk yang
+ *       sudah "berhasil" ditulis versi 6, tapi dengan baris Total palsu)
+ *       butuh angka ini naik supaya `planPdtReparseTick` memproses ulang
+ *       dan mengganti baris fakta yang salah.
  *
  * Kenaikan ini BUKAN kosmetik: `planPdtReparseTick` memilih batch lewat
  * `parser_versi < PDT_PARSER_VERSI`, jadi selama angkanya tetap 1 predikat
@@ -57,7 +73,7 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  * backlog begitu ia naik"). Menambah writer tanpa menaikkan angka ini =
  * fitur yang hanya berlaku untuk batch yang diunggah sesudahnya.
  */
-export const PDT_PARSER_VERSI = 6;
+export const PDT_PARSER_VERSI = 7;
 
 /**
  * Satu grup AND/NOT: seluruh `must` harus muncul (cocok substring, tanpa

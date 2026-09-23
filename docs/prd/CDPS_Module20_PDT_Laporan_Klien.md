@@ -172,12 +172,20 @@ Empat modul parser baru, tanda tangan diambil apa adanya dari
 (wajib menyangkal kolom funnel Shop; ekspor Showcase juga membawa `Paid follows`,
 dan tanpa penyangkalan ia salah tergolong):
 
+**Tanda tangan DIVERIFIKASI PENUH 2026-09-23** terhadap sample asli KEEMPAT
+tipe (`docs/DECISIONS.md` M20-R9-F-03-EMPAT-TIPE) — tabel di bawah menulis
+BENTUK NYATA, bukan literal `TTAM_TYPES` M14 (yang terbukti salah untuk
+`videoviews`, lihat baris itu). Dua kuirk struktural baru terbukti di SEMUA
+empat modul: baris "Total of N results"/"Total N hasil" sintetis (difilter)
+dan `Ad name` tidak unik per baris (digabung-jumlah sebelum ditulis,
+mencegah pelanggaran unique key `pdt_fact_ads`).
+
 | Modul | Tanda tangan |
 |---|---|
-| `tt_ads_manager_consideration` | `New consideration size` |
-| `tt_ads_manager_follows` | `Paid follows` **dan bukan** kolom funnel Shop |
-| `tt_ads_manager_showcase` | kolom funnel Shop (ATC / Initiate Checkout) |
-| `tt_ads_manager_videoviews` | ~~`Video views` **dan** `CPM`~~ **DIKOREKSI 2026-09-23** (`docs/DECISIONS.md` M20-R9-F-03-TTAM-VIDEOVIEWS): sample asli membuktikan berkas nyata nol kolom literal `'Video views'` — dipakai `'6-second focused views'` **dan** `'CPM'` |
+| `tt_ads_manager_consideration` | `New consideration size` (anchor tunggal, nol modul lain memilikinya) |
+| `tt_ads_manager_follows` | `Paid follows` **dan bukan** `New consideration size` (Brand Considerations JUGA punya `Paid follows`) |
+| `tt_ads_manager_showcase` | kolom funnel Shop (`Adds to cart (Shop)` **atau** `Checkouts initiated (Shop)`) |
+| `tt_ads_manager_videoviews` | ~~`Video views` **dan** `CPM`~~ ~~`'6-second focused views'` **dan** `CPM`~~ **DIKOREKSI KEDUA KALINYA 2026-09-23**: `CPM` **dan bukan** `New consideration size` **dan** (`Spend`+`Video views` **atau** `Spend`+`'6-second focused views'` **atau** `Belanja`+`'Tayangan video'` — varian Bahasa Indonesia, `CPM` tetap literal Inggris) |
 
 Belanja Ads Manager **tidak** boleh masuk perhitungan ROI GMV Max — kampanye ini
 dioptimasi ke jangkauan/checkout, bukan pesanan; mencampurnya membuat kampanye
@@ -362,7 +370,7 @@ jadi biaya menyimpannya nol dan ia jadi bukti riwayat.
 |---|---|---|
 | ~~`M20-URUTAN`~~ | ✅ diketok 2026-09-22: A → B → C → D → E → F → G | Yohan |
 | ~~`M20-M14-BEKU`~~ | ✅ diketok 2026-09-22: M14 **dibekukan** (bugfix kritis saja) sampai G | Yohan |
-| `M20-TTAM-SAMPLE` | 🟡 SEBAGIAN 2026-09-23: 1 dari 4 ekspor (Video Views) diunggah dan diverifikasi — `tt_ads_manager_videoviews` SELESAI, signature dikoreksi dari dugaan literal di atas (bukan `'Video views'`, tapi `'6-second focused views'` — `docs/DECISIONS.md` M20-R9-F-03-TTAM-VIDEOVIEWS). Masih menunggu sample `consideration`/`follows`/`showcase`; F-03 sisanya/F-04/F-05 menunggu, F-01/F-02/F-03-videoviews tidak | Yohan / Head of Account |
+| ~~`M20-TTAM-SAMPLE`~~ | ✅ **DITUTUP 2026-09-23**: KEEMPAT ekspor diunggah dan diverifikasi — `tt_ads_manager_consideration`/`follows`/`showcase`/`videoviews` SELESAI, tanda tangan tabel §R9 di atas mencerminkan bentuk nyata (bukan lagi dugaan literal `TTAM_TYPES`). F-03 SELESAI PENUH — `docs/DECISIONS.md` M20-R9-F-03-EMPAT-TIPE. F-04/F-05 tidak lagi diblokir. | Yohan Agustian |
 | ~~`M20-PORTAL-KOMPLAIN`~~ | ✅ diketok 2026-09-22: pintu komplain M15 apa adanya | Yohan |
 | ~~`M20-C01-LIVE`~~ | ✅ ditutup 2026-09-22 malam: migrasi C-01 diterapkan ke live (versi `20260922151204`), 186 tabel / 36 mesin terverifikasi; D-00 selesai | — |
 

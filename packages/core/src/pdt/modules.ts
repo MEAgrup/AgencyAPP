@@ -313,51 +313,145 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     kode: 'tt_ads_manager_videoviews',
     platform: 'tiktok',
     namaTampilan: 'TikTok Ads Manager — Video Views (upper funnel)',
-    // F-03 (M20 R9, videoviews-only — 2026-09-23, `docs/DECISIONS.md`). PRD
-    // R9 menulis tanda tangan ini APA ADANYA dari `report/detect.ts`
-    // `TTAM_TYPES.ttam_videoviews`: `hasCol('Video views') && hasCol('CPM')`
-    // — tapi itu SENDIRI ditebak tanpa sample asli (nol test fixture di
-    // `report/report.test.ts` yang bukan sintetis). Sample asli pemilik
-    // (Ultrasleep, `Ultrasleep_Video_views_TTAM.xlsx`, diunggah 2026-09-23)
-    // MEMBUKTIKAN dugaan itu salah: berkas nyata punya header
-    // ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'CPM',
-    // 'Cost per result', '6-second focused views', 'Result rate',
-    // '6-second focused views (paid views)',
-    // 'Focused view 6-second view rate (impression)', 'Impressions', ...] —
-    // NOL kolom literal 'Video views'; metrik intinya '6-second focused
-    // views' (TikTok "Focused View", generasi ekspor lebih baru dari yang
-    // diasumsikan PRD). Ditulis di sini sesuai berkas NYATA, bukan literal
-    // PRD — pola sama `tt_ads_live`'s `ROI (Toko saat ini)` vs dugaan awal
-    // `ROI` polos.
+    // F-03 (M20 R9 — 2026-09-23, `docs/DECISIONS.md`). PRD R9 menulis tanda
+    // tangan ini APA ADANYA dari `report/detect.ts` `TTAM_TYPES.ttam_videoviews`:
+    // `hasCol('Video views') && hasCol('CPM')` — tapi itu SENDIRI ditebak
+    // tanpa sample asli (nol test fixture di `report/report.test.ts` yang
+    // bukan sintetis). Sample asli pemilik TERNYATA membuktikan KEDUANYA
+    // ada, sekaligus KEDUANYA tidak cukup sendirian:
     //
-    // `anyOf` (Ad name / Ad group name) meniru gerbang umbrella
-    // `detectTtam`'s `isAdsManager` (`report/detect.ts`) — 'Spend' sendirian
-    // terlalu umum (banyak modul lain juga punya biaya), tapi kombinasi
-    // Spend+Ad(-group)-name+CPM+6-second-focused-views spesifik ke Ads
-    // Manager. **Belum ada `mustNot` terhadap tiga tipe TTAM lain**
-    // (consideration/follows/showcase) — sample asli KETIGANYA belum ada
-    // (`M20-TTAM-SAMPLE` masih terbuka untuk mereka), jadi menulis
-    // penyangkalan sekarang berarti menebak kolom yang belum pernah dilihat.
-    // Ditambahkan begitu sample masing-masing tiba, sama pola `ttam_follows`
-    // vs `ttam_showcase` (docblock `report/detect.ts` `TTAM_TYPES`).
+    //  - Ultrasleep (`Ultrasleep_Video_views_TTAM.xlsx`, sample PERTAMA,
+    //    2026-09-23) — NOL kolom literal `'Video views'`; metrik intinya
+    //    `'6-second focused views'` (TikTok "Focused View", generasi ekspor
+    //    lebih baru dari yang diasumsikan PRD).
+    //  - Gold Pigeon/Cottonella (`TTAM Video views`, sample KEDUA/KETIGA,
+    //    2026-09-23) — punya `'Video views'` literal, TIDAK punya
+    //    `'6-second focused views'` sama sekali. Mayoritas (2/3 sample),
+    //    bukan minoritas seperti dugaan koreksi pertama.
+    //  - Lano Batik (`TTAM Video views`, sample KEEMPAT, 2026-09-23) —
+    //    ekspor BERBAHASA INDONESIA: header diterjemahkan (`'Nama Iklan'`/
+    //    `'Belanja'`/`'Impresi'`/`'Tayangan video'`), TAPI `'CPM'` TETAP
+    //    literal Inggris (dikonfirmasi, bukan ditebak) — satu-satunya kolom
+    //    yang aman jadi gerbang lintas-bahasa.
+    //
+    // Ketiga varian TIDAK bisa digabung jadi satu `must` datar (bahasa
+    // Indonesia tidak punya `'Spend'`/`'Video views'` literal) — `anyOf` di
+    // bawah membawa SELURUH identitas bahasa/skema-nya sendiri-sendiri,
+    // `must`/`mustNot` di atasnya HANYA anchor lintas-varian (`'CPM'`) +
+    // penyangkal.
+    //
+    // `mustNot: ['New consideration size']` BARU (sample Brand Considerations
+    // baru tiba sesi ini, lihat modul `tt_ads_manager_consideration` di
+    // bawah) — terbukti PERLU: berkas Brand Considerations asli JUGA punya
+    // `'6-second focused views'` DAN `'CPM'` DAN `'Spend'` (satu bagian dari
+    // metrik consideration-nya adalah "Focused View" juga), jadi TANPA
+    // penyangkal ini berkas Brand Considerations akan `ambiguous` (cocok DUA
+    // modul sekaligus). `'New consideration size'` HANYA milik Brand
+    // Considerations di antara seluruh sample TTAM yang ada — verifikasi
+    // substring lengkap terhadap `modules.ts`/`meta_ads` juga dilakukan
+    // (`must:['CPM']` sendirian TIDAK bertabrakan — hanya `meta_ads` lain
+    // yang punya 'CPM' substring, dan `anyOf` di bawah butuh kombinasi
+    // 'Belanja'+'Tayangan video' yang TIDAK dipunyai `meta_ads`, hanya
+    // 'Belanja' saja lewat substring `'dibelanjakan'` — AND-group menutup
+    // celah itu).
     tandaTanganKolom: {
-      must: ['Spend', 'CPM', '6-second focused views'],
-      anyOf: [{ must: ['Ad name'] }, { must: ['Ad group name'] }],
+      must: ['CPM'],
+      mustNot: ['New consideration size'],
+      anyOf: [{ must: ['Spend', 'Video views'] }, { must: ['Spend', '6-second focused views'] }, { must: ['Belanja', 'Tayangan video'] }],
     },
     barisHeaderHint: 1,
     // `kolomDipanen` HANYA kolom yang benar-benar diekstrak
     // (`ekstrakBarisTtamVideoViews`, `@cdps/core` `pdt/fakta.ts`) ke
     // `pdt_fact_ads` — bukan superset dokumentasi (pola sama `tt_ads_product`).
-    // 'Ad name' jadi `kampanyeId` TEKS BEBAS (berkas ini granularitas per-Ad,
-    // NOL kolom ID kampanye numerik sama sekali) — preseden `shopee_ads_cpc`
-    // (`docs/DECISIONS.md` 2026-09-14 modul KEENAM, 'nama iklan' sebagai
-    // kunci saat tidak ada ID kampanye). 'CPM'/'6-second focused views' dkk.
-    // SENGAJA tidak dipanen — `pdt_fact_ads` tidak punya kolom untuk metrik
-    // spesifik video-view (Rule "skema spekulatif", sama alasan `prod_tp`
-    // R8 tidak ikut) karena bagian laporan yang akan membacanya (F-04
-    // "ads_manager") belum dibangun — kolomnya tetap di tanda tangan deteksi
-    // (di atas), hanya tidak di whitelist panen ini.
+    // Ejaan EN dituliskan di sini ('Ad name'/'Spend'/'Impressions') —
+    // ekstraktor sendiri yang mencari alias ID ('Nama Iklan'/'Belanja'/
+    // 'Impresi') lewat `idxAlias`, `kolomDipanen` TIDAK didaftar dobel
+    // (`validasiKolomWajib` membaca kolom ini APA ADANYA terhadap berkas,
+    // jadi mendaftar dua bahasa di sini justru mewajibkan KEDUANYA sekaligus
+    // — bukan salah satu). 'Ad name'/'Nama Iklan' jadi `kampanyeId` TEKS
+    // BEBAS (berkas ini granularitas per-Ad, NOL kolom ID kampanye numerik
+    // sama sekali) — preseden `shopee_ads_cpc` (`docs/DECISIONS.md`
+    // 2026-09-14 modul KEENAM). 'CPM'/'6-second focused views'/'Video views'
+    // dkk. SENGAJA tidak dipanen — `pdt_fact_ads` tidak punya kolom untuk
+    // metrik spesifik video-view (Rule "skema spekulatif", sama alasan
+    // `prod_tp` R8 tidak ikut) karena bagian laporan yang akan membacanya
+    // (F-04 "ads_manager") belum dibangun — kolomnya tetap di tanda tangan
+    // deteksi (di atas), hanya tidak di whitelist panen ini.
     kolomDipanen: ['Ad name', 'Spend', 'Impressions'],
+    wajib: false, // opsional — sisi ads awareness, bukan sisi rekonsiliasi GMV toko
+  },
+  {
+    kode: 'tt_ads_manager_consideration',
+    platform: 'tiktok',
+    namaTampilan: 'TikTok Ads Manager — Brand Considerations (upper funnel)',
+    // F-03 lanjutan (M20 R9 — 2026-09-23, `docs/DECISIONS.md`). Diverifikasi
+    // terhadap sample asli pemilik (Gold Pigeon, `TTAM Brand Considerations`,
+    // 2026-09-23): header `['Ad name', 'Primary status', 'Secondary status',
+    // 'Spend', 'Impressions', 'CPM', 'New consideration size', 'Cost per
+    // consideration', 'New consideration rate', '6-second focused views',
+    // 'Focused view 6-second view rate (impression)', 'Clicks (destination)',
+    // 'Paid likes', 'Paid shares', 'Paid comments', 'Paid follows',
+    // 'Secondary source', 'Primary source', 'Attribution source',
+    // 'Currency']`. `'New consideration size'` TIDAK dipunyai modul TTAM lain
+    // mana pun (videoviews/follows/showcase) — anchor tunggal sudah cukup,
+    // tanpa `anyOf`/`mustNot` (kebalikannya — modul LAIN yang butuh
+    // `mustNot` terhadap kolom ini, lihat `videoviews`/`follows` di atas/
+    // bawah). Berkas ini JUGA punya `'Paid follows'` — itulah kenapa
+    // `tt_ads_manager_follows` di bawah butuh `mustNot: ['New consideration
+    // size']` (arah sebaliknya).
+    tandaTanganKolom: { must: ['New consideration size'] },
+    barisHeaderHint: 1,
+    // `kolomDipanen` HANYA kolom yang benar-benar diekstrak
+    // (`ekstrakBarisTtamConsideration`, `@cdps/core` `pdt/fakta.ts`) —
+    // 'New consideration size'/'6-second focused views'/'Paid follows' dkk.
+    // SENGAJA tidak dipanen, sama alasan `videoviews` (nol kolom skema
+    // `pdt_fact_ads` untuk metrik consideration-spesifik).
+    kolomDipanen: ['Ad name', 'Spend', 'Impressions', 'Clicks (destination)'],
+    wajib: false, // opsional — sisi ads awareness, bukan sisi rekonsiliasi GMV toko
+  },
+  {
+    kode: 'tt_ads_manager_follows',
+    platform: 'tiktok',
+    namaTampilan: 'TikTok Ads Manager — Follows (upper funnel)',
+    // F-03 lanjutan (M20 R9 — 2026-09-23, `docs/DECISIONS.md`). Diverifikasi
+    // terhadap DUA sample asli pemilik (Gold Pigeon + Cottonella, `TTAM
+    // Follows`, 2026-09-23) — header inti sama (`['Ad name', 'Primary
+    // status', 'Secondary status', 'Spend', 'Impressions', ..., 'Clicks
+    // (destination)', 'Paid follows', ...]`), Cottonella menambah `'Reach'`/
+    // `'Paid profile visits'`/`'Paid likes'`/`'Paid comments'`/`'Cost per
+    // result'` (variasi kolom antar-akun, sama pola `showcase`/`videoviews`
+    // — tidak masuk `kolomDipanen`). `mustNot: ['New consideration size']`
+    // WAJIB — `tt_ads_manager_consideration` JUGA punya `'Paid follows'`
+    // (lihat docblock modul itu), tanpa penyangkal ini kedua modul akan
+    // `ambiguous` untuk berkas Brand Considerations.
+    tandaTanganKolom: { must: ['Paid follows'], mustNot: ['New consideration size'] },
+    barisHeaderHint: 1,
+    kolomDipanen: ['Ad name', 'Spend', 'Impressions', 'Clicks (destination)'],
+    wajib: false, // opsional — sisi ads awareness, bukan sisi rekonsiliasi GMV toko
+  },
+  {
+    kode: 'tt_ads_manager_showcase',
+    platform: 'tiktok',
+    namaTampilan: 'TikTok Ads Manager — Showcase (upper funnel)',
+    // F-03 lanjutan (M20 R9 — 2026-09-23, `docs/DECISIONS.md`). Diverifikasi
+    // terhadap DUA sample asli pemilik (Gold Pigeon + Cottonella, `TTAM
+    // Showcase`, 2026-09-23) — header inti sama (`['Ad name', ..., 'Spend',
+    // 'Impressions', ..., 'Clicks (destination)', ..., 'Product page views
+    // (Shop)', 'Adds to cart (Shop)', 'Add to cart value (Shop)', 'Checkouts
+    // initiated (Shop)', 'Checkout initiation value (Shop)', ...]`),
+    // Cottonella menambah `'Reach'`/`'CTR (destination)'` (variasi
+    // kolom-per-akun, tidak masuk `kolomDipanen`). Kolom funnel `'(Shop)'`
+    // TIDAK dipunyai modul TTAM lain mana pun — `anyOf` (Adds to cart /
+    // Checkouts initiated) meniru gerbang `punyaFunnelShop` OR legacy
+    // (`report/detect.ts` docblock `TTAM_TYPES`), `'Spend'` di `must` cuma
+    // penjaga umbrella "ini ekspor biaya", bukan penyangkal — nol modul lain
+    // punya kolom `'(Shop)'` sama sekali jadi nol risiko tabrakan terbukti.
+    tandaTanganKolom: {
+      must: ['Spend'],
+      anyOf: [{ must: ['Adds to cart (Shop)'] }, { must: ['Checkouts initiated (Shop)'] }],
+    },
+    barisHeaderHint: 1,
+    kolomDipanen: ['Ad name', 'Spend', 'Impressions', 'Clicks (destination)'],
     wajib: false, // opsional — sisi ads awareness, bukan sisi rekonsiliasi GMV toko
   },
   {

@@ -503,11 +503,61 @@ export function ekstrakBarisTtAdsLive(
 }
 
 /**
+ * Empat modul TikTok Ads Manager (TTAM) — `tt_ads_manager_videoviews`
+ * (F-03, 2026-09-23) + `tt_ads_manager_consideration`/`_follows`/`_showcase`
+ * (F-03 lanjutan, sample asli KEEMPAT tipe tiba sekaligus 2026-09-23, lihat
+ * `docs/DECISIONS.md`). Dua kuirk STRUKTURAL terbukti di SELURUH 9 sample
+ * asli (4 tipe × berbagai klien), TIDAK spesifik satu tipe:
+ *
+ * 1. **Baris "Total" sintetis** — setiap ekspor TTAM diakhiri satu baris
+ *    ringkasan (`'Total of N results'` EN, `'Total N hasil'` ID) yang sel
+ *    identitasnya (`Ad name`/`Nama Iklan`) TIDAK kosong, jadi lolos gerbang
+ *    "baris identitas kosong dilewati" lama dan tertulis sebagai kampanye
+ *    palsu ber-biaya/tayangan grand-total. Dikonfirmasi di berkas Ultrasleep
+ *    yang SAMA yang dipakai membangun modul videoviews — bug hidup di
+ *    versi F-03 pertama (`PDT_PARSER_VERSI` 6), dikoreksi di sini.
+ * 2. **`Ad name` TIDAK unik per baris** — TikTok merendaksi nama iklan asli
+ *    jadi label `'Ad name' + waktu-pembuatan-iklan`, jadi iklan yang dibuat
+ *    dalam detik/batch yang sama bertabrakan labelnya. Dikonfirmasi BUKAN
+ *    artefak redaksi berkas Ultrasleep saja — berkas Cottonella/Gold Pigeon
+ *    (klien lain, keempat tipe) punya duplikat `Ad name` dengan metrik
+ *    (Spend/Impressions/dst.) yang NYATA BERBEDA per baris, bukan nol/salin.
+ *    `uq_pdt_fact_ads` (`client_platform_id, sumber, kampanye_id, sku_id=NULL,
+ *    content_id=NULL, periode`) MEWAJIBKAN `kampanye_id` unik per baris yang
+ *    ditulis — tanpa penggabungan, insert baris kedua untuk `Ad name` yang
+ *    sama akan melanggar constraint itu (delete-then-insert, bukan `ON
+ *    CONFLICT`) dan MENGGAGALKAN SELURUH commit batch. Rule 4 (turunan tidak
+ *    boleh mengarang/membuang data mentah) melarang memilih satu baris dan
+ *    membuang sisanya — SUM adalah satu-satunya agregasi yang tidak
+ *    kehilangan spend/impression nyata untuk metrik yang memang aditif
+ *    (bukan rasio — `CPM`/`Cost per result`/dst. TIDAK dipanen, lihat
+ *    `kolomDipanen` tiap modul).
+ *
+ * `gabungkanBarisTtam`/`ADALAH_BARIS_TOTAL_TTAM` di bawah dipakai SEMUA
+ * fungsi `ekstrakBarisTtam*` untuk menutup kedua kuirk sekaligus.
+ */
+const ADALAH_BARIS_TOTAL_TTAM = /^total\b/i;
+
+function gabungkanBarisTtam<T extends { kampanyeId: string }>(baris: readonly T[], jumlahkan: (a: T, b: T) => T): T[] {
+  const peta = new Map<string, T>();
+  for (const b of baris) {
+    const ada = peta.get(b.kampanyeId);
+    peta.set(b.kampanyeId, ada ? jumlahkan(ada, b) : b);
+  }
+  return [...peta.values()];
+}
+
+const jumlahkanNullable = (a: number | null, b: number | null): number | null => (a == null && b == null ? null : (a ?? 0) + (b ?? 0));
+
+/**
  * Satu baris `pdt_fact_ads` mentah dari `tt_ads_manager_videoviews`, SEBELUM
  * `client_platform_id`/`batch_id`/`periode`/`parser_versi`. `gmv`/`pesananSku`/
  * `roas` PERMANEN `null` — berkas ini adalah ekspor Ads Manager upper-funnel
  * (optimasi video views, bukan pesanan), nol kolom atribusi penjualan sama
- * sekali (lihat docblock modul, `modules.ts`).
+ * sekali (lihat docblock modul, `modules.ts`). Nol kolom `Clicks (destination)`
+ * di SELURUH varian videoviews terverifikasi (beda dari tiga modul TTAM lain
+ * di bawah) — `klik` karena itu tidak ada field-nya sama sekali di sini,
+ * bukan lupa (penulis `pdt.ts` mengirim `null` literal).
  */
 export interface PdtBarisAdsTtamVideoViews {
   kampanyeId: string;
@@ -518,24 +568,28 @@ export interface PdtBarisAdsTtamVideoViews {
 /**
  * Ekstrak seluruh baris data `tt_ads_manager_videoviews` (Rule 8 whitelist
  * `modules.ts` — HANYA kolom yang diekstrak di sini boleh masuk
- * `kolomDipanen`). Diverifikasi terhadap sample asli pemilik (Ultrasleep,
- * `Ultrasleep_Video_views_TTAM.xlsx`, 2026-09-23, F-03/M20-TTAM-SAMPLE):
- * header persis `['Ad name', 'Primary status', 'Secondary status', 'Spend',
- * 'CPM', 'Cost per result', '6-second focused views', 'Result rate',
- * '6-second focused views (paid views)',
- * 'Focused view 6-second view rate (impression)', 'Impressions',
- * 'Secondary source', 'Primary source', 'Attribution source', 'Currency']`,
- * baris 1 = header (`barisHeaderHint`), 31 baris data.
+ * `kolomDipanen`).
  *
- * `kampanyeId` = kolom `Ad name` APA ADANYA (teks bebas — berkas ini
- * granularitas per-Ad, NOL kolom ID kampanye numerik) — preseden
- * `shopee_ads_cpc` (`docs/DECISIONS.md` 2026-09-14 modul KEENAM). `biaya` dari
- * `Spend`, `tayangan` dari `Impressions` — dua-duanya angka polos (BUKAN
- * format "Rp"/ribuan Seller Center) di sample asli, tapi `parsePdtAngka(...,
- * true)` (konvensi desimal Ads Manager) dipakai tetap, sama pola
- * `ekstrakBarisTtAdsProduct`/`ekstrakBarisTtAdsLive`, supaya berkas berformat
- * teks (mis. diunduh ulang lewat UI berbeda) tetap terbaca benar. Baris
- * ber-`Ad name` kosong dilewati.
+ * Diverifikasi terhadap TIGA sample asli berbeda (2026-09-23,
+ * F-03/M20-TTAM-SAMPLE) — bukan satu varian tunggal, DUA bahasa/skema kolom
+ * hidup berdampingan:
+ *  - EN mayoritas (Gold Pigeon/Cottonella): kolom metrik inti `'Video views'`.
+ *  - EN minoritas (Ultrasleep, sample PERTAMA modul ini dibangun darinya):
+ *    kolom metrik inti `'6-second focused views'` ("Focused View", generasi
+ *    ekspor lebih baru) — TANPA kolom `'Video views'` literal sama sekali.
+ *  - ID (Lano Batik): header diterjemahkan (`'Nama Iklan'`/`'Belanja'`/
+ *    `'Impresi'`/`'Tayangan video'`), TAPI `'CPM'` tetap literal Inggris di
+ *    ekspor Indonesia juga (dikonfirmasi, bukan ditebak).
+ *
+ * `kampanyeId` dari `Ad name` (EN) atau `Nama Iklan` (ID) APA ADANYA (teks
+ * bebas — berkas ini granularitas per-Ad, NOL kolom ID kampanye numerik) —
+ * preseden `shopee_ads_cpc` (`docs/DECISIONS.md` 2026-09-14 modul KEENAM).
+ * `biaya` dari `Spend`/`Belanja`, `tayangan` dari `Impressions`/`Impresi` —
+ * angka polos (BUKAN format "Rp"/ribuan Seller Center) di sample asli, tapi
+ * `parsePdtAngka(..., true)` (konvensi desimal Ads Manager) dipakai tetap,
+ * sama pola `ekstrakBarisTtAdsProduct`/`ekstrakBarisTtAdsLive`. Baris
+ * identitas kosong ATAU baris "Total" dilewati (lihat docblock kuirk TTAM di
+ * atas); duplikat `Ad name`/`Nama Iklan` DIJUMLAHKAN (`gabungkanBarisTtam`).
  */
 export function ekstrakBarisTtamVideoViews(
   aoa: readonly (readonly unknown[])[],
@@ -543,21 +597,141 @@ export function ekstrakBarisTtamVideoViews(
 ): PdtBarisAdsTtamVideoViews[] {
   const header = aoa[barisHeader - 1] ?? [];
   const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
-  const iAdName = idx('Ad name');
-  const iSpend = idx('Spend');
-  const iImpressions = idx('Impressions');
+  const idxAlias = (...nama: readonly string[]): number => {
+    for (const n of nama) {
+      const i = idx(n);
+      if (i !== -1) return i;
+    }
+    return -1;
+  };
+  const iAdName = idxAlias('Ad name', 'Nama Iklan');
+  const iSpend = idxAlias('Spend', 'Belanja');
+  const iImpressions = idxAlias('Impressions', 'Impresi');
 
-  const hasil: PdtBarisAdsTtamVideoViews[] = [];
+  const mentah: PdtBarisAdsTtamVideoViews[] = [];
   for (const row of aoa.slice(barisHeader)) {
     const kampanyeId = iAdName === -1 ? '' : String(row?.[iAdName] ?? '').trim();
-    if (kampanyeId === '') continue;
-    hasil.push({
+    if (kampanyeId === '' || ADALAH_BARIS_TOTAL_TTAM.test(kampanyeId)) continue;
+    mentah.push({
       kampanyeId,
       biaya: iSpend === -1 ? 0 : parsePdtAngka(row?.[iSpend], true),
       tayangan: iImpressions === -1 ? null : parsePdtAngka(row?.[iImpressions], true),
     });
   }
-  return hasil;
+  return gabungkanBarisTtam(mentah, (a, b) => ({
+    kampanyeId: a.kampanyeId,
+    biaya: a.biaya + b.biaya,
+    tayangan: jumlahkanNullable(a.tayangan, b.tayangan),
+  }));
+}
+
+/**
+ * Satu baris `pdt_fact_ads` mentah dari `tt_ads_manager_consideration`/
+ * `_follows`/`_showcase` — TIGA tipe TTAM lain yang, dikonfirmasi dari sample
+ * asli, sama-sama membawa `Ad name`/`Spend`/`Impressions`/`Clicks
+ * (destination)` dengan skema kolom BYTE-IDENTIK (beda dari `videoviews` di
+ * atas yang nol kolom klik). `gmv`/`pesananSku`/`roas` PERMANEN `null` — sama
+ * alasan `videoviews`, ketiganya upper-funnel, nol kolom atribusi penjualan.
+ */
+export interface PdtBarisAdsTtamUpperFunnel {
+  kampanyeId: string;
+  biaya: number;
+  tayangan: number | null;
+  klik: number | null;
+}
+
+/**
+ * Implementasi bersama `ekstrakBarisTtamConsideration`/`_Follows`/`_Showcase`
+ * di bawah — BUKAN diekspor sendiri (tiga modul TERPISAH di `pdt_parser_modul`/
+ * `modules.ts`, masing-masing tanda tangan/docblock sendiri per Rule 8; hanya
+ * badan ekstraksinya yang byte-identik, dikonfirmasi dari sample asli
+ * ketiganya — bukan asumsi). `Ad name`/`Nama Iklan` bilingual TIDAK
+ * dikonfirmasi untuk tiga tipe ini (beda dari `videoviews`, satu-satunya yang
+ * punya bukti sample Indonesia) — EN saja, sesuai sample yang ada.
+ */
+function ekstrakBarisTtamUpperFunnelBersama(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisAdsTtamUpperFunnel[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iAdName = idx('Ad name');
+  const iSpend = idx('Spend');
+  const iImpressions = idx('Impressions');
+  const iClicks = idx('Clicks (destination)');
+
+  const mentah: PdtBarisAdsTtamUpperFunnel[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const kampanyeId = iAdName === -1 ? '' : String(row?.[iAdName] ?? '').trim();
+    if (kampanyeId === '' || ADALAH_BARIS_TOTAL_TTAM.test(kampanyeId)) continue;
+    mentah.push({
+      kampanyeId,
+      biaya: iSpend === -1 ? 0 : parsePdtAngka(row?.[iSpend], true),
+      tayangan: iImpressions === -1 ? null : parsePdtAngka(row?.[iImpressions], true),
+      klik: iClicks === -1 ? null : parsePdtAngka(row?.[iClicks], true),
+    });
+  }
+  return gabungkanBarisTtam(mentah, (a, b) => ({
+    kampanyeId: a.kampanyeId,
+    biaya: a.biaya + b.biaya,
+    tayangan: jumlahkanNullable(a.tayangan, b.tayangan),
+    klik: jumlahkanNullable(a.klik, b.klik),
+  }));
+}
+
+/**
+ * Ekstrak seluruh baris data `tt_ads_manager_consideration` (Rule 8 whitelist
+ * `modules.ts`). Diverifikasi terhadap sample asli pemilik (Gold Pigeon,
+ * `TTAM Brand Considerations`, 2026-09-23): header `['Ad name', 'Primary
+ * status', 'Secondary status', 'Spend', 'Impressions', 'CPM', 'New
+ * consideration size', 'Cost per consideration', 'New consideration rate',
+ * '6-second focused views', 'Focused view 6-second view rate (impression)',
+ * 'Clicks (destination)', 'Paid likes', 'Paid shares', 'Paid comments', 'Paid
+ * follows', 'Secondary source', 'Primary source', 'Attribution source',
+ * 'Currency']`. `'New consideration size'`/`'6-second focused views'` dkk.
+ * SENGAJA tidak dipanen — `pdt_fact_ads` tidak punya kolom untuk metrik
+ * spesifik consideration (sama pola `videoviews`).
+ */
+export function ekstrakBarisTtamConsideration(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisAdsTtamUpperFunnel[] {
+  return ekstrakBarisTtamUpperFunnelBersama(aoa, barisHeader);
+}
+
+/**
+ * Ekstrak seluruh baris data `tt_ads_manager_follows` (Rule 8 whitelist
+ * `modules.ts`). Diverifikasi terhadap DUA sample asli pemilik (Gold Pigeon +
+ * Cottonella, `TTAM Follows`, 2026-09-23) — header inti sama
+ * (`['Ad name', 'Primary status', 'Secondary status', 'Spend', 'Impressions',
+ * ..., 'Clicks (destination)', 'Paid follows', ...]`), Cottonella menambah
+ * `'Reach'`/`'Paid profile visits'`/dst. yang tidak dipanen (bukan bagian
+ * `kolomDipanen`, sama pola variasi kolom-per-akun `showcase`/`videoviews`).
+ * `'Paid follows'` sendiri SENGAJA tidak dipanen — tidak ada kolom skema.
+ */
+export function ekstrakBarisTtamFollows(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisAdsTtamUpperFunnel[] {
+  return ekstrakBarisTtamUpperFunnelBersama(aoa, barisHeader);
+}
+
+/**
+ * Ekstrak seluruh baris data `tt_ads_manager_showcase` (Rule 8 whitelist
+ * `modules.ts`). Diverifikasi terhadap DUA sample asli pemilik (Gold Pigeon +
+ * Cottonella, `TTAM Showcase`, 2026-09-23) — header inti sama (`['Ad name',
+ * ..., 'Spend', 'Impressions', ..., 'Clicks (destination)', ..., 'Product
+ * page views (Shop)', 'Adds to cart (Shop)', 'Add to cart value (Shop)',
+ * 'Checkouts initiated (Shop)', 'Checkout initiation value (Shop)', ...]`),
+ * Cottonella menambah `'Reach'`/`'CTR (destination)'` yang tidak dipanen.
+ * Kolom funnel Shop (`Adds to cart`/`Checkouts initiated`/dst.) SENGAJA tidak
+ * dipanen — tidak ada kolom skema `pdt_fact_ads` untuk metrik funnel Shop.
+ */
+export function ekstrakBarisTtamShowcase(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisAdsTtamUpperFunnel[] {
+  return ekstrakBarisTtamUpperFunnelBersama(aoa, barisHeader);
 }
 
 /**
