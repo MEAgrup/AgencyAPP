@@ -320,3 +320,28 @@ export function setShopId(clientId: string, platformId: number, shopId: string):
   return api.put<{ shop_id: string | null }>(
     `/clients/${clientId}/platforms/${platformId}/shop-id`, { shop_id: shopId });
 }
+
+/** R3 — the buyer-journey stage a store is currently chasing; PDT's Tahap section reads it. */
+export const TAHAP_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Belum ditetapkan' },
+  { value: 'awareness', label: 'Awareness' },
+  { value: 'consideration', label: 'Consideration' },
+  { value: 'conversion', label: 'Conversion' },
+];
+
+export function labelTahap(v: string | null): string {
+  return TAHAP_OPTIONS.find((o) => o.value === (v ?? ''))?.label ?? (v ?? '');
+}
+
+/**
+ * PUT /clients/{id}/platforms/{pid}/tahap-fokus — set or clear the store's stage.
+ *
+ * Sent as `''` to clear, because that is what the blank `<option>` submits and
+ * translating it here would hide the one state the field must be able to return
+ * to. The server echoes what it stored, so the caller renders the truth rather
+ * than its own optimism.
+ */
+export function setTahapFokus(clientId: string, platformId: number, tahap: string): Promise<{ tahap_fokus: string | null }> {
+  return api.put<{ tahap_fokus: string | null }>(
+    `/clients/${clientId}/platforms/${platformId}/tahap-fokus`, { tahap });
+}

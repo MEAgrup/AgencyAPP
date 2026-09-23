@@ -10,7 +10,8 @@
  * layar pratinjau. Diteruskan UTUH ke `pdt.kirimLaporanPdt`
  * (`toPdtInsightDraft`, pass-through — validasi & pesan BI `[...]` adalah
  * tugas `pdt.normalizePdtInsightDraft` di core, bukan lapisan ini, pola sama
- * `InsightDraftBody`/`toInsightDraft` mesin lama). Diabaikan sepenuhnya kalau
+ * `InsightDraftBody`/`toInsightDraft` milik M14 (dicabut Gelombang G).
+ * Diabaikan sepenuhnya kalau
  * kunci `insight` tidak ada di body ⇒ insight mesin apa adanya.
  *
  * `pdt.kirimLaporanPdt` menghitung ULANG laporan lewat `bacaLaporanPdt`

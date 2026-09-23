@@ -195,7 +195,7 @@ const FE_FILES = [
   'account.ts', 'adopsi.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'bridge.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyactivity.ts', 'dailyops.ts', 'scs.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
-  'pdt.ts', 'performance.ts', 'portal.ts', 'px.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
+  'pdt.ts', 'performance.ts', 'portal.ts', 'px.ts', 'recap.ts', 'renewal.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
   // web-client-portal (M15-C2) — the external realm's own app, see FE_LIB_PORTAL.
   'klien/types.ts',
 ];
@@ -615,22 +615,9 @@ const WIRE_TO_FE: Record<string, string> = {
   RisetAwalPlatformWire: 'riset-awal.ts::RisetAwalPlatform',
   RisetAwalAnalisaWire: 'riset-awal.ts::RisetAwalAnalisa',
   RisetAwalIsianWire: 'riset-awal.ts::RisetAwalIsian',
-  // C1 — Mesin Laporan Klien: the report read-models.
-  ClientReportSummaryWire: 'report.ts::ClientReportSummary',
-  ClientReportBerkasWire: 'report.ts::ClientReportBerkas',
-  ClientReportDetailWire: 'report.ts::ClientReportDetail',
-  // Insight editable + gerbang publikasi (migrasi 20260908010000).
-  ReportInsightWire: 'report.ts::ReportInsight',
-  ReportRekomendasiWire: 'report.ts::Rekomendasi',
-  ReportIndikatorWire: 'report.ts::Indikator',
-  ReportTahapNarasiWire: 'report.ts::TahapNarasi',
-  ReportInsightRevisiWire: 'report.ts::ReportInsightRevisi',
-  ReportPublikasiWire: 'report.ts::ReportPublikasi',
   // Gelombang 3 — MEA SKU Screener (SC-08). No page consumes these yet
   // (UI is a later ticket) — the FE type file exists purely so this guard
   // watches the shape from day one.
-  // SH-06 — exclude-campaign picker on the Shopee report form.
-  ShopeeAdsCampaignOptionWire: 'report.ts::ShopeeAdsCampaignOption',
   ScreeningRunSummaryWire: 'skuscreener.ts::ScreeningRunSummary',
   ScreeningRunDetailWire: 'skuscreener.ts::ScreeningRunDetail',
   DecisionLogEntryWire: 'skuscreener.ts::DecisionLogEntry',
@@ -645,12 +632,6 @@ const WIRE_TO_FE: Record<string, string> = {
   AdsScanPortfolioRowWire: 'adsscanner.ts::AdsScanPortfolioRow',
   // F-6 (feedback lapangan 2026-09-14) — Daily Activity (DACT-).
   DailyActivityWire: 'dailyactivity.ts::DailyActivity',
-  ReportInsightBundleWire: 'report.ts::ReportInsightBundle',
-  // A REQUEST body (same reasoning as ProposalLineBody above): the insight the
-  // editor PUTs. Paired with the FE's `ReportInsight` — the same six fields the
-  // engine emits and the renderer consumes, so the editor cannot send a seventh
-  // field or rename one without this failing.
-  InsightDraftBody: 'report.ts::ReportInsight',
   // Client Portal (M15-C2) — paired against `web-client-portal`'s own lib, the
   // second FE app this guard now covers (see FE_LIB_PORTAL).
   PortalReportRowWire: 'klien/types.ts::PortalReportRow',

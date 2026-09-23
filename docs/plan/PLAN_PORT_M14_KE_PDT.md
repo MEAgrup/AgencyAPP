@@ -188,16 +188,20 @@ R8/R9, butuh skema `pdt_fact_shop_daily` baru.
 
 ---
 
-### Gelombang G — Pencabutan M14
+### Gelombang G — Pencabutan M14 ✅ SELESAI 2026-09-23
 
 Hanya dimulai setelah PRD §9 benar semuanya (A–F hijau, satu laporan nyata
 sudah menempuh siklus penuh di live, `total_sales` satu penulis).
 
 | Tiket | Isi |
 |---|---|
-| **G-01** | Cabut rute M14 (`/reports/*`, `/clients/{id}/reports*`), halaman "Laporan Performa (Mingguan/Bulanan)" di Direktori Klien, `ReportPanel.tsx`, `ShopeeReportForm.tsx`, dan tipe FE-nya — satu PR. **Jalur portal M14 tidak ada di daftar ini** karena sudah digantikan sumbernya di Gelombang D (R11); G-01 hanya membereskan sisi internal. |
-| **G-02** | `route-parity.test.ts` hijau dengan `KNOWN_GAPS` **kosong**; `shape-parity.test.ts` hijau. |
-| **G-03** | Entri `DECISIONS.md` menutup `M14-VS-PDT-DUPLIKASI`. |
+| **G-01** | ✅ SELESAI. Cabut rute M14 (10 berkas `reports/[id]/*` + `clients/[id]/reports*`), `ReportPanel.tsx`, `ShopeeReportForm.tsx`, `InsightEditor.tsx`, `web-internal/src/lib/report.ts` + dua test filenya — satu PR. **Regresi kapabilitas ditemukan+dicegah sebelum penghapusan**: satu-satunya kontrol UI `client_platforms.tahap_fokus` hidup di dalam `ReportPanel.tsx` — dipindahkan ke tabel Platform `clients/[id]/page.tsx` (`web-internal/src/lib/clients.ts::setTahapFokus`, meniru pola `setShopId`) sebelum `ReportPanel.tsx` dihapus. **Jalur portal M14 tidak ada di daftar ini** karena sudah digantikan sumbernya di Gelombang D (R11); G-01 hanya membereskan sisi internal. |
+| **G-02** | ✅ SELESAI. `route-parity.test.ts` hijau dengan `KNOWN_GAPS` **kosong**; `shape-parity.test.ts` hijau (`wire.ts` dipangkas — 10 tipe/konverter M14 dihapus, `PortalReportRowWire` dipertahankan). |
+| **G-03** | ✅ SELESAI. Entri `DECISIONS.md` "M20-R9-GELOMBANG-G-SELESAI" menutup `M14-VS-PDT-DUPLIKASI`. |
+
+Lihat `docs/DECISIONS.md` 2026-09-23 "M20-R9-GELOMBANG-G-SELESAI" untuk rincian
+lengkap (berkas yang dicabut, yang sengaja dipertahankan, hasil uji). Dengan
+ini seluruh Gelombang A→G plan M20 SELESAI.
 
 `client_reports` dan tabel turunannya **tidak dihapus**: append-only, 0 baris,
 biaya menyimpannya nol, dan ia jadi bukti riwayat.
@@ -208,7 +212,7 @@ laporan berjalan tenang.
 
 ---
 
-## 4. Yang memblokir, hari ini  *(diperbarui 2026-09-23 — F-04/F-05 SELESAI, Gelombang F ditutup penuh)*
+## 4. Yang memblokir, hari ini  *(diperbarui 2026-09-23 — Gelombang G SELESAI, plan M20 tuntas A→G)*
 
 | Kode | Memblokir | Status |
 |---|---|---|
@@ -219,7 +223,7 @@ laporan berjalan tenang.
 | ~~`M20-TOKOPEDIA-SAMPLE`~~ | F-01 | ✅ **DITUTUP 2026-09-23:** sample asli (Ultrasleep) diterima dan diverifikasi, F-01 SELESAI. `docs/DECISIONS.md` M20-R8-F-01-TOKOPEDIA. F-02 SELESAI sebelumnya, tidak terpengaruh. |
 | ~~`M20-C01-LIVE`~~ | D-00 | ✅ **DITUTUP 2026-09-22 malam:** migrasi `20261130010000` diterapkan ke live `CDPS SG` (versi live `20260922151204`), diverifikasi 186 tabel / 36 mesin / fungsi `jwt_owns_pdt_kiriman_am` ada. D-00 selesai. |
 
-Gelombang D dan Gelombang F **SELESAI PENUH** (F-01 s/d F-05, `docs/DECISIONS.md` M20-R9-F-04-TAHAP-FUNNEL) — nol blocker tersisa di §4. Gelombang G (pencabutan M14) siap dikerjakan begitu A–F hijau dikonfirmasi.
+Gelombang D dan Gelombang F **SELESAI PENUH** (F-01 s/d F-05, `docs/DECISIONS.md` M20-R9-F-04-TAHAP-FUNNEL). **Gelombang G (pencabutan M14) SELESAI 2026-09-23** (`docs/DECISIONS.md` M20-R9-GELOMBANG-G-SELESAI) — nol blocker tersisa, dan dengan itu seluruh gelombang A→G plan M20 tuntas.
 
 ---
 

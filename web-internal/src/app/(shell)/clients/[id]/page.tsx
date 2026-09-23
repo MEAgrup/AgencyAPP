@@ -22,6 +22,7 @@ import {
   PAYMENT_INTENT_OPTIONS,
   PAYMENT_STATUS_MENUNGGU_VERIFIKASI,
   PLATFORM_OPTIONS,
+  TAHAP_OPTIONS,
   addPlatform,
   editClient,
   getClient,
@@ -34,6 +35,7 @@ import {
   resumeService,
   setPaymentIntent,
   setShopId,
+  setTahapFokus,
   updatePlatform,
   voidService,
   type Client,
@@ -51,7 +53,6 @@ import {
 } from '@/lib/milestone';
 import { getBoard, UNIVERSAL_COLUMNS, type Card } from '@/lib/board';
 import BoardCard from '../../board/BoardCard';
-import ReportPanel from '@/components/clients/ReportPanel';
 import RenewalPanel from '@/components/clients/RenewalPanel';
 import ContractSection from '@/components/clients/ContractSection';
 
@@ -143,6 +144,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [shopIdDraft, setShopIdDraft] = useState<Record<number, string>>({});
   const [shopIdSavingId, setShopIdSavingId] = useState<number | null>(null);
   const [shopIdError, setShopIdError] = useState<string | null>(null);
+
+  // Tahap Fokus (R3) — relocated from the retired M14 ReportPanel (Gelombang G);
+  // PDT's own Tahap section reads client_platforms.tahap_fokus. Gate mirrors
+  // canEditPlatforms since this is part of the platform row, not report content.
+  const [tahapSavingId, setTahapSavingId] = useState<number | null>(null);
+  const [tahapError, setTahapError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -354,6 +361,19 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     }
   }
 
+  async function handleSetTahapFokus(platformId: number, tahap: string) {
+    setTahapError(null);
+    setTahapSavingId(platformId);
+    try {
+      await setTahapFokus(id, platformId, tahap);
+      await load();
+    } catch (err) {
+      setTahapError(errorMessage(err));
+    } finally {
+      setTahapSavingId(null);
+    }
+  }
+
   async function handleDeactivatePlatform(platformId: number, platformLabel: string) {
     if (!window.confirm(`Nonaktifkan platform "${platformLabel}"? Baris tetap ada (riwayat), hanya dihapus dari daftar aktif.`)) {
       return;
@@ -537,6 +557,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         </div>
         {platformError && <div className="alert alertError" role="alert">{platformError}</div>}
         {shopIdError && <div className="alert alertError" role="alert">{shopIdError}</div>}
+        {tahapError && <div className="alert alertError" role="alert">{tahapError}</div>}
         <div className="alert alertInfo" style={{ fontSize: 13 }}>
           <strong>Shop ID (isi hanya bila agency plan TAP/SAP sudah dibuat)</strong> — mengisinya
           adalah pernyataan bahwa toko ini boleh diproses Product Exchange (MCN MEA). Kosongkan
@@ -561,6 +582,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   <th>Dikelola Sejak</th>
                   <th>Aktif</th>
                   <th>Shop ID (Product Exchange)</th>
+                  <th>Tahap Fokus</th>
                   {canEditPlatforms && <th></th>}
                 </tr>
               </thead>
@@ -594,6 +616,22 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                       ) : (
                         p.shop_id || '—'
+                      )}
+                    </td>
+                    <td>
+                      {canEditPlatforms ? (
+                        <select
+                          aria-label={`Tahap Fokus ${p.platform}`}
+                          value={p.tahap_fokus ?? ''}
+                          disabled={tahapSavingId === p.client_platform_id}
+                          onChange={(e) => handleSetTahapFokus(p.client_platform_id, e.target.value)}
+                        >
+                          {TAHAP_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        TAHAP_OPTIONS.find((o) => o.value === (p.tahap_fokus ?? ''))?.label ?? '—'
                       )}
                     </td>
                     {canEditPlatforms && (
@@ -653,8 +691,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           </form>
         )}
       </section>
-
-      <ReportPanel clientId={id} platforms={client.platforms} />
 
       <section className="card">
         <div className="cardHeader">
