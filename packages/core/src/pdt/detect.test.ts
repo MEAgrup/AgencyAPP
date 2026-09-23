@@ -1,5 +1,5 @@
 /**
- * G1-02 — tes `detectPdtModule` terhadap seluruh 27 modul.
+ * G1-02 — tes `detectPdtModule` terhadap seluruh 28 modul.
  *
  * DoD backlog: "deteksi diuji terhadap 28 berkas sample (Fim Motor/Shopee,
  * Avitaskin/TikTok) dengan target nol salah-slot". Berkas mentahnya sendiri
@@ -37,7 +37,7 @@ function expectExactMatch(rows: Aoa, expected: string): void {
   expect(r.ambiguous, `fixture ${expected}`).toBe(false);
 }
 
-describe('detectPdtModule — TikTok (11 modul)', () => {
+describe('detectPdtModule — TikTok (12 modul)', () => {
   it('tt_orders', () => {
     expectExactMatch(
       [
@@ -148,6 +148,25 @@ describe('detectPdtModule — TikTok (11 modul)', () => {
     );
   });
 
+  // F-03 (M20 R9, videoviews-only) — sample asli pemilik
+  // (`Ultrasleep_Video_views_TTAM.xlsx`, 2026-09-23), header baris 1 PERSIS.
+  // Signature DIKOREKSI dari dugaan literal PRD ('Video views'+'CPM') — berkas
+  // nyata tidak punya kolom 'Video views' sama sekali, hanya '6-second
+  // focused views' (lihat docblock modul, `modules.ts`).
+  it('tt_ads_manager_videoviews', () => {
+    expectExactMatch(
+      [
+        ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'CPM', 'Cost per result',
+          '6-second focused views', 'Result rate', '6-second focused views (paid views)',
+          'Focused view 6-second view rate (impression)', 'Impressions', 'Secondary source',
+          'Primary source', 'Attribution source', 'Currency'],
+        ['Ad name2026-08-23 14:13:20', 'Paused', '', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815',
+          '2184', 'TikTok account', 'Your own content', '-', 'IDR'],
+      ],
+      'tt_ads_manager_videoviews',
+    );
+  });
+
   // M9-OA-4 — header PERSIS sample asli pemilik (ekspor sisi partner/TAP,
   // bahasa Inggris). Tanda tangannya (`Affiliate video-attributed GMV` +
   // `Video ID`) sengaja tidak memakai `Video ID` sendirian: kolom itu juga
@@ -171,11 +190,11 @@ describe('detectPdtModule — TikTok (11 modul)', () => {
     );
   });
 
-  it('kesebelas fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
+  it('kedua belas fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
     // Sudah tercakup satu-per-satu di atas (expectExactMatch memaksa matches
-    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 11 sekaligus,
+    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 12 sekaligus,
     // bukan cuma yang paling akhir diuji.
-    expect(TIKTOK).toHaveLength(11);
+    expect(TIKTOK).toHaveLength(12);
   });
 });
 
@@ -400,9 +419,9 @@ describe('detectPdtModule — meta_ads', () => {
 });
 
 describe('detectPdtModule — registry', () => {
-  it('27 modul total, kode unik', () => {
-    expect(PDT_MODULES).toHaveLength(27);
-    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(27);
+  it('28 modul total, kode unik', () => {
+    expect(PDT_MODULES).toHaveLength(28);
+    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(28);
   });
 
   it('sheet kosong tidak pernah cocok ke modul manapun', () => {

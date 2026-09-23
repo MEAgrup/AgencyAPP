@@ -310,6 +310,57 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     wajib: false,
   },
   {
+    kode: 'tt_ads_manager_videoviews',
+    platform: 'tiktok',
+    namaTampilan: 'TikTok Ads Manager — Video Views (upper funnel)',
+    // F-03 (M20 R9, videoviews-only — 2026-09-23, `docs/DECISIONS.md`). PRD
+    // R9 menulis tanda tangan ini APA ADANYA dari `report/detect.ts`
+    // `TTAM_TYPES.ttam_videoviews`: `hasCol('Video views') && hasCol('CPM')`
+    // — tapi itu SENDIRI ditebak tanpa sample asli (nol test fixture di
+    // `report/report.test.ts` yang bukan sintetis). Sample asli pemilik
+    // (Ultrasleep, `Ultrasleep_Video_views_TTAM.xlsx`, diunggah 2026-09-23)
+    // MEMBUKTIKAN dugaan itu salah: berkas nyata punya header
+    // ['Ad name', 'Primary status', 'Secondary status', 'Spend', 'CPM',
+    // 'Cost per result', '6-second focused views', 'Result rate',
+    // '6-second focused views (paid views)',
+    // 'Focused view 6-second view rate (impression)', 'Impressions', ...] —
+    // NOL kolom literal 'Video views'; metrik intinya '6-second focused
+    // views' (TikTok "Focused View", generasi ekspor lebih baru dari yang
+    // diasumsikan PRD). Ditulis di sini sesuai berkas NYATA, bukan literal
+    // PRD — pola sama `tt_ads_live`'s `ROI (Toko saat ini)` vs dugaan awal
+    // `ROI` polos.
+    //
+    // `anyOf` (Ad name / Ad group name) meniru gerbang umbrella
+    // `detectTtam`'s `isAdsManager` (`report/detect.ts`) — 'Spend' sendirian
+    // terlalu umum (banyak modul lain juga punya biaya), tapi kombinasi
+    // Spend+Ad(-group)-name+CPM+6-second-focused-views spesifik ke Ads
+    // Manager. **Belum ada `mustNot` terhadap tiga tipe TTAM lain**
+    // (consideration/follows/showcase) — sample asli KETIGANYA belum ada
+    // (`M20-TTAM-SAMPLE` masih terbuka untuk mereka), jadi menulis
+    // penyangkalan sekarang berarti menebak kolom yang belum pernah dilihat.
+    // Ditambahkan begitu sample masing-masing tiba, sama pola `ttam_follows`
+    // vs `ttam_showcase` (docblock `report/detect.ts` `TTAM_TYPES`).
+    tandaTanganKolom: {
+      must: ['Spend', 'CPM', '6-second focused views'],
+      anyOf: [{ must: ['Ad name'] }, { must: ['Ad group name'] }],
+    },
+    barisHeaderHint: 1,
+    // `kolomDipanen` HANYA kolom yang benar-benar diekstrak
+    // (`ekstrakBarisTtamVideoViews`, `@cdps/core` `pdt/fakta.ts`) ke
+    // `pdt_fact_ads` — bukan superset dokumentasi (pola sama `tt_ads_product`).
+    // 'Ad name' jadi `kampanyeId` TEKS BEBAS (berkas ini granularitas per-Ad,
+    // NOL kolom ID kampanye numerik sama sekali) — preseden `shopee_ads_cpc`
+    // (`docs/DECISIONS.md` 2026-09-14 modul KEENAM, 'nama iklan' sebagai
+    // kunci saat tidak ada ID kampanye). 'CPM'/'6-second focused views' dkk.
+    // SENGAJA tidak dipanen — `pdt_fact_ads` tidak punya kolom untuk metrik
+    // spesifik video-view (Rule "skema spekulatif", sama alasan `prod_tp`
+    // R8 tidak ikut) karena bagian laporan yang akan membacanya (F-04
+    // "ads_manager") belum dibangun — kolomnya tetap di tanda tangan deteksi
+    // (di atas), hanya tidak di whitelist panen ini.
+    kolomDipanen: ['Ad name', 'Spend', 'Impressions'],
+    wajib: false, // opsional — sisi ads awareness, bukan sisi rekonsiliasi GMV toko
+  },
+  {
     kode: 'tt_affiliate_video',
     platform: 'tiktok',
     namaTampilan: 'TikTok Shop Affiliate — Custom Report (Campaign/Creator/Product/Shop/Video)',

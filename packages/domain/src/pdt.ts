@@ -915,6 +915,9 @@ export async function commitUploadBatch(
   // `AskUserQuestion`, docs/DECISIONS.md).
   const berkasTtAdsProduct = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_product');
   const berkasTtAdsLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_live');
+  // F-03 (M20 R9, videoviews-only) — `tt_ads_manager_videoviews` → `pdt_fact_ads`
+  // (lihat docblock `ekstrakBarisTtamVideoViews`, `@cdps/core` `pdt/fakta.ts`).
+  const berkasTtamVideoViews = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_manager_videoviews');
   // G2-01-KUADRAN-SKU langkah 1 — `tt_product_analytics` → `pdt_fact_sku_period` (lihat
   // docblock `ekstrakBarisTtProductAnalytics`, `@cdps/core` `pdt/fakta.ts`) — sisi TikTok
   // untuk tabel yang sebelumnya hanya diisi Shopee (`shopee_ams_produk`, modul KEDELAPAN).
@@ -1022,7 +1025,7 @@ export async function commitUploadBatch(
         berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
         berkasTtAffiliateVideo, shopIdTersimpan: row.shop_id,
         berkasShopStatsTiktok, berkasShopStatsTokopedia, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
-        berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
+        berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtamVideoViews, berkasTtProductAnalytics,
         berkasShopeeKesehatan, berkasShopeeChat, berkasShopeeDiskon, berkasShopeeFlashSale,
       });
 
@@ -1130,6 +1133,7 @@ interface TulisFaktaModulTerparseInput {
   berkasShopeeAmsProduk: readonly BerkasTerparse[];
   berkasTtAdsProduct: readonly BerkasTerparse[];
   berkasTtAdsLive: readonly BerkasTerparse[];
+  berkasTtamVideoViews: readonly BerkasTerparse[];
   berkasTtProductAnalytics: readonly BerkasTerparse[];
   berkasShopeeKesehatan: readonly BerkasTerparse[];
   berkasShopeeChat: readonly BerkasTerparse[];
@@ -1168,7 +1172,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
     berkasTtAffiliateVideo, shopIdTersimpan,
     berkasShopStatsTiktok, berkasShopStatsTokopedia, berkasShopStatsShopee, berkasParentSkuUntukMaster, berkasTtOrders, berkasTtTransactionCreator,
-    berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtProductAnalytics,
+    berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive, berkasTtamVideoViews, berkasTtProductAnalytics,
     berkasShopeeKesehatan, berkasShopeeChat, berkasShopeeDiskon, berkasShopeeFlashSale,
   } = input;
 
@@ -1870,6 +1874,45 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
             (${clientPlatformId}, 'tt_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
              null, 'lower')`;
+      }
+    }
+  }
+
+  // F-03 (M20 R9, videoviews-only, 2026-09-23) — `tt_ads_manager_videoviews` →
+  // `pdt_fact_ads`, `tujuan = 'upper'` LITERAL (lihat docblock
+  // `ekstrakBarisTtamVideoViews`, `@cdps/core` `pdt/fakta.ts`, dan F-02
+  // guardrail `docs/DECISIONS.md` M20-F02-PDT-FACT-ADS-TUJUAN — baris ini
+  // otomatis dikeluarkan dari `recomputeAdsMetricEntriesPdt`/ROAS Attainment
+  // GMV Max tanpa kode tambahan di sini, gerbang itu sudah generik terhadap
+  // `tujuan`). `gmv`/`pesanan_sku`/`roas` SELALU null — berkas ini upper-funnel
+  // (video views), nol kolom atribusi penjualan. `sku_id`/`content_id` SELALU
+  // null (sama alasan `tt_ads_product`/`tt_ads_live` — delete-then-insert,
+  // bukan `ON CONFLICT`, karena keduanya bagian kunci unik `uq_pdt_fact_ads`).
+  // `tipe_kampanye_sumber` SELALU null — berkas ini nol kolom konfigurasi
+  // kampanye (sama pola `tt_ads_live`).
+  //
+  // `bacaIklanTiktok` (bagian "iklan"/GMV Max) TIDAK membaca sumber ini —
+  // query itu `sumber in ('tt_ads_product', 'tt_ads_live')` eksplisit
+  // (allow-list, bukan deny-list), jadi baris videoviews terstruktur aman
+  // dari section itu tanpa guardrail tambahan (diverifikasi sebelum menulis
+  // blok ini). `bacaKampanye` ("Per Kampanye") SENGAJA tidak difilter sumber
+  // sama sekali (docblock fungsi itu) — kampanye videoviews akan tampil di
+  // sana dengan biaya+tayangan terisi, gmv/roas '—' (jujur: kampanye
+  // awareness memang tidak punya GMV terpaut), bukan bug.
+  if (berkasTtamVideoViews.length > 0) {
+    await tx`
+      delete from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_manager_videoviews' and periode = ${periodeAwalBulan}::date`;
+    for (const b of berkasTtamVideoViews) {
+      for (const baris of pdt.ekstrakBarisTtamVideoViews(b.aoa, b.barisHeader)) {
+        await tx`
+          insert into pdt_fact_ads
+            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
+          values
+            (${clientPlatformId}, 'tt_ads_manager_videoviews', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
+             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, null, null, null,
+             null, 'upper')`;
       }
     }
   }
@@ -2670,6 +2713,7 @@ export async function reparsePdtBatch(
         berkasShopeeAmsProduk: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ams_produk'),
         berkasTtAdsProduct: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_product'),
         berkasTtAdsLive: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_live'),
+        berkasTtamVideoViews: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_manager_videoviews'),
         berkasTtProductAnalytics: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_product_analytics'),
         berkasShopeeKesehatan: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_kesehatan'),
         berkasShopeeChat: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_chat'),

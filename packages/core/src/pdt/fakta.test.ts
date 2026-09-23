@@ -22,6 +22,7 @@ import {
   ekstrakBarisTtAdsLive,
   ekstrakBarisTtAdsProduct,
   ekstrakBarisTtAffiliateVideo,
+  ekstrakBarisTtamVideoViews,
   ekstrakBarisTtLive,
   ekstrakBarisTtProductAnalytics,
   ekstrakBarisTtVideo,
@@ -246,6 +247,49 @@ describe('ekstrakBarisTtAdsLive', () => {
       'Tayangan LIVE 10 detik', 'Biaya per tayangan LIVE 10 detik', 'Pengikut saat LIVE', 'Mata uang',
     ];
     expect(ekstrakBarisTtAdsLive([headerAsli], 1)).toEqual([]);
+  });
+});
+
+// F-03 (M20 R9, videoviews-only) — header PERSIS sample asli pemilik
+// (Ultrasleep, `Ultrasleep_Video_views_TTAM.xlsx`, 2026-09-23).
+const HEADER_TTAM_VIDEOVIEWS = [
+  'Ad name', 'Primary status', 'Secondary status', 'Spend', 'CPM', 'Cost per result',
+  '6-second focused views', 'Result rate', '6-second focused views (paid views)',
+  'Focused view 6-second view rate (impression)', 'Impressions', 'Secondary source',
+  'Primary source', 'Attribution source', 'Currency',
+];
+
+describe('ekstrakBarisTtamVideoViews', () => {
+  it('memetakan satu baris asli (row 2 sample Ultrasleep) ke kampanyeId=Ad name/biaya=Spend/tayangan=Impressions', () => {
+    const aoa = [
+      HEADER_TTAM_VIDEOVIEWS,
+      ['Ad name2026-08-23 14:13:20', 'Paused', '', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815',
+        '2184', 'TikTok account', 'Your own content', '-', 'IDR'],
+    ];
+    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([
+      { kampanyeId: 'Ad name2026-08-23 14:13:20', biaya: 2665, tayangan: 2184 },
+    ]);
+  });
+
+  it('hanya kampanyeId/biaya/tayangan — nol kolom lain dipanen (CPM/6-second focused views/dst PERMANEN tidak ada consumer)', () => {
+    const aoa = [HEADER_TTAM_VIDEOVIEWS, ['Ad A', 'Active', '', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', 'x', 'y', '-', 'IDR']];
+    const [baris] = ekstrakBarisTtamVideoViews(aoa, 1);
+    expect(Object.keys(baris).sort()).toEqual(['biaya', 'kampanyeId', 'tayangan']);
+  });
+
+  it('baris dengan Ad name kosong dilewati', () => {
+    const aoa = [
+      HEADER_TTAM_VIDEOVIEWS,
+      ['', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+      ['Ad A', 'Active', '', '2665', '1220', '14.972', '178', '0.0815', '174', '0.0815', '2184', 'x', 'y', '-', 'IDR'],
+    ];
+    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toHaveLength(1);
+  });
+
+  it('Spend/Impressions kosong ⇒ biaya 0 / tayangan null (pola sama ekstrakBarisTtAdsLive)', () => {
+    const headerMinimal = ['Ad name'];
+    const aoa = [headerMinimal, ['Ad A']];
+    expect(ekstrakBarisTtamVideoViews(aoa, 1)).toEqual([{ kampanyeId: 'Ad A', biaya: 0, tayangan: null }]);
   });
 });
 
