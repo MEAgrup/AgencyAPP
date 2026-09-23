@@ -16,10 +16,14 @@
 # — baris di bawah ini nol efek pada perilaku gerbang, murni riwayat.
 m6a_section_d
 
-# d3_tutup_buku_pulihkan_komentar_jaga_transisi — migrasi jalur D-3 (sesi lain,
-# paralel dengan A2) yang belum di-back-port ke supabase/migrations/** pada
-# main. Dicatat sebagai baris Open A2-DRIFT, DECISIONS.md 2026-09-08 — BUKAN
-# milik tiket ini untuk diperbaiki. Hapus baris allowlist ini begitu berkasnya
-# muncul di main DAN baris A2-DRIFT ditutup, supaya kalau sesi lain
-# menambahkan drift lain dengan nama serupa, itu tetap tertangkap sebagai baru.
-d3_tutup_buku_pulihkan_komentar_jaga_transisi
+# hotfix_check_login_rate_limit_compat — ledger live TIDAK PERNAH lupa apply
+# lama walau fungsinya sudah di-DROP belakangan: baris ini menandai kapan
+# shim `check_login_rate_limit(text,int,int)` sempat diterapkan LANGSUNG ke
+# live (2026-09-14), sebelum `20261113010000_drop_check_login_rate_limit_shim.sql`
+# menghapus fungsinya untuk selamanya (diverifikasi live: nol baris `pg_proc`
+# bernama itu). Baris LEDGER tetap ada karena ledger append-only — bukan
+# fungsi yang masih hidup. Diverifikasi + ditutup DECISIONS.md 2026-09-17
+# baris "DRIFT-SISA-CHECK-LOGIN-RATE-LIMIT" ("🟢 DITUTUP 2026-09-17/18 ...
+# Repo↔live sekarang paritas fungsi PERSIS (nol sisa drift)") — nol tindakan
+# lanjutan diperlukan, murni riwayat ledger seperti m6a_section_d di atas.
+hotfix_check_login_rate_limit_compat
