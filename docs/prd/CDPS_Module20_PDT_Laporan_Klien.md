@@ -177,7 +177,7 @@ dan tanpa penyangkalan ia salah tergolong):
 | `tt_ads_manager_consideration` | `New consideration size` |
 | `tt_ads_manager_follows` | `Paid follows` **dan bukan** kolom funnel Shop |
 | `tt_ads_manager_showcase` | kolom funnel Shop (ATC / Initiate Checkout) |
-| `tt_ads_manager_videoviews` | `Video views` **dan** `CPM` |
+| `tt_ads_manager_videoviews` | ~~`Video views` **dan** `CPM`~~ **DIKOREKSI 2026-09-23** (`docs/DECISIONS.md` M20-R9-F-03-TTAM-VIDEOVIEWS): sample asli membuktikan berkas nyata nol kolom literal `'Video views'` — dipakai `'6-second focused views'` **dan** `'CPM'` |
 
 Belanja Ads Manager **tidak** boleh masuk perhitungan ROI GMV Max — kampanye ini
 dioptimasi ke jangkauan/checkout, bukan pesanan; mencampurnya membuat kampanye
@@ -362,7 +362,7 @@ jadi biaya menyimpannya nol dan ia jadi bukti riwayat.
 |---|---|---|
 | ~~`M20-URUTAN`~~ | ✅ diketok 2026-09-22: A → B → C → D → E → F → G | Yohan |
 | ~~`M20-M14-BEKU`~~ | ✅ diketok 2026-09-22: M14 **dibekukan** (bugfix kritis saja) sampai G | Yohan |
-| `M20-TTAM-SAMPLE` | ⏳ pemilik akan mengunggah 4 ekspor TikTok Ads Manager nyata; F-03/F-04/F-05 menunggu, F-01/F-02 tidak | Yohan / Head of Account |
+| `M20-TTAM-SAMPLE` | 🟡 SEBAGIAN 2026-09-23: 1 dari 4 ekspor (Video Views) diunggah dan diverifikasi — `tt_ads_manager_videoviews` SELESAI, signature dikoreksi dari dugaan literal di atas (bukan `'Video views'`, tapi `'6-second focused views'` — `docs/DECISIONS.md` M20-R9-F-03-TTAM-VIDEOVIEWS). Masih menunggu sample `consideration`/`follows`/`showcase`; F-03 sisanya/F-04/F-05 menunggu, F-01/F-02/F-03-videoviews tidak | Yohan / Head of Account |
 | ~~`M20-PORTAL-KOMPLAIN`~~ | ✅ diketok 2026-09-22: pintu komplain M15 apa adanya | Yohan |
 | ~~`M20-C01-LIVE`~~ | ✅ ditutup 2026-09-22 malam: migrasi C-01 diterapkan ke live (versi `20260922151204`), 186 tabel / 36 mesin terverifikasi; D-00 selesai | — |
 

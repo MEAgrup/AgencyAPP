@@ -2377,6 +2377,89 @@ describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_live → pdt_f
   });
 });
 
+// F-03 (M20 R9, videoviews-only, 2026-09-23) — `tt_ads_manager_videoviews` →
+// `pdt_fact_ads`, `tujuan = 'upper'` LITERAL. Header PERSIS sample asli
+// pemilik (Ultrasleep, `Ultrasleep_Video_views_TTAM.xlsx`) — lihat docblock
+// `ekstrakBarisTtamVideoViews`, `@cdps/core` `pdt/fakta.ts`.
+const HEADER_TTAM_VIDEOVIEWS = [
+  'Ad name', 'Primary status', 'Secondary status', 'Spend', 'CPM', 'Cost per result',
+  '6-second focused views', 'Result rate', '6-second focused views (paid views)',
+  'Focused view 6-second view rate (impression)', 'Impressions', 'Secondary source',
+  'Primary source', 'Attribution source', 'Currency',
+];
+
+function ttamVideoViewsBerkas(nama: string, baris: readonly [string, string, string][]): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TTAM_VIDEOVIEWS,
+    ...baris.map(([adName, spend, impressions]) => [
+      adName, 'Paused', '', spend, '1220', '14.972', '178', '0.0815', '174', '0.0815', impressions, 'x', 'y', '-', 'IDR',
+    ]),
+  ];
+  return { nama, sha256: 'sha-ttam-videoviews', bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_ads_manager_videoviews', ambiguous: false, matches: ['tt_ads_manager_videoviews'] };
+}
+
+describeDb('commitUploadBatch (F-03/M20 R9) — baris fakta tt_ads_manager_videoviews → pdt_fact_ads', () => {
+  it('satu baris per Ad name, sku_id/content_id/gmv/pesanan_sku/roas NULL, tujuan=upper', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttamVideoViewsBerkas('ttam-videoviews.xlsx', [['Ad name 1', '2665', '2184']]),
+    ];
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactAds(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      sumber: 'tt_ads_manager_videoviews', kampanye_id: 'Ad name 1', sku_id: null, content_id: null,
+      batch_id: persiapan.batchId, parser_versi: pdtCore.PDT_PARSER_VERSI, tayangan: 2184, klik: null,
+      pesanan_sku: null, gmv: null, roas: null, tipe_kampanye_sumber: null, tujuan: 'upper',
+    });
+    expect(Number(rows[0].biaya)).toBe(2665);
+  });
+
+  it('commit ULANG periode yang sama ⇒ replace-on-recommit, bukan menumpuk duplikat', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const pertama = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttamVideoViewsBerkas('ttam-videoviews.xlsx', [['Ad name 1', '2665', '2184']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, pertama, []);
+    expect((await loadFactAds(cpId)).filter((r) => r.sumber === 'tt_ads_manager_videoviews')).toHaveLength(1);
+
+    const kedua = [
+      ttVideoBerkasDenganPeriode('video-2.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttamVideoViewsBerkas('ttam-videoviews-revisi.xlsx', [['Ad name 1', '5000', '9000']]),
+    ];
+    const persiapanKedua = await commitUploadBatch(sql, ownerActor(), cpId, kedua, []);
+    const rows = (await loadFactAds(cpId)).filter((r) => r.sumber === 'tt_ads_manager_videoviews');
+    expect(rows).toHaveLength(1); // BUKAN 2
+    expect(rows[0].batch_id).toBe(persiapanKedua.batchId);
+    expect(Number(rows[0].biaya)).toBe(5000);
+  });
+
+  // `bacaIklanTiktok` (bagian "iklan"/GMV Max, dibaca `rakitLaporanTiktok`)
+  // TIDAK membaca sumber ini — `sumber in ('tt_ads_product', 'tt_ads_live')`
+  // eksplisit (allow-list, bukan deny-list), pola sama tes sibling
+  // "sumber shopee_ads_* TIDAK ikut terhitung" di bawah. Ini yang membuat F-02
+  // guardrail (`tujuan='upper'`) berlaku otomatis untuk ROAS Attainment GMV
+  // Max tanpa kode tambahan di sini.
+  it('bacaIklanTiktok (bagian "iklan"/GMV Max) TIDAK membaca sumber ini — allow-list, bukan deny-list', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttamVideoViewsBerkas('ttam-videoviews.xlsx', [['Ad name 1', '2665', '2184']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const hasil = await rakitLaporanTiktok(sql, cpId, '2026-07-01');
+    expect(hasil.iklan).toBeNull();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // commitUploadBatch (G2-01-KUADRAN-SKU langkah 1) — tt_product_analytics →
 // pdt_fact_sku_period, sisi TikTok untuk tabel yang sebelumnya hanya diisi

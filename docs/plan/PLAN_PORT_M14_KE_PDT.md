@@ -167,7 +167,7 @@ punya tepat satu penulis. **Tercapai** — E-01 s/d E-05 selesai.
 |---|---|
 | **F-01** | ✅ SELESAI — Modul parser `tt_shop_analytics_tokopedia` (tanda tangan kolom `baseline/detect.ts` `shop_tp`), penulis fakta ke `pdt_fact_shop_daily` dengan penanda kanal (`kanal` varchar, migrasi `20261203010000`), bagian laporan "Toko Tokopedia" (`render.ts::seksiTokopedia`). `prod_tp` sengaja **tidak** ikut. Terverifikasi terhadap sample asli pemilik (Ultrasleep) — struktur byte-identical dengan `tt_shop_analytics`; `docs/DECISIONS.md` M20-R8-F-01-TOKOPEDIA. |
 | **F-02** | ✅ SELESAI — Kolom `tujuan` (upper/lower funnel) di `pdt_fact_ads`, supaya guardrail "belanja Ads Manager tidak masuk ROI GMV Max" ditegakkan di query, bukan cuma di prosa. Migrasi `20261202010000`, ditegakkan di `recomputeAdsMetricEntriesPdt`; `docs/DECISIONS.md` M20-F02-PDT-FACT-ADS-TUJUAN. |
-| **F-03** | Empat modul parser TikTok Ads Manager, tanda tangan diambil apa adanya dari `report/detect.ts` `TTAM_TYPES` — **termasuk penyangkalan kolom funnel Shop pada `ttam_follows`**, tanpa itu ekspor Showcase salah tergolong. Diblokir `M20-TTAM-SAMPLE`. |
+| **F-03** | 🟡 SEBAGIAN — `tt_ads_manager_videoviews` ✅ SELESAI (2026-09-23), signature DIKOREKSI dari dugaan literal PRD/`report/detect.ts` setelah sample asli membuktikannya salah ('6-second focused views', bukan 'Video views' — `docs/DECISIONS.md` M20-R9-F-03-TTAM-VIDEOVIEWS). Tiga modul sisanya (`tt_ads_manager_consideration`/`follows`/`showcase`, **termasuk penyangkalan kolom funnel Shop pada `ttam_follows`**, tanpa itu ekspor Showcase salah tergolong) tetap diblokir `M20-TTAM-SAMPLE` — sample asli masing-masing belum ada. |
 | **F-04** | Bagian laporan `ads_manager` + pengisian `tahap.funnel` Awareness dan Add-to-Cart. |
 | **F-05** | Tes: pita "belum lengkap" pada bagian Tahap **hilang karena datanya ada**, bukan karena disembunyikan. |
 
@@ -203,11 +203,11 @@ laporan berjalan tenang.
 | `M20-URUTAN` | urutan gelombang | ✅ diketok 2026-09-22: A → B → C → D → E → F → G |
 | `M20-M14-BEKU` | apakah M14 dibekukan | ✅ diketok 2026-09-22: **dibekukan** (bugfix kritis saja) sampai G |
 | `M20-PORTAL-KOMPLAIN` | D-03 | ✅ diketok 2026-09-22: pakai pintu komplain M15 apa adanya |
-| `M20-TTAM-SAMPLE` | F-03/F-04/F-05 | ⏳ sample terunggah (`ultrasleep_tiktok_sellergmax.zip` + `Ultrasleep_Video_views_TTAM.xlsx`) — belum diverifikasi apakah keempat modul TTAM (`tt_ads_manager_consideration`/`follows`/`showcase`/`videoviews`) tercakup; investigasi berikutnya |
+| `M20-TTAM-SAMPLE` | F-03 sisa (consideration/follows/showcase)/F-04/F-05 | ⏳ **investigasi 2026-09-23 menutup SEBAGIAN:** dari dua kandidat di dalam zip (`[ads]-Live`/`[ads]-Product`), KEDUANYA ternyata GMV Max (Seller Center) — bukan TTAM, sudah ditangani `tt_ads_live`/`tt_ads_product`. Satu-satunya sample TTAM asli adalah `Ultrasleep_Video_views_TTAM.xlsx`, sudah dipakai membangun `tt_ads_manager_videoviews` (F-03 SEBAGIAN, `docs/DECISIONS.md` M20-R9-F-03-TTAM-VIDEOVIEWS). **Masih menunggu**: sample asli `tt_ads_manager_consideration`/`follows`/`showcase` — belum ada satu pun. |
 | ~~`M20-TOKOPEDIA-SAMPLE`~~ | F-01 | ✅ **DITUTUP 2026-09-23:** sample asli (Ultrasleep) diterima dan diverifikasi, F-01 SELESAI. `docs/DECISIONS.md` M20-R8-F-01-TOKOPEDIA. F-02 SELESAI sebelumnya, tidak terpengaruh. |
 | ~~`M20-C01-LIVE`~~ | D-00 | ✅ **DITUTUP 2026-09-22 malam:** migrasi `20261130010000` diterapkan ke live `CDPS SG` (versi live `20260922151204`), diverifikasi 186 tabel / 36 mesin / fungsi `jwt_owns_pdt_kiriman_am` ada. D-00 selesai. |
 
-Gelombang D sudah selesai dan Gelombang F kini punya F-01/F-02 SELESAI — satu-satunya blocker yang tersisa (`M20-TTAM-SAMPLE`) menyentuh F-03/F-04/F-05.
+Gelombang D sudah selesai dan Gelombang F kini punya F-01/F-02 SELESAI + F-03 SEBAGIAN (videoviews) — satu-satunya blocker yang tersisa (`M20-TTAM-SAMPLE`, kini hanya untuk consideration/follows/showcase) menyentuh sisa F-03/F-04/F-05.
 
 ---
 

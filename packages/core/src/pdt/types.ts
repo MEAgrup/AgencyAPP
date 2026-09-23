@@ -43,6 +43,12 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  *       pernah dipanen sama sekali (nol modul cocok). Batch lama yang sudah
  *       membawa berkas itu baru mendapat baris faktanya kalau angka ini naik
  *       — syarat kenaikan di paragraf atas.
+ *   6 — F-03 / M20-R9, videoviews-only (`docs/DECISIONS.md` 2026-09-23): modul
+ *       baru `tt_ads_manager_videoviews` mulai menulis `pdt_fact_ads`
+ *       (`tujuan='upper'`) dari ekspor TikTok Ads Manager Video Views yang
+ *       sebelumnya tidak dikenali modul apa pun (nol modul cocok). Sama pola
+ *       versi 5 — batch lama yang sudah membawa berkas ini butuh angka ini
+ *       naik supaya `planPdtReparseTick` memprosesnya ulang.
  *
  * Kenaikan ini BUKAN kosmetik: `planPdtReparseTick` memilih batch lewat
  * `parser_versi < PDT_PARSER_VERSI`, jadi selama angkanya tetap 1 predikat
@@ -51,7 +57,7 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  * backlog begitu ia naik"). Menambah writer tanpa menaikkan angka ini =
  * fitur yang hanya berlaku untuk batch yang diunggah sesudahnya.
  */
-export const PDT_PARSER_VERSI = 5;
+export const PDT_PARSER_VERSI = 6;
 
 /**
  * Satu grup AND/NOT: seluruh `must` harus muncul (cocok substring, tanpa

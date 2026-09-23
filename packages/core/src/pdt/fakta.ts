@@ -503,6 +503,64 @@ export function ekstrakBarisTtAdsLive(
 }
 
 /**
+ * Satu baris `pdt_fact_ads` mentah dari `tt_ads_manager_videoviews`, SEBELUM
+ * `client_platform_id`/`batch_id`/`periode`/`parser_versi`. `gmv`/`pesananSku`/
+ * `roas` PERMANEN `null` — berkas ini adalah ekspor Ads Manager upper-funnel
+ * (optimasi video views, bukan pesanan), nol kolom atribusi penjualan sama
+ * sekali (lihat docblock modul, `modules.ts`).
+ */
+export interface PdtBarisAdsTtamVideoViews {
+  kampanyeId: string;
+  biaya: number;
+  tayangan: number | null;
+}
+
+/**
+ * Ekstrak seluruh baris data `tt_ads_manager_videoviews` (Rule 8 whitelist
+ * `modules.ts` — HANYA kolom yang diekstrak di sini boleh masuk
+ * `kolomDipanen`). Diverifikasi terhadap sample asli pemilik (Ultrasleep,
+ * `Ultrasleep_Video_views_TTAM.xlsx`, 2026-09-23, F-03/M20-TTAM-SAMPLE):
+ * header persis `['Ad name', 'Primary status', 'Secondary status', 'Spend',
+ * 'CPM', 'Cost per result', '6-second focused views', 'Result rate',
+ * '6-second focused views (paid views)',
+ * 'Focused view 6-second view rate (impression)', 'Impressions',
+ * 'Secondary source', 'Primary source', 'Attribution source', 'Currency']`,
+ * baris 1 = header (`barisHeaderHint`), 31 baris data.
+ *
+ * `kampanyeId` = kolom `Ad name` APA ADANYA (teks bebas — berkas ini
+ * granularitas per-Ad, NOL kolom ID kampanye numerik) — preseden
+ * `shopee_ads_cpc` (`docs/DECISIONS.md` 2026-09-14 modul KEENAM). `biaya` dari
+ * `Spend`, `tayangan` dari `Impressions` — dua-duanya angka polos (BUKAN
+ * format "Rp"/ribuan Seller Center) di sample asli, tapi `parsePdtAngka(...,
+ * true)` (konvensi desimal Ads Manager) dipakai tetap, sama pola
+ * `ekstrakBarisTtAdsProduct`/`ekstrakBarisTtAdsLive`, supaya berkas berformat
+ * teks (mis. diunduh ulang lewat UI berbeda) tetap terbaca benar. Baris
+ * ber-`Ad name` kosong dilewati.
+ */
+export function ekstrakBarisTtamVideoViews(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+): PdtBarisAdsTtamVideoViews[] {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
+  const iAdName = idx('Ad name');
+  const iSpend = idx('Spend');
+  const iImpressions = idx('Impressions');
+
+  const hasil: PdtBarisAdsTtamVideoViews[] = [];
+  for (const row of aoa.slice(barisHeader)) {
+    const kampanyeId = iAdName === -1 ? '' : String(row?.[iAdName] ?? '').trim();
+    if (kampanyeId === '') continue;
+    hasil.push({
+      kampanyeId,
+      biaya: iSpend === -1 ? 0 : parsePdtAngka(row?.[iSpend], true),
+      tayangan: iImpressions === -1 ? null : parsePdtAngka(row?.[iImpressions], true),
+    });
+  }
+  return hasil;
+}
+
+/**
  * Satu baris `pdt_fact_content` mentah dari `tt_video`, SEBELUM
  * `client_platform_id`/`batch_id`/`periode`/`parser_versi` (pemanggil yang
  * melengkapi). `waktuPosting`/`skuId` SENGAJA tidak ada field-nya di sini —
