@@ -9,8 +9,8 @@
 // tabel kalimat BI-nya, dan merakit kalimatnya di server adalah yang mencegah
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
-import type { interview as ivcore, pdt as pdtCore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyactivity, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, pdt, performance, plan, plangate, portal, productexchange, recap, renewal, report, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
+import type { interview as ivcore, pdt as pdtCore } from '@cdps/core';
+import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyactivity, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, pdt, performance, plan, plangate, portal, productexchange, recap, renewal, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -6910,258 +6910,6 @@ export function risetAwalBaselineToWire(v: risetAwal.BaselineView): RisetAwalBas
 }
 
 // ---------------------------------------------------------------------------
-// C1 — Mesin Laporan Klien (report.ts). snake_case wire; `null` explicit, never
-// omitempty; payload/kelengkapan_file are opaque jsonb passed through verbatim
-// (the renderer, not the FE, reads their shape).
-// ---------------------------------------------------------------------------
-export interface ClientReportSummaryWire {
-  id: number;
-  client_id: string;
-  client_platform_id: number;
-  platform: string;
-  periode_tipe: string;
-  periode_mulai: string;
-  periode_akhir: string;
-  hari_periode: number;
-  rentang_dari_berkas: boolean;
-  skor: number | null;
-  skor_label: string | null;
-  gmv_net: number;
-  gmv_kotor: number;
-  gmv_runrate_bulanan: number;
-  benchmark_versi: number | null;
-  benchmark_versi_shopee: number | null;
-  engine_versi: string;
-  created_at: string;
-  created_by: string;
-}
-
-export interface ClientReportBerkasWire {
-  id: number;
-  nama_berkas: string;
-  sha256: string;
-  ukuran_bytes: number;
-  tipe_terdeteksi: string | null;
-  tipe_override: string | null;
-  jumlah_baris: number | null;
-  periode: unknown;
-}
-
-export interface ClientReportDetailWire extends ClientReportSummaryWire {
-  payload: unknown;
-  kelengkapan_file: unknown;
-  berkas: ClientReportBerkasWire[];
-  publikasi: ReportPublikasiWire;
-}
-
-export function clientReportSummaryToWire(r: report.ReportSummary): ClientReportSummaryWire {
-  return {
-    id: r.id,
-    client_id: r.clientId,
-    client_platform_id: r.clientPlatformId,
-    platform: r.platform,
-    periode_tipe: r.periodeTipe,
-    periode_mulai: r.periodeMulai,
-    periode_akhir: r.periodeAkhir,
-    hari_periode: r.hariPeriode,
-    rentang_dari_berkas: r.rentangDariBerkas,
-    skor: r.skor,
-    skor_label: r.skorLabel,
-    gmv_net: r.gmvNet,
-    gmv_kotor: r.gmvKotor,
-    gmv_runrate_bulanan: r.gmvRunrateBulanan,
-    benchmark_versi: r.benchmarkVersi,
-    benchmark_versi_shopee: r.benchmarkVersiShopee,
-    engine_versi: r.engineVersi,
-    // `payloadSchema` (domain) is deliberately NOT surfaced here — `renderReport`
-    // dispatches on it server-side before wire serialisation ever runs, and
-    // adding it to the wire DTO with no FE consumer would fail shape-parity
-    // (O43 c: no wire key without an FE type declaring it). Add it here only
-    // alongside real FE-side use of it.
-    created_at: r.createdAt,
-    created_by: r.createdBy,
-  };
-}
-
-export function clientReportBerkasToWire(b: report.ReportBerkas): ClientReportBerkasWire {
-  return {
-    id: b.id,
-    nama_berkas: b.namaBerkas,
-    sha256: b.sha256,
-    ukuran_bytes: b.ukuranBytes,
-    tipe_terdeteksi: b.tipeTerdeteksi,
-    tipe_override: b.tipeOverride,
-    jumlah_baris: b.jumlahBaris,
-    periode: b.periode ?? null,
-  };
-}
-
-export function clientReportDetailToWire(d: report.ReportDetail): ClientReportDetailWire {
-  return {
-    ...clientReportSummaryToWire(d),
-    payload: d.payload ?? null,
-    kelengkapan_file: d.kelengkapanFile ?? null,
-    berkas: d.berkas.map(clientReportBerkasToWire),
-    publikasi: reportPublikasiToWire(d.publikasi),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Insight yang bisa disunting + publikasi (migrasi 20260908010000)
-// ---------------------------------------------------------------------------
-/**
- * The narrative, in the SAME snake_case shape the engine payload uses
- * (`payload.insight`). Deliberately not a new vocabulary: the editor loads a
- * revision, the renderer consumes a revision, and the engine produces one — if
- * the wire shape differed, one of those three would need a translation layer
- * that could disagree with the other two.
- */
-/** One recommendation card. Named, not inline: shape-parity follows references
- *  on both sides, and an inline object is a shape it cannot check. */
-export interface ReportRekomendasiWire {
-  judul: string;
-  target: string;
-  dampak: string;
-  timeline: string;
-}
-
-/** One leading indicator for the outlook block. */
-export interface ReportIndikatorWire {
-  nama: string;
-  target: string;
-}
-
-/** R3 — one paragraph of stage prose (`client_report_insight.tahap_narasi`). */
-export interface ReportTahapNarasiWire {
-  tahap: string;
-  judul: string;
-  teks: string;
-}
-
-export interface ReportInsightWire {
-  ringkasan: string;
-  poin: string[];
-  rekomendasi_tinggi: ReportRekomendasiWire[];
-  rekomendasi_sedang: ReportRekomendasiWire[];
-  outlook: string;
-  indikator: ReportIndikatorWire[];
-  tahap_narasi: ReportTahapNarasiWire[];
-}
-
-export interface ReportInsightRevisiWire {
-  revisi: number;
-  sumber: string;
-  insight: ReportInsightWire;
-  catatan_revisi: string | null;
-  created_at: string;
-  created_by: string;
-}
-
-export interface ReportPublikasiWire {
-  status: string;
-  insight_revisi: number | null;
-  diterbitkan_pada: string | null;
-  diterbitkan_oleh: string | null;
-  dicabut_pada: string | null;
-  dicabut_oleh: string | null;
-  alasan_cabut: string | null;
-}
-
-export interface ReportInsightBundleWire {
-  report_id: number;
-  publikasi: ReportPublikasiWire;
-  terbaru: ReportInsightRevisiWire;
-  mesin: ReportInsightRevisiWire;
-  terpaku: ReportInsightRevisiWire | null;
-  ada_perubahan_belum_terbit: boolean;
-}
-
-function reportInsightToWire(i: report.ReportInsightRevisi['insight']): ReportInsightWire {
-  return {
-    ringkasan: i.ringkasan,
-    poin: [...i.poin],
-    rekomendasi_tinggi: i.rekomendasi_tinggi.map((r) => ({ ...r })),
-    rekomendasi_sedang: i.rekomendasi_sedang.map((r) => ({ ...r })),
-    outlook: i.outlook,
-    indikator: i.indikator.map((m) => ({ ...m })),
-    tahap_narasi: i.tahap_narasi.map((n) => ({ ...n })),
-  };
-}
-
-export function reportInsightRevisiToWire(r: report.ReportInsightRevisi): ReportInsightRevisiWire {
-  return {
-    revisi: r.revisi,
-    sumber: r.sumber,
-    insight: reportInsightToWire(r.insight),
-    catatan_revisi: r.catatanRevisi,
-    created_at: r.createdAt,
-    created_by: r.createdBy,
-  };
-}
-
-export function reportPublikasiToWire(p: report.ReportPublikasi): ReportPublikasiWire {
-  return {
-    status: p.status,
-    insight_revisi: p.insightRevisi,
-    diterbitkan_pada: p.diterbitkanPada,
-    diterbitkan_oleh: p.diterbitkanOleh,
-    dicabut_pada: p.dicabutPada,
-    dicabut_oleh: p.dicabutOleh,
-    alasan_cabut: p.alasanCabut,
-  };
-}
-
-export function reportInsightBundleToWire(b: report.ReportInsightBundle): ReportInsightBundleWire {
-  return {
-    report_id: b.reportId,
-    publikasi: reportPublikasiToWire(b.publikasi),
-    terbaru: reportInsightRevisiToWire(b.terbaru),
-    mesin: reportInsightRevisiToWire(b.mesin),
-    terpaku: b.terpaku === null ? null : reportInsightRevisiToWire(b.terpaku),
-    ada_perubahan_belum_terbit: b.adaPerubahanBelumTerbit,
-  };
-}
-
-/**
- * The inbound half — the editor's PUT body.
- *
- * Typed as the contract the FE editor is written against (shape-parity compares
- * it to `report.ts::ReportInsight`, so a seventh field or a renamed one fails a
- * test). Every field is OPTIONAL because absence is a real case the server must
- * answer with a `[...]` message, not a TypeError.
- *
- * The types here are documentation, not a runtime guarantee — the same is true
- * of `ProposalLineBody`. Judgement stays in `report.normalizeInsightDraft`
- * (core), which owns every limit and every Bahasa-Indonesia message and treats
- * its input as `unknown`, because an HTTP body can be anything regardless of
- * what TypeScript believes.
- */
-export interface InsightDraftBody {
-  ringkasan?: string;
-  poin?: string[];
-  rekomendasi_tinggi?: ReportRekomendasiWire[];
-  rekomendasi_sedang?: ReportRekomendasiWire[];
-  outlook?: string;
-  indikator?: ReportIndikatorWire[];
-  tahap_narasi?: ReportTahapNarasiWire[];
-}
-
-export function toInsightDraft(b: InsightDraftBody): coreReport.InsightDraft {
-  // Passed through UNTOUCHED, including empty strings and absent keys: core
-  // decides what is missing and says so in Bahasa Indonesia. Defaulting here
-  // would turn "the AM left it blank" into "the AM wrote an empty sentence".
-  return {
-    ringkasan: b.ringkasan,
-    poin: b.poin,
-    rekomendasi_tinggi: b.rekomendasi_tinggi,
-    rekomendasi_sedang: b.rekomendasi_sedang,
-    outlook: b.outlook,
-    indikator: b.indikator,
-    tahap_narasi: b.tahap_narasi,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Client Portal read-model (M15-C2) — the ALLOW-LIST surfaces
 //
 // These four are the narrowest wire shapes in this file, and that is the point:
@@ -7803,29 +7551,6 @@ export function trackerRowToWire(t: skuscreener.TrackerRow): TrackerRowWire {
     delta_ctr_pct: t.deltaCtrPct, delta_cr_pct: t.deltaCrPct, delta_metric_pct: t.deltaMetricPct,
     verdict: t.verdict, budget_decision: t.budgetDecision, notes: t.notes,
     created_at: t.createdAt, created_by: t.createdBy, updated_at: t.updatedAt,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// SH-06 — the exclude-campaign picker on the Shopee report form.
-// ---------------------------------------------------------------------------
-export interface ShopeeAdsCampaignOptionWire {
-  id: string;
-  objective: string;
-  tipe_iklan: string;
-  start_date: string;
-  end_date: string;
-  budget: string;
-}
-
-export function shopeeAdsCampaignOptionToWire(c: report.ShopeeAdsCampaignOption): ShopeeAdsCampaignOptionWire {
-  return {
-    id: c.id,
-    objective: c.objective,
-    tipe_iklan: c.tipeIklan,
-    start_date: c.startDate,
-    end_date: c.endDate,
-    budget: c.budget,
   };
 }
 
@@ -9832,8 +9557,9 @@ function pdtLaporanTahapToWire(t: pdtCore.PdtLaporanTahap | null): PdtLaporanTah
 
 /**
  * G2-01-INSIGHT-EDIT — bentuk body draf sunting AM (`POST .../laporan/kirim`),
- * field `insight` opsional. Pola sama `InsightDraftBody`/`toInsightDraft`
- * (mesin lama): diteruskan UTUH termasuk string kosong/kunci hilang — core
+ * field `insight` opsional. Pola sama `InsightDraftBody`/`toInsightDraft` milik
+ * M14 (dicabut Gelombang G, lihat `docs/DECISIONS.md`): diteruskan UTUH
+ * termasuk string kosong/kunci hilang — core
  * (`pdt.normalizePdtInsightDraft`) yang memutuskan apa yang kurang dan
  * mengucapkannya dalam Bahasa Indonesia, bukan lapisan ini. Tidak ikut
  * `PdtLaporanInsightWire` (bentuk RESPONS, field wajib) — ini bentuk
