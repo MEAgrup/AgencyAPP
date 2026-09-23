@@ -217,14 +217,15 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(body.afiliasi).toEqual({
       total_kreator: 1, produktif: 1, gmv: 200_000, pesanan: 5, aov: 40_000, jumlah_live: 2, jumlah_video: 3,
     });
-    // TikTok tahap — tahap_fokus belum diset ⇒ fokus null. Impresi/ATC SELALU null dengan catatan
-    // (ttam belum dibangun); klik funnel null (produk_diklik tidak diisi fixture); reuse langsung
+    // TikTok tahap — tahap_fokus belum diset ⇒ fokus null. Impresi PERMANEN null dengan catatan
+    // (gap skema toko, F-04 tidak menutupnya); atc null (nol baris tt_ads_manager_showcase periode
+    // ini di fixture); klik funnel null (produk_diklik tidak diisi fixture); reuse langsung
     // gmv/roi/aff_total/aff_produktif/konten dari kpi/iklan/afiliasi/video yang sudah dibangun di atas.
     expect(body.tahap.fokus).toBeNull();
     const funnelByKode = Object.fromEntries(body.tahap.funnel.map((f: { kode: string }) => [f.kode, f]));
     expect(funnelByKode.impresi).toEqual({ kode: 'impresi', label: 'Impresi produk', nilai: null, lolos: null, lolos_dari: null, catatan: 'kolom impresi toko belum ada di skema PDT saat ini' });
     expect(funnelByKode.klik.nilai).toBeNull();
-    expect(funnelByKode.atc.catatan).toBe('hanya terbaca dari export Ads Manager Showcase — belum dibangun');
+    expect(funnelByKode.atc.catatan).toBe('tidak ada di export Ads Manager Showcase periode ini');
     expect(funnelByKode.pengunjung.nilai).toBe(2_000);
     expect(funnelByKode.pesanan.nilai).toBe(40);
     const blokByKode = Object.fromEntries(body.tahap.blok.map((b: { kode: string }) => [b.kode, b]));

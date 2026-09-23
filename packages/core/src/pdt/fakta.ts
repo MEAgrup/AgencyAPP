@@ -558,11 +558,18 @@ const jumlahkanNullable = (a: number | null, b: number | null): number | null =>
  * di SELURUH varian videoviews terverifikasi (beda dari tiga modul TTAM lain
  * di bawah) — `klik` karena itu tidak ada field-nya sama sekali di sini,
  * bukan lupa (penulis `pdt.ts` mengirim `null` literal).
+ *
+ * `videoViews` (F-04, M20-R9-F-04-TAHAP-FUNNEL) — hasil optimasi video views
+ * itu sendiri, TIGA varian kolom sama seperti deteksi (`'Video views'`/`'6-
+ * second focused views'`/`'Tayangan video'`) — konsumen: `report.tahap`
+ * `vv_views` DAN `vv_per1k` (biaya per 1.000 views, turunan `biaya`/
+ * `videoViews`, bukan kolom sendiri).
  */
 export interface PdtBarisAdsTtamVideoViews {
   kampanyeId: string;
   biaya: number;
   tayangan: number | null;
+  videoViews: number | null;
 }
 
 /**
@@ -580,6 +587,11 @@ export interface PdtBarisAdsTtamVideoViews {
  *  - ID (Lano Batik): header diterjemahkan (`'Nama Iklan'`/`'Belanja'`/
  *    `'Impresi'`/`'Tayangan video'`), TAPI `'CPM'` tetap literal Inggris di
  *    ekspor Indonesia juga (dikonfirmasi, bukan ditebak).
+ *
+ * `videoViews` DIPANEN sejak F-04 (M20-R9-F-04-TAHAP-FUNNEL) dari kolom metrik
+ * inti yang SAMA yang dipakai deteksi tiga varian di atas — konsumen:
+ * `report.tahap` `vv_views`/`vv_per1k`. Sebelum F-04 kolom ini SENGAJA tidak
+ * dipanen ("PERMANEN tidak ada consumer") — keliru: F-04 memberinya consumer.
  *
  * `kampanyeId` dari `Ad name` (EN) atau `Nama Iklan` (ID) APA ADANYA (teks
  * bebas — berkas ini granularitas per-Ad, NOL kolom ID kampanye numerik) —
@@ -607,6 +619,7 @@ export function ekstrakBarisTtamVideoViews(
   const iAdName = idxAlias('Ad name', 'Nama Iklan');
   const iSpend = idxAlias('Spend', 'Belanja');
   const iImpressions = idxAlias('Impressions', 'Impresi');
+  const iVideoViews = idxAlias('Video views', '6-second focused views', 'Tayangan video');
 
   const mentah: PdtBarisAdsTtamVideoViews[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -616,12 +629,14 @@ export function ekstrakBarisTtamVideoViews(
       kampanyeId,
       biaya: iSpend === -1 ? 0 : parsePdtAngka(row?.[iSpend], true),
       tayangan: iImpressions === -1 ? null : parsePdtAngka(row?.[iImpressions], true),
+      videoViews: iVideoViews === -1 ? null : parsePdtAngka(row?.[iVideoViews], true),
     });
   }
   return gabungkanBarisTtam(mentah, (a, b) => ({
     kampanyeId: a.kampanyeId,
     biaya: a.biaya + b.biaya,
     tayangan: jumlahkanNullable(a.tayangan, b.tayangan),
+    videoViews: jumlahkanNullable(a.videoViews, b.videoViews),
   }));
 }
 
@@ -632,12 +647,20 @@ export function ekstrakBarisTtamVideoViews(
  * (destination)` dengan skema kolom BYTE-IDENTIK (beda dari `videoviews` di
  * atas yang nol kolom klik). `gmv`/`pesananSku`/`roas` PERMANEN `null` — sama
  * alasan `videoviews`, ketiganya upper-funnel, nol kolom atribusi penjualan.
+ *
+ * `hasil` (F-04, M20-R9-F-04-TAHAP-FUNNEL) — metrik OPTIMASI spesifik modul,
+ * beda kolom sumber per pemanggil (lihat parameter `kolomHasil` di bawah):
+ * `null` untuk `consideration` (nol konsumen report untuk `'New consideration
+ * size'`), `'Paid follows'` untuk `follows` (konsumen `report.tahap`
+ * `fol_follows`), `'Adds to cart (Shop)'` untuk `showcase` (konsumen
+ * `sc_atc` DAN funnel puncak langkah `atc`).
  */
 export interface PdtBarisAdsTtamUpperFunnel {
   kampanyeId: string;
   biaya: number;
   tayangan: number | null;
   klik: number | null;
+  hasil: number | null;
 }
 
 /**
@@ -648,10 +671,14 @@ export interface PdtBarisAdsTtamUpperFunnel {
  * ketiganya — bukan asumsi). `Ad name`/`Nama Iklan` bilingual TIDAK
  * dikonfirmasi untuk tiga tipe ini (beda dari `videoviews`, satu-satunya yang
  * punya bukti sample Indonesia) — EN saja, sesuai sample yang ada.
+ *
+ * `kolomHasil` (F-04) — nama kolom sumber metrik `hasil`, `null` bila
+ * pemanggil (`consideration`) sengaja tidak memanennya.
  */
 function ekstrakBarisTtamUpperFunnelBersama(
   aoa: readonly (readonly unknown[])[],
   barisHeader: number,
+  kolomHasil: string | null,
 ): PdtBarisAdsTtamUpperFunnel[] {
   const header = aoa[barisHeader - 1] ?? [];
   const idx = (nama: string): number => header.findIndex((c) => norm(c) === norm(nama));
@@ -659,6 +686,7 @@ function ekstrakBarisTtamUpperFunnelBersama(
   const iSpend = idx('Spend');
   const iImpressions = idx('Impressions');
   const iClicks = idx('Clicks (destination)');
+  const iHasil = kolomHasil == null ? -1 : idx(kolomHasil);
 
   const mentah: PdtBarisAdsTtamUpperFunnel[] = [];
   for (const row of aoa.slice(barisHeader)) {
@@ -669,6 +697,7 @@ function ekstrakBarisTtamUpperFunnelBersama(
       biaya: iSpend === -1 ? 0 : parsePdtAngka(row?.[iSpend], true),
       tayangan: iImpressions === -1 ? null : parsePdtAngka(row?.[iImpressions], true),
       klik: iClicks === -1 ? null : parsePdtAngka(row?.[iClicks], true),
+      hasil: iHasil === -1 ? null : parsePdtAngka(row?.[iHasil], true),
     });
   }
   return gabungkanBarisTtam(mentah, (a, b) => ({
@@ -676,6 +705,7 @@ function ekstrakBarisTtamUpperFunnelBersama(
     biaya: a.biaya + b.biaya,
     tayangan: jumlahkanNullable(a.tayangan, b.tayangan),
     klik: jumlahkanNullable(a.klik, b.klik),
+    hasil: jumlahkanNullable(a.hasil, b.hasil),
   }));
 }
 
@@ -689,14 +719,16 @@ function ekstrakBarisTtamUpperFunnelBersama(
  * 'Clicks (destination)', 'Paid likes', 'Paid shares', 'Paid comments', 'Paid
  * follows', 'Secondary source', 'Primary source', 'Attribution source',
  * 'Currency']`. `'New consideration size'`/`'6-second focused views'` dkk.
- * SENGAJA tidak dipanen — `pdt_fact_ads` tidak punya kolom untuk metrik
- * spesifik consideration (sama pola `videoviews`).
+ * SENGAJA tidak dipanen — `report.tahap` tidak punya field untuk metrik
+ * spesifik consideration ("New consideration size" bukan angka yang
+ * ditampilkan), jadi `hasil` PERMANEN `null` untuk modul ini (`kolomHasil:
+ * null`, beda dari `follows`/`showcase` di bawah).
  */
 export function ekstrakBarisTtamConsideration(
   aoa: readonly (readonly unknown[])[],
   barisHeader: number,
 ): PdtBarisAdsTtamUpperFunnel[] {
-  return ekstrakBarisTtamUpperFunnelBersama(aoa, barisHeader);
+  return ekstrakBarisTtamUpperFunnelBersama(aoa, barisHeader, null);
 }
 
 /**
@@ -707,13 +739,15 @@ export function ekstrakBarisTtamConsideration(
  * ..., 'Clicks (destination)', 'Paid follows', ...]`), Cottonella menambah
  * `'Reach'`/`'Paid profile visits'`/dst. yang tidak dipanen (bukan bagian
  * `kolomDipanen`, sama pola variasi kolom-per-akun `showcase`/`videoviews`).
- * `'Paid follows'` sendiri SENGAJA tidak dipanen — tidak ada kolom skema.
+ * `'Paid follows'` DIPANEN sejak F-04 (M20-R9-F-04-TAHAP-FUNNEL) sebagai
+ * `hasil` — konsumen `report.tahap` `fol_follows`/`fol_cost` (turunan
+ * `biaya`/`hasil`, bukan kolom sendiri).
  */
 export function ekstrakBarisTtamFollows(
   aoa: readonly (readonly unknown[])[],
   barisHeader: number,
 ): PdtBarisAdsTtamUpperFunnel[] {
-  return ekstrakBarisTtamUpperFunnelBersama(aoa, barisHeader);
+  return ekstrakBarisTtamUpperFunnelBersama(aoa, barisHeader, 'Paid follows');
 }
 
 /**
@@ -724,14 +758,18 @@ export function ekstrakBarisTtamFollows(
  * page views (Shop)', 'Adds to cart (Shop)', 'Add to cart value (Shop)',
  * 'Checkouts initiated (Shop)', 'Checkout initiation value (Shop)', ...]`),
  * Cottonella menambah `'Reach'`/`'CTR (destination)'` yang tidak dipanen.
- * Kolom funnel Shop (`Adds to cart`/`Checkouts initiated`/dst.) SENGAJA tidak
- * dipanen — tidak ada kolom skema `pdt_fact_ads` untuk metrik funnel Shop.
+ * `'Adds to cart (Shop)'` DIPANEN sejak F-04 (M20-R9-F-04-TAHAP-FUNNEL)
+ * sebagai `hasil` — konsumen `report.tahap` `sc_atc`/`sc_cost_atc` (turunan)
+ * DAN funnel puncak langkah `atc`, satu-satunya langkah funnel yang benar-
+ * benar bersumber dari Ads Manager. `'Checkouts initiated (Shop)'` (anggota
+ * `anyOf` tanda tangan) TETAP tidak dipanen — "add to cart", bukan
+ * "checkout", yang diminta report.
  */
 export function ekstrakBarisTtamShowcase(
   aoa: readonly (readonly unknown[])[],
   barisHeader: number,
 ): PdtBarisAdsTtamUpperFunnel[] {
-  return ekstrakBarisTtamUpperFunnelBersama(aoa, barisHeader);
+  return ekstrakBarisTtamUpperFunnelBersama(aoa, barisHeader, 'Adds to cart (Shop)');
 }
 
 /**

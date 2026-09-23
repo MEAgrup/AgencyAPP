@@ -168,11 +168,23 @@ punya tepat satu penulis. **Tercapai** — E-01 s/d E-05 selesai.
 | **F-01** | ✅ SELESAI — Modul parser `tt_shop_analytics_tokopedia` (tanda tangan kolom `baseline/detect.ts` `shop_tp`), penulis fakta ke `pdt_fact_shop_daily` dengan penanda kanal (`kanal` varchar, migrasi `20261203010000`), bagian laporan "Toko Tokopedia" (`render.ts::seksiTokopedia`). `prod_tp` sengaja **tidak** ikut. Terverifikasi terhadap sample asli pemilik (Ultrasleep) — struktur byte-identical dengan `tt_shop_analytics`; `docs/DECISIONS.md` M20-R8-F-01-TOKOPEDIA. |
 | **F-02** | ✅ SELESAI — Kolom `tujuan` (upper/lower funnel) di `pdt_fact_ads`, supaya guardrail "belanja Ads Manager tidak masuk ROI GMV Max" ditegakkan di query, bukan cuma di prosa. Migrasi `20261202010000`, ditegakkan di `recomputeAdsMetricEntriesPdt`; `docs/DECISIONS.md` M20-F02-PDT-FACT-ADS-TUJUAN. |
 | **F-03** | ✅ SELESAI (2026-09-23) — KEEMPAT modul parser TTAM dibangun: `tt_ads_manager_videoviews` (signature DIKOREKSI KEDUA KALINYA jadi `anyOf` tiga varian EN/EN/ID sekaligus, setelah sample tambahan membuktikan '6-second focused views' hanya SATU dari tiga varian nyata), `tt_ads_manager_consideration` (anchor `'New consideration size'`), `tt_ads_manager_follows` (anchor `'Paid follows'` + `mustNot` terhadap consideration), `tt_ads_manager_showcase` (anchor `anyOf` kolom funnel Shop). Dua kuirk struktural baru ditemukan+ditutup di SEMUA empat modul sekaligus: baris "Total of N results"/"Total N hasil" sintetis (difilter) dan `Ad name` tidak unik per baris (digabung-jumlah, mencegah pelanggaran `uq_pdt_fact_ads`) — `docs/DECISIONS.md` M20-R9-F-03-EMPAT-TIPE. |
-| **F-04** | Bagian laporan `ads_manager` + pengisian `tahap.funnel` Awareness dan Add-to-Cart. |
-| **F-05** | Tes: pita "belum lengkap" pada bagian Tahap **hilang karena datanya ada**, bukan karena disembunyikan. |
+| **F-04** | ✅ SELESAI (2026-09-23) — kolom `pdt_fact_ads.hasil` (video views/paid follows/add-to-cart, migrasi `20261207010000`) + `vv_impresi`/`vv_views`/`vv_cpm`/`vv_per1k`/`fol_follows`/`fol_cost`/`sc_atc`/`sc_cost_atc` dan funnel puncak langkah `atc` semuanya terisi dari KEEMPAT modul TTAM (bukan lagi hardcode `null`). Sekalian menutup bug F-03: `sc_impresi`/`sc_klik` DULU salah sumber (`tt_ads_product`/`tt_ads_live`, GMV Max — bukan Ads Manager), dikoreksi ke `tt_ads_manager_showcase` yang benar. `docs/DECISIONS.md` M20-R9-F-04-TAHAP-FUNNEL. |
+| **F-05** | ✅ SELESAI (2026-09-23, digabung ke F-04) — tes end-to-end (`laporan.test.ts`/`pdt.test.ts`/`route.test.ts`) mengunci: pita "belum lengkap" hilang untuk `atc` begitu `tt_ads_manager_showcase` terisi; `bangunLaporanKelengkapan` tidak lagi menuduh "Ads Manager belum punya modul PDT" untuk rung yang sudah terisi atau yang penyebabnya bukan Ads Manager (`impresi`). |
 
-**Kriteria keluar:** blok `kelengkapan` untuk bagian Tahap berbunyi `lengkap:
-true` pada satu toko nyata yang membawa keempat ekspor Ads Manager.
+**Kriteria keluar (DIKOREKSI 2026-09-23 — lihat `docs/DECISIONS.md`
+M20-R9-F-04-TAHAP-FUNNEL):** kriteria asli ("blok `kelengkapan` untuk bagian
+Tahap berbunyi `lengkap: true` pada satu toko nyata yang membawa keempat
+ekspor Ads Manager") **tidak bisa tercapai secara literal** — rung `impresi`
+("Impresi produk (toko)") PERMANEN `null` (gap `pdt_fact_shop_daily` tidak
+terkait Ads Manager sama sekali, tidak diberi proksi karena itu akan
+mencampur metrik toko dengan metrik iklan). Yang **tercapai**: bagian
+Awareness + Add-to-Cart (`vv_*`/`fol_*`/`sc_*`/funnel `atc`) terisi penuh
+dari data nyata untuk toko yang membawa keempat ekspor, dan `kelengkapan`
+tidak lagi salah menuduh modul-modul itu belum ada — `alasan`/`modulHilang`
+kini spesifik per rung, `impresi` tidak pernah lagi disalahkan ke Ads
+Manager. Gelombang F dianggap **SELESAI** dengan kriteria yang dikoreksi
+ini; menutup gap `impresi` (bila diinginkan) adalah tiket baru di luar M20
+R8/R9, butuh skema `pdt_fact_shop_daily` baru.
 
 ---
 
@@ -196,7 +208,7 @@ laporan berjalan tenang.
 
 ---
 
-## 4. Yang memblokir, hari ini  *(diperbarui 2026-09-23 — `M20-TTAM-SAMPLE` ditutup)*
+## 4. Yang memblokir, hari ini  *(diperbarui 2026-09-23 — F-04/F-05 SELESAI, Gelombang F ditutup penuh)*
 
 | Kode | Memblokir | Status |
 |---|---|---|
@@ -207,7 +219,7 @@ laporan berjalan tenang.
 | ~~`M20-TOKOPEDIA-SAMPLE`~~ | F-01 | ✅ **DITUTUP 2026-09-23:** sample asli (Ultrasleep) diterima dan diverifikasi, F-01 SELESAI. `docs/DECISIONS.md` M20-R8-F-01-TOKOPEDIA. F-02 SELESAI sebelumnya, tidak terpengaruh. |
 | ~~`M20-C01-LIVE`~~ | D-00 | ✅ **DITUTUP 2026-09-22 malam:** migrasi `20261130010000` diterapkan ke live `CDPS SG` (versi live `20260922151204`), diverifikasi 186 tabel / 36 mesin / fungsi `jwt_owns_pdt_kiriman_am` ada. D-00 selesai. |
 
-Gelombang D sudah selesai dan Gelombang F kini punya F-01/F-02/F-03 SELESAI PENUH — nol blocker tersisa di §4, F-04/F-05 siap dikerjakan.
+Gelombang D dan Gelombang F **SELESAI PENUH** (F-01 s/d F-05, `docs/DECISIONS.md` M20-R9-F-04-TAHAP-FUNNEL) — nol blocker tersisa di §4. Gelombang G (pencabutan M14) siap dikerjakan begitu A–F hijau dikonfirmasi.
 
 ---
 

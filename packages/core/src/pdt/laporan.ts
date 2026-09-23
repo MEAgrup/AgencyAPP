@@ -1020,12 +1020,21 @@ function isPdtTahapKey(v: string | null): v is PdtTahapKey {
 const tm = (kode: string, label: string, nilai: number | null, satuan: PdtTahapSatuan): PdtLaporanTahapMetrik =>
   ({ kode, label, nilai, satuan });
 
-function buildFunnelTiktok(kpi: PdtLaporanKpiRingkas, klik: number | null): PdtLaporanFunnelLangkah[] {
+/**
+ * `impresi` PERMANEN `null` — "Impresi produk (toko)" adalah metrik Analitik
+ * Toko (tayangan halaman produk), skema `pdt_fact_shop_daily` saat ini tidak
+ * punya kolomnya sama sekali. INI BUKAN metrik Ads Manager (beda dari `atc`
+ * di bawah) — F-04 (M20-R9-F-04-TAHAP-FUNNEL) TIDAK menutup gap ini, dan
+ * tidak dimaksudkan untuk (docs/DECISIONS.md M20-R9-F-04-TAHAP-FUNNEL, item
+ * terbuka: `impresi` permanen `—` sampai skema `pdt_fact_shop_daily`
+ * diperluas, atau ditetapkan tidak akan pernah diperluas).
+ */
+function buildFunnelTiktok(kpi: PdtLaporanKpiRingkas, klik: number | null, atc: number | null): PdtLaporanFunnelLangkah[] {
   const rows: Omit<PdtLaporanFunnelLangkah, 'lolos' | 'lolosDari'>[] = [
     { kode: 'impresi', label: 'Impresi produk', nilai: null, catatan: 'kolom impresi toko belum ada di skema PDT saat ini' },
     { kode: 'klik', label: 'Klik ke halaman produk', nilai: klik, catatan: klik == null ? 'tidak ada di export Analitik Toko periode ini' : null },
     { kode: 'pengunjung', label: 'Pengunjung toko', nilai: kpi.pengunjung, catatan: null },
-    { kode: 'atc', label: 'Add to Cart', nilai: null, catatan: 'hanya terbaca dari export Ads Manager Showcase — belum dibangun' },
+    { kode: 'atc', label: 'Add to Cart', nilai: atc, catatan: atc == null ? 'tidak ada di export Ads Manager Showcase periode ini' : null },
     { kode: 'pesanan', label: 'Pesanan', nilai: kpi.pesanan, catatan: null },
   ];
 
@@ -1046,12 +1055,27 @@ export interface PdtLaporanTahapInput {
   cpaInput: { biaya: number; pesanan: number | null } | null;
   affPosting: number | null;
   /**
-   * Σ `tayangan`/`klik` `pdt_fact_ads` sumber TikTok Ads Manager
-   * (`tt_ads_product` `'Impresi iklan produk'`/`'Jumlah klik iklan produk'`,
-   * `tt_ads_live` `'Tayangan LIVE'`). `null` = nol baris iklan Ads Manager
-   * periode ini, BUKAN nol tayangan.
+   * Σ `biaya`/`tayangan`/`hasil` (video views) `pdt_fact_ads` sumber
+   * `tt_ads_manager_videoviews` (F-04, M20-R9-F-04-TAHAP-FUNNEL). `null` =
+   * nol baris periode ini, BUKAN nol tayangan/views. Konsumen: `vv_impresi`/
+   * `vv_views`/`vv_cpm`/`vv_per1k`.
    */
-  ttamFunnel: { tayangan: number | null; klik: number | null } | null;
+  videoViews: { biaya: number; tayangan: number | null; hasil: number | null } | null;
+  /**
+   * Σ `biaya`/`hasil` (paid follows) `pdt_fact_ads` sumber
+   * `tt_ads_manager_follows`. `null` = nol baris periode ini. Konsumen:
+   * `fol_follows`/`fol_cost`.
+   */
+  follows: { biaya: number; hasil: number | null } | null;
+  /**
+   * Σ `biaya`/`tayangan`/`klik`/`hasil` (add to cart) `pdt_fact_ads` sumber
+   * `tt_ads_manager_showcase`. `null` = nol baris periode ini. Konsumen:
+   * `sc_impresi`/`sc_klik`/`sc_ctr`/`sc_atc`/`sc_cost_atc` DAN funnel puncak
+   * langkah `atc` (satu-satunya langkah funnel yang bersumber dari Ads
+   * Manager — `impresi` tetap `null` permanen, gap terpisah, lihat docblock
+   * `buildFunnelTiktok`).
+   */
+  showcase: { biaya: number; tayangan: number | null; klik: number | null; hasil: number | null } | null;
 }
 
 /**
@@ -1073,9 +1097,19 @@ export function bangunLaporanTahap(
   const aov = kpi.gmv == null || kpi.pesanan == null || kpi.pesanan === 0 ? null : bulat(kpi.gmv / kpi.pesanan);
   const cpa = input.cpaInput == null || input.cpaInput.pesanan == null || input.cpaInput.pesanan === 0
     ? null : bulat(input.cpaInput.biaya / input.cpaInput.pesanan);
-  const tf = input.ttamFunnel;
-  const ttamCtr = tf == null || tf.klik == null || tf.tayangan == null || tf.tayangan === 0
-    ? null : persen5(tf.klik / tf.tayangan);
+
+  // F-04 (M20-R9-F-04-TAHAP-FUNNEL) — turunan `videoViews`/`follows`/
+  // `showcase`, semuanya Rule 4 (auto-calculated, tidak pernah kolom sendiri,
+  // selalu recomputable dari `biaya`/`tayangan`/`klik`/`hasil`).
+  const vv = input.videoViews;
+  const vvCpm = vv == null || vv.tayangan == null || vv.tayangan === 0 ? null : bulat((vv.biaya / vv.tayangan) * 1000);
+  const vvPer1k = vv == null || vv.hasil == null || vv.hasil === 0 ? null : bulat((vv.biaya / vv.hasil) * 1000);
+  const fol = input.follows;
+  const folCost = fol == null || fol.hasil == null || fol.hasil === 0 ? null : bulat(fol.biaya / fol.hasil);
+  const sc = input.showcase;
+  const scCtr = sc == null || sc.klik == null || sc.tayangan == null || sc.tayangan === 0
+    ? null : persen5(sc.klik / sc.tayangan);
+  const scCostAtc = sc == null || sc.hasil == null || sc.hasil === 0 ? null : bulat(sc.biaya / sc.hasil);
 
   const belanja: Record<PdtTahapKey, number | null> = {
     awareness: null,
@@ -1088,26 +1122,32 @@ export function bangunLaporanTahap(
 
   const metrik: Record<PdtTahapKey, PdtLaporanTahapMetrik[]> = {
     awareness: [
-      tm('vv_impresi', 'Impresi iklan awareness', null, 'angka'),
-      tm('vv_views', 'Video views (iklan)', null, 'angka'),
-      tm('vv_cpm', 'CPM', null, 'rupiah'),
-      tm('vv_per1k', 'Biaya per 1.000 views', null, 'rupiah'),
-      tm('fol_follows', 'Follower dari campaign', null, 'angka'),
-      tm('fol_cost', 'Biaya per follower', null, 'rupiah'),
+      // F-04 (M20-R9-F-04-TAHAP-FUNNEL) — kelimanya DULU hardcode `null`
+      // ("modul TikTok Ads Manager belum dibangun"); `tt_ads_manager_
+      // videoviews`/`_follows` sudah punya modul+ekstraktor+penulis sejak F-03
+      // (2026-09-23), dan kolom `hasil` (video views/paid follows) sejak F-04.
+      tm('vv_impresi', 'Impresi iklan awareness', vv?.tayangan ?? null, 'angka'),
+      tm('vv_views', 'Video views (iklan)', vv?.hasil ?? null, 'angka'),
+      tm('vv_cpm', 'CPM', vvCpm, 'rupiah'),
+      tm('vv_per1k', 'Biaya per 1.000 views', vvPer1k, 'rupiah'),
+      tm('fol_follows', 'Follower dari campaign', fol?.hasil ?? null, 'angka'),
+      tm('fol_cost', 'Biaya per follower', folCost, 'rupiah'),
       tm('konten_n', 'Konten diproduksi & tayang', video?.total ?? null, 'angka'),
       tm('konten_vv', 'Total views konten', video?.vv ?? null, 'angka'),
       tm('konten_follower', 'Follower baru dari konten', null, 'angka'),
     ],
     consideration: [
-      // Ketiganya DULU hardcode `null` dengan catatan "modul TikTok Ads Manager
-      // belum dibangun" — keliru: `tt_ads_product`/`tt_ads_live` sudah punya
-      // modul, ekstraktor, dan penulis `pdt_fact_ads` sejak 2026-09-16
-      // (`G1-09-2BII-TTADS-SAMPLE`), dan angkanya memang ada di berkas unggahan.
-      tm('sc_impresi', 'Impresi iklan showcase', input.ttamFunnel?.tayangan ?? null, 'angka'),
-      tm('sc_klik', 'Klik ke halaman produk (iklan)', input.ttamFunnel?.klik ?? null, 'angka'),
-      tm('sc_ctr', 'CTR showcase', ttamCtr, 'persen'),
-      tm('sc_atc', 'Add to cart (iklan showcase)', null, 'angka'),
-      tm('sc_cost_atc', 'Biaya per add to cart', null, 'rupiah'),
+      // `sc_impresi`/`sc_klik` DULU (F-03) sumbernya `tt_ads_product`/
+      // `tt_ads_live` (GMV Max produk/live — SALAH platform iklan untuk label
+      // "showcase") — F-04 mengoreksi ke sumber sebenarnya,
+      // `tt_ads_manager_showcase`. `sc_atc`/`sc_cost_atc` DULU hardcode
+      // `null` ("belum dibangun") — modul showcase sudah ada sejak F-03,
+      // kolom `hasil` (add to cart) sejak F-04.
+      tm('sc_impresi', 'Impresi iklan showcase', sc?.tayangan ?? null, 'angka'),
+      tm('sc_klik', 'Klik ke halaman produk (iklan)', sc?.klik ?? null, 'angka'),
+      tm('sc_ctr', 'CTR showcase', scCtr, 'persen'),
+      tm('sc_atc', 'Add to cart (iklan showcase)', sc?.hasil ?? null, 'angka'),
+      tm('sc_cost_atc', 'Biaya per add to cart', scCostAtc, 'rupiah'),
       tm('toko_impresi', 'Impresi produk (toko)', null, 'angka'),
       tm('toko_klik', 'Klik produk (toko)', input.klik, 'angka'),
       tm('aff_total', 'Kreator afiliasi terdaftar', afiliasi?.totalKreator ?? null, 'angka'),
@@ -1127,7 +1167,7 @@ export function bangunLaporanTahap(
 
   return {
     fokus,
-    funnel: buildFunnelTiktok(kpi, input.klik),
+    funnel: buildFunnelTiktok(kpi, input.klik, sc?.hasil ?? null),
     konversiTotal: { nilai: kpi.cvr },
     belanjaTotal: belanjaTotal == null ? null : bulat(belanjaTotal),
     blok: ALL_TAHAP.map((kode) => ({
@@ -2126,10 +2166,6 @@ export interface PdtLaporanKelengkapan {
 /** Modul parser PDT yang belum punya penulis fakta, per celah yang diketahui. */
 const MODUL_KANAL_SHOPEE = ['shopee_voucher', 'shopee_chat', 'meta_ads', 'shopee_video'];
 const MODUL_IKLAN_SHOPEE = ['ads_banner'];
-const MODUL_TAHAP_TIKTOK = [
-  'tt_ads_manager_consideration', 'tt_ads_manager_follows',
-  'tt_ads_manager_showcase', 'tt_ads_manager_videoviews',
-];
 
 export interface PdtLaporanKelengkapanInput {
   platform: 'tiktok' | 'shopee';
@@ -2143,9 +2179,20 @@ export interface PdtLaporanKelengkapanInput {
  * pengetahuan tentang DB.
  *
  * Status `tahap` diturunkan dari DATANYA (ada langkah funnel ber-`nilai: null`),
- * bukan dari daftar platform yang ditulis tangan. Begitu modul Ads Manager
- * mendarat dan funnel terisi, baris ini jadi `lengkap` **dengan sendirinya** —
- * tidak ada konstanta yang harus diingat untuk diubah.
+ * bukan dari daftar platform yang ditulis tangan — `alasan`/`modulHilang`
+ * dirakit dari `catatan` PER LANGKAH (`buildFunnelTiktok`, `@cdps/core`
+ * `pdt/laporan.ts`), bukan satu kalimat generik untuk keempat modul TTAM
+ * (F-04, M20-R9-F-04-TAHAP-FUNNEL — koreksi: sebelum ini SELALU menuduh
+ * "ekspor TikTok Ads Manager belum punya modul PDT" untuk SETIAP langkah
+ * kosong, termasuk `impresi`, yang tidak pernah dan tidak akan bersumber
+ * dari Ads Manager sama sekali).
+ *
+ * `impresi` PERMANEN `null` (lihat docblock `buildFunnelTiktok`) — baris ini
+ * karena itu TIDAK PERNAH `lengkap: true` sampai `pdt_fact_shop_daily`
+ * mendapat kolom impresi toko, item terbuka yang SENGAJA di luar cakupan F-04/
+ * F-05 (`docs/DECISIONS.md` M20-R9-F-04-TAHAP-FUNNEL). `atc` satu-satunya
+ * langkah yang benar-benar "modul belum diunggah periode ini" (`showcase`) —
+ * `modulHilang` hanya menyebut modul itu, bukan keempat kode TTAM.
  */
 export function bangunLaporanKelengkapan(input: PdtLaporanKelengkapanInput): PdtLaporanKelengkapan {
   const baris: PdtLaporanKelengkapanBaris[] = [];
@@ -2179,15 +2226,15 @@ export function bangunLaporanKelengkapan(input: PdtLaporanKelengkapanInput): Pdt
   }
 
   if (input.tahap) {
-    const kosong = input.tahap.funnel.filter((f) => f.nilai === null).map((f) => f.label);
+    const kosong = input.tahap.funnel.filter((f) => f.nilai === null);
     baris.push(
       kosong.length === 0
         ? { bagian: 'tahap', lengkap: true, alasan: '', modulHilang: [] }
         : {
             bagian: 'tahap',
             lengkap: false,
-            alasan: `Langkah funnel berikut belum dipanen ke fakta, jadi ditandai "—", BUKAN nol aktivitas: ${kosong.join(', ')}. Sumbernya ekspor TikTok Ads Manager, yang belum punya modul PDT.`,
-            modulHilang: [...MODUL_TAHAP_TIKTOK],
+            alasan: `Langkah funnel berikut ditandai "—", BUKAN nol aktivitas: ${kosong.map((f) => `${f.label} (${f.catatan ?? 'penyebab tidak diketahui'})`).join('; ')}.`,
+            modulHilang: kosong.some((f) => f.kode === 'atc') ? ['tt_ads_manager_showcase'] : [],
           },
     );
   }

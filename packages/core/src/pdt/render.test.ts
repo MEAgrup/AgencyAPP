@@ -82,7 +82,7 @@ const TIKTOK_FULL_BASE: PdtLaporanTiktokOptions = {
     { sumber: 'tt_ads_product', kampanyeId: 'CMP-1', biaya: 500_000, gmv: 2_000_000, tayangan: 100_000, klik: 5_000, pesanan: 40 },
     { sumber: 'tt_ads_live', kampanyeId: 'CMP-2', biaya: 500_000, gmv: 0, tayangan: 50_000, klik: 2_000, pesanan: 0 },
   ],
-  tahap: { tahapFokus: 'conversion', klik: 6_000, cpaInput: { biaya: 1_000_000, pesanan: 40 }, affPosting: 6, ttamFunnel: null },
+  tahap: { tahapFokus: 'conversion', klik: 6_000, cpaInput: { biaya: 1_000_000, pesanan: 40 }, affPosting: 6, videoViews: null, follows: null, showcase: null },
   tokopedia: {
     kini: { gmv: 6_000_000, pesanan: 60, pengunjung: 3_000, produkTerjual: 70, pembeli: 58 },
     sebelumnya: { gmv: 5_000_000, pesanan: 50, pengunjung: 2_800, produkTerjual: 55, pembeli: 48 },
@@ -202,10 +202,10 @@ describe('R1/R2 — klien HTML never contains internal-only content (real substr
     expect(klien).not.toContain('Kelengkapan');
   });
 
-  it('tiktok: kelengkapan alasan text ("belum dipanen ke fakta") is internal-only', () => {
+  it('tiktok: kelengkapan alasan text ("BUKAN nol aktivitas") is internal-only', () => {
     const { klien, internal } = renderBoth(buildTiktokFull());
-    expect(klien).not.toContain('belum dipanen ke fakta');
-    expect(internal).toContain('belum dipanen ke fakta');
+    expect(klien).not.toContain('BUKAN nol aktivitas');
+    expect(internal).toContain('BUKAN nol aktivitas');
     expect(internal).toContain('benchmark versi 7');
   });
 

@@ -1912,6 +1912,12 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // sekali (docblock fungsi itu) — kampanye TTAM akan tampil di sana dengan
   // biaya+tayangan(+klik) terisi, gmv/roas '—' (jujur: kampanye awareness
   // memang tidak punya GMV terpaut), bukan bug.
+  //
+  // `hasil` (F-04, M20-R9-F-04-TAHAP-FUNNEL) — metrik OPTIMASI per modul:
+  // `videoviews` → `baris.videoViews`, `consideration` → `baris.hasil`
+  // (PERMANEN null, nol konsumen report), `follows`/`showcase` →
+  // `baris.hasil` (Paid follows / Adds to cart (Shop)). Konsumen tunggal:
+  // `bacaTahapTiktok` di bawah.
   if (berkasTtamVideoViews.length > 0) {
     await tx`
       delete from pdt_fact_ads
@@ -1921,11 +1927,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan, hasil)
           values
             (${clientPlatformId}, 'tt_ads_manager_videoviews', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, null, null, null,
-             null, 'upper')`;
+             null, 'upper', ${baris.videoViews})`;
       }
     }
   }
@@ -1939,11 +1945,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan, hasil)
           values
             (${clientPlatformId}, 'tt_ads_manager_consideration', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, null, null, null,
-             null, 'upper')`;
+             null, 'upper', ${baris.hasil})`;
       }
     }
   }
@@ -1957,11 +1963,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan, hasil)
           values
             (${clientPlatformId}, 'tt_ads_manager_follows', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, null, null, null,
-             null, 'upper')`;
+             null, 'upper', ${baris.hasil})`;
       }
     }
   }
@@ -1975,11 +1981,11 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
+             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan, hasil)
           values
             (${clientPlatformId}, 'tt_ads_manager_showcase', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
              ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, null, null, null,
-             null, 'upper')`;
+             null, 'upper', ${baris.hasil})`;
       }
     }
   }
@@ -3876,7 +3882,7 @@ async function bacaAfiliasi(sql: Sql, clientPlatformId: number, periodeAwalBulan
 
 /**
  * Bagian "tahap" TikTok (keputusan pemilik via `AskUserQuestion`, 2026-09-16,
- * KETUJUH — lihat docblock `pdt.PdtLaporanTahap`, `@cdps/core`). EMPAT
+ * KETUJUH — lihat docblock `pdt.PdtLaporanTahap`, `@cdps/core`). ENAM
  * sub-query BARU (bukan reuse murni bagian lain — `pdt.bangunLaporanTahap`
  * yang menerima kpi/iklan/afiliasi/video yang SUDAH dibangun untuk sisanya):
  *  - `tahap_fokus` dari `client_platforms` — kolom SAMA yang sudah dipakai
@@ -3891,9 +3897,17 @@ async function bacaAfiliasi(sql: Sql, clientPlatformId: number, periodeAwalBulan
  *  - `affPosting` — hitungan BARU `pdt_fact_creator_period` ber-`jumlah_
  *    live>0 OR jumlah_video>0`, `null` bila nol baris kreator sama sekali
  *    (cermin konvensi `bacaAfiliasi`).
+ *  - `videoViews`/`follows`/`showcase` (F-04, M20-R9-F-04-TAHAP-FUNNEL) —
+ *    masing-masing SATU query per `sumber` TTAM (`tt_ads_manager_
+ *    videoviews`/`_follows`/`_showcase`) — TIDAK lagi dicampur ke query
+ *    `cpaInput` di atas (bug F-03: `adsRow` DULU juga memberi `ttamFunnel`
+ *    dari `tt_ads_product`/`tt_ads_live`, GMV Max produk/live, BUKAN Ads
+ *    Manager sama sekali — keliru, ditutup di sini). `consideration`
+ *    SENGAJA tidak dibaca — nol konsumen report (lihat `PdtBarisAdsTtamUpperFunnel`
+ *    docblock, `fakta.ts`).
  */
 async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanTahapInput> {
-  const [[cp], [klikRow], [adsRow], [affRow]] = await Promise.all([
+  const [[cp], [klikRow], [adsRow], [affRow], [vvRow], [folRow], [scRow]] = await Promise.all([
     sql<{ tahap_fokus: string | null }[]>`select tahap_fokus from client_platforms where id = ${clientPlatformId}`,
     sql<{ n: number; klik: string }[]>`
       select count(produk_diklik)::int as n, coalesce(sum(produk_diklik), 0) as klik
@@ -3903,16 +3917,9 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
          and kanal = 'tiktok'
          and tanggal >= ${periodeAwalBulan}::date
          and tanggal < (${periodeAwalBulan}::date + interval '1 month')`,
-    // `tayangan`/`klik` ikut dibaca di query yang SAMA (bukan query kelima):
-    // keduanya kolom `pdt_fact_ads` pada baris yang sama persis yang `biaya`/
-    // `pesanan_sku` sudah diambil. `count(...)` per kolom karena `sum()` atas
-    // nol baris non-null tetap 0, dan 0 di funnel berarti "nol tayangan"
-    // sementara yang benar "tidak diketahui" (Rule 12).
-    sql<{ n: number; biaya: string; pesanan_n: number; pesanan: string; tayangan_n: number; tayangan: string; klik_n: number; klik: string }[]>`
+    sql<{ n: number; biaya: string; pesanan_n: number; pesanan: string }[]>`
       select count(*)::int as n, coalesce(sum(biaya), 0) as biaya,
-             count(pesanan_sku)::int as pesanan_n, coalesce(sum(pesanan_sku), 0) as pesanan,
-             count(tayangan)::int as tayangan_n, coalesce(sum(tayangan), 0) as tayangan,
-             count(klik)::int as klik_n, coalesce(sum(klik), 0) as klik
+             count(pesanan_sku)::int as pesanan_n, coalesce(sum(pesanan_sku), 0) as pesanan
         from pdt_fact_ads
        where client_platform_id = ${clientPlatformId}
          and periode = ${periodeAwalBulan}::date
@@ -3923,6 +3930,33 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
         from pdt_fact_creator_period
        where client_platform_id = ${clientPlatformId}
          and periode = ${periodeAwalBulan}::date`,
+    // `count(...)` per kolom karena `sum()` atas nol baris non-null tetap 0,
+    // dan 0 di funnel berarti "nol tayangan/hasil" sementara yang benar
+    // "tidak diketahui" (Rule 12) — pola sama `adsRow`/`klikRow` di atas.
+    sql<{ n: number; biaya: string; tayangan_n: number; tayangan: string; hasil_n: number; hasil: string }[]>`
+      select count(*)::int as n, coalesce(sum(biaya), 0) as biaya,
+             count(tayangan)::int as tayangan_n, coalesce(sum(tayangan), 0) as tayangan,
+             count(hasil)::int as hasil_n, coalesce(sum(hasil), 0) as hasil
+        from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId}
+         and periode = ${periodeAwalBulan}::date
+         and sumber = 'tt_ads_manager_videoviews'`,
+    sql<{ n: number; biaya: string; hasil_n: number; hasil: string }[]>`
+      select count(*)::int as n, coalesce(sum(biaya), 0) as biaya,
+             count(hasil)::int as hasil_n, coalesce(sum(hasil), 0) as hasil
+        from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId}
+         and periode = ${periodeAwalBulan}::date
+         and sumber = 'tt_ads_manager_follows'`,
+    sql<{ n: number; biaya: string; tayangan_n: number; tayangan: string; klik_n: number; klik: string; hasil_n: number; hasil: string }[]>`
+      select count(*)::int as n, coalesce(sum(biaya), 0) as biaya,
+             count(tayangan)::int as tayangan_n, coalesce(sum(tayangan), 0) as tayangan,
+             count(klik)::int as klik_n, coalesce(sum(klik), 0) as klik,
+             count(hasil)::int as hasil_n, coalesce(sum(hasil), 0) as hasil
+        from pdt_fact_ads
+       where client_platform_id = ${clientPlatformId}
+         and periode = ${periodeAwalBulan}::date
+         and sumber = 'tt_ads_manager_showcase'`,
   ]);
 
   return {
@@ -3930,9 +3964,20 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
     klik: klikRow.n === 0 ? null : Number(klikRow.klik),
     cpaInput: adsRow.n === 0 ? null : { biaya: Number(adsRow.biaya), pesanan: adsRow.pesanan_n === 0 ? null : Number(adsRow.pesanan) },
     affPosting: affRow.total === 0 ? null : affRow.posting,
-    ttamFunnel: adsRow.n === 0 ? null : {
-      tayangan: adsRow.tayangan_n === 0 ? null : Number(adsRow.tayangan),
-      klik: adsRow.klik_n === 0 ? null : Number(adsRow.klik),
+    videoViews: vvRow.n === 0 ? null : {
+      biaya: Number(vvRow.biaya),
+      tayangan: vvRow.tayangan_n === 0 ? null : Number(vvRow.tayangan),
+      hasil: vvRow.hasil_n === 0 ? null : Number(vvRow.hasil),
+    },
+    follows: folRow.n === 0 ? null : {
+      biaya: Number(folRow.biaya),
+      hasil: folRow.hasil_n === 0 ? null : Number(folRow.hasil),
+    },
+    showcase: scRow.n === 0 ? null : {
+      biaya: Number(scRow.biaya),
+      tayangan: scRow.tayangan_n === 0 ? null : Number(scRow.tayangan),
+      klik: scRow.klik_n === 0 ? null : Number(scRow.klik),
+      hasil: scRow.hasil_n === 0 ? null : Number(scRow.hasil),
     },
   };
 }

@@ -196,6 +196,15 @@ Konsekuensi yang dituju: begitu R9 mendarat, `tahap.funnel` Awareness dan
 Add-to-Cart berhenti `null`, dan pita kuning §1.1 **hilang karena datanya ada** —
 bukan karena disembunyikan.
 
+**✅ TERCAPAI 2026-09-23 (F-04, `docs/DECISIONS.md` M20-R9-F-04-TAHAP-FUNNEL):**
+`vv_impresi`/`vv_views`/`vv_cpm`/`vv_per1k`/`fol_follows`/`fol_cost` (Awareness)
+dan `sc_atc`/`sc_cost_atc` + funnel puncak langkah `atc` (Add-to-Cart) terisi
+dari kolom baru `pdt_fact_ads.hasil`. Pita kuning untuk rung `atc` hilang
+begitu `tt_ads_manager_showcase` terisi periode itu. Rung `impresi`
+("Impresi produk (toko)") **tetap** `null` — gap `pdt_fact_shop_daily`
+terpisah, tidak pernah bersumber dari Ads Manager, sengaja **tidak** diberi
+proksi dari data iklan (akan mencampur metrik toko dengan metrik iklan).
+
 ### R10 · Portal klien membaca lewat modul domainnya sendiri
 Pembacaan klien memakai DTO sempit di `packages/domain/src/client-portal.ts`
 (allow-list), **bukan** objek domain internal yang di-serialize sebagian. Mode
