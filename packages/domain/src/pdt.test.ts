@@ -2485,6 +2485,37 @@ describeDb('commitUploadBatch (F-03/M20 R9) — baris fakta tt_ads_manager_video
   });
 });
 
+// F-03 lanjutan (M20 R9, 2026-09-23) — regresi: migrasi `20261205010000`
+// menambah `anyOf` varian Bahasa Indonesia ke `tandaTanganKolom`
+// `tt_ads_manager_videoviews` TANPA baris `pdt_kolom_alias` yang
+// memetakannya — berkas ID DETEKSI benar tapi GAGAL `validasiKolomWajib`
+// (nol 'Ad name'/'Spend'/'Impressions' literal di berkas itu). Ditutup
+// migrasi `20261206010000` (tiga baris alias). Tes ini membuktikan jalur
+// PENUH (deteksi → wajib) lewat `previewUploadBatch`, bukan cuma ekstraksi
+// murni (yang sudah dites `fakta.test.ts` — itu tidak menyentuh
+// `validasiKolomWajib`/alias sama sekali).
+describeDb('previewUploadBatch (F-03 lanjutan) — tt_ads_manager_videoviews varian Bahasa Indonesia lolos kolom wajib', () => {
+  it('header Nama Iklan/Belanja/Impresi ⇒ status ok (bukan gagal), lewat alias pdt_kolom_alias', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const headerId = [
+      'Nama Iklan', 'Status utama', 'Status sekunder', 'Belanja', 'Impresi', 'Jangkauan',
+      'Tayangan video', 'CPM', 'Sumber sekunder', 'Sumber utama', 'Sumber atribusi', 'Mata Uang',
+    ];
+    const aoa: unknown[][] = [
+      headerId,
+      ['Nama Iklan2026-08-05 09:00:00', 'Aktif', '', '30000', '6000', '5500', '4000', '5000', 'Akun TikTok', 'Konten milik sendiri', '-', 'IDR'],
+    ];
+    const input: PdtPreviewBerkasInput = {
+      nama: 'ttam-videoviews-id.xlsx', sha256: 'sha-ttam-videoviews-id', bytes: 100, ditolakPagar: null, decodeGagal: null,
+      aoa, sheets: null, modulTerdeteksi: 'tt_ads_manager_videoviews', ambiguous: false, matches: ['tt_ads_manager_videoviews'],
+    };
+    const hasil = await previewUploadBatch(sql, ownerActor(), cpId, [input]);
+    expect(hasil.berkas[0]).toMatchObject({ status: 'ok', modulKode: 'tt_ads_manager_videoviews', pesan: null });
+  });
+});
+
 // F-03 lanjutan (M20 R9, 2026-09-23) — `tt_ads_manager_consideration`/
 // `_follows`/`_showcase` → `pdt_fact_ads`. Header PERSIS sample asli pemilik
 // (Gold Pigeon) — lihat docblock `ekstrakBarisTtamConsideration`/`_Follows`/
