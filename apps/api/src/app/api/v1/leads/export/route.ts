@@ -38,6 +38,7 @@ const HEADER = [
   'id', 'lead_name', 'phone_number', 'email', 'source', 'origin_division',
   'origin_campaign_id', 'last_touch_campaign_id', 'record_status',
   'winning_attempt_id', 'created_at', 'open_attempt_count',
+  'created_by', 'created_by_nama',
 ] as const;
 
 function rowToCsvCells(r: leads.LeadsDbRow): string[] {
@@ -45,6 +46,7 @@ function rowToCsvCells(r: leads.LeadsDbRow): string[] {
     r.id, r.leadName, r.phoneNumber, r.email ?? '', r.source, r.originDivision,
     r.originCampaignId ?? '', r.lastTouchCampaignId ?? '', r.recordStatus,
     r.winningAttemptId ?? '', tz.dateTimeString(r.createdAt), String(r.openAttemptCount),
+    r.createdBy, r.createdByNama,
   ];
 }
 

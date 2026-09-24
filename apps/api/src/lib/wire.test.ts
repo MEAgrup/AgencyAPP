@@ -150,6 +150,7 @@ describe('leads wire mappers', () => {
       recordStatus: 'active', winningAttemptId: null,
       createdAt: new Date('2026-07-01T00:00:00.000Z'), openAttemptCount: 1,
       registeredByMe: true, claimedByMe: false,
+      createdBy: 'EMP-1', createdByNama: 'Budi',
     };
     expect(leadRowToWire(row)).toEqual({
       id: 'LEAD-1', lead_name: 'X', phone_number: '08', email: null, source: 'Scouting',
@@ -159,6 +160,8 @@ describe('leads wire mappers', () => {
       // Kolom Peran tab Lead Saya — dikirim EKSPLISIT sebagai boolean, tidak
       // pernah dihilangkan saat false (kunci hilang = kolom kosong, O43).
       registered_by_me: true, claimed_by_me: false,
+      // "Didaftarkan oleh" (issue #64 / O40).
+      created_by: 'EMP-1', created_by_nama: 'Budi',
     });
   });
 
@@ -168,6 +171,7 @@ describe('leads wire mappers', () => {
         id: 'LEAD-1', leadName: 'X', phoneNumber: '08', email: null, source: 'Scouting',
         originDivision: 'Sales', originCampaignId: null, lastTouchCampaignId: null,
         recordStatus: 'active', winningAttemptId: null, createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        createdBy: 'EMP-1', createdByNama: 'Budi',
       },
       attempts: [
         {
@@ -179,6 +183,9 @@ describe('leads wire mappers', () => {
     const wire = leadDetailToWire(detail);
     expect(wire.lead).not.toHaveProperty('open_attempt_count');
     expect(wire.lead.created_at).toBe('2026-07-01T00:00:00.000Z');
+    // "Didaftarkan oleh" (issue #64 / O40) — the detail view carries it too.
+    expect(wire.lead.created_by).toBe('EMP-1');
+    expect(wire.lead.created_by_nama).toBe('Budi');
     expect(wire.attempts).toEqual([
       {
         id: 'PRSP-1', owner_employee_id: 'EMP-1', owner_nama: 'Budi', status: 'New Lead',

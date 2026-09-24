@@ -180,6 +180,9 @@ export interface LeadRowWire {
   open_attempt_count: number;
   registered_by_me: boolean;
   claimed_by_me: boolean;
+  /** "Didaftarkan oleh" (issue #64 / O40) — id lalu nama tampilan pendaftar pertama. */
+  created_by: string;
+  created_by_nama: string;
 }
 
 export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
@@ -198,6 +201,8 @@ export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
     open_attempt_count: r.openAttemptCount,
     registered_by_me: r.registeredByMe,
     claimed_by_me: r.claimedByMe,
+    created_by: r.createdBy,
+    created_by_nama: r.createdByNama,
   };
 }
 
@@ -711,6 +716,8 @@ export function leadDetailToWire(d: leads.LeadDetailView): LeadDetailWire {
       record_status: l.recordStatus,
       winning_attempt_id: l.winningAttemptId,
       created_at: l.createdAt.toISOString(),
+      created_by: l.createdBy,
+      created_by_nama: l.createdByNama,
     },
     attempts: d.attempts.map((a) => ({
       id: a.id,
