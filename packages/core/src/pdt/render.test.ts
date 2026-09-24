@@ -248,13 +248,24 @@ describe('G4-03 aksi 1/7 — Cancel Rate / GMV Pesanan Selesai cards, read-only'
     expect(internal).toContain('GMV Pesanan Selesai');
   });
 
-  it('shopee: cancelRate/gmvPesananSelesai both null ⇒ cards absent from klien, shown as — in internal', () => {
-    const base = { ...SHOPEE_FULL_BASE, layanan: { chat: null, penalti: [], cancelRate: null, gmvPesananSelesai: null } };
+  it('shopee: cancelRate/gmvPesananSelesai both null, chat still present ⇒ cards absent from klien, shown as — in internal (R2.3, section itself stays populated)', () => {
+    const base = {
+      ...SHOPEE_FULL_BASE,
+      layanan: { chat: SHOPEE_FULL_BASE.layanan!.chat, penalti: SHOPEE_FULL_BASE.layanan!.penalti, cancelRate: null, gmvPesananSelesai: null },
+    };
     const { klien, internal } = renderBoth(bangunLaporanShopee(base));
     expect(klien).not.toContain('Cancel Rate');
     expect(klien).not.toContain('GMV Pesanan Selesai');
     expect(internal).toContain('Cancel Rate');
     expect(internal).toContain('GMV Pesanan Selesai');
+  });
+
+  it('shopee: chat null, penalti empty, DAN cancelRate/gmvPesananSelesai both null ⇒ whole "layanan" section collapses, shown as one empty-state note in internal (not per-card dashes)', () => {
+    const base = { ...SHOPEE_FULL_BASE, layanan: { chat: null, penalti: [], cancelRate: null, gmvPesananSelesai: null } };
+    const { klien, internal } = renderBoth(bangunLaporanShopee(base));
+    expect(klien).not.toContain('Cancel Rate');
+    expect(internal).not.toContain('Cancel Rate');
+    expect(internal).toContain('Belum ada data layanan chat / kesehatan toko periode ini.');
   });
 });
 
