@@ -520,6 +520,8 @@ export interface Strategi {
   durasi_kontrak_bulan: number;
   tanggal_mulai_kontrak: string;
   tanggal_akhir_kontrak: string;
+  /** O76 — floor GMV bulanan kontraktual, dikunci Sales saat closing. `null` = tidak ada. */
+  target_gmv_kontrak_bulanan: string | null;
   tanggal_mulai_siklus: string | null;
   siklus_terkunci: boolean;
   toleransi_over_persen: number;

@@ -70,8 +70,10 @@ import {
   MSG_TIDAK_ADA_BELUM_DIJAWAB,
   MSG_TOP_SKU_REQUIRED,
   MSG_URUTAN_EKSEKUSI_REQUIRED,
+  FLOOR_DARI_KONTRAK,
   FLOOR_DISETUJUI_HEAD,
   FLOOR_INPUT_AM,
+  MSG_FLOOR_KONTRAK_TIDAK_SESUAI,
   STRATEGI_AKTIF,
   STRATEGI_DIAJUKAN,
   STRATEGI_DIARSIPKAN,
@@ -1083,6 +1085,63 @@ describeDb('Section D — Rules 7 and 8', () => {
       },
     ]);
     expect(saved.targets[0].sumberFloor).toBe('input_am');
+  });
+
+  it('locks the floor from the Contract when target_gmv_bulanan is set (O76)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await sql`update contracts set target_gmv_bulanan = 400000000.00 where id = ${s.contractId}`;
+    const saved = await saveTargets(sql, am(), s.id, [
+      { channel: 'Shopee', monthIndex: 1, metric: 'gmv', nilaiFloor: '250000000.00', nilaiStretch: '300000000.00' },
+      { channel: 'TikTok Shop', monthIndex: 1, metric: 'gmv', nilaiFloor: '150000000.00', nilaiStretch: '180000000.00' },
+    ]);
+    const gmvRows = saved.targets.filter((t) => t.metric === 'gmv');
+    expect(gmvRows).toHaveLength(2);
+    for (const row of gmvRows) {
+      expect(row.sumberFloor).toBe(FLOOR_DARI_KONTRAK);
+    }
+  });
+
+  it('refuses a per-channel split that does not sum to the Contract floor (O76)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await sql`update contracts set target_gmv_bulanan = 400000000.00 where id = ${s.contractId}`;
+    await expect(
+      saveTargets(sql, am(), s.id, [
+        { channel: 'Shopee', monthIndex: 1, metric: 'gmv', nilaiFloor: '250000000.00', nilaiStretch: '300000000.00' },
+        // 250jt + 100jt = 350jt ≠ the Contract's locked 400jt.
+        { channel: 'TikTok Shop', monthIndex: 1, metric: 'gmv', nilaiFloor: '100000000.00', nilaiStretch: '180000000.00' },
+      ]),
+    ).rejects.toThrow(MSG_FLOOR_KONTRAK_TIDAK_SESUAI);
+  });
+
+  it('leaves the AM input_am path untouched when the Contract has no GMV floor (O76)', async () => {
+    // No `update contracts` here — HEADER's contract is born with
+    // target_gmv_bulanan NULL, same as every Strategi before O76.
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const saved = await saveTargets(sql, am(), s.id, [
+      { channel: 'Shopee', monthIndex: 1, metric: 'gmv', nilaiFloor: '999999999.00', nilaiStretch: '999999999.00' },
+    ]);
+    expect(saved.targets[0].sumberFloor).toBe(FLOOR_INPUT_AM);
+  });
+
+  it('never promotes a dari_kontrak row through approveStrategi (O76)', async () => {
+    const { strategiId } = await seedSubmittable();
+    const s = await getStrategi(sql, am(), strategiId);
+    await sql`update contracts set target_gmv_bulanan = 400000000.00 where id = ${s.contractId}`;
+    await saveTargets(sql, am(), strategiId, [
+      { channel: 'Shopee', monthIndex: 1, metric: 'gmv', nilaiFloor: '400000000.00', nilaiStretch: '460000000.00' },
+      // D-4's own supporting-metric row, unaffected by the sum check.
+      { channel: 'Shopee', monthIndex: 1, metric: 'pengunjung', nilaiStretch: '90000' },
+    ]);
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const approved = await getStrategi(sql, am(), strategiId);
+    const gmvRow = approved.targets.find((t) => t.metric === 'gmv');
+    // Still dari_kontrak, not flipped to disetujui_head — Sales already locked
+    // it, so there was nothing for Head approval to promote.
+    expect(gmvRow?.sumberFloor).toBe(FLOOR_DARI_KONTRAK);
   });
 
   it('refuses an assumption pointing at a target that does not exist (D-9)', async () => {

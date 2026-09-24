@@ -8,12 +8,19 @@
  * written: Rule 2 ("exactly one active Strategi per Contract"), D-1 ("Auto from
  * Contract") and §7 ("n PLAN rows where n = contract months").
  *
- * **What this module is deliberately not.** There is no money here. The agreed
- * value, the instalments and the payment gate are `transactions` (M0 §5 / M5)
- * and stay there; duplicating a rupiah figure onto the contract would create a
- * second answer to "how much did they agree to pay". A Contract carries the
- * *window* — duration and dates — because that is the field M6B's period
- * generator consumes and the field nothing else owned.
+ * **What this module is deliberately not.** There is no PAYMENT money here.
+ * The agreed value, the instalments and the payment gate are `transactions`
+ * (M0 §5 / M5) and stay there; duplicating a rupiah figure onto the contract
+ * would create a second answer to "how much did they agree to pay". A
+ * Contract carries the *window* — duration and dates — because that is the
+ * field M6B's period generator consumes and the field nothing else owned.
+ *
+ * `target_gmv_bulanan` (O76) is not an exception to this — it answers a
+ * different question ("what GMV did the client commit to", a performance
+ * floor) from "how much did they agree to pay" (`transactions`), and nothing
+ * else owns THAT question either. It is read-only from this module's own
+ * write paths (`ContractInput` omits it) precisely because it is not part of
+ * the AM's manual grouping flow — only `sales.close()` may set it.
  *
  * **No state machine, on purpose.** No PRD gives a contract a lifecycle;
  * Strategi (#15) and Plan (#16) are the entities with status. Registering an
@@ -105,6 +112,17 @@ export interface Contract {
   jenis: string;
   /** Rantai perpanjangan: `CTR-` sebelumnya pada klien yang sama, atau null. */
   contractSebelumnyaId: string | null;
+  /**
+   * O76 — floor GMV bulanan kontraktual, dikunci Sales saat closing
+   * (`sales.close`, `ClosingInput.targetGmvBulanan`). `null` = deal ini tidak
+   * punya komitmen GMV (sah). Read-only DI SINI dengan sengaja: modul ini tidak
+   * mengekspos jalur tulis untuk kolom ini — `ContractInput` (dipakai
+   * `createContract`/`updateContract`, jalur manual AM mengelompokkan Service
+   * yang sudah ada) sengaja tidak menyertakannya, karena keputusan pemilik
+   * membatasi field ini pada momen closing, bukan pengelompokan manual
+   * belakangan. Dibaca `strategi.saveTargets` untuk validasi jumlah floor.
+   */
+  targetGmvBulanan: string | null;
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -127,6 +145,7 @@ interface ContractRow {
   catatan: string | null;
   jenis: string;
   contract_sebelumnya_id: string | null;
+  target_gmv_bulanan: string | null;
   created_at: string | Date;
   updated_at: string | Date;
   created_by: string;
@@ -147,6 +166,7 @@ function rowToContract(r: ContractRow): Contract {
     catatan: r.catatan,
     jenis: r.jenis,
     contractSebelumnyaId: r.contract_sebelumnya_id,
+    targetGmvBulanan: r.target_gmv_bulanan,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
     createdBy: r.created_by,
@@ -291,6 +311,23 @@ export async function ownerAmOfContract(
      where ct.id = ${contractId}`;
   if (rows.length === 0) throw new NotFoundError(MSG_CONTRACT_NOT_FOUND);
   return rows[0].assigned_am_id;
+}
+
+/**
+ * targetGmvBulananOfContract (O76) — the locked monthly GMV floor, read
+ * directly rather than through `getContract` so `strategi.saveTargets` (which
+ * already resolved the caller's write access to the Strategi via
+ * `ownerAmOfContract`) does not pay a second, redundant permission check just
+ * to read one column.
+ */
+export async function targetGmvBulananOfContract(
+  sql: Queryable,
+  contractId: string,
+): Promise<string | null> {
+  const rows = await sql<{ target_gmv_bulanan: string | null }[]>`
+    select target_gmv_bulanan from contracts where id = ${contractId}`;
+  if (rows.length === 0) throw new NotFoundError(MSG_CONTRACT_NOT_FOUND);
+  return rows[0].target_gmv_bulanan;
 }
 
 async function loadContractRow(sql: Queryable, id: string, forUpdate = false): Promise<Contract> {

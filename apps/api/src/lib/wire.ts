@@ -4344,6 +4344,8 @@ export interface ContractWire {
   /** R-01: `baru` | `perpanjangan` | `cross_sell`. */
   jenis: string;
   contract_sebelumnya_id: string | null;
+  /** O76 — floor GMV bulanan kontraktual, dikunci Sales saat closing. Read-only. */
+  target_gmv_bulanan: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -4359,6 +4361,7 @@ export function contractToWire(c: contract.Contract): ContractWire {
     catatan: c.catatan,
     jenis: c.jenis,
     contract_sebelumnya_id: c.contractSebelumnyaId,
+    target_gmv_bulanan: c.targetGmvBulanan,
     created_by: c.createdBy,
     created_at: c.createdAt,
     updated_at: c.updatedAt,
@@ -4497,6 +4500,8 @@ export interface StrategiWire {
   durasi_kontrak_bulan: number;
   tanggal_mulai_kontrak: string;
   tanggal_akhir_kontrak: string;
+  /** O76 — Contract's locked GMV floor, joined the same way as the window above. */
+  target_gmv_kontrak_bulanan: string | null;
   tanggal_mulai_siklus: string | null;
   siklus_terkunci: boolean;
   toleransi_over_persen: number;
@@ -4576,6 +4581,7 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     durasi_kontrak_bulan: s.durasiKontrakBulan,
     tanggal_mulai_kontrak: s.tanggalMulaiKontrak,
     tanggal_akhir_kontrak: s.tanggalAkhirKontrak,
+    target_gmv_kontrak_bulanan: s.targetGmvKontrakBulanan,
     tanggal_mulai_siklus: s.tanggalMulaiSiklus,
     siklus_terkunci: s.siklusTerkunci,
     toleransi_over_persen: s.toleransiOverPersen,

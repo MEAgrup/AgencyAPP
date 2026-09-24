@@ -285,6 +285,13 @@ export interface ClosingInput {
   durasi_bulan_override?: number | null;
   alasan_override?: string | null;
   /**
+   * O76 — floor GMV bulanan kontraktual, dikunci Sales di sini. Opsional (tidak
+   * setiap deal punya komitmen GMV); tidak seperti `durasi_bulan_override`, ini
+   * BUKAN override apa pun (tidak ada default katalog untuk disimpang), jadi
+   * tidak ada alasan wajib. String desimal Rupiah, mis. "400000000.00".
+   */
+  target_gmv_bulanan?: string | null;
+  /**
    * Tombol "Include PPN" (ketokan D-4 2026-09-08). Seluruh harga di sistem ini
    * non-PPN; ini SATU-SATUNYA tempat yang memutuskan apakah 11% ditambahkan ke
    * invoice. Kalau menyala, cicilan harus berjumlah dasar + PPN.
