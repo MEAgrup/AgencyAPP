@@ -55,6 +55,7 @@ import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { isAccountLead, isAccountStaff, isReadOnlyOD } from '@/lib/account';
+import { formatIDR } from '@/lib/money';
 import StatusBadge from '@/components/StatusBadge';
 import SectionA, {
   konteksDraftOf,
@@ -734,6 +735,13 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
           Kontrak {detail.contract_id} · {detail.tanggal_mulai_kontrak} →{' '}
           {detail.tanggal_akhir_kontrak} ({detail.durasi_kontrak_bulan} bulan)
         </p>
+        {detail.target_gmv_kontrak_bulanan !== null && (
+          <p className="muted" style={{ fontSize: 12, margin: '2px 0 0' }}>
+            Target GMV Bulanan Kontraktual (O76): <strong>{formatIDR(detail.target_gmv_kontrak_bulanan)}</strong> —
+            dikunci Sales saat closing. Jumlah floor GMV Section D lintas channel per bulan harus sama
+            dengan angka ini.
+          </p>
+        )}
         <p className="muted" style={{ fontSize: 12, margin: '2px 0 0' }}>
           Gunakan <strong>Salin JSON</strong> / <strong>Unduh JSON</strong> untuk membawa data
           Seksi A &amp; B (dan seksi lain yang sudah terisi) ke tools AI eksternal sebelum

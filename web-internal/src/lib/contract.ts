@@ -18,6 +18,12 @@ export interface Contract {
   /** R-01: `baru` | `perpanjangan` | `cross_sell`. */
   jenis: string;
   contract_sebelumnya_id: string | null;
+  /**
+   * O76 — floor GMV bulanan kontraktual, dikunci Sales saat closing.
+   * `null` = deal ini tidak punya komitmen GMV (sah). Read-only di sini —
+   * hanya `sales.close()` (form Closing Sales) yang menuliskannya.
+   */
+  target_gmv_bulanan: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

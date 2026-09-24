@@ -137,17 +137,32 @@ export const CHANNEL_STATES = ['Eksisting', 'Belum Aktif'] as const;
 export type ChannelState = (typeof CHANNEL_STATES)[number];
 
 /**
- * `sumber_floor` — the floor's APPROVAL PATH (O57 item (b)), not its origin.
+ * `sumber_floor` — the floor's APPROVAL PATH (O57 item (b), extended O76), not
+ * its origin in the pre-O57 sense.
  *
  * The pre-O57 pair was `kontrak | input_am`, a quality signal invented because
- * CDPS had no Contract to pull a floor from. The owner decision keeps the floor
- * an AM input and puts a Head approval behind it, so what the column has to
- * record is who has signed off — which is also what makes Rule 7's "read-only"
- * enforceable: read-only AFTER `disetujui_head`, frozen by a DB trigger.
+ * CDPS had no Contract to pull a floor from. O57 kept the floor an AM input and
+ * put a Head approval behind it (`input_am` → `disetujui_head`, frozen by a DB
+ * trigger once approved) — that pair is what this file built first.
+ *
+ * O76 adds a THIRD path, `dari_kontrak`: when the Contract carries a locked
+ * `target_gmv_bulanan` (Sales set it at closing — `sales.close`), the AM still
+ * splits it across channels here, but the split's sum is enforced against that
+ * number (`saveTargets`) and the resulting rows are `dari_kontrak` from the
+ * moment they are written — frozen by the SAME trigger as `disetujui_head`,
+ * without a Head approval step, because Sales already locked the number. A
+ * Contract with no `target_gmv_bulanan` (not every deal carries a GMV
+ * commitment) falls through to the original `input_am` → `disetujui_head` path,
+ * unchanged.
+ *
+ * `dari_kontrak` is NOT the retired pre-O57 `kontrak` value despite the similar
+ * name: `kontrak` was a claim with no Contract entity to back it; `dari_kontrak`
+ * points at a `contracts.target_gmv_bulanan` row that actually exists.
  */
 export const FLOOR_INPUT_AM = 'input_am';
 export const FLOOR_DISETUJUI_HEAD = 'disetujui_head';
-export const FLOOR_SOURCES = [FLOOR_INPUT_AM, FLOOR_DISETUJUI_HEAD] as const;
+export const FLOOR_DARI_KONTRAK = 'dari_kontrak';
+export const FLOOR_SOURCES = [FLOOR_INPUT_AM, FLOOR_DISETUJUI_HEAD, FLOOR_DARI_KONTRAK] as const;
 export type FloorSource = (typeof FLOOR_SOURCES)[number];
 
 /** D-2 / D-4 metrics. `gmv` is the one the floor/stretch rule applies to. */
@@ -496,6 +511,14 @@ export const MSG_BASELINE_INCOMPLETE =
   '[baseline bulanan belum lengkap untuk seluruh periode yang dideklarasikan]';
 /** D-2 — no GMV stretch target for a contracted channel. */
 export const MSG_TARGET_MISSING = '[target GMV per bulan wajib diisi untuk setiap channel]';
+/**
+ * O76 — a month's per-channel GMV floor split does not sum to the Contract's
+ * locked `target_gmv_bulanan`. Only fires when the Contract actually carries a
+ * number (not every deal does); when it does, Sales already locked it at
+ * closing, so the AM's job is to allocate it across channels, not to change it.
+ */
+export const MSG_FLOOR_KONTRAK_TIDAK_SESUAI =
+  '[jumlah floor GMV bulan ini di seluruh channel harus sama dengan target GMV kontraktual]';
 /**
  * D-4 — no supporting-metric target at all for a contracted channel (X-15).
  *
@@ -956,6 +979,12 @@ export interface Strategi extends StrategiKonteks {
   durasiKontrakBulan: number;
   tanggalMulaiKontrak: string;
   tanggalAkhirKontrak: string;
+  /**
+   * O76 — the Contract's locked monthly GMV floor, joined in the same way as
+   * the window above (derived, read-only here; `sales.close()` is the only
+   * writer). `null` = this agreement carries no GMV commitment.
+   */
+  targetGmvKontrakBulanan: string | null;
   tanggalMulaiSiklus: string | null;
   siklusTerkunci: boolean;
   toleransiOverPersen: number;
@@ -1500,6 +1529,7 @@ interface StrategiRow {
   durasi_kontrak_bulan: number;
   tanggal_mulai_kontrak: string | Date;
   tanggal_akhir_kontrak: string | Date;
+  target_gmv_kontrak_bulanan: string | null;
   tanggal_mulai_siklus: string | Date | null;
   siklus_terkunci: boolean;
   toleransi_over_persen: string;
@@ -1579,6 +1609,7 @@ function rowToStrategi(r: StrategiRow): Strategi {
     durasiKontrakBulan: r.durasi_kontrak_bulan,
     tanggalMulaiKontrak: dateStr(r.tanggal_mulai_kontrak),
     tanggalAkhirKontrak: dateStr(r.tanggal_akhir_kontrak),
+    targetGmvKontrakBulanan: r.target_gmv_kontrak_bulanan,
     tanggalMulaiSiklus: dateOrNull(r.tanggal_mulai_siklus),
     siklusTerkunci: r.siklus_terkunci,
     toleransiOverPersen: Number(r.toleransi_over_persen),
@@ -1820,13 +1851,15 @@ async function loadStrategiRow(sql: Queryable, id: string, forUpdate = false): P
     ? await sql<StrategiRow[]>`
         select s.*, ct.durasi_bulan as durasi_kontrak_bulan,
                ct.tanggal_mulai as tanggal_mulai_kontrak,
-               ct.tanggal_akhir as tanggal_akhir_kontrak
+               ct.tanggal_akhir as tanggal_akhir_kontrak,
+               ct.target_gmv_bulanan as target_gmv_kontrak_bulanan
           from strategi s join contracts ct on ct.id = s.contract_id
          where s.id = ${id} for update of s`
     : await sql<StrategiRow[]>`
         select s.*, ct.durasi_bulan as durasi_kontrak_bulan,
                ct.tanggal_mulai as tanggal_mulai_kontrak,
-               ct.tanggal_akhir as tanggal_akhir_kontrak
+               ct.tanggal_akhir as tanggal_akhir_kontrak,
+               ct.target_gmv_bulanan as target_gmv_kontrak_bulanan
           from strategi s join contracts ct on ct.id = s.contract_id
          where s.id = ${id}`;
   if (rows.length === 0) {
@@ -3229,7 +3262,8 @@ export async function listStrategiForService(
   const rows = await sql<StrategiRow[]>`
     select s.*, ct.durasi_bulan as durasi_kontrak_bulan,
            ct.tanggal_mulai as tanggal_mulai_kontrak,
-           ct.tanggal_akhir as tanggal_akhir_kontrak
+           ct.tanggal_akhir as tanggal_akhir_kontrak,
+           ct.target_gmv_bulanan as target_gmv_kontrak_bulanan
       from strategi s
       join contracts ct on ct.id = s.contract_id
       join services sv on sv.contract_id = s.contract_id
@@ -3243,7 +3277,8 @@ export async function activeStrategi(sql: Queryable, serviceId: string): Promise
   const rows = await sql<StrategiRow[]>`
     select s.*, ct.durasi_bulan as durasi_kontrak_bulan,
            ct.tanggal_mulai as tanggal_mulai_kontrak,
-           ct.tanggal_akhir as tanggal_akhir_kontrak
+           ct.tanggal_akhir as tanggal_akhir_kontrak,
+           ct.target_gmv_bulanan as target_gmv_kontrak_bulanan
       from strategi s
       join contracts ct on ct.id = s.contract_id
       join services sv on sv.contract_id = s.contract_id
@@ -5006,9 +5041,19 @@ export interface TargetInput {
  *
  * `sumber_floor` is NOT an input (O57 item (b), house rule #4). It records the
  * APPROVAL PATH, and the only way into it is: written `input_am` here, flipped
- * to `disetujui_head` by `approveStrategi`. Letting the caller supply it would
- * hand the AM who types the floor the power to mark it approved — the exact
- * separation D-7 Sanggahan Target depends on.
+ * to `disetujui_head` by `approveStrategi` — UNLESS the Contract carries a
+ * locked `target_gmv_bulanan` (O76), in which case a 'gmv' row is written
+ * `dari_kontrak` directly and never needs `approveStrategi` to touch it.
+ * Letting the caller supply either value would hand the AM who types the floor
+ * the power to mark it approved — the exact separation D-7 Sanggahan Target
+ * depends on.
+ *
+ * O76's sum check: when the Contract has a `target_gmv_bulanan`, every month
+ * that has at least one 'gmv' floor row must sum those rows (across channels)
+ * to EXACTLY that number. The AM still decides the per-channel split; they do
+ * not decide the total — Sales already locked that at closing. A Contract with
+ * no `target_gmv_bulanan` (not every deal carries a GMV commitment) skips this
+ * check entirely and behaves exactly as before O76.
  *
  * Reachable only while the record is a draft (`requireDraftAndWriter`), so an
  * approved floor can never be rewritten through this door: by then the Strategi
@@ -5022,7 +5067,7 @@ export async function saveTargets(
 ): Promise<StrategiDetail> {
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    await requireDraftAndWriter(tx, actor, id);
+    const head = await requireDraftAndWriter(tx, actor, id);
     for (const t of targets) {
       if (!TARGET_METRICS.includes(t.metric)) {
         throw new ValidationError(MSG_INCOMPLETE);
@@ -5043,6 +5088,26 @@ export async function saveTargets(
         }
       }
     }
+    // O76 — resolve the Contract's locked floor ONCE, then check every month
+    // that has a 'gmv' row against it. `money.parse` compares as bigint minor
+    // units, never as float, so a "same to the rupiah" check cannot drift.
+    const targetGmvBulanan = await contract.targetGmvBulananOfContract(tx, head.contractId);
+    const floorSource = targetGmvBulanan === null ? FLOOR_INPUT_AM : FLOOR_DARI_KONTRAK;
+    if (targetGmvBulanan !== null) {
+      const contractFloor = money.parse(targetGmvBulanan);
+      const sumsByMonth = new Map<number, bigint>();
+      for (const t of targets) {
+        if (t.metric !== 'gmv') continue;
+        const floor = t.nilaiFloor ?? null;
+        if (floor === null) continue;
+        sumsByMonth.set(t.monthIndex, (sumsByMonth.get(t.monthIndex) ?? 0n) + money.parse(floor));
+      }
+      for (const sum of sumsByMonth.values()) {
+        if (sum !== contractFloor) {
+          throw new ValidationError(MSG_FLOOR_KONTRAK_TIDAK_SESUAI);
+        }
+      }
+    }
     await tx`delete from strategi_target where strategi_id = ${id}`;
     for (const t of targets) {
       const floor = t.metric === 'gmv' ? (t.nilaiFloor ?? null) : null;
@@ -5051,7 +5116,7 @@ export async function saveTargets(
           (strategi_id, channel, month_index, metric, nilai_floor, nilai_stretch, sumber_floor, created_by)
         values
           (${id}, ${t.channel}, ${t.monthIndex}, ${t.metric}, ${floor}, ${t.nilaiStretch},
-           ${floor === null ? null : FLOOR_INPUT_AM}, ${actor.employeeId})`;
+           ${floor === null ? null : floorSource}, ${actor.employeeId})`;
     }
     await ex.audit.insertAudit({
       entityType: ENTITY_STRATEGI,
@@ -8267,11 +8332,25 @@ async function copyChildren(
         from strategi_baseline_bulan where channel_id = ${oldChannels[i].id}`;
   }
 
+  // O76 — a revision inherits `dari_kontrak` rows AS `dari_kontrak`, not reset
+  // to `input_am`. The Contract's `target_gmv_bulanan` did not change just
+  // because a new draft was opened, and `nilai_floor` is copied byte-for-byte
+  // from `fromId` (unchanged), so a sum that matched before still matches —
+  // there is nothing for Head to re-approve. Rows that were plain `input_am`
+  // (no contractual floor) still reset the same way they always did: a
+  // revision's approval state starts over precisely because THAT floor was an
+  // AM claim, not a locked number.
+  const revisionContract = await tx<{ target_gmv_bulanan: string | null }[]>`
+    select c.target_gmv_bulanan from contracts c
+      join strategi s on s.contract_id = c.id
+     where s.id = ${fromId}`;
+  const revisionFloorSource =
+    revisionContract[0]?.target_gmv_bulanan == null ? FLOOR_INPUT_AM : FLOOR_DARI_KONTRAK;
   await tx`
     insert into strategi_target
       (strategi_id, channel, month_index, metric, nilai_floor, nilai_stretch, sumber_floor, created_by)
     select ${toId}, channel, month_index, metric, nilai_floor, nilai_stretch,
-           case when nilai_floor is null then null else ${FLOOR_INPUT_AM} end, ${actorId}
+           case when nilai_floor is null then null else ${revisionFloorSource} end, ${actorId}
       from strategi_target where strategi_id = ${fromId}`;
 
   await tx`
