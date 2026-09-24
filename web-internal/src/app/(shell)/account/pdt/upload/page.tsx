@@ -436,7 +436,7 @@ function UploadPdtWorkspace() {
         )}
         {selectedClient && !platformLoading && !platformErr && platformOptions.length === 0 && (
           <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Klien ini belum punya toko Shopee/TikTok Shop aktif — Tokopedia/Lazada/Blibli tetap manual (PDT-22).
+            Klien ini belum punya toko Shopee/TikTok Shop aktif — Tokopedia/Lazada/Others tetap manual (PDT-22).
           </p>
         )}
         {selectedClient && (

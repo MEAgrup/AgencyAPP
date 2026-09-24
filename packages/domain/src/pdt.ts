@@ -212,7 +212,7 @@ function modulPlatform(kode: string): pdt.PdtModuleDef | undefined {
   return pdt.PDT_MODULES.find((m) => m.kode === kode);
 }
 
-/** PDT-22: `client_platforms.platform` (Title Case) → kosakata `pdt` (Rule vokab berbeda, migrasi G1-01 §catatan). `null` = Tokopedia/Lazada/Blibli, PDT tidak berlaku (manual, PDT-22). */
+/** PDT-22: `client_platforms.platform` (Title Case) → kosakata `pdt` (Rule vokab berbeda, migrasi G1-01 §catatan). `null` = Tokopedia/Lazada/Others, PDT tidak berlaku (manual, PDT-22). */
 export function platformKeVokabPdt(platform: string): pdt.PdtPlatform | null {
   if (platform === 'Shopee') return 'shopee';
   if (platform === 'TikTok Shop') return 'tiktok';
@@ -405,7 +405,7 @@ export async function previewUploadBatch(
 
   const platform = platformKeVokabPdt(row.platform);
   if (!platform) {
-    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
 
   const moduleOptions = pdt.PDT_MODULES.filter((m) => m.platform === platform).map((m) => ({ kode: m.kode, namaTampilan: m.namaTampilan }));
@@ -470,7 +470,7 @@ export async function siapkanUploadBatch(
   const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
   if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
   if (!platformKeVokabPdt(row.platform)) {
-    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
 
   const stagingPath = `_staging/${row.client_id}/${clientPlatformId}/${randomUUID()}.zip`;
@@ -807,7 +807,7 @@ export async function commitUploadBatch(
 
   const platform = platformKeVokabPdt(row.platform);
   if (!platform) {
-    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
 
   const modulValidUntukPlatform = new Set(pdt.PDT_MODULES.filter((m) => m.platform === platform).map((m) => m.kode));
@@ -4398,7 +4398,7 @@ export async function bacaLaporanPdt(
 
   const platform = platformKeVokabPdt(row.platform);
   if (!platform) {
-    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
 
   return platform === 'tiktok'
@@ -5104,7 +5104,7 @@ async function recomputeAdsMetricEntriesPdt(
   await ads.deletePdtAdsMetricEntries(tx, clientPlatformId, periodeMulai);
 
   const adsPlatform = ads.pdtPlatformKeAdsPlatform(platform);
-  if (!adsPlatform) return; // nol padanan platform Ads (Tokopedia/Lazada/Blibli) — secara struktur tidak berlaku, bukan pertanyaan terbuka
+  if (!adsPlatform) return; // nol padanan platform Ads (Tokopedia/Lazada/Others) — secara struktur tidak berlaku, bukan pertanyaan terbuka
 
   const [current] = await tx<{ ada: boolean }[]>`
     select exists (

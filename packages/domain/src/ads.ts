@@ -1003,7 +1003,7 @@ export async function findOverlappingShopeeAdsCampaigns(
 // is NOT `ad_campaigns.platform` ('Shopee Ads'/'TikTok Shop Ads'/'Social
 // Ads') — this is the crosswalk, owned here since it is this module's own
 // vocabulary. Platforms with no Ads-division equivalent today (Tokopedia,
-// Lazada, Blibli) map to null: structurally moot, not an open question — no
+// Lazada, Others) map to null: structurally moot, not an open question — no
 // `ad_campaigns.platform` value exists for them to match against.
 const PDT_PLATFORM_KE_ADS: Readonly<Record<string, string>> = {
   Shopee: 'Shopee Ads',
