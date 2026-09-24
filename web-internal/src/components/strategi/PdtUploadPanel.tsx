@@ -151,7 +151,7 @@ export default function PdtUploadPanel({
       )}
 
       <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-        Hanya toko <b>Shopee</b> dan <b>TikTok Shop</b> yang aktif — Tokopedia/Lazada/Blibli tetap
+        Hanya toko <b>Shopee</b> dan <b>TikTok Shop</b> yang aktif — Tokopedia/Lazada/Others tetap
         manual (PDT-22). Angka yang sudah Anda ketik sendiri tidak ditimpa.
       </p>
     </section>

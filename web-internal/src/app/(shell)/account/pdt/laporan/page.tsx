@@ -163,7 +163,7 @@
  * memaksa AM mengetik ID — beda dari `/ads/screening` yang harus memakai
  * kolom teks karena RLS tidak punya lengan Ads (lihat docblock di sana).
  * Opsi platform disaring ke Shopee/TikTok Shop (PDT-22: Tokopedia/Lazada/
- * Blibli tetap manual) — memilih platform lain hanya akan 400 di server.
+ * Others tetap manual) — memilih platform lain hanya akan 400 di server.
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -719,7 +719,7 @@ export default function LaporanPdtPage() {
         )}
         {selectedClient && !platformLoading && !platformErr && platformOptions.length === 0 && (
           <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Klien ini belum punya toko Shopee/TikTok Shop aktif — Tokopedia/Lazada/Blibli tetap manual (PDT-22).
+            Klien ini belum punya toko Shopee/TikTok Shop aktif — Tokopedia/Lazada/Others tetap manual (PDT-22).
           </p>
         )}
         {selectedClient && (

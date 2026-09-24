@@ -120,16 +120,14 @@ export const PAYMENT_STATUS_MENUNGGU_VERIFIKASI = '[Menunggu Verifikasi]';
  *  sub-data") — `close()` splits the Qualified Lead Form's joined selection back
  *  into one row per platform.
  *
- *  ⚠️ Bukan lagi "verbatim from the PRD": M0 §4.3 menulis `… / Lazada / Others`,
- *  sedangkan CHECK `ck_client_platforms_platform` menegakkan `… / Lazada /
- *  Blibli`. Selama daftar ini memuat `Others`, memilihnya melahirkan SQLSTATE
- *  23514 — 500 berpesan Postgres, bukan pesan BI. Daftar di sini mengikuti
- *  kosakata yang BENAR-BENAR ditegakkan DB (cerminan `client.PLATFORM_VOCAB`),
- *  supaya UI berhenti menawarkan pilihan yang pasti gagal. Mana dari keduanya
- *  yang sah adalah pertanyaan terbuka **O77** (`docs/DECISIONS.md`) — menambah
+ *  **O77 DITUTUP (2026-09-24):** sempat berselisih dari PRD M0 §4.3 (`Others`)
+ *  karena migrasi `20261010010000` salah mengutip PDT-22 dan menegakkan
+ *  `Blibli` di CHECK sebagai gantinya. Pemilik memilih "Others only" —
+ *  `20261209010000_o77_...sql` mengembalikan CHECK ke `Others`, daftar ini
+ *  ikut kembali VERBATIM dari PRD. Cermin `client.PLATFORM_VOCAB` — menambah
  *  atau mencabut nilai di sini berarti mengubah CHECK dan `PLATFORM_VOCAB`
  *  sekaligus, bukan salah satunya. */
-export const PLATFORM_OPTIONS = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Blibli'] as const;
+export const PLATFORM_OPTIONS = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Others'] as const;
 
 // GET /clients[?limit=&cursor=] — P2 §6: dipaginasi server-side. `next_cursor`
 // null = halaman terakhir; kirim balik sebagai `cursor` untuk lanjutannya.

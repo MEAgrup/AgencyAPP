@@ -144,10 +144,10 @@ describe('platformKeVokabPdt (PDT-22 — vokab client_platforms.platform ≠ vok
     expect(platformKeVokabPdt('TikTok Shop')).toBe('tiktok');
   });
 
-  it('Tokopedia/Lazada/Blibli → null (manual, PDT tidak berlaku)', () => {
+  it('Tokopedia/Lazada/Others → null (manual, PDT tidak berlaku)', () => {
     expect(platformKeVokabPdt('Tokopedia')).toBeNull();
     expect(platformKeVokabPdt('Lazada')).toBeNull();
-    expect(platformKeVokabPdt('Blibli')).toBeNull();
+    expect(platformKeVokabPdt('Others')).toBeNull();
   });
 });
 
@@ -564,7 +564,7 @@ describeDb('previewUploadBatch (G1-09) — gerbang izin + platform', () => {
     expect(hasil.platform).toBe('shopee');
   });
 
-  it('platform Tokopedia/Lazada/Blibli ⇒ ValidationError (PDT-22, manual saja)', async () => {
+  it('platform Tokopedia/Lazada/Others ⇒ ValidationError (PDT-22, manual saja)', async () => {
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
     const cpId = await insertClientPlatform(clientId, 'Tokopedia');
@@ -600,7 +600,7 @@ describeDb('siapkanUploadBatch (G1-09-BODY-BESAR) — gerbang izin + path stagin
     await expect(siapkanUploadBatch(sql, otherAm(), cpId)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it('platform Tokopedia/Lazada/Blibli ⇒ ValidationError (PDT-22, manual saja) — SEBELUM path staging dibuat', async () => {
+  it('platform Tokopedia/Lazada/Others ⇒ ValidationError (PDT-22, manual saja) — SEBELUM path staging dibuat', async () => {
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
     const cpId = await insertClientPlatform(clientId, 'Tokopedia');
@@ -857,7 +857,7 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2a) — gerbang izin + platform
     await expect(commitUploadBatch(sql, otherAm(), cpId, [], [])).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it('platform Tokopedia/Lazada/Blibli ⇒ ValidationError (PDT-22, manual saja)', async () => {
+  it('platform Tokopedia/Lazada/Others ⇒ ValidationError (PDT-22, manual saja)', async () => {
     const clientId = nextClientId();
     await insertClient(clientId, OWNER_AM);
     const cpId = await insertClientPlatform(clientId, 'Tokopedia');
