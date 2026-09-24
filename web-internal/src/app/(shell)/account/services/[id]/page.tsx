@@ -110,7 +110,16 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // M6A Strategi (STRG-) — a different entity from `strategy` above; see the
   // card comment. Listed rather than singled out because Rule 13 makes versions
   // ROWS, so a Service legitimately has several.
-  const [strategiList, setStrategiList] = useState<Strategi[]>([]);
+  // `null` = not read yet, or the read FAILED — deliberately NOT `[]`, which is
+  // the answer "this Service has none" and is what opens the create door below.
+  // O78: `listStrategi` answered 500 in production for days (the O76 migration
+  // was merged with its code but never applied, so `ct.target_gmv_bulanan` did
+  // not exist), and this hub read that failure as "Belum ada Strategi" — hiding
+  // the Draft `STRG-` the Service already had behind a create form the server
+  // could only ever reject with [strategi untuk kontrak ini sudah ada]. The AM
+  // lost every route to the real record. Never offer to create what we failed
+  // to look for. Same `T[] | null` idiom as `briefs` above.
+  const [strategiList, setStrategiList] = useState<Strategi[] | null>(null);
   const [strategiError, setStrategiError] = useState<string | null>(null);
 
   // Create Strategi (STRG-) form — the canonical create door, promoted onto the
@@ -235,6 +244,9 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     try {
       setStrategiList(await listStrategi(id));
     } catch (err) {
+      // Back to "unknown", not to an empty list — a stale success from an
+      // earlier load must not keep the create door open either.
+      setStrategiList(null);
       setStrategiError(errorMessage(err));
     }
   }, [id]);
@@ -352,12 +364,12 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // Plan periods carry the one-click "warisi jadi Brief" door (RAB-16) — the
   // AM never has to retype kuota/divisi/hasil that Plan already holds. Only an
   // Aktif Strategi has generated periods, so this stays null until then.
-  const strgActiveContractId = strategiList.find((st) => st.status === 'Aktif')?.contract_id ?? null;
+  const strgActiveContractId = strategiList?.find((st) => st.status === 'Aktif')?.contract_id ?? null;
   // Pensiunnya `STR-` (ketokan 2026-09-08) membuat `approvedStrategy` selamanya
   // null di jalur yang diputuskan, jadi gerbang form Brief di bawah harus
   // membaca STRG- — kalau tidak, satu-satunya jalur yang hidup justru yang
   // tidak pernah membuka formnya.
-  const strgAktif = strategiList.some((st) => st.status === 'Aktif');
+  const strgAktif = strategiList?.some((st) => st.status === 'Aktif') ?? false;
   // The §4 write door is only open at [Awaiting Onboarding] (
   // setStrategyRequirement both reject otherwise, MSG_SERVICE_NOT_AWAITING). When
   // the Service read is unavailable, fall back to permissive and let the server
@@ -626,7 +638,13 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           <h2>Strategi (STRG-)</h2>
         </div>
         {strategiError && <div className="alert alertError" role="alert">{strategiError}</div>}
-        {strategiList.length === 0 ? (
+        {strategiList === null ? (
+          <p className="muted">
+            {strategiError
+              ? 'Daftar Strategi gagal dimuat, jadi belum diketahui apakah layanan ini sudah punya Strategi. Muat ulang halaman — jangan buat Strategi baru sebelum daftar ini tampil.'
+              : 'Memuat Strategi…'}
+          </p>
+        ) : strategiList.length === 0 ? (
           <p className="muted">Belum ada Strategi untuk layanan ini.</p>
         ) : (
           <div className="stack" style={{ gap: 6 }}>
@@ -682,6 +700,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             2026-08-27. */}
         {canWrite &&
           (planGated || service?.plan_determination_pending) &&
+          strategiList !== null &&
           strategiList.length === 0 && (
             <form className="form" onSubmit={handleCreateStrategi} style={{ marginTop: 12 }}>
               <div className="alert alertInfo" role="status">
