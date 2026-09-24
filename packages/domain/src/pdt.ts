@@ -3493,12 +3493,17 @@ export async function rakitInputSkorShopee(
  * `@cdps/core`) dalam satu pemanggilan. BEDA dari `hitungSkorTiktok`: Shopee
  * tidak punya benchmark (asimetri asli mesin produksi, lihat docblock
  * `computeSkorShopee`) — nol `benchmarkVersi` dikembalikan.
+ *
+ * **`input` diikutsertakan di hasil** (G4-03 aksi 1) supaya `rakitLaporanShopee`
+ * bisa meneruskan `input.dibuat?.cancelRate` ke bagian "layanan" laporan
+ * TANPA query kedua — angka yang sama persis yang dipakai dimensi skor
+ * Conversion & Retention, satu sumber kebenaran.
  */
 export async function hitungSkorShopee(
   sql: Sql,
   clientPlatformId: number,
   periodeAwalBulan: string,
-): Promise<{ hasil: pdt.PdtSkorHasilShopee }> {
+): Promise<{ hasil: pdt.PdtSkorHasilShopee; input: pdt.PdtSkorInputShopee }> {
   // KUADRAN-SHOPEE — kolom `kuadran` ditulis SEBELUM apa pun membacanya, pola
   // dan alasan yang sama dengan `hitungSkorTiktok` (Rule 4: field turunan,
   // selalu recomputable, tidak pernah ditulis tangan). `rakitInputSkorShopee`
@@ -3507,7 +3512,7 @@ export async function hitungSkorShopee(
   // dan ia dipanggil SETELAH fungsi ini.
   await klasifikasiUlangKuadranSkuShopee(sql, clientPlatformId, periodeAwalBulan);
   const input = await rakitInputSkorShopee(sql, clientPlatformId, periodeAwalBulan);
-  return { hasil: pdt.computeSkorShopee(input) };
+  return { hasil: pdt.computeSkorShopee(input), input };
 }
 
 // ===========================================================================
@@ -4102,7 +4107,8 @@ async function bacaPromo(sql: Sql, clientPlatformId: number, periodeAwalBulan: s
  * mengisinya — `avg()` Postgres sudah mengabaikan NULL, jadi baris yang
  * tidak membawa kolom itu tidak menarik rata-ratanya ke bawah.
  */
-async function bacaLayanan(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanLayananInput | null> {
+/** Chat + penalti saja — `cancelRate`/`gmvPesananSelesai` (G4-03 aksi 1/7) datang dari promise SAUDARA di `rakitLaporanShopee`, digabung di sana ke bentuk penuh `pdt.PdtLaporanLayananInput`. */
+async function bacaLayanan(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<Pick<pdt.PdtLaporanLayananInput, 'chat' | 'penalti'> | null> {
   const [[chatRow], penaltiRows] = await Promise.all([
     sql<{
       baris: number;
@@ -4356,7 +4362,7 @@ export async function rakitLaporanShopee(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanShopee> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, harian, kanal, iklan, live, video, produk, afiliasi, kreator, sesiLive, kampanye, promo, layanan, { hasil: skor }] = await Promise.all([
+  const [kpi, harian, kanal, iklan, live, video, produk, afiliasi, kreator, sesiLive, kampanye, promo, layananBaca, kpiDibayar, { hasil: skor, input: skorInput }] = await Promise.all([
     bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim'),
     bacaHarian(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim', false),
     bacaKanalShopee(sql, clientPlatformId, periodeAwalBulan),
@@ -4370,8 +4376,22 @@ export async function rakitLaporanShopee(
     bacaKampanye(sql, clientPlatformId, periodeAwalBulan),
     bacaPromo(sql, clientPlatformId, periodeAwalBulan),
     bacaLayanan(sql, clientPlatformId, periodeAwalBulan),
+    // G4-03 aksi 7 — basis 'dibayar' TIDAK dipakai bagian "kpi" mana pun di atas
+    // (itu 'siap_dikirim', Rule 16); `bacaKpiShopDaily` dipakai ulang apa adanya,
+    // hanya `.gmv`-nya yang dipakai `layanan.gmvPesananSelesai` di bawah.
+    bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'dibayar'),
     hitungSkorShopee(sql, clientPlatformId, periodeAwalBulan),
   ]);
+  // G4-03 aksi 1/7 — cancelRate diteruskan dari `rakitInputSkorShopee` (via
+  // `hitungSkorShopee`), bukan query kedua; gmvPesananSelesai dari `kpiDibayar`
+  // di atas. Digabung ke `layanan` di sini (bukan di dalam `bacaLayanan`) karena
+  // kedua sumbernya adalah promise SAUDARA, bukan bagian query layanan itu sendiri.
+  const layanan: pdt.PdtLaporanLayananInput = {
+    chat: layananBaca?.chat ?? null,
+    penalti: layananBaca?.penalti ?? [],
+    cancelRate: skorInput.dibuat?.cancelRate ?? null,
+    gmvPesananSelesai: kpiDibayar?.gmv ?? null,
+  };
   return pdt.bangunLaporanShopee({
     clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, harian, kanal, iklan, live, video, produk, afiliasi,
     kreator, sesiLive, kampanye, promo, layanan, skor,

@@ -1563,12 +1563,21 @@ export function bangunLaporanPromo(input: PdtLaporanPromoInput, gmvToko: number 
  * **SHOPEE-ONLY**, alasan sama "promo": `pdt_fact_layanan_chat` (G3-02a) dan
  * `pdt_fact_kesehatan_penalti` (G2-01) hanya punya penulis fakta Shopee.
  *
- * **Cancel rate dan retur SENGAJA TIDAK ADA di sini.** Mesin lama §9
- * menampilkan keduanya dari `k.batal_pesanan`/`k.retur_pesanan`;
- * `pdt_fact_shop_daily` TIDAK PERNAH punya kolom pembatalan/retur sama
- * sekali (skema `20261011010000` §5a) — jadi keduanya tidak bisa dihitung
- * ulang dari fakta PDT dan TIDAK ditebak. Menampilkan "0%" untuk angka yang
- * tidak diketahui persis melanggar Rule 12.
+ * **Cancel rate dan GMV pesanan selesai — G4-03 aksi 1/7, read-only PERMANEN.**
+ * Paragraf ini dulu mencatat keduanya "SENGAJA TIDAK ADA" karena
+ * `pdt_fact_shop_daily` belum punya kolom `pesanan_dibatalkan` — itu tidak
+ * lagi benar sejak migrasi G2-01 menambah kolom itu. Owner memutuskan
+ * (`docs/DECISIONS.md` 2026-09-18 `G4-03-DIVISI-STORE-OPS`, opsi c) kedua
+ * metrik ini TIDAK PERNAH menulis `pdt_usulan` — tidak ada divisi Brief yang
+ * jujur untuk operasi toko murni — dan tetap ditampilkan di sini sebagai KPI
+ * read-only saja. `cancelRate` = Σ`pesanan_dibatalkan` ÷ Σ`pesanan` basis
+ * `'dibuat'` — ANGKA YANG SAMA yang sudah dihitung `rakitInputSkorShopee`
+ * untuk dimensi skor Conversion & Retention (pemanggil meneruskan nilai itu,
+ * bukan query kedua — satu sumber kebenaran). `gmvPesananSelesai` = Σ`gmv`
+ * basis `'dibayar'` (`BASIS_SHEET_SHOPEE` sheet "Pesanan Dibayar") — bukan
+ * sheet/laporan "Pesanan Selesai" terpisah, `"selesai" ≡ 'dibayar'`
+ * dikonfirmasi eksplisit pemilik. Retur TETAP tidak ada — `pdt_fact_shop_daily`
+ * masih tidak punya kolom retur sama sekali, jadi masih tidak ditebak (Rule 12).
  *
  * **Satuan persen dinormalkan jadi PECAHAN di sini.** Kolom sumbernya
  * literal "CSAT %" dan "Tingkat Konversi (Chat Dibalas)" dan disimpan APA
@@ -1611,6 +1620,10 @@ export interface PdtLaporanPenaltiInput {
 export interface PdtLaporanLayananInput {
   chat: PdtLaporanLayananChatInput | null;
   penalti: readonly PdtLaporanPenaltiInput[];
+  /** G4-03 aksi 1 — Σ`pesanan_dibatalkan` ÷ Σ`pesanan`, basis `'dibuat'`. PECAHAN, diteruskan dari `rakitInputSkorShopee`. `null` = nol baris basis `'dibuat'` yang membawa kolom `pesanan_dibatalkan` periode ini (bukan 0 pembatalan sungguhan — Rule 12). */
+  cancelRate: number | null;
+  /** G4-03 aksi 7 — Σ`gmv` basis `'dibayar'`. `null` = nol baris basis `'dibayar'` periode ini. */
+  gmvPesananSelesai: number | null;
 }
 
 export interface PdtLaporanLayananChat {
@@ -1642,11 +1655,15 @@ export interface PdtLaporanLayanan {
   poinPenaltiTotal: number | null;
   /** Urut poin desc. Kosong = nol penalti aktif (bukan "tidak diketahui"). */
   penalti: PdtLaporanPenalti[];
+  /** G4-03 aksi 1 — PECAHAN, read-only PERMANEN (`docs/DECISIONS.md` 2026-09-18 `G4-03-DIVISI-STORE-OPS`). `null` = tidak diketahui periode ini. */
+  cancelRate: number | null;
+  /** G4-03 aksi 7 — read-only PERMANEN, alasan sama `cancelRate`. `null` = tidak diketahui periode ini. */
+  gmvPesananSelesai: number | null;
 }
 
-/** Rakit "layanan". `null` (whole object) bila nol baris chat DAN nol baris penalti. */
+/** Rakit "layanan". `null` (whole object) bila nol baris chat, nol baris penalti, DAN kedua metrik store-ops (G4-03 aksi 1/7) tidak diketahui. */
 export function bangunLaporanLayanan(input: PdtLaporanLayananInput | null): PdtLaporanLayanan | null {
-  if (input == null || (input.chat == null && input.penalti.length === 0)) return null;
+  if (input == null || (input.chat == null && input.penalti.length === 0 && input.cancelRate == null && input.gmvPesananSelesai == null)) return null;
 
   const c = input.chat;
   const pecahanPersen = (v: number | null | undefined): number | null =>
@@ -1675,6 +1692,8 @@ export function bangunLaporanLayanan(input: PdtLaporanLayananInput | null): PdtL
     chat,
     poinPenaltiTotal: input.penalti.length === 0 ? null : bulat(input.penalti.reduce((a, p) => a + p.poin, 0)),
     penalti,
+    cancelRate: persen5(input.cancelRate),
+    gmvPesananSelesai: bulat(input.gmvPesananSelesai),
   };
 }
 

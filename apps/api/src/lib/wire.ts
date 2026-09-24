@@ -9286,14 +9286,18 @@ export interface PdtLaporanPenaltiWire {
 }
 
 /**
- * §9 mesin Shopee lama. `null` untuk TikTok SELALU. Cancel rate dan retur
- * mesin lama TIDAK ADA di sini — `pdt_fact_shop_daily` tidak punya kolom
- * pembatalan/retur sama sekali (lihat docblock `pdt.bangunLaporanLayanan`).
+ * §9 mesin Shopee lama. `null` untuk TikTok SELALU. `cancel_rate`/
+ * `gmv_pesanan_selesai` — G4-03 aksi 1/7, read-only PERMANEN (tidak pernah
+ * menulis `pdt_usulan`, `docs/DECISIONS.md` 2026-09-18
+ * `G4-03-DIVISI-STORE-OPS`). Retur mesin lama TETAP TIDAK ADA di sini —
+ * `pdt_fact_shop_daily` tidak punya kolom retur sama sekali.
  */
 export interface PdtLaporanLayananWire {
   chat: PdtLaporanLayananChatWire | null;
   poin_penalti_total: number | null;
   penalti: PdtLaporanPenaltiWire[];
+  cancel_rate: number | null;
+  gmv_pesanan_selesai: number | null;
 }
 
 /** F-01 (M20 R8). */
@@ -9536,6 +9540,8 @@ function pdtLaporanLayananToWire(l: pdtCore.PdtLaporanLayanan | null): PdtLapora
     },
     poin_penalti_total: l.poinPenaltiTotal,
     penalti: l.penalti.map((p) => ({ poin: p.poin, deskripsi: p.deskripsi, durasi: p.durasi })),
+    cancel_rate: l.cancelRate,
+    gmv_pesanan_selesai: l.gmvPesananSelesai,
   };
 }
 

@@ -551,6 +551,10 @@ export interface PdtLaporanLayanan {
   chat: PdtLaporanLayananChat | null;
   poin_penalti_total: number | null;
   penalti: PdtLaporanPenalti[];
+  /** G4-03 aksi 1 — read-only PERMANEN. */
+  cancel_rate: number | null;
+  /** G4-03 aksi 7 — read-only PERMANEN. */
+  gmv_pesanan_selesai: number | null;
 }
 
 /** F-01 (M20 R8). */
