@@ -148,6 +148,8 @@ const SHOPEE_FULL_BASE: PdtLaporanShopeeOptions = {
   layanan: {
     chat: { barisSumber: 1, pengunjung: 5_000, chatMasuk: 400, chatDibalas: 380, waktuResponDetik: 1_800, csatPersen: 92.5, totalPesanan: 60, penjualan: 12_000_000, tingkatKonversiChatDibalasPersen: 15.8 },
     penalti: [{ poin: 1, deskripsi: 'Keterlambatan kirim', durasi: '30 hari' }],
+    cancelRate: 0.032,
+    gmvPesananSelesai: 9_800_000,
   },
   skor: computeSkorShopee(SKOR_INPUT_SHOPEE_PENUH),
 };
@@ -234,6 +236,36 @@ describe('R2.3 — a null metric inside an otherwise-populated section', () => {
     // The day itself is real (2026-08-02, pengunjung known) — its GMV cell is
     // simply blank in klien, never rendered as the placeholder dash.
     expect(klien).not.toMatch(/2026-08-02[\s\S]{0,40}—/);
+  });
+});
+
+describe('G4-03 aksi 1/7 — Cancel Rate / GMV Pesanan Selesai cards, read-only', () => {
+  it('shopee: both cards render with their values in klien and internal', () => {
+    const { klien, internal } = renderBoth(buildShopeeFull());
+    expect(klien).toContain('Cancel Rate');
+    expect(klien).toContain('GMV Pesanan Selesai');
+    expect(internal).toContain('Cancel Rate');
+    expect(internal).toContain('GMV Pesanan Selesai');
+  });
+
+  it('shopee: cancelRate/gmvPesananSelesai both null, chat still present ⇒ cards absent from klien, shown as — in internal (R2.3, section itself stays populated)', () => {
+    const base = {
+      ...SHOPEE_FULL_BASE,
+      layanan: { chat: SHOPEE_FULL_BASE.layanan!.chat, penalti: SHOPEE_FULL_BASE.layanan!.penalti, cancelRate: null, gmvPesananSelesai: null },
+    };
+    const { klien, internal } = renderBoth(bangunLaporanShopee(base));
+    expect(klien).not.toContain('Cancel Rate');
+    expect(klien).not.toContain('GMV Pesanan Selesai');
+    expect(internal).toContain('Cancel Rate');
+    expect(internal).toContain('GMV Pesanan Selesai');
+  });
+
+  it('shopee: chat null, penalti empty, DAN cancelRate/gmvPesananSelesai both null ⇒ whole "layanan" section collapses, shown as one empty-state note in internal (not per-card dashes)', () => {
+    const base = { ...SHOPEE_FULL_BASE, layanan: { chat: null, penalti: [], cancelRate: null, gmvPesananSelesai: null } };
+    const { klien, internal } = renderBoth(bangunLaporanShopee(base));
+    expect(klien).not.toContain('Cancel Rate');
+    expect(internal).not.toContain('Cancel Rate');
+    expect(internal).toContain('Belum ada data layanan chat / kesehatan toko periode ini.');
   });
 });
 

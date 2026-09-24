@@ -7466,3 +7466,82 @@ describeDb('konfirmasiIdentitasBatch (G1-09-KONFIRMASI-IDENTITAS) — Rule 2/4, 
   });
 
 });
+
+// ---------------------------------------------------------------------------
+// rakitLaporanShopee — bagian "layanan": G4-03 aksi 1 (cancel rate) + aksi 7
+// (GMV pesanan selesai), read-only PERMANEN (docs/DECISIONS.md 2026-09-18
+// G4-03-DIVISI-STORE-OPS opsi c — TIDAK PERNAH menulis pdt_usulan).
+// cancelRate diteruskan dari rakitInputSkorShopee (via hitungSkorShopee),
+// BUKAN query kedua — satu sumber kebenaran dengan dimensi skor Conversion &
+// Retention. gmvPesananSelesai dari pdt_fact_shop_daily basis 'dibayar',
+// basis yang TIDAK dipakai kpi/kanal/dimensi skor mana pun (Rule 16 KPI
+// laporan Shopee = 'siap_dikirim', skor Conversion & Retention = 'dibuat').
+// ---------------------------------------------------------------------------
+describeDb('rakitLaporanShopee — bagian "layanan" store-ops (G4-03 aksi 1/7)', () => {
+  async function fixtureShopee(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee');
+    const rows = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, parser_versi, retensi_sampai, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'shopee', '2026-07-01'::date, '2026-07-31'::date, 'verified', ${pdtCore.PDT_PARSER_VERSI}, '2027-07-31'::date, ${OWNER_AM})
+      returning id`;
+    return { cpId, batchId: rows[0].id };
+  }
+
+  it('cancelRate = Σ pesanan_dibatalkan / Σ pesanan basis dibuat; gmvPesananSelesai = Σ gmv basis dibayar — dua basis independen', async () => {
+    const { cpId, batchId } = await fixtureShopee();
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pengunjung, pesanan_dibatalkan)
+      values (${cpId}, '2026-07-05'::date, 'dibuat', 'shopee', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 9_000_000, 100, 5_000, 5)`;
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'dibayar', 'shopee', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 7_000_000, 90, 5_000)`;
+    // basis 'siap_dikirim' (KPI ringkas laporan, Rule 16) angka BEDA lagi — membuktikan gmvPesananSelesai bukan alias kpi.gmv.
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'siap_dikirim', 'shopee', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 6_500_000, 85, 5_000)`;
+
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.layanan?.cancelRate).toBe(0.05);
+    expect(hasil.layanan?.gmvPesananSelesai).toBe(7_000_000);
+    expect(hasil.kpi.gmv).toBe(6_500_000);
+  });
+
+  it('basis dibuat tanpa kolom pesanan_dibatalkan terisi (berkas lama) ⇒ cancelRate null, BUKAN 0 (Rule 12)', async () => {
+    const { cpId, batchId } = await fixtureShopee();
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'dibuat', 'shopee', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 9_000_000, 100, 5_000)`;
+    // basis 'dibayar' terisi HANYA supaya whole-object 'layanan' tidak ikut collapse
+    // ke null (bangunLaporanLayanan) — yang diuji baris ini murni cancelRate.
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pengunjung)
+      values (${cpId}, '2026-07-05'::date, 'dibayar', 'shopee', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 5_000_000, 60, 5_000)`;
+
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.layanan?.cancelRate).toBeNull();
+    expect(hasil.layanan?.gmvPesananSelesai).toBe(5_000_000);
+  });
+
+  it('nol baris basis dibayar ⇒ gmvPesananSelesai null', async () => {
+    const { cpId, batchId } = await fixtureShopee();
+    // basis 'dibuat' terisi HANYA supaya whole-object 'layanan' tidak ikut collapse
+    // ke null — yang diuji baris ini murni gmvPesananSelesai.
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pengunjung, pesanan_dibatalkan)
+      values (${cpId}, '2026-07-05'::date, 'dibuat', 'shopee', ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 9_000_000, 100, 5_000, 3)`;
+
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.layanan?.cancelRate).toBe(0.03);
+    expect(hasil.layanan?.gmvPesananSelesai).toBeNull();
+  });
+
+  it('nol baris pdt_fact_shop_daily sama sekali, DAN nol chat/penalti ⇒ layanan seluruhnya null', async () => {
+    const { cpId } = await fixtureShopee();
+    const hasil = await rakitLaporanShopee(sql, cpId, '2026-07-01');
+    expect(hasil.layanan).toBeNull();
+  });
+});

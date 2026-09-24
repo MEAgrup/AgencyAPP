@@ -352,11 +352,16 @@ function seksiLayanan(p: PdtLaporanShopee, mode: RenderMode): string {
   const L = p.layanan;
   if (!L) return mode === 'internal' ? kosong('Belum ada data layanan chat / kesehatan toko periode ini.') : '';
   const c = L.chat;
-  const cards = c ? [
-    kartuOpsional(mode, c.responseRate, 'Tingkat Chat Direspon', c.responseRate == null ? DASH : pct(c.responseRate, 1)),
-    kartuOpsional(mode, c.csat, 'CSAT Chat', c.csat == null ? DASH : pct(c.csat, 1)),
-    kartuOpsional(mode, c.konversiChatDibalas, 'Konversi dari Chat', c.konversiChatDibalas == null ? DASH : pct(c.konversiChatDibalas, 1)),
-  ].filter(Boolean) : [];
+  const cards = [
+    ...(c ? [
+      kartuOpsional(mode, c.responseRate, 'Tingkat Chat Direspon', c.responseRate == null ? DASH : pct(c.responseRate, 1)),
+      kartuOpsional(mode, c.csat, 'CSAT Chat', c.csat == null ? DASH : pct(c.csat, 1)),
+      kartuOpsional(mode, c.konversiChatDibalas, 'Konversi dari Chat', c.konversiChatDibalas == null ? DASH : pct(c.konversiChatDibalas, 1)),
+    ] : []),
+    // G4-03 aksi 1/7 — read-only PERMANEN, tidak pernah menulis pdt_usulan (docs/DECISIONS.md 2026-09-18 G4-03-DIVISI-STORE-OPS).
+    kartuOpsional(mode, L.cancelRate, 'Cancel Rate', L.cancelRate == null ? DASH : pct(L.cancelRate, 1)),
+    kartuOpsional(mode, L.gmvPesananSelesai, 'GMV Pesanan Selesai', rpPendek(L.gmvPesananSelesai)),
+  ].filter(Boolean);
   const penaltiRows = L.penalti.map((x) => `<tr class="border-b last:border-0">${td(esc(x.deskripsi))}${td(esc(x.durasi))}${td(`<b>${num(x.poin)}</b>`, true)}</tr>`);
   const penaltiBlock = L.poinPenaltiTotal == null
     ? ''
