@@ -171,6 +171,9 @@ export interface LeadRow {
   // Keduanya false bila permintaan tidak memakai filter `mine`.
   registered_by_me: boolean;
   claimed_by_me: boolean;
+  // "Didaftarkan oleh" (issue #64 / O40) — pendaftar pertama, tak pernah berubah.
+  created_by: string;
+  created_by_nama: string;
 }
 
 // One row in GET /leads/{id}'s attempts list (the "kontes" for this lead).

@@ -120,7 +120,7 @@ describeDb('GET /leads/export — Director, real DB', () => {
     const body = await res.text();
     const lines = body.split('\r\n'); // BOM already stripped by .text()
     expect(lines[0]).toBe(
-      'id;lead_name;phone_number;email;source;origin_division;origin_campaign_id;last_touch_campaign_id;record_status;winning_attempt_id;created_at;open_attempt_count',
+      'id;lead_name;phone_number;email;source;origin_division;origin_campaign_id;last_touch_campaign_id;record_status;winning_attempt_id;created_at;open_attempt_count;created_by;created_by_nama',
     );
     const row = lines.find((l) => l.startsWith(LEAD_ID));
     expect(row).toBeDefined();
@@ -129,6 +129,10 @@ describeDb('GET /leads/export — Director, real DB', () => {
     expect(row).toContain('"ZZ Export Toko; Aneh"');
     // 2026-09-01 10:00:00+07 is 2026-09-01 10:00:00 WIB — no UTC shift.
     expect(row).toContain('2026-09-01 10:00:00');
+    // O40/issue #64 — "Didaftarkan oleh": ZZ-EXP-DIR has no `employees` row, so
+    // employee_display_name falls back to the id itself (verified fallback,
+    // 20260724134427_employee_display_name.sql), and the row ends with it twice.
+    expect(row).toMatch(/;ZZ-EXP-DIR;ZZ-EXP-DIR$/);
   });
 
   it('honors the same status/q/source filters as GET /leads', async () => {

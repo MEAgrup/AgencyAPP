@@ -1204,6 +1204,15 @@ export interface LeadsDbRow {
    */
   registeredByMe: boolean;
   claimedByMe: boolean;
+  /**
+   * "Didaftarkan oleh" (issue #64 / O40). `createdBy` is `leads.created_by`,
+   * set once at registration and never revised (a reopen does not touch it),
+   * so this is genuinely the first registrant. `createdByNama` resolves via
+   * `private.employee_display_name`, RLS-safe the same way `ownerNama` is
+   * resolved for the attempt contest.
+   */
+  createdBy: string;
+  createdByNama: string;
 }
 
 /**
@@ -1266,12 +1275,14 @@ export async function leadsDatabase(
     last_touch_campaign_id: string | null; record_status: string;
     winning_attempt_id: string | null; created_at: Date; open_attempt_count: string;
     registered_by_me: boolean; claimed_by_me: boolean;
+    created_by: string; created_by_nama: string;
   }[]>`
     select l.id, l.lead_name, l.phone_number, l.email, l.source, l.origin_division,
            l.origin_campaign_id, l.last_touch_campaign_id, l.record_status, l.winning_attempt_id, l.created_at,
            (select count(*) from prospect_attempts pa
              where pa.lead_id = l.id and pa.status <> all(${OPEN_ATTEMPT_TERMINAL})) as open_attempt_count,
            (${mine} <> '' and l.created_by = ${mine}) as registered_by_me,
+           l.created_by, private.employee_display_name(l.created_by) as created_by_nama,
            (${mine} <> '' and exists(
               select 1 from prospect_attempts pa4
                where pa4.lead_id = l.id and pa4.owner_employee_id = ${mine})) as claimed_by_me
@@ -1295,6 +1306,7 @@ export async function leadsDatabase(
     winningAttemptId: r.winning_attempt_id, createdAt: r.created_at,
     openAttemptCount: Number(r.open_attempt_count),
     registeredByMe: r.registered_by_me, claimedByMe: r.claimed_by_me,
+    createdBy: r.created_by, createdByNama: r.created_by_nama,
   }));
   return page.paginate(mapped, filter.page, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }
@@ -1312,6 +1324,9 @@ export interface LeadCoreView {
   recordStatus: string;
   winningAttemptId: string | null;
   createdAt: Date;
+  /** "Didaftarkan oleh" (issue #64 / O40) — see `LeadsDbRow.createdBy`/`createdByNama`. */
+  createdBy: string;
+  createdByNama: string;
 }
 
 /** Lead detail: the record plus its attempt contest (oldest first). */
@@ -1327,9 +1342,11 @@ export async function leadDetailView(sql: Queryable, id: string): Promise<LeadDe
     source: string; origin_division: string; origin_campaign_id: string | null;
     last_touch_campaign_id: string | null; record_status: string;
     winning_attempt_id: string | null; created_at: Date;
+    created_by: string; created_by_nama: string;
   }[]>`
     select id, lead_name, phone_number, email, source, origin_division,
-           origin_campaign_id, last_touch_campaign_id, record_status, winning_attempt_id, created_at
+           origin_campaign_id, last_touch_campaign_id, record_status, winning_attempt_id, created_at,
+           created_by, private.employee_display_name(created_by) as created_by_nama
     from leads where id = ${id}`;
   if (rows.length === 0) {
     throw new NotFoundError();
@@ -1353,6 +1370,7 @@ export async function leadDetailView(sql: Queryable, id: string): Promise<LeadDe
       source: r.source, originDivision: r.origin_division, originCampaignId: r.origin_campaign_id,
       lastTouchCampaignId: r.last_touch_campaign_id, recordStatus: r.record_status,
       winningAttemptId: r.winning_attempt_id, createdAt: r.created_at,
+      createdBy: r.created_by, createdByNama: r.created_by_nama,
     },
     attempts: attempts.map((a) => ({
       id: a.id, ownerEmployeeId: a.owner_employee_id, ownerNama: a.owner_nama,
