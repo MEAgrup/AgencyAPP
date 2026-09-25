@@ -52,7 +52,8 @@ export const MSG_PDT_INSIGHT_REK_TERLALU_BANYAK = `[maksimal ${PDT_INSIGHT_MAX_R
 export const MSG_PDT_INSIGHT_INDIKATOR_TERLALU_BANYAK = `[maksimal ${PDT_INSIGHT_MAX_INDIKATOR} indikator]`;
 export const MSG_PDT_INSIGHT_REK_TAK_LENGKAP = '[setiap rekomendasi wajib punya judul, target, dampak, dan timeline]';
 export const MSG_PDT_INSIGHT_INDIKATOR_TAK_LENGKAP = '[setiap indikator wajib punya nama dan target]';
-export const MSG_PDT_INSIGHT_ADA_MARKUP = '[teks insight tidak boleh memuat tanda < atau > — tulis sebagai teks biasa]';
+export const MSG_PDT_INSIGHT_ADA_MARKUP =
+  '[teks insight tidak boleh memuat tag HTML seperti <b> atau <script> — tanda pembanding < dan > boleh dipakai]';
 
 /** `[teks "…" melebihi N karakter]` — names the offending field, not just "too long". */
 export function msgPdtInsightTerlaluPanjang(label: string, max: number): string {
@@ -88,8 +89,20 @@ export class PdtInsightDraftError extends Error {
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 
+/**
+ * Cocok `<tag`, `</tag`, `<!--`/`<!DOCTYPE`, `<?xml` — bukan bare `<`/`>` polos.
+ * Keputusan pemilik `docs/DECISIONS.md` 2026-09-25 "PDT-INSIGHT-BANDING-VS-TAG":
+ * AM sering menulis simbol pembanding di narasi ("ROAS > 4", "cancel rate < 5%")
+ * dan versi lama menolak SEMUA `<`/`>`, memaksa AM mengedit manual untuk kalimat
+ * yang sudah aman — renderer (`esc()`, `pdt/render.ts`) meng-escape `<`/`>`/`&`/`"`
+ * pada SETIAP interpolasi, jadi bare `<`/`>` yang tersimpan apa adanya tidak
+ * pernah jadi markup hidup. Pola tag SUNGGUH tetap ditolak sebagai lapisan kedua
+ * (preseden sama, sekadar dipersempit) — SAMA PERSIS `report/insight-edit.ts`.
+ */
+const TAG_LIKE = /<\/?[a-zA-Z!?]/;
+
 function noMarkup(v: string): string {
-  if (v.includes('<') || v.includes('>')) throw new PdtInsightDraftError(MSG_PDT_INSIGHT_ADA_MARKUP);
+  if (TAG_LIKE.test(v)) throw new PdtInsightDraftError(MSG_PDT_INSIGHT_ADA_MARKUP);
   return v;
 }
 

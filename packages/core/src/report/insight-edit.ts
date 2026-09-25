@@ -65,7 +65,7 @@ export const MSG_REK_TAK_LENGKAP =
   '[setiap rekomendasi wajib punya judul, target, dampak, dan timeline]';
 export const MSG_INDIKATOR_TAK_LENGKAP = '[setiap indikator wajib punya nama dan target]';
 export const MSG_ADA_MARKUP =
-  '[teks insight tidak boleh memuat tanda < atau > — tulis sebagai teks biasa]';
+  '[teks insight tidak boleh memuat tag HTML seperti <b> atau <script> — tanda pembanding < dan > boleh dipakai]';
 export const MSG_TAHAP_TAK_DIKENAL = '[tahap tidak dikenal — pilih Awareness, Consideration, atau Conversion]';
 export const MSG_TAHAP_GANDA = '[setiap tahap hanya boleh punya satu narasi]';
 export const MSG_TAHAP_TAK_LENGKAP = '[narasi tahap wajib punya judul dan teks]';
@@ -101,8 +101,20 @@ export class InsightDraftError extends Error {
 
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
+/**
+ * Cocok `<tag`, `</tag`, `<!--`/`<!DOCTYPE`, `<?xml` — bukan bare `<`/`>` polos.
+ * Keputusan pemilik `docs/DECISIONS.md` 2026-09-25 "PDT-INSIGHT-BANDING-VS-TAG":
+ * AM sering menulis simbol pembanding di narasi ("ROAS > 4", "cancel rate < 5%")
+ * dan versi lama menolak SEMUA `<`/`>`, memaksa AM mengedit manual untuk kalimat
+ * yang sudah aman — `esc()` meng-escape `<`/`>`/`&`/`"` pada SETIAP interpolasi
+ * renderer, jadi bare `<`/`>` yang tersimpan apa adanya tidak pernah jadi markup
+ * hidup. Pola tag SUNGGUH tetap ditolak sebagai lapisan kedua (preseden sama,
+ * sekadar dipersempit) — SAMA PERSIS `pdt/insight-edit.ts`.
+ */
+const TAG_LIKE = /<\/?[a-zA-Z!?]/;
+
 function noMarkup(v: string): string {
-  if (v.includes('<') || v.includes('>')) throw new InsightDraftError(MSG_ADA_MARKUP);
+  if (TAG_LIKE.test(v)) throw new InsightDraftError(MSG_ADA_MARKUP);
   return v;
 }
 
