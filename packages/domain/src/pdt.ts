@@ -4878,13 +4878,22 @@ export interface PdtInsightEditDraft {
   tahap_narasi?: unknown;
 }
 
-const MSG_TAHAP_NARASI_MARKUP = '[teks narasi tahap tidak boleh memuat tanda < atau > — tulis sebagai teks biasa]';
+const MSG_TAHAP_NARASI_MARKUP =
+  '[teks narasi tahap tidak boleh memuat tag HTML seperti <b> atau <script> — tanda pembanding < dan > boleh dipakai]';
 const TAHAP_NARASI_MAX = pdt.PDT_INSIGHT_MAX.outlook;
+
+/**
+ * Cocok `<tag`, `</tag`, `<!--`/`<!DOCTYPE`, `<?xml` — bukan bare `<`/`>` polos.
+ * Sama alasan+pola `TAG_LIKE` di `pdt/insight-edit.ts`/`report/insight-edit.ts`
+ * (`docs/DECISIONS.md` 2026-09-25 "PDT-INSIGHT-BANDING-VS-TAG") — disalin di
+ * sini karena `tahap_narasi` divalidasi terpisah (bidang KETUJUH, khusus C-02).
+ */
+const TAG_LIKE = /<\/?[a-zA-Z!?]/;
 
 function normTahapNarasi(v: unknown): string | null {
   const s = typeof v === 'string' ? v.trim() : '';
   if (!s) return null;
-  if (s.includes('<') || s.includes('>')) throw new pdt.PdtInsightDraftError(MSG_TAHAP_NARASI_MARKUP);
+  if (TAG_LIKE.test(s)) throw new pdt.PdtInsightDraftError(MSG_TAHAP_NARASI_MARKUP);
   if (s.length > TAHAP_NARASI_MAX) throw new pdt.PdtInsightDraftError(pdt.msgPdtInsightTerlaluPanjang('narasi tahap', TAHAP_NARASI_MAX));
   return s;
 }
