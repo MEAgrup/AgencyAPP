@@ -158,6 +158,20 @@
  * per-periode — daftar ini mencakup semua periode sekaligus) dan disegarkan
  * setelah kirim berhasil.
  *
+ * **"Kirim ke Klien" ≠ klien melihatnya** — kiriman lahir dengan
+ * `pdt_laporan_publikasi.status='[Draf]'` (lihat docblock `ensureInsightSeed`,
+ * `@cdps/domain`) dan client-portal HANYA membaca status `[Terbit]`
+ * (`client-portal.ts::listReports`/`reportHtml`). Panel "Publikasi ke Klien"
+ * SENGAJA dipasang di sini, langsung di bawah banner "Kirim ke Klien"/"Kirim
+ * Ulang" — bukan cuma di "Edit Narasi" baris tabel Riwayat Pengiriman di
+ * bawah Tren Harian dst. — supaya "Terbitkan" tidak butuh scroll dan tidak
+ * lolos dari perhatian AM (insiden nyata: laporan dikirim tapi tak pernah
+ * diterbitkan, klien melihat "Belum ada laporan"). `PdtInsightEditor` yang
+ * sama dipasang di DUA tempat (di sini untuk kiriman TERBARU periode yang
+ * sedang dipilih, di tabel Riwayat untuk menyunting kiriman mana pun
+ * termasuk yang lama) — nol duplikasi logika, `kirimanTerakhirUntukPeriodeIni`
+ * reaktif terhadap `riwayat` yang sama.
+ *
  * Klien+platform dipilih dari daftar (bukan kolom teks bebas): `GET /clients`
  * sudah terbuka untuk Account (RLS `clients_select`), jadi tak ada alasan
  * memaksa AM mengetik ID — beda dari `/ads/screening` yang harus memakai
@@ -766,6 +780,35 @@ export default function LaporanPdtPage() {
                 {kirimHasil.menggantikan_kiriman_id !== null && (
                   <> Revisi — menggantikan kiriman #{kirimHasil.menggantikan_kiriman_id}.</>
                 )}
+              </div>
+            )}
+            {/*
+             * Publikasi cepat (M20 C-04 UX) — dipindah ke sini dari
+             * SATU-SATUNYA tempatnya sebelumnya ("Edit Narasi" di baris tabel
+             * "Riwayat Pengiriman", di bawah Tren Harian dst.). Laporan
+             * pertama kali dikirim ke `pdt_laporan_kiriman` dengan
+             * `pdt_laporan_publikasi.status='[Draf]'` — klien TIDAK melihat
+             * apa pun sampai "Terbitkan" ditekan (client-portal hanya
+             * membaca status `[Terbit]`, lihat `client-portal.ts::
+             * listReports`/`reportHtml`). Insiden nyata: AM menekan "Kirim
+             * ke Klien"/"Kirim Ulang", membaca banner di atas sebagai
+             * "sudah sampai ke klien", dan tidak pernah men-scroll ke
+             * "Riwayat Pengiriman" — laporan tertahan di `[Draf]` selamanya.
+             * `PdtInsightEditor` sendiri TIDAK diduplikasi (nol logika baru
+             * di sini): komponen yang sama dipasang di kedua tempat, dan
+             * `kirimanTerakhirUntukPeriodeIni` sudah reaktif terhadap
+             * `riwayat` (di-refresh `handleKirim` sesudah kirim sukses)
+             * jadi id di sini SELALU kiriman TERBARU periode yang sedang
+             * dipilih — sama definisi dengan baris paling atas tabel Riwayat.
+             */}
+            {kirimanTerakhirUntukPeriodeIni && (
+              <div className="card" style={{ marginBottom: 16, background: 'var(--color-bg)' }}>
+                <h3 style={{ marginTop: 0 }}>Publikasi ke Klien</h3>
+                <p className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+                  &quot;Kirim ke Klien&quot; di atas baru membekukan angka — klien BELUM melihat apa pun sampai
+                  &quot;Terbitkan&quot; ditekan di bawah ini. Boleh disunting dulu narasinya sebelum diterbitkan.
+                </p>
+                <PdtInsightEditor kirimanId={kirimanTerakhirUntukPeriodeIni.id} onPublikasiChange={() => void loadRiwayat()} />
               </div>
             )}
             <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
