@@ -1176,10 +1176,16 @@ export interface StrategiQueueRow {
   tanggal_mulai_kontrak: string;
   tanggal_akhir_kontrak: string;
   diajukan_pada: string | null;
+  /** S-03 — the AM who owns the contract, for the `/persetujuan` card. */
+  owner_am: string | null;
+  owner_am_nama: string;
 }
 
-export function listStrategiQueue(): Promise<{ data: StrategiQueueRow[] }> {
-  return api.get<{ data: StrategiQueueRow[] }>('/strategi');
+export function listStrategiQueue(status?: string): Promise<{ data: StrategiQueueRow[] }> {
+  const search = new URLSearchParams();
+  if (status) search.set('status', status);
+  const qs = search.toString();
+  return api.get<{ data: StrategiQueueRow[] }>(`/strategi${qs ? `?${qs}` : ''}`);
 }
 
 export function createStrategi(serviceId: string, body: StrategiHeaderBody): Promise<Strategi> {

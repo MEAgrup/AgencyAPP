@@ -2472,6 +2472,66 @@ describeDb('listStrategiQueue', () => {
     expect(row?.growthThesis).toEqual(expect.any(String));
     expect(row?.diajukanPada).not.toBeNull();
   });
+
+  /**
+   * S-01 — `?status=` server-side filter feeding `/persetujuan`'s "Persetujuan
+   * Strategi" section (`?status=Diajukan`). Scoping itself (SPV/OD/Director vs
+   * AM-own-only vs forbidden) is unchanged by the filter — asserted above —
+   * so these only cover the filter's own behaviour: it narrows, an absent
+   * filter still means "every status" (unchanged default), and an unrecognised
+   * value is not a 400/throw — same `finance.schemeChangeRequests` `?status=`
+   * convention (equality folded into SQL, no validation against the real set).
+   */
+  it('?status= narrows to that STRG- status, empty/omitted means every status', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+
+    const diajukan = await listStrategiQueue(sql, spv(), { status: 'Diajukan' });
+    expect(diajukan.some((s) => s.id === strategiId)).toBe(true);
+
+    // Not in `Aktif` yet — a different status must exclude it.
+    const aktif = await listStrategiQueue(sql, spv(), { status: 'Aktif' });
+    expect(aktif.some((s) => s.id === strategiId)).toBe(false);
+
+    // Omitted and explicitly empty both mean "every status" (the default
+    // unfiltered read every other caller of `listStrategiQueue` relies on).
+    const omitted = await listStrategiQueue(sql, spv());
+    expect(omitted.some((s) => s.id === strategiId)).toBe(true);
+    const blank = await listStrategiQueue(sql, spv(), { status: '  ' });
+    expect(blank.some((s) => s.id === strategiId)).toBe(true);
+  });
+
+  it('an unrecognised ?status= matches nothing rather than throwing', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+
+    const bogus = await listStrategiQueue(sql, spv(), { status: 'Tidak-Ada-Status-Ini' });
+    expect(bogus.some((s) => s.id === strategiId)).toBe(false);
+  });
+
+  it('the status filter still respects AM-own-only scope', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+
+    const ownerFiltered = await listStrategiQueue(sql, am(), { status: 'Diajukan' });
+    expect(ownerFiltered.some((s) => s.id === strategiId)).toBe(true);
+    const foreignFiltered = await listStrategiQueue(sql, otherAm(), { status: 'Diajukan' });
+    expect(foreignFiltered.some((s) => s.id === strategiId)).toBe(false);
+  });
+
+  /**
+   * S-03 — `/persetujuan`'s "Persetujuan Strategi" card shows the AM who
+   * submitted it. `owner_am`/`owner_am_nama` are the contract's owning AM
+   * (`clients.assigned_am_id`), the same "who is this about" shape
+   * `client.pendingHoldRequests`/`pendingClosureRequests` already carry.
+   */
+  it('carries the owning AM (id + display name) for the /persetujuan card', async () => {
+    const { strategiId } = await seedSubmittable();
+    const row = (await listStrategiQueue(sql, spv())).find((s) => s.id === strategiId);
+    expect(row?.ownerAm).toBe('ZZ-AM');
+    expect(row?.ownerAmNama).toEqual(expect.any(String));
+    expect(row?.ownerAmNama).not.toBe('');
+  });
 });
 
 // ---------------------------------------------------------------------------

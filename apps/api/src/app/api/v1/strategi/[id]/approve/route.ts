@@ -4,8 +4,10 @@
  * Approving version n+1 archives version n in the same transaction (Rule 13) —
  * the active version never disappears mid-revision, and never doubles either.
  *
- * It does NOT yet move the parent Service: the Brief gate still reads the older
- * M6 §4 entity until the form swap. See the `strategi` module header.
+ * Since A-3 (2026-09-07, STATE_MACHINES §6b) this ALSO moves every plan-gated
+ * Service on the contract from `[Awaiting Onboarding]` to `[Strategy Approved]`
+ * in the same transaction, unlocking Brief dispatch — see
+ * `driveServicesToStrategyApproved` in the `strategi` module.
  */
 import { strategi } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
