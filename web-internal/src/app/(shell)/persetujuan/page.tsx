@@ -43,6 +43,7 @@
  *   - Block Task (M12)    `task.pendingBlockRequests`      → `/tasks|assets/{id}/block/{req}/approve|reject`
  *   - Eskalasi KOL        `kol.pendingEscalations`         → `/bookings/{id}/continue|drop`
  *   - Penutupan Service   `client.pendingClosureRequests`  → `/services/{id}/closure/approve|reject`
+ *   - Void Service (T-2d) `client.pendingVoidRequests`     → `/services/{id}/void/approve|reject`
  *   - Permintaan Finance  `req.listPermintaanQueue('Finance')` → `/permintaan/{id}/proses|selesai|tolak`
  *   - Persetujuan Strategi (Paket S) `strategi.listStrategiQueue('Diajukan')` →
  *     `/strategi/{id}/approve|return` — dulu di halaman ini ada baris "Review
@@ -84,12 +85,16 @@ import {
 import {
   approveHoldService,
   approveServiceClosure,
+  approveVoidService,
   listPendingClosureRequests,
   listPendingHoldRequests,
+  listPendingVoidRequests,
   rejectHoldService,
   rejectServiceClosure,
+  rejectVoidService,
   type PendingClosureRequest,
   type PendingHoldRequest,
+  type PendingVoidRequest,
 } from '@/lib/clients';
 import {
   approveBlock,
@@ -799,6 +804,71 @@ function ClosureCard({
 }
 
 // ---------------------------------------------------------------------------
+// 5c. Permintaan Void Service (T-2d, docs/DECISIONS.md 2026-09-28
+// "VOID-DUA-LANGKAH DIPUTUS") — [Void Requested] pools requests from TWO
+// origins ([In Execution] / [On Hold]); `origin_status` (from the same
+// audit-log lookback `rejectVoid` uses) is shown so the approver knows which
+// one they are deciding on before they click.
+// ---------------------------------------------------------------------------
+
+function VoidCard({
+  row,
+  canDecide,
+  onDone,
+}: {
+  row: PendingVoidRequest;
+  canDecide: boolean;
+  onDone: () => void;
+}) {
+  const { busy, error, run } = useDecision(onDone);
+  return (
+    <ApprovalCard
+      id={row.service_id}
+      href={`/clients/${row.client_id}`}
+      title={
+        <>
+          {row.toko} &middot; {row.service_name}
+        </>
+      }
+      badge={<span className="badge badge-amber">Void Requested</span>}
+      meta={[
+        { label: 'PIC klien', value: row.nama_pic || '—' },
+        { label: 'AM pemilik', value: row.owner_am_nama || row.owner_am || '—' },
+        { label: 'Status asal', value: row.origin_status || '—' },
+        { label: 'Diajukan oleh', value: row.requested_by_nama || row.requested_by || '—' },
+        { label: 'Diminta pada', value: formatDateTime(row.updated_at) },
+      ]}
+      reason={{ label: 'Alasan void', text: row.reason }}
+    >
+      {canDecide ? (
+        <DecisionActions
+          fieldId={`void-note-${row.service_id}`}
+          busy={busy}
+          error={error}
+          approveLabel="Setujui void"
+          rejectLabel="Tolak void"
+          noteLabel="Catatan (opsional; tercatat di audit saat menolak)"
+          noteRequiredForReject={false}
+          confirmText={(k) =>
+            k === 'approve'
+              ? `Setujui void ${row.service_name} untuk ${row.toko}? Brief non-Approved ikut dibatalkan.`
+              : `Tolak void ${row.service_name}? Service kembali ke ${row.origin_status || 'status semula'}.`
+          }
+          onDecide={(kind, note) =>
+            run(kind, () =>
+              kind === 'approve' ? approveVoidService(row.service_id) : rejectVoidService(row.service_id, note),
+            )
+          }
+          hint="Void terkunci — status asal dipulihkan dari log pengajuan jika ditolak (Service ini bisa berasal dari In Execution ATAU On Hold)."
+        />
+      ) : (
+        <WaitingNote who="Head of Account / Director" />
+      )}
+    </ApprovalCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 6. Permintaan Block Task (M12)
 // ---------------------------------------------------------------------------
 
@@ -1185,6 +1255,10 @@ const SECTION_LABELS = [
   // atas: baris baru di ujung, bukan disisipkan di tengah, supaya index yang
   // sudah ada untuk sembilan antrian lama tidak bergeser.
   'Persetujuan Strategi (STRG-)',
+  // T-2d (Void Service dua-langkah) — SAMA aturan: ditambahkan TERAKHIR,
+  // bukan disisipkan dekat 'Permintaan Hold Service' meski tematis lebih
+  // dekat ke situ, supaya sepuluh index yang sudah ada tidak bergeser.
+  'Permintaan Void Service',
 ] as const;
 
 export default function PerluPersetujuanPage() {
@@ -1225,6 +1299,9 @@ export default function PerluPersetujuanPage() {
   const canDecideHold = !readOnly && (isAccountLead(role) || isDirector);
   // Narrower than Hold (O75 owner decision): Director only, no Account Lead fallback.
   const canDecideClosure = !readOnly && isDirector;
+  // T-2d — identical gate shape to canDecideHold (canApproveVoid domain gate:
+  // Account Lead OR Director; owner: "persetujuan akhir harus dari anthy").
+  const canDecideVoid = !readOnly && (isAccountLead(role) || isDirector);
   // Mirror `req.canProcess`: divisi tujuan (Finance) level apa pun, atau
   // Director. `readOnly` menjaga OD tetap read-only (Phase 0 §4).
   const canDecideFinanceReq = !readOnly && (isDirector || role?.division === 'Finance');
@@ -1250,6 +1327,7 @@ export default function PerluPersetujuanPage() {
   const [deleteRequests, setDeleteRequests] = useState<DeleteRequestQueueRow[] | null>(null);
   const [holdRequests, setHoldRequests] = useState<PendingHoldRequest[] | null>(null);
   const [closureRequests, setClosureRequests] = useState<PendingClosureRequest[] | null>(null);
+  const [voidRequests, setVoidRequests] = useState<PendingVoidRequest[] | null>(null);
   const [financeReqs, setFinanceReqs] = useState<Permintaan[] | null>(null);
   const [blockRequests, setBlockRequests] = useState<PendingBlockRequest[] | null>(null);
   const [escalations, setEscalations] = useState<PendingEscalation[] | null>(null);
@@ -1278,10 +1356,11 @@ export default function PerluPersetujuanPage() {
         canViewFinanceReq ? listPermintaanQueue('Finance') : Promise.resolve([]),
         listPendingClosureRequests(),
         canViewStrategiQueue ? listStrategiQueue('Diajukan') : Promise.resolve({ data: [] }),
+        listPendingVoidRequests(),
       ]);
       const [
         attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, blockRes,
-        financeReqRes, closureRes, strategiRes,
+        financeReqRes, closureRes, strategiRes, voidRes,
       ] = results;
       setAttempts(attemptRes.status === 'fulfilled' ? attemptRes.value.data : []);
       setAttemptsTruncated(attemptRes.status === 'fulfilled' && attemptRes.value.next_cursor !== null);
@@ -1297,6 +1376,7 @@ export default function PerluPersetujuanPage() {
       setFinanceReqs(financeReqRes.status === 'fulfilled' ? financeReqRes.value : []);
       setClosureRequests(closureRes.status === 'fulfilled' ? closureRes.value.data : []);
       setStrategiQueue(strategiRes.status === 'fulfilled' ? strategiRes.value.data : []);
+      setVoidRequests(voidRes.status === 'fulfilled' ? voidRes.value.data : []);
       setSectionErrors(
         results
           .map((r, i) => (r.status === 'rejected' ? `${SECTION_LABELS[i]}: ${errorMessage(r.reason)}` : null))
@@ -1342,6 +1422,7 @@ export default function PerluPersetujuanPage() {
     financeReq: financeReqs?.length ?? 0,
     closure: closureRequests?.length ?? 0,
     strategi: strategiQueue?.length ?? 0,
+    voidReq: voidRequests?.length ?? 0,
   };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
@@ -1356,6 +1437,7 @@ export default function PerluPersetujuanPage() {
     { id: 'kol', label: 'Eskalasi KOL', count: counts.kol },
     { id: 'financeReq', label: 'Permintaan Finance', count: counts.financeReq },
     { id: 'strategi', label: 'Persetujuan Strategi', count: counts.strategi },
+    { id: 'voidReq', label: 'Void Service', count: counts.voidReq },
   ].filter((t) => t.count > 0);
 
   return (
@@ -1563,6 +1645,17 @@ export default function PerluPersetujuanPage() {
           >
             {strategiQueue?.map((r) => (
               <StrategiCard key={r.id} row={r} canDecide={canDecideStrategi} onDone={load} />
+            ))}
+          </Section>
+
+          <Section
+            id="voidReq"
+            title="Permintaan Void Service"
+            count={counts.voidReq}
+            hint="Staff mengajukan, Head of Account memutuskan (T-2d). Bisa berasal dari [In Execution] ATAU [On Hold] — status asal ditampilkan per kartu."
+          >
+            {voidRequests?.map((r) => (
+              <VoidCard key={r.service_id} row={r} canDecide={canDecideVoid} onDone={load} />
             ))}
           </Section>
         </>

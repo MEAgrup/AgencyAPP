@@ -230,6 +230,46 @@ export function rejectServiceClosure(serviceId: string, reason?: string): Promis
   return api.post<{ ok: boolean }>(`/services/${serviceId}/close/reject`, { reason: reason ?? '' });
 }
 
+// client.PendingVoidRequest — one Service in [Void Requested], for the
+// "Perlu Persetujuan Saya" queue (GET /services/void-requests).
+export interface PendingVoidRequest {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  service_name: string;
+  owner_am: string | null;
+  owner_am_nama: string;
+  /** Waktu void DIMINTA (dari audit `service_void_requested`; fallback lahirnya Service). */
+  updated_at: string;
+  /** Alasan wajib yang diketik pengaju saat mengajukan void; '' kalau baris auditnya tak terbaca. */
+  reason: string;
+  requested_by: string;
+  requested_by_nama: string;
+  /** `[In Execution]` atau `[On Hold]` — origin request ini (T-2d, dua origin). */
+  origin_status: string;
+}
+
+/** GET /services/void-requests — every Service in [Void Requested], oldest first (Head of Account / Director). */
+export function listPendingVoidRequests(): Promise<{ data: PendingVoidRequest[] }> {
+  return api.get<{ data: PendingVoidRequest[] }>('/services/void-requests');
+}
+
+/** T-2d: staff MENGAJUKAN void ([In Execution]/[On Hold] → [Void Requested]); reason wajib. Head lalu ACC/tolak. */
+export function requestVoidService(serviceId: string, reason: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/void/request`, { reason });
+}
+
+/** T-2d: Head of Account MENYETUJUI void ([Void Requested] → [Cancelled — Service Voided]). */
+export function approveVoidService(serviceId: string): Promise<VoidResult> {
+  return api.post<VoidResult>(`/services/${serviceId}/void/approve`);
+}
+
+/** T-2d: Head of Account MENOLAK void ([Void Requested] → origin asalnya); reason opsional. */
+export function rejectVoidService(serviceId: string, reason?: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/void/reject`, { reason: reason ?? '' });
+}
+
 export function setPaymentIntent(clientId: string, paymentIntent: string): Promise<{ client: Client }> {
   return api.post<{ client: Client }>(`/clients/${clientId}/payment-intent`, {
     payment_intent: paymentIntent,

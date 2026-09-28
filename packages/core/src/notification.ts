@@ -128,6 +128,12 @@ export const EVENTS = {
   ServiceHoldRejected: 'service_hold_rejected', // -> owning AM
   ServiceResumed: 'service_resumed', // -> owning AM
 
+  // v20 (T-2d) — Void Service two-step approval flow (docs/DECISIONS.md
+  // 2026-09-28 "VOID-DUA-LANGKAH DIPUTUS"). Mirrors v8 Hold Service exactly.
+  ServiceVoidRequested: 'service_void_requested', // -> Head of Account (Account leads)
+  ServiceVoided: 'service_voided', // -> owning AM
+  ServiceVoidRejected: 'service_void_rejected', // -> owning AM
+
   // v9 — Penugasan Internal.
   PenugasanDitugaskan: 'penugasan_ditugaskan', // -> the assigned employee
   PenugasanSelesai: 'penugasan_selesai', // -> the assigner (atasan)
@@ -378,6 +384,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
     eventCount: 3,
     decisionRef: 'docs/DECISIONS.md 2026-09-18 (O75 — Service selesai)',
   },
+  {
+    version: 20,
+    description:
+      'T-2d Void Service two-step — 3 event (service_void_requested, service_voided, service_void_rejected). Staff mengajukan, Head of Account/Director menyetujui/menolak — mirrors v8 Hold exactly, plus [On Hold] sebagai origin BARU.',
+    eventCount: 3,
+    decisionRef: 'docs/DECISIONS.md 2026-09-28 (VOID-DUA-LANGKAH DIPUTUS)',
+  },
 ] as const;
 
 /** The catalog version currently in force. */
@@ -580,6 +593,26 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
     description: 'Penutupan Service ditolak Director — ke AM pemilik',
     resolver: 'explicit',
     version: 19,
+  },
+
+  // --- v20 (T-2d — Void Service two-step). Description/resolver WAJIB sama
+  // persis dengan seed migrasi 20261211010000_t2d_void_twostep.sql. Mirrors v8
+  // Hold Service: 'leadsOfDivision' for the request event, 'explicit' for
+  // approve/reject (owning AM, supplied by the caller). ---
+  [EVENTS.ServiceVoidRequested]: {
+    description: 'Staff mengajukan Void Service — ke Head of Account',
+    resolver: 'leadsOfDivision',
+    version: 20,
+  },
+  [EVENTS.ServiceVoided]: {
+    description: 'Void Service disetujui Head of Account — ke AM pemilik',
+    resolver: 'explicit',
+    version: 20,
+  },
+  [EVENTS.ServiceVoidRejected]: {
+    description: 'Void Service ditolak Head of Account — ke AM pemilik',
+    resolver: 'explicit',
+    version: 20,
   },
 };
 
