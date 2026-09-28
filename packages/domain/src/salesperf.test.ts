@@ -13,6 +13,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
+import { voidService } from './client';
 import {
   bySalesperson,
   bySource,
@@ -684,6 +685,433 @@ describeDb('salesReport — Laporan Penjualan (pemilik 2026-09-10, Bagian 3)', (
     const first = await salesReport(sql, director('ZZSP-DIR'), f);
     const second = await salesReport(sql, director('ZZSP-DIR'), f);
     expect(second).toEqual(first);
+  });
+});
+
+// ===========================================================================
+// Paket V — Void mengurangi closing Sales (`VOID-KURANGI-CLOSING DIPUTUS`,
+// docs/DECISIONS.md 2026-09-28). `transactions.total_agreed_value` stays
+// immutable (house rule) — every assertion below reads it back unchanged
+// alongside the new DERIVED fields (`omzetKotor`/`nilaiVoid`/`omzetBersih`,
+// `klien`/`klienVoid`/`klienBersih`). Each `it` owns a dedicated fixture
+// (own client/transaction), voided via the REAL `client.voidService` (so the
+// audit_log row + timestamp that `loadDealFacts` reads comes from the actual
+// engine, not a hand-rolled row) wherever the scenario doesn't need a
+// specific historical month — the cross-month case inserts its own
+// audit_log rows directly (same pattern `seed()`'s stage events use above)
+// so the two void events land in two DIFFERENT, controlled months.
+// ===========================================================================
+describeDb('Paket V — Void mengurangi closing Sales', () => {
+  it('full void (satu-satunya layanan): −1 klien di BULAN VOID, bukan bulan closing; Total Agreed tetap immutable', async () => {
+    const CLIV = 'CLI-ZZSPV-0001';
+    const CTRV = 'CTR-ZZSPV-0001';
+    const TRXV = 'TRX-ZZSPV-0001';
+    const SVCV = 'SVC-ZZSPV-0001';
+    try {
+      await sql`
+        insert into clients (id, nama_pic, toko, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, transaction_id, created_at, created_by)
+        values (${CLIV}, 'ZZSPV PIC', 'ZZSPV Toko', 'Jakarta', 'Fashion', 'https://shopee/zzspv',
+                '0.00', '0.00', ${SLS1}, ${SLS1}, ${TRXV}, '2026-05-10 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_at, created_by)
+        values (${CTRV}, ${CLIV}, 3, '2026-05-10', '2026-08-10', 'baru', '2026-05-10 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
+        values (${CLIV}, ${SLS1}, 10000, ${SLS1})`;
+      await sql`
+        insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_at, created_by)
+        values (${TRXV}, ${CLIV}, '[Lunas]', '8000000.00', '[Menunggu Verifikasi]', '2026-05-10 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                              commission_rule, status, created_by)
+        values (${SVCV}, ${CLIV}, 'MSV-ZZSP', 1, 'ZZSPV Service', '8000000.00', '10% of standard price', '[Ongoing]', ${SLS1})`;
+
+      // Void HAPPENS in July — a different month than the May closing (Q-V2).
+      await sql`update services set status = '[Cancelled — Service Voided]' where id = ${SVCV}`;
+      await sql`
+        insert into audit_log (entity_type, entity_id, actor_employee_id, action, after_json, created_at, created_by)
+        values ('service', ${SVCV}, ${SLS1}, 'transition:[Ongoing]->[Cancelled — Service Voided]',
+                '{"status": "[Cancelled — Service Voided]"}'::jsonb, '2026-07-20 03:00:00+00', ${SLS1})`;
+
+      const trxTotal = (await sql<{ total_agreed_value: string }[]>`select total_agreed_value from transactions where id = ${TRXV}`)[0].total_agreed_value;
+      expect(trxTotal).toBe('8000000.00'); // immutable — voidService/void bookkeeping never touches it
+
+      // --- byMonth: closing month (May) keeps Omzet Kotor; void month (July)
+      // carries Nilai Void/klien −1 as its OWN row, independent of May.
+      const months = await byMonth(sql, director('ZZSP-DIR'), { period: null, salespersonId: SLS1, source: null, campaignId: null });
+      const may = months.find((r) => r.period === '202605')!;
+      const jul = months.find((r) => r.period === '202607')!;
+      expect(may).toBeDefined();
+      expect(may.omzetKotor).toBe('8000000.00');
+      expect(may.nilaiVoid).toBe('0.00'); // void hasn't happened yet as far as May's own bucket is concerned
+      expect(may.omzetBersih).toBe('8000000.00');
+      expect(may.klien).toBe('1.00');
+      expect(may.klienVoid).toBe('0.00');
+      expect(may.klienBersih).toBe('1.00');
+
+      expect(jul).toBeDefined(); // a bucket that has ONLY void data still renders (no crash on avgDealCycleDays etc.)
+      expect(jul.omzetKotor).toBe('0.00');
+      expect(jul.nilaiVoid).toBe('8000000.00');
+      expect(jul.omzetBersih).toBe('-8000000.00'); // sanctioned negative (Q-V2)
+      expect(jul.klien).toBe('0.00');
+      expect(jul.klienVoid).toBe('1.00');
+      expect(jul.klienBersih).toBe('-1.00');
+      expect(jul.avgDealCycleDays).toBeNull();
+      expect(jul.closingRatePct).toBeNull();
+
+      // --- salesReport, isolated to May only: the void (July) is out of range,
+      // so this month reads exactly like an un-voided closing.
+      const mayReport = await salesReport(sql, director('ZZSP-DIR'), { period: { from: '2026-05', to: '2026-05' }, salespersonId: SLS1, source: null, campaignId: null });
+      const mayRow = mayReport.rows.find((r) => r.salespersonId === SLS1)!;
+      expect(mayRow.omzetKotor).toBe('8000000.00');
+      expect(mayRow.nilaiVoid).toBe('0.00');
+      expect(mayRow.omzetBersih).toBe('8000000.00');
+      expect(mayRow.klien).toBe('1.00');
+      expect(mayRow.klienVoid).toBe('0.00');
+      expect(mayRow.klienBersih).toBe('1.00');
+      expect(mayReport.total.totalDeal).toBe(1);
+      expect(mayReport.total.klienCount).toBe(1);
+      expect(mayReport.total.klienVoid).toBe(0);
+      expect(mayReport.total.klienBersih).toBe(1);
+
+      // --- salesReport, isolated to July only: the CLOSING (May) is out of
+      // range — nothing to count there — but the void still fires, and the
+      // distinct-level klienBersih can go NEGATIVE (a void with no offsetting
+      // closing that period), same sanctioned behaviour as the money side.
+      const julReport = await salesReport(sql, director('ZZSP-DIR'), { period: { from: '2026-07', to: '2026-07' }, salespersonId: SLS1, source: null, campaignId: null });
+      const julRow = julReport.rows.find((r) => r.salespersonId === SLS1)!;
+      expect(julRow.omzetKotor).toBe('0.00');
+      expect(julRow.nilaiVoid).toBe('8000000.00');
+      expect(julRow.omzetBersih).toBe('-8000000.00');
+      expect(julRow.klien).toBe('0.00');
+      expect(julRow.klienVoid).toBe('1.00');
+      expect(julRow.klienBersih).toBe('-1.00');
+      expect(julReport.total.totalDeal).toBe(0); // closing-month distinct set — the deal never closed in July
+      expect(julReport.total.klienCount).toBe(0);
+      expect(julReport.total.klienVoid).toBe(1); // void-month distinct set — independent population (Q-V2)
+      expect(julReport.total.klienBersih).toBe(-1);
+    } finally {
+      // audit_log is append-only (house rule #3, no bypass) — the ZZSPV-
+      // namespaced row stays, harmless, same pattern `salesperf.test.ts`'s
+      // outer seed() and `reads_rls.test.ts` already accept.
+      await sql`delete from services where id = ${SVCV}`;
+      await sql`delete from transactions where id = ${TRXV}`;
+      await sql`delete from client_sales_allocations where client_id = ${CLIV}`;
+      await sql`delete from contracts where id = ${CTRV}`;
+      await sql`delete from clients where id = ${CLIV}`;
+    }
+  });
+
+  it('partial void (2 layanan, hanya satu di-void): klien TIDAK berkurang, hanya Nilai Void', async () => {
+    const CLIV = 'CLI-ZZSPV-0002';
+    const CTRV = 'CTR-ZZSPV-0002';
+    const TRXV = 'TRX-ZZSPV-0002';
+    const SVC_KEEP = 'SVC-ZZSPV-0002A';
+    const SVC_VOID = 'SVC-ZZSPV-0002B';
+    try {
+      await sql`
+        insert into clients (id, nama_pic, toko, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, transaction_id, created_at, created_by)
+        values (${CLIV}, 'ZZSPV2 PIC', 'ZZSPV2 Toko', 'Jakarta', 'Fashion', 'https://shopee/zzspv2',
+                '0.00', '0.00', ${SLS1}, ${SLS1}, ${TRXV}, '2026-05-11 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_at, created_by)
+        values (${CTRV}, ${CLIV}, 3, '2026-05-11', '2026-08-11', 'baru', '2026-05-11 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
+        values (${CLIV}, ${SLS1}, 10000, ${SLS1})`;
+      await sql`
+        insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_at, created_by)
+        values (${TRXV}, ${CLIV}, '[Lunas]', '10000000.00', '[Menunggu Verifikasi]', '2026-05-11 02:00:00+00', ${SLS1})`;
+      // SVC_VOID starts '[Awaiting Onboarding]' — one of voidService's actual
+      // valid FROM states (sm_edges), not '[Ongoing]' (no such edge exists).
+      await sql`
+        insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                              commission_rule, status, created_by) values
+          (${SVC_KEEP}, ${CLIV}, 'MSV-ZZSP-A', 1, 'ZZSPV2 Service A', '4000000.00', '10% of standard price', '[Ongoing]', ${SLS1}),
+          (${SVC_VOID}, ${CLIV}, 'MSV-ZZSP-B', 1, 'ZZSPV2 Service B', '6000000.00', '10% of standard price', '[Awaiting Onboarding]', ${SLS1})`;
+
+      await voidService(sql, director('ZZSP-DIR'), SVC_VOID, 'klien mengurangi satu layanan');
+
+      const perf = await bySalesperson(sql, director('ZZSP-DIR'), { period: null, salespersonId: SLS1, source: null, campaignId: null });
+      const r = perf.find((x) => x.salespersonId === SLS1)!;
+      // Isolate this fixture's contribution from the shared base CLI fixture
+      // (klien 1.00 / omzet 10.000.000,00 / no void), same pattern the
+      // "money: weighted omzet…" test above uses.
+      const nilaiVoid = BigInt(r.nilaiVoid.replace('.', ''));
+      const klienVoidFrac = Number(r.klienVoid);
+      // 10.000.000 × 6.000.000 ÷ 10.000.000 = 6.000.000 exactly — proportional
+      // to standard_price (Q-V4), and it is the ONLY void in this fixture set.
+      expect(nilaiVoid).toBe(600000000n); // Rp 6.000.000,00 in minor units
+      expect(klienVoidFrac).toBe(0); // partial void — the client keeps counting (Q-V3)
+
+      const omzetKotorFromThis = BigInt(r.omzetKotor.replace('.', '')) - 1000000000n; // minus base CLI's 10.000.000,00
+      expect(omzetKotorFromThis).toBe(1000000000n); // Rp 10.000.000,00 — Total Agreed, untouched by the void
+      const omzetBersihFromThis = omzetKotorFromThis - nilaiVoid;
+      expect(omzetBersihFromThis).toBe(400000000n); // Rp 4.000.000,00 — Kotor − Void
+    } finally {
+      await sql`delete from services where id in (${SVC_KEEP}, ${SVC_VOID})`;
+      await sql`delete from transactions where id = ${TRXV}`;
+      await sql`delete from client_sales_allocations where client_id = ${CLIV}`;
+      await sql`delete from contracts where id = ${CTRV}`;
+      await sql`delete from clients where id = ${CLIV}`;
+    }
+  });
+
+  it('void yang sama pada satu deal, dua BULAN berbeda → dua entri nilaiVoidPerBulan terpisah', async () => {
+    const CLIV = 'CLI-ZZSPV-0003';
+    const CTRV = 'CTR-ZZSPV-0003';
+    const TRXV = 'TRX-ZZSPV-0003';
+    const SVC_KEEP = 'SVC-ZZSPV-0003A';
+    const SVC_VOID1 = 'SVC-ZZSPV-0003B';
+    const SVC_VOID2 = 'SVC-ZZSPV-0003C';
+    try {
+      await sql`
+        insert into clients (id, nama_pic, toko, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, transaction_id, created_at, created_by)
+        values (${CLIV}, 'ZZSPV3 PIC', 'ZZSPV3 Toko', 'Jakarta', 'Fashion', 'https://shopee/zzspv3',
+                '0.00', '0.00', ${SLS1}, ${SLS1}, ${TRXV}, '2026-02-05 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_at, created_by)
+        values (${CTRV}, ${CLIV}, 3, '2026-02-05', '2026-05-05', 'baru', '2026-02-05 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
+        values (${CLIV}, ${SLS1}, 10000, ${SLS1})`;
+      await sql`
+        insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_at, created_by)
+        values (${TRXV}, ${CLIV}, '[Lunas]', '12000000.00', '[Menunggu Verifikasi]', '2026-02-05 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                              commission_rule, status, created_by) values
+          (${SVC_KEEP}, ${CLIV}, 'MSV-ZZSP-A', 1, 'ZZSPV3 Service A', '4000000.00', '10% of standard price', '[Ongoing]', ${SLS1}),
+          (${SVC_VOID1}, ${CLIV}, 'MSV-ZZSP-B', 1, 'ZZSPV3 Service B', '4000000.00', '10% of standard price', '[Cancelled — Service Voided]', ${SLS1}),
+          (${SVC_VOID2}, ${CLIV}, 'MSV-ZZSP-C', 1, 'ZZSPV3 Service C', '4000000.00', '10% of standard price', '[Cancelled — Service Voided]', ${SLS1})`;
+      // Two DIFFERENT void months for the SAME deal.
+      await sql`
+        insert into audit_log (entity_type, entity_id, actor_employee_id, action, after_json, created_at, created_by) values
+          ('service', ${SVC_VOID1}, ${SLS1}, 'transition:[Ongoing]->[Cancelled — Service Voided]',
+           '{"status": "[Cancelled — Service Voided]"}'::jsonb, '2026-01-15 03:00:00+00', ${SLS1}),
+          ('service', ${SVC_VOID2}, ${SLS1}, 'transition:[Ongoing]->[Cancelled — Service Voided]',
+           '{"status": "[Cancelled — Service Voided]"}'::jsonb, '2026-03-15 03:00:00+00', ${SLS1})`;
+
+      const months = await byMonth(sql, director('ZZSP-DIR'), { period: null, salespersonId: SLS1, source: null, campaignId: null });
+      const jan = months.find((r) => r.period === '202601')!;
+      const mar = months.find((r) => r.period === '202603')!;
+      const feb = months.find((r) => r.period === '202602')!; // the deal's own closing month
+
+      expect(jan).toBeDefined();
+      expect(jan.nilaiVoid).toBe('4000000.00'); // 12.000.000 × 4.000.000 ÷ 12.000.000
+      expect(mar).toBeDefined();
+      expect(mar.nilaiVoid).toBe('4000000.00'); // a SEPARATE entry, not merged into Jan's
+      expect(feb.omzetKotor).toBe('12000000.00'); // the DEAL's full Total Agreed (isolate from base CLI: base is June, Feb is this deal only)
+      expect(feb.nilaiVoid).toBe('0.00'); // the closing month itself carries NO void — both voids are booked elsewhere
+      // Neither service that remained un-voided (SVC_KEEP) makes this a full
+      // void, so no klien −1 anywhere.
+      expect(jan.klienVoid).toBe('0.00');
+      expect(mar.klienVoid).toBe('0.00');
+    } finally {
+      // audit_log is append-only — the two ZZSPV- rows stay (same as above).
+      await sql`delete from services where id in (${SVC_KEEP}, ${SVC_VOID1}, ${SVC_VOID2})`;
+      await sql`delete from transactions where id = ${TRXV}`;
+      await sql`delete from client_sales_allocations where client_id = ${CLIV}`;
+      await sql`delete from contracts where id = ${CTRV}`;
+      await sql`delete from clients where id = ${CLIV}`;
+    }
+  });
+
+  it('deal TANPA layanan sama sekali: tidak crash, bulanSemuaVoid TETAP null (himpunan kosong ≠ "semua void")', async () => {
+    const CLIV = 'CLI-ZZSPV-0004';
+    const CTRV = 'CTR-ZZSPV-0004';
+    const TRXV = 'TRX-ZZSPV-0004';
+    try {
+      await sql`
+        insert into clients (id, nama_pic, toko, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, transaction_id, created_at, created_by)
+        values (${CLIV}, 'ZZSPV4 PIC', 'ZZSPV4 Toko', 'Jakarta', 'Fashion', 'https://shopee/zzspv4',
+                '0.00', '0.00', ${SLS1}, ${SLS1}, ${TRXV}, '2026-05-12 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_at, created_by)
+        values (${CTRV}, ${CLIV}, 3, '2026-05-12', '2026-08-12', 'baru', '2026-05-12 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
+        values (${CLIV}, ${SLS1}, 10000, ${SLS1})`;
+      await sql`
+        insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_at, created_by)
+        values (${TRXV}, ${CLIV}, '[Lunas]', '3000000.00', '[Menunggu Verifikasi]', '2026-05-12 02:00:00+00', ${SLS1})`;
+      // Deliberately: NO row inserted into `services` for this client at all.
+
+      const perf = await bySalesperson(sql, director('ZZSP-DIR'), { period: { from: '2026-05', to: '2026-05' }, salespersonId: SLS1, source: null, campaignId: null });
+      const r = perf.find((x) => x.salespersonId === SLS1)!;
+      expect(r.omzetKotor).toBe('3000000.00'); // Total Agreed still counts as a closing even with zero Service rows
+      expect(r.nilaiVoid).toBe('0.00');
+      expect(r.omzetBersih).toBe('3000000.00');
+      expect(r.klien).toBe('1.00');
+      expect(r.klienVoid).toBe('0.00'); // the empty set is NOT "all voided"
+      expect(r.klienBersih).toBe('1.00');
+    } finally {
+      await sql`delete from transactions where id = ${TRXV}`;
+      await sql`delete from client_sales_allocations where client_id = ${CLIV}`;
+      await sql`delete from contracts where id = ${CTRV}`;
+      await sql`delete from clients where id = ${CLIV}`;
+    }
+  });
+
+  it('layanan sumber=meago pada deal ini DIKECUALIKAN dari pembilang MAUPUN penyebut Nilai Void (cermin finance.dealServiceRows)', async () => {
+    const CLIV = 'CLI-ZZSPV-0005';
+    const CTRV = 'CTR-ZZSPV-0005';
+    const TRXV = 'TRX-ZZSPV-0005';
+    const SVCV = 'SVC-ZZSPV-0005';
+    const SVC_MEAGO = 'SVC-ZZSPV-0005-MEAGO';
+    try {
+      await sql`
+        insert into clients (id, nama_pic, toko, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, transaction_id, created_at, created_by)
+        values (${CLIV}, 'ZZSPV5 PIC', 'ZZSPV5 Toko', 'Jakarta', 'Fashion', 'https://shopee/zzspv5',
+                '0.00', '0.00', ${SLS1}, ${SLS1}, ${TRXV}, '2026-05-13 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_at, created_by)
+        values (${CTRV}, ${CLIV}, 3, '2026-05-13', '2026-08-13', 'baru', '2026-05-13 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
+        values (${CLIV}, ${SLS1}, 10000, ${SLS1})`;
+      await sql`
+        insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_at, created_by)
+        values (${TRXV}, ${CLIV}, '[Lunas]', '5000000.00', '[Menunggu Verifikasi]', '2026-05-13 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                              commission_rule, status, created_by)
+        values (${SVCV}, ${CLIV}, 'MSV-ZZSP', 1, 'ZZSPV5 Service', '5000000.00', '10% of standard price', '[Awaiting Onboarding]', ${SLS1})`;
+      // A bridged MEAGO service on the SAME client — huge price, ACTIVE (never
+      // voided). If it leaked into `dealServiceRows`' set, it would both
+      // balloon the denominator (wrong Nilai Void) AND block full-void
+      // detection (an active service would make `allVoided` false).
+      await sql`
+        insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                              commission_rule, status, sumber, created_by)
+        values (${SVC_MEAGO}, ${CLIV}, 'MSV-ZZSP', 1, 'ZZSPV5 MEAGO Bridge', '999999999.00', '50% of standard price', '[Awaiting Onboarding]', 'meago', ${SLS1})`;
+
+      // voidService writes its audit_log row at REAL wall-clock "now" (not
+      // this fixture's May closing date), so this reads back with
+      // `period: null` — same pattern the partial-void test above uses —
+      // and isolates THIS fixture's contribution from the shared base CLI
+      // fixture (klien 1.00 / omzet 10.000.000,00 / no void).
+      await voidService(sql, director('ZZSP-DIR'), SVCV, 'klien membatalkan satu-satunya layanan CDPS');
+
+      const perf = await bySalesperson(sql, director('ZZSP-DIR'), { period: null, salespersonId: SLS1, source: null, campaignId: null });
+      const r = perf.find((x) => x.salespersonId === SLS1)!;
+      // Nilai Void = 5.000.000 × 5.000.000 ÷ 5.000.000 = 5.000.000 exactly —
+      // if the meago row had leaked into the denominator this would be a tiny
+      // fraction of 5.000.000 instead.
+      const nilaiVoid = BigInt(r.nilaiVoid.replace('.', ''));
+      expect(nilaiVoid).toBe(500000000n); // Rp 5.000.000,00 in minor units
+      const omzetKotorFromThis = BigInt(r.omzetKotor.replace('.', '')) - 1000000000n; // minus base CLI's 10.000.000,00
+      expect(omzetKotorFromThis).toBe(500000000n); // Rp 5.000.000,00 — Total Agreed, untouched by the void
+      expect(omzetKotorFromThis - nilaiVoid).toBe(0n); // Omzet Bersih = 0 for THIS deal — fully voided
+      // And it's a FULL void (klien −1) — the meago row does not count as "a
+      // remaining active service" that would keep this a partial void.
+      expect(Number(r.klienVoid)).toBe(1); // only THIS deal could have voided fully in this fixture set
+    } finally {
+      await sql`delete from services where id in (${SVCV}, ${SVC_MEAGO})`;
+      await sql`delete from transactions where id = ${TRXV}`;
+      await sql`delete from client_sales_allocations where client_id = ${CLIV}`;
+      await sql`delete from contracts where id = ${CTRV}`;
+      await sql`delete from clients where id = ${CLIV}`;
+    }
+  });
+
+  it('recompute-from-log: void lalu hitung dua kali, tidak ada jalur mutasi — hasil byte-identik (aturan rumah #3/#4)', async () => {
+    const CLIV = 'CLI-ZZSPV-0006';
+    const CTRV = 'CTR-ZZSPV-0006';
+    const TRXV = 'TRX-ZZSPV-0006';
+    const SVCV = 'SVC-ZZSPV-0006';
+    try {
+      await sql`
+        insert into clients (id, nama_pic, toko, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, transaction_id, created_at, created_by)
+        values (${CLIV}, 'ZZSPV6 PIC', 'ZZSPV6 Toko', 'Jakarta', 'Fashion', 'https://shopee/zzspv6',
+                '0.00', '0.00', ${SLS1}, ${SLS1}, ${TRXV}, '2026-05-14 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_at, created_by)
+        values (${CTRV}, ${CLIV}, 3, '2026-05-14', '2026-08-14', 'baru', '2026-05-14 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
+        values (${CLIV}, ${SLS1}, 10000, ${SLS1})`;
+      await sql`
+        insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_at, created_by)
+        values (${TRXV}, ${CLIV}, '[Lunas]', '7000000.00', '[Menunggu Verifikasi]', '2026-05-14 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                              commission_rule, status, created_by)
+        values (${SVCV}, ${CLIV}, 'MSV-ZZSP', 1, 'ZZSPV6 Service', '7000000.00', '10% of standard price', '[Awaiting Onboarding]', ${SLS1})`;
+
+      await voidService(sql, director('ZZSP-DIR'), SVCV, 'uji recompute');
+
+      const f = { period: { from: '2026-05', to: '2026-05' }, salespersonId: SLS1, source: null, campaignId: null };
+      const first = await bySalesperson(sql, director('ZZSP-DIR'), f);
+      const second = await bySalesperson(sql, director('ZZSP-DIR'), f);
+      expect(second).toEqual(first); // no cache, no stored column — same DB state, same answer every time
+    } finally {
+      await sql`delete from services where id = ${SVCV}`;
+      await sql`delete from transactions where id = ${TRXV}`;
+      await sql`delete from client_sales_allocations where client_id = ${CLIV}`;
+      await sql`delete from contracts where id = ${CTRV}`;
+      await sql`delete from clients where id = ${CLIV}`;
+    }
+  });
+});
+
+describeDb('Paket V — klien_count_min_kontrak OKR mengecualikan deal yang sudah semua-void', () => {
+  it('actualValue turun setelah satu-satunya layanan deal itu di-void', async () => {
+    const CLIK = 'CLI-ZZSPV-OKR1';
+    const CTRK = 'CTR-ZZSPV-OKR1';
+    const TRXK = 'TRX-ZZSPV-OKR1';
+    const SVCK = 'SVC-ZZSPV-OKR1';
+    try {
+      await sql`
+        insert into clients (id, nama_pic, toko, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, transaction_id, created_at, created_by)
+        values (${CLIK}, 'ZZSPV-OKR PIC', 'ZZSPV-OKR Toko', 'Jakarta', 'Fashion', 'https://shopee/zzspvokr',
+                '0.00', '0.00', ${SLS1}, ${SLS1}, ${TRXK}, '2026-09-05 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, jenis, created_at, created_by)
+        values (${CTRK}, ${CLIK}, 3, '2026-09-05', '2026-12-05', 'baru', '2026-09-05 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
+        values (${CLIK}, ${SLS1}, 10000, ${SLS1})`;
+      await sql`
+        insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_at, created_by)
+        values (${TRXK}, ${CLIK}, '[Lunas]', '15000000.00', '[Menunggu Verifikasi]', '2026-09-05 02:00:00+00', ${SLS1})`;
+      await sql`
+        insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                              commission_rule, status, created_by)
+        values (${SVCK}, ${CLIK}, 'MSV-ZZSP', 1, 'ZZSPV-OKR Service', '15000000.00', '10% of standard price', '[Awaiting Onboarding]', ${SLS1})`;
+
+      await setTarget(sql, director('ZZSP-DIR'), {
+        salespersonId: SLS1, periodStart: '2026-09-01', periodKind: 'bulan',
+        metricKey: 'klien_count_min_kontrak', metricParam: '10000000', targetValue: '5',
+      });
+
+      const before = await listTargets(sql, director('ZZSP-DIR'), '2026-09-01');
+      const kckBefore = before.find((t) => t.salespersonId === SLS1 && t.metricKey === 'klien_count_min_kontrak')!;
+      expect(kckBefore.actualValue).toBe('1.00'); // one client, Rp 15.000.000 >= Rp 10.000.000 threshold
+
+      await voidService(sql, director('ZZSP-DIR'), SVCK, 'klien membatalkan seluruh layanan');
+
+      const after = await listTargets(sql, director('ZZSP-DIR'), '2026-09-01');
+      const kckAfter = after.find((t) => t.salespersonId === SLS1 && t.metricKey === 'klien_count_min_kontrak')!;
+      // Fully voided (last remaining service) → no longer an achieved client,
+      // same "closing counted twice stops double-counting everywhere" intent
+      // as Omzet Bersih (VOID-KURANGI-CLOSING DIPUTUS).
+      expect(kckAfter.actualValue).toBe('0.00');
+    } finally {
+      await sql`delete from sales_targets where salesperson_id = ${SLS1} and period_start = '2026-09-01' and metric_key = 'klien_count_min_kontrak'`;
+      await sql`delete from services where id = ${SVCK}`;
+      await sql`delete from transactions where id = ${TRXK}`;
+      await sql`delete from client_sales_allocations where client_id = ${CLIK}`;
+      await sql`delete from contracts where id = ${CTRK}`;
+      await sql`delete from clients where id = ${CLIK}`;
+    }
   });
 });
 

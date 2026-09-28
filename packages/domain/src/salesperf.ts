@@ -61,7 +61,7 @@
 
 import { money, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
-import { commissionAchievementBatch } from './finance';
+import { commissionAchievementBatch, dealServiceRows, type DealServiceFullRow } from './finance';
 import { SALES_DIVISION } from './leads';
 import { JENIS_BAYAR_KOMISI as RENEWAL_JENIS_BAYAR_KOMISI } from './renewal';
 
@@ -158,6 +158,20 @@ export interface SalesPerfRow {
   klienCrossSell: string;
   klienCount: string;
   /**
+   * Paket V (`VOID-KURANGI-CLOSING DIPUTUS`, 2026-09-28) — ADDITIVE trio,
+   * fraction-weighted (same `basis_points` convention as `klienBaru` et al,
+   * NOT the distinct-client count `SalesReportTotal` uses at its own total
+   * level — see that type's header for why the two questions differ).
+   * `klien` = same value as `klienCount` above (kept, unrenamed, per house
+   * field-name stability); `klienVoid` = Σ alloc fraction of a deal whose
+   * LAST remaining service was voided in this row's bucket month (Q-V3);
+   * `klienBersih` = `klien` − `klienVoid`, can render negative for a
+   * single-month bucket with only a void and no offsetting closing.
+   */
+  klien: string;
+  klienVoid: string;
+  klienBersih: string;
+  /**
    * "Total Sales" pada permintaan pemilik 2026-09-10 — jumlah DEAL yang orang
    * ini ikut memilikinya, bilangan bulat dan TIDAK dibobot `basis_points`.
    * Deal yang dijual berdua dihitung satu untuk masing-masing: yang dibagi
@@ -168,6 +182,20 @@ export interface SalesPerfRow {
   totalDeal: number;
   omzet: string;
   omzetIdr: string;
+  /**
+   * Paket V — ADDITIVE trio. `omzet`/`omzetIdr` above stay EXACTLY what they
+   * were before this package (= Kotor, unrenamed — Finance/komisi read them
+   * and must not change silently). `omzetKotor`/`omzetKotorIdr` are the same
+   * value under the new name, for callers that want it alongside `nilaiVoid`
+   * and `omzetBersih` (= `omzetKotor` − `nilaiVoid`, can be negative — Q-V2,
+   * "ditampilkan apa adanya, bukan error").
+   */
+  omzetKotor: string;
+  omzetKotorIdr: string;
+  nilaiVoid: string;
+  nilaiVoidIdr: string;
+  omzetBersih: string;
+  omzetBersihIdr: string;
   komisiKontrak: string;
   komisiKontrakIdr: string;
   komisiDiakui: string;
@@ -503,6 +531,18 @@ function inPeriod(period: PeriodFilter | null, at: Date): boolean {
   return p >= toYyyymm(period.from) && p <= toYyyymm(period.to);
 }
 
+/**
+ * inPeriodStr: like `inPeriod`, but the bucket is already a "YYYYMM" string
+ * (the Void pass's own month, from `audit_log`, not a `Date`) — used so the
+ * Void pass's period gate is a genuinely SEPARATE check from the closing
+ * pass's `inPeriod(filter.period, d.at)` (Q-V2: a deal can close in one
+ * month and be voided in another, and each event is gated by ITS OWN month).
+ */
+function inPeriodStr(period: PeriodFilter | null, periodYyyymm: string): boolean {
+  if (period === null) return true;
+  return periodYyyymm >= toYyyymm(period.from) && periodYyyymm <= toYyyymm(period.to);
+}
+
 // ---------------------------------------------------------------------------
 // bySalesperson / byMonth — share one accumulation pass; byMonth just keys the
 // accumulator by (salesperson, period) instead of (salesperson).
@@ -538,6 +578,17 @@ interface Accumulator {
   omzet: money.Money;
   komisiKontrak: money.Money;
   komisiDiakui: money.Money;
+  /**
+   * Paket V — Σ Nilai Void booked into THIS bucket's own month (the void's
+   * month, not the closing's — Q-V2). `omzet` above stays the closing-month
+   * gross figure, untouched by this; Omzet Bersih (`finalizeRow`) is
+   * `omzet - nilaiVoid` computed per bucket, which is how a month with only
+   * a void and no offsetting closing renders negative (sanctioned by the
+   * decision, not clamped).
+   */
+  nilaiVoid: money.Money;
+  /** Paket V — Σ alloc fraction of a deal whose LAST remaining service was voided in THIS bucket's month (Q-V3). Fraction-weighted, same convention as `klienBaruFrac` et al — NOT the distinct-client count `SalesReportTotal` uses (see that type's own header). */
+  klienVoidFrac: number;
 }
 
 function emptyAcc(): Accumulator {
@@ -548,6 +599,7 @@ function emptyAcc(): Accumulator {
     effortFollowUp: 0, effortVisit: 0, effortOnlineMeeting: 0,
     klienBaruFrac: 0, klienPerpanjanganFrac: 0, klienCrossSellFrac: 0, totalDeal: 0,
     omzet: 0n, komisiKontrak: 0n, komisiDiakui: 0n,
+    nilaiVoid: 0n, klienVoidFrac: 0,
   };
 }
 
@@ -569,6 +621,23 @@ async function gather(
     byMonth ? `${salespersonId}|${at === null ? '' : tz.period(at)}` : salespersonId;
   const get = (salespersonId: string, at: Date | null): Accumulator => {
     const k = keyOf(salespersonId, at);
+    let a = acc.get(k);
+    if (a === undefined) {
+      a = emptyAcc();
+      acc.set(k, a);
+    }
+    return a;
+  };
+  // Paket V — same bucket key as `get`, but keyed directly off an already
+  // "YYYYMM" string (the Void's own month from `audit_log`) instead of a
+  // `Date`, so it never has to round-trip a constructed Date through
+  // `tz.period` to land on the right key. In `byMonth=false` mode `keyOf`
+  // ignores its second argument entirely, so this still collapses to the
+  // one bucket per salesperson `bySalesperson`/`salesReport` expect.
+  const keyOfPeriod = (salespersonId: string, periodYyyymm: string): string =>
+    byMonth ? `${salespersonId}|${periodYyyymm}` : salespersonId;
+  const getByPeriod = (salespersonId: string, periodYyyymm: string): Accumulator => {
+    const k = keyOfPeriod(salespersonId, periodYyyymm);
     let a = acc.get(k);
     if (a === undefined) {
       a = emptyAcc();
@@ -663,6 +732,31 @@ async function gather(
       a.omzet += money.proRata(d.totalAgreedValue, BigInt(alloc.basisPoints), 10000n);
       a.komisiKontrak += money.proRata(d.totalDealCommission, BigInt(alloc.basisPoints), 10000n);
       a.komisiDiakui += d.recognized.get(alloc.salespersonId) ?? 0n;
+    }
+  }
+
+  // --- Paket V: Void pass — booked into the VOID's own month, a genuinely
+  // SEPARATE gate from the closing pass above (Q-V2, `inPeriodStr` vs
+  // `inPeriod`). Money and client-count are two different facts here:
+  // `nilaiVoidPerBulan` can carry an entry for every month a service on the
+  // deal was voided (a partial void moves money only); `bulanSemuaVoid`
+  // fires the client -1 exactly once, only for the month the deal's LAST
+  // remaining service was voided (Q-V3).
+  for (const d of facts.deals) {
+    for (const [voidMonth, voidValue] of d.nilaiVoidPerBulan) {
+      if (!inPeriodStr(filter.period, voidMonth)) continue;
+      for (const alloc of d.allocs) {
+        if (!ids.includes(alloc.salespersonId)) continue;
+        const a = getByPeriod(alloc.salespersonId, voidMonth);
+        a.nilaiVoid += money.proRata(voidValue, BigInt(alloc.basisPoints), 10000n);
+      }
+    }
+    if (d.bulanSemuaVoid !== null && inPeriodStr(filter.period, d.bulanSemuaVoid)) {
+      for (const alloc of d.allocs) {
+        if (!ids.includes(alloc.salespersonId)) continue;
+        const a = getByPeriod(alloc.salespersonId, d.bulanSemuaVoid);
+        a.klienVoidFrac += alloc.basisPoints / 10000;
+      }
     }
   }
 
@@ -765,6 +859,24 @@ interface DealFact {
   /** Komisi diakui per salesperson — sudah dibobot alokasi oleh `commissionAchievementBatch`. */
   recognized: ReadonlyMap<string, money.Money>;
   allocs: readonly AllocShare[];
+  /**
+   * Paket V (`VOID-KURANGI-CLOSING DIPUTUS`, 2026-09-28) — Nilai Void per
+   * BULAN VOID (bukan bulan closing, Q-V2), key "YYYYMM". Proporsional:
+   * `totalAgreedValue × Σ standard_price(layanan void bulan itu) ÷
+   * Σ standard_price(SEMUA layanan deal ini)`, memakai predikat
+   * `finance.dealServiceRows` — SAMA PERSIS dengan yang memetakan Service ke
+   * deal untuk komisi (Q-V4). Dua+ layanan void di bulan yang sama pada deal
+   * yang sama SATU entri (dijumlahkan); dua bulan berbeda = dua entri.
+   */
+  nilaiVoidPerBulan: ReadonlyMap<string, money.Money>;
+  /**
+   * "YYYYMM" void TERAKHIR pada deal ini, HANYA diisi kalau SEMUA layanan
+   * deal ini (himpunan non-kosong, predikat sama) sudah void (Q-V3: klien
+   * berkurang hanya saat layanan TERAKHIR sebuah transaksi di-void). `null`
+   * untuk void sebagian, dan untuk deal tanpa layanan sama sekali (himpunan
+   * kosong TIDAK dianggap "semua void").
+   */
+  bulanSemuaVoid: string | null;
 }
 
 interface DealFacts {
@@ -802,29 +914,94 @@ async function loadDealFacts(sql: Queryable, ids: readonly string[]): Promise<De
     allocByClient.set(a.client_id, list);
   }
 
+  const txnIds = dealRows.map((d) => d.transaction_id);
+
   // P2 §7 — one batch of queries instead of one round per transaction.
-  const achByTxn = await commissionAchievementBatch(sql, dealRows.map((d) => d.transaction_id));
+  const achByTxn = await commissionAchievementBatch(sql, txnIds);
+
+  // Paket V — SAME predicate as commission (`finance.dealServiceRows`),
+  // UNFILTERED (voided AND non-voided), batched once across every deal —
+  // not per-transaction, same P2 §7 principle as `achByTxn` above.
+  const svcRows = await dealServiceRows(sql, txnIds);
+  const svcByTxn = new Map<string, DealServiceFullRow[]>();
+  for (const r of svcRows) {
+    const list = svcByTxn.get(r.transactionId) ?? [];
+    list.push(r);
+    svcByTxn.set(r.transactionId, list);
+  }
+  const voidedServiceIds = svcRows.filter((r) => r.status === SERVICE_STATUS_VOIDED).map((r) => r.serviceId);
+  const voidTsByService = await loadVoidTimestamps(sql, voidedServiceIds);
 
   return {
     deals: dealRows.map((d) => {
       const ach = achByTxn.get(d.transaction_id);
+      // `ach` tidak pernah hilang — idnya berasal dari `transactions` itu
+      // sendiri. Nol eksplisit, bukan baris yang dibuang: sebuah deal yang
+      // menghilang dari bauran karena komisinya tidak terbaca adalah bug yang
+      // jauh lebih sulit dilihat daripada satu kolom uang bernilai nol.
+      const totalAgreedValue = ach === undefined ? 0n : money.parse(ach.totalAgreedValue);
+
+      const svcs = svcByTxn.get(d.transaction_id) ?? [];
+      const totalStandardPrice = svcs.reduce((sum, s) => sum + money.parse(s.standardPrice), 0n);
+      const voidedPriceByMonth = new Map<string, money.Money>();
+      let latestVoidAt: Date | null = null;
+      let allVoided = svcs.length > 0;
+      for (const s of svcs) {
+        if (s.status !== SERVICE_STATUS_VOIDED) {
+          allVoided = false;
+          continue;
+        }
+        const voidAt = voidTsByService.get(s.serviceId);
+        if (voidAt === undefined) continue; // defensive: sm_transition always writes one, but don't crash if absent
+        const month = tz.period(voidAt);
+        voidedPriceByMonth.set(month, (voidedPriceByMonth.get(month) ?? 0n) + money.parse(s.standardPrice));
+        if (latestVoidAt === null || voidAt > latestVoidAt) latestVoidAt = voidAt;
+      }
+      const nilaiVoidPerBulan = new Map<string, money.Money>();
+      for (const [month, voidedPrice] of voidedPriceByMonth) {
+        nilaiVoidPerBulan.set(month, totalStandardPrice === 0n ? 0n : money.proRata(totalAgreedValue, voidedPrice, totalStandardPrice));
+      }
+
       return {
         transactionId: d.transaction_id,
         clientId: d.client_id,
         contractId: d.contract_id,
         jenis: d.jenis,
         at: d.at,
-        // `ach` tidak pernah hilang — idnya berasal dari `transactions` itu
-        // sendiri. Nol eksplisit, bukan baris yang dibuang: sebuah deal yang
-        // menghilang dari bauran karena komisinya tidak terbaca adalah bug yang
-        // jauh lebih sulit dilihat daripada satu kolom uang bernilai nol.
-        totalAgreedValue: ach === undefined ? 0n : money.parse(ach.totalAgreedValue),
+        totalAgreedValue,
         totalDealCommission: ach === undefined ? 0n : money.parse(ach.totalDealCommission),
         recognized: new Map((ach?.shares ?? []).map((sh) => [sh.salespersonId, money.parse(sh.recognizedCommission)])),
         allocs: allocByClient.get(d.client_id) ?? [],
+        nilaiVoidPerBulan,
+        bulanSemuaVoid: allVoided && latestVoidAt !== null ? tz.period(latestVoidAt) : null,
       };
     }),
   };
+}
+
+/**
+ * loadVoidTimestamps — batched lookup of "when was this Service voided",
+ * from `audit_log` itself (house rule #3/#4: no status is ever set outside
+ * `sm_transition`, and it writes exactly one immutable row per transition —
+ * `entity_type='service'`, `after_json->>'status'` the TO state). Matches on
+ * `after_json->>'status'` rather than the literal `action` string, so it is
+ * robust to whichever FROM state a Service was voided from (M4-OA-5 allows
+ * more than one). `LockedFieldError` in `client.voidService` prevents
+ * re-voiding an already-terminal Service, so there is at most one such row
+ * per id — `min()` is defensive, not a real multi-row case.
+ */
+async function loadVoidTimestamps(sql: Queryable, serviceIds: readonly string[]): Promise<Map<string, Date>> {
+  const out = new Map<string, Date>();
+  if (serviceIds.length === 0) return out;
+  const rows = await sql<{ entity_id: string; voided_at: Date }[]>`
+    select entity_id, min(created_at) as voided_at
+      from audit_log
+     where entity_type = 'service'
+       and entity_id = any(${[...serviceIds]})
+       and after_json ->> 'status' = ${SERVICE_STATUS_VOIDED}
+     group by entity_id`;
+  for (const r of rows) out.set(r.entity_id, r.voided_at);
+  return out;
 }
 
 /** fmtFrac renders a weighted-client fraction to 2 decimals (§3 "angka pecahan di sheet"). */
@@ -860,9 +1037,18 @@ function finalizeRow(salespersonId: string, roster: ReadonlyMap<string, RosterEn
     klienPerpanjangan: fmtFrac(a.klienPerpanjanganFrac),
     klienCrossSell: fmtFrac(a.klienCrossSellFrac),
     klienCount: fmtFrac(a.klienBaruFrac + a.klienPerpanjanganFrac + a.klienCrossSellFrac),
+    klien: fmtFrac(a.klienBaruFrac + a.klienPerpanjanganFrac + a.klienCrossSellFrac),
+    klienVoid: fmtFrac(a.klienVoidFrac),
+    klienBersih: fmtFrac(a.klienBaruFrac + a.klienPerpanjanganFrac + a.klienCrossSellFrac - a.klienVoidFrac),
     totalDeal: a.totalDeal,
     omzet: money.decimal(a.omzet),
     omzetIdr: money.format(a.omzet),
+    omzetKotor: money.decimal(a.omzet),
+    omzetKotorIdr: money.format(a.omzet),
+    nilaiVoid: money.decimal(a.nilaiVoid),
+    nilaiVoidIdr: money.format(a.nilaiVoid),
+    omzetBersih: money.decimal(a.omzet - a.nilaiVoid),
+    omzetBersihIdr: money.format(a.omzet - a.nilaiVoid),
     komisiKontrak: money.decimal(a.komisiKontrak),
     komisiKontrakIdr: money.format(a.komisiKontrak),
     komisiDiakui: money.decimal(a.komisiDiakui),
@@ -1132,8 +1318,19 @@ export interface SalesReportRow {
   klienPerpanjangan: string;
   klienCrossSell: string;
   klienCount: string;
+  /** Paket V — fraction-weighted trio, sama konvensi dengan `SalesPerfRow`'s (lihat header field itu). `klien` = `klienCount` di atas, dipertahankan tanpa berganti nama. */
+  klien: string;
+  klienVoid: string;
+  klienBersih: string;
   omzet: string;
   omzetIdr: string;
+  /** Paket V — ADDITIVE trio, sama seperti `SalesPerfRow`: `omzet`/`omzetIdr` di atas tetap Kotor apa adanya. */
+  omzetKotor: string;
+  omzetKotorIdr: string;
+  nilaiVoid: string;
+  nilaiVoidIdr: string;
+  omzetBersih: string;
+  omzetBersihIdr: string;
   komisiKontrak: string;
   komisiKontrakIdr: string;
   komisiDiakui: string;
@@ -1145,11 +1342,30 @@ export interface SalesReportTotal {
   salespersonCount: number;
   /** COUNT(DISTINCT contract) — BUKAN Σ kolom `totalDeal`: satu deal berdua tetap satu deal. */
   totalDeal: number;
-  /** COUNT(DISTINCT client), dengan alasan yang sama. */
+  /** COUNT(DISTINCT client), dengan alasan yang sama. Kotor — dipertahankan tanpa berganti nama (Paket V). */
   klienCount: number;
+  /**
+   * Paket V — DISTINCT-set trio di level TOTAL (bukan fraction-weighted,
+   * berbeda dari trio pada `SalesReportRow`/`SalesPerfRow`: pertanyaan di
+   * level total adalah "berapa KLIEN", bukan "berapa bagian klien milik
+   * siapa" — lihat header berkas ini soal kenapa `totalDeal`/`klienCount`
+   * memakai COUNT(DISTINCT ...)). `klienVoid` = jumlah klien DISTINCT yang
+   * layanan TERAKHIRnya di-void pada periode filter ini (Q-V3); `klienBersih`
+   * = `klienCount` − `klienVoid`, bisa negatif untuk periode yang isinya
+   * hanya void tanpa closing baru yang mengimbangi (sama seperti omzet).
+   */
+  klienVoid: number;
+  klienBersih: number;
   /** Total GMV — Σ omzet per orang, aman karena sudah pro-rata Σ basis_points = 10000. */
   omzet: string;
   omzetIdr: string;
+  /** Paket V — ADDITIVE trio di level TOTAL. `omzet`/`omzetIdr` tetap Kotor. */
+  omzetKotor: string;
+  omzetKotorIdr: string;
+  nilaiVoid: string;
+  nilaiVoidIdr: string;
+  omzetBersih: string;
+  omzetBersihIdr: string;
   komisiKontrak: string;
   komisiKontrakIdr: string;
   komisiDiakui: string;
@@ -1200,12 +1416,18 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
     totalDeal: number;
     baru: number; perpanjangan: number; crossSell: number;
     omzet: money.Money; komisiKontrak: money.Money; komisiDiakui: money.Money;
+    nilaiVoid: money.Money;
+    klienVoidFrac: number;
   }
+  const emptyBucket = (): Bucket => ({
+    totalDeal: 0, baru: 0, perpanjangan: 0, crossSell: 0, omzet: 0n, komisiKontrak: 0n, komisiDiakui: 0n,
+    nilaiVoid: 0n, klienVoidFrac: 0,
+  });
   const per = new Map<string, Bucket>();
   const bucket = (id: string): Bucket => {
     let b = per.get(id);
     if (b === undefined) {
-      b = { totalDeal: 0, baru: 0, perpanjangan: 0, crossSell: 0, omzet: 0n, komisiKontrak: 0n, komisiDiakui: 0n };
+      b = emptyBucket();
       per.set(id, b);
     }
     return b;
@@ -1216,10 +1438,17 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
   // lalu diperpanjang adalah DUA deal, dan tetap SATU klien.
   const distinctDeals = new Set<string>();
   const distinctClients = new Set<string>();
+  // Paket V — himpunan klien DISTINCT yang layanan TERAKHIRnya di-void di
+  // DALAM periode filter (Q-V3). Populasi ini SENGAJA independen dari
+  // `distinctClients` di atas: closing-nya bisa saja jatuh di bulan lain
+  // (atau di luar filter sama sekali) — Nilai Void/klien-void dibuku ke
+  // bulan VOID-nya sendiri, bukan bulan closing (Q-V2).
+  const distinctVoidedClients = new Set<string>();
 
   let totalOmzet = 0n;
   let totalKomisiKontrak = 0n;
   let totalKomisiDiakui = 0n;
+  let totalNilaiVoid = 0n;
   for (const d of facts.deals) {
     if (!inPeriod(f.period, d.at)) continue;
     let counted = false;
@@ -1248,9 +1477,37 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
     }
   }
 
+  // Paket V — Void pass, gated by the VOID's own month (`inPeriodStr`), a
+  // genuinely separate check from the closing pass above (Q-V2). See
+  // `gather`'s own Void pass for the identical split between money
+  // (`nilaiVoidPerBulan`, can fire more than once per deal) and client count
+  // (`bulanSemuaVoid`, fires at most once, only on full void — Q-V3).
+  for (const d of facts.deals) {
+    for (const [voidMonth, voidValue] of d.nilaiVoidPerBulan) {
+      if (!inPeriodStr(f.period, voidMonth)) continue;
+      for (const alloc of d.allocs) {
+        if (!idSet.has(alloc.salespersonId)) continue;
+        const b = bucket(alloc.salespersonId);
+        const share = money.proRata(voidValue, BigInt(alloc.basisPoints), 10000n);
+        b.nilaiVoid += share;
+        totalNilaiVoid += share;
+      }
+    }
+    if (d.bulanSemuaVoid !== null && inPeriodStr(f.period, d.bulanSemuaVoid)) {
+      let anyAlloc = false;
+      for (const alloc of d.allocs) {
+        if (!idSet.has(alloc.salespersonId)) continue;
+        bucket(alloc.salespersonId).klienVoidFrac += alloc.basisPoints / 10000;
+        anyAlloc = true;
+      }
+      if (anyAlloc) distinctVoidedClients.add(d.clientId);
+    }
+  }
+
   const rows: SalesReportRow[] = ids.map((id) => {
-    const b = per.get(id) ?? { totalDeal: 0, baru: 0, perpanjangan: 0, crossSell: 0, omzet: 0n, komisiKontrak: 0n, komisiDiakui: 0n };
+    const b = per.get(id) ?? emptyBucket();
     const r = rosterMap.get(id);
+    const klien = b.baru + b.perpanjangan + b.crossSell;
     return {
       salespersonId: id,
       nama: r?.nama ?? id,
@@ -1259,9 +1516,18 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
       klienBaru: fmtFrac(b.baru),
       klienPerpanjangan: fmtFrac(b.perpanjangan),
       klienCrossSell: fmtFrac(b.crossSell),
-      klienCount: fmtFrac(b.baru + b.perpanjangan + b.crossSell),
+      klienCount: fmtFrac(klien),
+      klien: fmtFrac(klien),
+      klienVoid: fmtFrac(b.klienVoidFrac),
+      klienBersih: fmtFrac(klien - b.klienVoidFrac),
       omzet: money.decimal(b.omzet),
       omzetIdr: money.format(b.omzet),
+      omzetKotor: money.decimal(b.omzet),
+      omzetKotorIdr: money.format(b.omzet),
+      nilaiVoid: money.decimal(b.nilaiVoid),
+      nilaiVoidIdr: money.format(b.nilaiVoid),
+      omzetBersih: money.decimal(b.omzet - b.nilaiVoid),
+      omzetBersihIdr: money.format(b.omzet - b.nilaiVoid),
       komisiKontrak: money.decimal(b.komisiKontrak),
       komisiKontrakIdr: money.format(b.komisiKontrak),
       komisiDiakui: money.decimal(b.komisiDiakui),
@@ -1277,8 +1543,16 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
       salespersonCount: rows.length,
       totalDeal: distinctDeals.size,
       klienCount: distinctClients.size,
+      klienVoid: distinctVoidedClients.size,
+      klienBersih: distinctClients.size - distinctVoidedClients.size,
       omzet: money.decimal(totalOmzet),
       omzetIdr: money.format(totalOmzet),
+      omzetKotor: money.decimal(totalOmzet),
+      omzetKotorIdr: money.format(totalOmzet),
+      nilaiVoid: money.decimal(totalNilaiVoid),
+      nilaiVoidIdr: money.format(totalNilaiVoid),
+      omzetBersih: money.decimal(totalOmzet - totalNilaiVoid),
+      omzetBersihIdr: money.format(totalOmzet - totalNilaiVoid),
       komisiKontrak: money.decimal(totalKomisiKontrak),
       komisiKontrakIdr: money.format(totalKomisiKontrak),
       komisiDiakui: money.decimal(totalKomisiDiakui),
@@ -1443,22 +1717,54 @@ async function computeMetricActualsBatch(sql: Queryable, rows: readonly TargetSo
     }
   }
 
-  // klien_count_min_kontrak — distinct threshold per row, kept per-row.
-  for (const r of rows) {
-    if (r.metric_key !== 'klien_count_min_kontrak') continue;
-    const range = periodRangeFor(normalizeDate(r.period_start), r.period_kind);
-    const threshold = money.decimal(money.parse(r.metric_param ?? '0'));
-    const cnt = await sql<{ n: string }[]>`
-      select count(distinct cl.id) as n
-        from clients cl
-        join contracts c on c.client_id = cl.id
-        join transactions t on t.id = cl.transaction_id
-        join client_sales_allocations a on a.client_id = cl.id
-       where a.salesperson_id = ${r.salesperson_id}
-         and a.basis_points > 0
-         and t.total_agreed_value >= ${threshold}::numeric
-         and wib_period(c.created_at) between ${range.from} and ${range.to}`;
-    result.set(targetRowKey(r.salesperson_id, r.metric_key), cnt[0].n);
+  // klien_count_min_kontrak — distinct threshold per row, kept per-row (the
+  // candidate query itself, threshold differs row to row so there is no
+  // shared `= any($ids)` shape to batch it into). Paket V (`VOID-KURANGI-
+  // CLOSING DIPUTUS`, 2026-09-28): a transaction whose LAST remaining
+  // service has since been voided no longer counts as an achieved client —
+  // same rule as `salesReport`/`gather`'s client-void logic, so "closing
+  // counted twice" stops double-counting everywhere Kinerja Sales derives
+  // from the same closing/void facts. That void check IS batched across
+  // every row, over the shared `finance.dealServiceRows` predicate — the
+  // same one `loadDealFacts` uses, so this metric can never disagree with
+  // Omzet Bersih about which deals are fully voided.
+  const kckRows = rows.filter((r) => r.metric_key === 'klien_count_min_kontrak');
+  if (kckRows.length > 0) {
+    const perRowCandidates = new Map<TargetSourceRow, { clientId: string; transactionId: string }[]>();
+    const allCandidateTxnIds = new Set<string>();
+    for (const r of kckRows) {
+      const range = periodRangeFor(normalizeDate(r.period_start), r.period_kind);
+      const threshold = money.decimal(money.parse(r.metric_param ?? '0'));
+      const candidates = await sql<{ client_id: string; transaction_id: string }[]>`
+        select distinct cl.id as client_id, t.id as transaction_id
+          from clients cl
+          join contracts c on c.client_id = cl.id
+          join transactions t on t.id = cl.transaction_id
+          join client_sales_allocations a on a.client_id = cl.id
+         where a.salesperson_id = ${r.salesperson_id}
+           and a.basis_points > 0
+           and t.total_agreed_value >= ${threshold}::numeric
+           and wib_period(c.created_at) between ${range.from} and ${range.to}`;
+      perRowCandidates.set(r, candidates.map((c) => ({ clientId: c.client_id, transactionId: c.transaction_id })));
+      candidates.forEach((c) => allCandidateTxnIds.add(c.transaction_id));
+    }
+    const svcRows = await dealServiceRows(sql, [...allCandidateTxnIds]);
+    const svcByTxn = new Map<string, DealServiceFullRow[]>();
+    for (const sv of svcRows) {
+      const list = svcByTxn.get(sv.transactionId) ?? [];
+      list.push(sv);
+      svcByTxn.set(sv.transactionId, list);
+    }
+    for (const r of kckRows) {
+      const candidates = perRowCandidates.get(r) ?? [];
+      const clientIds = new Set<string>();
+      for (const c of candidates) {
+        const svcs = svcByTxn.get(c.transactionId) ?? [];
+        const fullyVoided = svcs.length > 0 && svcs.every((s) => s.status === SERVICE_STATUS_VOIDED);
+        if (!fullyVoided) clientIds.add(c.clientId);
+      }
+      result.set(targetRowKey(r.salesperson_id, r.metric_key), String(clientIds.size));
+    }
   }
 
   return result;

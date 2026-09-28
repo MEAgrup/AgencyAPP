@@ -7224,10 +7224,21 @@ export interface SalesPerfRowWire {
   klien_perpanjangan: string;
   klien_cross_sell: string;
   klien_count: string;
+  /** Paket V (`VOID-KURANGI-CLOSING DIPUTUS`, 2026-09-28) — additive trio, fraction-weighted like `klien_count` above (NOT `SalesReportTotalWire`'s distinct-set trio). `klien` = `klien_count`, kept unrenamed. */
+  klien: string;
+  klien_void: string;
+  klien_bersih: string;
   /** "Total Sales" (pemilik 2026-09-10) — jumlah deal per orang, tidak dibobot. Jangan dijumlahkan ke bawah; total agensi ada di `SalesReportTotalWire.total_deal`. */
   total_deal: number;
   omzet: string;
   omzet_idr: string;
+  /** Paket V — additive trio. `omzet`/`omzet_idr` stay exactly Kotor as before. */
+  omzet_kotor: string;
+  omzet_kotor_idr: string;
+  nilai_void: string;
+  nilai_void_idr: string;
+  omzet_bersih: string;
+  omzet_bersih_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -7255,8 +7266,12 @@ export function salesPerfRowToWire(r: salesperf.SalesPerfRow): SalesPerfRowWire 
     avg_deal_cycle_days: r.avgDealCycleDays,
     effort_follow_up: r.effortFollowUp, effort_visit: r.effortVisit, effort_online_meeting: r.effortOnlineMeeting,
     klien_baru: r.klienBaru, klien_perpanjangan: r.klienPerpanjangan, klien_cross_sell: r.klienCrossSell, klien_count: r.klienCount,
+    klien: r.klien, klien_void: r.klienVoid, klien_bersih: r.klienBersih,
     total_deal: r.totalDeal,
     omzet: r.omzet, omzet_idr: r.omzetIdr,
+    omzet_kotor: r.omzetKotor, omzet_kotor_idr: r.omzetKotorIdr,
+    nilai_void: r.nilaiVoid, nilai_void_idr: r.nilaiVoidIdr,
+    omzet_bersih: r.omzetBersih, omzet_bersih_idr: r.omzetBersihIdr,
     komisi_kontrak: r.komisiKontrak, komisi_kontrak_idr: r.komisiKontrakIdr,
     komisi_diakui: r.komisiDiakui, komisi_diakui_idr: r.komisiDiakuiIdr,
     target_omzet: r.targetOmzet, target_omzet_idr: r.targetOmzetIdr, pencapaian_pct: r.pencapaianPct,
@@ -7351,8 +7366,19 @@ export interface SalesReportRowWire {
   klien_perpanjangan: string;
   klien_cross_sell: string;
   klien_count: string;
+  /** Paket V — additive trio, fraction-weighted (same convention as `SalesPerfRowWire`'s). `klien` = `klien_count`, kept unrenamed. */
+  klien: string;
+  klien_void: string;
+  klien_bersih: string;
   omzet: string;
   omzet_idr: string;
+  /** Paket V — additive trio. `omzet`/`omzet_idr` stay exactly Kotor as before. */
+  omzet_kotor: string;
+  omzet_kotor_idr: string;
+  nilai_void: string;
+  nilai_void_idr: string;
+  omzet_bersih: string;
+  omzet_bersih_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -7364,8 +7390,18 @@ export interface SalesReportTotalWire {
   /** COUNT(DISTINCT contract) — bukan Σ kolom `total_deal` di atasnya. */
   total_deal: number;
   klien_count: number;
+  /** Paket V — DISTINCT-set trio at TOTAL level (not fraction-weighted — see `salesperf.SalesReportTotal`'s own header). */
+  klien_void: number;
+  klien_bersih: number;
   omzet: string;
   omzet_idr: string;
+  /** Paket V — additive trio at TOTAL level. `omzet`/`omzet_idr` stay exactly Kotor as before. */
+  omzet_kotor: string;
+  omzet_kotor_idr: string;
+  nilai_void: string;
+  nilai_void_idr: string;
+  omzet_bersih: string;
+  omzet_bersih_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -7392,7 +7428,11 @@ export function salesReportRowToWire(r: salesperf.SalesReportRow): SalesReportRo
     total_deal: r.totalDeal,
     klien_baru: r.klienBaru, klien_perpanjangan: r.klienPerpanjangan,
     klien_cross_sell: r.klienCrossSell, klien_count: r.klienCount,
+    klien: r.klien, klien_void: r.klienVoid, klien_bersih: r.klienBersih,
     omzet: r.omzet, omzet_idr: r.omzetIdr,
+    omzet_kotor: r.omzetKotor, omzet_kotor_idr: r.omzetKotorIdr,
+    nilai_void: r.nilaiVoid, nilai_void_idr: r.nilaiVoidIdr,
+    omzet_bersih: r.omzetBersih, omzet_bersih_idr: r.omzetBersihIdr,
     komisi_kontrak: r.komisiKontrak, komisi_kontrak_idr: r.komisiKontrakIdr,
     komisi_diakui: r.komisiDiakui, komisi_diakui_idr: r.komisiDiakuiIdr,
   };
@@ -7405,7 +7445,11 @@ export function salesReportToWire(r: salesperf.SalesReport): SalesReportWire {
       salesperson_count: r.total.salespersonCount,
       total_deal: r.total.totalDeal,
       klien_count: r.total.klienCount,
+      klien_void: r.total.klienVoid, klien_bersih: r.total.klienBersih,
       omzet: r.total.omzet, omzet_idr: r.total.omzetIdr,
+      omzet_kotor: r.total.omzetKotor, omzet_kotor_idr: r.total.omzetKotorIdr,
+      nilai_void: r.total.nilaiVoid, nilai_void_idr: r.total.nilaiVoidIdr,
+      omzet_bersih: r.total.omzetBersih, omzet_bersih_idr: r.total.omzetBersihIdr,
       komisi_kontrak: r.total.komisiKontrak, komisi_kontrak_idr: r.total.komisiKontrakIdr,
       komisi_diakui: r.total.komisiDiakui, komisi_diakui_idr: r.total.komisiDiakuiIdr,
     },

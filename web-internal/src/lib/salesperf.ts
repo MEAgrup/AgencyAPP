@@ -40,6 +40,12 @@ export interface SalesPerfRow {
   klien_perpanjangan: string;
   klien_cross_sell: string;
   klien_count: string;
+  // Paket V (`VOID-KURANGI-CLOSING DIPUTUS`, 2026-09-28) — additive trio,
+  // fraction-weighted like klien_count above (NOT SalesReportTotal's
+  // distinct-set trio). klien = klien_count, kept unrenamed.
+  klien: string;
+  klien_void: string;
+  klien_bersih: string;
   // "Total Sales" (pemilik 2026-09-10) — jumlah deal per orang, bilangan bulat
   // dan TIDAK dibobot alokasi: deal yang dijual berdua bernilai 1 untuk
   // masing-masing. Jangan dijumlahkan ke bawah untuk mendapat total agensi —
@@ -47,6 +53,13 @@ export interface SalesPerfRow {
   total_deal: number;
   omzet: string;
   omzet_idr: string;
+  // Paket V — additive trio. omzet/omzet_idr stay exactly Kotor as before.
+  omzet_kotor: string;
+  omzet_kotor_idr: string;
+  nilai_void: string;
+  nilai_void_idr: string;
+  omzet_bersih: string;
+  omzet_bersih_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -98,8 +111,20 @@ export interface SalesReportRow {
   klien_perpanjangan: string;
   klien_cross_sell: string;
   klien_count: string;
+  // Paket V — additive trio, fraction-weighted (same convention as
+  // SalesPerfRow's). klien = klien_count, kept unrenamed.
+  klien: string;
+  klien_void: string;
+  klien_bersih: string;
   omzet: string;
   omzet_idr: string;
+  // Paket V — additive trio. omzet/omzet_idr stay exactly Kotor as before.
+  omzet_kotor: string;
+  omzet_kotor_idr: string;
+  nilai_void: string;
+  nilai_void_idr: string;
+  omzet_bersih: string;
+  omzet_bersih_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -114,8 +139,20 @@ export interface SalesReportTotal {
   salesperson_count: number;
   total_deal: number;
   klien_count: number;
+  // Paket V — DISTINCT-set trio at TOTAL level (not fraction-weighted — see
+  // salesperf.SalesReportTotal's own header for why this differs from the
+  // row-level trio above).
+  klien_void: number;
+  klien_bersih: number;
   omzet: string;
   omzet_idr: string;
+  // Paket V — additive trio at TOTAL level. omzet/omzet_idr stay Kotor.
+  omzet_kotor: string;
+  omzet_kotor_idr: string;
+  nilai_void: string;
+  nilai_void_idr: string;
+  omzet_bersih: string;
+  omzet_bersih_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;

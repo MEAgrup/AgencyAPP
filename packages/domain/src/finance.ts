@@ -753,15 +753,38 @@ interface DealServiceRow {
   commission_rule: string;
 }
 
-async function dealServices(sql: Queryable, transactionIds: readonly string[]): Promise<Map<string, DealServiceRow[]>> {
-  const out = new Map<string, DealServiceRow[]>();
-  if (transactionIds.length === 0) return out;
-  const rows = await sql<{ transaction_id: string; standard_price: string; commission_rule: string }[]>`
-    select tt.id as transaction_id, s.standard_price, s.commission_rule
+/** Status Service yang dibatalkan (M4-OA-5) — cermin `client.SERVICE_VOIDED`. Salinan lokal, pola yang sama dengan setiap file lain yang menyentuh status ini (`salesperf.ts`, `kol.ts`, `creative.ts`, `tutupbuku.ts`). */
+const SERVICE_VOIDED = '[Cancelled — Service Voided]';
+
+/** One row of `dealServiceRows` — a Service, its deal (`transactionId`), and enough to compute commission (`dealServices`) OR Void value (`salesperf.loadDealFacts`) from the SAME set. */
+export interface DealServiceFullRow {
+  transactionId: string;
+  serviceId: string;
+  standardPrice: string;
+  commissionRule: string;
+  status: string;
+}
+
+/**
+ * dealServiceRows — the shared join/where predicate that decides "which
+ * Services belong to this deal" (see the big comment above), WITHOUT any
+ * status filter. `dealServices` (commission, below) builds on this by
+ * dropping voided rows; `salesperf.loadDealFacts`'s Void-value computation
+ * (Paket V, `VOID-KURANGI-CLOSING DIPUTUS` 2026-09-28) needs the UNFILTERED
+ * set — every row, voided or not, with its own `standard_price` and
+ * `status` — so it imports THIS function directly rather than
+ * `dealServices`, and the two can never state a different set of Services
+ * for the same transaction.
+ */
+export async function dealServiceRows(sql: Queryable, transactionIds: readonly string[]): Promise<DealServiceFullRow[]> {
+  if (transactionIds.length === 0) return [];
+  const rows = await sql<{
+    transaction_id: string; service_id: string; standard_price: string; commission_rule: string; status: string;
+  }[]>`
+    select tt.id as transaction_id, s.id as service_id, s.standard_price, s.commission_rule, s.status
       from transactions tt
       join services s
         on s.client_id = tt.client_id
-       and s.status <> '[Cancelled — Service Voided]'
        -- Bridge MSDPS→CDPS A7 anti-drift (amandemen §4.3): komisi dijumlahkan
        -- PER LAYANAN di sini, jadi klien CDPS lama yang JUGA menerima satu
        -- SVC- MEAGO tidak boleh menaikkan komisi tanpa transaksi CDPS di
@@ -782,10 +805,21 @@ async function dealServices(sql: Queryable, transactionIds: readonly string[]): 
                        order by t2.created_at, t2.id limit 1))
              )
            )`;
+  return rows.map((r) => ({
+    transactionId: r.transaction_id, serviceId: r.service_id,
+    standardPrice: r.standard_price, commissionRule: r.commission_rule, status: r.status,
+  }));
+}
+
+/** dealServices — commission's own view of `dealServiceRows`: the same predicate, filtered to non-voided rows (M4-OA-5: no commission for undelivered work). */
+async function dealServices(sql: Queryable, transactionIds: readonly string[]): Promise<Map<string, DealServiceRow[]>> {
+  const out = new Map<string, DealServiceRow[]>();
+  const rows = await dealServiceRows(sql, transactionIds);
   for (const r of rows) {
-    const list = out.get(r.transaction_id) ?? [];
-    list.push({ standard_price: r.standard_price, commission_rule: r.commission_rule });
-    out.set(r.transaction_id, list);
+    if (r.status === SERVICE_VOIDED) continue;
+    const list = out.get(r.transactionId) ?? [];
+    list.push({ standard_price: r.standardPrice, commission_rule: r.commissionRule });
+    out.set(r.transactionId, list);
   }
   return out;
 }
