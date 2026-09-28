@@ -3273,6 +3273,16 @@ export interface StrategiQueueRow {
   tanggalMulaiKontrak: string;
   tanggalAkhirKontrak: string;
   diajukanPada: string | null;
+  /**
+   * S-03 (`/persetujuan` "Persetujuan Strategi" card) — the AM who owns the
+   * contract, same `owner_am`/`owner_am_nama` shape `client.pendingHoldRequests`
+   * / `client.pendingClosureRequests` already use for "who is this about" on a
+   * card the reviewer never opens. Added alongside the S-01 status filter
+   * because that is the first caller with no detail-page fallback to fall back
+   * on; every other `listStrategiQueue` caller simply ignores the new fields.
+   */
+  ownerAm: string | null;
+  ownerAmNama: string;
 }
 
 interface StrategiQueueDbRow {
@@ -3286,6 +3296,8 @@ interface StrategiQueueDbRow {
   tanggal_mulai_kontrak: string;
   tanggal_akhir_kontrak: string;
   diajukan_pada: string | null;
+  owner_am: string | null;
+  owner_am_nama: string | null;
 }
 
 function rowToStrategiQueue(r: StrategiQueueDbRow): StrategiQueueRow {
@@ -3300,7 +3312,24 @@ function rowToStrategiQueue(r: StrategiQueueDbRow): StrategiQueueRow {
     tanggalMulaiKontrak: r.tanggal_mulai_kontrak,
     tanggalAkhirKontrak: r.tanggal_akhir_kontrak,
     diajukanPada: r.diajukan_pada,
+    ownerAm: r.owner_am,
+    ownerAmNama: r.owner_am_nama ?? '',
   };
+}
+
+/** Options for {@link listStrategiQueue}. */
+export interface StrategiQueueOptions {
+  /**
+   * Optional server-side status filter (S-01, `/persetujuan` "Persetujuan
+   * Strategi" section — `?status=Diajukan`). Empty/omitted means every
+   * status, same convention `finance.schemeChangeRequests` already uses for
+   * a queue's `?status=` param: the equality filter is folded into the SQL
+   * itself rather than validated against the real STRG- status set, so an
+   * unrecognised value simply matches nothing instead of being a 400 — no
+   * sibling queue in this codebase throws on a bad `?status=`, and the
+   * caller (the FE aggregator) only ever sends `Diajukan`.
+   */
+  status?: string;
 }
 
 /**
@@ -3310,15 +3339,22 @@ function rowToStrategiQueue(r: StrategiQueueDbRow): StrategiQueueRow {
  * `account.listStrategies`: Account lead / OD / Director see all; an
  * Account-staff AM sees only the contracts they own.
  */
-export async function listStrategiQueue(sql: Queryable, actor: Actor): Promise<StrategiQueueRow[]> {
+export async function listStrategiQueue(
+  sql: Queryable,
+  actor: Actor,
+  opts: StrategiQueueOptions = {},
+): Promise<StrategiQueueRow[]> {
+  const status = (opts.status ?? '').trim();
   if (permission.canReadDivision(actor, ACCOUNT_DIVISION)) {
     const rows = await sql<StrategiQueueDbRow[]>`
       select s.id, s.contract_id, s.client_id, c.toko as client_toko, s.versi_no, s.status,
              s.growth_thesis, ct.tanggal_mulai as tanggal_mulai_kontrak,
-             ct.tanggal_akhir as tanggal_akhir_kontrak, s.diajukan_pada
+             ct.tanggal_akhir as tanggal_akhir_kontrak, s.diajukan_pada,
+             c.assigned_am_id as owner_am, private.employee_display_name(c.assigned_am_id) as owner_am_nama
         from strategi s
         join contracts ct on ct.id = s.contract_id
         join clients c on c.id = s.client_id
+       where (${status} = '' or s.status = ${status})
        order by s.id desc`;
     return rows.map(rowToStrategiQueue);
   }
@@ -3326,11 +3362,13 @@ export async function listStrategiQueue(sql: Queryable, actor: Actor): Promise<S
     const rows = await sql<StrategiQueueDbRow[]>`
       select s.id, s.contract_id, s.client_id, c.toko as client_toko, s.versi_no, s.status,
              s.growth_thesis, ct.tanggal_mulai as tanggal_mulai_kontrak,
-             ct.tanggal_akhir as tanggal_akhir_kontrak, s.diajukan_pada
+             ct.tanggal_akhir as tanggal_akhir_kontrak, s.diajukan_pada,
+             c.assigned_am_id as owner_am, private.employee_display_name(c.assigned_am_id) as owner_am_nama
         from strategi s
         join contracts ct on ct.id = s.contract_id
         join clients c on c.id = s.client_id
        where c.assigned_am_id = ${actor.employeeId}
+         and (${status} = '' or s.status = ${status})
        order by s.id desc`;
     return rows.map(rowToStrategiQueue);
   }
@@ -7570,6 +7608,14 @@ export async function submitStrategi(sql: Sql, actor: Actor, id: string): Promis
     if (!res.ok) throw transitionError(res);
     await tx`update strategi set diajukan_pada = now() where id = ${id}`;
     await appendEvent(tx, id, head.versiNo, 'diajukan', actor.employeeId, null);
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.StrategiDiajukan,
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actor: actor.employeeId,
+      deepLink: `/account/strategi/${id}`,
+      division: ACCOUNT_DIVISION,
+    });
     return loadStrategiRow(tx, id);
   });
 }
@@ -7704,6 +7750,25 @@ export async function approveStrategi(sql: Sql, actor: Actor, id: string): Promi
          and sumber_floor = ${FLOOR_INPUT_AM}`;
     await appendEvent(tx, id, head.versiNo, 'disetujui', actor.employeeId, null);
 
+    // S-04 — notify the AM who submitted this version. `explicit` resolver
+    // (catalog v2): the reviewer already knows they approved it, so the only
+    // recipient this ticket asks for is the author, per the owning contract's
+    // `assigned_am_id`. A contract with no AM (should not happen — Rule 8/9
+    // require one before submit is reachable) simply notifies no one rather
+    // than throwing, same defensive shape `ownerAmOfContract` callers use
+    // elsewhere in this file.
+    const ownerAm = await ownerAmOfContract(tx, head.contractId);
+    if (ownerAm !== null) {
+      await notification.emit(ex.notify, {
+        event: notification.EVENTS.StrategiDisetujui,
+        entityType: ENTITY_STRATEGI,
+        entityId: id,
+        actor: actor.employeeId,
+        deepLink: `/account/strategi/${id}`,
+        explicitRecipients: [ownerAm],
+      });
+    }
+
     // A-3 / M6A §5.7 — approval unlocks Brief dispatch, and unlocking it means
     // MOVING the Service. Same transaction as the approval, so a rejected edge
     // rolls the approval back with it (the shape `account.approveStrategy` set,
@@ -7766,6 +7831,20 @@ export async function returnStrategi(
     if (!res.ok) throw transitionError(res);
     await tx`update strategi set catatan_reviewer = ${note} where id = ${id}`;
     await appendEvent(tx, id, head.versiNo, 'dikembalikan', actor.employeeId, note);
+    // S-04 — notify the AM who submitted it (`explicit` resolver, catalog v2).
+    // Same defensive null-check as `approveStrategi`: an ownerless contract
+    // notifies no one instead of throwing.
+    const ownerAm = await ownerAmOfContract(tx, head.contractId);
+    if (ownerAm !== null) {
+      await notification.emit(ex.notify, {
+        event: notification.EVENTS.StrategiDikembalikan,
+        entityType: ENTITY_STRATEGI,
+        entityId: id,
+        actor: actor.employeeId,
+        deepLink: `/account/strategi/${id}`,
+        explicitRecipients: [ownerAm],
+      });
+    }
     return loadStrategiRow(tx, id);
   });
 }

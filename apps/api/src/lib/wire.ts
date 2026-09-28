@@ -4633,7 +4633,12 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
   };
 }
 
-/** One row of `GET /strategi` — the SPV/Head of Account queue (owner QA 2026-08-26). */
+/**
+ * One row of `GET /strategi` — the SPV/Head of Account queue (owner QA
+ * 2026-08-26). `owner_am`/`owner_am_nama` added for S-03 (`/persetujuan`
+ * "Persetujuan Strategi" card) — same shape `PendingHoldRequestWire` /
+ * `PendingClosureRequestWire` already use.
+ */
 export interface StrategiQueueRowWire {
   id: string;
   contract_id: string;
@@ -4645,6 +4650,8 @@ export interface StrategiQueueRowWire {
   tanggal_mulai_kontrak: string;
   tanggal_akhir_kontrak: string;
   diajukan_pada: string | null;
+  owner_am: string | null;
+  owner_am_nama: string;
 }
 
 export function strategiQueueRowToWire(r: strategi.StrategiQueueRow): StrategiQueueRowWire {
@@ -4659,6 +4666,8 @@ export function strategiQueueRowToWire(r: strategi.StrategiQueueRow): StrategiQu
     tanggal_mulai_kontrak: r.tanggalMulaiKontrak,
     tanggal_akhir_kontrak: r.tanggalAkhirKontrak,
     diajukan_pada: r.diajukanPada,
+    owner_am: r.ownerAm,
+    owner_am_nama: r.ownerAmNama,
   };
 }
 

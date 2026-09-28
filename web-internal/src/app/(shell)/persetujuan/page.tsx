@@ -42,8 +42,13 @@
  *   - Hold Service        `client.pendingHoldRequests`     → `/services/{id}/hold/approve|reject`
  *   - Block Task (M12)    `task.pendingBlockRequests`      → `/tasks|assets/{id}/block/{req}/approve|reject`
  *   - Eskalasi KOL        `kol.pendingEscalations`         → `/bookings/{id}/continue|drop`
- *   - Review Strategi     `account.pendingStrategyReviews` → `/strategies/{id}/approve|request-revision|approve-gmv`
+ *   - Penutupan Service   `client.pendingClosureRequests`  → `/services/{id}/closure/approve|reject`
  *   - Permintaan Finance  `req.listPermintaanQueue('Finance')` → `/permintaan/{id}/proses|selesai|tolak`
+ *   - Persetujuan Strategi (Paket S) `strategi.listStrategiQueue('Diajukan')` →
+ *     `/strategi/{id}/approve|return` — dulu di halaman ini ada baris "Review
+ *     Strategi" yang menunjuk jalur `STR-` (`account.pendingStrategyReviews`,
+ *     `/strategies/{id}/...`); jalur itu DIPENSIUNKAN 2026-09-08 (§8 di bawah)
+ *     dan baris ini menggantikannya untuk `STRG-` (M6A), yang kanonik.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
@@ -103,6 +108,12 @@ import {
   type PendingEscalation,
 } from '@/lib/kol';
 import { isAccountLead } from '@/lib/account';
+import {
+  approveStrategi,
+  listStrategiQueue,
+  returnStrategi,
+  type StrategiQueueRow,
+} from '@/lib/strategi';
 import StatusBadge from '@/components/StatusBadge';
 import ApprovalCard, { MetaGrid, ReasonBlock } from '@/components/persetujuan/ApprovalCard';
 import DecisionActions, { type DecisionKind } from '@/components/persetujuan/DecisionActions';
@@ -992,19 +1003,77 @@ function EscalationCard({
 }
 
 // ---------------------------------------------------------------------------
-// 8. (kosong) — Review Strategi & Plan `STR-` DIPENSIUNKAN 2026-09-08
+// 8. Persetujuan Strategi (STRG-, M6A §7 Rule 12) — Paket S
 // ---------------------------------------------------------------------------
 //
-// Ketokan pemilik: `STRG-` (M6A) yang kanonik. Antrian ini adalah pintu approve
-// `STR-`, dan sesudah A-3 menyambungkan `STRG-` ke mesin status Service, dua
-// pintu hidup ke satu kunci bisa saling mematikan: STRG- disetujui lebih dulu ⇒
-// persetujuan STR- untuk Service yang sama gagal total dan ter-rollback, SPV
-// terkunci permanen dari Plan itu. Jadi pintunya dicabut, bukan dibiarkan
-// setengah — "setengah pensiun lebih buruk daripada tidak pensiun".
+// Sejarah singkat, karena ini bekas antrian `STR-` yang dipensiunkan 2026-09-08
+// (lihat commit itu untuk alasannya — dua pintu hidup ke satu kunci Service
+// bisa saling mematikan). `STRG-` (M6A) yang kanonik sejak ketokan itu, dan
+// sampai R2 ("STRG di Persetujuan Saya") persetujuannya HANYA ada di halaman
+// detail `/account/strategi/{id}` — SPV/Head of Account harus tahu ID-nya dan
+// membuka satu per satu, tidak ada satu tempat yang mengumpulkan versi mana
+// saja yang `Diajukan`. Kartu ini mengisi kekosongan itu; tombolnya memanggil
+// endpoint yang SAMA (`/strategi/{id}/approve|return`) dengan gate role yang
+// sama (`canApproveStrategi` — Account lead / Director), aturan #3 halaman ini.
 //
-// Review Strategi sekarang di `/account/strategi/{id}` (jalur `STRG-`), yang
-// punya versioning dan mendorong Service-nya sendiri. Alasan lengkap:
-// `apps/api/src/lib/retired-str.ts` + `docs/DECISIONS.md` 2026-09-08.
+// `reason` di sini adalah `growth_thesis` (E-1) — bukan alasan pengajuan
+// (STRG- tidak punya field seperti itu), tapi ia "yang paling dekat" STRG-
+// punya ke tesis satu-kalimat versi `STR-` yang lama, jadi ia mengisi slot
+// yang sama: konteks yang seharusnya terlihat tanpa membuka detail.
+
+function StrategiCard({
+  row,
+  canDecide,
+  onDone,
+}: {
+  row: StrategiQueueRow;
+  canDecide: boolean;
+  onDone: () => void;
+}) {
+  const { busy, error, run } = useDecision(onDone);
+  const href = `/account/strategi/${row.id}`;
+  return (
+    <ApprovalCard
+      id={row.id}
+      href={href}
+      title={
+        <>
+          {row.client_toko} &middot; versi {row.versi_no}
+        </>
+      }
+      badge={<StatusBadge status={row.status} />}
+      meta={[
+        { label: 'Versi', value: `v${row.versi_no}` },
+        { label: 'AM pengaju', value: row.owner_am_nama || row.owner_am || '—' },
+        { label: 'Diajukan', value: formatDateTime(row.diajukan_pada) },
+        { label: 'Detail', value: <Link href={href}>Buka detail strategi</Link> },
+      ]}
+      reason={{ label: 'Growth thesis', text: row.growth_thesis }}
+    >
+      {canDecide ? (
+        <DecisionActions
+          fieldId={`strg-note-${row.id}`}
+          busy={busy}
+          error={error}
+          approveLabel="Setujui"
+          rejectLabel="Kembalikan"
+          noteLabel="Catatan (wajib saat Kembalikan — AM hanya melihat kalimat ini)"
+          confirmText={(k) =>
+            k === 'approve'
+              ? `Setujui Strategi ${row.id} (${row.client_toko}, v${row.versi_no})? Versi ini menjadi Aktif dan gerbang Brief terbuka.`
+              : `Kembalikan Strategi ${row.id}? Nomor versinya TIDAK berubah — AM merevisi versi yang sama.`
+          }
+          onDecide={(kind, note) =>
+            run(kind, () => (kind === 'approve' ? approveStrategi(row.id) : returnStrategi(row.id, note)))
+          }
+          hint="Setujui mengarsipkan versi Aktif sebelumnya (bila ada) dan mendorong Service tergerbang-Plan ke [Strategy Approved]. Kembalikan wajib catatan."
+        />
+      ) : (
+        <WaitingNote who="Account Lead / Director" />
+      )}
+    </ApprovalCard>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 9. Permintaan ke Finance (REQ-, M16 §5.5) — A-2
@@ -1112,6 +1181,10 @@ const SECTION_LABELS = [
   // dilabeli nama antrian lain.
   'Permintaan ke Finance',
   'Permintaan Penutupan Service',
+  // S-02 (Paket S) — ditambahkan TERAKHIR di kedua array, persis aturan di
+  // atas: baris baru di ujung, bukan disisipkan di tengah, supaya index yang
+  // sudah ada untuk sembilan antrian lama tidak bergeser.
+  'Persetujuan Strategi (STRG-)',
 ] as const;
 
 export default function PerluPersetujuanPage() {
@@ -1132,6 +1205,14 @@ export default function PerluPersetujuanPage() {
   // mengajari orang mengabaikan area galat.
   const canViewFinanceReq = Boolean(role?.director || role?.division === 'Finance');
 
+  // S-02 — `strategi.listStrategiQueue` 403 untuk siapa pun di luar divisi
+  // Account tanpa peran read-all (`permission.canReadDivision` di domain: OD /
+  // Director selalu boleh, selain itu harus divisi Account level apa pun — AM
+  // staff melihat kliennya sendiri). Sama alasan seperti `canViewFinanceReq`:
+  // tanpa gerbang ini SETIAP pemakai non-Account akan melihat baris galat yang
+  // sudah pasti gagal.
+  const canViewStrategiQueue = Boolean(role?.director || role?.od || role?.division === 'Account');
+
   // ---- Gate keputusan per antrian (cermin gate server; server tetap otoritas) ----
   // `isODOnly` (lib/kol) adalah definisi yang sama yang dipakai halaman-halaman
   // M9: OD murni (tanpa lapis Director) read-only di seluruh sistem, Phase 0 §4.
@@ -1148,6 +1229,10 @@ export default function PerluPersetujuanPage() {
   // Director. `readOnly` menjaga OD tetap read-only (Phase 0 §4).
   const canDecideFinanceReq = !readOnly && (isDirector || role?.division === 'Finance');
   const canDecideBlock = !readOnly && canViewBlockQueue;
+  // S-03 — mirrors `canDecideHold`/`canDecideClosure`: same domain gate
+  // (`canApproveStrategi` = Account lead, Director always carries lead
+  // authority). OD sees the section (read-all) but never these buttons.
+  const canDecideStrategi = !readOnly && (isAccountLead(role) || isDirector);
   // Antrian eskalasi SUDAH difilter server ke `canContinueEscalation` — apa pun
   // yang muncul boleh dilanjutkan pemiliknya. Drop punya gate sendiri (lebih
   // sempit: KOL lead / Account lead / Director).
@@ -1168,6 +1253,7 @@ export default function PerluPersetujuanPage() {
   const [financeReqs, setFinanceReqs] = useState<Permintaan[] | null>(null);
   const [blockRequests, setBlockRequests] = useState<PendingBlockRequest[] | null>(null);
   const [escalations, setEscalations] = useState<PendingEscalation[] | null>(null);
+  const [strategiQueue, setStrategiQueue] = useState<StrategiQueueRow[] | null>(null);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1191,10 +1277,11 @@ export default function PerluPersetujuanPage() {
         canViewBlockQueue ? getTeamPortal() : Promise.resolve(null),
         canViewFinanceReq ? listPermintaanQueue('Finance') : Promise.resolve([]),
         listPendingClosureRequests(),
+        canViewStrategiQueue ? listStrategiQueue('Diajukan') : Promise.resolve({ data: [] }),
       ]);
       const [
         attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, blockRes,
-        financeReqRes, closureRes,
+        financeReqRes, closureRes, strategiRes,
       ] = results;
       setAttempts(attemptRes.status === 'fulfilled' ? attemptRes.value.data : []);
       setAttemptsTruncated(attemptRes.status === 'fulfilled' && attemptRes.value.next_cursor !== null);
@@ -1209,6 +1296,7 @@ export default function PerluPersetujuanPage() {
       );
       setFinanceReqs(financeReqRes.status === 'fulfilled' ? financeReqRes.value : []);
       setClosureRequests(closureRes.status === 'fulfilled' ? closureRes.value.data : []);
+      setStrategiQueue(strategiRes.status === 'fulfilled' ? strategiRes.value.data : []);
       setSectionErrors(
         results
           .map((r, i) => (r.status === 'rejected' ? `${SECTION_LABELS[i]}: ${errorMessage(r.reason)}` : null))
@@ -1219,7 +1307,7 @@ export default function PerluPersetujuanPage() {
     } finally {
       setLoading(false);
     }
-  }, [canViewBlockQueue, canViewFinanceReq]);
+  }, [canViewBlockQueue, canViewFinanceReq, canViewStrategiQueue]);
 
   useEffect(() => {
     load();
@@ -1253,6 +1341,7 @@ export default function PerluPersetujuanPage() {
     block: blockRequests?.length ?? 0,
     financeReq: financeReqs?.length ?? 0,
     closure: closureRequests?.length ?? 0,
+    strategi: strategiQueue?.length ?? 0,
   };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
@@ -1266,6 +1355,7 @@ export default function PerluPersetujuanPage() {
     { id: 'block', label: 'Block Task', count: counts.block },
     { id: 'kol', label: 'Eskalasi KOL', count: counts.kol },
     { id: 'financeReq', label: 'Permintaan Finance', count: counts.financeReq },
+    { id: 'strategi', label: 'Persetujuan Strategi', count: counts.strategi },
   ].filter((t) => t.count > 0);
 
   return (
@@ -1462,6 +1552,17 @@ export default function PerluPersetujuanPage() {
           >
             {financeReqs?.map((r) => (
               <PermintaanCard key={r.id} row={r} canDecide={canDecideFinanceReq} onDone={load} />
+            ))}
+          </Section>
+
+          <Section
+            id="strategi"
+            title="Persetujuan Strategi (STRG-)"
+            count={counts.strategi}
+            hint="AM mengajukan, Account Lead/Director menyetujui atau mengembalikan (Rule 12). Menyetujui mengunci versi jadi Aktif dan membuka gerbang Brief."
+          >
+            {strategiQueue?.map((r) => (
+              <StrategiCard key={r.id} row={r} canDecide={canDecideStrategi} onDone={load} />
             ))}
           </Section>
         </>
