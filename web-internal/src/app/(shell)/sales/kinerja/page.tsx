@@ -256,8 +256,10 @@ export default function KinerjaSalesPage() {
                   <thead>
                     <tr>
                       <th>Sales</th><th>Level</th><th>Total Sales (deal)</th>
-                      <th>Klien Baru</th><th>Perpanjangan</th><th>Cross Sell</th><th>Klien</th>
-                      <th>Omzet (GMV)</th><th>Komisi Kontrak</th><th>Komisi Diakui</th>
+                      <th>Klien Baru</th><th>Perpanjangan</th><th>Cross Sell</th>
+                      <th>Klien</th><th>Klien Void</th><th>Klien Bersih</th>
+                      <th>Omzet Kotor</th><th>Nilai Void</th><th>Omzet Bersih</th>
+                      <th>Komisi Kontrak</th><th>Komisi Diakui</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -269,8 +271,12 @@ export default function KinerjaSalesPage() {
                         <td>{r.klien_baru}</td>
                         <td>{r.klien_perpanjangan}</td>
                         <td>{r.klien_cross_sell}</td>
-                        <td>{r.klien_count}</td>
-                        <td>{r.omzet_idr}</td>
+                        <td>{r.klien}</td>
+                        <td>{r.klien_void}</td>
+                        <td>{r.klien_bersih}</td>
+                        <td>{r.omzet_kotor_idr}</td>
+                        <td>{r.nilai_void_idr}</td>
+                        <td>{r.omzet_bersih_idr}</td>
                         <td>{r.komisi_kontrak_idr}</td>
                         <td>{r.komisi_diakui_idr}</td>
                       </tr>
@@ -280,7 +286,9 @@ export default function KinerjaSalesPage() {
                       datang APA ADANYA dari server: `total_deal`/`klien_count`
                       adalah COUNT(DISTINCT ...), bukan penjumlahan kolom di
                       atasnya — satu deal yang dijual berdua muncul pada dua
-                      baris dan menjumlahkannya akan melaporkannya dua kali. */}
+                      baris dan menjumlahkannya akan melaporkannya dua kali.
+                      `klien_void`/`klien_bersih` di baris TOTAL SAMA-SAMA
+                      COUNT(DISTINCT ...) (Paket V) — bukan Σ kolom di atasnya. */}
                   <tfoot>
                     <tr>
                       <th>TOTAL</th>
@@ -288,7 +296,11 @@ export default function KinerjaSalesPage() {
                       <th>{report.total.total_deal}</th>
                       <th colSpan={3}></th>
                       <th>{report.total.klien_count}</th>
-                      <th>{report.total.omzet_idr}</th>
+                      <th>{report.total.klien_void}</th>
+                      <th>{report.total.klien_bersih}</th>
+                      <th>{report.total.omzet_kotor_idr}</th>
+                      <th>{report.total.nilai_void_idr}</th>
+                      <th>{report.total.omzet_bersih_idr}</th>
                       <th>{report.total.komisi_kontrak_idr}</th>
                       <th>{report.total.komisi_diakui_idr}</th>
                     </tr>
@@ -336,7 +348,9 @@ export default function KinerjaSalesPage() {
                     <th>Follow Up</th><th>Visit</th><th>Online Meeting</th>
                     <th>Total Sales (deal)</th>
                     <th>Klien Baru</th><th>Perpanjangan</th><th>Cross Sell</th>
-                    <th>Omzet</th><th>Komisi Kontrak</th><th>Komisi Diakui</th>
+                    <th>Klien</th><th>Klien Void</th><th>Klien Bersih</th>
+                    <th>Omzet Kotor</th><th>Nilai Void</th><th>Omzet Bersih</th>
+                    <th>Komisi Kontrak</th><th>Komisi Diakui</th>
                     <th>Target</th><th>Pencapaian</th><th>Sisa Target</th><th>MoM</th>
                   </tr>
                 </thead>
@@ -363,7 +377,12 @@ export default function KinerjaSalesPage() {
                       <td>{r.klien_baru}</td>
                       <td>{r.klien_perpanjangan}</td>
                       <td>{r.klien_cross_sell}</td>
-                      <td>{r.omzet_idr}</td>
+                      <td>{r.klien}</td>
+                      <td>{r.klien_void}</td>
+                      <td>{r.klien_bersih}</td>
+                      <td>{r.omzet_kotor_idr}</td>
+                      <td>{r.nilai_void_idr}</td>
+                      <td>{r.omzet_bersih_idr}</td>
                       <td>{r.komisi_kontrak_idr}</td>
                       <td>{r.komisi_diakui_idr}</td>
                       <td>{dash(r.target_omzet_idr)}</td>
@@ -387,7 +406,10 @@ export default function KinerjaSalesPage() {
                 <thead>
                   <tr>
                     <th>Periode</th><th>Sales</th><th>Closing</th><th>Closing Rate</th>
-                    <th>Deal Cycle (hari)</th><th>Omzet</th><th>Komisi Diakui</th><th>Pencapaian</th><th>MoM</th>
+                    <th>Deal Cycle (hari)</th>
+                    <th>Klien</th><th>Klien Void</th><th>Klien Bersih</th>
+                    <th>Omzet Kotor</th><th>Nilai Void</th><th>Omzet Bersih</th>
+                    <th>Komisi Diakui</th><th>Pencapaian</th><th>MoM</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -398,7 +420,12 @@ export default function KinerjaSalesPage() {
                       <td>{r.closed_success}</td>
                       <td>{dash(r.closing_rate_pct === null ? null : `${r.closing_rate_pct}%`)}</td>
                       <td>{dash(r.avg_deal_cycle_days)}</td>
-                      <td>{r.omzet_idr}</td>
+                      <td>{r.klien}</td>
+                      <td>{r.klien_void}</td>
+                      <td>{r.klien_bersih}</td>
+                      <td>{r.omzet_kotor_idr}</td>
+                      <td>{r.nilai_void_idr}</td>
+                      <td>{r.omzet_bersih_idr}</td>
                       <td>{r.komisi_diakui_idr}</td>
                       <td>{dash(r.pencapaian_pct === null ? null : `${r.pencapaian_pct}%`)}</td>
                       <td>{dash(r.mom_pct === null ? null : `${r.mom_pct}%`)}</td>

@@ -40,6 +40,11 @@ const HEADER_SALES = [
   'salesperson_id', 'nama', 'level_sales', 'total_deal',
   'klien_baru', 'klien_perpanjangan', 'klien_cross_sell', 'klien_count',
   'omzet', 'komisi_kontrak', 'komisi_diakui',
+  // Paket V (`VOID-KURANGI-CLOSING DIPUTUS`, 2026-09-28) — APPENDED, not
+  // interleaved: every column before this point keeps its exact original
+  // position, so a consumer that parses this CSV by column index (rather
+  // than by header name) does not silently misread an existing column.
+  'klien_void', 'klien_bersih', 'omzet_kotor', 'nilai_void', 'omzet_bersih',
 ] as const;
 
 const HEADER_LAYANAN = ['master_service_id', 'nama_layanan', 'jumlah', 'nilai'] as const;
@@ -58,12 +63,14 @@ export function renderSalesReportCsv(r: salesperf.SalesReport): string {
       row.salespersonId, row.nama, row.levelSales, String(row.totalDeal),
       row.klienBaru, row.klienPerpanjangan, row.klienCrossSell, row.klienCount,
       row.omzet, row.komisiKontrak, row.komisiDiakui,
+      row.klienVoid, row.klienBersih, row.omzetKotor, row.nilaiVoid, row.omzetBersih,
     ]));
   }
   lines.push(line([
     'TOTAL', `${r.total.salespersonCount} sales`, '', String(r.total.totalDeal),
     '', '', '', String(r.total.klienCount),
     r.total.omzet, r.total.komisiKontrak, r.total.komisiDiakui,
+    String(r.total.klienVoid), String(r.total.klienBersih), r.total.omzetKotor, r.total.nilaiVoid, r.total.omzetBersih,
   ]));
   lines.push('');
   lines.push(line(['Rekap Layanan Terjual']));

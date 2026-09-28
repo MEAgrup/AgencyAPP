@@ -36,6 +36,7 @@ import {
   ForbiddenError as ClientForbidden, LockedFieldError, SERVICE_VOIDED,
   MSG_FIELD_ROLE_DENIED, MSG_FIELD_LOCKED,
 } from './client';
+import { bySalesperson } from './salesperf';
 
 const URL = process.env.DATABASE_URL;
 const RUN = !!URL && process.env.UAT === '1';
@@ -97,6 +98,11 @@ async function cleanup() {
   await sql`delete from leads where created_by like 'ZZ-%'`;
   await sql`delete from master_service_versions where created_by like 'ZZ-%'`;
   await sql`delete from master_services where created_by like 'ZZ-%'`;
+  // ZZ-BUDI's employee row (D2b Kinerja Sales roster fixture, see the `it`
+  // block's setup) — role_mappings ('SALES'/'SALES JASA') is deliberately
+  // LEFT alone: harmless shared reference data, `on conflict do nothing` on
+  // every insert, same pattern other fixtures in this codebase use.
+  await sql`delete from employees where employee_id = 'ZZ-BUDI'`;
 }
 
 let seq = 0;
@@ -114,6 +120,17 @@ describeDb('Wave 1 exit — end-to-end money-path UAT', () => {
     const s1 = await seedService('SVC-ZZ-UAT1', '9000000.00');
     const s2 = await seedService('SVC-ZZ-UAT2', '6000000.00');
     const s3 = await seedService('SVC-ZZ-UAT3', '6900000.00');
+
+    // === Setup — ZZ-BUDI as a real employee (Sales staff), needed ONLY for the
+    // D2b Kinerja Sales check below: `salesperf.loadRoster` (`private.
+    // employee_roster()`) joins `employees ⋈ role_mappings`, and every other
+    // actor in this harness is an ad-hoc `Actor` that never touches that join.
+    await sql`insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values ('ZZ-BUDI', 'ZZ Budi', 'zz.budi@example.test', 'SALES', 'SALES JASA', true, 'ZZ-ADMIN')
+      on conflict (employee_id) do nothing`;
+    await sql`insert into role_mappings (divisi, jabatan, division, level, created_by)
+      values ('SALES', 'SALES JASA', 'Sales', 'staff', 'ZZ-ADMIN')
+      on conflict (divisi, jabatan) do nothing`;
 
     // === B1 — register the deal lead (Sales Staff)
     const dealPhone = phone();
@@ -162,7 +179,11 @@ describeDb('Wave 1 exit — end-to-end money-path UAT', () => {
       namaPic: 'x', toko: 'Nego Co', kota: 'JKT', linkToko: 'https://x', kategori: 'x', platform: 'Shopee',
       gmvBaseline: '1000000', targetGmv: '2000000', services: [{ masterServiceId: s1, quantity: 1 }],
     });
-    await submitNegotiation(sql, budi(), negReg.attempt.id, [{ masterServiceId: s1, proposedPrice: '8000000', commissionRule: '10% of standard price', paymentTerms: 'Termin 2x' }], false);
+    // NB: pre-existing drift found while validating Paket V — F-4 (`sales.ts`
+    // `writeProposal`) now requires `alasanNego` for any submission with a
+    // custom line; the runbook harness predates that rule. Unrelated to Paket
+    // V itself, fixed here only so this file runs at all.
+    await submitNegotiation(sql, budi(), negReg.attempt.id, [{ masterServiceId: s1, proposedPrice: '8000000', commissionRule: '10% of standard price', paymentTerms: 'Termin 2x' }], false, 'Harga custom disepakati via telepon');
     const pend = (await sql<{ status: string }[]>`select status from prospect_attempts where id = ${negReg.attempt.id}`)[0].status;
     await decideNegotiation(sql, salesLead(), negReg.attempt.id, DECISION_APPROVE);
     const appr = (await sql<{ status: string }[]>`select status from prospect_attempts where id = ${negReg.attempt.id}`)[0].status;
@@ -202,11 +223,14 @@ describeDb('Wave 1 exit — end-to-end money-path UAT', () => {
     await expectThrow('C2 locked/system field', 'Account Lead', MSG_FIELD_LOCKED, () => updateClient(sql, accountLead(), clientId, { transactionId: 'x' } as never));
 
     // === C3 — platform add + deactivate
-    const pid = await addPlatform(sql, accountLead(), clientId, { platform: 'TikTok', storeLink: 'https://tt/alpha' });
+    // NB: pre-existing drift found while validating Paket V — `PLATFORM_VOCAB`
+    // (`client.ts`) now spells this 'TikTok Shop', not 'TikTok'. Unrelated to
+    // Paket V, fixed here only so this file runs at all.
+    const pid = await addPlatform(sql, accountLead(), clientId, { platform: 'TikTok Shop', storeLink: 'https://tt/alpha' });
     await updatePlatform(sql, accountLead(), clientId, pid, { active: false });
     const plats = await sql<{ platform: string; active: boolean }[]>`select platform, active from client_platforms where client_id = ${clientId} order by id`;
-    plats.length === 2 && plats.some((p) => p.platform === 'TikTok' && p.active === false) && plats.some((p) => p.platform === 'Shopee')
-      ? pass('C3 platform add/deactivate', 'Account Lead', `Shopee kept, TikTok active=false (no DELETE)`)
+    plats.length === 2 && plats.some((p) => p.platform === 'TikTok Shop' && p.active === false) && plats.some((p) => p.platform === 'Shopee')
+      ? pass('C3 platform add/deactivate', 'Account Lead', `Shopee kept, TikTok Shop active=false (no DELETE)`)
       : fail('C3 platform', 'Account Lead', JSON.stringify(plats));
 
     // === C4a — filed scheme change, wrong total (pre-verification guard)
@@ -303,6 +327,24 @@ describeDb('Wave 1 exit — end-to-end money-path UAT', () => {
       ? pass('D2 void service excludes commission', 'Account Lead', `SVC ${svcStatus}; commission ${fmt(c1.totalDealCommission)} → ${fmt(c2.totalDealCommission)}; TRX total immutable ${fmt(trxTotal)}`)
       : fail('D2 void', 'Account Lead', JSON.stringify({ svcStatus, before: c1.totalDealCommission, after: c2.totalDealCommission, trxTotal }));
     void vr;
+
+    // === D2b — Paket V (`VOID-KURANGI-CLOSING DIPUTUS`, 2026-09-28): the SAME
+    // void reduces Omzet Bersih at Kinerja Sales, proportionally by standard
+    // price (Q-V4) — 9.000.000 voided of 21.900.000 total standard price,
+    // against a Total Agreed of 21.900.000 → Nilai Void = 9.000.000 exactly.
+    // Omzet Kotor stays the full closing (Total Agreed stays immutable, D2
+    // above); Omzet Bersih = Kotor − Void. `period: null` collapses closing
+    // and void into ONE bucket regardless of which real-world month this
+    // suite happens to run in (both events land in "now").
+    const perfAfterVoid = await bySalesperson(sql, salesLead(), { period: null, salespersonId: 'ZZ-BUDI', source: null, campaignId: null });
+    const budiPerf = perfAfterVoid.find((r) => r.salespersonId === 'ZZ-BUDI');
+    budiPerf !== undefined
+      && money.parse(budiPerf.omzetKotor) === rp('21900000')
+      && money.parse(budiPerf.nilaiVoid) === rp('9000000')
+      && money.parse(budiPerf.omzetBersih) === rp('12900000')
+      && money.parse(budiPerf.omzet) === rp('21900000') // `omzet` lama TETAP kotor — tidak berganti makna diam-diam (Q-V1)
+      ? pass('D2b Omzet Bersih Kinerja Sales', 'Sales Lead', `Kotor ${budiPerf.omzetKotorIdr}, Void ${budiPerf.nilaiVoidIdr}, Bersih ${budiPerf.omzetBersihIdr}`)
+      : fail('D2b Omzet Bersih Kinerja Sales', 'Sales Lead', JSON.stringify(budiPerf));
 
     // === D3 — audit log immutable (no UPDATE / DELETE path)
     await expectThrow('D3 audit UPDATE blocked', 'Dev/OD', '', () => sql`update audit_log set action = 'tampered' where entity_id = ${clientId}` as unknown as Promise<unknown>);

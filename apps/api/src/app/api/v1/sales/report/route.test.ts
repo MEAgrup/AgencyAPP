@@ -167,7 +167,7 @@ describeDb('GET /sales/report + /export — DB sungguhan', () => {
 
     const lines = (await res.text()).split('\r\n');
     expect(lines[0]).toBe('Laporan Penjualan — per Sales');
-    expect(lines[1]).toBe('salesperson_id;nama;level_sales;total_deal;klien_baru;klien_perpanjangan;klien_cross_sell;klien_count;omzet;komisi_kontrak;komisi_diakui');
+    expect(lines[1]).toBe('salesperson_id;nama;level_sales;total_deal;klien_baru;klien_perpanjangan;klien_cross_sell;klien_count;omzet;komisi_kontrak;komisi_diakui;klien_void;klien_bersih;omzet_kotor;nilai_void;omzet_bersih');
     expect(lines.some((l) => l.startsWith(`${SLS};`))).toBe(true);
     const total = lines.find((l) => l.startsWith('TOTAL;'));
     expect(total).toBeDefined();
@@ -198,18 +198,29 @@ describe('renderSalesReportCsv — baris TOTAL tidak pernah dihitung dari kolom 
     // berkas berubah jadi 2 dan tes ini yang memerah lebih dulu.
     const csv = renderSalesReportCsv({
       rows: [
-        { salespersonId: 'A', nama: 'Aa', levelSales: 'Junior', totalDeal: 1, klienBaru: '0.60', klienPerpanjangan: '0.00', klienCrossSell: '0.00', klienCount: '0.60', omzet: '600.00', omzetIdr: 'Rp. 600,00', komisiKontrak: '0.00', komisiKontrakIdr: 'Rp. 0,00', komisiDiakui: '0.00', komisiDiakuiIdr: 'Rp. 0,00' },
-        { salespersonId: 'B', nama: 'Bb', levelSales: 'Head', totalDeal: 1, klienBaru: '0.40', klienPerpanjangan: '0.00', klienCrossSell: '0.00', klienCount: '0.40', omzet: '400.00', omzetIdr: 'Rp. 400,00', komisiKontrak: '0.00', komisiKontrakIdr: 'Rp. 0,00', komisiDiakui: '0.00', komisiDiakuiIdr: 'Rp. 0,00' },
+        {
+          salespersonId: 'A', nama: 'Aa', levelSales: 'Junior', totalDeal: 1, klienBaru: '0.60', klienPerpanjangan: '0.00', klienCrossSell: '0.00', klienCount: '0.60',
+          klien: '0.60', klienVoid: '0.00', klienBersih: '0.60',
+          omzet: '600.00', omzetIdr: 'Rp. 600,00', omzetKotor: '600.00', omzetKotorIdr: 'Rp. 600,00', nilaiVoid: '0.00', nilaiVoidIdr: 'Rp. 0,00', omzetBersih: '600.00', omzetBersihIdr: 'Rp. 600,00',
+          komisiKontrak: '0.00', komisiKontrakIdr: 'Rp. 0,00', komisiDiakui: '0.00', komisiDiakuiIdr: 'Rp. 0,00',
+        },
+        {
+          salespersonId: 'B', nama: 'Bb', levelSales: 'Head', totalDeal: 1, klienBaru: '0.40', klienPerpanjangan: '0.00', klienCrossSell: '0.00', klienCount: '0.40',
+          klien: '0.40', klienVoid: '0.00', klienBersih: '0.40',
+          omzet: '400.00', omzetIdr: 'Rp. 400,00', omzetKotor: '400.00', omzetKotorIdr: 'Rp. 400,00', nilaiVoid: '0.00', nilaiVoidIdr: 'Rp. 0,00', omzetBersih: '400.00', omzetBersihIdr: 'Rp. 400,00',
+          komisiKontrak: '0.00', komisiKontrakIdr: 'Rp. 0,00', komisiDiakui: '0.00', komisiDiakuiIdr: 'Rp. 0,00',
+        },
       ],
       total: {
-        salespersonCount: 2, totalDeal: 1, klienCount: 1,
+        salespersonCount: 2, totalDeal: 1, klienCount: 1, klienVoid: 0, klienBersih: 1,
         omzet: '1000.00', omzetIdr: 'Rp. 1.000,00',
+        omzetKotor: '1000.00', omzetKotorIdr: 'Rp. 1.000,00', nilaiVoid: '0.00', nilaiVoidIdr: 'Rp. 0,00', omzetBersih: '1000.00', omzetBersihIdr: 'Rp. 1.000,00',
         komisiKontrak: '0.00', komisiKontrakIdr: 'Rp. 0,00',
         komisiDiakui: '0.00', komisiDiakuiIdr: 'Rp. 0,00',
       },
       services: [{ masterServiceId: 'MS-1', nama: 'Satu', jumlah: 1, nilai: '1000.00', nilaiIdr: 'Rp. 1.000,00' }],
     });
     const total = csv.split('\r\n').find((l) => l.startsWith('TOTAL;'))!;
-    expect(total).toBe('TOTAL;2 sales;;1;;;;1;1000.00;0.00;0.00');
+    expect(total).toBe('TOTAL;2 sales;;1;;;;1;1000.00;0.00;0.00;0;1;1000.00;0.00;1000.00');
   });
 });
