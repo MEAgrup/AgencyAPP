@@ -1741,6 +1741,17 @@ export interface ClosingInput {
   /** Mandatory when `durasiBulanOverride` is set. Free text, audited. */
   alasanOverride?: string | null;
   /**
+   * O76 — the contractual monthly GMV floor, locked by Sales at closing.
+   * Optional (not every deal carries a GMV commitment) and, unlike
+   * `durasiBulanOverride`, not an override of anything — there is no catalog
+   * default to deviate from, so no mandatory reason travels with it. Decimal
+   * money string (e.g. "400000000.00"). Written to `contracts.target_gmv_bulanan`
+   * and becomes the single source `strategi_target.sumber_floor = 'dari_kontrak'`
+   * reads from (packages/domain/src/strategi.ts `saveTargets`) — Head approval
+   * is skipped for that floor because Sales already locked it here.
+   */
+  targetGmvBulanan?: string | null;
+  /**
    * The "Include PPN" button Sales presses at closing (ketokan D-4 2026-09-08).
    * Every price in the system is non-PPN; this is the ONE place that decides
    * whether 11% is added to the invoice, and it is stored on the transaction so
@@ -2144,16 +2155,38 @@ export async function close(
     //     record, so none is invented (the AM can still group them later through
     //     `contract.createContract`).
     const window = resolveClosingWindow(lines, input, now);
+    // O76 — the contractual GMV floor. Elective (no catalog default, so no
+    // mandatory reason like `alasanOverride`), and only meaningful when a
+    // Contract is actually born below: a floor with no contract to hang off
+    // is not a smaller version of the field, it is a data-entry mistake.
+    const targetGmvRaw = (input.targetGmvBulanan ?? '').trim();
+    let targetGmvBulanan: string | null = null;
+    if (targetGmvRaw !== '') {
+      if (window === null) {
+        throw new IncompleteError();
+      }
+      let parsed: bigint;
+      try {
+        parsed = money.parse(targetGmvRaw);
+      } catch {
+        throw new IncompleteError();
+      }
+      if (parsed <= 0n) {
+        throw new IncompleteError();
+      }
+      targetGmvBulanan = money.decimal(parsed);
+    }
     let contractId: string | null = null;
     if (window !== null) {
       contractId = await ex.ident.identNext('CTR', now);
       await tx`
         insert into contracts
-          (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, catatan, jenis, created_by)
+          (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, catatan, jenis,
+           target_gmv_bulanan, created_by)
         values
           (${contractId}, ${clientId}, ${window.durasiBulan}, ${window.tanggalMulai},
            ${window.tanggalAkhir}, ${contractCatatan(window.alasan)}, ${CONTRACT_JENIS_BARU},
-           ${actor.employeeId})`;
+           ${targetGmvBulanan}, ${actor.employeeId})`;
       await ex.audit.insertAudit({
         entityType: 'contract', entityId: contractId, actorEmployeeId: actor.employeeId,
         action: 'create',
@@ -2168,6 +2201,10 @@ export async function close(
           // making the reason mandatory is that it is readable HERE later.
           sumber_durasi: window.alasan === null ? 'katalog' : 'override',
           alasan_override: window.alasan,
+          // O76 — null is a real answer (no GMV commitment in this deal), not
+          // an omission; recorded explicitly so a later reader never has to
+          // guess whether Sales forgot the field or deliberately left it out.
+          target_gmv_bulanan: targetGmvBulanan,
         },
         createdBy: actor.employeeId,
       });

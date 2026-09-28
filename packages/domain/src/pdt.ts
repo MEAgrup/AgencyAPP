@@ -212,7 +212,7 @@ function modulPlatform(kode: string): pdt.PdtModuleDef | undefined {
   return pdt.PDT_MODULES.find((m) => m.kode === kode);
 }
 
-/** PDT-22: `client_platforms.platform` (Title Case) → kosakata `pdt` (Rule vokab berbeda, migrasi G1-01 §catatan). `null` = Tokopedia/Lazada/Blibli, PDT tidak berlaku (manual, PDT-22). */
+/** PDT-22: `client_platforms.platform` (Title Case) → kosakata `pdt` (Rule vokab berbeda, migrasi G1-01 §catatan). `null` = Tokopedia/Lazada/Others, PDT tidak berlaku (manual, PDT-22). */
 export function platformKeVokabPdt(platform: string): pdt.PdtPlatform | null {
   if (platform === 'Shopee') return 'shopee';
   if (platform === 'TikTok Shop') return 'tiktok';
@@ -405,7 +405,7 @@ export async function previewUploadBatch(
 
   const platform = platformKeVokabPdt(row.platform);
   if (!platform) {
-    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
 
   const moduleOptions = pdt.PDT_MODULES.filter((m) => m.platform === platform).map((m) => ({ kode: m.kode, namaTampilan: m.namaTampilan }));
@@ -470,7 +470,7 @@ export async function siapkanUploadBatch(
   const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
   if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
   if (!platformKeVokabPdt(row.platform)) {
-    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
 
   const stagingPath = `_staging/${row.client_id}/${clientPlatformId}/${randomUUID()}.zip`;
@@ -807,7 +807,7 @@ export async function commitUploadBatch(
 
   const platform = platformKeVokabPdt(row.platform);
   if (!platform) {
-    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
 
   const modulValidUntukPlatform = new Set(pdt.PDT_MODULES.filter((m) => m.platform === platform).map((m) => m.kode));
@@ -3493,12 +3493,17 @@ export async function rakitInputSkorShopee(
  * `@cdps/core`) dalam satu pemanggilan. BEDA dari `hitungSkorTiktok`: Shopee
  * tidak punya benchmark (asimetri asli mesin produksi, lihat docblock
  * `computeSkorShopee`) — nol `benchmarkVersi` dikembalikan.
+ *
+ * **`input` diikutsertakan di hasil** (G4-03 aksi 1) supaya `rakitLaporanShopee`
+ * bisa meneruskan `input.dibuat?.cancelRate` ke bagian "layanan" laporan
+ * TANPA query kedua — angka yang sama persis yang dipakai dimensi skor
+ * Conversion & Retention, satu sumber kebenaran.
  */
 export async function hitungSkorShopee(
   sql: Sql,
   clientPlatformId: number,
   periodeAwalBulan: string,
-): Promise<{ hasil: pdt.PdtSkorHasilShopee }> {
+): Promise<{ hasil: pdt.PdtSkorHasilShopee; input: pdt.PdtSkorInputShopee }> {
   // KUADRAN-SHOPEE — kolom `kuadran` ditulis SEBELUM apa pun membacanya, pola
   // dan alasan yang sama dengan `hitungSkorTiktok` (Rule 4: field turunan,
   // selalu recomputable, tidak pernah ditulis tangan). `rakitInputSkorShopee`
@@ -3507,7 +3512,7 @@ export async function hitungSkorShopee(
   // dan ia dipanggil SETELAH fungsi ini.
   await klasifikasiUlangKuadranSkuShopee(sql, clientPlatformId, periodeAwalBulan);
   const input = await rakitInputSkorShopee(sql, clientPlatformId, periodeAwalBulan);
-  return { hasil: pdt.computeSkorShopee(input) };
+  return { hasil: pdt.computeSkorShopee(input), input };
 }
 
 // ===========================================================================
@@ -4102,7 +4107,8 @@ async function bacaPromo(sql: Sql, clientPlatformId: number, periodeAwalBulan: s
  * mengisinya — `avg()` Postgres sudah mengabaikan NULL, jadi baris yang
  * tidak membawa kolom itu tidak menarik rata-ratanya ke bawah.
  */
-async function bacaLayanan(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanLayananInput | null> {
+/** Chat + penalti saja — `cancelRate`/`gmvPesananSelesai` (G4-03 aksi 1/7) datang dari promise SAUDARA di `rakitLaporanShopee`, digabung di sana ke bentuk penuh `pdt.PdtLaporanLayananInput`. */
+async function bacaLayanan(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<Pick<pdt.PdtLaporanLayananInput, 'chat' | 'penalti'> | null> {
   const [[chatRow], penaltiRows] = await Promise.all([
     sql<{
       baris: number;
@@ -4356,7 +4362,7 @@ export async function rakitLaporanShopee(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanShopee> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
-  const [kpi, harian, kanal, iklan, live, video, produk, afiliasi, kreator, sesiLive, kampanye, promo, layanan, { hasil: skor }] = await Promise.all([
+  const [kpi, harian, kanal, iklan, live, video, produk, afiliasi, kreator, sesiLive, kampanye, promo, layananBaca, kpiDibayar, { hasil: skor, input: skorInput }] = await Promise.all([
     bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim'),
     bacaHarian(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim', false),
     bacaKanalShopee(sql, clientPlatformId, periodeAwalBulan),
@@ -4370,8 +4376,22 @@ export async function rakitLaporanShopee(
     bacaKampanye(sql, clientPlatformId, periodeAwalBulan),
     bacaPromo(sql, clientPlatformId, periodeAwalBulan),
     bacaLayanan(sql, clientPlatformId, periodeAwalBulan),
+    // G4-03 aksi 7 — basis 'dibayar' TIDAK dipakai bagian "kpi" mana pun di atas
+    // (itu 'siap_dikirim', Rule 16); `bacaKpiShopDaily` dipakai ulang apa adanya,
+    // hanya `.gmv`-nya yang dipakai `layanan.gmvPesananSelesai` di bawah.
+    bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'dibayar'),
     hitungSkorShopee(sql, clientPlatformId, periodeAwalBulan),
   ]);
+  // G4-03 aksi 1/7 — cancelRate diteruskan dari `rakitInputSkorShopee` (via
+  // `hitungSkorShopee`), bukan query kedua; gmvPesananSelesai dari `kpiDibayar`
+  // di atas. Digabung ke `layanan` di sini (bukan di dalam `bacaLayanan`) karena
+  // kedua sumbernya adalah promise SAUDARA, bukan bagian query layanan itu sendiri.
+  const layanan: pdt.PdtLaporanLayananInput = {
+    chat: layananBaca?.chat ?? null,
+    penalti: layananBaca?.penalti ?? [],
+    cancelRate: skorInput.dibuat?.cancelRate ?? null,
+    gmvPesananSelesai: kpiDibayar?.gmv ?? null,
+  };
   return pdt.bangunLaporanShopee({
     clientPlatformId, periodeAwalBulan, generatedAt: now.toISOString(), kpi, harian, kanal, iklan, live, video, produk, afiliasi,
     kreator, sesiLive, kampanye, promo, layanan, skor,
@@ -4398,7 +4418,7 @@ export async function bacaLaporanPdt(
 
   const platform = platformKeVokabPdt(row.platform);
   if (!platform) {
-    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`);
+    throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
 
   return platform === 'tiktok'
@@ -4858,13 +4878,22 @@ export interface PdtInsightEditDraft {
   tahap_narasi?: unknown;
 }
 
-const MSG_TAHAP_NARASI_MARKUP = '[teks narasi tahap tidak boleh memuat tanda < atau > — tulis sebagai teks biasa]';
+const MSG_TAHAP_NARASI_MARKUP =
+  '[teks narasi tahap tidak boleh memuat tag HTML seperti <b> atau <script> — tanda pembanding < dan > boleh dipakai]';
 const TAHAP_NARASI_MAX = pdt.PDT_INSIGHT_MAX.outlook;
+
+/**
+ * Cocok `<tag`, `</tag`, `<!--`/`<!DOCTYPE`, `<?xml` — bukan bare `<`/`>` polos.
+ * Sama alasan+pola `TAG_LIKE` di `pdt/insight-edit.ts`/`report/insight-edit.ts`
+ * (`docs/DECISIONS.md` 2026-09-25 "PDT-INSIGHT-BANDING-VS-TAG") — disalin di
+ * sini karena `tahap_narasi` divalidasi terpisah (bidang KETUJUH, khusus C-02).
+ */
+const TAG_LIKE = /<\/?[a-zA-Z!?]/;
 
 function normTahapNarasi(v: unknown): string | null {
   const s = typeof v === 'string' ? v.trim() : '';
   if (!s) return null;
-  if (s.includes('<') || s.includes('>')) throw new pdt.PdtInsightDraftError(MSG_TAHAP_NARASI_MARKUP);
+  if (TAG_LIKE.test(s)) throw new pdt.PdtInsightDraftError(MSG_TAHAP_NARASI_MARKUP);
   if (s.length > TAHAP_NARASI_MAX) throw new pdt.PdtInsightDraftError(pdt.msgPdtInsightTerlaluPanjang('narasi tahap', TAHAP_NARASI_MAX));
   return s;
 }
@@ -5104,7 +5133,7 @@ async function recomputeAdsMetricEntriesPdt(
   await ads.deletePdtAdsMetricEntries(tx, clientPlatformId, periodeMulai);
 
   const adsPlatform = ads.pdtPlatformKeAdsPlatform(platform);
-  if (!adsPlatform) return; // nol padanan platform Ads (Tokopedia/Lazada/Blibli) — secara struktur tidak berlaku, bukan pertanyaan terbuka
+  if (!adsPlatform) return; // nol padanan platform Ads (Tokopedia/Lazada/Others) — secara struktur tidak berlaku, bukan pertanyaan terbuka
 
   const [current] = await tx<{ ada: boolean }[]>`
     select exists (

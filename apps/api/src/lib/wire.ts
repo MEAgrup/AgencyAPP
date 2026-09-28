@@ -180,6 +180,9 @@ export interface LeadRowWire {
   open_attempt_count: number;
   registered_by_me: boolean;
   claimed_by_me: boolean;
+  /** "Didaftarkan oleh" (issue #64 / O40) — id lalu nama tampilan pendaftar pertama. */
+  created_by: string;
+  created_by_nama: string;
 }
 
 export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
@@ -198,6 +201,8 @@ export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
     open_attempt_count: r.openAttemptCount,
     registered_by_me: r.registeredByMe,
     claimed_by_me: r.claimedByMe,
+    created_by: r.createdBy,
+    created_by_nama: r.createdByNama,
   };
 }
 
@@ -711,6 +716,8 @@ export function leadDetailToWire(d: leads.LeadDetailView): LeadDetailWire {
       record_status: l.recordStatus,
       winning_attempt_id: l.winningAttemptId,
       created_at: l.createdAt.toISOString(),
+      created_by: l.createdBy,
+      created_by_nama: l.createdByNama,
     },
     attempts: d.attempts.map((a) => ({
       id: a.id,
@@ -4344,6 +4351,8 @@ export interface ContractWire {
   /** R-01: `baru` | `perpanjangan` | `cross_sell`. */
   jenis: string;
   contract_sebelumnya_id: string | null;
+  /** O76 — floor GMV bulanan kontraktual, dikunci Sales saat closing. Read-only. */
+  target_gmv_bulanan: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -4359,6 +4368,7 @@ export function contractToWire(c: contract.Contract): ContractWire {
     catatan: c.catatan,
     jenis: c.jenis,
     contract_sebelumnya_id: c.contractSebelumnyaId,
+    target_gmv_bulanan: c.targetGmvBulanan,
     created_by: c.createdBy,
     created_at: c.createdAt,
     updated_at: c.updatedAt,
@@ -4497,6 +4507,8 @@ export interface StrategiWire {
   durasi_kontrak_bulan: number;
   tanggal_mulai_kontrak: string;
   tanggal_akhir_kontrak: string;
+  /** O76 — Contract's locked GMV floor, joined the same way as the window above. */
+  target_gmv_kontrak_bulanan: string | null;
   tanggal_mulai_siklus: string | null;
   siklus_terkunci: boolean;
   toleransi_over_persen: number;
@@ -4576,6 +4588,7 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     durasi_kontrak_bulan: s.durasiKontrakBulan,
     tanggal_mulai_kontrak: s.tanggalMulaiKontrak,
     tanggal_akhir_kontrak: s.tanggalAkhirKontrak,
+    target_gmv_kontrak_bulanan: s.targetGmvKontrakBulanan,
     tanggal_mulai_siklus: s.tanggalMulaiSiklus,
     siklus_terkunci: s.siklusTerkunci,
     toleransi_over_persen: s.toleransiOverPersen,
@@ -9289,14 +9302,18 @@ export interface PdtLaporanPenaltiWire {
 }
 
 /**
- * §9 mesin Shopee lama. `null` untuk TikTok SELALU. Cancel rate dan retur
- * mesin lama TIDAK ADA di sini — `pdt_fact_shop_daily` tidak punya kolom
- * pembatalan/retur sama sekali (lihat docblock `pdt.bangunLaporanLayanan`).
+ * §9 mesin Shopee lama. `null` untuk TikTok SELALU. `cancel_rate`/
+ * `gmv_pesanan_selesai` — G4-03 aksi 1/7, read-only PERMANEN (tidak pernah
+ * menulis `pdt_usulan`, `docs/DECISIONS.md` 2026-09-18
+ * `G4-03-DIVISI-STORE-OPS`). Retur mesin lama TETAP TIDAK ADA di sini —
+ * `pdt_fact_shop_daily` tidak punya kolom retur sama sekali.
  */
 export interface PdtLaporanLayananWire {
   chat: PdtLaporanLayananChatWire | null;
   poin_penalti_total: number | null;
   penalti: PdtLaporanPenaltiWire[];
+  cancel_rate: number | null;
+  gmv_pesanan_selesai: number | null;
 }
 
 /** F-01 (M20 R8). */
@@ -9539,6 +9556,8 @@ function pdtLaporanLayananToWire(l: pdtCore.PdtLaporanLayanan | null): PdtLapora
     },
     poin_penalti_total: l.poinPenaltiTotal,
     penalti: l.penalti.map((p) => ({ poin: p.poin, deskripsi: p.deskripsi, durasi: p.durasi })),
+    cancel_rate: l.cancelRate,
+    gmv_pesanan_selesai: l.gmvPesananSelesai,
   };
 }
 

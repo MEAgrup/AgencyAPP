@@ -111,8 +111,8 @@ Tidak ada seed PDT, jadi ini langkah wajib pertama. **Login sebagai `EMP-0008` (
    > baris toko, jadi langkah 2–3 tetap manual.
 2. Buka **`/clients/{id}`** → tambahkan platform toko. Platform **harus persis**
    `Shopee` atau `TikTok Shop`.
-   > Tokopedia/Lazada/Blibli **ditolak server** dengan
-   > `[platform toko '...' tidak didukung PDT — Tokopedia/Lazada/Blibli tetap manual (PDT-22)]`.
+   > Tokopedia/Lazada/Others **ditolak server** dengan
+   > `[platform toko '...' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`.
    > Itu perilaku benar, bukan bug.
 3. Pastikan klien punya **AM (`assigned_am_id`)**. Klien tanpa AM **tidak bisa** di-upload oleh
    AM biasa (hanya lead/Director Account).
@@ -562,7 +562,7 @@ nilai lama yang di-grandfather migrasi `20261010010000` — sedangkan dropdown P
 hanya mengenal nilai tunggal `Shopee` dan `TikTok Shop`, sehingga klien itu
 tampak "belum punya toko" padahal barisnya ada.
 
-Kalau suatu saat butuh platform ketiga (Tokopedia/Lazada/Blibli), tambahkan dari
+Kalau suatu saat butuh platform ketiga (Tokopedia/Lazada/Others), tambahkan dari
 **Detail Klien → Tambah Platform** sebagai baris tersendiri, satu nilai satu
 baris. Gerbang duplikat mencocokkan nilai platform PERSIS, jadi baris baru tidak
 akan bertabrakan dengan yang sudah ada.

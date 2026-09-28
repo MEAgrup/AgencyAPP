@@ -448,6 +448,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   // override is noise and an override with no reason is refused server-side.
   const [durasiOverride, setDurasiOverride] = useState('');
   const [alasanOverride, setAlasanOverride] = useState('');
+  const [targetGmvBulanan, setTargetGmvBulanan] = useState('');
   const [installments, setInstallments] = useState<InstallmentRow[]>([]);
   const [closeSubmitting, setCloseSubmitting] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
@@ -1023,6 +1024,9 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
               alasan_override: alasanOverride.trim(),
             }
           : {}),
+        // O76 — opsional dan BUKAN override apa pun (tak ada default katalog),
+        // jadi tidak ada alasan wajib menyertainya seperti durasi di atas.
+        ...(targetGmvBulanan.trim() !== '' ? { target_gmv_bulanan: targetGmvBulanan.trim() } : {}),
         ...(useInstallments
           ? { installments: installments.map((i) => ({ amount: i.amount, due_date: i.due_date })) }
           : {}),
@@ -2133,6 +2137,30 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                     />
                   </div>
                 )}
+              </div>
+
+              {/* O76 — floor GMV bulanan kontraktual. Opsional (tidak setiap
+                  deal punya komitmen GMV) dan BUKAN override apa pun, jadi
+                  tanpa alasan wajib. Sekali dikunci di sini, AM memecahnya ke
+                  channel di Strategi tapi tidak bisa mengubah totalnya. */}
+              <div className="formRow">
+                <div className="field">
+                  <label htmlFor="close-target-gmv">Target GMV Bulanan Kontraktual (Rp, opsional)</label>
+                  <input
+                    id="close-target-gmv"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="kosongkan jika deal ini tidak punya komitmen GMV"
+                    value={targetGmvBulanan}
+                    onChange={(e) => setTargetGmvBulanan(e.target.value)}
+                  />
+                  <p className="muted" style={{ fontSize: 12 }}>
+                    Kalau diisi, angka ini mengunci floor GMV Strategi (D-1) &mdash; AM tetap memecahnya
+                    per channel, tapi jumlahnya per bulan harus sama dengan angka ini, dan Head tidak
+                    perlu menyetujui ulang karena Sales sudah menguncinya di sini.
+                  </p>
+                </div>
               </div>
 
               {(paymentScheme === '[Termin]' || paymentScheme === '[Bayar di Belakang]') && (

@@ -1677,9 +1677,9 @@ describeDb('A-4 — the cooperation window at closing (K-2)', () => {
   }
 
   const contractOf = async (clientId: string) =>
-    sql<{ id: string; durasi_bulan: number; tanggal_mulai: string; tanggal_akhir: string; catatan: string | null; jenis: string }[]>`
+    sql<{ id: string; durasi_bulan: number; tanggal_mulai: string; tanggal_akhir: string; catatan: string | null; jenis: string; target_gmv_bulanan: string | null }[]>`
       select id, durasi_bulan, tanggal_mulai::text as tanggal_mulai,
-             tanggal_akhir::text as tanggal_akhir, catatan, jenis
+             tanggal_akhir::text as tanggal_akhir, catatan, jenis, target_gmv_bulanan
         from contracts where client_id = ${clientId}`;
 
   const soloParties = {
@@ -1942,6 +1942,76 @@ describeDb('A-4 — the cooperation window at closing (K-2)', () => {
     expect(rows2[0].after_json).toHaveProperty('contract_id');
     expect(rows2[0].after_json.contract_id).toBeNull();
     expect(rows2[0].after_json.durasi_bulan).toBeNull();
+  });
+
+  // --- O76 — the contractual GMV floor, locked here too --------------------
+
+  it('locks the contractual GMV floor onto the contract when Sales sets it', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-O76-GMV', 6);
+    const res = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      targetGmvBulanan: '400000000.00',
+    });
+    const ct = (await contractOf(res.clientId))[0];
+    expect(ct.target_gmv_bulanan).toBe('400000000.00');
+  });
+
+  it('leaves target_gmv_bulanan null when Sales does not set it — not every deal has one', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-O76-NOGMV', 6);
+    const res = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties: soloParties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    const ct = (await contractOf(res.clientId))[0];
+    expect(ct.target_gmv_bulanan).toBeNull();
+  });
+
+  it('refuses a GMV floor with no Contract to hang it off', async () => {
+    const oneOff = await seedDurasiService('SVC-ZZ-O76-ONEOFF', null);
+    const attemptId = await autoApprovedAttempt(budi(), oneOff);
+    await expect(close(sql, budi(), attemptId, {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      targetGmvBulanan: '400000000.00',
+    })).rejects.toBeInstanceOf(IncompleteError);
+    // Nothing was half-created, same guarantee as the durasi override rollback.
+    expect(await status(attemptId)).toBe('Negotiation - Auto Approved');
+  });
+
+  it('rejects a malformed or non-positive GMV figure with the house BI error', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-O76-BAND', 6);
+    for (const bad of ['0', '-1', 'sepuluh juta']) {
+      const attemptId = await autoApprovedAttempt(budi(), svc);
+      await expect(close(sql, budi(), attemptId, {
+        parties: soloParties,
+        paymentScheme: PAYMENT_SCHEME_LUNAS,
+        targetGmvBulanan: bad,
+      })).rejects.toBeInstanceOf(IncompleteError);
+    }
+  });
+
+  it('records target_gmv_bulanan on the contract-create audit row — explicit null when absent', async () => {
+    const svc = await seedDurasiService('SVC-ZZ-O76-AUDIT', 6);
+    const withGmv = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties: soloParties,
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+      targetGmvBulanan: '400000000.00',
+    });
+    const ctG = (await contractOf(withGmv.clientId))[0];
+    const rowsG = await sql<{ after_json: { target_gmv_bulanan: string | null } }[]>`
+      select after_json from audit_log
+       where entity_type = 'contract' and entity_id = ${ctG.id} and action = 'create'`;
+    expect(rowsG[0].after_json.target_gmv_bulanan).toBe('400000000.00');
+
+    const noGmv = await close(sql, budi(), await autoApprovedAttempt(budi(), svc), {
+      parties: soloParties, paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    const ctN = (await contractOf(noGmv.clientId))[0];
+    const rowsN = await sql<{ after_json: { target_gmv_bulanan: string | null } }[]>`
+      select after_json from audit_log
+       where entity_type = 'contract' and entity_id = ${ctN.id} and action = 'create'`;
+    expect(rowsN[0].after_json).toHaveProperty('target_gmv_bulanan');
+    expect(rowsN[0].after_json.target_gmv_bulanan).toBeNull();
   });
 });
 

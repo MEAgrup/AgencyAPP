@@ -2291,6 +2291,16 @@ GMV bulanan otoritatif tetap entri manual AM (M6B P-E / M6D §3 Rule 11).
 > ini; sisa jalur ke 6 tetap aksi 4 (kini tinggal ambang) dan aksi 5 (tinggal ambang).
 > Rincian: `docs/DECISIONS.md` 2026-09-19 (baris Decided "G4-03 aksi 4").
 
+> **Status 2026-09-24 (mode otonom) — aksi 1 (cancel rate) + aksi 7 (GMV pesanan selesai)
+> DITAMPILKAN di laporan PDT Shopee, menutup janji "ditampilkan di laporan/dashboard kelak"
+> yang `G4-03-DIVISI-STORE-OPS` (sesi 42) sengaja sisakan.** Read-only PERMANEN, TIDAK
+> menghitung ke Rule 30 (nilainya TIDAK berubah, TETAP 3 dari ≥6) — baris ini murni
+> menyambungkan angka yang sudah dihitung (`cancelRate` sudah ada di mesin skor Conversion &
+> Retention sejak G2-01) ke bagian "Layanan & Kesehatan Toko" laporan (`kartuOpsional`,
+> pola sama chat/CSAT). Nol migrasi baru. Rincian: `docs/DECISIONS.md` 2026-09-24
+> ("G4-03 aksi 1/7 DITAMPILKAN"). **Sisa jalur ke Rule 30 tidak berubah**: aksi 4
+> (diskon/flash sale) dan aksi 5 (GMV live absolut) tetap menunggu ambang Rupiah dari pemilik.
+
 ---
 
 ## 5. G5 — Product Exchange — ⛔ **DIBLOKIR, jangan dijadwalkan**

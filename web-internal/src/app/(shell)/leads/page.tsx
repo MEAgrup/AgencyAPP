@@ -840,6 +840,7 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
                 <th>Kontes</th>
                 <th>Pemenang</th>
                 <th>Dibuat</th>
+                <th>Didaftarkan oleh</th>
                 {canRequestDelete && <th></th>}
               </tr>
             </thead>
@@ -870,6 +871,7 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
                     <td>{r.open_attempt_count}</td>
                     <td>{r.winning_attempt_id || '—'}</td>
                     <td>{formatDate(r.created_at)}</td>
+                    <td>{r.created_by_nama}</td>
                     {canRequestDelete && (
                       <td>
                         {deletable && (
@@ -892,7 +894,7 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
                   ...(canRequestDelete && openFor === r.id
                     ? [
                         <tr key={`${r.id}-delete-form`}>
-                          <td colSpan={12}>
+                          <td colSpan={13}>
                             <form
                               className="formRow"
                               onSubmit={(e) => submitDeleteRequest(e, r.id)}

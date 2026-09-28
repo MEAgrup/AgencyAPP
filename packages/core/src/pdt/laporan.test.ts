@@ -1260,24 +1260,24 @@ describe('bangunLaporanLayanan (§9 mesin Shopee lama)', () => {
     tingkatKonversiChatDibalasPersen: 15.8,
   };
 
-  it('null / nol chat DAN nol penalti ⇒ null (whole object)', () => {
+  it('null / nol chat, nol penalti, DAN kedua metrik store-ops null ⇒ null (whole object)', () => {
     expect(bangunLaporanLayanan(null)).toBeNull();
-    expect(bangunLaporanLayanan({ chat: null, penalti: [] })).toBeNull();
+    expect(bangunLaporanLayanan({ chat: null, penalti: [], cancelRate: null, gmvPesananSelesai: null })).toBeNull();
   });
 
   it('responseRate DITURUNKAN chatDibalas ÷ chatMasuk, bukan dibaca kolom konversi', () => {
-    const h = bangunLaporanLayanan({ chat, penalti: [] });
+    const h = bangunLaporanLayanan({ chat, penalti: [], cancelRate: null, gmvPesananSelesai: null });
     expect(h?.chat?.responseRate).toBe(0.95);
     expect(h?.chat?.konversiChatDibalas).toBe(0.158); // kolom BERBEDA, bukan pengganti
   });
 
   it('kolom "%" sumber dinormalkan jadi PECAHAN sekali di sini — FE punya satu aturan format', () => {
-    const h = bangunLaporanLayanan({ chat, penalti: [] });
+    const h = bangunLaporanLayanan({ chat, penalti: [], cancelRate: null, gmvPesananSelesai: null });
     expect(h?.chat?.csat).toBe(0.925);
   });
 
   it('chatMasuk 0 ⇒ responseRate null (bukan 0/0)', () => {
-    const h = bangunLaporanLayanan({ chat: { ...chat, chatMasuk: 0, chatDibalas: 0 }, penalti: [] });
+    const h = bangunLaporanLayanan({ chat: { ...chat, chatMasuk: 0, chatDibalas: 0 }, penalti: [], cancelRate: null, gmvPesananSelesai: null });
     expect(h?.chat?.responseRate).toBeNull();
   });
 
@@ -1289,6 +1289,8 @@ describe('bangunLaporanLayanan (§9 mesin Shopee lama)', () => {
         { poin: 3, deskripsi: 'Produk dilarang', durasi: '90 hari' },
         { poin: 2, deskripsi: 'Pesanan tidak terkirim', durasi: '60 hari' },
       ],
+      cancelRate: null,
+      gmvPesananSelesai: null,
     });
     expect(h?.penalti.map((p) => p.poin)).toEqual([3, 2, 1]);
     expect(h?.poinPenaltiTotal).toBe(6);
@@ -1296,14 +1298,33 @@ describe('bangunLaporanLayanan (§9 mesin Shopee lama)', () => {
   });
 
   it('nol penalti ⇒ poinPenaltiTotal null (tidak diketahui), BUKAN 0 yang mengarang "toko bersih"', () => {
-    const h = bangunLaporanLayanan({ chat, penalti: [] });
+    const h = bangunLaporanLayanan({ chat, penalti: [], cancelRate: null, gmvPesananSelesai: null });
     expect(h?.poinPenaltiTotal).toBeNull();
     expect(h?.penalti).toEqual([]);
   });
 
   it('baris penalti berpoin 0 ⇒ total 0 — toko SUNGGUH bersih, beda dari nol baris', () => {
-    const h = bangunLaporanLayanan({ chat: null, penalti: [{ poin: 0, deskripsi: 'Tidak ada penalti', durasi: '' }] });
+    const h = bangunLaporanLayanan({ chat: null, penalti: [{ poin: 0, deskripsi: 'Tidak ada penalti', durasi: '' }], cancelRate: null, gmvPesananSelesai: null });
     expect(h?.poinPenaltiTotal).toBe(0);
+  });
+
+  // G4-03 aksi 1/7 — cancelRate/gmvPesananSelesai, read-only PERMANEN (docs/DECISIONS.md 2026-09-18 G4-03-DIVISI-STORE-OPS).
+  it('cancelRate dibulatkan 5 desimal (persen5), diteruskan apa adanya dari input', () => {
+    const h = bangunLaporanLayanan({ chat: null, penalti: [], cancelRate: 0.0512345678, gmvPesananSelesai: null });
+    expect(h?.cancelRate).toBe(0.05123);
+  });
+
+  it('gmvPesananSelesai dibulatkan ke integer (bulat)', () => {
+    const h = bangunLaporanLayanan({ chat: null, penalti: [], cancelRate: null, gmvPesananSelesai: 123_456_789.6 });
+    expect(h?.gmvPesananSelesai).toBe(123_456_790);
+  });
+
+  it('cancelRate/gmvPesananSelesai TERISI sendiri ⇒ whole object TIDAK null walau chat null dan nol penalti', () => {
+    const h = bangunLaporanLayanan({ chat: null, penalti: [], cancelRate: 0.05, gmvPesananSelesai: null });
+    expect(h).not.toBeNull();
+    expect(h?.cancelRate).toBe(0.05);
+    expect(h?.gmvPesananSelesai).toBeNull();
+    expect(h?.chat).toBeNull();
   });
 });
 

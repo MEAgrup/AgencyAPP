@@ -123,6 +123,10 @@ describeDb('leadsDatabase', () => {
     expect(row!.openAttemptCount).toBe(1); // the registrant's live attempt
     expect(row!.originCampaignId).toBeNull();
     expect(row!.lastTouchCampaignId).toBeNull();
+    // "Didaftarkan oleh" (issue #64 / O40) — set once at registration; ZZ-BUDI
+    // has no `employees` row, so employee_display_name falls back to the id.
+    expect(row!.createdBy).toBe('ZZ-BUDI');
+    expect(row!.createdByNama).toBe('ZZ-BUDI');
 
     // q filter matches on name…
     const byName = (await leadsDatabase(sql, { q: 'Zensu' })).rows;
@@ -226,6 +230,9 @@ describeDb('leadDetailView', () => {
     const detail = await leadDetailView(sql, lead.id);
     expect(detail.lead.id).toBe(lead.id);
     expect(detail.lead.recordStatus).toBe('active');
+    // "Didaftarkan oleh" (issue #64 / O40) — the detail view carries it too.
+    expect(detail.lead.createdBy).toBe('ZZ-BUDI');
+    expect(detail.lead.createdByNama).toBe('ZZ-BUDI');
     expect(detail.attempts).toHaveLength(1);
     expect(detail.attempts[0].ownerEmployeeId).toBe('ZZ-BUDI');
     expect(detail.attempts[0].status).toBe('New Lead');

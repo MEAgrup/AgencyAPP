@@ -26,7 +26,7 @@ describe('RAB-04 · platform → method registry', () => {
     expect(metodeForPlatform('shopee')).toBe('analisa_penuh');
     expect(metodeForPlatform('Tokopedia')).toBe('analisa_tipis');
     expect(metodeForPlatform('Lazada')).toBe('manual');
-    expect(metodeForPlatform('Blibli')).toBe('manual');
+    expect(metodeForPlatform('Others')).toBe('manual');
   });
 
   it('mesinForPlatform memilih mesin, dan hanya untuk platform yang punya', () => {

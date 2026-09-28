@@ -171,16 +171,17 @@ describe('platform gate (no DB)', () => {
   // baru mati di CHECK `ck_client_platforms_platform` sebagai SQLSTATE 23514:
   // 500 berpesan Postgres, bukan 400 berpesan BI (aturan rumah #5).
   it('addPlatform: platform di luar PLATFORM_VOCAB ditolak dengan pesan BI, bukan dilempar ke CHECK DB', async () => {
-    // 'Others' ada di M0 §4.3 tapi TIDAK di CHECK — persis pilihan yang dulu
-    // ditawarkan dropdown dan selalu gagal sebagai 500.
-    await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'Others' }))
+    // 'Blibli' sempat ada di CHECK (sebelum O77 ditutup) tapi TIDAK PERNAH di
+    // M0 §4.3 — sekarang di luar kosakata, persis pilihan yang dulu diterima
+    // CHECK tapi tak terjangkau dropdown.
+    await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'Blibli' }))
       .rejects.toBeInstanceOf(PlatformInvalidError);
     await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'Bukalapak' }))
       .rejects.toBeInstanceOf(PlatformInvalidError);
     // Pencocokan persis: casing dan spasi bukan urusan penebak.
     await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'shopee' }))
       .rejects.toBeInstanceOf(PlatformInvalidError);
-    await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'Others' }))
+    await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'Blibli' }))
       .rejects.toThrow(MSG_PLATFORM_TIDAK_VALID);
     // Gerbang kosakata dilewati untuk nilai sah — yang gagal berikutnya adalah
     // tanggal, membuktikan penolakan di atas memang dari kosakata, bukan efek
@@ -191,8 +192,8 @@ describe('platform gate (no DB)', () => {
     }
   });
 
-  it('PLATFORM_VOCAB = kosakata CHECK ck_client_platforms_platform (O77)', () => {
-    expect([...PLATFORM_VOCAB]).toEqual(['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Blibli']);
+  it('PLATFORM_VOCAB = kosakata CHECK ck_client_platforms_platform (O77 ditutup — Others, bukan Blibli)', () => {
+    expect([...PLATFORM_VOCAB]).toEqual(['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Others']);
   });
 
   it('updatePlatform: profile authority + at least one field', async () => {

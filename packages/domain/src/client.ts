@@ -71,21 +71,27 @@ export const MSG_PLATFORM_DUPLIKAT =
 
 /**
  * G1-00 lanjutan — kosakata `client_platforms.platform`, SAMA PERSIS dengan
- * CHECK `ck_client_platforms_platform` (migrasi
- * `20261010010000_g1_00_client_platforms_platform_check.sql`, yang mengutip PDT
- * PRD Rule 22 untuk Lazada/Blibli). Ditegakkan di sini karena CHECK-nya
+ * CHECK `ck_client_platforms_platform` (migrasi `20261209010000_o77_...sql`,
+ * yang mengikuti PRD M0 §4.3 verbatim). Ditegakkan di sini karena CHECK-nya
  * memvalidasi setiap INSERT baru: tanpa gerbang domain, nilai di luar daftar
  * ini keluar sebagai SQLSTATE 23514 mentah — 500 dengan pesan Postgres, bukan
  * pesan BI `[...]` (melanggar aturan rumah #5).
  *
+ * **O77 DITUTUP (2026-09-24):** migrasi `20261010010000` sempat mengganti
+ * `Others` dengan `Blibli` di CHECK, mengutip PDT-22 — padahal PDT-22
+ * menyebut Blibli sebagai CONTOH platform tanpa parser (bersama
+ * Tokopedia/Lazada), bukan sebagai pilihan Platform List. `Others` yang PRD
+ * minta sejak awal tidak pernah dicabut di sana. Pemilik memilih "Others
+ * only" — CHECK dikembalikan mengikuti PRD, `Blibli` dicabut dari kosakata
+ * ini (istilah PDT-22 untuk platform tanpa parser tetap sah, itu pernyataan
+ * berbeda dari kosakata kolom ini).
+ *
  * Kosakata ini juga yang dicerminkan `PLATFORM_OPTIONS` di
- * `web-internal/src/lib/clients.ts`. Keduanya sempat berselisih: FE menawarkan
- * `'Others'` (tidak ada di CHECK — setiap penambahan dengan pilihan itu gagal)
- * dan TIDAK menawarkan `'Blibli'` (ada di CHECK, jadi tak terjangkau sama
- * sekali). Menambah nilai baru berarti mengubah CHECK, konstanta ini, dan
- * `PLATFORM_OPTIONS` sekaligus — bukan salah satunya.
+ * `web-internal/src/lib/clients.ts`. Menambah nilai baru berarti mengubah
+ * CHECK, konstanta ini, dan `PLATFORM_OPTIONS` sekaligus — bukan salah
+ * satunya.
  */
-export const PLATFORM_VOCAB = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Blibli'] as const;
+export const PLATFORM_VOCAB = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Others'] as const;
 
 export const MSG_PLATFORM_TIDAK_VALID = '[platform tidak valid]';
 

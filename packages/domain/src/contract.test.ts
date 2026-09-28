@@ -277,6 +277,21 @@ describeDb('the entity itself', () => {
       new NotFoundError(MSG_CONTRACT_NOT_FOUND),
     );
   });
+
+  it('O76 — targetGmvBulanan is null through the manual path, and read-only here', async () => {
+    // ContractInput has no such field: only sales.close() may set it. A
+    // contract minted through THIS module's createContract always reads back
+    // null, whatever the caller passes.
+    const clientId = await seedClient();
+    const c = await createContract(sql, am(), clientId, WINDOW);
+    expect(c.targetGmvBulanan).toBeNull();
+
+    // A value set some other way (here: directly, standing in for sales.close())
+    // still reads back through getContract — this module exposes the column,
+    // it just never writes it.
+    await sql`update contracts set target_gmv_bulanan = 400000000.00 where id = ${c.id}`;
+    expect((await getContract(sql, am(), c.id)).targetGmvBulanan).toBe('400000000.00');
+  });
 });
 
 describeDb('one agreement, several Services (the point of O57)', () => {

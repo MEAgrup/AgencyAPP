@@ -90,9 +90,19 @@ describe('normalizePdtInsightDraft (G2-01-INSIGHT-EDIT)', () => {
     expect(() => normalizePdtInsightDraft({ ...VALID, indikator: ind })).toThrow(MSG_PDT_INSIGHT_INDIKATOR_TERLALU_BANYAK);
   });
 
-  it('markup < atau > di teks mana pun ⇒ ditolak', () => {
+  it('tag HTML sungguhan di teks mana pun ⇒ ditolak', () => {
     expect(() => normalizePdtInsightDraft({ ...VALID, ringkasan: 'GMV <script>naik</script>' })).toThrow(MSG_PDT_INSIGHT_ADA_MARKUP);
     expect(() => normalizePdtInsightDraft({ ...VALID, poin: ['Poin <b>tebal</b>'] })).toThrow(MSG_PDT_INSIGHT_ADA_MARKUP);
+  });
+
+  it('simbol pembanding polos (bukan tag) ⇒ diizinkan (docs/DECISIONS.md 2026-09-25 "PDT-INSIGHT-BANDING-VS-TAG")', () => {
+    const hasil = normalizePdtInsightDraft({
+      ...VALID,
+      ringkasan: 'ROAS > 4 dan cancel rate < 5% periode ini.',
+      poin: ['CVR turun, 1 < 2'],
+    });
+    expect(hasil.ringkasan).toBe('ROAS > 4 dan cancel rate < 5% periode ini.');
+    expect(hasil.poin).toEqual(['CVR turun, 1 < 2']);
   });
 
   it('teks melebihi batas karakter ⇒ ditolak dengan pesan menyebut label+batas', () => {

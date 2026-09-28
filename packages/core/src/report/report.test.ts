@@ -555,10 +555,19 @@ describe('normalizeInsightDraft', () => {
     })).toThrow(MSG_REK_TAK_LENGKAP);
   });
 
-  it('refuses markup in any field', () => {
+  it('refuses actual HTML tags in any field', () => {
     expect(() => normalizeInsightDraft({ ...ok, ringkasan: 'naik <b>20%</b>' }))
       .toThrow(MSG_ADA_MARKUP);
-    expect(() => normalizeInsightDraft({ ...ok, poin: ['a > b'] })).toThrow(MSG_ADA_MARKUP);
+    expect(() => normalizeInsightDraft({ ...ok, poin: ['klik <script>alert(1)</script>'] }))
+      .toThrow(MSG_ADA_MARKUP);
+    expect(() => normalizeInsightDraft({ ...ok, outlook: '<!-- catatan -->' }))
+      .toThrow(MSG_ADA_MARKUP);
+  });
+
+  it('allows bare comparison symbols — not every < or > is markup', () => {
+    const out = normalizeInsightDraft({ ...ok, ringkasan: 'ROAS > 4 dan cancel rate < 5%', poin: ['a > b'] });
+    expect(out.ringkasan).toBe('ROAS > 4 dan cancel rate < 5%');
+    expect(out.poin).toEqual(['a > b']);
   });
 
   it('enforces length and list ceilings, naming the field', () => {
