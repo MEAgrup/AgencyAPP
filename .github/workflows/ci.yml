@@ -278,12 +278,19 @@ jobs:
       # Hold), sm_machines TETAP 35 (`service` sudah ada sejak awal).
       # M20 Gelombang C-01 (20261130010000): +1 machine `pdt_laporan` (35→36) —
       # [Draf]→[Terbit]⇄[Dicabut], status publikasi. NOL event notifikasi baru.
-      - name: Verify migration seed counts (36 machines, 79 events, catalog registry consistent)
+      # T-2d Void Service two-step (20261211010000_t2d_void_twostep.sql):
+      # +3 event katalog v20 (service_void_requested/service_voided/
+      # service_void_rejected) (79→82) — edge langsung [In Execution]→
+      # [Cancelled — Service Voided] DICABUT, digantikan dua-langkah via
+      # [Void Requested] (mirrors T-2b Hold); [On Hold]→[Void Requested] BARU
+      # (tidak ada edge void dari On Hold sebelumnya). sm_machines TETAP 36
+      # (`service` sudah ada sejak awal).
+      - name: Verify migration seed counts (36 machines, 82 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 36 then raise exception 'expected 36 machines'; end if;
-               if (select count(*) from notif_events) <> 79 then raise exception 'expected 79 events'; end if;
+               if (select count(*) from notif_events) <> 82 then raise exception 'expected 82 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;

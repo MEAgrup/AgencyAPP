@@ -186,7 +186,15 @@ check() { # nama · sql · harapan
 check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "186"
 check "entity_prefix"    "select count(*) from entity_prefix"    "45"
 check "sm_machines"      "select count(*) from sm_machines"      "36"
-check "notif_events"     "select count(*) from notif_events"     "79"
+check "notif_events"     "select count(*) from notif_events"     "82"
+# --- T-2d Void Service two-step (20261211010000_t2d_void_twostep.sql) -------
+# notif_events 79→82: +3 event katalog v20 (service_void_requested/
+#       service_voided/service_void_rejected). Nol tabel baru, nol mesin baru
+#       (`service` sudah ada) ⇒ tabel public TETAP 186, sm_machines TETAP 36.
+#       Edge [In Execution]→[Cancelled — Service Voided] DICABUT (satu origin
+#       saja), digantikan dua-langkah via [Void Requested]; [On Hold]→
+#       [Void Requested] BARU (docs/DECISIONS.md 2026-09-28 VOID-DUA-LANGKAH
+#       DIPUTUS).
 # --- M20 Gelombang C-01 (20261130010000) — insight + publikasi laporan PDT --
 # 186 = 184 + 2 tabel `pdt_laporan_insight` (append-only, revisi narasi) +
 #       `pdt_laporan_publikasi` (status hidup di sini, R5) ⇒ entity_prefix

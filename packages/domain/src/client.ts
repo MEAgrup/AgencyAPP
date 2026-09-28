@@ -509,12 +509,63 @@ export interface VoidResult {
 }
 
 /**
- * voidService voids a Service (M4-OA-5) and cascade-cancels its child Briefs that
- * are not yet [Approved]. SPV/Account Lead or Director only, reason mandatory,
- * fully audited. The Service and each affected Brief move to [Cancelled — Service
- * Voided] through the engine (the division-specific Account-Lead gate is a code
- * guard here, stricter than the engine's division-agnostic requireLead). An
- * already voided/Done Service cannot be re-voided (LockedFieldError).
+ * The cascade shared by every code path that actually flips a Service to
+ * [Cancelled — Service Voided]: child Briefs not yet [Approved] (nor already
+ * voided) follow the Service into Voided; a Brief already [Approved] is left
+ * alone and reported back (`skippedApprovedBriefs`) so the actor can see what
+ * survived. Extracted from `voidService`'s original inline loop (T-2d, owner
+ * decision `docs/DECISIONS.md` 2026-09-28 "VOID-DUA-LANGKAH DIPUTUS") so both
+ * the untouched instant-void path below (the three pre-execution states) and
+ * the new two-step `approveVoid` (§ below, [In Execution] / [On Hold]) drive
+ * the exact same cascade — pure extraction, no behavior change. Cascade only
+ * runs at the moment a Service really becomes Voided, never at request time.
+ */
+async function cascadeVoidBriefs(
+  ex: ReturnType<typeof executors>, tx: Queryable, serviceId: string, actor: Actor,
+): Promise<{ voidedBriefs: string[]; skippedApprovedBriefs: string[] }> {
+  const briefs = await tx<{ id: string; status: string }[]>`
+    select id, status from briefs where service_id = ${serviceId} for update`;
+  const voidedBriefs: string[] = [];
+  const skippedApprovedBriefs: string[] = [];
+  for (const b of briefs) {
+    if (b.status === BRIEF_APPROVED) {
+      // Approved work is not undone by voiding the Service — it is reported back
+      // so the actor can see what survived (Go's SkippedApproved).
+      skippedApprovedBriefs.push(b.id);
+      continue;
+    }
+    if (b.status === SERVICE_VOIDED) {
+      continue; // already cancelled by an earlier pass
+    }
+    const bres = await statemachine.transition(ex.sm, {
+      machine: 'brief_task', entityType: 'brief', table: 'briefs', entityId: b.id, to: SERVICE_VOIDED, actor,
+    });
+    if (!bres.ok) {
+      throw new Error(`void cascade ${b.id} -> ${SERVICE_VOIDED} failed: ${bres.message}`);
+    }
+    voidedBriefs.push(b.id);
+  }
+  return { voidedBriefs, skippedApprovedBriefs };
+}
+
+/**
+ * voidService voids a Service INSTANTLY (M4-OA-5) and cascade-cancels its child
+ * Briefs that are not yet [Approved]. SPV/Account Lead or Director only, reason
+ * mandatory, fully audited. The Service and each affected Brief move to
+ * [Cancelled — Service Voided] through the engine (the division-specific
+ * Account-Lead gate is a code guard here, stricter than the engine's
+ * division-agnostic requireLead). An already voided/Done Service cannot be
+ * re-voided (LockedFieldError).
+ *
+ * **Scope narrowed 2026-09-28 (T-2d, "VOID-DUA-LANGKAH DIPUTUS"):** this instant
+ * path now only ever succeeds from the THREE pre-execution states
+ * (`[Awaiting Onboarding]`, `[Strategy Approved]`, `[Briefed]`) — the owner's
+ * decision left those three untouched deliberately. `[In Execution]` and
+ * `[On Hold]` no longer have a direct edge to Voided (`sm_edges` removed it for
+ * `[In Execution]`, and never had one for `[On Hold]`); a Service in either of
+ * those two now goes through `requestVoid` → `approveVoid`/`rejectVoid` below.
+ * The engine enforces this — `statemachine.transition` simply fails for a
+ * Service in one of those two states, same as any other blocked edge.
  */
 export async function voidService(sql: Sql, actor: Actor, serviceId: string, reason: string): Promise<VoidResult> {
   if (!canVoidService(actor)) {
@@ -543,29 +594,7 @@ export async function voidService(sql: Sql, actor: Actor, serviceId: string, rea
       throw new LockedFieldError();
     }
 
-    // Cascade: child Briefs not yet [Approved] (nor already voided) → cancelled.
-    const briefs = await tx<{ id: string; status: string }[]>`
-      select id, status from briefs where service_id = ${serviceId} for update`;
-    const voidedBriefs: string[] = [];
-    const skippedApprovedBriefs: string[] = [];
-    for (const b of briefs) {
-      if (b.status === BRIEF_APPROVED) {
-        // Approved work is not undone by voiding the Service — it is reported back
-        // so the actor can see what survived (Go's SkippedApproved).
-        skippedApprovedBriefs.push(b.id);
-        continue;
-      }
-      if (b.status === SERVICE_VOIDED) {
-        continue; // already cancelled by an earlier pass
-      }
-      const bres = await statemachine.transition(ex.sm, {
-        machine: 'brief_task', entityType: 'brief', table: 'briefs', entityId: b.id, to: SERVICE_VOIDED, actor,
-      });
-      if (!bres.ok) {
-        throw new Error(`void cascade ${b.id} -> ${SERVICE_VOIDED} failed: ${bres.message}`);
-      }
-      voidedBriefs.push(b.id);
-    }
+    const { voidedBriefs, skippedApprovedBriefs } = await cascadeVoidBriefs(ex, tx, serviceId, actor);
 
     await ex.audit.insertAudit({
       entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
@@ -812,6 +841,254 @@ export async function resumeService(sql: Sql, actor: Actor, serviceId: string, r
       explicitRecipients: svc.ownerAm === '' ? [] : [svc.ownerAm],
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Void Service — TWO-STEP (T-2d, owner decision `docs/DECISIONS.md` 2026-09-28
+// "VOID-DUA-LANGKAH DIPUTUS"). Mirrors T-2b Hold Service PERSIS: staff
+// REQUESTS ([In Execution] → [Void Requested] or [On Hold] → [Void Requested],
+// `require_lead=false`), Head of Account (Account Lead) or Director APPROVES
+// (→ [Cancelled — Service Voided], cascading to child Briefs same as the old
+// instant void) or REJECTS (→ back to whichever of the two states it came
+// from). Owner's own words: "yg bisa void service Account Head (Anthy), bisa
+// diajukan oleh staff tapi persetujuan akhir harus dari anthy" — requester =
+// owning AM / Account lead / Director (`canRequestVoid`, identical shape to
+// `canRequestHold`); approver = Head of Account / Director (`canApproveVoid`,
+// identical shape to `canApproveHold`).
+//
+// Origin scope is DELIBERATELY narrow: only `[In Execution]` (the normal case,
+// replacing the old direct edge) and `[On Hold]` (brand new — no void edge
+// existed for it before) become two-step. The THREE pre-execution states
+// (`[Awaiting Onboarding]`, `[Strategy Approved]`, `[Briefed]`) are OUT OF
+// SCOPE — `canVoidService`/`voidService` above are UNCHANGED for them.
+//
+// THE ONE GENUINELY NEW MECHANISM HERE (no direct precedent, though the
+// pattern it borrows is precedented): `[Void Requested]` pools requests from
+// TWO different origins, so a plain `require_lead` reject edge back to a fixed
+// state cannot work — one `[Void Requested]` row rejected the wrong way would
+// silently resurrect a Service into the wrong state. `rejectVoid` instead
+// reads the LATEST `service_void_requested` audit row for this Service
+// (`before_json->>'status'`) to recover which of the two origins it actually
+// came from, then validates that value is one of the two legal origins before
+// transitioning — defense against a corrupt/unexpected audit trail. Reading
+// the latest matching audit row to recover a fact `services` itself has no
+// column for is the SAME technique `pendingHoldRequests`'s LATERAL join
+// already uses for `reason` (and Paket V's `salesperf.loadVoidTimestamps`
+// uses for `after_json->>'status'`) — not a new idea, just the first time this
+// codebase needs it to pick a TRANSITION TARGET rather than display text.
+//
+// Cascade to child Briefs (`cascadeVoidBriefs`, shared with the untouched
+// instant `voidService`) now happens ONLY at approve time — the moment the
+// Service actually becomes Voided — never at request time, since a request
+// that gets rejected must leave every child Brief exactly as it was.
+//
+// Each step appends to audit_log and emits a v20 notification: request → Head
+// of Account (`leadsOfDivision`, mirrors Hold's request event); approve/
+// reject → the owning AM (`explicit`, mirrors Hold's approve/reject events).
+// Migration `20261211010000_t2d_void_twostep.sql`.
+// ---------------------------------------------------------------------------
+
+export const SERVICE_VOID_REQUESTED = '[Void Requested]';
+
+/** canRequestVoid: the owning AM, an Account lead, or Director may REQUEST a void. */
+export function canRequestVoid(actor: Actor, ownerAm: string): boolean {
+  if (actor.role.director) return true;
+  if (actor.role.division === ACCOUNT_DIVISION) {
+    if (actor.role.level === permission.LevelLead) return true;
+    return actor.employeeId === ownerAm; // owning AM
+  }
+  return false;
+}
+
+/** canApproveVoid: Head of Account (Account Lead) or Director — approve / reject. */
+export function canApproveVoid(actor: Actor): boolean {
+  return actor.role.director ||
+    (actor.role.division === ACCOUNT_DIVISION && actor.role.level === permission.LevelLead);
+}
+
+/**
+ * requestVoid moves a Service [In Execution] → [Void Requested] OR
+ * [On Hold] → [Void Requested] (T-2d) — the two legal origins. The owning AM /
+ * Account lead / Director, reason mandatory, audited; notifies Head of
+ * Account. A Service in neither origin state is rejected (ServiceStateError →
+ * 409). `beforeJson.status` here is exactly what `approveVoid`/`rejectVoid`
+ * later read back to recover which origin this request came from — it is not
+ * incidental bookkeeping.
+ */
+export async function requestVoid(sql: Sql, actor: Actor, serviceId: string, reason: string): Promise<void> {
+  const why = (reason ?? '').trim();
+  if (why === '') throw new IncompleteError();
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await lockServiceWithOwner(tx, serviceId);
+    if (!canRequestVoid(actor, svc.ownerAm)) throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+    if (svc.status !== SERVICE_IN_EXECUTION && svc.status !== SERVICE_ON_HOLD) throw new ServiceStateError();
+    await moveService(ex, serviceId, SERVICE_VOID_REQUESTED, actor);
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_void_requested', beforeJson: { status: svc.status },
+      afterJson: { status: SERVICE_VOID_REQUESTED, reason: why }, createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.ServiceVoidRequested,
+      entityType: 'service', entityId: serviceId, actor: actor.employeeId, division: ACCOUNT_DIVISION,
+    });
+  });
+}
+
+/**
+ * approveVoid moves a Service [Void Requested] → [Cancelled — Service Voided]
+ * (T-2d), Head of Account / Director, and runs the SAME cascade
+ * (`cascadeVoidBriefs`) the old instant `voidService` ran — child Briefs not
+ * yet [Approved] follow it into Voided, [Approved] ones are left standing and
+ * reported back. Audited; notifies the owning AM. A Service not
+ * [Void Requested] is rejected (ServiceStateError → 409).
+ */
+export async function approveVoid(sql: Sql, actor: Actor, serviceId: string): Promise<VoidResult> {
+  if (!canApproveVoid(actor)) throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await lockServiceWithOwner(tx, serviceId);
+    if (svc.status !== SERVICE_VOID_REQUESTED) throw new ServiceStateError();
+    await moveService(ex, serviceId, SERVICE_VOIDED, actor);
+    const { voidedBriefs, skippedApprovedBriefs } = await cascadeVoidBriefs(ex, tx, serviceId, actor);
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_voided', beforeJson: { status: svc.status },
+      afterJson: {
+        status: SERVICE_VOIDED, voided_briefs: voidedBriefs,
+        skipped_approved_briefs: skippedApprovedBriefs,
+      },
+      createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.ServiceVoided,
+      entityType: 'service', entityId: serviceId, actor: actor.employeeId,
+      explicitRecipients: svc.ownerAm === '' ? [] : [svc.ownerAm],
+    });
+    return { serviceId, voidedBriefs, skippedApprovedBriefs };
+  });
+}
+
+/**
+ * rejectVoid moves a Service [Void Requested] back to whichever of the two
+ * legal origins ([In Execution] or [On Hold]) it actually came from (T-2d) —
+ * the Head declines the request. Head of Account / Director. The origin is
+ * recovered from the LATEST `service_void_requested` audit row's
+ * `before_json.status` (see the block comment above); if that row is missing
+ * or its value is not one of the two legal origins, this throws rather than
+ * guessing a target — the state machine only ever reaches [Void Requested]
+ * through that exact audit-writing transition, so either case means the audit
+ * trail is corrupt, not that a default is safe. Audited; notifies the owning
+ * AM. A Service not [Void Requested] is rejected (ServiceStateError → 409).
+ */
+export async function rejectVoid(sql: Sql, actor: Actor, serviceId: string, reason: string): Promise<void> {
+  if (!canApproveVoid(actor)) throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+  const why = (reason ?? '').trim();
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await lockServiceWithOwner(tx, serviceId);
+    if (svc.status !== SERVICE_VOID_REQUESTED) throw new ServiceStateError();
+
+    const originRows = await tx<{ status: string | null }[]>`
+      select a.before_json->>'status' as status
+        from audit_log a
+       where a.entity_type = 'service' and a.entity_id = ${serviceId}
+         and a.action = 'service_void_requested'
+       order by a.created_at desc, a.id desc
+       limit 1`;
+    const origin = originRows[0]?.status ?? null;
+    if (origin !== SERVICE_IN_EXECUTION && origin !== SERVICE_ON_HOLD) {
+      throw new Error(
+        `rejectVoid: could not recover a valid origin state for service ${serviceId} ` +
+        `(service_void_requested audit lookback returned ${origin === null ? 'no row' : JSON.stringify(origin)})`,
+      );
+    }
+
+    await moveService(ex, serviceId, origin, actor);
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_void_rejected', beforeJson: { status: svc.status },
+      afterJson: { status: origin, reason: why === '' ? null : why }, createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.ServiceVoidRejected,
+      entityType: 'service', entityId: serviceId, actor: actor.employeeId,
+      explicitRecipients: svc.ownerAm === '' ? [] : [svc.ownerAm],
+    });
+  });
+}
+
+/** One Service sitting in [Void Requested], waiting on the Head of Account's call. */
+export interface PendingVoidRequest {
+  serviceId: string;
+  clientId: string;
+  toko: string;
+  namaPic: string;
+  serviceName: string;
+  ownerAm: string | null;
+  ownerAmNama: string;
+  updatedAt: Date;
+  /** The MANDATORY reason typed on `requestVoid` (audit-only, mirrors PendingHoldRequest). */
+  reason: string;
+  requestedBy: string;
+  requestedByNama: string;
+  /**
+   * Which state this request came FROM — `[In Execution]` or `[On Hold]` —
+   * read back from the SAME audit row `rejectVoid` uses to recover its reject
+   * target (§ block comment above). Not cosmetic: voiding a Service that was
+   * actively running is a different decision from voiding one already paused,
+   * and `[Void Requested]` alone no longer tells the approver which one this
+   * is. Empty string only if the audit row is unreadable (RLS) or missing.
+   */
+  originStatus: string;
+}
+
+/**
+ * pendingVoidRequests lists every Service in [Void Requested], oldest first —
+ * the "Perlu Persetujuan Saya" queue for Head of Account / Director
+ * (`canApproveVoid`'s exact set). Mirrors `pendingHoldRequests` exactly,
+ * including the RLS caveat: an owning AM would ALSO pass the read-scope RLS
+ * arm for their own client, but this is an approval queue, not a visibility
+ * list, so it gates explicitly and returns empty for anyone who cannot
+ * actually decide.
+ */
+export async function pendingVoidRequests(sql: Queryable, actor: Actor): Promise<PendingVoidRequest[]> {
+  if (!canApproveVoid(actor)) return [];
+  const rows = await sql<{
+    id: string; client_id: string; toko: string; nama_pic: string; name: string;
+    assigned_am_id: string | null; owner_am_nama: string | null; updated_at: Date;
+    reason: string | null; requested_by: string | null; requested_by_nama: string | null;
+    origin_status: string | null;
+  }[]>`
+    select s.id, s.client_id, c.toko, c.nama_pic, s.name, c.assigned_am_id,
+           private.employee_display_name(c.assigned_am_id) as owner_am_nama,
+           coalesce(req.created_at, s.created_at) as updated_at,
+           req.reason, req.actor_employee_id as requested_by,
+           private.employee_display_name(req.actor_employee_id) as requested_by_nama,
+           req.origin_status
+      from services s
+      join clients c on c.id = s.client_id
+      -- Same LATERAL + latest-row pattern as pendingHoldRequests, plus
+      -- before_json status — the origin rejectVoid would recover for this
+      -- exact row, surfaced here so the approver sees it too.
+      left join lateral (
+        select a.after_json->>'reason' as reason, a.before_json->>'status' as origin_status,
+               a.actor_employee_id, a.created_at
+          from audit_log a
+         where a.entity_type = 'service' and a.entity_id = s.id
+           and a.action = 'service_void_requested'
+         order by a.created_at desc, a.id desc
+         limit 1
+      ) req on true
+     where s.status = ${SERVICE_VOID_REQUESTED}
+     order by coalesce(req.created_at, s.created_at) asc, s.id asc`;
+  return rows.map((r) => ({
+    serviceId: r.id, clientId: r.client_id, toko: r.toko, namaPic: r.nama_pic, serviceName: r.name,
+    ownerAm: r.assigned_am_id, ownerAmNama: r.owner_am_nama ?? '', updatedAt: r.updated_at,
+    reason: r.reason ?? '', requestedBy: r.requested_by ?? '',
+    requestedByNama: r.requested_by_nama ?? '', originStatus: r.origin_status ?? '',
+  }));
 }
 
 // ---------------------------------------------------------------------------

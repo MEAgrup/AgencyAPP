@@ -705,6 +705,7 @@ const WIRE_TO_FE: Record<string, string> = {
   // "Perlu Persetujuan Saya" (2026-08-31) — combined approval inbox queues.
   PendingHoldRequestWire: 'clients.ts::PendingHoldRequest',
   PendingClosureRequestWire: 'clients.ts::PendingClosureRequest',
+  PendingVoidRequestWire: 'clients.ts::PendingVoidRequest',
   PendingEscalationWire: 'kol.ts::PendingEscalation',
   PendingStrategyReviewWire: 'account.ts::PendingStrategyReview',
   // M13 client health

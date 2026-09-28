@@ -3393,6 +3393,33 @@ export function pendingClosureRequestToWire(r: client.PendingClosureRequest): Pe
   };
 }
 
+/** GET /services/void-requests row — the "Perlu Persetujuan Saya" Void Service queue (T-2d). */
+export interface PendingVoidRequestWire {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  service_name: string;
+  owner_am: string | null;
+  owner_am_nama: string;
+  updated_at: string;
+  /** Alasan wajib yang diketik pengaju saat mengajukan void (dari audit `service_void_requested`). */
+  reason: string;
+  requested_by: string;
+  requested_by_nama: string;
+  /** `[In Execution]` atau `[On Hold]` — origin request ini, dari lookback audit yang sama. */
+  origin_status: string;
+}
+
+export function pendingVoidRequestToWire(r: client.PendingVoidRequest): PendingVoidRequestWire {
+  return {
+    service_id: r.serviceId, client_id: r.clientId, toko: r.toko, nama_pic: r.namaPic, service_name: r.serviceName,
+    owner_am: r.ownerAm, owner_am_nama: r.ownerAmNama, updated_at: r.updatedAt.toISOString(),
+    reason: r.reason, requested_by: r.requestedBy, requested_by_nama: r.requestedByNama,
+    origin_status: r.originStatus,
+  };
+}
+
 // --- M4 service void (Go module4_client.VoidResult) ---
 
 /** The void cascade result as web-internal's `VoidResult` (lib/clients.ts) expects it. */

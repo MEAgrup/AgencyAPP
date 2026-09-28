@@ -19,8 +19,10 @@ import {
   canEditProfile,
   canApproveClosure,
   canApproveHold,
+  canApproveVoid,
   canRequestClosure,
   canRequestHold,
+  canRequestVoid,
   canReassignPic,
   canSetPaymentIntent,
   canVoidService,
@@ -49,6 +51,10 @@ import {
   PLATFORM_VOCAB,
   PlatformDuplicateError,
   PlatformInvalidError,
+  pendingVoidRequests,
+  requestVoid,
+  approveVoid,
+  rejectVoid,
   resumeService,
   ServiceStateError,
   setPaymentIntent,
@@ -121,6 +127,18 @@ describe('lock-matrix predicates', () => {
     expect(canApproveHold(director())).toBe(true);
     expect(canApproveHold(accountStaff())).toBe(false);
     expect(canApproveHold(budi())).toBe(false);
+  });
+  it('Void Service (T-2d): request = owner AM / lead / Director; approve = Head of Account (lead) / Director', () => {
+    // Identical shape to canRequestHold/canApproveHold.
+    expect(canRequestVoid(accountStaff(), 'ZZ-AM')).toBe(true);
+    expect(canRequestVoid(accountStaff(), 'ZZ-SOMEONE')).toBe(false);
+    expect(canRequestVoid(accountLead(), 'ZZ-AM')).toBe(true);
+    expect(canRequestVoid(director(), 'ZZ-AM')).toBe(true);
+    expect(canRequestVoid(budi(), 'ZZ-AM')).toBe(false);
+    expect(canApproveVoid(accountLead())).toBe(true);
+    expect(canApproveVoid(director())).toBe(true);
+    expect(canApproveVoid(accountStaff())).toBe(false);
+    expect(canApproveVoid(budi())).toBe(false);
   });
 });
 
@@ -618,6 +636,164 @@ describeDb('Hold Service two-step (T-2b / RM-2)', () => {
     await approveHold(sql, accountLead(), svc);
     const b = await sql<{ status: string }[]>`select status from briefs where id = ${brief}`;
     expect(b[0].status).toBe('[To Do]'); // untouched by the hold
+  });
+});
+
+describeDb('Void Service two-step (T-2d, docs/DECISIONS.md 2026-09-28)', () => {
+  const serviceOf = async (clientId: string): Promise<string> =>
+    (await sql<{ id: string }[]>`select id from services where client_id = ${clientId} limit 1`)[0].id;
+  const statusOf = async (svc: string): Promise<string> =>
+    (await sql<{ status: string }[]>`select status from services where id = ${svc}`)[0].status;
+
+  /** A fresh [In Execution] service on the client, whose AM is set to ZZ-AM (the accountStaff owner). */
+  async function inExecService(clientId: string): Promise<string> {
+    await sql`update clients set assigned_am_id = 'ZZ-AM' where id = ${clientId}`;
+    const id = `SVC-VOID-${seq++}`;
+    await sql`insert into services (id, client_id, master_service_id, master_version_no, name,
+        standard_price, commission_rule, status, requires_strategy_plan, created_by)
+      values (${id}, ${clientId}, 'MSV-X', 1, 'Full Mgmt', '10000000.00', 'rule', '[In Execution]', false, 'ZZ-ADMIN')`;
+    return id;
+  }
+
+  /** Seed a Brief on a service at `status` (stub table, brief_task machine). */
+  async function seedBrief(serviceId: string, status: string, n: number): Promise<string> {
+    const id = `BRF-VOID-${seq++}-${n}`;
+    await sql`insert into briefs (id, service_id, title, status, created_by) values (${id}, ${serviceId}, ${'Brief ' + n}, ${status}, 'ZZ-ADMIN')`;
+    return id;
+  }
+
+  it('staff requests → [Void Requested]: owner gate + mandatory reason + audit (before_json origin) + notif to Head', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    await expect(requestVoid(sql, budi(), svc, 'salah input')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(requestVoid(sql, accountStaff(), svc, '   ')).rejects.toBeInstanceOf(IncompleteError);
+    await requestVoid(sql, accountStaff(), svc, 'klien batal jasa');
+    expect(await statusOf(svc)).toBe('[Void Requested]');
+    const audit = await sql<{ after_json: { reason: string; status: string }; before_json: { status: string } }[]>`
+      select after_json, before_json from audit_log
+       where entity_id = ${svc} and action = 'service_void_requested' order by id desc limit 1`;
+    expect(audit[0].after_json.status).toBe('[Void Requested]');
+    expect(audit[0].after_json.reason).toBe('klien batal jasa');
+    // The origin `rejectVoid` will later read back to recover its target.
+    expect(audit[0].before_json.status).toBe('[In Execution]');
+  });
+
+  it('only [In Execution] / [On Hold] may be requested for void — the three pre-execution states (and terminal states) cannot', async () => {
+    const clientId = await closedClient();
+    const svc = await serviceOf(clientId); // born [Awaiting Onboarding]
+    await sql`update clients set assigned_am_id = 'ZZ-AM' where id = ${clientId}`;
+    for (const bad of ['[Awaiting Onboarding]', '[Strategy Approved]', '[Briefed]', 'Done', '[Cancelled — Service Voided]']) {
+      await sql`update services set status = ${bad} where id = ${svc}`;
+      await expect(requestVoid(sql, accountStaff(), svc, 'x')).rejects.toBeInstanceOf(ServiceStateError);
+    }
+  });
+
+  it('Head approves [Void Requested] → Voided; staff cannot approve; cascades child Briefs (skips [Approved]); notifies owner AM', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    const todo = await seedBrief(svc, '[To Do]', 1);
+    const done = await seedBrief(svc, '[Approved]', 2);
+    await requestVoid(sql, accountStaff(), svc, 'batal');
+    await expect(approveVoid(sql, accountStaff(), svc)).rejects.toBeInstanceOf(ForbiddenError);
+    const awm = await auditWatermark();
+    const nwm = await notifWatermark();
+    const res = await approveVoid(sql, accountLead(), svc);
+    expect(await statusOf(svc)).toBe('[Cancelled — Service Voided]');
+    expect(res.voidedBriefs).toEqual([todo]);
+    expect(res.skippedApprovedBriefs).toEqual([done]);
+    const todoRow = await sql<{ status: string }[]>`select status from briefs where id = ${todo}`;
+    expect(todoRow[0].status).toBe('[Cancelled — Service Voided]');
+    const doneRow = await sql<{ status: string }[]>`select status from briefs where id = ${done}`;
+    expect(doneRow[0].status).toBe('[Approved]'); // untouched, same as voidService's cascade
+    const audit = await sql<{ n: string }[]>`
+      select count(*) as n from audit_log
+       where id > ${awm} and entity_id = ${svc} and action = 'service_voided'`;
+    expect(Number(audit[0].n)).toBe(1);
+    const notif = await sql<{ n: string }[]>`
+      select count(*) as n from notifications
+       where id > ${nwm} and entity_id = ${svc}
+         and event_type = 'service_voided' and recipient_employee_id = 'ZZ-AM'`;
+    expect(Number(notif[0].n)).toBe(1);
+  });
+
+  it('approve/reject require [Void Requested] (409 otherwise)', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    await expect(approveVoid(sql, accountLead(), svc)).rejects.toBeInstanceOf(ServiceStateError);
+    await expect(rejectVoid(sql, accountLead(), svc, '')).rejects.toBeInstanceOf(ServiceStateError);
+  });
+
+  it('rejectVoid: permission gate (staff cannot reject)', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    await requestVoid(sql, accountStaff(), svc, 'batal');
+    await expect(rejectVoid(sql, accountStaff(), svc, 'x')).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  // --- THE critical multi-origin correctness tests: prove rejectVoid recovers
+  // the REAL origin from the audit-log lookback rather than defaulting to one
+  // fixed state. [Void Requested] pools requests from TWO different origins —
+  // a reject that silently always landed on [In Execution] would pass every
+  // OTHER test in this file yet corrupt every rejected On-Hold void in
+  // production, so these two are checked in opposite directions.
+
+  it('rejectVoid recovers [In Execution] when that was the origin', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    await requestVoid(sql, accountStaff(), svc, 'batal jasa');
+    expect(await statusOf(svc)).toBe('[Void Requested]');
+    const nwm = await notifWatermark();
+    await rejectVoid(sql, director(), svc, 'belum yakin');
+    expect(await statusOf(svc)).toBe('[In Execution]');
+    const audit = await sql<{ after_json: { status: string; reason: string | null } }[]>`
+      select after_json from audit_log
+       where entity_id = ${svc} and action = 'service_void_rejected' order by id desc limit 1`;
+    expect(audit[0].after_json.status).toBe('[In Execution]');
+    expect(audit[0].after_json.reason).toBe('belum yakin');
+    const notif = await sql<{ n: string }[]>`
+      select count(*) as n from notifications
+       where id > ${nwm} and entity_id = ${svc}
+         and event_type = 'service_void_rejected' and recipient_employee_id = 'ZZ-AM'`;
+    expect(Number(notif[0].n)).toBe(1);
+  });
+
+  it('rejectVoid recovers [On Hold] when that was the origin — NOT [In Execution]', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId); // born [In Execution]
+    await sql`update services set status = '[On Hold]' where id = ${svc}`; // fixture: now On Hold
+    await requestVoid(sql, accountStaff(), svc, 'batal jasa saat hold');
+    expect(await statusOf(svc)).toBe('[Void Requested]');
+    await rejectVoid(sql, director(), svc, '');
+    // The one assertion that actually proves the audit-log lookback works: a
+    // reject that silently defaulted to [In Execution] would pass every other
+    // test here and fail only this one.
+    expect(await statusOf(svc)).toBe('[On Hold]');
+    const audit = await sql<{ after_json: { status: string; reason: string | null } }[]>`
+      select after_json from audit_log
+       where entity_id = ${svc} and action = 'service_void_rejected' order by id desc limit 1`;
+    expect(audit[0].after_json.status).toBe('[On Hold]');
+    expect(audit[0].after_json.reason).toBeNull(); // '' normalized to null, same as rejectHold
+  });
+
+  it('pendingVoidRequests surfaces originStatus per row and gates to Head of Account / Director', async () => {
+    const clientId = await closedClient();
+    const svcExec = await inExecService(clientId);
+    await requestVoid(sql, accountStaff(), svcExec, 'dari in execution');
+    const svcHold = await inExecService(clientId);
+    await sql`update services set status = '[On Hold]' where id = ${svcHold}`;
+    await requestVoid(sql, accountStaff(), svcHold, 'dari on hold');
+
+    expect(await pendingVoidRequests(sql, accountStaff())).toEqual([]); // approval queue, not read-scope
+    const rows = await pendingVoidRequests(sql, accountLead());
+    const rowExec = rows.find((r) => r.serviceId === svcExec);
+    const rowHold = rows.find((r) => r.serviceId === svcHold);
+    expect(rowExec).toBeDefined();
+    expect(rowExec!.originStatus).toBe('[In Execution]');
+    expect(rowExec!.reason).toBe('dari in execution');
+    expect(rowExec!.ownerAm).toBe('ZZ-AM');
+    expect(rowHold).toBeDefined();
+    expect(rowHold!.originStatus).toBe('[On Hold]');
+    expect(rowHold!.reason).toBe('dari on hold');
   });
 });
 

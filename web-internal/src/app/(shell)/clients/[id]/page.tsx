@@ -32,6 +32,9 @@ import {
   requestServiceClosure,
   approveServiceClosure,
   rejectServiceClosure,
+  requestVoidService,
+  approveVoidService,
+  rejectVoidService,
   resumeService,
   setPaymentIntent,
   setShopId,
@@ -61,7 +64,17 @@ const ON_HOLD_STATUS = '[On Hold]';
 const HOLD_REQUESTED_STATUS = '[Hold Requested]';
 const IN_EXECUTION_STATUS = '[In Execution]';
 const CLOSURE_REQUESTED_STATUS = '[Closure Requested]';
+const VOID_REQUESTED_STATUS = '[Void Requested]';
 const DONE_STATUS = 'Done';
+
+// Void Service two-step (T-2d, docs/DECISIONS.md 2026-09-28 "VOID-DUA-LANGKAH
+// DIPUTUS") origins. The THREE pre-execution states are explicitly OUT OF
+// SCOPE and keep the old instant-void button/handler untouched.
+const PRE_EXECUTION_STATUSES = new Set([
+  '[Awaiting Onboarding]',
+  '[Strategy Approved]',
+  '[Briefed]',
+]);
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
@@ -109,6 +122,15 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const canRequestClosure = isAccountStaff(role) || isAccountLead(role) || !!role?.director;
   const canApproveClosure = !!role?.director;
   const [closurePendingId, setClosurePendingId] = useState<string | null>(null);
+
+  // Void Service two-step (T-2d, docs/DECISIONS.md 2026-09-28). Owning AM /
+  // lead / Director may REQUEST (mirrors canRequestHold); Head of Account
+  // (Account Lead) / Director APPROVE / REJECT (mirrors canApproveHold — same
+  // gate `canVoidService` used server-side for the untouched instant path
+  // below, so it also gates that old button now).
+  const canRequestVoid = isAccountStaff(role) || isAccountLead(role) || !!role?.director;
+  const canApproveVoid = isAccountLead(role) || !!role?.director;
+  const [voidTwoStepPendingId, setVoidTwoStepPendingId] = useState<string | null>(null);
 
   // Payment Intent
   const [intentChoice, setIntentChoice] = useState<string>('');
@@ -286,6 +308,65 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     const reason = window.prompt(`Alasan tolak penutupan "${serviceName}"? (opsional)`);
     if (reason === null) return; // cancelled
     await runClosure(serviceId, () => rejectServiceClosure(serviceId, reason), `Pengajuan penutupan "${serviceName}" ditolak (kembali In Execution).`);
+  }
+
+  async function runVoidTwoStep(serviceId: string, fn: () => Promise<unknown>, ok: string) {
+    setVoidError(null);
+    setVoidMessage(null);
+    setVoidTwoStepPendingId(serviceId);
+    try {
+      await fn();
+      setVoidMessage(ok);
+      await load();
+    } catch (err) {
+      setVoidError(errorMessage(err));
+    } finally {
+      setVoidTwoStepPendingId(null);
+    }
+  }
+
+  async function handleRequestVoid(serviceId: string, serviceName: string) {
+    const reason = window.prompt(
+      `Alasan ajukan void service "${serviceName}"? (wajib — Brief non-Approved akan ikut dibatalkan bila disetujui)`,
+    );
+    if (reason === null) return; // cancelled
+    if (reason.trim() === '') {
+      setVoidError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+    await runVoidTwoStep(
+      serviceId,
+      () => requestVoidService(serviceId, reason.trim()),
+      `Pengajuan void "${serviceName}" dikirim — menunggu ACC Head of Account.`,
+    );
+  }
+
+  async function handleApproveVoid(serviceId: string, serviceName: string) {
+    if (!window.confirm(`Setujui void service "${serviceName}"? Brief non-Approved ikut dibatalkan.`)) return;
+    setVoidError(null);
+    setVoidMessage(null);
+    setVoidTwoStepPendingId(serviceId);
+    try {
+      const res = await approveVoidService(serviceId);
+      setVoidMessage(
+        `Service "${serviceName}" berhasil di-void. Brief dibatalkan: ${res.voided_briefs.length}, brief Approved dipertahankan: ${res.skipped_approved_briefs.length}.`,
+      );
+      await load();
+    } catch (err) {
+      setVoidError(errorMessage(err));
+    } finally {
+      setVoidTwoStepPendingId(null);
+    }
+  }
+
+  async function handleRejectVoid(serviceId: string, serviceName: string) {
+    const reason = window.prompt(`Alasan tolak void "${serviceName}"? (opsional)`);
+    if (reason === null) return; // cancelled
+    await runVoidTwoStep(
+      serviceId,
+      () => rejectVoidService(serviceId, reason),
+      `Pengajuan void "${serviceName}" ditolak (kembali ke status semula).`,
+    );
   }
 
   async function handleSetIntent(e: FormEvent) {
@@ -895,7 +976,50 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                             )}
                           </>
                         )}
-                        {s.status !== VOIDED_STATUS && s.status !== DONE_STATUS && (
+                        {/* Void Service dua-langkah (T-2d): hanya dua origin
+                            [In Execution]/[On Hold]. Tiga state pra-eksekusi
+                            di bawah TETAP instan (voidService lama). */}
+                        {canRequestVoid &&
+                          (s.status === IN_EXECUTION_STATUS || s.status === ON_HOLD_STATUS) && (
+                            <button
+                              type="button"
+                              className="btn btnDanger btnSm"
+                              disabled={voidTwoStepPendingId !== null}
+                              onClick={() => handleRequestVoid(s.id, s.name)}
+                            >
+                              {voidTwoStepPendingId === s.id ? 'Memproses...' : 'Ajukan Void'}
+                            </button>
+                        )}
+                        {s.status === VOID_REQUESTED_STATUS && (
+                          <>
+                            <span className="badge badge-amber" title="Menunggu ACC Head of Account">Menunggu ACC</span>
+                            {canApproveVoid && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btnDanger btnSm"
+                                  disabled={voidTwoStepPendingId !== null}
+                                  onClick={() => handleApproveVoid(s.id, s.name)}
+                                >
+                                  {voidTwoStepPendingId === s.id ? '...' : 'Setujui Void'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btnGhost btnSm"
+                                  disabled={voidTwoStepPendingId !== null}
+                                  onClick={() => handleRejectVoid(s.id, s.name)}
+                                >
+                                  {voidTwoStepPendingId === s.id ? '...' : 'Tolak'}
+                                </button>
+                              </>
+                            )}
+                          </>
+                        )}
+                        {/* Void instan — HANYA tiga state pra-eksekusi (M4-OA-5
+                            lama, tidak disentuh T-2d). Digerbang canApproveVoid
+                            (== canVoidService server-side: Account Lead/Director)
+                            supaya tombol ini tidak tampil untuk semua peran. */}
+                        {canApproveVoid && PRE_EXECUTION_STATUSES.has(s.status) && (
                           <button
                             type="button"
                             className="btn btnDanger btnSm"
