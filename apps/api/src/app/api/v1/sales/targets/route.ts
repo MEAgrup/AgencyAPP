@@ -31,7 +31,8 @@ export async function PUT(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
     const body = await readJson<{
-      salesperson_id?: string; period_start?: string; period_kind?: string; target_omzet?: string;
+      salesperson_id?: string; period_start?: string; period_kind?: string;
+      metric_key?: string; metric_param?: string; target_value?: string;
     }>(request);
     await salesperf.setTarget(db(), actor, toSetTargetInput(body));
     return json({ ok: true });
