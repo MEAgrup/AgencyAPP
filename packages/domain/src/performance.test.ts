@@ -29,6 +29,7 @@ import {
   COMP_KECEPATAN_REVIEW_AM,
   COMP_NOTE_COMPLIANCE,
   COMP_OPTIMIZATION_ACTIVITY,
+  COMP_PLAN_PERIODE_DISCIPLINE,
   COMP_RECAP_DISCIPLINE,
   COMP_ROAS_ATTAINMENT,
   COMP_SOURCING_TURNAROUND,
@@ -299,6 +300,64 @@ describe('pure scoring core', () => {
     expect(kra.baseWeight).toBe(10);
     expect(kra.effectiveWeight).toBeCloseTo(10, 6);
   });
+
+  // X-12 (pemilik 2026-09-29 "jalankan rekomendasi", migrasi 20261212010000):
+  // `plan_periode_discipline` carved PROPORTIONALLY out of the post-LT-1 AM
+  // profile at 10%, from ALL five existing components (never singled out of
+  // kecepatan_review_am — X-12's own guardrail). Same safety invariant as
+  // D-14/LT-1: an AM with no Plan period due that period scores EXACTLY as
+  // they did before X-12.
+  const AM_WEIGHTS_X12 = {
+    chr_average: 36.45,
+    complaint_resolution_speed: 18.225,
+    revision_escalation_rate: 18.225,
+    recap_discipline: 8.1,
+    kecepatan_review_am: 9,
+    plan_periode_discipline: 10,
+  };
+
+  it('X-12: the AM profile still sums to 100 after the carve', () => {
+    expect(Object.values(AM_WEIGHTS_X12).reduce((a, b) => a + b, 0)).toBeCloseTo(100, 9);
+  });
+
+  it('X-12: proportional carve — excluding plan_periode_discipline restores the pre-X12 profile', () => {
+    const { comps, profile } = scoreProfile(AM_WEIGHTS_X12, [
+      { name: COMP_CHR_AVERAGE, included: true, raw: 80, reason: '', diagnostic: false },
+      { name: 'complaint_resolution_speed', included: true, raw: 100, reason: '', diagnostic: false },
+      { name: 'revision_escalation_rate', included: true, raw: 100, reason: '', diagnostic: false },
+      { name: COMP_RECAP_DISCIPLINE, included: true, raw: 50, reason: '', diagnostic: false },
+      { name: COMP_KECEPATAN_REVIEW_AM, included: true, raw: 0, reason: '', diagnostic: false },
+      { name: COMP_PLAN_PERIODE_DISCIPLINE, included: false, raw: 0, reason: 'no Plan periode due', diagnostic: false },
+    ]);
+    const eff = Object.fromEntries(comps.map((c) => [c.name, c.effectiveWeight]));
+    // Renormalised survivors == the pre-X12 40.5/20.25/20.25/9/10 exactly.
+    expect(eff[COMP_CHR_AVERAGE]).toBeCloseTo(40.5, 6);
+    expect(eff['complaint_resolution_speed']).toBeCloseTo(20.25, 6);
+    expect(eff['revision_escalation_rate']).toBeCloseTo(20.25, 6);
+    expect(eff[COMP_RECAP_DISCIPLINE]).toBeCloseTo(9, 6);
+    expect(eff[COMP_KECEPATAN_REVIEW_AM]).toBeCloseTo(10, 6);
+    expect(eff[COMP_PLAN_PERIODE_DISCIPLINE]).toBe(0);
+    // …and therefore the identical profile to the LT-1 case above: 77.4.
+    expect(profile).toBeCloseTo(77.4, 3);
+  });
+
+  it('X-12: plan_periode_discipline carries its 10% when present', () => {
+    const { comps, profile, profileOk } = scoreProfile(AM_WEIGHTS_X12, [
+      { name: COMP_CHR_AVERAGE, included: true, raw: 80, reason: '', diagnostic: false },
+      { name: 'complaint_resolution_speed', included: true, raw: 100, reason: '', diagnostic: false },
+      { name: 'revision_escalation_rate', included: true, raw: 100, reason: '', diagnostic: false },
+      { name: COMP_RECAP_DISCIPLINE, included: true, raw: 50, reason: '', diagnostic: false },
+      { name: COMP_KECEPATAN_REVIEW_AM, included: true, raw: 0, reason: '', diagnostic: false },
+      { name: COMP_PLAN_PERIODE_DISCIPLINE, included: true, raw: 0, reason: '', diagnostic: false },
+    ]);
+    expect(profileOk).toBe(true);
+    // 0.3645×80 + 0.18225×100 + 0.18225×100 + 0.081×50 + 0.09×0 + 0.10×0
+    // = 29.16+18.225+18.225+4.05 = 69.66.
+    expect(profile).toBeCloseTo(69.66, 3);
+    const pd = compByName(comps, COMP_PLAN_PERIODE_DISCIPLINE)!;
+    expect(pd.baseWeight).toBe(10);
+    expect(pd.effectiveWeight).toBeCloseTo(10, 6);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -379,6 +438,22 @@ async function insRecap(
 /** Record that `divisi` touched a recap that week (a wrr_divisi row — "owes a note"). */
 async function insWrrDivisi(recapId: string, divisi: string): Promise<void> {
   await sql`insert into wrr_divisi (recap_id, divisi, created_by) values (${recapId}, ${divisi}, 'ZZ-TEST')`;
+}
+/**
+ * X-12: a Plan periode seeded directly at a terminal status (`Ditutup` /
+ * `Ditutup Otomatis`), bypassing the state machine — same test-only pattern
+ * as `insRecap`. `lingkup='klien'` (contract_id/strategi_id NULL) keeps the
+ * fixture minimal; `am_periode_discipline` only reads client_id/tanggal_akhir/
+ * status, never lingkup. `periodeNo` must be distinct per client
+ * (`uq_plan_periode_klien`) — the caller picks it, same as `insRecap`'s
+ * caller picks a distinct `isoWeek`.
+ */
+async function insPlanPeriode(
+  id: string, clientId: string, periodeNo: number, tanggalAkhir: string, status: string,
+): Promise<void> {
+  await sql`insert into plan
+      (id, lingkup, client_id, periode_no, tanggal_mulai, tanggal_akhir, jumlah_minggu, status, created_by)
+    values (${id}, 'klien', ${clientId}, ${periodeNo}, ${tanggalAkhir}::date - 27, ${tanggalAkhir}::date, 4, ${status}, 'ZZ-TEST')`;
 }
 /** Record that `divisi` filed its mandatory weekly note (RM-8) for a recap. */
 async function insCatatanDivisi(recapId: string, divisi: string): Promise<void> {
@@ -671,6 +746,42 @@ describeDb('D-14: Division Weekly-Note Compliance (M14 §9 / M6D RM-8)', () => {
   });
 });
 
+describeDb('X-12: AM Plan-Periode Discipline (M16 §6.4)', () => {
+  it('counts periods the AM closed themselves against those force-closed by B-09', async () => {
+    const am = uid('EMP-PDD');
+    const client = uid('CLI-PDD');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    await insClient(client, am);
+    // Four June periods due, one each:
+    await insPlanPeriode(uid('PLN'), client, 1, '2026-06-07', 'Ditutup');           // AM-closed on time → numerator
+    await insPlanPeriode(uid('PLN'), client, 2, '2026-06-14', 'Ditutup Otomatis'); // force-closed by B-09 → against
+    await insPlanPeriode(uid('PLN'), client, 3, '2026-06-21', 'Ditutup');           // AM-closed on time → numerator
+    await insPlanPeriode(uid('PLN'), client, 4, '2026-06-28', 'Aktif');            // still open, not yet terminal → not counted either way
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), am, JUNE);
+    const pd = compByName(snap.components, COMP_PLAN_PERIODE_DISCIPLINE)!;
+    expect(pd.included).toBe(true);
+    // 2 of 3 terminal periods closed by the AM (the still-Aktif one isn't terminal, so it's outside the denominator) → 66.67%.
+    expect(pd.raw).toBeCloseTo((2 / 3) * 100, 6);
+  });
+
+  it('excludes + redistributes when the AM has no Plan periode due in the period (Rule 6)', async () => {
+    const am = uid('EMP-PDN');
+    const client = uid('CLI-PDN');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    await insClient(client, am);
+    await insCHRSnapshot(uid('CHR'), client, 90, '[]'); // only CHR present
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), am, JUNE);
+    const pd = compByName(snap.components, COMP_PLAN_PERIODE_DISCIPLINE)!;
+    expect(pd.included).toBe(false); // no Plan periode due → excluded
+  });
+});
+
 describeDb('placeholder target flagged', () => {
   it('a KOL creator_count using the seeded placeholder target flags targets_placeholder', async () => {
     const koko = uid('EMP-KOL');
@@ -924,8 +1035,11 @@ describeDb('LT-32: kecepatan_review_am wiring (AM)', () => {
     // LT-1 (pemilik/COO 2026-08-29, migrasi 20260901010000): weight carved from
     // 0 to a real 10%, and the 24h target seeded in the same migration —
     // without that target row the component would still be silently excluded
-    // and the whole decision would be a no-op.
-    expect(kra!.baseWeight).toBe(10);
+    // and the whole decision would be a no-op. X-12 (migrasi 20261212010000)
+    // later carved `plan_periode_discipline` out of the WHOLE post-LT-1 profile
+    // (×0.90), so this component's live weight is now 9, not 10 — the number
+    // itself moved, LT-1's decision (a real, non-zero weight) did not.
+    expect(kra!.baseWeight).toBe(9);
     expect(kra!.included).toBe(true);
     // 48h actual against a 24h target = 200% ⇒ OA-1 transform 200−200 = 0.
     // This is exactly the PRD §6.1 scenario the module was built for: the AM
