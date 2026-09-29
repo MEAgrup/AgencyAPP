@@ -122,6 +122,17 @@ export const COMP_SOURCING_TURNAROUND = 'sourcing_turnaround';
  * AM's score moves until the weight is actually set.
  */
 export const COMP_KECEPATAN_REVIEW_AM = 'kecepatan_review_am';
+/**
+ * X-12 (M16 §6.4, owner 2026-09-29 "jalankan rekomendasi"). AM Plan-Periode
+ * Discipline: % of the AM's Plan periods due in the period (`tanggal_akhir`
+ * in range) that the AM closed themselves (`Ditutup`) rather than force-closed
+ * by the B-09 overrun job (`Ditutup Otomatis`, Rule 15). Unlike D-14
+ * (`recap_discipline`), `plan`'s `Ditutup`/`Ditutup Otomatis` are BOTH genuine
+ * terminal states (no edge back to `Aktif` in `sm_edges` for the `plan`
+ * machine) — the status itself is already permanent, so no separate flag
+ * column was needed. A raw 0..100 percentage — carries NO period target.
+ */
+export const COMP_PLAN_PERIODE_DISCIPLINE = 'plan_periode_discipline';
 
 /**
  * modifierComponent maps a role type to the Module 13 Health-Score sub-component
@@ -1288,6 +1299,10 @@ async function amCandidates(q: Queryable, staffID: string, per: Period, pt: Plac
   // Weekly-Recap Discipline (D-14 / M14 §9): % of the AM's active-client weekly
   // recaps in the period the AM closed on time and never force-closed.
   cands.push(await amRecapDiscipline(q, staffID, per));
+
+  // Plan-Periode Discipline (X-12 / M16 §6.4): % of the AM's Plan periods due
+  // in the period the AM closed themselves rather than force-closed by B-09.
+  cands.push(await amPeriodeDiscipline(q, staffID, per));
   return cands;
 }
 
@@ -1315,6 +1330,33 @@ async function amRecapDiscipline(q: Queryable, staffID: string, per: Period): Pr
     });
   }
   return cand({ name: COMP_RECAP_DISCIPLINE, included: true, raw: (Number(rows[0].ontime) / total) * 100 });
+}
+
+/**
+ * amPeriodeDiscipline (X-12 / M16 §6.4, owner 2026-09-29 "jalankan rekomendasi")
+ * builds the AM Plan-Periode Discipline candidate = % of the AM's Plan periods
+ * whose `tanggal_akhir` falls in the period AND that already reached a terminal
+ * status (`Ditutup` or `Ditutup Otomatis`) that the AM closed themselves
+ * (`Ditutup`). Unlike `amRecapDiscipline`, there is no separate permanent flag
+ * to read: `plan`'s `Ditutup`/`Ditutup Otomatis` are BOTH genuine terminal
+ * states (nol edge keluar di `sm_edges` untuk mesin `plan`), so `status` itself
+ * never "forgets" a force-close the way `weekly_result_recap`'s quasi-terminal
+ * `Ditutup Otomatis` can (Head reopen, RM-5). Already a 0..100 percentage — no
+ * period target (Rule 2). Excluded + redistributed (Rule 6) when the AM has no
+ * Plan period due in the period. One set-based query (P-1): constant
+ * regardless of portfolio.
+ */
+async function amPeriodeDiscipline(q: Queryable, staffID: string, per: Period): Promise<Candidate> {
+  const rows = await q<{ total: string; ontime: string }[]>`
+    select total, ontime from private.am_periode_discipline(${staffID}, ${per.startDate}, ${per.endDate})`;
+  const total = Number(rows[0].total);
+  if (total === 0) {
+    return cand({
+      name: COMP_PLAN_PERIODE_DISCIPLINE, included: false,
+      reason: 'tidak ada periode Plan jatuh tempo pada periode — dikecualikan + bobot didistribusi ulang',
+    });
+  }
+  return cand({ name: COMP_PLAN_PERIODE_DISCIPLINE, included: true, raw: (Number(rows[0].ontime) / total) * 100 });
 }
 
 /**

@@ -22,6 +22,7 @@ export const KPI_COMPONENTS = [
   'note_compliance', // D-14: Kepatuhan Catatan Mingguan (Creative/Ads/KOL/AI Optimizer/Store Operation)
   'sourcing_turnaround', // diagnostic only untuk KOL
   'kecepatan_review_am', // M16 §6.4 — bobot AWAL 0 (Rule 6 meredistribusi); DECISIONS.md LT-1
+  'plan_periode_discipline', // X-12 (M16 §6.4): Disiplin Periode Plan (AM), carve 10% dari profil AM
 ] as const;
 
 // M16/M17 — AI Optimizer + Store Operation ditambahkan dengan bobot AWAL 0 di
@@ -287,4 +288,5 @@ export const COMPONENT_LABELS: Record<string, string> = {
   recap_discipline: 'Disiplin Rekap Mingguan', // D-14 (AM)
   note_compliance: 'Kepatuhan Catatan Mingguan', // D-14 (Creative/Ads/KOL)
   sourcing_turnaround: 'Sourcing Turnaround', // diagnostic
+  plan_periode_discipline: 'Disiplin Periode Plan', // X-12 (AM)
 };
