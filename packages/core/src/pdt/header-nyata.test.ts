@@ -74,7 +74,7 @@ describe('registry PDT vs header berkas nyata (sesi 43)', () => {
       if (hilang.length > 0) turun.push(`${e.kode}: ${hilang.map((h) => h.kolom).join(', ')}`);
     }
     expect(turun).toEqual([
-      // SATU-SATUNYA penurunan status di 12 klien, dan ia informatif: kolom
+      // Penurunan status di 12 klien Juli 2026 hanya SATU, dan ia informatif: kolom
       // `Pengembalian dana` ADA di ekspor Avitaskin lama ("Sample nama asli",
       // dipakai sesi 33) tapi HILANG di kelima ekspor TikTok yang lebih baru —
       // TikTok memang mencabutnya dari "Shop Analytics_Key metrics". Karena ia
@@ -82,6 +82,11 @@ describe('registry PDT vs header berkas nyata (sesi 43)', () => {
       // hanya `parse_status='sebagian'`; batch TETAP lolos ke `verified`. Persis
       // pembedaan yang G1-08-SEBAGIAN dibangun untuk menangani, sekarang terbukti
       // di data nyata dan bukan lagi hipotetis.
+      // Ekspor Analitik Produk tampilan baru (Sep 2026, Linda Hijab & Qadizza)
+      // mencabut `Status daftar produk`. Sebelum 2026-09-30 kolom itu WAJIB ⇒
+      // berkas `gagal` ⇒ rekonsiliasi TikTok tertutup; kini opsional
+      // (TT-ADS-GMVMAX-KAMPANYE, `docs/DECISIONS.md`).
+      'tt_product_analytics: Status daftar produk',
       'tt_shop_analytics: Pengembalian dana',
     ]);
   });

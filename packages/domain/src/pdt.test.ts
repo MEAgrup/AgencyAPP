@@ -2378,6 +2378,111 @@ describeDb('commitUploadBatch (2026-09-16) — baris fakta tt_ads_live → pdt_f
   });
 });
 
+// ---------------------------------------------------------------------------
+// TT-ADS-GMVMAX-KAMPANYE (2026-09-30) — ekspor GMV Max tampilan baru (satu baris
+// per kampanye, sample asli Qadizza Skincare). Modul `tt_ads_product_kampanye`/
+// `tt_ads_live_kampanye` menulis `pdt_fact_ads` dengan `sumber` LAMA supaya
+// laporan/skor tidak berubah; `ID Campaign` ganda dalam satu batch (berkas asli
+// + salinan yang diganti nama) TIDAK dihitung dua kali.
+// ---------------------------------------------------------------------------
+const HEADER_TT_ADS_PRODUCT_KAMPANYE = [
+  'ID Campaign', 'Nama kampanye', 'Perlindungan ROI', 'shop_roi2_qcpx_spillover_shopping_value', 'Anggaran saat ini',
+  'Biaya', 'Biaya Bersih', 'Pengembalian dana', 'Biaya iklan yang dikembalikan', 'Target performa', 'Anggaran harian',
+  'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor', 'ROI', 'Peningkatan aktif', 'Mata uang',
+];
+const HEADER_TT_ADS_LIVE_KAMPANYE = [
+  'ID Campaign', 'Nama kampanye', 'Anggaran saat ini', 'Biaya', 'shop_roi2_qcpx_spillover_shopping_value',
+  'Perlindungan ROI', 'Target performa', 'Biaya Bersih', 'Pendapatan kotor', 'ROI', 'Pesanan SKU', 'Pengembalian dana',
+  'Biaya iklan yang dikembalikan', 'Biaya per pesanan', 'Tayangan LIVE', 'Biaya ROI target', 'Hasil ROI target dasar',
+  'Biaya boost penonton', 'Anggaran boost materi iklan', 'Biaya boost materi iklan', 'Peningkatan aktif', 'Mata uang',
+];
+
+function ttAdsProductKampanyeBerkas(nama: string, sha256: string): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TT_ADS_PRODUCT_KAMPANYE,
+    ['1872486795598994', '6 Produk Best-Test', 'Tidak memenuhi syarat untuk perlindungan ROI', '0', '500000',
+      '1344379', '1344379', '-', '-', 'Penghasilan bruto', '500000', '50', '26888', '7225985', '5.37', '', 'IDR'],
+    ['1876289099685554', 'Mix 5 Products', 'Memenuhi syarat untuk perlindungan ROI', '0', '100000',
+      '36650', '36650', '-', '-', 'Penghasilan bruto', '100000', '0', '0', '0', '0.00', '', 'IDR'],
+  ];
+  return { nama, sha256, bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_ads_product_kampanye', ambiguous: false, matches: ['tt_ads_product_kampanye'] };
+}
+
+function ttAdsLiveKampanyeBerkas(nama: string, sha256: string): PdtPreviewBerkasInput {
+  const aoa: unknown[][] = [
+    HEADER_TT_ADS_LIVE_KAMPANYE,
+    ['1872486598855729', 'GMAX LIVE QADIZZA', '600000', '1893821', '0', 'Memenuhi syarat untuk perlindungan ROI',
+      'Penghasilan bruto', '1893821', '15743867', '8.31', '91', '-', '-', '20811', '7249', '1893821', '8.31', '0', '0', '0',
+      'Mega LIVE', 'IDR'],
+  ];
+  return { nama, sha256, bytes: 100, ditolakPagar: null, decodeGagal: null, aoa, sheets: null, modulTerdeteksi: 'tt_ads_live_kampanye', ambiguous: false, matches: ['tt_ads_live_kampanye'] };
+}
+
+describeDb('commitUploadBatch (TT-ADS-GMVMAX-KAMPANYE) — ekspor GMV Max per kampanye → pdt_fact_ads', () => {
+  it('product + live format baru ⇒ status ok, ditulis dengan sumber tt_ads_product/tt_ads_live', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttAdsProductKampanyeBerkas('Product campaign data.xlsx', 'sha-kampanye-product'),
+      ttAdsLiveKampanyeBerkas('Live campaign data.xlsx', 'sha-kampanye-live'),
+    ];
+    const preview = await previewUploadBatch(sql, ownerActor(), cpId, berkas);
+    const statusPerModul = Object.fromEntries(preview.berkas.map((b) => [b.modulKode, b.status]));
+    expect(statusPerModul).toMatchObject({ tt_ads_product_kampanye: 'ok', tt_ads_live_kampanye: 'ok' });
+
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactAds(cpId);
+    const product = rows.filter((r) => r.sumber === 'tt_ads_product');
+    const live = rows.filter((r) => r.sumber === 'tt_ads_live');
+    expect(product.map((r) => r.kampanye_id).sort()).toEqual(['1872486795598994', '1876289099685554']);
+    const best = product.find((r) => r.kampanye_id === '1872486795598994')!;
+    expect(Number(best.biaya)).toBe(1344379);
+    expect(Number(best.gmv)).toBe(7225985);
+    expect(best).toMatchObject({ pesanan_sku: 50, tayangan: null, klik: null, tipe_kampanye_sumber: null });
+    expect(live).toHaveLength(1);
+    expect(Number(live[0].biaya)).toBe(1893821);
+    expect(Number(live[0].gmv)).toBe(15743867);
+    expect(live[0]).toMatchObject({ kampanye_id: '1872486598855729', pesanan_sku: 91, tayangan: 7249, klik: null });
+  });
+
+  it('berkas yang sama terunggah dua kali dalam satu ZIP (nama asli + nama tim) ⇒ tiap kampanye ditulis SEKALI', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      ttAdsProductKampanyeBerkas('Product campaign data.xlsx', 'sha-kampanye-product-a'),
+      ttAdsProductKampanyeBerkas('[ads]-Product && Klien.xlsx', 'sha-kampanye-product-b'),
+      ttAdsLiveKampanyeBerkas('Live campaign data.xlsx', 'sha-kampanye-live-a'),
+      ttAdsLiveKampanyeBerkas('[ads]-Live && Klien.xlsx', 'sha-kampanye-live-b'),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadFactAds(cpId);
+    expect(rows.filter((r) => r.sumber === 'tt_ads_product')).toHaveLength(2);
+    expect(rows.filter((r) => r.sumber === 'tt_ads_live')).toHaveLength(1);
+  });
+
+  it('format lama per materi + ringkasan format baru untuk kampanye yang SAMA ⇒ ringkasan tidak menambah ulang (urutan berkas tidak berpengaruh)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const berkas = [
+      ttVideoBerkasDenganPeriode('video.xlsx', 'KR-1', '01/07/2026 - 31/07/2026'),
+      // ringkasan format baru SENGAJA di depan
+      ttAdsProductKampanyeBerkas('Product campaign data.xlsx', 'sha-kampanye-product'),
+      ttAdsProductBerkas('ads-product-lama.xlsx', [['1872486795598994', '1000', '1', '5000'], ['1872486795598994', '2000', '2', '6000']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = (await loadFactAds(cpId)).filter((r) => r.sumber === 'tt_ads_product');
+    // 2 baris per materi (format lama) untuk kampanye ...994 + 1 baris ringkasan untuk ...554 saja
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((r) => r.kampanye_id === '1872486795598994').map((r) => Number(r.biaya)).sort((a, b) => a - b)).toEqual([1000, 2000]);
+    expect(rows.filter((r) => r.kampanye_id === '1876289099685554')).toHaveLength(1);
+  });
+});
+
 // F-03 (M20 R9, videoviews-only, 2026-09-23) — `tt_ads_manager_videoviews` →
 // `pdt_fact_ads`, `tujuan = 'upper'` LITERAL. Header PERSIS sample asli
 // pemilik (Ultrasleep, `Ultrasleep_Video_views_TTAM.xlsx`) — lihat docblock

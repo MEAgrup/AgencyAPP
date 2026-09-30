@@ -253,6 +253,45 @@ describe('ekstrakBarisTtAdsLive', () => {
   });
 });
 
+// TT-ADS-GMVMAX-KAMPANYE (2026-09-30) — ekspor GMV Max tampilan baru (satu
+// baris per kampanye). Header + baris PERSIS sample asli Qadizza Skincare
+// 21–27 Sep 2026; modul `*_kampanye` memakai ekstraktor yang SAMA dengan
+// format lama, jadi yang dibuktikan di sini: kolom yang hilang (tayangan/klik
+// produk, `Jenis materi iklan`) jadi `null`, bukan 0, dan angka tetap benar.
+describe('format ringkasan per kampanye GMV Max (tt_ads_*_kampanye)', () => {
+  it('Product campaign data ⇒ satu baris per kampanye; tayangan/klik/tipe null', () => {
+    const aoa = [
+      ['ID Campaign', 'Nama kampanye', 'Perlindungan ROI', 'shop_roi2_qcpx_spillover_shopping_value', 'Anggaran saat ini',
+        'Biaya', 'Biaya Bersih', 'Pengembalian dana', 'Biaya iklan yang dikembalikan', 'Target performa', 'Anggaran harian',
+        'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor', 'ROI', 'Peningkatan aktif', 'Mata uang'],
+      ['1872486795598994', '6 Produk Best-Test', 'Tidak memenuhi syarat untuk perlindungan ROI', '0', '500000',
+        '1344379', '1344379', '-', '-', 'Penghasilan bruto', '500000', '50', '26888', '7225985', '5.37', '', 'IDR'],
+      ['1876289099685554', 'Mix 5 Products', 'Memenuhi syarat untuk perlindungan ROI', '0', '100000',
+        '36650', '36650', '-', '-', 'Penghasilan bruto', '100000', '0', '0', '0', '0.00', '', 'IDR'],
+    ];
+    const hasil = ekstrakBarisTtAdsProduct(aoa, 1);
+    expect(hasil).toEqual([
+      { kampanyeId: '1872486795598994', biaya: 1344379, pesananSku: 50, gmv: 7225985, roas: 7225985 / 1344379, tayangan: null, klik: null, tipeKampanyeSumber: null },
+      { kampanyeId: '1876289099685554', biaya: 36650, pesananSku: 0, gmv: 0, roas: 0, tayangan: null, klik: null, tipeKampanyeSumber: null },
+    ]);
+  });
+
+  it('Live campaign data ⇒ satu baris per kampanye, Tayangan LIVE terbaca', () => {
+    const aoa = [
+      ['ID Campaign', 'Nama kampanye', 'Anggaran saat ini', 'Biaya', 'shop_roi2_qcpx_spillover_shopping_value',
+        'Perlindungan ROI', 'Target performa', 'Biaya Bersih', 'Pendapatan kotor', 'ROI', 'Pesanan SKU', 'Pengembalian dana',
+        'Biaya iklan yang dikembalikan', 'Biaya per pesanan', 'Tayangan LIVE', 'Biaya ROI target', 'Hasil ROI target dasar',
+        'Biaya boost penonton', 'Anggaran boost materi iklan', 'Biaya boost materi iklan', 'Peningkatan aktif', 'Mata uang'],
+      ['1872486598855729', 'GMAX LIVE QADIZZA', '600000', '1893821', '0', 'Memenuhi syarat untuk perlindungan ROI',
+        'Penghasilan bruto', '1893821', '15743867', '8.31', '91', '-', '-', '20811', '7249', '1893821', '8.31', '0', '0', '0',
+        'Mega LIVE', 'IDR'],
+    ];
+    expect(ekstrakBarisTtAdsLive(aoa, 1)).toEqual([
+      { kampanyeId: '1872486598855729', biaya: 1893821, pesananSku: 91, gmv: 15743867, roas: 15743867 / 1893821, tayangan: 7249 },
+    ]);
+  });
+});
+
 // F-03 (M20 R9, videoviews-only) — header PERSIS sample asli pemilik
 // (Ultrasleep, `Ultrasleep_Video_views_TTAM.xlsx`, 2026-09-23).
 const HEADER_TTAM_VIDEOVIEWS = [
