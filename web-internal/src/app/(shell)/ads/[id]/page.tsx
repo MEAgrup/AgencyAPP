@@ -38,6 +38,12 @@ function formatDateTime(value: string | null | undefined) {
   return new Date(value).toLocaleString('id-ID');
 }
 
+/** Tanggal hari ini di WIB sebagai YYYY-MM-DD (nilai default & batas atas input tanggal iklan). */
+function todayWib(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date());
+}
+
 export default function AdCampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { role } = useAuth();
@@ -70,6 +76,9 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
   // Lifecycle (mutually-exclusive buttons → one error slot + a pending-action tag).
   const [lifecyclePending, setLifecyclePending] = useState<string | null>(null);
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  // ADS-PERIODE-IKLAN-AKTUAL — tanggal iklan sungguhan untuk Mulai/Selesai Iklan.
+  const [tanggalMulaiIklan, setTanggalMulaiIklan] = useState(todayWib());
+  const [tanggalSelesaiIklan, setTanggalSelesaiIklan] = useState(todayWib());
 
   // Link / unlink creative asset
   const [linkAssetId, setLinkAssetId] = useState('');
@@ -347,12 +356,32 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
             <div>{campaign.target_kpi}</div>
           </div>
           <div>
-            <div className="muted" style={{ fontSize: 12 }}>Tanggal Mulai</div>
+            <div className="muted" style={{ fontSize: 12 }}>Rencana Mulai</div>
             <div>{formatDate(campaign.start_date)}</div>
           </div>
           <div>
-            <div className="muted" style={{ fontSize: 12 }}>Tanggal Selesai</div>
+            <div className="muted" style={{ fontSize: 12 }}>Rencana Selesai</div>
             <div>{formatDate(campaign.end_date)}</div>
+          </div>
+          {/* ADS-PERIODE-IKLAN-AKTUAL (Improvement Req Account butir 6) — periode
+              iklan SUNGGUHAN, terpisah dari rencana & durasi kontrak. */}
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>Iklan Mulai (aktual)</div>
+            <div>{campaign.iklan_mulai ? formatDate(campaign.iklan_mulai) : 'Belum dimulai'}</div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>Iklan Selesai (aktual)</div>
+            <div>
+              {campaign.iklan_selesai
+                ? formatDate(campaign.iklan_selesai)
+                : campaign.iklan_mulai ? 'Masih berjalan' : '—'}
+            </div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>
+              Lama Iklan Berjalan &middot; <span title="Dihitung dari tanggal mulai s/d selesai (atau hari ini)">🔒 read-only</span>
+            </div>
+            <div>{campaign.hari_iklan_berjalan === null ? '—' : `${campaign.hari_iklan_berjalan} hari`}</div>
           </div>
         </div>
       </section>
@@ -480,37 +509,82 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
             <h2>Aksi Kampanye</h2>
           </div>
           {lifecycleError && <div className="alert alertError" role="alert">{lifecycleError}</div>}
-          <div className="row" style={{ gap: 10 }}>
-            {canLaunch && (
+          <div className="stack" style={{ gap: 12 }}>
+            {canLaunch && !campaign.iklan_mulai && (
+              <div className="row" style={{ gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div className="field">
+                  <label htmlFor="tgl-mulai-iklan">Tanggal iklan mulai</label>
+                  <input
+                    id="tgl-mulai-iklan"
+                    type="date"
+                    max={todayWib()}
+                    value={tanggalMulaiIklan}
+                    onChange={(e) => setTanggalMulaiIklan(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  disabled={lifecyclePending !== null}
+                  onClick={() => runLifecycle('launch', () => launchCampaign(id, tanggalMulaiIklan))}
+                >
+                  {lifecyclePending === 'launch' ? 'Memproses...' : 'Mulai Iklan'}
+                </button>
+              </div>
+            )}
+            <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+              {canLaunch && campaign.iklan_mulai && (
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  disabled={lifecyclePending !== null}
+                  onClick={() => runLifecycle('launch', () => launchCampaign(id))}
+                >
+                  {lifecyclePending === 'launch' ? 'Memproses...' : 'Lanjutkan Iklan (Resume)'}
+                </button>
+              )}
+              {isActive && (
+                <button
+                  type="button"
+                  className="btn btnSecondary"
+                  disabled={lifecyclePending !== null}
+                  onClick={() => runLifecycle('pause', () => pauseCampaign(id))}
+                >
+                  {lifecyclePending === 'pause' ? 'Memproses...' : 'Jeda (Pause)'}
+                </button>
+              )}
+            </div>
+            <div className="row" style={{ gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              {campaign.iklan_mulai && (
+                <div className="field">
+                  <label htmlFor="tgl-selesai-iklan">Tanggal iklan selesai</label>
+                  <input
+                    id="tgl-selesai-iklan"
+                    type="date"
+                    min={campaign.iklan_mulai}
+                    max={todayWib()}
+                    value={tanggalSelesaiIklan}
+                    onChange={(e) => setTanggalSelesaiIklan(e.target.value)}
+                  />
+                </div>
+              )}
               <button
                 type="button"
-                className="btn btnPrimary"
+                className="btn btnDanger"
                 disabled={lifecyclePending !== null}
-                onClick={() => runLifecycle('launch', () => launchCampaign(id))}
+                onClick={() =>
+                  runLifecycle(
+                    'end',
+                    () => endCampaign(id, campaign.iklan_mulai ? tanggalSelesaiIklan : undefined),
+                    'Selesaikan iklan ini? Status [Ended] bersifat final dan tidak dapat dibatalkan.',
+                  )
+                }
               >
-                {lifecyclePending === 'launch' ? 'Memproses...' : 'Luncurkan / Resume'}
+                {lifecyclePending === 'end'
+                  ? 'Memproses...'
+                  : campaign.iklan_mulai ? 'Selesai Iklan' : 'Akhiri (tanpa tayang)'}
               </button>
-            )}
-            {isActive && (
-              <button
-                type="button"
-                className="btn btnSecondary"
-                disabled={lifecyclePending !== null}
-                onClick={() => runLifecycle('pause', () => pauseCampaign(id))}
-              >
-                {lifecyclePending === 'pause' ? 'Memproses...' : 'Jeda (Pause)'}
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn btnDanger"
-              disabled={lifecyclePending !== null}
-              onClick={() =>
-                runLifecycle('end', () => endCampaign(id), 'Akhiri kampanye ini? Status [Ended] bersifat final dan tidak dapat dibatalkan.')
-              }
-            >
-              {lifecyclePending === 'end' ? 'Memproses...' : 'Akhiri (End)'}
-            </button>
+            </div>
           </div>
         </section>
       )}

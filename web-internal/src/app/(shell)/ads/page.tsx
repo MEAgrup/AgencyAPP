@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 import {
   PLATFORM_OPTIONS,
   TIPE_IKLAN_OPTIONS,
@@ -335,9 +336,9 @@ export default function AdsWorkspacePage() {
                     </td>
                     <td>{b.due_date || '—'}</td>
                     <td>{b.priority || '—'}</td>
-                    <td><StatusBadge status={b.status} /></td>
+                    <td><StatusBadge status={briefDisplayStatus(b)} /></td>
                     <td>
-                      {canManage && b.status === BRIEF_TODO ? (
+                      {canManage && b.status === BRIEF_TODO && b.intake_state !== 'dikembalikan' ? (
                         <button
                           type="button"
                           className="btn btnSecondary btnSm"

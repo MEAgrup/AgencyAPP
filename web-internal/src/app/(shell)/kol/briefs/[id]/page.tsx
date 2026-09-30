@@ -24,6 +24,7 @@ import {
 import { hitungProgres, labelProgres } from '@/lib/brief-progress';
 import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 import StageTimelinePanel from '@/components/StageTimelinePanel';
 
 function formatDateTime(value: string | null | undefined) {
@@ -291,7 +292,7 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
         </div>
         <div className="row" style={{ gap: 8 }}>
           {brief.revision_flagged && <span className="badge badge-red">Revisi Berulang</span>}
-          <StatusBadge status={brief.status} />
+          <StatusBadge status={briefDisplayStatus(brief)} />
         </div>
       </div>
 

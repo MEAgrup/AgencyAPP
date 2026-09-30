@@ -120,6 +120,10 @@ export default function BriefBoardPage() {
                             {b.deliverable_type} &middot; {b.priority}
                           </div>
                           <div className="muted" style={{ fontSize: 12 }}>Due: {b.due_date || '—'}</div>
+                          {/* BRIEF-KEMBALI-SIKLUS — dikembalikan divisi, giliran AM merevisi. */}
+                          {b.intake_state === 'dikembalikan' && (
+                            <span className="badge badge-red" style={{ marginTop: 4 }}>Hold &middot; perlu revisi AM</span>
+                          )}
                         </Link>
                       ))
                     )}

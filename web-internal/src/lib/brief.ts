@@ -96,4 +96,31 @@ export interface Brief {
    * divisi tanpa tabel anak — dan `0` justru baris yang paling perlu dilihat.
    */
   jumlah_anak: number;
+  /**
+   * BRIEF-KEMBALI-SIKLUS (2026-09-30) — status intake turunan:
+   * `menunggu` (belum/akan dinilai ulang divisi), `diterima`, atau
+   * `dikembalikan` (= HOLD, brief ada di tangan AM untuk direvisi).
+   */
+  intake_state: BriefIntakeState;
+}
+
+export type BriefIntakeState = 'menunggu' | 'diterima' | 'dikembalikan';
+
+/** Status tampilan untuk Brief yang ditahan (dikembalikan ke AM). Bukan state mesin. */
+export const BRIEF_HOLD_DISPLAY = '[Hold]';
+
+const TERMINAL_BRIEF = new Set(['[Approved]', '[Cancelled — Service Voided]']);
+
+/**
+ * briefDisplayStatus — status yang DIRENDER untuk sebuah Brief. Brief yang
+ * dikembalikan ke AM dan belum dikirim ulang tampil `[Hold]` di semua layar
+ * (butir 2 Improvement Req Account): pekerjaannya sedang di AM, bukan di divisi.
+ * `status` aslinya tetap dikirim server apa adanya dan tetap yang dipakai untuk
+ * gerbang aksi.
+ */
+export function briefDisplayStatus(b: Pick<Brief, 'status' | 'intake_state'>): string {
+  if (b.intake_state === 'dikembalikan' && !TERMINAL_BRIEF.has(b.status)) {
+    return BRIEF_HOLD_DISPLAY;
+  }
+  return b.status;
 }

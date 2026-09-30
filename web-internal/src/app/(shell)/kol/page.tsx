@@ -7,6 +7,7 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { getMonthlyKolReport, listKolBriefQueue, type Brief, type MonthlyKolReport } from '@/lib/kol';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 
 export default function KolWorkspacePage() {
   const router = useRouter();
@@ -212,6 +213,10 @@ export default function KolWorkspacePage() {
               <thead>
                 <tr>
                   <th>ID</th>
+                  {/* Improvement Req Account butir 4 (2026-09-30) — KOL bekerja
+                      per-merek; ID klien saja tidak terbaca. Pola sama dengan
+                      antrean Ads/Creative/tasks. */}
+                  <th>Klien</th>
                   <th>Judul</th>
                   <th>Deliverable</th>
                   <th>PIC</th>
@@ -230,11 +235,15 @@ export default function KolWorkspacePage() {
                 {briefs.map((b) => (
                   <tr key={b.id}>
                     <td><Link href={`/kol/briefs/${b.id}`}>{b.id}</Link></td>
+                    <td>
+                      {b.client_nama || '—'}
+                      {b.client_id && <div className="muted" style={{ fontSize: 11 }}>{b.client_id}</div>}
+                    </td>
                     <td>{b.title}</td>
                     <td>{b.deliverable_type}</td>
-                    <td>{b.assigned_pic || '—'}</td>
+                    <td>{b.assigned_pic_nama || b.assigned_pic || '—'}</td>
                     <td>{b.priority}</td>
-                    <td><StatusBadge status={b.status} /></td>
+                    <td><StatusBadge status={briefDisplayStatus(b)} /></td>
                     <td>{b.due_date || '—'}</td>
                     <td>{b.quantity_target > 0 ? b.quantity_target : '—'}</td>
                   </tr>

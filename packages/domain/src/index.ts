@@ -138,6 +138,8 @@ export * as audit from './audit';
 export * as engine from './engine';
 // M16 (Akun A "Tahapan & Metrik") — mesin tahapan produksi per Brief + lead time.
 export * as stage from './stage';
+export * as briefIntake from './brief-intake';
+export * as clientLog from './client-log';
 export * as leadtime from './leadtime';
 // Permintaan (REQ-, M16 §5.5) — a SECOND, standalone client-linked request
 // entity. Deliberately not `internaltask` (which is sengaja WITHOUT client_id)

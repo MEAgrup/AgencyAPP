@@ -48,6 +48,12 @@ export const MSG_INVALID_SLA = '[target hari kerja harus lebih dari 0 hari kerja
 export const MSG_SLA_FORBIDDEN = '[anda tidak memiliki akses untuk mengubah target tahap ini]';
 export const MSG_STAGE_CODE_INVALID = '[tahap tidak valid untuk pipeline brief ini]';
 export const MSG_VIEW_FORBIDDEN = '[anda tidak memiliki akses ke tahapan brief ini]';
+/**
+ * BRIEF-KEMBALI-SIKLUS: keluar dari `Brief Dikembalikan ke AM` HANYA lewat
+ * `brief-intake.kirimUlangBrief` (catatan revisi + baris `brief_kirim_ulang` +
+ * notifikasi divisi). Jalur `advanceStage` LT-4 lama melewati ketiganya.
+ */
+export const MSG_GUNAKAN_KIRIM_ULANG = '[gunakan Revisi & Kirim Ulang Brief untuk mengirim ulang brief ini]';
 
 export class ValidationError extends Error {
   constructor(message: string) {
@@ -306,6 +312,9 @@ export async function advanceStage(sql: Sql, actor: Actor, briefId: string, to: 
     if (r.stagePipelineCode === null || r.productionStage === null) {
       throw new ConflictError(MSG_NO_PIPELINE);
     }
+    if (r.productionStage === STAGE_RETURNED) {
+      throw new ConflictError(MSG_GUNAKAN_KIRIM_ULANG);
+    }
     const pipeline = await pipelineByCode(tx, r.stagePipelineCode);
     const currentDef = await stageDefByCode(tx, r.stagePipelineCode, r.productionStage);
     if (currentDef?.gatePihak === 'AM') {
@@ -345,18 +354,35 @@ export interface ReviewInput {
   catatan?: string;
 }
 
+/** Hasil satu keputusan intake — dipakai `brief-intake.reviewIntake`. */
+export interface ReviewOutcome {
+  putaran: number;
+  ownerAm: string;
+  assignedDivision: string;
+}
+
 /**
  * reviewBrief records the division's intake decision (PRD §2 Rule 10) — ALWAYS,
  * regardless of whether the division has a pipeline or whether that pipeline
- * literally has a `'Cek Brief AM'` state (Live Stream does not — HANDOFF
- * §1.2). `brief_review` is append-ONCE: a second call on the same Brief is a
- * conflict, never an update (aturan rumah #3).
+ * literally has a `'Cek Brief AM'` state.
+ *
+ * BRIEF-KEMBALI-SIKLUS (2026-09-30): `brief_review` kini satu baris per
+ * PUTARAN. Keputusan hanya boleh diambil saat status intake turunan
+ * (`private.brief_intake_state`) adalah `menunggu` — belum pernah diputus, atau
+ * AM sudah mengirim ulang pengembalian putaran sebelumnya. Keputusan kedua
+ * pada putaran yang sama tetap 409; baris lama tidak pernah diubah (aturan
+ * rumah #3).
  *
  * The stage machine is driven ONLY when the Brief's CURRENT `production_stage`
  * is exactly `'Cek Brief AM'` — the one condition under which this decision
  * corresponds to a real edge in that pipeline's machine.
  */
 export async function reviewBrief(sql: Sql, actor: Actor, briefId: string, input: ReviewInput): Promise<void> {
+  await withTransaction(sql, (tx) => reviewBriefTx(tx, actor, briefId, input));
+}
+
+/** reviewBriefTx is reviewBrief's transaction BODY, for a caller composing more work in the same transaction. */
+export async function reviewBriefTx(tx: Queryable, actor: Actor, briefId: string, input: ReviewInput): Promise<ReviewOutcome> {
   if (input.keputusan !== 'Diterima' && input.keputusan !== 'Dikembalikan') {
     throw new ValidationError(MSG_INVALID_KEPUTUSAN);
   }
@@ -366,46 +392,48 @@ export async function reviewBrief(sql: Sql, actor: Actor, briefId: string, input
     throw new ValidationError(MSG_ALASAN_REQUIRED);
   }
 
-  return withTransaction(sql, async (tx) => {
-    const ex = executors(tx);
-    const r = await lockBriefStage(tx, briefId);
-    if (!canReviewBrief(actor, r.assignedDivision)) {
-      throw new ForbiddenError(MSG_EXEC_FORBIDDEN);
+  const ex = executors(tx);
+  const r = await lockBriefStage(tx, briefId);
+  if (!canReviewBrief(actor, r.assignedDivision)) {
+    throw new ForbiddenError(MSG_EXEC_FORBIDDEN);
+  }
+  const state = await tx<{ s: string | null; putaran: number | null }[]>`
+    select private.brief_intake_state(${briefId}) as s,
+           (select max(putaran) from brief_review where brief_id = ${briefId}) as putaran`;
+  if (state[0].s !== 'menunggu') {
+    throw new ConflictError(MSG_ALREADY_REVIEWED);
+  }
+  const putaran = Number(state[0].putaran ?? 0) + 1;
+  if (input.keputusan === 'Dikembalikan') {
+    const allowed = REASON_CODES_BY_DIVISION[r.assignedDivision] ?? REASON_FALLBACK;
+    if (!allowed.includes(alasan)) {
+      throw new ValidationError(MSG_ALASAN_INVALID);
     }
-    const already = await tx<{ n: number }[]>`select 1 as n from brief_review where brief_id = ${briefId}`;
-    if (already.length > 0) {
-      throw new ConflictError(MSG_ALREADY_REVIEWED);
-    }
-    if (input.keputusan === 'Dikembalikan') {
-      const allowed = REASON_CODES_BY_DIVISION[r.assignedDivision] ?? REASON_FALLBACK;
-      if (!allowed.includes(alasan)) {
-        throw new ValidationError(MSG_ALASAN_INVALID);
-      }
-    }
-    await tx`
-      insert into brief_review (brief_id, keputusan, alasan_kode, catatan, actor_employee_id)
-      values (${briefId}, ${input.keputusan}, ${input.keputusan === 'Dikembalikan' ? alasan : null}, ${catatan}, ${actor.employeeId})`;
+  }
+  await tx`
+    insert into brief_review (brief_id, putaran, keputusan, alasan_kode, catatan, actor_employee_id)
+    values (${briefId}, ${putaran}, ${input.keputusan}, ${input.keputusan === 'Dikembalikan' ? alasan : null}, ${catatan}, ${actor.employeeId})`;
 
-    if (r.productionStage === STAGE_CEK_BRIEF_AM && r.stagePipelineCode !== null) {
-      const pipeline = await pipelineByCode(tx, r.stagePipelineCode);
-      const to =
-        input.keputusan === 'Diterima' ? await nextStageAfterIntake(tx, pipeline.machineName) : STAGE_RETURNED;
-      const res = await statemachine.transition(ex.sm, {
-        machine: pipeline.machineName, entityType: 'brief_stage', table: 'briefs',
-        idColumn: 'id', statusColumn: 'production_stage', entityId: briefId, to, actor,
-      });
-      if (!res.ok) {
-        throw transitionError(res);
-      }
+  if (r.productionStage === STAGE_CEK_BRIEF_AM && r.stagePipelineCode !== null) {
+    const pipeline = await pipelineByCode(tx, r.stagePipelineCode);
+    const to =
+      input.keputusan === 'Diterima' ? await nextStageAfterIntake(tx, pipeline.machineName) : STAGE_RETURNED;
+    const res = await statemachine.transition(ex.sm, {
+      machine: pipeline.machineName, entityType: 'brief_stage', table: 'briefs',
+      idColumn: 'id', statusColumn: 'production_stage', entityId: briefId, to, actor,
+    });
+    if (!res.ok) {
+      throw transitionError(res);
     }
+  }
 
-    if (r.ownerAm !== '') {
-      await notification.emit(ex.notify, {
-        event: input.keputusan === 'Diterima' ? notification.EVENTS.BriefDiterimaDivisi : notification.EVENTS.BriefDikembalikan,
-        entityType: 'brief', entityId: briefId, actor: actor.employeeId, explicitRecipients: [r.ownerAm],
-      });
-    }
-  });
+  if (r.ownerAm !== '') {
+    await notification.emit(ex.notify, {
+      event: input.keputusan === 'Diterima' ? notification.EVENTS.BriefDiterimaDivisi : notification.EVENTS.BriefDikembalikan,
+      entityType: 'brief', entityId: briefId, actor: actor.employeeId, explicitRecipients: [r.ownerAm],
+    });
+  }
+  return { putaran, ownerAm: r.ownerAm, assignedDivision: r.assignedDivision };
 }
 
 /** nextStageAfterIntake finds the one 'Cek Brief AM' edge that is NOT the return path. */
@@ -461,11 +489,36 @@ export async function setStageSlaTarget(sql: Sql, actor: Actor, briefId: string,
 // Read path — LT-25.
 // ---------------------------------------------------------------------------
 
+export interface ReviewRecord {
+  putaran: number;
+  keputusan: Keputusan;
+  alasanKode: string | null;
+  catatan: string;
+  actorEmployeeId: string;
+  createdAt: Date;
+}
+
+/** Satu kiriman ulang AM (BRIEF-KEMBALI-SIKLUS). */
+export interface KirimUlangRecord {
+  putaran: number;
+  catatan: string;
+  perubahan: Record<string, { before: unknown; after: unknown }>;
+  actorEmployeeId: string;
+  createdAt: Date;
+}
+
 export interface StageOverview {
   briefId: string;
   stagePipelineCode: string | null;
   productionStage: string | null;
-  review: { keputusan: Keputusan; alasanKode: string | null; catatan: string; actorEmployeeId: string; createdAt: Date } | null;
+  /** Keputusan PUTARAN TERAKHIR (null = belum pernah diputus). */
+  review: ReviewRecord | null;
+  /** Status intake turunan: menunggu | diterima | dikembalikan (= HOLD). */
+  intakeState: 'menunggu' | 'diterima' | 'dikembalikan';
+  /** Seluruh keputusan, putaran menaik. */
+  reviews: ReviewRecord[];
+  /** Seluruh kiriman ulang AM, putaran menaik. */
+  kirimUlang: KirimUlangRecord[];
   leadTime: StageLeadTimeSummary;
   nextStages: NextStage[];
 }
@@ -494,6 +547,9 @@ export interface NextStage {
 }
 
 async function listNextStages(tx: Queryable, pipelineCode: string, from: string): Promise<NextStage[]> {
+  if (from === STAGE_RETURNED) {
+    return []; // keluar dari sini HANYA lewat kirimUlangBrief (MSG_GUNAKAN_KIRIM_ULANG)
+  }
   const pipeline = await pipelineByCode(tx, pipelineCode);
   const toStates = (await allowedTransitions(tx, pipeline.machineName, from)).filter((s) => s !== STAGE_RETURNED);
   if (toStates.length === 0) {
@@ -524,12 +580,30 @@ export async function getStageOverview(sql: Queryable, actor: Actor, briefId: st
     throw new ForbiddenError(MSG_VIEW_FORBIDDEN);
   }
 
-  const reviewRows = await sql<{ keputusan: Keputusan; alasan_kode: string | null; catatan: string; actor_employee_id: string; created_at: Date }[]>`
-    select keputusan, alasan_kode, catatan, actor_employee_id, created_at from brief_review where brief_id = ${briefId}`;
-  const review = reviewRows.length === 0 ? null : {
-    keputusan: reviewRows[0].keputusan, alasanKode: reviewRows[0].alasan_kode, catatan: reviewRows[0].catatan,
-    actorEmployeeId: reviewRows[0].actor_employee_id, createdAt: reviewRows[0].created_at,
-  };
+  const [reviewRows, kirimRows, stateRows] = await Promise.all([
+    sql<{ putaran: number; keputusan: Keputusan; alasan_kode: string | null; catatan: string; actor_employee_id: string; created_at: Date }[]>`
+      select putaran, keputusan, alasan_kode, catatan, actor_employee_id, created_at
+        from brief_review where brief_id = ${briefId} order by putaran asc`,
+    sql<{ putaran: number; catatan: string; perubahan: Record<string, { before: unknown; after: unknown }> | null; actor_employee_id: string; created_at: Date }[]>`
+      select putaran, catatan, perubahan, actor_employee_id, created_at
+        from brief_kirim_ulang where brief_id = ${briefId} order by putaran asc`,
+    sql<{ s: string | null }[]>`select private.brief_intake_state(${briefId}) as s`,
+  ]);
+  const reviews: ReviewRecord[] = reviewRows.map((x) => ({
+    putaran: Number(x.putaran), keputusan: x.keputusan, alasanKode: x.alasan_kode, catatan: x.catatan,
+    actorEmployeeId: x.actor_employee_id, createdAt: x.created_at,
+  }));
+  const kirimUlang: KirimUlangRecord[] = kirimRows.map((x) => ({
+    putaran: Number(x.putaran), catatan: x.catatan, perubahan: x.perubahan ?? {},
+    actorEmployeeId: x.actor_employee_id, createdAt: x.created_at,
+  }));
+  const review = reviews.length === 0 ? null : reviews[reviews.length - 1];
+  const s0 = stateRows[0]?.s;
+  const intakeState = s0 === 'diterima' || s0 === 'dikembalikan' ? s0 : 'menunggu';
+  // Rentang "AM kirim → divisi merespons" tetap diukur dari keputusan PERTAMA:
+  // itu respons divisi atas brief yang AM kirim. Putaran berikutnya tercatat di
+  // `reviews`/`kirimUlang` dan di baris tahap `Brief Dikembalikan ke AM`.
+  const firstReview = reviews.length === 0 ? null : reviews[0];
 
   // Rule 12: divisi tanpa pipeline (stage_pipeline_code null) tetap punya
   // rentang Cek Brief AM (brief_review) — computeStageLeadTime menghitung
@@ -545,7 +619,7 @@ export async function getStageOverview(sql: Queryable, actor: Actor, briefId: st
   const overrides = new Map(overrideRows.map((o) => [o.stage_code, Number(o.target_hari_kerja)]));
   const leadTime = await computeStageLeadTime(
     sql, defs, transitionsOf(stageLog, briefId), transitionsOf(statusLog, briefId), overrides,
-    r.created_at, review?.createdAt ?? null,
+    r.created_at, firstReview?.createdAt ?? null,
   );
   const nextStages =
     r.stage_pipeline_code === null || r.production_stage === null
@@ -554,7 +628,7 @@ export async function getStageOverview(sql: Queryable, actor: Actor, briefId: st
 
   return {
     briefId: r.id, stagePipelineCode: r.stage_pipeline_code, productionStage: r.production_stage, review, leadTime,
-    nextStages,
+    nextStages, intakeState, reviews, kirimUlang,
   };
 }
 

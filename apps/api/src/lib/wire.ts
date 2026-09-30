@@ -10,7 +10,7 @@
 // halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
 import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, pdt as pdtCore } from '@cdps/core';
-import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, dailyactivity, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, pdt, performance, plan, plangate, portal, productexchange, recap, renewal, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
+import type { account, activity, admin, adopsi, ads, adsscanner, audit, auth, board, bridge, briefInherit, briefIntake, campaign, client, clientLog, clientPortal, clientPortalAuth, contract, creative, dailyactivity, dailyops, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, pdt, performance, plan, plangate, portal, productexchange, recap, renewal, req, risetAwal, sales, salesperf, scs, showcase, skuscreener, stage, storeops, strategi, task, tutupbuku, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -539,6 +539,8 @@ export interface BriefWire {
   source_creative_brief_id: string | null;
   /** A-req-3 — jumlah unit kerja anak; 0 untuk divisi tanpa tabel anak. */
   jumlah_anak: number;
+  /** BRIEF-KEMBALI-SIKLUS — menunggu | diterima | dikembalikan (= HOLD, menunggu revisi AM). */
+  intake_state: string;
 }
 
 export function briefToWire(b: account.Brief): BriefWire {
@@ -579,6 +581,7 @@ export function briefToWire(b: account.Brief): BriefWire {
     budget: b.budget,
     source_creative_brief_id: b.sourceCreativeBriefId,
     jumlah_anak: b.jumlahAnak,
+    intake_state: b.intakeState,
   };
 }
 
@@ -1108,6 +1111,11 @@ export interface CampaignWire {
   tipe_iklan: string;
   /** M16 LT-42 (Ads Management Date) — hari tambahan manual. */
   additional_days: number;
+  /** ADS-PERIODE-IKLAN-AKTUAL — tanggal iklan sungguhan mulai/selesai, `''` kalau belum. */
+  iklan_mulai: string;
+  iklan_selesai: string;
+  /** Hari kalender iklan berjalan (inklusif), `null` kalau belum pernah dimulai. Turunan. */
+  hari_iklan_berjalan: number | null;
   /**
    * B-5 / K-3 — Brief Creative sumber brief setup kampanye ini
    * (`briefs.source_creative_brief_id`, kolom F-4), atau `''`. Selalu dikirim:
@@ -1135,6 +1143,7 @@ export function campaignToWire(c: ads.Campaign): CampaignWire {
     id: c.id, brief_id: c.briefId, client_id: c.clientId, platform: c.platform, objective: c.objective,
     budget: c.budget, budget_display: c.budgetDisplay, start_date: c.startDate, end_date: c.endDate,
     target_kpi: c.targetKpi, status: c.status, tipe_iklan: c.tipeIklan, additional_days: c.additionalDays,
+    iklan_mulai: c.iklanMulai, iklan_selesai: c.iklanSelesai, hari_iklan_berjalan: c.hariIklanBerjalan,
     source_creative_brief_id: c.sourceCreativeBriefId,
     total_spend: c.totalSpend, total_spend_display: c.totalSpendDisplay,
     total_gmv: c.totalGmv, total_gmv_display: c.totalGmvDisplay, roas: c.roas, roas_display: c.roasDisplay,
@@ -3499,6 +3508,36 @@ export function demoTaskDetailToWire(
 // --- Cross-module audit trail (Go audit.Entry) ---
 
 /** One audit entry as web-internal's `AuditEntry` (lib/types.ts) expects it. */
+/**
+ * clientLog.ClientLogEntry → wire (GET /clients/{id}/activity-log,
+ * LOG-AKTIVITAS-KLIEN). Seluruh kunci selalu dikirim; json mentah apa adanya.
+ */
+export interface ClientLogEntryWire {
+  id: number;
+  entity_type: string;
+  entity_id: string;
+  actor_employee_id: string;
+  actor_nama: string;
+  action: string;
+  before_json: unknown;
+  after_json: unknown;
+  created_at: string;
+}
+
+export function clientLogEntryToWire(e: clientLog.ClientLogEntry): ClientLogEntryWire {
+  return {
+    id: e.id,
+    entity_type: e.entityType,
+    entity_id: e.entityId,
+    actor_employee_id: e.actorEmployeeId,
+    actor_nama: e.actorNama,
+    action: e.action,
+    before_json: e.beforeJson ?? null,
+    after_json: e.afterJson ?? null,
+    created_at: e.createdAt.toISOString(),
+  };
+}
+
 export interface AuditEntryWire {
   entity_type: string;
   entity_id: string;
@@ -7068,9 +7107,21 @@ export interface StageLeadTimeRowWire {
 
 /** The Cek Brief AM decision (PRD §2 Rule 10), if the Brief has been reviewed. */
 export interface StageReviewWire {
+  /** BRIEF-KEMBALI-SIKLUS — putaran keputusan ini (1 = pertama). */
+  putaran: number;
   keputusan: string;
   alasan_kode: string | null;
   catatan: string;
+  actor_employee_id: string;
+  created_at: string;
+}
+
+/** Satu kiriman ulang AM atas brief yang dikembalikan (BRIEF-KEMBALI-SIKLUS). */
+export interface StageKirimUlangWire {
+  putaran: number;
+  catatan: string;
+  /** {kolom: {before, after}} — hanya field yang berubah. */
+  perubahan: Record<string, { before: unknown; after: unknown }>;
   actor_employee_id: string;
   created_at: string;
 }
@@ -7094,6 +7145,10 @@ export interface StageOverviewWire {
   stage_pipeline_code: string | null;
   production_stage: string | null;
   review: StageReviewWire | null;
+  /** BRIEF-KEMBALI-SIKLUS — menunggu | diterima | dikembalikan (= HOLD). */
+  intake_state: string;
+  reviews: StageReviewWire[];
+  kirim_ulang: StageKirimUlangWire[];
   stages: StageLeadTimeRowWire[];
   total_hari_kerja: number | null;
   tahap_aktif: string | null;
@@ -7101,21 +7156,32 @@ export interface StageOverviewWire {
   next_stages: NextStageWire[];
 }
 
+function stageReviewToWire(r: stage.ReviewRecord): StageReviewWire {
+  return {
+    putaran: r.putaran,
+    keputusan: r.keputusan,
+    alasan_kode: r.alasanKode,
+    catatan: r.catatan,
+    actor_employee_id: r.actorEmployeeId,
+    created_at: r.createdAt.toISOString(),
+  };
+}
+
 export function stageOverviewToWire(o: stage.StageOverview): StageOverviewWire {
   return {
     brief_id: o.briefId,
     stage_pipeline_code: o.stagePipelineCode,
     production_stage: o.productionStage,
-    review:
-      o.review === null
-        ? null
-        : {
-            keputusan: o.review.keputusan,
-            alasan_kode: o.review.alasanKode,
-            catatan: o.review.catatan,
-            actor_employee_id: o.review.actorEmployeeId,
-            created_at: o.review.createdAt.toISOString(),
-          },
+    review: o.review === null ? null : stageReviewToWire(o.review),
+    intake_state: o.intakeState,
+    reviews: o.reviews.map(stageReviewToWire),
+    kirim_ulang: o.kirimUlang.map((k) => ({
+      putaran: k.putaran,
+      catatan: k.catatan,
+      perubahan: k.perubahan,
+      actor_employee_id: k.actorEmployeeId,
+      created_at: k.createdAt.toISOString(),
+    })),
     stages: o.leadTime.stages.map((s) => ({
       stage_code: s.stageCode,
       label: s.label,
@@ -7137,6 +7203,35 @@ export function stageOverviewToWire(o: stage.StageOverview): StageOverviewWire {
     },
     next_stages: o.nextStages.map((n) => ({ stage_code: n.stageCode, label: n.label })),
   };
+}
+
+/** Body of POST /briefs/{id}/kirim-ulang (BRIEF-KEMBALI-SIKLUS). Bukan wire respons — sengaja tidak diekspor. */
+interface KirimUlangBody {
+  catatan?: string;
+  title?: string;
+  instructions?: string;
+  reference_attachments?: string;
+  due_date?: string;
+  quantity_target?: number;
+  priority?: string;
+  tanggal_mulai?: string;
+  tanggal_akhir?: string;
+  budget?: string | null;
+}
+
+/** Request body → briefIntake.KirimUlangInput. Kunci absen = field tidak diubah. */
+export function toKirimUlangInput(b: KirimUlangBody): briefIntake.KirimUlangInput {
+  const perubahan: account.BriefRevisi = {};
+  if (b.title !== undefined) perubahan.title = String(b.title);
+  if (b.instructions !== undefined) perubahan.instructions = String(b.instructions);
+  if (b.reference_attachments !== undefined) perubahan.referenceAttachments = String(b.reference_attachments);
+  if (b.due_date !== undefined) perubahan.dueDate = String(b.due_date);
+  if (b.quantity_target !== undefined) perubahan.quantityTarget = Number(b.quantity_target);
+  if (b.priority !== undefined) perubahan.priority = String(b.priority);
+  if (b.tanggal_mulai !== undefined) perubahan.tanggalMulai = String(b.tanggal_mulai ?? '');
+  if (b.tanggal_akhir !== undefined) perubahan.tanggalAkhir = String(b.tanggal_akhir ?? '');
+  if (b.budget !== undefined) perubahan.budget = b.budget === null ? null : String(b.budget);
+  return { catatan: b.catatan ?? '', perubahan };
 }
 
 /** Request body → stage.ReviewInput (Cek Brief AM decision, POST /briefs/{id}/stage/review). */

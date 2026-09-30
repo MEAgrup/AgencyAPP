@@ -165,6 +165,7 @@ export const EVENTS = {
   BriefDispatched: 'm16.brief.dispatched',             // -> lead divisi tujuan
   BriefDiterimaDivisi: 'm16.brief.diterima_divisi',    // -> AM pemilik klien
   BriefDikembalikan: 'm16.brief.dikembalikan',         // -> AM pemilik klien (+ alasan)
+  BriefDikirimUlang: 'm16.brief.dikirim_ulang',        // -> divisi (penolak + PIC), katalog v21
   // HANYA untuk tahap ber-gate (`gate_pihak` AM/KLIEN) — memberi tahu AM setiap
   // tahap maju akan membanjiri dia dengan 7 notifikasi per Brief.
   TahapButuhAksiAm: 'm16.tahap.butuh_aksi_am',         // -> AM pemilik klien
@@ -391,6 +392,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
     eventCount: 3,
     decisionRef: 'docs/DECISIONS.md 2026-09-28 (VOID-DUA-LANGKAH DIPUTUS)',
   },
+  {
+    version: 21,
+    description:
+      'BRIEF-KEMBALI-SIKLUS — 1 event (m16.brief.dikirim_ulang): AM merevisi & mengirim ulang brief yang dikembalikan divisi.',
+    eventCount: 1,
+    decisionRef: 'docs/DECISIONS.md 2026-09-30 (BRIEF-KEMBALI-SIKLUS)',
+  },
 ] as const;
 
 /** The catalog version currently in force. */
@@ -613,6 +621,15 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
     description: 'Void Service ditolak Head of Account — ke AM pemilik',
     resolver: 'explicit',
     version: 20,
+  },
+
+  // --- v21 (BRIEF-KEMBALI-SIKLUS). Description/resolver WAJIB sama persis dengan
+  // seed migrasi 20261213010000_brief_kembali_revisi_kirim_ulang.sql. 'explicit':
+  // penerimanya (penolak putaran itu + PIC) dipasok brief-intake.kirimUlangBrief. ---
+  [EVENTS.BriefDikirimUlang]: {
+    description: 'AM merevisi & mengirim ulang brief yang dikembalikan — ke divisi (penolak + PIC)',
+    resolver: 'explicit',
+    version: 21,
   },
 };
 

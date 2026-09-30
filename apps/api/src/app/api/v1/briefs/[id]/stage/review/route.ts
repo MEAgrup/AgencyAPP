@@ -3,10 +3,11 @@
  * target division accepts the Brief ("Diterima", advances the pipeline one
  * edge) or returns it to the AM ("Dikembalikan" + structured `alasan_kode`,
  * dead-ends at `Brief Dikembalikan ke AM`). Body: { keputusan, alasan_kode?,
- * catatan? }. Division staff/lead or Director; one-time (a second review on
- * the same Brief is a 409).
+ * catatan? }. Division staff/lead or Director; one decision per putaran (a
+ * second review before the AM resends is a 409). "Diterima" also moves a
+ * [To Do] Brief to [In Progress] (BRIEF-KEMBALI-SIKLUS butir 3).
  */
-import { stage } from '@cdps/domain';
+import { briefIntake } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
@@ -17,7 +18,9 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     const actor = requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<{ keputusan?: string; alasan_kode?: string; catatan?: string }>(request);
-    await stage.reviewBrief(db(), actor, id, toReviewInput(b));
+    // BRIEF-KEMBALI-SIKLUS: lewat briefIntake — "Diterima" juga menggerakkan
+    // Brief [To Do] → [In Progress] di transaksi yang sama (butir 3).
+    await briefIntake.reviewIntake(db(), actor, id, toReviewInput(b));
     return json({ ok: true });
   });
 }

@@ -183,10 +183,13 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "186"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "187"
 check "entity_prefix"    "select count(*) from entity_prefix"    "45"
 check "sm_machines"      "select count(*) from sm_machines"      "36"
-check "notif_events"     "select count(*) from notif_events"     "82"
+# --- BRIEF-KEMBALI-SIKLUS (20261213010000): +1 tabel brief_kirim_ulang (186→187),
+#     +1 event katalog v21 m16.brief.dikirim_ulang (82→83). ADS-PERIODE-IKLAN-AKTUAL
+#     (20261213020000) hanya kolom — gate tetap.
+check "notif_events"     "select count(*) from notif_events"     "83"
 # --- T-2d Void Service two-step (20261211010000_t2d_void_twostep.sql) -------
 # notif_events 79→82: +3 event katalog v20 (service_void_requested/
 #       service_voided/service_void_rejected). Nol tabel baru, nol mesin baru

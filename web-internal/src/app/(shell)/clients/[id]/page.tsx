@@ -58,6 +58,7 @@ import { getBoard, UNIVERSAL_COLUMNS, type Card } from '@/lib/board';
 import BoardCard from '../../board/BoardCard';
 import RenewalPanel from '@/components/clients/RenewalPanel';
 import ContractSection from '@/components/clients/ContractSection';
+import ClientActivityLogPanel from '@/components/ClientActivityLogPanel';
 
 const VOIDED_STATUS = '[Cancelled — Service Voided]';
 const ON_HOLD_STATUS = '[On Hold]';
@@ -1199,6 +1200,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
       {/* T-4c (RM-11) — Upcoming Milestones terstruktur */}
       <MilestonesSection clientId={id} canManage={canRequestHold} />
+
+      {/* Improvement Req Account butir 5 (2026-09-30) — log aktivitas per
+          klien, dari assign AM oleh Head sampai Service selesai. Gerbangnya
+          sama dengan hub Service (AM/lead Account/OD/Director); server tetap
+          memutus AM mana yang pemilik. */}
+      {canOpenServiceHub && <ClientActivityLogPanel clientId={id} />}
     </div>
   );
 }

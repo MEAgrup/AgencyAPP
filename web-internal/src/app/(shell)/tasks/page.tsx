@@ -15,6 +15,7 @@ import {
   type Card,
 } from '@/lib/tasks';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 
 type ViewMode = 'mine' | 'division';
 
@@ -300,7 +301,7 @@ function TasksListPage() {
                       )}
                     </td>
                     <td>{b.priority || '—'}</td>
-                    <td><StatusBadge status={b.status} /></td>
+                    <td><StatusBadge status={briefDisplayStatus(b)} /></td>
                     <td>{b.due_date || '—'}</td>
                     <td>{b.revision_flagged ? <span className="badge badge-purple">Quality Flag</span> : '—'}</td>
                   </tr>

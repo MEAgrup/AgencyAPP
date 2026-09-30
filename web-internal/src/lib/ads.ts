@@ -22,6 +22,7 @@
 
 import { api } from '@/lib/api';
 import type { BadgeTone } from '@/lib/status';
+import type { BriefIntakeState } from '@/lib/brief';
 
 // ---------------------------------------------------------------------------
 // Entity shapes
@@ -43,6 +44,12 @@ export interface Campaign {
   status: string; // [Setting] | [Active] | [Paused] | [Ended] (M16 LT-40)
   tipe_iklan: string; // M16 LT-41 — GMV Max Product | GMV Max Live | TTAM
   additional_days: number; // M16 LT-42 (Ads Management Date)
+  // ADS-PERIODE-IKLAN-AKTUAL — tanggal iklan SUNGGUHAN mulai/selesai (dicatat
+  // saat Mulai Iklan / Selesai Iklan), `''` kalau belum. Beda dari
+  // start_date/end_date yang tanggal RENCANA.
+  iklan_mulai: string;
+  iklan_selesai: string;
+  hari_iklan_berjalan: number | null; // turunan, inklusif; null = belum pernah mulai
   // B-5 / K-3 — Brief Creative SUMBER brief setup kampanye ini
   // (`briefs.source_creative_brief_id`, kolom F-4), atau `''`. `AssetPicker`
   // menyaring ke nilai ini; `''` ⇒ seluruh aset [Approved] milik klien
@@ -127,6 +134,8 @@ export interface AdsBrief {
   status: string;
   created_by: string;
   created_at: string;
+  /** BRIEF-KEMBALI-SIKLUS — `dikembalikan` = HOLD (menunggu revisi AM). */
+  intake_state: BriefIntakeState;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,8 +219,11 @@ export function getCampaign(id: string): Promise<Campaign> {
 // Lifecycle edges — no body; response is a generic statemachine.Result whose shape
 // is not stable across M8, so callers should refresh via getCampaign afterwards
 // rather than parse the return (m8 brief §1.3 recommendation).
-export function launchCampaign(id: string): Promise<unknown> {
-  return api.post<unknown>(`/campaigns/${id}/launch`);
+// "Mulai Iklan" — `tanggal` = tanggal iklan SUNGGUHAN mulai (YYYY-MM-DD, WIB,
+// tidak boleh melewati hari ini); absen = hari ini. Dicatat HANYA saat
+// aktivasi pertama (ADS-PERIODE-IKLAN-AKTUAL).
+export function launchCampaign(id: string, tanggal?: string): Promise<unknown> {
+  return api.post<unknown>(`/campaigns/${id}/launch`, { tanggal: tanggal ?? '' });
 }
 
 export function resumeCampaign(id: string): Promise<unknown> {
@@ -222,8 +234,9 @@ export function pauseCampaign(id: string): Promise<unknown> {
   return api.post<unknown>(`/campaigns/${id}/pause`);
 }
 
-export function endCampaign(id: string): Promise<unknown> {
-  return api.post<unknown>(`/campaigns/${id}/end`);
+// "Selesai Iklan" — `tanggal` = tanggal iklan SUNGGUHAN selesai; absen = hari ini.
+export function endCampaign(id: string, tanggal?: string): Promise<unknown> {
+  return api.post<unknown>(`/campaigns/${id}/end`, { tanggal: tanggal ?? '' });
 }
 
 // POST /campaigns/{id}/assets {asset_id} → {id, asset_id, linked:true}.

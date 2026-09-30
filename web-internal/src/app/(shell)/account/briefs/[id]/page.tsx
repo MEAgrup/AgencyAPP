@@ -18,7 +18,9 @@ import {
   type Brief,
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 import StageTimelinePanel from '@/components/StageTimelinePanel';
+import BriefRevisiPanel from '@/components/BriefRevisiPanel';
 import { transitionTo } from '@/lib/transition';
 
 export default function BriefDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -33,6 +35,8 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
   const [actionSubmitting, setActionSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  // Bumped after a resend so the stage panel re-reads the new putaran.
+  const [stageRefresh, setStageRefresh] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -132,7 +136,7 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
         </div>
         <div className="row" style={{ gap: 8 }}>
           {brief.revision_flagged && <span className="badge badge-red">Revisi Berulang</span>}
-          <StatusBadge status={brief.status} />
+          <StatusBadge status={briefDisplayStatus(brief)} />
         </div>
       </div>
 
@@ -222,7 +226,25 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
         // edge out of `Brief Dikembalikan ke AM` is theirs to drive — the
         // canReview gate above is a DIVISION gate and never covers an AM.
         isAmOwner={isAMReviewer}
+        refreshKey={stageRefresh}
       />
+
+      {/* BRIEF-KEMBALI-SIKLUS butir 1 — brief yang dikembalikan divisi bisa
+          direvisi & dikirim ulang AM. Server tetap memeriksa kepemilikan. */}
+      {isAMReviewer && brief.intake_state === 'dikembalikan' && (
+        <BriefRevisiPanel
+          key={`${brief.id}-${stageRefresh}`}
+          brief={brief}
+          onResent={() => {
+            setActionMessage('Brief dikirim ulang ke divisi.');
+            setStageRefresh((n) => n + 1);
+            void load();
+          }}
+        />
+      )}
+      {actionMessage && !(canReview || canDecide) && (
+        <div className="alert alertSuccess" role="status">{actionMessage}</div>
+      )}
 
       {isAMReviewer && (canReview || canDecide) && (
         <section className="card">

@@ -35,6 +35,10 @@ import {
   parseGmvTarget,
   parseRoasTarget,
   pauseCampaign,
+  periodeIklan,
+  resumeCampaign,
+  MSG_TANGGAL_IKLAN_MASA_DEPAN,
+  MSG_TANGGAL_SELESAI_SEBELUM_MULAI,
   setAdditionalDays,
   unlinkAsset,
   ValidationError,
@@ -416,6 +420,67 @@ describeDb('lifecycle (§2 / §4 Flow 2)', () => {
     // An [Ended] campaign rejects new Metric Entries.
     await expect(logMetricEntry(sql, adsStaff(), c.id, { periodStart: '2026-07-01', periodEnd: '2026-07-07', spend: '1000000', gmv: '4000000', entryMethod: 'Manual' }))
       .rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
+// ADS-PERIODE-IKLAN-AKTUAL (Improvement Req Account butir 6, 2026-09-30).
+describe('periodeIklan (pure)', () => {
+  it('menghitung hari berjalan inklusif; null bila belum mulai', () => {
+    const now = new Date('2026-09-30T05:00:00Z');
+    expect(periodeIklan(null, null, now)).toEqual({ iklanMulai: '', iklanSelesai: '', hariIklanBerjalan: null });
+    expect(periodeIklan('2026-09-01', '2026-09-10', now).hariIklanBerjalan).toBe(10);
+    expect(periodeIklan('2026-09-30', null, now).hariIklanBerjalan).toBe(1);
+    expect(periodeIklan('2026-09-21', null, now)).toEqual({ iklanMulai: '2026-09-21', iklanSelesai: '', hariIklanBerjalan: 10 });
+  });
+});
+
+describeDb('Mulai Iklan / Selesai Iklan — periode iklan aktual', () => {
+  it('Mulai Iklan mencatat tanggal sekali (resume tidak menggeser), Selesai Iklan mencatat akhir + audit', async () => {
+    const { clientId, briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    await linkAsset(sql, adsStaff(), c.id, await approvedAsset(clientId));
+    await setBriefStatus(briefId, '[Approved]');
+
+    await expect(launchCampaign(sql, adsStaff(), c.id, { tanggal: '2999-01-01' }))
+      .rejects.toThrow(MSG_TANGGAL_IKLAN_MASA_DEPAN);
+    expect(await campaignStatus(c.id)).toBe('[Setting]'); // ditolak = nol transisi
+
+    await launchCampaign(sql, adsStaff(), c.id, { tanggal: '2026-09-05' });
+    let got = await getCampaign(sql, adsStaff(), c.id);
+    expect(got.iklanMulai).toBe('2026-09-05');
+    expect(got.iklanSelesai).toBe('');
+
+    await pauseCampaign(sql, adsStaff(), c.id);
+    await resumeCampaign(sql, adsStaff(), c.id);
+    got = await getCampaign(sql, adsStaff(), c.id);
+    expect(got.iklanMulai).toBe('2026-09-05'); // tetap tanggal pertama
+
+    await expect(endCampaign(sql, adsStaff(), c.id, { tanggal: '2026-09-01' }))
+      .rejects.toThrow(MSG_TANGGAL_SELESAI_SEBELUM_MULAI);
+    await endCampaign(sql, adsStaff(), c.id, { tanggal: '2026-09-20' });
+    got = await getCampaign(sql, adsStaff(), c.id);
+    expect(got.status).toBe('[Ended]');
+    expect(got.iklanSelesai).toBe('2026-09-20');
+    expect(got.hariIklanBerjalan).toBe(16);
+
+    const audit = await sql<{ after_json: Record<string, string> }[]>`
+      select after_json from audit_log
+       where entity_type = 'ad_campaign' and entity_id = ${c.id} and action = 'periode_iklan_dicatat' order by id`;
+    expect(audit.map((a) => a.after_json)).toEqual([{ iklan_mulai: '2026-09-05' }, { iklan_selesai: '2026-09-20' }]);
+
+    // Ads Management Date berjangkar pada tanggal iklan SUNGGUHAN mulai.
+    const md = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
+    expect(md.startDate).toBe('2026-09-05');
+  });
+
+  it('kampanye yang diakhiri dari [Setting] tidak punya periode iklan', async () => {
+    const { briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    await endCampaign(sql, adsStaff(), c.id, { tanggal: '2026-09-20' });
+    const got = await getCampaign(sql, adsStaff(), c.id);
+    expect(got.iklanMulai).toBe('');
+    expect(got.iklanSelesai).toBe('');
+    expect(got.hariIklanBerjalan).toBeNull();
   });
 });
 

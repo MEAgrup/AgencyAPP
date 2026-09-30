@@ -29,6 +29,7 @@ import {
   type Brief,
 } from '@/lib/creative';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 import StageTimelinePanel from '@/components/StageTimelinePanel';
 import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 
@@ -397,7 +398,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
         </div>
         <div className="row" style={{ gap: 8 }}>
           {brief.revision_flagged && <span className="badge badge-red">Revisi Berulang</span>}
-          <StatusBadge status={brief.status} />
+          <StatusBadge status={briefDisplayStatus(brief)} />
         </div>
       </div>
 

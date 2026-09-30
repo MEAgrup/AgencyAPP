@@ -31,6 +31,9 @@ const EXACT_MAP: Record<string, BadgeTone> = {
   // tanpa baris ini akan jatuh ke 'gray' — tak terbedakan dari `[To Do]`,
   // padahal ini sinyal butuh-perhatian (belum Not Qualified, tapi mangkrak).
   '[Unrespon]': 'amber',
+  // BRIEF-KEMBALI-SIKLUS — status TAMPILAN Brief yang dikembalikan ke AM
+  // (`briefDisplayStatus`), bukan state mesin. Merah-ish amber: butuh aksi AM.
+  '[Hold]': 'red',
 };
 
 export function badgeTone(status: string): BadgeTone {

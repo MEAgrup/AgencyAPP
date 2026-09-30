@@ -192,7 +192,7 @@ const FE_FILES = [
   // itu hidup empat kali (account/tasks/creative/kol) dengan hanya SATU yang
   // di-anchor di sini; lihat `ONE_BRIEF` di bawah, yang menjaga agar tidak
   // lahir yang kelima.
-  'account.ts', 'adopsi.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'bridge.ts', 'brief.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyactivity.ts', 'dailyops.ts', 'scs.ts',
+  'account.ts', 'adopsi.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'bridge.ts', 'brief.ts', 'client-log.ts', 'clients.ts', 'contract.ts', 'creative.ts', 'dailyactivity.ts', 'dailyops.ts', 'scs.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
   'pdt.ts', 'performance.ts', 'portal.ts', 'px.ts', 'recap.ts', 'renewal.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'showcase.ts', 'skuscreener.ts', 'adsscanner.ts', 'stage.ts', 'storeops.ts', 'strategi.ts', 'tasks.ts', 'tutupbuku.ts', 'types.ts',
@@ -761,6 +761,8 @@ const WIRE_TO_FE: Record<string, string> = {
   StageIntakeWire: 'stage.ts::StageIntake',
   StageOverviewWire: 'stage.ts::StageOverview',
   NextStageWire: 'stage.ts::NextStage', // LT-60
+  StageKirimUlangWire: 'stage.ts::StageKirimUlang', // BRIEF-KEMBALI-SIKLUS
+  ClientLogEntryWire: 'client-log.ts::ClientLogEntry', // LOG-AKTIVITAS-KLIEN
   // PDT (Pusat Data Toko) G1-09 — pratinjau deteksi batch, sebelum disimpan.
   PdtPreviewBatchWire: 'pdt.ts::PdtPreviewBatch',
   PdtPreviewBerkasWire: 'pdt.ts::PdtPreviewBerkas',

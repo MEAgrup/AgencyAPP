@@ -1860,7 +1860,17 @@ export interface Brief {
    * employee_id-nya — sebuah id masih lebih berguna daripada kolom kosong.
    */
   assignedPicNama: string;
+  /**
+   * BRIEF-KEMBALI-SIKLUS (2026-09-30) — status intake turunan lewat
+   * `private.brief_intake_state`: `menunggu` (belum/akan dinilai ulang divisi),
+   * `diterima`, atau `dikembalikan` (= HOLD, menunggu revisi AM). Nol kolom
+   * tersimpan; `status` mesin `brief_task` tidak disentuh.
+   */
+  intakeState: BriefIntakeState;
 }
+
+/** Status intake turunan sebuah Brief (lihat `Brief.intakeState`). */
+export type BriefIntakeState = 'menunggu' | 'diterima' | 'dikembalikan';
 
 // --- Input validation ---
 
@@ -2081,6 +2091,8 @@ export async function insertBrief(
     sourceCreativeBriefId: orNull(input.sourceCreativeBriefId),
     // Brief yang baru lahir belum punya anak — nol, bukan hasil query.
     jumlahAnak: 0,
+    // Brief yang baru lahir belum dinilai divisi.
+    intakeState: 'menunggu',
   };
 }
 
@@ -2291,6 +2303,127 @@ export async function onBriefLeavesToDo(tx: Queryable, actor: Actor, serviceId: 
   if (!res.ok) {
     throw transitionError(res);
   }
+}
+
+// --- Brief revisi (BRIEF-KEMBALI-SIKLUS, 2026-09-30) ---
+
+/**
+ * Field isi Brief yang boleh direvisi AM saat Brief dikembalikan divisi.
+ * `undefined` = tidak diubah. Divisi, deliverable, service, dan recurring
+ * SENGAJA tidak ada: divisi/deliverable menentukan pipeline tahapan yang sudah
+ * lahir (`stage.resolvePipeline`), dan mengubahnya berarti Brief yang lain.
+ */
+export interface BriefRevisi {
+  title?: string;
+  instructions?: string;
+  referenceAttachments?: string;
+  dueDate?: string;
+  quantityTarget?: number;
+  priority?: string;
+  tanggalMulai?: string;
+  tanggalAkhir?: string;
+  budget?: string | null;
+}
+
+export type BriefRevisiDiff = Record<string, { before: unknown; after: unknown }>;
+
+/**
+ * applyBriefRevisi menerapkan revisi isi Brief di transaksi pemanggil dan
+ * mengembalikan HANYA field yang benar-benar berubah (before/after, kunci
+ * snake_case kolomnya). Tidak menggerbang dan tidak menulis audit — pemanggilnya
+ * (`brief-intake.kirimUlangBrief`) memegang gerbang AM dan menulis satu baris
+ * audit untuk seluruh kiriman. Validasi = aturan `validateBrief` atas nilai
+ * HASIL gabungan, supaya Brief yang direvisi tidak pernah lebih longgar dari
+ * Brief yang lahir.
+ */
+export async function applyBriefRevisi(tx: Queryable, briefId: string, patch: BriefRevisi): Promise<BriefRevisiDiff> {
+  const rows = await tx<{
+    title: string; instructions: string | null; reference_attachments: string | null; due_date: string | Date;
+    quantity_target: number; priority: string; tanggal_mulai: string | Date | null; tanggal_akhir: string | Date | null;
+    budget: string | null;
+  }[]>`
+    select title, instructions, reference_attachments, due_date, quantity_target, priority,
+           tanggal_mulai, tanggal_akhir, budget
+      from briefs where id = ${briefId}`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
+  }
+  const cur = rows[0];
+  const before: Record<string, string | number | null> = {
+    title: cur.title,
+    instructions: cur.instructions ?? '',
+    reference_attachments: cur.reference_attachments ?? '',
+    due_date: dateStr(cur.due_date),
+    quantity_target: Number(cur.quantity_target),
+    priority: cur.priority,
+    tanggal_mulai: cur.tanggal_mulai === null ? '' : dateStr(cur.tanggal_mulai),
+    tanggal_akhir: cur.tanggal_akhir === null ? '' : dateStr(cur.tanggal_akhir),
+    budget: cur.budget === null ? null : money.decimal(money.parse(cur.budget)),
+  };
+  const next = { ...before };
+  if (patch.title !== undefined) next.title = patch.title.trim();
+  if (patch.instructions !== undefined) next.instructions = patch.instructions.trim();
+  if (patch.referenceAttachments !== undefined) next.reference_attachments = patch.referenceAttachments.trim();
+  if (patch.dueDate !== undefined) next.due_date = patch.dueDate.trim();
+  if (patch.quantityTarget !== undefined) next.quantity_target = Number(patch.quantityTarget);
+  if (patch.priority !== undefined) next.priority = patch.priority.trim();
+  if (patch.tanggalMulai !== undefined) next.tanggal_mulai = patch.tanggalMulai.trim();
+  if (patch.tanggalAkhir !== undefined) next.tanggal_akhir = patch.tanggalAkhir.trim();
+  if (patch.budget !== undefined) {
+    const t = (patch.budget ?? '').toString().trim();
+    if (t !== '' && Number.isNaN(Number(t))) {
+      throw new ValidationError(bi.INCOMPLETE_DATA);
+    }
+    next.budget = budgetOrNull(t);
+  }
+
+  // Validasi atas nilai gabungan — cermin validateBrief.
+  const title = String(next.title);
+  const due = String(next.due_date);
+  const qty = Number(next.quantity_target);
+  const priority = String(next.priority);
+  if (title === '' || due === '' || !Number.isInteger(qty) || qty <= 0 || priority === '') {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  if (!ALLOWED_PRIORITIES.has(priority)) {
+    throw new ValidationError(MSG_INVALID_PRIORITY);
+  }
+  const mulai = String(next.tanggal_mulai);
+  const akhir = String(next.tanggal_akhir);
+  for (const d of [due, mulai, akhir]) {
+    if (d !== '' && (!RE_DATE.test(d) || Number.isNaN(Date.parse(`${d}T00:00:00Z`)))) {
+      throw new ValidationError(bi.INCOMPLETE_DATA);
+    }
+  }
+  if (mulai !== '' && akhir !== '' && mulai > akhir) {
+    throw new ValidationError(MSG_BRIEF_JENDELA_TIDAK_URUT);
+  }
+  if (next.budget !== null && money.parse(String(next.budget)) < 0n) {
+    throw new ValidationError(MSG_BRIEF_BUDGET_NEGATIF);
+  }
+
+  const diff: BriefRevisiDiff = {};
+  for (const k of Object.keys(before)) {
+    if (before[k] !== next[k]) {
+      diff[k] = { before: before[k], after: next[k] };
+    }
+  }
+  if (Object.keys(diff).length === 0) {
+    return diff;
+  }
+  await tx`
+    update briefs set
+      title = ${title},
+      instructions = ${orNull(String(next.instructions))},
+      reference_attachments = ${orNull(String(next.reference_attachments))},
+      due_date = ${due},
+      quantity_target = ${qty},
+      priority = ${priority},
+      tanggal_mulai = ${mulai === '' ? null : mulai},
+      tanggal_akhir = ${akhir === '' ? null : akhir},
+      budget = ${next.budget}
+     where id = ${briefId}`;
+  return diff;
 }
 
 // --- Brief reads ---
@@ -2551,6 +2684,7 @@ interface BriefRow {
   budget: string | null;
   source_creative_brief_id: string | null;
   jumlah_anak: number | string | null;
+  intake_state: string | null;
 }
 
 /**
@@ -2577,10 +2711,15 @@ function briefCols(sql: Queryable) {
     b.stage_pipeline_code, b.production_stage,
     b.tanggal_mulai, b.tanggal_akhir, b.budget, b.source_creative_brief_id,
     private.brief_jumlah_anak(b.id) as jumlah_anak,
+    private.brief_intake_state(b.id) as intake_state,
     private.brief_client_id(b.id) as client_id,
     private.brief_client_toko(b.id) as client_nama,
     case when b.assigned_pic is null then null
          else private.employee_display_name(b.assigned_pic) end as assigned_pic_nama`;
+}
+
+function toIntakeState(v: string | null): BriefIntakeState {
+  return v === 'diterima' || v === 'dikembalikan' ? v : 'menunggu';
 }
 
 function rowToBrief(r: BriefRow): Brief {
@@ -2600,6 +2739,7 @@ function rowToBrief(r: BriefRow): Brief {
     budget: r.budget,
     sourceCreativeBriefId: r.source_creative_brief_id,
     jumlahAnak: Number(r.jumlah_anak ?? 0),
+    intakeState: toIntakeState(r.intake_state),
   };
 }
 

@@ -27,6 +27,7 @@ import {
   type TaskSource,
 } from '@/lib/tasks';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 import StageTimelinePanel from '@/components/StageTimelinePanel';
 import { transitionLabel, type TransitionResult } from '@/lib/transition';
@@ -313,9 +314,12 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     );
   }
 
-  const showStart = canExecute && status === '[To Do]';
-  const showSubmit = canExecute && status === '[In Progress]';
-  const showRework = canExecute && status === '[Revision Requested]';
+  // BRIEF-KEMBALI-SIKLUS: Brief yang dikembalikan ke AM = HOLD — divisi tidak
+  // menggerakkannya sampai AM mengirim ulang (server menolak dengan BI 409).
+  const onHold = source === 'brief' && brief?.intake_state === 'dikembalikan';
+  const showStart = canExecute && !onHold && status === '[To Do]';
+  const showSubmit = canExecute && !onHold && status === '[In Progress]';
+  const showRework = canExecute && !onHold && status === '[Revision Requested]';
   const showResume = canDecideBlock && status === '[Blocked]';
   const showRequestBlock = canRequestBlock && status === '[In Progress]';
   const hasAnyExecutionAction = showStart || showSubmit || showRework || showResume || showRequestBlock;
@@ -342,7 +346,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         </div>
         <div className="row" style={{ gap: 8 }}>
           {revisionFlagged && <span className="badge badge-purple">Quality Flag</span>}
-          <StatusBadge status={status} />
+          <StatusBadge status={source === 'brief' && brief ? briefDisplayStatus(brief) : status} />
         </div>
       </div>
 
@@ -466,6 +470,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           // Server memeriksa kepemilikan sesungguhnya, jadi AM yang bukan pemilik
           // mendapat 403 BI, bukan tombol yang disembunyikan diam-diam.
           isAmOwner={!isODonly && (isAM || isDirector)}
+          revisiHref={`/account/briefs/${encodeURIComponent(id)}#revisi`}
         />
       )}
 

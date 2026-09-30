@@ -38,9 +38,20 @@ export interface StageLeadTimeRow {
 
 /** The Cek Brief AM decision (PRD §2 Rule 10), if any. Mirrors `StageReviewWire`. */
 export interface StageReview {
+  /** BRIEF-KEMBALI-SIKLUS — putaran keputusan (1 = pertama). */
+  putaran: number;
   keputusan: string;
   alasan_kode: string | null;
   catatan: string;
+  actor_employee_id: string;
+  created_at: string;
+}
+
+/** Satu kiriman ulang AM (BRIEF-KEMBALI-SIKLUS). Mirrors `StageKirimUlangWire`. */
+export interface StageKirimUlang {
+  putaran: number;
+  catatan: string;
+  perubahan: Record<string, { before: unknown; after: unknown }>;
   actor_employee_id: string;
   created_at: string;
 }
@@ -64,6 +75,10 @@ export interface StageOverview {
   stage_pipeline_code: string | null;
   production_stage: string | null;
   review: StageReview | null;
+  /** menunggu | diterima | dikembalikan (= HOLD, menunggu revisi AM). */
+  intake_state: 'menunggu' | 'diterima' | 'dikembalikan';
+  reviews: StageReview[];
+  kirim_ulang: StageKirimUlang[];
   stages: StageLeadTimeRow[];
   total_hari_kerja: number | null;
   tahap_aktif: string | null;
@@ -95,4 +110,26 @@ export function advanceBriefStage(briefId: string, to: string): Promise<{ ok: bo
 /** Override one stage's target hari kerja for this Brief (Lead/SPV/Director only). */
 export function setBriefStageSla(briefId: string, stageCode: string, targetHariKerja: number): Promise<{ ok: true }> {
   return api.post<{ ok: true }>(`/briefs/${briefId}/stage/sla`, { stage_code: stageCode, target_hari_kerja: targetHariKerja });
+}
+
+/**
+ * Body of POST /briefs/{id}/kirim-ulang (BRIEF-KEMBALI-SIKLUS). Kunci yang
+ * tidak dikirim = field tidak diubah; `catatan` wajib.
+ */
+export interface KirimUlangInput {
+  catatan: string;
+  title?: string;
+  instructions?: string;
+  reference_attachments?: string;
+  due_date?: string;
+  quantity_target?: number;
+  priority?: string;
+  tanggal_mulai?: string;
+  tanggal_akhir?: string;
+  budget?: string | null;
+}
+
+/** AM merevisi & mengirim ulang Brief yang dikembalikan divisi. */
+export function kirimUlangBrief(briefId: string, input: KirimUlangInput): Promise<{ ok: true; putaran: number }> {
+  return api.post<{ ok: true; putaran: number }>(`/briefs/${briefId}/kirim-ulang`, input);
 }
