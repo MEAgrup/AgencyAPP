@@ -32,6 +32,7 @@ import {
   type Strategy,
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 import { formatIDR } from '@/lib/money';
 import { createStrategi, listStrategi, type Strategi } from '@/lib/strategi';
 import { getContract, type Contract } from '@/lib/contract';
@@ -1133,7 +1134,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                     <td>{b.deliverable_type}</td>
                     <td>{b.due_date || '—'}</td>
                     <td>{b.priority}</td>
-                    <td><StatusBadge status={b.status} /></td>
+                    <td><StatusBadge status={briefDisplayStatus(b)} /></td>
                   </tr>
                 ))}
               </tbody>

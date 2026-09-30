@@ -19,6 +19,12 @@
 // edge BACK to `Cek Brief AM` is gate_pihak='AM', so it is the owning AM who
 // drives it, not the division. `canReview`/`canAdvance` are both division
 // gates and never cover an AM, hence `isAmOwner` below.
+//
+// BRIEF-KEMBALI-SIKLUS (pemilik 2026-09-30): the resend now goes through
+// `POST /briefs/{id}/kirim-ulang` (revisi isi + catatan) — the form lives in
+// `BriefRevisiPanel`, rendered by the AM's page. This panel only shows the
+// HOLD state + the full putaran history, and re-opens the Terima/Kembalikan
+// decision for the division once the AM has resent (`intake_state='menunggu'`).
 
 import { useCallback, useEffect, useState } from 'react';
 import { errorMessage } from '@/lib/api';
@@ -63,6 +69,8 @@ export default function StageTimelinePanel({
   canReview,
   canAdvance = canReview,
   isAmOwner = false,
+  refreshKey = 0,
+  revisiHref,
 }: {
   briefId: string;
   /** brief.assigned_division — picks the alasan_kode list for "Dikembalikan". */
@@ -86,6 +94,10 @@ export default function StageTimelinePanel({
    * Account viewer gets the verbatim BI 403 rather than a hidden button.
    */
   isAmOwner?: boolean;
+  /** Bump to force a reload (e.g. after the AM resent the Brief elsewhere on the page). */
+  refreshKey?: number;
+  /** Where the AM revises & resends a held Brief, when that form is NOT on this page. */
+  revisiHref?: string;
 }) {
   const [overview, setOverview] = useState<StageOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,7 +122,7 @@ export default function StageTimelinePanel({
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   async function handleAccept() {
     setActionError(null);
@@ -185,9 +197,14 @@ export default function StageTimelinePanel({
   // `stage.reviewBrief` mencatat baris `brief_review` (keputusan + alasan) lalu
   // MELEWATI transisi tahapan ketika `stagePipelineCode` null. Yang tertinggal
   // hanya kondisi di sini.
+  //
+  // BRIEF-KEMBALI-SIKLUS: `intake_state` (server, `private.brief_intake_state`)
+  // menggantikan `review === null` — sesudah AM mengirim ulang, putaran baru
+  // terbuka dan keputusan divisi dibutuhkan LAGI walaupun `review` terisi.
   const pendingReview =
-    overview.review === null
+    overview.intake_state === 'menunggu'
     && (overview.production_stage === 'Cek Brief AM' || overview.stage_pipeline_code === null);
+  const onHold = overview.intake_state === 'dikembalikan';
   // LT-4: the only stage an AM drives out of. Everything else stays on the
   // division gate the caller passed.
   const mayAdvance = canAdvance || (isAmOwner && overview.production_stage === STAGE_RETURNED);
@@ -215,12 +232,57 @@ export default function StageTimelinePanel({
         )}
       </div>
 
-      {overview.review && (
-        <div className={`alert ${overview.review.keputusan === 'Diterima' ? 'alertSuccess' : 'alertError'}`}>
-          Cek Brief AM: <strong>{overview.review.keputusan}</strong>
+      {onHold && (
+        <div className="alert alertError" role="status">
+          <strong>Status: Hold</strong> — brief dikembalikan ke AM
+          {overview.review?.alasan_kode && ` (${overview.review.alasan_kode})`}.
+          {' '}Menunggu AM merevisi &amp; mengirim ulang brief; divisi belum bisa memprosesnya.
+          {overview.review?.catatan && <div className="muted">Catatan divisi: {overview.review.catatan}</div>}
+          {isAmOwner && revisiHref && (
+            <div style={{ marginTop: 6 }}>
+              <a href={revisiHref}>Revisi &amp; Kirim Ulang Brief &rarr;</a>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!onHold && overview.review && (
+        <div className={`alert ${overview.review.keputusan === 'Diterima' ? 'alertSuccess' : 'alertInfo'}`}>
+          Cek Brief AM{overview.review.putaran > 1 ? ` (putaran ${overview.review.putaran})` : ''}:{' '}
+          <strong>{overview.review.keputusan}</strong>
           {overview.review.alasan_kode && ` — ${overview.review.alasan_kode}`}
+          {overview.intake_state === 'menunggu' && ' — brief sudah direvisi & dikirim ulang AM, menunggu keputusan divisi.'}
           {overview.review.catatan && <div className="muted">{overview.review.catatan}</div>}
         </div>
+      )}
+
+      {(overview.reviews.length > 1 || overview.kirim_ulang.length > 0) && (
+        <details>
+          <summary className="muted">Riwayat pengembalian &amp; kiriman ulang ({overview.reviews.length} putaran)</summary>
+          <ul style={{ marginTop: 6 }}>
+            {overview.reviews.map((rv) => {
+              const k = overview.kirim_ulang.find((x) => x.putaran === rv.putaran);
+              return (
+                <li key={rv.putaran} style={{ marginBottom: 6 }}>
+                  <strong>Putaran {rv.putaran}</strong> — divisi: {rv.keputusan}
+                  {rv.alasan_kode && ` (${rv.alasan_kode})`} · {new Date(rv.created_at).toLocaleString('id-ID')}
+                  {rv.catatan && <div className="muted">{rv.catatan}</div>}
+                  {k && (
+                    <div>
+                      AM kirim ulang · {new Date(k.created_at).toLocaleString('id-ID')}
+                      <div className="muted">Catatan revisi: {k.catatan}</div>
+                      {Object.keys(k.perubahan).length > 0 && (
+                        <div className="muted" style={{ fontSize: 12 }}>
+                          Diubah: {Object.keys(k.perubahan).join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       )}
 
       {canReview && pendingReview && (

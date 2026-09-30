@@ -207,6 +207,7 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
     budget: null,
     sourceCreativeBriefId: null,
     jumlahAnak: 0,
+    intakeState: 'menunggu',
   };
 
   it('maps every Brief field to its snake_case wire key', () => {
@@ -244,6 +245,7 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
       budget: null,
       source_creative_brief_id: null,
       jumlah_anak: 0,
+      intake_state: 'menunggu',
     });
     expectNoCamelKeys(briefToWire(full));
   });
@@ -261,6 +263,7 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
     budget: null,
     sourceCreativeBriefId: null,
     jumlahAnak: 0,
+    intakeState: 'menunggu',
     };
     const wire = briefToWire(bare) as unknown as Record<string, unknown>;
     for (const k of ['strategy_id', 'assigned_pic', 'recurring_frequency',
@@ -588,6 +591,9 @@ describe('M8 campaignToWire (Campaign + derived §5 performance view)', () => {
     status: '[Active]',
     tipeIklan: 'GMV Max Product',
     additionalDays: 0,
+    iklanMulai: '2026-07-02',
+    iklanSelesai: '',
+    hariIklanBerjalan: 5,
     // B-5/K-3: `''` adalah nilai yang domain benar-benar kirim saat brief setup
     // kampanye tidak menunjuk Brief Creative sumber — bukan `undefined`.
     sourceCreativeBriefId: '',
@@ -621,6 +627,9 @@ describe('M8 campaignToWire (Campaign + derived §5 performance view)', () => {
       status: '[Active]',
       tipe_iklan: 'GMV Max Product',
       additional_days: 0,
+      iklan_mulai: '2026-07-02',
+      iklan_selesai: '',
+      hari_iklan_berjalan: 5,
       // B-5/K-3 — dikirim SELALU, `''` saat brief setup tidak menunjuk sumber.
       source_creative_brief_id: '',
       total_spend: 8000000,

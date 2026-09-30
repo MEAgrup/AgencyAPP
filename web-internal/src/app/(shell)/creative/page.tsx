@@ -16,6 +16,7 @@ import {
   type ReminderScanResult,
 } from '@/lib/creative';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 
 export default function CreativeWorkspacePage() {
   const { role } = useAuth();
@@ -280,7 +281,7 @@ export default function CreativeWorkspacePage() {
                       )}
                     </td>
                     <td>{b.priority}</td>
-                    <td><StatusBadge status={b.status} /></td>
+                    <td><StatusBadge status={briefDisplayStatus(b)} /></td>
                     <td>{b.due_date || '—'}</td>
                   </tr>
                 ))}

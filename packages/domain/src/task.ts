@@ -79,6 +79,11 @@ export const MSG_BLOCK_REQUEST_CLOSED = '[permintaan block sudah diproses]';
 export const MSG_OUTPUT_LINK_REQUIRED = '[link output wajib diisi sebelum submit]';
 /** M16 §2 Rule 11 / LT-26 — a Brief may not enter [Submitted] before its stage pipeline reaches a terminal state. */
 export const MSG_STAGE_NOT_COMPLETE = '[tahapan produksi brief ini belum mencapai tahap akhir]';
+/**
+ * BRIEF-KEMBALI-SIKLUS (2026-09-30, butir 2): Brief yang dikembalikan ke AM
+ * berstatus HOLD — pekerjaannya ada di tangan AM sampai dikirim ulang.
+ */
+export const MSG_BRIEF_DITAHAN = '[brief sedang dikembalikan ke AM (Hold) — tunggu AM mengirim ulang brief]';
 
 // ---------------------------------------------------------------------------
 // Task sources (§ source.go). One registered canonical-Task row type each; only
@@ -348,6 +353,15 @@ async function execEdgeTx(
   }
   if (r.status !== requireFrom) {
     throw new ConflictError(bi.TRANSITION_NOT_ALLOWED); // pin the source state
+  }
+  // BRIEF-KEMBALI-SIKLUS: Brief yang sedang dikembalikan ke AM (HOLD) tidak
+  // boleh digerakkan divisi. Hanya Brief-as-task — Aset punya jalurnya sendiri
+  // dan batch-nya tidak boleh gagal setengah karena satu induk ditahan.
+  if (src.table === 'briefs') {
+    const st = await tx<{ s: string | null }[]>`select private.brief_intake_state(${id}) as s`;
+    if (st[0]?.s === 'dikembalikan') {
+      throw new ConflictError(MSG_BRIEF_DITAHAN);
+    }
   }
   // §4 Rule 3 (M8): an Ads Brief-as-task cannot submit until its Ad Campaign is
   // complete (≥1 linked Creative Asset). No-op for non-Ads divisions and Assets.

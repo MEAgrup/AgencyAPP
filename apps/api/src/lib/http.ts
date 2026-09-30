@@ -114,6 +114,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ScheduleTotalError: 400, // finance.ScheduleTotalError
   ScsValidationError: 400, // scs.ValidationError (M19 separuh SCS)
   StageValidationError: 400, // stage.ValidationError
+  BriefIntakeValidationError: 400, // briefIntake.ValidationError
   StoreOpsValidationError: 400, // storeops.ValidationError
   TaskValidationError: 400, // task.ValidationError
   TooManySalespeopleError: 400, // sales.TooManySalespeopleError
@@ -153,6 +154,8 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   SalesPerfForbiddenError: 403, // salesperf.ForbiddenError
   ScsForbiddenError: 403, // scs.ForbiddenError (M19 separuh SCS)
   StageForbiddenError: 403, // stage.ForbiddenError
+  BriefIntakeForbiddenError: 403, // briefIntake.ForbiddenError
+  ClientLogForbiddenError: 403, // clientLog.ForbiddenError
   StoreOpsForbiddenError: 403, // storeops.ForbiddenError
   TaskForbiddenError: 403, // task.ForbiddenError
   TutupBukuForbiddenError: 403, // tutupbuku.ForbiddenError
@@ -185,6 +188,8 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ServiceNotFoundError: 404, // msl.ServiceNotFoundError
   ScsNotFoundError: 404, // scs.NotFoundError (M19 separuh SCS)
   StageNotFoundError: 404, // stage.NotFoundError
+  BriefIntakeNotFoundError: 404, // briefIntake.NotFoundError
+  ClientLogNotFoundError: 404, // clientLog.NotFoundError
   StoreOpsNotFoundError: 404, // storeops.NotFoundError
   TaskNotFoundError: 404, // task.NotFoundError
   TutupBukuNotFoundError: 404, // tutupbuku.NotFoundError
@@ -229,6 +234,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ServiceInUseError: 409, // msl.ServiceInUseError (hapus ditolak, arsipkan saja)
   ServiceStateError: 409, // client.ServiceStateError
   StageConflictError: 409, // stage.ConflictError
+  BriefIntakeConflictError: 409, // briefIntake.ConflictError
   StoreOpsConflictError: 409, // storeops.ConflictError
   TaskConflictError: 409, // task.ConflictError
   TutupBukuConflictError: 409, // tutupbuku.ConflictError
@@ -287,6 +293,28 @@ export function transitionResponse(result: statemachine.TransitionResult): Respo
 export async function readJson<T = Record<string, unknown>>(req: Request): Promise<T> {
   try {
     return (await req.json()) as T;
+  } catch {
+    throw new BadRequestError('invalid JSON body');
+  }
+}
+
+/**
+ * readOptionalJson — like readJson, but an EMPTY body is `{}` (for routes that
+ * historically took no body and gained optional fields, e.g. the Ads launch/end
+ * edges' `tanggal`). A non-empty body that is not JSON is still a 400.
+ */
+export async function readOptionalJson<T = Record<string, unknown>>(req: Request): Promise<T> {
+  let text: string;
+  try {
+    text = await req.text();
+  } catch {
+    throw new BadRequestError('invalid JSON body');
+  }
+  if (text.trim() === '') {
+    return {} as T;
+  }
+  try {
+    return JSON.parse(text) as T;
   } catch {
     throw new BadRequestError('invalid JSON body');
   }

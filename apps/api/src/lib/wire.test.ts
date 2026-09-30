@@ -322,6 +322,7 @@ describe('M6 account wire mappers', () => {
     budget: null,
     sourceCreativeBriefId: null,
     jumlahAnak: 0,
+    intakeState: 'menunggu',
     };
     expect(briefToWire(b)).toEqual({
       id: 'BRF-202607-0001', service_id: 'SVC-1', assigned_division: 'Creative', deliverable_type: 'Video',
@@ -334,7 +335,7 @@ describe('M6 account wire mappers', () => {
       // A-req-1/2/3 — nol omitempty di sini, jadi keempatnya SELALU terkirim:
       // `''`/`null`/`0` adalah jawaban ("belum diisi"), kunci yang hilang bukan.
       tanggal_mulai: '', tanggal_akhir: '', budget: null,
-      source_creative_brief_id: null, jumlah_anak: 0,
+      source_creative_brief_id: null, jumlah_anak: 0, intake_state: 'menunggu',
     });
   });
 
@@ -352,6 +353,7 @@ describe('M6 account wire mappers', () => {
     budget: null,
     sourceCreativeBriefId: null,
     jumlahAnak: 0,
+    intakeState: 'menunggu',
     };
     const w = briefToWire(b);
     expect(w.strategy_id).toBe('STR-1');
@@ -477,6 +479,7 @@ describe('M8 ads wire mappers', () => {
       id: 'ADC-202607-0001', briefId: 'BRF-1', clientId: 'CLI-1', platform: 'Shopee Ads', objective: 'Sales',
       budget: 8000000, budgetDisplay: 'Rp. 8.000.000,00', startDate: '2026-07-01', endDate: '2026-08-31',
       targetKpi: 'ROAS ≥ 4x', status: '[Active]', tipeIklan: 'GMV Max Product', additionalDays: 0,
+      iklanMulai: '2026-07-03', iklanSelesai: '2026-07-20', hariIklanBerjalan: 18, // ADS-PERIODE-IKLAN-AKTUAL
       sourceCreativeBriefId: 'BRF-202607-0009', // B-5/K-3
       totalSpend: 1000000, totalSpendDisplay: 'Rp. 1.000.000,00',
       totalGmv: 4000000, totalGmvDisplay: 'Rp. 4.000.000,00', roas: 4, roasDisplay: '4x', linkedAssetIds: ['AST-1'],
@@ -492,6 +495,9 @@ describe('M8 ads wire mappers', () => {
     expect(w.created_at).toBe('2026-07-01T00:00:00.000Z');
     expect(w.tipe_iklan).toBe('GMV Max Product');
     expect(w.additional_days).toBe(0);
+    expect(w.iklan_mulai).toBe('2026-07-03');
+    expect(w.iklan_selesai).toBe('2026-07-20');
+    expect(w.hari_iklan_berjalan).toBe(18);
   });
 
   it('metricEntryToWire + optimizationToWire map their records', () => {

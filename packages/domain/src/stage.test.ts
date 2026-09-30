@@ -26,6 +26,7 @@ import {
   type Actor,
 } from './stage';
 import { startTask, submitTask, MSG_STAGE_NOT_COMPLETE } from './task';
+import * as briefIntake from './brief-intake';
 
 const creativeStaff = (id = 'ZZ-STG-C'): Actor => ({
   employeeId: id, divisi: 'Creative', role: permission.makeRole({ division: 'Creative', level: 'staff' }),
@@ -122,6 +123,7 @@ afterAll(async () => {
 afterEach(async () => {
   if (!sql) return;
   await sql`delete from brief_stage_sla where brief_id like 'BRF-%' and set_by like 'ZZ-%'`;
+  await sql`delete from brief_kirim_ulang where brief_id in (select id from briefs where created_by like 'ZZ-%')`;
   await sql`delete from brief_review where actor_employee_id like 'ZZ-%'`;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
@@ -185,28 +187,37 @@ describeDb('reviewBrief (Cek Brief AM)', () => {
   // LT-4 (pemilik 2026-08-29, rekomendasi B): the returned Brief is no longer a
   // dead-end — the SAME Brief goes back to `Cek Brief AM`, driven by the owning
   // AM (gate_pihak='AM'), never by the division that rejected it.
+  //
+  // BRIEF-KEMBALI-SIKLUS (2026-09-30): the resend now goes through
+  // `briefIntake.kirimUlangBrief` (catatan revisi + brief_kirim_ulang row), and
+  // the division then decides AGAIN through reviewBrief — putaran 2.
   it('LT-4: the owning AM sends the returned Brief back to Cek Brief AM', async () => {
     const { svcId, amId } = await fixture();
     const b = await createBrief(sql, accountStaff(amId), svcId, creativeBrief());
     await reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Dikembalikan', alasanKode: 'Brief kurang jelas' });
 
-    // The destination is offered off sm_edges, not guessed from urutan.
     let overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe(STAGE_RETURNED);
-    expect(overview.nextStages).toEqual([{ stageCode: 'Cek Brief AM', label: 'Cek Brief AM' }]);
+    expect(overview.intakeState).toBe('dikembalikan');
+    // The old advanceStage door is closed — it would skip the catatan + row.
+    expect(overview.nextStages).toEqual([]);
+    await expect(advanceStage(sql, accountStaff(amId), b.id, 'Cek Brief AM')).rejects.toBeInstanceOf(ConflictError);
 
-    await advanceStage(sql, accountStaff(amId), b.id, 'Cek Brief AM');
+    await briefIntake.kirimUlangBrief(sql, accountStaff(amId), b.id, { catatan: 'brief dilengkapi' });
     overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe('Cek Brief AM');
-    // brief_review is append-ONCE (aturan rumah #3): the original rejection is
-    // still the permanent record, the resend does not erase it.
-    expect(overview.review?.keputusan).toBe('Dikembalikan');
-    // …and the division picks it up again through the ordinary work edge, not
-    // through a second reviewBrief (which stays a conflict).
-    await expect(reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Diterima' })).rejects.toBeInstanceOf(ConflictError);
-    await advanceStage(sql, creativeStaff(), b.id, 'Script');
+    expect(overview.intakeState).toBe('menunggu');
+    // brief_review stays append-only (aturan rumah #3): putaran 1 is still there.
+    expect(overview.reviews.map((r) => [r.putaran, r.keputusan])).toEqual([[1, 'Dikembalikan']]);
+    expect(overview.kirimUlang.map((k) => [k.putaran, k.catatan])).toEqual([[1, 'brief dilengkapi']]);
+    // …and the division decides again — putaran 2.
+    await reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Diterima' });
     overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe('Script');
+    expect(overview.review?.putaran).toBe(2);
+    expect(overview.intakeState).toBe('diterima');
+    // A third decision on the same putaran is still a conflict.
+    await expect(reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Diterima' })).rejects.toBeInstanceOf(ConflictError);
   });
 
   it('LT-4: the rejecting division may NOT drive the resend — gate_pihak=AM', async () => {
@@ -214,12 +225,13 @@ describeDb('reviewBrief (Cek Brief AM)', () => {
     const b = await createBrief(sql, accountStaff(amId), svcId, creativeBrief());
     await reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Dikembalikan', alasanKode: 'Brief kurang jelas' });
 
-    await expect(advanceStage(sql, creativeStaff(), b.id, 'Cek Brief AM')).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(advanceStage(sql, creativeLead(), b.id, 'Cek Brief AM')).rejects.toBeInstanceOf(ForbiddenError);
+    const input = { catatan: 'x' };
+    await expect(briefIntake.kirimUlangBrief(sql, creativeStaff(), b.id, input)).rejects.toBeInstanceOf(briefIntake.ForbiddenError);
+    await expect(briefIntake.kirimUlangBrief(sql, creativeLead(), b.id, input)).rejects.toBeInstanceOf(briefIntake.ForbiddenError);
     // A different AM is not the owning AM either.
-    await expect(advanceStage(sql, accountStaff('ZZ-STG-AM2'), b.id, 'Cek Brief AM')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(briefIntake.kirimUlangBrief(sql, accountStaff('ZZ-STG-AM2'), b.id, input)).rejects.toBeInstanceOf(briefIntake.ForbiddenError);
     // Director always may (Role Matrix §4).
-    await advanceStage(sql, director(), b.id, 'Cek Brief AM');
+    await briefIntake.kirimUlangBrief(sql, director(), b.id, input);
     const overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe('Cek Brief AM');
   });
@@ -473,10 +485,10 @@ describeDb('getStageOverview.nextStages (LT-60)', () => {
 
     let overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe(STAGE_RETURNED);
-    expect(overview.nextStages).toEqual([{ stageCode: 'Cek Brief AM', label: 'Terima Brief AM' }]);
+    expect(overview.nextStages).toEqual([]);
 
-    await expect(advanceStage(sql, liveStaff, b.id, 'Cek Brief AM')).rejects.toBeInstanceOf(ForbiddenError);
-    await advanceStage(sql, accountStaff(amId), b.id, 'Cek Brief AM');
+    await expect(briefIntake.kirimUlangBrief(sql, liveStaff, b.id, { catatan: 'x' })).rejects.toBeInstanceOf(briefIntake.ForbiddenError);
+    await briefIntake.kirimUlangBrief(sql, accountStaff(amId), b.id, { catatan: 'sampel dikirim' });
     overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe('Cek Brief AM');
   });

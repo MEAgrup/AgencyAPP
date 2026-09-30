@@ -496,6 +496,13 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
                 <div><Link href={`/kol/briefs/${brief.id}`}>{brief.title}</Link></div>
               </div>
               <div>
+                <div className="muted" style={{ fontSize: 12 }}>Klien</div>
+                <div>
+                  {brief.client_nama || '—'}
+                  {brief.client_id && <div className="muted" style={{ fontSize: 11 }}>{brief.client_id}</div>}
+                </div>
+              </div>
+              <div>
                 <div className="muted" style={{ fontSize: 12 }}>Jatuh Tempo Campaign (Due Date)</div>
                 <div>{brief.due_date || '—'}</div>
               </div>

@@ -32,6 +32,7 @@ function brief(id: string, status: string): AdsBrief {
     status,
     created_by: '200000001',
     created_at: '2026-08-12T15:53:13Z',
+    intake_state: 'diterima',
   };
 }
 

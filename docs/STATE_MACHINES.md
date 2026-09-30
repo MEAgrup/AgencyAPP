@@ -277,6 +277,7 @@ dihitung `working_days_between`):
 - **`[In Review]` → `[Approved]` TETAP milik AM pemilik klien (+ Director).** K-1 menyebutnya eksplisit: "AM tetap pemegang approval akhir". Lead yang bisa approve berarti divisi menyetujui pekerjaannya sendiri.
 - `[Blocked]`: pause, resume to `[In Progress]`; **SPV/Lead-only transition**; staff/AM submit block requests (pending queue). Blocked intervals excluded from turnaround.
 - `[Cancelled — Service Voided]`: terminal, only via Void cascade.
+- **`[To Do]` → `[In Progress]` saat divisi MENERIMA brief (BRIEF-KEMBALI-SIKLUS butir 3, 2026-09-30):** `briefIntake.reviewIntake` "Diterima" mendorong edge ini (+ Service `[Briefed]` → `[In Execution]`) di transaksi yang sama bila Brief masih `[To Do]`. Brief yang dikembalikan ke AM (status intake `dikembalikan`) tampil **`[Hold]`** — label TURUNAN, bukan state mesin ini (lihat §18 "Siklus revisi & kirim ulang").
 - Live Stream Briefs skip this machine entirely (M10).
 - Ads: Brief-as-task uses this machine (M12 §5.3b); post-Approved optimization lives on ADC, not the Brief.
 
@@ -315,6 +316,7 @@ The Ad Campaign is a **living** record that **outlives** its setup Brief (M8 §2
 | `[Active]` | `[Ended]` | Advertiser / Director | End date reached, budget exhausted, or manually stopped (§2). Terminal. |
 | `[Paused]` | `[Ended]` | Advertiser / Director | A held campaign may be ended without ever launching. Terminal. |
 
+- **Periode iklan aktual (ADS-PERIODE-IKLAN-AKTUAL, 2026-09-30):** aktivasi PERTAMA ke `[Active]` ("Mulai Iklan") mencatat `ad_campaigns.iklan_mulai`, `→[Ended]` ("Selesai Iklan") mencatat `iklan_selesai` — tanggal WIB yang dinyatakan Advertiser (boleh mundur, tidak boleh melewati hari ini, selesai ≥ mulai), di transaksi transisi + audit `periode_iklan_dicatat`. Resume tidak menggeser `iklan_mulai`. Kolom fakta, bukan state; Ads Management Date berjangkar pada `coalesce(iklan_mulai, start_date)`.
 - Born `[Paused]` (engine `initial`), **not** via the engine — creation is a birth-status INSERT (same precedent as Brief/Asset/Strategy birth statuses); every later move goes through the engine (house rule 2).
 - The `[Paused]↔[Active]` edges are **not** `requireLead` at the engine level — the Advertiser optimizes freely (§6 Rule 3). The Launch dependency (Brief + Assets `[Approved]`) is a **code guard** on the `[Paused]→[Active]` edge (mirrors the Void-Service / Direct-breakdown code guards), because the engine cannot see the parent Brief's or linked Assets' statuses.
 - Metric Entries (`MTR-`) and Optimization Log entries (`OPT-`) are **append-only child rows** (M8 §5/§6), not state machines: they carry no status and never transition. Total Spend / Total GMV / ROAS and each Asset's Attributed GMV are **derived** from these immutable rows (house rules 3/4), never stored as mutable running columns.
@@ -436,6 +438,13 @@ Tahap pertama setiap pipeline. Divisi memilih *Terima & proses* (lanjut) atau *B
 - `sm_terminal_states` **tetap** tidak memuatnya: guard `submitTask` (Rule 11) membaca tabel itu, dan brief yang dikembalikan justru belum dikerjakan. Edge keluar tidak menjadikannya tahap sukses.
 - `brief_review` tetap **append-once**: pengembalian pertama adalah catatan permanen dan kiriman ulang tidak menghapusnya. Setelah kembali ke `Cek Brief AM`, divisi melanjutkannya lewat `advanceStage` ke tahap kerja pertama — `reviewBrief` kedua tetap 409.
 - `urutan=99` menjaga checkpoint cabang ini selalu di baris terakhir timeline; Brief yang tidak pernah dikembalikan mendapat `N/A` di baris itu, nol kontribusi ke `totalHariKerja`.
+
+**Siklus revisi & kirim ulang (BRIEF-KEMBALI-SIKLUS, pemilik 2026-09-30) — MENGGANTIKAN dua detail LT-4 di atas.**
+- Kiriman ulang kini HANYA lewat `briefIntake.kirimUlangBrief` (`POST /briefs/{id}/kirim-ulang`): AM pemilik/Director merevisi isi Brief + catatan wajib → baris `brief_kirim_ulang` → edge `Brief Dikembalikan ke AM → Cek Brief AM` (bila ber-pipeline) → notif `m16.brief.dikirim_ulang`. `advanceStage` dari `Brief Dikembalikan ke AM` ditolak 409 dan `next_stages`-nya kosong.
+- `brief_review` kini **multi-putaran** (PK `brief_id, putaran`), tetap append-only. Sesudah kiriman ulang, divisi memutus LAGI lewat `reviewBrief` (putaran n+1) — bukan `advanceStage` dari `Cek Brief AM`.
+- **Berlaku juga untuk divisi TANPA pipeline** (Ads, Store Operation): siklusnya hidup di `brief_review` + `brief_kirim_ulang`, bukan di `production_stage`.
+- Status intake TURUNAN `private.brief_intake_state`: `menunggu` | `diterima` | `dikembalikan`. `dikembalikan` = **HOLD** — dirender `[Hold]` di FE, dan `task` menolak start/submit/rework Brief itu. BUKAN state mesin §7; kolom `status` tidak disentuh.
+- Rentang intake "AM kirim → divisi merespons" tetap diukur ke keputusan PERTAMA.
 
 ## 19. Permintaan `REQ-` (M16 §5.5) — mesin #.., permintaan divisi yang TERKAIT KLIEN
 `[Diajukan]` → `[Diproses]` → `[Selesai]`; `[Diajukan]` | `[Diproses]` → `[Ditolak]`. Terminal: `[Selesai]`, `[Ditolak]`.

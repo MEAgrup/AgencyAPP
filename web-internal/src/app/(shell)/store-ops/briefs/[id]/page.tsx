@@ -22,6 +22,7 @@ import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
 import EmployeePicker from '@/components/EmployeePicker';
 import StageTimelinePanel from '@/components/StageTimelinePanel';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 import { getBrief, type Brief } from '@/lib/tasks';
 import type { AssignableEmployee } from '@/lib/types';
@@ -177,7 +178,7 @@ export default function StoreOpsBriefPage({ params }: { params: Promise<{ id: st
       <section className="card">
         <div className="cardHeader">
           <h2>Ringkasan</h2>
-          <StatusBadge status={brief.status} />
+          <StatusBadge status={briefDisplayStatus(brief)} />
         </div>
         <div className="grid2">
           <div>

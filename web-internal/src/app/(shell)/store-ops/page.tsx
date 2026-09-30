@@ -20,6 +20,7 @@ import { errorMessage } from '@/lib/api';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import StatusBadge from '@/components/StatusBadge';
+import { briefDisplayStatus } from '@/lib/brief';
 import {
   DIVISION,
   fmtPersen,
@@ -124,7 +125,7 @@ export default function StoreOpsBoardPage() {
                         {b.client_nama || '—'}
                         <div className="muted" style={{ fontSize: 12 }}>{b.client_id || '—'}</div>
                       </td>
-                      <td><StatusBadge status={b.status} /></td>
+                      <td><StatusBadge status={briefDisplayStatus(b)} /></td>
                       <td>{b.assigned_pic_nama || '—'}</td>
                       <td>
                         {/* A-req-3: "0" bukan data kosong, ia berarti BELUM DIPECAH —

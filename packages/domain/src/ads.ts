@@ -268,6 +268,19 @@ export interface Campaign {
   /** M16 LT-42 (Ads Management Date) — hari tambahan manual (mis. libur Lebaran). */
   additionalDays: number;
   /**
+   * ADS-PERIODE-IKLAN-AKTUAL — tanggal iklan SUNGGUHAN mulai (Mulai Iklan) dan
+   * selesai (Selesai Iklan), `''` kalau belum. Beda dari `startDate`/`endDate`
+   * yang tanggal RENCANA saat kampanye dibuat.
+   */
+  iklanMulai: string;
+  iklanSelesai: string;
+  /**
+   * Hari kalender iklan berjalan (inklusif) — dari `iklanMulai` sampai
+   * `iklanSelesai`, atau sampai hari ini (WIB) kalau belum selesai. `null`
+   * kalau iklan belum pernah dimulai. Turunan, tidak disimpan.
+   */
+  hariIklanBerjalan: number | null;
+  /**
    * B-5 / ketokan K-3 — Brief Creative yang menjadi SUMBER brief setup kampanye
    * ini (`briefs.source_creative_brief_id`, kolom F-4), atau `''` kalau brief
    * setup-nya tidak menunjuk satu pun.
@@ -445,7 +458,7 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
     return {
       id, briefId, clientId: brief.client_id, platform, objective, budget: Number(budget) / 100,
       budgetDisplay: money.format(budget), startDate: start, endDate: end, targetKpi, status: STATUS_SETTING,
-      tipeIklan, additionalDays: 0,
+      tipeIklan, additionalDays: 0, iklanMulai: '', iklanSelesai: '', hariIklanBerjalan: null,
       sourceCreativeBriefId: brief.source_creative_brief_id ?? '',
       totalSpend: 0, totalSpendDisplay: money.format(0n), totalGmv: 0, totalGmvDisplay: money.format(0n),
       roas: null, roasDisplay: '—', linkedAssetIds: [], metricEntryCount: 0, optimizationCount: 0,
@@ -456,17 +469,66 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
 
 // --- Lifecycle (§2 / STATE_MACHINES §14) ---
 
-/** launchCampaign drives [Paused] → [Active], beginning real spend (§4 Flow 2). Guarded. */
-export function launchCampaign(sql: Sql, actor: Actor, campaignId: string): Promise<statemachine.TransitionResult> {
-  return activate(sql, actor, campaignId);
+/** Opsi aksi Mulai/Selesai Iklan — `tanggal` = tanggal SUNGGUHAN (WIB), absen = hari ini. */
+export interface TanggalIklanOpts {
+  tanggal?: string;
+  /** Untuk tes — "hari ini" yang dipakai validasi. */
+  now?: Date;
+}
+
+/**
+ * launchCampaign = "Mulai Iklan": drives [Setting]/[Paused] → [Active],
+ * beginning real spend (§4 Flow 2). Guarded. The FIRST activation records
+ * `iklan_mulai` (ADS-PERIODE-IKLAN-AKTUAL) — the real start date, which may be
+ * back-dated but never in the future.
+ */
+export function launchCampaign(sql: Sql, actor: Actor, campaignId: string, opts: TanggalIklanOpts = {}): Promise<statemachine.TransitionResult> {
+  return activate(sql, actor, campaignId, opts);
 }
 
 /** resumeCampaign drives a paused campaign back to [Active] (§6 Rule 1). Same guard as launch. */
 export function resumeCampaign(sql: Sql, actor: Actor, campaignId: string): Promise<statemachine.TransitionResult> {
-  return activate(sql, actor, campaignId);
+  return activate(sql, actor, campaignId, {});
 }
 
-async function activate(sql: Sql, actor: Actor, campaignId: string): Promise<statemachine.TransitionResult> {
+/** tanggalIklan validates an optional YYYY-MM-DD (default: today WIB), never after today. */
+function tanggalIklan(opts: TanggalIklanOpts): string {
+  const today = tz.dateString(opts.now ?? new Date());
+  const t = (opts.tanggal ?? '').trim();
+  if (t === '') {
+    return today;
+  }
+  if (!RE_DATE.test(t) || Number.isNaN(Date.parse(`${t}T00:00:00Z`))) {
+    throw new ValidationError(MSG_TANGGAL_IKLAN_INVALID);
+  }
+  if (t > today) {
+    throw new ValidationError(MSG_TANGGAL_IKLAN_MASA_DEPAN);
+  }
+  return t;
+}
+
+/**
+ * recordPeriodeIklan writes `iklan_mulai`/`iklan_selesai` in the caller's
+ * transaction + one audit row. Only ever fills an EMPTY column: the first
+ * Mulai Iklan fixes the start (resume never moves it), Selesai Iklan the end.
+ */
+async function recordPeriodeIklan(
+  tx: Queryable, actor: Actor, campaignId: string, kolom: 'iklan_mulai' | 'iklan_selesai', tanggal: string,
+): Promise<void> {
+  const ex = executors(tx);
+  if (kolom === 'iklan_mulai') {
+    await tx`update ad_campaigns set iklan_mulai = ${tanggal} where id = ${campaignId}`;
+  } else {
+    await tx`update ad_campaigns set iklan_selesai = ${tanggal} where id = ${campaignId}`;
+  }
+  await ex.audit.insertAudit({
+    entityType: 'ad_campaign', entityId: campaignId, actorEmployeeId: actor.employeeId,
+    action: 'periode_iklan_dicatat', beforeJson: { [kolom]: null }, afterJson: { [kolom]: tanggal },
+    createdBy: actor.employeeId,
+  });
+}
+
+async function activate(sql: Sql, actor: Actor, campaignId: string, opts: TanggalIklanOpts): Promise<statemachine.TransitionResult> {
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     const r = await lockCampaign(tx, campaignId);
@@ -480,11 +542,16 @@ async function activate(sql: Sql, actor: Actor, campaignId: string): Promise<sta
     if (!(await allLinkedAssetsApproved(tx, r.id))) {
       throw new ConflictError(MSG_LAUNCH_ASSETS_NOT_APPROVED);
     }
+    const tanggal = tanggalIklan(opts);
     const res = await statemachine.transition(ex.sm, {
       machine: MACHINE_AD_CAMPAIGN, entityType: 'ad_campaign', table: 'ad_campaigns', entityId: campaignId, to: STATUS_ACTIVE, actor,
     });
     if (!res.ok) {
       throw transitionError(res);
+    }
+    const cur = await tx<{ iklan_mulai: string | Date | null }[]>`select iklan_mulai from ad_campaigns where id = ${campaignId}`;
+    if (cur[0]?.iklan_mulai === null) {
+      await recordPeriodeIklan(tx, actor, campaignId, 'iklan_mulai', tanggal);
     }
     return res;
   });
@@ -495,23 +562,44 @@ export function pauseCampaign(sql: Sql, actor: Actor, campaignId: string): Promi
   return driveLifecycle(sql, actor, campaignId, STATUS_PAUSED);
 }
 
-/** endCampaign drives a campaign to [Ended] (terminal, from [Active] or [Paused]). */
-export function endCampaign(sql: Sql, actor: Actor, campaignId: string): Promise<statemachine.TransitionResult> {
-  return driveLifecycle(sql, actor, campaignId, STATUS_ENDED);
+/**
+ * endCampaign = "Selesai Iklan": drives a campaign to [Ended] (terminal, from
+ * [Active], [Paused] or [Setting]). Records `iklan_selesai` when the ad ever
+ * started (ADS-PERIODE-IKLAN-AKTUAL) — not before `iklan_mulai`, not in the
+ * future. A campaign ended straight from [Setting] never ran: no period.
+ */
+export function endCampaign(sql: Sql, actor: Actor, campaignId: string, opts: TanggalIklanOpts = {}): Promise<statemachine.TransitionResult> {
+  return driveLifecycle(sql, actor, campaignId, STATUS_ENDED, opts);
 }
 
-async function driveLifecycle(sql: Sql, actor: Actor, campaignId: string, to: string): Promise<statemachine.TransitionResult> {
+async function driveLifecycle(
+  sql: Sql, actor: Actor, campaignId: string, to: string, opts: TanggalIklanOpts = {},
+): Promise<statemachine.TransitionResult> {
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     await lockCampaign(tx, campaignId);
     if (!canManageCampaign(actor)) {
       throw new ForbiddenError(MSG_CAMPAIGN_MANAGE_FORBIDDEN);
     }
+    let selesai: string | null = null;
+    if (to === STATUS_ENDED) {
+      const cur = await tx<{ iklan_mulai: string | Date | null }[]>`select iklan_mulai from ad_campaigns where id = ${campaignId}`;
+      const mulai = cur[0]?.iklan_mulai ?? null;
+      if (mulai !== null) {
+        selesai = tanggalIklan(opts);
+        if (selesai < dateStr(mulai)) {
+          throw new ValidationError(MSG_TANGGAL_SELESAI_SEBELUM_MULAI);
+        }
+      }
+    }
     const res = await statemachine.transition(ex.sm, {
       machine: MACHINE_AD_CAMPAIGN, entityType: 'ad_campaign', table: 'ad_campaigns', entityId: campaignId, to, actor,
     });
     if (!res.ok) {
       throw transitionError(res);
+    }
+    if (selesai !== null) {
+      await recordPeriodeIklan(tx, actor, campaignId, 'iklan_selesai', selesai);
     }
     return res;
   });
@@ -581,8 +669,12 @@ export async function setAdditionalDays(sql: Sql, actor: Actor, campaignId: stri
  */
 export async function computeAdsManagementEndDate(sql: Queryable, actor: Actor, campaignId: string): Promise<AdsManagementDate> {
   await campaignViewGate(sql, actor, campaignId);
+  // ADS-PERIODE-IKLAN-AKTUAL: jangkarnya tanggal iklan SUNGGUHAN mulai bila
+  // sudah dicatat (keputusan durasi Q4 2026-09-07: "durasi dihitung dari start
+  // campaign"), baru tanggal rencana untuk kampanye yang belum pernah jalan.
   const rows = await sql<{ start_date: string | Date; additional_days: number; brief_id: string }[]>`
-    select start_date, additional_days, brief_id from ad_campaigns where id = ${campaignId}`;
+    select coalesce(iklan_mulai, start_date) as start_date, additional_days, brief_id
+      from ad_campaigns where id = ${campaignId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_CAMPAIGN_NOT_FOUND);
   }
@@ -1149,10 +1241,11 @@ export async function getCampaign(sql: Queryable, actor: Actor, campaignId: stri
     { id: string; brief_id: string; client_id: string; platform: string; objective: string; budget: string;
       start_date: string | Date; end_date: string | Date; target_kpi: string; status: string; created_by: string;
       created_at: Date; assigned_am_id: string | null; tipe_iklan: string; additional_days: number;
-      source_creative_brief_id: string | null }[]
+      source_creative_brief_id: string | null; iklan_mulai: string | Date | null; iklan_selesai: string | Date | null }[]
   >`
     select c.id, c.brief_id, c.client_id, c.platform, c.objective, c.budget, c.start_date, c.end_date,
            c.target_kpi, c.status, c.created_by, c.created_at, cl.assigned_am_id, c.tipe_iklan, c.additional_days,
+           c.iklan_mulai, c.iklan_selesai,
            -- B-5/K-3: Brief Creative sumber, lewat private.* dan BUKAN lewat
            -- "left join briefs".
            --
@@ -1181,6 +1274,7 @@ export async function getCampaign(sql: Queryable, actor: Actor, campaignId: stri
     budget: Number(budget) / 100, budgetDisplay: money.format(budget), startDate: dateStr(row.start_date),
     endDate: dateStr(row.end_date), targetKpi: row.target_kpi, status: row.status, createdBy: row.created_by,
     createdAt: row.created_at, tipeIklan: row.tipe_iklan, additionalDays: Number(row.additional_days),
+    ...periodeIklan(row.iklan_mulai, row.iklan_selesai, new Date()),
     sourceCreativeBriefId: row.source_creative_brief_id ?? '', ...derived,
   };
 }
@@ -1377,6 +1471,24 @@ async function campaignViewGate(sql: Queryable, actor: Actor, campaignId: string
   }
 }
 
+/**
+ * periodeIklan projects the recorded real ad period + its derived running
+ * length (calendar days, inclusive — hari pertama iklan tayang dihitung 1).
+ * Exported for tests.
+ */
+export function periodeIklan(
+  mulai: string | Date | null, selesai: string | Date | null, now: Date,
+): { iklanMulai: string; iklanSelesai: string; hariIklanBerjalan: number | null } {
+  if (mulai === null) {
+    return { iklanMulai: '', iklanSelesai: '', hariIklanBerjalan: null };
+  }
+  const m = dateStr(mulai);
+  const s = selesai === null ? '' : dateStr(selesai);
+  const ujung = s !== '' ? s : tz.dateString(now);
+  const hari = Math.round((Date.parse(`${ujung}T00:00:00Z`) - Date.parse(`${m}T00:00:00Z`)) / 86400000) + 1;
+  return { iklanMulai: m, iklanSelesai: s, hariIklanBerjalan: Math.max(hari, 0) };
+}
+
 /** dateStr normalizes a postgres date value (string or Date) to YYYY-MM-DD. */
 function dateStr(v: string | Date): string {
   return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
@@ -1457,6 +1569,10 @@ export const MSG_LAPORAN_MINGGU_INVALID = '[minggu laporan tidak valid]';
 export const MSG_LAPORAN_MINGGU_DEPAN = '[laporan mingguan hanya dapat diisi untuk minggu yang sudah berjalan]';
 /** Reporting on a week before the brief was ever worked on. */
 export const MSG_LAPORAN_SEBELUM_MULAI = '[laporan mingguan baru dapat diisi setelah brief mulai dikerjakan]';
+// ADS-PERIODE-IKLAN-AKTUAL (Improvement Req Account butir 6, 2026-09-30).
+export const MSG_TANGGAL_IKLAN_INVALID = '[tanggal iklan tidak valid]';
+export const MSG_TANGGAL_IKLAN_MASA_DEPAN = '[tanggal iklan tidak boleh melewati hari ini]';
+export const MSG_TANGGAL_SELESAI_SEBELUM_MULAI = '[tanggal selesai iklan tidak boleh sebelum tanggal mulai iklan]';
 
 /**
  * The six recomputed metrics, in display order. `sifat` says how the number
