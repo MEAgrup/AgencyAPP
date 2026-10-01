@@ -72,6 +72,14 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  *       TTAM versi 7 (tanpa `hasil`) butuh angka ini naik supaya
  *       `planPdtReparseTick` memproses ulang dan mengisi kolom yang
  *       sebelumnya kosong.
+ *   9 — TT-ADS-GMVMAX-KAMPANYE (`docs/DECISIONS.md` 2026-09-30): TikTok
+ *       mengganti tampilan ekspor GMV Max jadi ringkasan per kampanye
+ *       ("Product campaign data …"/"Live campaign data …"), yang tidak cocok
+ *       ke tanda tangan `tt_ads_product`/`tt_ads_live` (nol modul cocok ⇒
+ *       bagian iklan kosong). Dua modul baru `tt_ads_product_kampanye`/
+ *       `tt_ads_live_kampanye` kini menulis `pdt_fact_ads` dari berkas itu.
+ *       Batch yang sudah terunggah dengan berkas format baru butuh angka ini
+ *       naik supaya `planPdtReparseTick` memanennya — sama pola versi 5/6.
  *
  * Kenaikan ini BUKAN kosmetik: `planPdtReparseTick` memilih batch lewat
  * `parser_versi < PDT_PARSER_VERSI`, jadi selama angkanya tetap 1 predikat
@@ -80,7 +88,7 @@ export type PdtPlatform = 'tiktok' | 'shopee' | 'meta';
  * backlog begitu ia naik"). Menambah writer tanpa menaikkan angka ini =
  * fitur yang hanya berlaku untuk batch yang diunggah sesudahnya.
  */
-export const PDT_PARSER_VERSI = 8;
+export const PDT_PARSER_VERSI = 9;
 
 /**
  * Satu grup AND/NOT: seluruh `must` harus muncul (cocok substring, tanpa

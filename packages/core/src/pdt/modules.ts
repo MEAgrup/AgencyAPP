@@ -133,7 +133,15 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // (B33-PARENT-SKU): modul ini `wajib: true`, jadi kolom WAJIB yang hilang menjatuhkan
     // berkas ke `gagal`, membuangnya dari `terparse`, dan menggagalkan pasangan rekonsiliasi
     // TikTok — menukar satu kolom B-3.3 yang kosong dengan pintu upload yang tertutup.
-    kolomOpsional: ['Nama', 'Klik produk', 'Produk terjual'],
+    //
+    // `'Status daftar produk'` ikut OPSIONAL sejak 2026-09-30 (TT-ADS-GMVMAX-KAMPANYE,
+    // `docs/DECISIONS.md`): ekspor Analitik Produk tampilan baru (Linda Hijab & Qadizza
+    // Skincare, 14–27 Sep 2026, 175 kolom) TIDAK lagi membawa kolom ini. Ekstraktor PDT
+    // tidak pernah membacanya (`ekstrakBarisTtProductAnalytics` — "tidak dipetakan"), jadi
+    // sebagai kolom WAJIB ia murni menjatuhkan berkas ke `gagal` ⇒ pasangan rekonsiliasi
+    // TikTok tidak lengkap ⇒ batch tidak bisa `verified`. Ekspor lama yang masih
+    // membawanya tetap `ok`.
+    kolomOpsional: ['Nama', 'Klik produk', 'Produk terjual', 'Status daftar produk'],
     wajib: true,
   },
   {
@@ -307,6 +315,52 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // report.dim_gmvmax(0.22), bukan gerbang PDT sendiri. 'Tayangan LIVE' tambahan
     // undokumentasi — dibiarkan wajib, tidak ditebak. Hilang 'Pendapatan kotor' ⇒ 'sebagian'.
     kolomOpsional: ['Pendapatan kotor'],
+    wajib: false,
+  },
+  // ---------------------------------------------------------------------------
+  // GMV Max — ekspor RINGKASAN PER KAMPANYE (TT-ADS-GMVMAX-KAMPANYE, 2026-09-30,
+  // `docs/DECISIONS.md`). TikTok mengganti tampilan ekspor GMV Max: berkas
+  // "Product campaign data <rentang>.xlsx" / "Live campaign data <rentang>.xlsx"
+  // kini SATU baris per kampanye (sheet `Data`), bukan lagi satu baris per
+  // materi iklan (`tt_ads_product`) / per sesi LIVE (`tt_ads_live`). Kolom
+  // pembeda kedua modul lama (`ID produk`/`ID video`/`Akun TikTok`/`Impresi
+  // iklan produk`/`Jumlah klik iklan produk`, dan `Nama LIVE`) HILANG, jadi
+  // tanda tangan lama tidak pernah cocok ⇒ berkas jatuh ke `perlu_pilih_modul`
+  // dan bagian iklan laporan kosong. Sample asli: Qadizza Skincare (14–20 &
+  // 21–27 Sep 2026) — header terekam `header-nyata.fixture.ts`.
+  //
+  // Dua modul TERPISAH (bukan varian `anyOf` di modul lama) karena kolom
+  // WAJIB-nya berbeda: menjadikan kolom per-materi opsional di modul lama akan
+  // menurunkan SETIAP berkas format baru ke `sebagian` dan melonggarkan gerbang
+  // format lama. Keduanya MENULIS `pdt_fact_ads` dengan `sumber` YANG SAMA
+  // (`tt_ads_product`/`tt_ads_live`) — `sumber` adalah jenis iklan, bukan
+  // bentuk berkas — sehingga laporan/skor/strategi tidak berubah sama sekali.
+  // Tanda tangan saling `mustNot` dengan modul lama (`ID produk`/`Nama LIVE`)
+  // supaya satu berkas tidak pernah cocok ke dua modul.
+  {
+    kode: 'tt_ads_product_kampanye',
+    platform: 'tiktok',
+    namaTampilan: 'TikTok GMV Max — Product Campaigns (ringkasan per kampanye)',
+    tandaTanganKolom: {
+      must: ['ID Campaign', 'Nama kampanye', 'Biaya', 'Pendapatan kotor', 'Anggaran harian'],
+      mustNot: ['ID produk', 'Nama LIVE', 'Tayangan LIVE'],
+    },
+    barisHeaderHint: 1,
+    // Kolom yang benar-benar diekstrak `ekstrakBarisTtAdsProduct` dari format
+    // ini (tayangan/klik/tipe materi TIDAK ada di berkasnya ⇒ `null`, bukan 0).
+    kolomDipanen: ['ID Campaign', 'Biaya', 'Pesanan SKU', 'Pendapatan kotor'],
+    wajib: false,
+  },
+  {
+    kode: 'tt_ads_live_kampanye',
+    platform: 'tiktok',
+    namaTampilan: 'TikTok GMV Max — Live Campaigns (ringkasan per kampanye)',
+    tandaTanganKolom: {
+      must: ['ID Campaign', 'Nama kampanye', 'Biaya', 'Pendapatan kotor', 'Tayangan LIVE'],
+      mustNot: ['Nama LIVE', 'ID produk'],
+    },
+    barisHeaderHint: 1,
+    kolomDipanen: ['ID Campaign', 'Biaya', 'Pesanan SKU', 'Pendapatan kotor', 'Tayangan LIVE'],
     wajib: false,
   },
   {

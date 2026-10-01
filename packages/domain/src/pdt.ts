@@ -205,6 +205,40 @@ const ALIAS_PER_MODUL: ReadonlyMap<string, Record<string, readonly string[]>> = 
  */
 const MODUL_PREAMBLE_SHOPEE: readonly string[] = ['shopee_ads_cpc', 'shopee_ads_search', 'shopee_ads_live'];
 
+/**
+ * TT-ADS-GMVMAX-KAMPANYE (2026-09-30, `docs/DECISIONS.md`) — modul yang menulis
+ * `pdt_fact_ads` `sumber='tt_ads_product'`/`'tt_ads_live'`. Format lama (per
+ * materi iklan / per sesi LIVE) dan format baru GMV Max (ringkasan per kampanye,
+ * `*_kampanye`) adalah BENTUK BERKAS yang berbeda untuk JENIS iklan yang sama,
+ * jadi keduanya jatuh ke `sumber` yang sama dan seluruh konsumen hilir
+ * (laporan, skor, strategi, ads metric entries) tidak perlu tahu bedanya.
+ */
+const MODUL_TT_ADS_PRODUCT: ReadonlySet<string> = new Set(['tt_ads_product', 'tt_ads_product_kampanye']);
+const MODUL_TT_ADS_LIVE: ReadonlySet<string> = new Set(['tt_ads_live', 'tt_ads_live_kampanye']);
+
+/**
+ * Format ringkasan per kampanye membawa TEPAT satu baris per `ID Campaign` per
+ * periode — `ID Campaign` yang sama muncul dua kali dalam satu batch berarti
+ * berkas yang sama terunggah dua kali (mis. ZIP berisi berkas asli "Product
+ * campaign data …" DAN salinan yang sudah diganti nama tim), bukan dua
+ * kampanye. Baris kedua dilewati supaya belanja/GMV tidak terhitung ganda.
+ * Format lama per materi/per sesi TIDAK pernah dilewati (di sana satu kampanye
+ * memang banyak baris dan dijumlahkan di hilir) tapi ID-nya ikut dicatat:
+ * kampanye yang sudah masuk lewat format lama tidak ditulis ULANG oleh
+ * ringkasan format baru di batch yang sama. Pemanggil mengurutkan berkas
+ * format lama lebih dulu (`formatLamaDulu`) supaya hasilnya tidak bergantung
+ * urutan berkas di ZIP.
+ */
+function lewatiKampanyeGanda(modulKode: string, kampanyeId: string, tertulis: Set<string>): boolean {
+  const ringkasan = modulKode.endsWith('_kampanye');
+  if (ringkasan && tertulis.has(kampanyeId)) return true;
+  tertulis.add(kampanyeId);
+  return false;
+}
+
+const formatLamaDulu = (berkas: readonly BerkasTerparse[]): BerkasTerparse[] =>
+  [...berkas].sort((a, b) => Number(a.modul.kode.endsWith('_kampanye')) - Number(b.modul.kode.endsWith('_kampanye')));
+
 /** Kolom kanonik `pdt_parser_modul` yang membawa `ID Kreator` (Rule 3) — dicari LEWAT DEFINISI modul, bukan kode modul hardcode, supaya tetap benar kalau whitelist modul TikTok lain kelak menambah kolom ini. */
 const KOLOM_ID_KREATOR = 'ID Kreator';
 
@@ -913,8 +947,9 @@ export async function commitUploadBatch(
   // `ekstrakBarisTtAdsProduct`/`ekstrakBarisTtAdsLive`, `@cdps/core` `pdt/fakta.ts`,
   // untuk kenapa dibangun KONSERVATIF tanpa sample asli — keputusan pemilik via
   // `AskUserQuestion`, docs/DECISIONS.md).
-  const berkasTtAdsProduct = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_product');
-  const berkasTtAdsLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => b.modul.kode === 'tt_ads_live');
+  // TT-ADS-GMVMAX-KAMPANYE (2026-09-30): format ringkasan per kampanye ikut jalur yang sama.
+  const berkasTtAdsProduct = identitas.status === 'tolak' ? [] : terparse.filter((b) => MODUL_TT_ADS_PRODUCT.has(b.modul.kode));
+  const berkasTtAdsLive = identitas.status === 'tolak' ? [] : terparse.filter((b) => MODUL_TT_ADS_LIVE.has(b.modul.kode));
   // F-03 (M20 R9) — empat modul TTAM → `pdt_fact_ads` (lihat docblock
   // `ekstrakBarisTtamVideoViews`/`ekstrakBarisTtamConsideration`/`_Follows`/
   // `_Showcase`, `@cdps/core` `pdt/fakta.ts`).
@@ -1845,8 +1880,10 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     await tx`
       delete from pdt_fact_ads
        where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_product' and periode = ${periodeAwalBulan}::date`;
-    for (const b of berkasTtAdsProduct) {
+    const kampanyeTertulis = new Set<string>();
+    for (const b of formatLamaDulu(berkasTtAdsProduct)) {
       for (const baris of pdt.ekstrakBarisTtAdsProduct(b.aoa, b.barisHeader)) {
+        if (lewatiKampanyeGanda(b.modul.kode, baris.kampanyeId, kampanyeTertulis)) continue;
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
@@ -1873,8 +1910,10 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
     await tx`
       delete from pdt_fact_ads
        where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_live' and periode = ${periodeAwalBulan}::date`;
-    for (const b of berkasTtAdsLive) {
+    const kampanyeTertulis = new Set<string>();
+    for (const b of formatLamaDulu(berkasTtAdsLive)) {
       for (const baris of pdt.ekstrakBarisTtAdsLive(b.aoa, b.barisHeader)) {
+        if (lewatiKampanyeGanda(b.modul.kode, baris.kampanyeId, kampanyeTertulis)) continue;
         await tx`
           insert into pdt_fact_ads
             (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
@@ -2784,8 +2823,8 @@ export async function reparsePdtBatch(
         berkasTtTransactionCreator: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_transaction_creator'),
         berkasShopeeAmsAfiliasi: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ams_afiliasi'),
         berkasShopeeAmsProduk: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_ams_produk'),
-        berkasTtAdsProduct: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_product'),
-        berkasTtAdsLive: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_live'),
+        berkasTtAdsProduct: terparseUntukFakta.filter((b) => MODUL_TT_ADS_PRODUCT.has(b.modul.kode)),
+        berkasTtAdsLive: terparseUntukFakta.filter((b) => MODUL_TT_ADS_LIVE.has(b.modul.kode)),
         berkasTtamVideoViews: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_manager_videoviews'),
         berkasTtamConsideration: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_manager_consideration'),
         berkasTtamFollows: terparseUntukFakta.filter((b) => b.modul.kode === 'tt_ads_manager_follows'),

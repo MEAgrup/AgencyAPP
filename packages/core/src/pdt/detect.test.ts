@@ -1,5 +1,5 @@
 /**
- * G1-02 — tes `detectPdtModule` terhadap seluruh 31 modul.
+ * G1-02 — tes `detectPdtModule` terhadap seluruh 33 modul.
  *
  * DoD backlog: "deteksi diuji terhadap 28 berkas sample (Fim Motor/Shopee,
  * Avitaskin/TikTok) dengan target nol salah-slot". Berkas mentahnya sendiri
@@ -37,7 +37,7 @@ function expectExactMatch(rows: Aoa, expected: string): void {
   expect(r.ambiguous, `fixture ${expected}`).toBe(false);
 }
 
-describe('detectPdtModule — TikTok (15 modul)', () => {
+describe('detectPdtModule — TikTok (17 modul)', () => {
   it('tt_orders', () => {
     expectExactMatch(
       [
@@ -145,6 +145,36 @@ describe('detectPdtModule — TikTok (15 modul)', () => {
         ['LIVE Kampanye A', 'CAM-2', 'Kampanye Live A', '1000000', '10', '3.16', '3160000'],
       ],
       'tt_ads_live',
+    );
+  });
+
+  // TT-ADS-GMVMAX-KAMPANYE (2026-09-30) — ekspor GMV Max tampilan baru, satu
+  // baris per kampanye. Header PERSIS sample asli Qadizza Skincare.
+  it('tt_ads_product_kampanye (GMV Max "Product campaign data")', () => {
+    expectExactMatch(
+      [
+        ['ID Campaign', 'Nama kampanye', 'Perlindungan ROI', 'shop_roi2_qcpx_spillover_shopping_value', 'Anggaran saat ini',
+          'Biaya', 'Biaya Bersih', 'Pengembalian dana', 'Biaya iklan yang dikembalikan', 'Target performa', 'Anggaran harian',
+          'Pesanan SKU', 'Biaya per pesanan', 'Pendapatan kotor', 'ROI', 'Peningkatan aktif', 'Mata uang'],
+        ['1872486795598994', '6 Produk Best-Test', 'Tidak memenuhi syarat untuk perlindungan ROI', '0', '500000',
+          '1344379', '1344379', '-', '-', 'Penghasilan bruto', '500000', '50', '26888', '7225985', '5.37', '', 'IDR'],
+      ],
+      'tt_ads_product_kampanye',
+    );
+  });
+
+  it('tt_ads_live_kampanye (GMV Max "Live campaign data")', () => {
+    expectExactMatch(
+      [
+        ['ID Campaign', 'Nama kampanye', 'Anggaran saat ini', 'Biaya', 'shop_roi2_qcpx_spillover_shopping_value',
+          'Perlindungan ROI', 'Target performa', 'Biaya Bersih', 'Pendapatan kotor', 'ROI', 'Pesanan SKU', 'Pengembalian dana',
+          'Biaya iklan yang dikembalikan', 'Biaya per pesanan', 'Tayangan LIVE', 'Biaya ROI target', 'Hasil ROI target dasar',
+          'Biaya boost penonton', 'Anggaran boost materi iklan', 'Biaya boost materi iklan', 'Peningkatan aktif', 'Mata uang'],
+        ['1872486598855729', 'GMAX LIVE QADIZZA', '600000', '1893821', '0', 'Memenuhi syarat untuk perlindungan ROI',
+          'Penghasilan bruto', '1893821', '15743867', '8.31', '91', '-', '-', '20811', '7249', '1893821', '8.31', '0', '0', '0',
+          'Mega LIVE', 'IDR'],
+      ],
+      'tt_ads_live_kampanye',
     );
   });
 
@@ -293,11 +323,11 @@ describe('detectPdtModule — TikTok (15 modul)', () => {
     );
   });
 
-  it('kelima belas fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
+  it('ketujuh belas fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
     // Sudah tercakup satu-per-satu di atas (expectExactMatch memaksa matches
-    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 15 sekaligus,
+    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 17 sekaligus,
     // bukan cuma yang paling akhir diuji.
-    expect(TIKTOK).toHaveLength(15);
+    expect(TIKTOK).toHaveLength(17);
   });
 });
 
@@ -522,9 +552,9 @@ describe('detectPdtModule — meta_ads', () => {
 });
 
 describe('detectPdtModule — registry', () => {
-  it('31 modul total, kode unik', () => {
-    expect(PDT_MODULES).toHaveLength(31);
-    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(31);
+  it('33 modul total, kode unik', () => {
+    expect(PDT_MODULES).toHaveLength(33);
+    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(33);
   });
 
   it('sheet kosong tidak pernah cocok ke modul manapun', () => {

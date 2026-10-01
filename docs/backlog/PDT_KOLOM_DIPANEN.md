@@ -84,7 +84,7 @@ Bucket 1:
 | `CTR` | -- konsumen: pdt_fact_sku_period.ctr — polos, ini memang ejaan nyatanya |
 | `CTOR (pesanan SKU)` | -- konsumen: pdt_fact_sku_period.ctor — **ejaan DIKOREKSI 2026-09-19** dari `CTOR` polos (alias) |
 | `Impresi produk` | -- konsumen: pdt_fact_sku_period.impresi |
-| `Status daftar produk` | -- konsumen: pdt_sku_master.status_listing |
+| `Status daftar produk` | -- konsumen: pdt_sku_master.status_listing — **OPSIONAL sejak 2026-09-30**: ekspor tampilan baru (Sep 2026) tidak lagi membawanya (TT-ADS-GMVMAX-KAMPANYE) |
 
 Bucket 2 (derived-add — `report/metrik.ts:457`, `adsscanner/tiktok/metrik.ts:58-77`):
 
@@ -252,6 +252,20 @@ Bucket 2 (derived-add — `report/metrik.ts:151,191` `adsReport`):
 | Kolom | Konsumen | Dampak bila hilang |
 |---|---|---|
 | `Pendapatan kotor` | -- konsumen: pdt_fact_ads.gmv/roas, report.dim_gmvmax(0.22) | `requireCols` throw di `:151`; dimensi 0.22 mati |
+
+### 1.9b `tt_ads_product_kampanye` / `tt_ads_live_kampanye` — `Product campaign data *.xlsx` / `Live campaign data *.xlsx`
+
+Ekspor GMV Max **tampilan baru** (TT-ADS-GMVMAX-KAMPANYE, `docs/DECISIONS.md` 2026-09-30):
+satu baris per KAMPANYE, sheet `Data`, header baris 1. Menulis `pdt_fact_ads` dengan
+`sumber` LAMA (`tt_ads_product` / `tt_ads_live`) — konsumen hilir sama persis dengan §1.8/§1.9.
+
+| Modul | Kolom dipanen (semua wajib) | Konsumen |
+|---|---|---|
+| `tt_ads_product_kampanye` | `ID Campaign`, `Biaya`, `Pesanan SKU`, `Pendapatan kotor` | pdt_fact_ads.kampanye_id/biaya/pesanan_sku/gmv/roas |
+| `tt_ads_live_kampanye` | `ID Campaign`, `Biaya`, `Pesanan SKU`, `Pendapatan kotor`, `Tayangan LIVE` | idem + pdt_fact_ads.tayangan |
+
+Tidak ada lagi di berkasnya (⇒ `null`): `Impresi iklan produk`/`Jumlah klik iklan produk`
+(tayangan/klik produk), `Jenis materi iklan` (`tipe_kampanye_sumber`), `Nama LIVE`.
 
 ### 1.10 `tt_affiliate_video` — `CustomReport_Campaign_Creator_Product_Shop_Video_*.xlsx`
 
