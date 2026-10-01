@@ -22,6 +22,7 @@ import {
   MSG_CONTACT_FORBIDDEN,
   MSG_CONTACT_NOT_FOUND,
   MSG_INCOMPLETE,
+  DEFAULT_CLIENT_PORTAL_TEMP_PASSWORD,
   adminResetClientContactPassword,
   canManageAllClientContacts,
   canManageOneClientContact,
@@ -30,9 +31,12 @@ import {
   findClientContactByEmailForReset,
   getClientContactMe,
   listClientContacts,
+  passwordSementaraKlien,
   provisionClientContact,
   setClientContactStatus,
 } from './client-portal-auth';
+import { validatePassword } from './auth';
+import { DEFAULT_TEMP_PASSWORD } from './employees';
 
 const am = (id = 'ZZ-AM') => ({
   employeeId: id,
@@ -90,6 +94,25 @@ describe('canManageOneClientContact — per-record, not flat like canManageVendo
 // Integration
 // ---------------------------------------------------------------------------
 const URL = process.env.DATABASE_URL;
+describe('password sementara default Client Portal (CP-PASSWORD-DEFAULT, 2026-10-01)', () => {
+  it('nilainya #reportmeagency dan lolos aturan password (8-72 karakter)', () => {
+    expect(DEFAULT_CLIENT_PORTAL_TEMP_PASSWORD).toBe('#reportmeagency');
+    expect(() => validatePassword(DEFAULT_CLIENT_PORTAL_TEMP_PASSWORD)).not.toThrow();
+  });
+
+  it('isian kosong/spasi/null → default; isian AM dipakai apa adanya (setelah trim)', () => {
+    expect(passwordSementaraKlien('')).toBe('#reportmeagency');
+    expect(passwordSementaraKlien('   ')).toBe('#reportmeagency');
+    expect(passwordSementaraKlien(undefined)).toBe('#reportmeagency');
+    expect(passwordSementaraKlien(null)).toBe('#reportmeagency');
+    expect(passwordSementaraKlien(' rahasiaKlien1 ')).toBe('rahasiaKlien1');
+  });
+
+  it('TERPISAH dari default realm karyawan/vendor — mengganti satu tidak mengganti yang lain', () => {
+    expect(DEFAULT_CLIENT_PORTAL_TEMP_PASSWORD).not.toBe(DEFAULT_TEMP_PASSWORD);
+  });
+});
+
 const describeDb = describe.skipIf(!URL);
 
 let sql: Sql;
@@ -264,6 +287,15 @@ describeDb('adminResetClientContactPassword', () => {
     await expect(
       adminResetClientContactPassword(sql, director(), '11111111-1111-1111-1111-111111111111', 'temp12345'),
     ).rejects.toThrow(MSG_CONTACT_NOT_FOUND);
+  });
+
+  it('isian kosong (tombol Reset Password di UI) memakai default dan lolos validasi', async () => {
+    const clientId = await seedClient();
+    const uid = await fakeContact(clientId, { mustChangePassword: false });
+    await adminResetClientContactPassword(sql, am(), uid, '');
+    const row = await sql<{ must_change_password: boolean }[]>`
+      select must_change_password from client_contacts where auth_user_id = ${uid}::uuid`;
+    expect(row[0].must_change_password).toBe(true);
   });
 
   it('rejects a too-short temp password', async () => {

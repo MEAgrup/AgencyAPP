@@ -19,12 +19,37 @@ import * as ads from './ads';
 import * as pdtVerdict from './pdt-verdict';
 
 /**
- * canUploadBatch — siapa yang boleh mengunggah batch PDT untuk sebuah toko
- * klien (Flow A langkah 1-2). AM pemilik klien, atau lead/Director Account.
+ * Lingkup sebuah klien yang dibutuhkan gerbang PDT: AM pemiliknya, dan apakah
+ * klien itu punya brief Ads (`private.jwt_client_has_ads_brief` — predikat
+ * yang SAMA dengan arm Ads di `clients_select`, SCR-UI-1). Dibaca bersama di
+ * `loadClientPlatformUntukPdt`, jadi tidak ada call site yang bisa lupa salah
+ * satunya.
  */
-export function canUploadBatch(actor: Actor, ownerAm: string | null): boolean {
+export interface PdtLingkupKlien {
+  ownerAm: string | null;
+  adaBriefAds: boolean;
+}
+
+/**
+ * PDT-ADS-BANTU-AM (keputusan pemilik 2026-10-01): divisi Ads — staff maupun
+ * lead — boleh membantu AM mengunggah data toko dan menyunting laporan PDT,
+ * DIBATASI ke klien yang punya brief Ads. Batasnya HIMPUNAN KLIEN, bukan level
+ * jabatan, sama persis dengan arm Ads di `clients_select` (SCR-UI-1): klien di
+ * luar himpunan itu memang tidak muncul di picker klien seorang staff Ads.
+ */
+function bantuanAds(actor: Actor, lingkup: PdtLingkupKlien): boolean {
+  return actor.role.division === ads.ADS_DIVISION && lingkup.adaBriefAds;
+}
+
+/**
+ * canUploadBatch — siapa yang boleh mengunggah batch PDT untuk sebuah toko
+ * klien (Flow A langkah 1-2). AM pemilik klien, lead/Director Account, atau
+ * divisi Ads untuk klien yang punya brief Ads (PDT-ADS-BANTU-AM).
+ */
+export function canUploadBatch(actor: Actor, lingkup: PdtLingkupKlien): boolean {
   if (permission.isLead(actor, ACCOUNT_DIVISION)) return true; // Director membawa lead di mana pun
-  return ownerAm !== null && ownerAm === actor.employeeId;
+  if (lingkup.ownerAm !== null && lingkup.ownerAm === actor.employeeId) return true;
+  return bantuanAds(actor, lingkup);
 }
 
 /**
@@ -38,12 +63,27 @@ export function canKelolaBenchmark(actor: Actor): boolean {
 }
 
 /**
- * canKirimLaporan — siapa yang boleh menekan "Kirim ke klien" (Flow B
- * langkah 4, membekukan snapshot ke `pdt_laporan_kiriman`). Lingkup sama
- * seperti `canUploadBatch`: orang yang boleh mengunggah data toko itu adalah
- * orang yang sama yang boleh memutuskan angkanya boleh dikirim ke klien.
+ * canKirimLaporan — siapa yang boleh membaca laporan PDT, menekan "Kirim ke
+ * klien" (Flow B langkah 4, membekukan snapshot ke `pdt_laporan_kiriman`) dan
+ * menyunting narasinya. Lingkup sama seperti `canUploadBatch`, termasuk
+ * divisi Ads (PDT-ADS-BANTU-AM).
+ *
+ * "Kirim" BUKAN publikasi: kiriman lahir `[Draf]` dan klien belum melihat apa
+ * pun sampai `canTerbitkanLaporan` di bawah dipenuhi.
  */
-export function canKirimLaporan(actor: Actor, ownerAm: string | null): boolean {
+export function canKirimLaporan(actor: Actor, lingkup: PdtLingkupKlien): boolean {
+  return canUploadBatch(actor, lingkup);
+}
+
+/**
+ * canTerbitkanLaporan — siapa yang boleh Terbitkan / Terbitkan Ulang / Cabut
+ * (mesin `pdt_laporan`), yaitu memindahkan apa yang KLIEN lihat di portal.
+ * AM pemilik klien, atau lead/Director Account — TANPA divisi Ads: keputusan
+ * pemilik 2026-10-01 memberi Ads hak unggah + sunting laporan untuk membantu
+ * AM, sedangkan keputusan menayangkan ke klien tetap di tangan pemilik akun
+ * klien (PDT-ADS-BANTU-AM).
+ */
+export function canTerbitkanLaporan(actor: Actor, ownerAm: string | null): boolean {
   if (permission.isLead(actor, ACCOUNT_DIVISION)) return true;
   return ownerAm !== null && ownerAm === actor.employeeId;
 }
@@ -400,6 +440,11 @@ interface ClientPlatformRow {
   shop_id: string | null;
   akun_konten_toko: string[] | null;
   assigned_am_id: string | null;
+  ada_brief_ads: boolean;
+}
+
+function lingkupDari(row: ClientPlatformRow): PdtLingkupKlien {
+  return { ownerAm: row.assigned_am_id, adaBriefAds: row.ada_brief_ads };
 }
 
 /**
@@ -410,7 +455,8 @@ interface ClientPlatformRow {
  */
 async function loadClientPlatformUntukPdt(sql: Queryable, clientPlatformId: number): Promise<ClientPlatformRow> {
   const rows = await sql<ClientPlatformRow[]>`
-    select cp.id, cp.client_id, cp.platform, cp.shop_id, cp.akun_konten_toko, c.assigned_am_id
+    select cp.id, cp.client_id, cp.platform, cp.shop_id, cp.akun_konten_toko, c.assigned_am_id,
+           private.jwt_client_has_ads_brief(c.id) as ada_brief_ads
       from client_platforms cp
       join clients c on c.id = cp.client_id
      where cp.id = ${clientPlatformId}`;
@@ -435,7 +481,7 @@ export async function previewUploadBatch(
 ): Promise<PdtPreviewBatchHasil> {
   const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
 
-  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+  if (!canUploadBatch(actor, lingkupDari(row))) throw new ForbiddenError();
 
   const platform = platformKeVokabPdt(row.platform);
   if (!platform) {
@@ -502,7 +548,7 @@ export async function siapkanUploadBatch(
   clientPlatformId: number,
 ): Promise<PdtSiapkanUploadHasil> {
   const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
-  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+  if (!canUploadBatch(actor, lingkupDari(row))) throw new ForbiddenError();
   if (!platformKeVokabPdt(row.platform)) {
     throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
@@ -837,7 +883,7 @@ export async function commitUploadBatch(
   now: Date = new Date(),
 ): Promise<PdtCommitPersiapan> {
   const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
-  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+  if (!canUploadBatch(actor, lingkupDari(row))) throw new ForbiddenError();
 
   const platform = platformKeVokabPdt(row.platform);
   if (!platform) {
@@ -2103,7 +2149,7 @@ export async function konfirmasiIdentitasBatch(sql: Sql, actor: Actor, batchId: 
     if (!batch) throw new NotFoundError('[batch PDT tidak ditemukan]');
 
     const cpRow = await loadClientPlatformUntukPdt(tx, batch.client_platform_id);
-    if (!canUploadBatch(actor, cpRow.assigned_am_id)) throw new ForbiddenError();
+    if (!canUploadBatch(actor, lingkupDari(cpRow))) throw new ForbiddenError();
 
     if (batch.status !== 'identitas_belum_terikat') {
       throw new ValidationError('[batch ini tidak sedang menunggu konfirmasi identitas]');
@@ -2195,7 +2241,7 @@ export interface PdtBatchRingkas {
  */
 export async function listRiwayatBatchPdt(sql: Sql, actor: Actor, clientPlatformId: number): Promise<PdtBatchRingkas[]> {
   const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
-  if (!canUploadBatch(actor, row.assigned_am_id)) throw new ForbiddenError();
+  if (!canUploadBatch(actor, lingkupDari(row))) throw new ForbiddenError();
 
   const rows = await sql<{
     // `bigint` (int8, OID 20) — driver mengembalikan STRING (pencegahan
@@ -4453,7 +4499,7 @@ export async function bacaLaporanPdt(
   now: Date = new Date(),
 ): Promise<pdt.PdtLaporanTiktok | pdt.PdtLaporanShopee> {
   const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
-  if (!canKirimLaporan(actor, row.assigned_am_id)) throw new ForbiddenError();
+  if (!canKirimLaporan(actor, lingkupDari(row))) throw new ForbiddenError();
 
   const platform = platformKeVokabPdt(row.platform);
   if (!platform) {
@@ -4539,12 +4585,23 @@ export async function kirimLaporanPdt(
   const benchmarkVersi = laporan.platform === 'tiktok' ? laporan.benchmarkVersi : null;
 
   return withTransaction(sql, async (tx) => {
-    const [prev] = await tx<{ id: number }[]>`
-      select id from pdt_laporan_kiriman
-       where client_platform_id = ${clientPlatformId}
-         and periode_mulai = ${periodeAwalBulan}::date
-       order by dikirim_pada desc
+    const [prev] = await tx<{ id: number; status_publikasi: string | null }[]>`
+      select k.id, pub.status as status_publikasi
+        from pdt_laporan_kiriman k
+        left join pdt_laporan_publikasi pub on pub.kiriman_id = k.id
+       where k.client_platform_id = ${clientPlatformId}
+         and k.periode_mulai = ${periodeAwalBulan}::date
+       order by k.dikirim_pada desc
        limit 1`;
+
+    // PDT-ADS-BANTU-AM: kiriman baru untuk periode yang SEDANG `[Terbit]` membuat
+    // periode itu hilang dari portal sampai diterbitkan ulang (`client-portal.ts`
+    // `listReports`, aturan "kiriman terbaru saja"). Itu sama dengan mencabut, jadi
+    // hanya yang boleh Terbitkan/Cabut yang boleh melakukannya — divisi Ads tidak.
+    if (prev?.status_publikasi === PDT_LAPORAN_STATES.terbit) {
+      const cp = await loadClientPlatformUntukPdt(tx, clientPlatformId);
+      if (!canTerbitkanLaporan(actor, cp.assigned_am_id)) throw new ForbiddenError(MSG_KIRIM_ULANG_TERBIT);
+    }
 
     const [row] = await tx<{
       id: number;
@@ -4642,7 +4699,7 @@ export type PdtKirimanRingkas = Omit<PdtLaporanKirimanHasil, 'laporan'>;
  */
 export async function riwayatKirimanPdt(sql: Sql, actor: Actor, clientPlatformId: number): Promise<PdtKirimanRingkas[]> {
   const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
-  if (!canKirimLaporan(actor, row.assigned_am_id)) throw new ForbiddenError();
+  if (!canKirimLaporan(actor, lingkupDari(row))) throw new ForbiddenError();
 
   const rows = await sql<{
     id: number;
@@ -4675,6 +4732,9 @@ export async function riwayatKirimanPdt(sql: Sql, actor: Actor, clientPlatformId
 
 /** M20 §6 — string persis, dipakai ulang dari M14 (`report.ts`), bukan diparafrase. */
 export const MSG_KIRIMAN_NOT_FOUND = '[laporan tidak ditemukan]';
+/** PDT-ADS-BANTU-AM — kirim ulang periode yang sedang tayang di portal = mencabutnya; hanya AM/Lead Account/Director. */
+export const MSG_KIRIM_ULANG_TERBIT =
+  '[laporan periode ini sedang terbit di portal klien — kirim ulang hanya oleh AM pemilik klien atau Lead Account]';
 /** M20 §6 — string persis, dipakai ulang dari M14 (`report.ts`), bukan diparafrase. */
 export const MSG_LAPORAN_FORBIDDEN = '[anda tidak memiliki akses ke data ini]';
 
@@ -4707,7 +4767,7 @@ export async function bacaKirimanLaporanPdt(sql: Sql, actor: Actor, kirimanId: n
   if (!row) throw new NotFoundError(MSG_KIRIMAN_NOT_FOUND);
 
   const cp = await loadClientPlatformUntukPdt(sql, row.client_platform_id);
-  if (!canKirimLaporan(actor, cp.assigned_am_id) && !actor.role.od) {
+  if (!canKirimLaporan(actor, lingkupDari(cp)) && !actor.role.od) {
     throw new ForbiddenError(MSG_LAPORAN_FORBIDDEN);
   }
 
@@ -4863,20 +4923,26 @@ async function ensureInsightSeed(tx: TransactionSql, kirimanId: number): Promise
 
 async function loadKirimanScope(
   sql: Queryable, kirimanId: number,
-): Promise<{ clientPlatformId: number; clientId: string; platform: string; periodeMulai: string; ownerAm: string | null }> {
+): Promise<{ clientPlatformId: number; clientId: string; platform: string; periodeMulai: string; lingkup: PdtLingkupKlien }> {
   const [row] = await sql<{ client_platform_id: number; periode_mulai: string }[]>`
     select client_platform_id, periode_mulai::text as periode_mulai from pdt_laporan_kiriman where id = ${kirimanId}`;
   if (!row) throw new NotFoundError(MSG_KIRIMAN_NOT_FOUND);
   const cp = await loadClientPlatformUntukPdt(sql, row.client_platform_id);
   return {
     clientPlatformId: row.client_platform_id, clientId: cp.client_id, platform: cp.platform,
-    periodeMulai: row.periode_mulai, ownerAm: cp.assigned_am_id,
+    periodeMulai: row.periode_mulai, lingkup: lingkupDari(cp),
   };
 }
 
 async function requireCanTulisInsight(sql: Queryable, actor: Actor, kirimanId: number): Promise<void> {
-  const { ownerAm } = await loadKirimanScope(sql, kirimanId);
-  if (!canKirimLaporan(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
+  const { lingkup } = await loadKirimanScope(sql, kirimanId);
+  if (!canKirimLaporan(actor, lingkup)) throw new ForbiddenError(MSG_FORBIDDEN);
+}
+
+/** Terbitkan / Terbitkan Ulang / Cabut — gerbang lebih sempit dari menyunting (PDT-ADS-BANTU-AM). */
+async function requireCanTerbitkan(sql: Queryable, actor: Actor, kirimanId: number): Promise<void> {
+  const { lingkup } = await loadKirimanScope(sql, kirimanId);
+  if (!canTerbitkanLaporan(actor, lingkup.ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
 }
 
 /** Gabungan state yang dibutuhkan editor FE (C-04) sekaligus: revisi terbaru + status publikasi. */
@@ -4884,6 +4950,12 @@ export interface PdtInsightState {
   kirimanId: number;
   terbaru: PdtLaporanInsightRow;
   publikasi: PdtLaporanPublikasiRow;
+  /**
+   * Boleh-tidaknya PEMBACA ini Terbitkan/Cabut (`canTerbitkanLaporan`). Dihitung
+   * server supaya editor tidak menampilkan tombol yang pasti 403 — divisi Ads
+   * boleh menyunting tapi tidak menerbitkan (PDT-ADS-BANTU-AM).
+   */
+  bolehTerbitkan: boolean;
 }
 
 /**
@@ -4893,8 +4965,9 @@ export interface PdtInsightState {
  * belum pernah disentuh Gelombang C — jadi berlaku untuk kiriman LAMA sekalipun.
  */
 export async function bacaInsightKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtInsightState> {
-  const { ownerAm } = await loadKirimanScope(sql, kirimanId);
-  if (!canKirimLaporan(actor, ownerAm) && !actor.role.od) throw new ForbiddenError(MSG_FORBIDDEN);
+  const { lingkup } = await loadKirimanScope(sql, kirimanId);
+  if (!canKirimLaporan(actor, lingkup) && !actor.role.od) throw new ForbiddenError(MSG_FORBIDDEN);
+  const bolehTerbitkan = canTerbitkanLaporan(actor, lingkup.ownerAm);
 
   return withTransaction(sql, async (tx) => {
     await ensureInsightSeed(tx, kirimanId);
@@ -4902,7 +4975,7 @@ export async function bacaInsightKiriman(sql: Sql, actor: Actor, kirimanId: numb
       select * from pdt_laporan_insight where kiriman_id = ${kirimanId} order by revisi desc limit 1`;
     const [publikasi] = await tx<PublikasiDbRow[]>`
       select * from pdt_laporan_publikasi where kiriman_id = ${kirimanId}`;
-    return { kirimanId, terbaru: insightRowFromDb(terbaru), publikasi: publikasiRowFromDb(publikasi) };
+    return { kirimanId, terbaru: insightRowFromDb(terbaru), publikasi: publikasiRowFromDb(publikasi), bolehTerbitkan };
   });
 }
 
@@ -5040,7 +5113,7 @@ export async function resetInsightKiriman(sql: Sql, actor: Actor, kirimanId: num
  * runPdtLaporanTransition — `sm_transition` mesin `pdt_laporan` di dalam
  * transaksi pemanggil (pola sama `runTransition` di `interview.ts`). Edge
  * mesin ini NOL `require_lead` (lihat docblock migrasi C-01) — gerbang
- * siapa-boleh sudah dievaluasi pemanggil (`requireCanTulisInsight`) SEBELUM
+ * siapa-boleh sudah dievaluasi pemanggil (`requireCanTerbitkan`) SEBELUM
  * fungsi ini dipanggil, jadi `role_denied` seharusnya tidak pernah terjadi
  * di sini; tetap dipetakan untuk kelengkapan pola.
  */
@@ -5225,7 +5298,7 @@ async function recomputeAdsMetricEntriesPdt(
  * Attainment) untuk periode kiriman ini.
  */
 export async function terbitkanKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtLaporanPublikasiRow> {
-  await requireCanTulisInsight(sql, actor, kirimanId);
+  await requireCanTerbitkan(sql, actor, kirimanId);
 
   return withTransaction(sql, async (tx) => {
     await ensureInsightSeed(tx, kirimanId);
@@ -5260,7 +5333,7 @@ export async function terbitkanKiriman(sql: Sql, actor: Actor, kirimanId: number
  * (E-03), sama alasan `terbitkanKiriman`.
  */
 export async function terbitkanUlangKiriman(sql: Sql, actor: Actor, kirimanId: number): Promise<PdtLaporanPublikasiRow> {
-  await requireCanTulisInsight(sql, actor, kirimanId);
+  await requireCanTerbitkan(sql, actor, kirimanId);
 
   return withTransaction(sql, async (tx) => {
     await ensureInsightSeed(tx, kirimanId);
@@ -5304,7 +5377,7 @@ export async function terbitkanUlangKiriman(sql: Sql, actor: Actor, kirimanId: n
  * pemilik, `docs/DECISIONS.md` `M20-R6-HEALTH-SCORE-SNAPSHOT-LAMA`).
  */
 export async function cabutKiriman(sql: Sql, actor: Actor, kirimanId: number, alasan: string): Promise<PdtLaporanPublikasiRow> {
-  await requireCanTulisInsight(sql, actor, kirimanId);
+  await requireCanTerbitkan(sql, actor, kirimanId);
   const alasanTrim = typeof alasan === 'string' ? alasan.trim() : '';
   if (!alasanTrim) throw new ValidationError(MSG_ALASAN_CABUT_WAJIB);
 

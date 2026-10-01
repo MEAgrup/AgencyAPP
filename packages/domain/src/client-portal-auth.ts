@@ -31,7 +31,30 @@ import {
   type Actor,
 } from './account';
 import { validatePassword } from './auth';
-import { BCRYPT_COST, DEFAULT_TEMP_PASSWORD } from './employees';
+import { BCRYPT_COST } from './employees';
+
+/**
+ * Password sementara default untuk kontak Client Portal — dipakai saat AM
+ * mengosongkan kolom password ketika mengundang kontak, dan oleh tombol
+ * "Reset Password". Keputusan pemilik 2026-10-01 (CP-PASSWORD-DEFAULT):
+ * satu nilai seragam yang mudah disampaikan AM ke klien; aman dipakai karena
+ * setiap akun baru/hasil reset ditandai `must_change_password` sehingga portal
+ * memaksa klien menggantinya di login pertama.
+ *
+ * SENGAJA terpisah dari `employees.DEFAULT_TEMP_PASSWORD` (realm karyawan &
+ * vendor): mengganti password default klien tidak boleh ikut mengganti
+ * password default karyawan.
+ */
+export const DEFAULT_CLIENT_PORTAL_TEMP_PASSWORD = '#reportmeagency';
+
+/**
+ * Password sementara yang benar-benar dipasang: isian AM bila diisi (setelah
+ * trim), selain itu `DEFAULT_CLIENT_PORTAL_TEMP_PASSWORD`. Satu fungsi untuk
+ * jalur undang DAN reset supaya keduanya tidak pernah berbeda default.
+ */
+export function passwordSementaraKlien(isian: string | null | undefined): string {
+  return (isian ?? '').trim() || DEFAULT_CLIENT_PORTAL_TEMP_PASSWORD;
+}
 
 // --- BI messages. M15 doc has no error strings of its own, so these follow
 // the house convention (CLAUDE.md #5) and the LT-61/vendor precedent. ---
@@ -145,7 +168,7 @@ export interface ProvisionClientContactInput {
   clientId: string;
   nama: string;
   email: string;
-  /** Optional initial temp password; blank => employees.ts DEFAULT_TEMP_PASSWORD. */
+  /** Optional initial temp password; blank => DEFAULT_CLIENT_PORTAL_TEMP_PASSWORD. */
   tempPassword?: string;
 }
 
@@ -194,7 +217,7 @@ export async function provisionClientContact(
       throw new ForbiddenError(MSG_CONTACT_FORBIDDEN);
     }
 
-    const temp = (input.tempPassword ?? '').trim() || DEFAULT_TEMP_PASSWORD;
+    const temp = passwordSementaraKlien(input.tempPassword);
     const hash = bcrypt.hashSync(temp, BCRYPT_COST);
 
     let authUserId: string;
@@ -301,7 +324,7 @@ export async function adminResetClientContactPassword(
   tempPassword: string,
 ): Promise<void> {
   const id = (authUserId ?? '').trim();
-  const temp = (tempPassword ?? '').trim() || DEFAULT_TEMP_PASSWORD;
+  const temp = passwordSementaraKlien(tempPassword);
   if (id === '') {
     throw new ValidationError(MSG_INCOMPLETE);
   }
