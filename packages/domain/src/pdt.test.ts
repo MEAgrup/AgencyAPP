@@ -48,6 +48,7 @@ import {
   MSG_KIRIMAN_NOT_FOUND,
   MSG_LAPORAN_FORBIDDEN,
   MSG_KIRIM_ULANG_TERBIT,
+  msgKirimBatchBelumTerverifikasi,
   riwayatKirimanPdt,
   ConflictError,
   bacaInsightKiriman,
@@ -71,6 +72,12 @@ import {
   rakitLaporanTiktok,
   reparsePdtBatch,
   siapkanUploadBatch,
+  batchHanyaFaktaHarian,
+  parseJenisPeriode,
+  rakitLaporanShopeeMingguan,
+  rakitLaporanTiktokMingguan,
+  MSG_JENIS_PERIODE,
+  MSG_PERIODE_MINGGUAN,
   type PdtCommitOverride,
   type PdtPreviewBerkasInput,
 } from './pdt';
@@ -6552,6 +6559,12 @@ describeDb('kirimLaporanPdt (Flow B langkah 4) — bekukan snapshot ke pdt_lapor
         periodeMulai: '2026-07-01', periodeSelesai: '2026-07-31', retensiSampai: '2026-08-01',
         status: 'ditolak', retensiAlasan: 'ditolak',
       });
+      // PDT-KIRIM-BATCH-VERIFIED: kirim hanya boleh bila batch TERBARU periode ini verified —
+      // jadi unggahan yang ditolak itu diikuti unggahan ulang yang lolos. Batch ditolak yang
+      // lebih lama tetap overlap dan tetap harus diperpanjang (itu yang diuji di sini).
+      await insertBatch(cpId, clientId, {
+        periodeMulai: '2026-07-01', periodeSelesai: '2026-07-31', retensiSampai: '2026-08-01',
+      });
 
       await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date('2026-08-05T00:00:00.000Z'));
 
@@ -6680,6 +6693,7 @@ describeDb('riwayatKirimanPdt (Flow B langkah 5) — daftar kiriman satu toko, t
     expect(r).toEqual({
       id: dikirim.id,
       clientPlatformId: cpId,
+      jenisPeriode: 'bulanan',
       periodeMulai: '2026-07-01',
       periodeSelesai: '2026-07-31',
       parserVersi: dikirim.parserVersi,
@@ -7812,5 +7826,226 @@ describeDb('PDT-ADS-BANTU-AM — divisi Ads membantu AM (unggah + sunting, bukan
     const { cpId } = await fixture('Ads');
     await expect(siapkanUploadBatch(sql, creativeActor(), cpId)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(kirimLaporanPdt(sql, creativeActor(), cpId, '2026-07-01')).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describeDb('PDT-KIRIM-BATCH-VERIFIED — Kirim ke Klien ditolak bila batch terbaru periode itu belum Terverifikasi', () => {
+  async function fixture(): Promise<{ clientId: string; cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    return { clientId, cpId };
+  }
+
+  async function batch(
+    clientId: string, cpId: number, status: string,
+    periode: { mulai: string; selesai: string } = { mulai: '2026-07-01', selesai: '2026-07-31' },
+  ): Promise<void> {
+    await sql`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, alasan_ditolak,
+         parser_versi, retensi_sampai, retensi_alasan, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', ${periode.mulai}::date, ${periode.selesai}::date, ${status},
+         ${status === 'ditolak' ? '[selisih rekonsiliasi GMV 3.2% melebihi ambang 0.5%]' : null},
+         1, '2027-12-31'::date, 'default', ${OWNER_AM})`;
+  }
+
+  it('batch terbaru Ditolak ⇒ ValidationError dengan label status, nol kiriman tertulis', async () => {
+    const { clientId, cpId } = await fixture();
+    await batch(clientId, cpId, 'ditolak');
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).rejects.toThrow(msgKirimBatchBelumTerverifikasi('ditolak'));
+    expect(msgKirimBatchBelumTerverifikasi('ditolak')).toContain('"Ditolak"');
+    expect(await riwayatKirimanPdt(sql, ownerActor(), cpId)).toEqual([]);
+  });
+
+  it('batch terbaru masih Diproses / Menunggu Konfirmasi Identitas ⇒ ditolak juga', async () => {
+    for (const status of ['parsing', 'identitas_belum_terikat']) {
+      const { clientId, cpId } = await fixture();
+      await batch(clientId, cpId, status);
+      await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).rejects.toBeInstanceOf(ValidationError);
+    }
+  });
+
+  it('verified LAMA tidak menolong bila unggahan SESUDAHNYA ditolak (angkanya sudah tertimpa)', async () => {
+    const { clientId, cpId } = await fixture();
+    await batch(clientId, cpId, 'verified');
+    await batch(clientId, cpId, 'ditolak');
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).rejects.toThrow(msgKirimBatchBelumTerverifikasi('ditolak'));
+  });
+
+  it('batch terbaru Terverifikasi ⇒ boleh dikirim (termasuk sesudah batch ditolak diperbaiki)', async () => {
+    const { clientId, cpId } = await fixture();
+    await batch(clientId, cpId, 'ditolak');
+    await batch(clientId, cpId, 'verified');
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).resolves.toBeTruthy();
+  });
+
+  it('batch periode LAIN yang ditolak tidak memblokir bulan ini; nol batch tetap boleh (perilaku lama)', async () => {
+    const { clientId, cpId } = await fixture();
+    await batch(clientId, cpId, 'ditolak', { mulai: '2026-08-01', selesai: '2026-08-31' });
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).resolves.toBeTruthy();
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-08-01')).rejects.toBeInstanceOf(ValidationError);
+  });
+});
+
+
+// ===========================================================================
+// PDT-MINGGUAN (pemilik 2026-10-01) — laporan mingguan RINGKAS dari fakta
+// harian; kiriman ber-`jenis_periode`; batch mingguan tidak menimpa slot
+// agregat bulanan; Total Sales tetap dari laporan bulanan saja.
+// ===========================================================================
+describe('PDT-MINGGUAN — batchHanyaFaktaHarian / parseJenisPeriode (murni)', () => {
+  it('hanya batch pendek (≤10 hari) yang TIDAK mulai tanggal 1 yang dianggap mingguan', () => {
+    expect(batchHanyaFaktaHarian('2026-07-06', '2026-07-12')).toBe(true);
+    expect(batchHanyaFaktaHarian('2026-07-13', '2026-07-22')).toBe(true); // 10 hari
+    expect(batchHanyaFaktaHarian('2026-07-13', '2026-07-23')).toBe(false); // 11 hari
+    expect(batchHanyaFaktaHarian('2026-07-01', '2026-07-07')).toBe(false); // bulan-berjalan
+    expect(batchHanyaFaktaHarian('2026-07-01', '2026-07-31')).toBe(false);
+    expect(batchHanyaFaktaHarian('2026-07-05', '2026-07-31')).toBe(false); // perilaku lama dipertahankan
+    expect(batchHanyaFaktaHarian('2026-07-29', '2026-08-26')).toBe(false); // "28 hari terakhir" (ada di data live)
+  });
+
+  it('jenis kosong ⇒ bulanan; nilai asing ⇒ ValidationError BI', () => {
+    expect(parseJenisPeriode(undefined)).toBe('bulanan');
+    expect(parseJenisPeriode('')).toBe('bulanan');
+    expect(parseJenisPeriode('mingguan')).toBe('mingguan');
+    expect(() => parseJenisPeriode('harian')).toThrow(MSG_JENIS_PERIODE);
+  });
+});
+
+describeDb('PDT-MINGGUAN — laporan mingguan ringkas, kiriman, portal & batch', () => {
+  async function fixture(platform: 'TikTok Shop' | 'Shopee' = 'TikTok Shop'): Promise<{ clientId: string; cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, platform);
+    const [b] = await sql<{ id: number }[]>`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status,
+         parser_versi, retensi_sampai, retensi_alasan, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, ${platform === 'Shopee' ? 'shopee' : 'tiktok'}, '2026-07-01'::date, '2026-07-31'::date, 'verified',
+         1, '2027-12-31'::date, 'default', ${OWNER_AM})
+      returning id`;
+    return { clientId, cpId, batchId: Number(b.id) };
+  }
+
+  async function harian(
+    cpId: number, batchId: number, tanggal: string, basis: string, kanal: string, gmv: number, pesanan: number,
+    extra: { pengunjung?: number; batal?: number } = {},
+  ): Promise<void> {
+    await sql`
+      insert into pdt_fact_shop_daily
+        (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pengunjung, pesanan_dibatalkan)
+      values (${cpId}, ${tanggal}::date, ${basis}, ${kanal}, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, ${gmv}, ${pesanan},
+              ${extra.pengunjung ?? null}, ${extra.batal ?? null})`;
+  }
+
+  it('TikTok: KPI & tren hanya Senin–Minggu; Tokopedia vs minggu lalu; bagian agregat null; skor tidak dihitung', async () => {
+    const { cpId, batchId } = await fixture();
+    await harian(cpId, batchId, '2026-07-05', 'net', 'tiktok', 999_000, 99, { pengunjung: 9_000 }); // Minggu SEBELUM
+    await harian(cpId, batchId, '2026-07-06', 'net', 'tiktok', 100_000, 10, { pengunjung: 1_000 });
+    await harian(cpId, batchId, '2026-07-12', 'net', 'tiktok', 300_000, 30, { pengunjung: 1_000 });
+    await harian(cpId, batchId, '2026-07-13', 'net', 'tiktok', 777_000, 77, { pengunjung: 7_000 }); // Senin SESUDAH
+    await harian(cpId, batchId, '2026-07-01', 'net', 'tokopedia', 50_000, 5, { pengunjung: 100 }); // minggu lalu
+    await harian(cpId, batchId, '2026-07-08', 'net', 'tokopedia', 100_000, 10, { pengunjung: 200 });
+    // agregat bulanan ADA, tapi tidak boleh muncul di laporan mingguan
+    await sql`
+      insert into pdt_fact_creator_period (client_platform_id, creator_handle, periode, batch_id, parser_versi, gmv)
+      values (${cpId}, 'kreator_a', '2026-07-01'::date, ${batchId}, ${pdtCore.PDT_PARSER_VERSI}, 123)`;
+
+    const l = await rakitLaporanTiktokMingguan(sql, cpId, '2026-07-06');
+    expect(l.jenisPeriode).toBe('mingguan');
+    expect(l.periodeAwalBulan).toBe('2026-07-06');
+    expect(l.periodeSelesai).toBe('2026-07-12');
+    expect(l.kpi.gmv).toBe(400_000);
+    expect(l.kpi.pesanan).toBe(40);
+    expect(l.harian?.titik.map((t) => t.tanggal)).toEqual(['2026-07-06', '2026-07-12']);
+    expect(l.tokopedia?.gmv).toBe(100_000);
+    expect(l.tokopedia?.perubahan.gmv).toBe(1); // +100% (pecahan)
+    for (const k of ['iklan', 'live', 'video', 'produk', 'afiliasi', 'kreator', 'sesiLive', 'kampanye', 'tahap'] as const) {
+      expect(l[k], k).toBeNull();
+    }
+    expect(l.kanal.items).toEqual([]);
+    expect(l.skor.total).toBeNull();
+    expect(l.insight.ringkasan).not.toContain('belum bisa dihitung');
+    expect(l.insight.outlook).toContain('minggu depan');
+    expect(pdtCore.renderLaporanHtml(l, 'klien')).toContain('Weekly Report');
+  });
+
+  it('Shopee: cancel rate & skor pesanan-dibuat dari minggu itu saja; promo/chat/kesehatan null', async () => {
+    const { cpId, batchId } = await fixture('Shopee');
+    await harian(cpId, batchId, '2026-07-07', 'siap_dikirim', 'shopee', 200_000, 20);
+    await harian(cpId, batchId, '2026-07-07', 'dibuat', 'shopee', 220_000, 40, { pengunjung: 1_000, batal: 4 });
+    await harian(cpId, batchId, '2026-07-20', 'dibuat', 'shopee', 1, 100, { pengunjung: 100, batal: 90 }); // minggu lain
+
+    const l = await rakitLaporanShopeeMingguan(sql, cpId, '2026-07-06');
+    expect(l.jenisPeriode).toBe('mingguan');
+    expect(l.kpi.gmv).toBe(200_000);
+    expect(l.layanan?.cancelRate).toBe(0.1);
+    expect(l.layanan?.chat ?? null).toBeNull();
+    expect(l.promo).toBeNull();
+    expect(l.skor.total).not.toBeNull();
+  });
+
+  it('periode mingguan wajib hari Senin', async () => {
+    const { cpId } = await fixture();
+    await expect(rakitLaporanTiktokMingguan(sql, cpId, '2026-07-07')).rejects.toThrow(MSG_PERIODE_MINGGUAN);
+    await expect(bacaLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date(), 'mingguan')).rejects.toThrow(MSG_PERIODE_MINGGUAN);
+  });
+
+  it('kirim mingguan: periode Senin–Minggu, jenis tersimpan, TIDAK menggantikan kiriman bulanan bertanggal mulai sama', async () => {
+    const { cpId } = await fixture();
+    const bulanan = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-06-01');
+    const mingguan = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-06-01', new Date(), undefined, 'mingguan');
+    expect(mingguan.jenisPeriode).toBe('mingguan');
+    expect(mingguan.periodeMulai).toBe('2026-06-01');
+    expect(mingguan.periodeSelesai).toBe('2026-06-07');
+    expect(mingguan.menggantikanKirimanId).toBeNull();
+    const ulang = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-06-01', new Date(), undefined, 'mingguan');
+    expect(String(ulang.menggantikanKirimanId)).toBe(String(mingguan.id));
+    const riwayat = await riwayatKirimanPdt(sql, ownerActor(), cpId);
+    expect(riwayat.map((r) => r.jenisPeriode).sort()).toEqual(['bulanan', 'mingguan', 'mingguan']);
+    expect(bulanan.jenisPeriode).toBe('bulanan');
+  });
+
+  it('gerbang batch memakai rentang MINGGU: batch ditolak minggu lain tidak memblokir, yang beririsan memblokir', async () => {
+    const { clientId, cpId } = await fixture(); // batch Juli penuh verified (dibuat lebih dulu)
+    await sql`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, alasan_ditolak,
+         parser_versi, retensi_sampai, retensi_alasan, dibuat_oleh)
+      values (${clientId}, ${cpId}, 'tiktok', '2026-07-20'::date, '2026-07-26'::date, 'ditolak', '[x]',
+              1, '2027-12-31'::date, 'default', ${OWNER_AM})`;
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-06', new Date(), undefined, 'mingguan')).resolves.toBeTruthy();
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-20', new Date(), undefined, 'mingguan'))
+      .rejects.toThrow(msgKirimBatchBelumTerverifikasi('ditolak'));
+  });
+
+  it('menerbitkan laporan mingguan TIDAK menyentuh total_sales (tetap dari laporan bulanan)', async () => {
+    const { clientId, cpId, batchId } = await fixture();
+    await harian(cpId, batchId, '2026-07-06', 'net', 'tiktok', 400_000, 40);
+    const m = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-06', new Date(), undefined, 'mingguan');
+    await terbitkanKiriman(sql, ownerActor(), Number(m.id));
+    const [c1] = await sql<{ total_sales: string }[]>`select total_sales from clients where id = ${clientId}`;
+    expect(Number(c1.total_sales)).toBe(0);
+    const b = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+    await terbitkanKiriman(sql, ownerActor(), Number(b.id));
+    const [c2] = await sql<{ total_sales: string }[]>`select total_sales from clients where id = ${clientId}`;
+    expect(Number(c2.total_sales)).toBe(400_000);
+  });
+
+  it('batch mingguan di tengah bulan TIDAK menimpa slot agregat bulanan (iklan tetap angka bulanan)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', '938284780');
+    await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsLiveBerkas('bulan.xlsx', '938284780', '01/07/2026 - 31/07/2026', [
+      ['Live Pagi', 'AD-1', '1000', '20', '2000000', '150000'],
+    ])], []);
+    await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsLiveBerkas('minggu.xlsx', '938284780', '06/07/2026 - 12/07/2026', [
+      ['Live Pagi', 'AD-1', '10', '1', '5000', '1000'],
+    ])], []);
+    const rows = await sql<{ biaya: string }[]>`select biaya from pdt_fact_ads where client_platform_id = ${cpId}`;
+    expect(rows.map((r) => Number(r.biaya))).toEqual([150000]);
   });
 });
