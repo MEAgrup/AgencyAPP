@@ -203,7 +203,9 @@ describe('visibleNav — the delivery divisions (symmetry)', () => {
         '/finance',
         '/clients',
         '/health',
-        '/account/pdt/laporan',
+        // PDT-ADS-BANTU-AM (2026-10-01): Ads MELIHAT Laporan PDT — diuji
+        // terpisah di blok Account di bawah.
+        ...(division === 'Ads' ? [] : ['/account/pdt/laporan']),
         '/account',
       ]) {
         expect(seen, `${division} must not see ${href}`).not.toContain(href);
@@ -257,19 +259,25 @@ describe('visibleNav — Account', () => {
     expect(seen).toContain('/clients');
   });
 
-  it('Account staff (AM) and lead see Laporan PDT (G2-01); other divisions do not', () => {
+  it('Account staff (AM), lead, dan divisi Ads see Laporan PDT (G2-01, PDT-ADS-BANTU-AM); other divisions do not', () => {
     expect(hrefs(role('Account', 'staff'))).toContain('/account/pdt/laporan');
     expect(hrefs(role('Account', 'lead'))).toContain('/account/pdt/laporan');
-    for (const division of ['Sales', 'Marketing', 'Finance', 'Creative', 'Ads', 'KOL', 'Live Stream']) {
+    // Ads membantu AM menyunting laporan — gerbang baris sesungguhnya
+    // (`canKirimLaporan`: klien ber-brief Ads) ada di server.
+    expect(hrefs(role('Ads', 'staff'))).toContain('/account/pdt/laporan');
+    expect(hrefs(role('Ads', 'lead'))).toContain('/account/pdt/laporan');
+    for (const division of ['Sales', 'Marketing', 'Finance', 'Creative', 'KOL', 'Live Stream']) {
       expect(hrefs(role(division, 'staff')), `${division} must not see /account/pdt/laporan`)
         .not.toContain('/account/pdt/laporan');
     }
   });
 
-  it('Account staff (AM) and lead see Upload Data Toko PDT (G1-09 sub-langkah 3); other divisions do not', () => {
+  it('Account staff (AM), lead, dan divisi Ads see Upload Data Toko PDT (G1-09 sub-langkah 3, PDT-ADS-BANTU-AM); other divisions do not', () => {
     expect(hrefs(role('Account', 'staff'))).toContain('/account/pdt/upload');
     expect(hrefs(role('Account', 'lead'))).toContain('/account/pdt/upload');
-    for (const division of ['Sales', 'Marketing', 'Finance', 'Creative', 'Ads', 'KOL', 'Live Stream']) {
+    expect(hrefs(role('Ads', 'staff'))).toContain('/account/pdt/upload');
+    expect(hrefs(role('Ads', 'lead'))).toContain('/account/pdt/upload');
+    for (const division of ['Sales', 'Marketing', 'Finance', 'Creative', 'KOL', 'Live Stream']) {
       expect(hrefs(role(division, 'staff')), `${division} must not see /account/pdt/upload`)
         .not.toContain('/account/pdt/upload');
     }

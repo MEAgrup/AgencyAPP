@@ -10005,6 +10005,8 @@ export interface PdtInsightStateWire {
   kiriman_id: number;
   terbaru: PdtLaporanInsightRowWire;
   publikasi: PdtLaporanPublikasiWire;
+  /** Pembaca ini boleh Terbitkan/Cabut? (`canTerbitkanLaporan`, PDT-ADS-BANTU-AM). */
+  boleh_terbitkan: boolean;
 }
 
 export function pdtInsightStateToWire(s: pdt.PdtInsightState): PdtInsightStateWire {
@@ -10012,6 +10014,7 @@ export function pdtInsightStateToWire(s: pdt.PdtInsightState): PdtInsightStateWi
     kiriman_id: s.kirimanId,
     terbaru: pdtLaporanInsightRowToWire(s.terbaru),
     publikasi: pdtLaporanPublikasiToWire(s.publikasi),
+    boleh_terbitkan: s.bolehTerbitkan,
   };
 }
 

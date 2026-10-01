@@ -16,6 +16,15 @@ import { api, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import type { ClientContactAccount } from '@/lib/types';
 
+/**
+ * Cermin `DEFAULT_CLIENT_PORTAL_TEMP_PASSWORD` (`packages/domain/src/
+ * client-portal-auth.ts`, CP-PASSWORD-DEFAULT 2026-10-01) — dipakai HANYA
+ * untuk teks petunjuk di layar ini supaya AM tahu apa yang harus disampaikan
+ * ke klien. Server tetap yang memasang password; kalau dua nilai ini berbeda,
+ * nilai server yang berlaku.
+ */
+const PASSWORD_DEFAULT_KLIEN = '#reportmeagency';
+
 interface ClientPickerRow {
   id: string;
   toko: string;
@@ -97,7 +106,9 @@ export default function AdminClientContactsPage() {
       });
       const target = clients.find((c) => c.id === clientId);
       const tempNote =
-        tempPassword.trim() === '' ? 'password sementara default' : 'password sementara yang Anda isi';
+        tempPassword.trim() === ''
+          ? `password sementara default (${PASSWORD_DEFAULT_KLIEN})`
+          : 'password sementara yang Anda isi';
       setProvisionMsg(
         `Akun untuk ${nama} (${target?.toko ?? clientId}) berhasil dibuat. ` +
           `Kontak bisa login dengan ${tempNote}; sampaikan lewat kanal pribadi.`,
@@ -137,7 +148,7 @@ export default function AdminClientContactsPage() {
     try {
       await api.post(`/admin/client-contacts/${row.auth_user_id}/reset-password`, {});
       setResetMsg(
-        `Password ${row.nama} berhasil direset ke password sementara default. ` +
+        `Password ${row.nama} berhasil direset ke password sementara default (${PASSWORD_DEFAULT_KLIEN}). ` +
           `Kontak wajib menggantinya saat login berikutnya; sampaikan lewat kanal pribadi.`,
       );
       await load();
@@ -224,7 +235,7 @@ export default function AdminClientContactsPage() {
                   autoComplete="off"
                   value={tempPassword}
                   onChange={(e) => setTempPassword(e.target.value)}
-                  placeholder="kosongkan untuk default"
+                  placeholder={`kosongkan untuk default (${PASSWORD_DEFAULT_KLIEN})`}
                 />
               </label>
               {provisionError && <div className="alert alertError">{provisionError}</div>}

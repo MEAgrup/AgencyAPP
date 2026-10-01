@@ -1160,7 +1160,13 @@ DECLARE
   actual text[];
   expected text[] := ARRAY[
     'ad_campaign_assets_select','ad_campaigns_select','campaigns_select',
-    'client_platforms_select','client_report_insight_sel_portal',
+    -- `client_platforms_select` DIKELUARKAN dari daftar ini 2026-10-01
+    -- (migrasi `20261215010000`, PDT-ADS-BANTU-AM): ia sekarang punya lengan
+    -- `jwt_division() = 'Ads' AND private.jwt_client_has_ads_brief(client_id)`
+    -- — predikat yang sama dengan arm Ads `clients_select` (§45), supaya tim
+    -- Ads yang membantu AM di halaman PDT melihat toko klien yang memang
+    -- sudah terlihat olehnya. Diuji di §45 di bawah.
+    'client_report_insight_sel_portal',
     'client_report_publikasi_sel_portal','client_reports_sel_portal',
     -- `client_sales_allocations_select` DIKELUARKAN dari daftar ini 2026-09-10
     -- (migrasi `20261001010000`): ia sekarang punya lengan
@@ -1517,6 +1523,37 @@ DO $$ BEGIN
   -- "membersihkan" predikatnya dengan menambah filter status:
   IF NOT EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-DONE')
   THEN RAISE EXCEPTION 'SCR-UI-1: klien yang layanan Ads-nya sudah Done HARUS tetap terlihat (keputusan pemilik 2026-09-06: riwayat tetap terbaca)'; END IF;
+END $$;
+
+-- PDT-ADS-BANTU-AM (migrasi 20261215010000): toko (`client_platforms`) klien
+-- yang sama ikut terlihat oleh divisi Ads — dan HANYA itu. Picker toko di
+-- halaman PDT membaca tabel ini di bawah RLS; tanpa arm ini staff Ads melihat
+-- klien tapi daftar tokonya kosong.
+RESET ROLE;
+INSERT INTO client_platforms (client_id, platform, active, created_by)
+VALUES ('CLI-RLS-ADS-AKTIF', 'TikTok Shop', true, 'EMP-RLS-OWNER'),
+       ('CLI-RLS-ADS-LAIN',  'TikTok Shop', true, 'EMP-RLS-OWNER'),
+       ('CLI-RLS-ADS-NOL',   'Shopee',      true, 'EMP-RLS-OWNER');
+SET LOCAL ROLE authenticated;
+
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-ADS","division":"Ads","level":"staff"}}', true);
+DO $$
+DECLARE terlihat text;
+BEGIN
+  SELECT string_agg(client_id, ', ' ORDER BY client_id) INTO terlihat
+    FROM client_platforms WHERE client_id LIKE 'CLI-RLS-ADS-%';
+  IF terlihat IS DISTINCT FROM 'CLI-RLS-ADS-AKTIF' THEN
+    RAISE EXCEPTION
+      'PDT-ADS-BANTU-AM client_platforms_select arm Ads: staff Ads harus melihat PERSIS toko klien ber-brief Ads — terlihat: %', coalesce(terlihat, '(nol)');
+  END IF;
+END $$;
+
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE","division":"Creative","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM client_platforms WHERE client_id LIKE 'CLI-RLS-ADS-%') <> 0
+  THEN RAISE EXCEPTION 'PDT-ADS-BANTU-AM: staff non-Ads tidak boleh ikut melihat toko lewat arm Ads'; END IF;
 END $$;
 
 -- ---------------------------------------------------------------------------

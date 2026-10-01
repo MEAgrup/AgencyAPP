@@ -357,7 +357,7 @@ export default function PdtInsightEditor({ kirimanId, onPublikasiChange }: {
           Reset ke narasi mesin
         </button>
 
-        {pub.status === '[Draf]' && (
+        {state.boleh_terbitkan && pub.status === '[Draf]' && (
           <button
             type="button"
             className="btn btnPrimary btnSm"
@@ -368,7 +368,7 @@ export default function PdtInsightEditor({ kirimanId, onPublikasiChange }: {
           </button>
         )}
 
-        {pub.status === '[Terbit]' && (
+        {state.boleh_terbitkan && pub.status === '[Terbit]' && (
           <button
             type="button"
             className="btn btnGhost btnSm"
@@ -387,7 +387,7 @@ export default function PdtInsightEditor({ kirimanId, onPublikasiChange }: {
           </button>
         )}
 
-        {pub.status === '[Dicabut]' && (
+        {state.boleh_terbitkan && pub.status === '[Dicabut]' && (
           <button
             type="button"
             className="btn btnPrimary btnSm"
@@ -398,6 +398,11 @@ export default function PdtInsightEditor({ kirimanId, onPublikasiChange }: {
           </button>
         )}
       </div>
+      {!state.boleh_terbitkan && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+          Terbitkan / Cabut ke klien dilakukan oleh AM pemilik klien atau Lead Account. Simpan draf Anda, lalu kabari AM.
+        </p>
+      )}
     </div>
   );
 }

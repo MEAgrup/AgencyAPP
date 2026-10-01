@@ -739,6 +739,8 @@ export interface PdtInsightState {
   kiriman_id: number;
   terbaru: PdtLaporanInsightRow;
   publikasi: PdtLaporanPublikasi;
+  /** `false` untuk divisi Ads: boleh menyunting, Terbitkan/Cabut tetap di AM/Lead Account (PDT-ADS-BANTU-AM). */
+  boleh_terbitkan: boolean;
 }
 
 /** Body PUT .../insight — pola sama `PdtInsightDraft` (draf pra-kirim) + `tahap_narasi` baru. */
