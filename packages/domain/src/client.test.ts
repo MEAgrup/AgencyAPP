@@ -975,6 +975,68 @@ describeDb('listClients — durasi kontrak terbaru (FS-5b)', () => {
   });
 });
 
+describeDb('listClients — pencarian nama klien / nama toko', () => {
+  // Kolom toko/nama_pic ditulis langsung (seperti assigned_am_id di atas) supaya
+  // pencarian diuji terpisah dari pipeline closing. Token unik per baris agar
+  // tidak bertabrakan dengan klien lain di DB uji.
+  const tag = `zqx${Date.now()}`;
+  const label = async (toko: string, namaPic: string): Promise<string> => {
+    const id = await closedClient();
+    await sql`update clients set toko = ${toko}, nama_pic = ${namaPic} where id = ${id}`;
+    return id;
+  };
+  const ids = async (q?: string): Promise<string[]> =>
+    (await listClients(sql, undefined, q)).rows.map((r) => r.id);
+
+  it('mencocokkan nama toko dan nama klien, tanpa membedakan huruf besar/kecil', async () => {
+    const byToko = await label(`Toko ${tag} Jaya`, 'Siti');
+    const byNama = await label('Gerai Lain', `Budi ${tag}`);
+    const other = await label('Gerai Lain', 'Siti');
+
+    const found = await ids(tag.toUpperCase());
+    expect(found).toEqual(expect.arrayContaining([byToko, byNama]));
+    expect(found).not.toContain(other);
+  });
+
+  it('spasi / string kosong / undefined = tanpa filter', async () => {
+    const a = await label(`Toko ${tag} A`, 'Siti');
+    for (const q of [undefined, '', '   ']) {
+      expect(await ids(q)).toContain(a);
+    }
+  });
+
+  it('menganggap % dan _ sebagai teks biasa, bukan wildcard', async () => {
+    const plain = await label(`Toko ${tag} ab`, 'Siti');
+    const literal = await label(`Toko ${tag} 100%_promo`, 'Siti');
+
+    expect(await ids(`${tag} 100%_`)).toEqual([literal]);
+    expect(await ids(`${tag} 100%`)).toEqual([literal]);
+    expect(await ids(`%`)).toEqual(expect.arrayContaining([literal])); // hanya baris ber-'%'
+    expect(await ids(`${tag} %`)).toEqual([]); // '%' bukan wildcard
+    expect(await ids(`${tag} a_`)).not.toContain(plain);
+  });
+
+  it('bekerja bersama paginasi keyset', async () => {
+    const a = await label(`Toko ${tag} P1`, 'Siti');
+    const b = await label(`Toko ${tag} P2`, 'Siti');
+    await label('Gerai Lain', 'Siti');
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 10; guard++) {
+      const p: page.Page<{ id: string }> = await listClients(
+        sql,
+        { limit: 1, cursor: cursor === null ? null : page.decodeCursor(cursor) },
+        `${tag} P`,
+      );
+      seen.push(...p.rows.map((r) => r.id));
+      if (p.nextCursor === null) break;
+      cursor = p.nextCursor;
+    }
+    expect(seen).toEqual([b, a]); // terbaru dulu
+  });
+});
+
 describeDb('listClients — keyset pagination (P2 §6)', () => {
   it('pages the roster and, unpaged, still returns everything', async () => {
     const a = await closedClient();
