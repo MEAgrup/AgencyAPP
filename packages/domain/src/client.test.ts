@@ -1010,7 +1010,9 @@ describeDb('listClients — pencarian nama klien / nama toko', () => {
     const literal = await label(`Toko ${tag} 100%_promo`, 'Siti');
 
     expect(await ids(`${tag} 100%_`)).toEqual([literal]);
-    expect(await ids(`${tag} %`)).toEqual([literal]);
+    expect(await ids(`${tag} 100%`)).toEqual([literal]);
+    expect(await ids(`%`)).toEqual(expect.arrayContaining([literal])); // hanya baris ber-'%'
+    expect(await ids(`${tag} %`)).toEqual([]); // '%' bukan wildcard
     expect(await ids(`${tag} a_`)).not.toContain(plain);
   });
 
