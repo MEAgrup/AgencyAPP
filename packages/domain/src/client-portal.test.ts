@@ -165,8 +165,10 @@ async function seedKlien(): Promise<Fixture> {
  * rather than erroring), so no file-upload fixture is needed — unlike M14's
  * `createReport`, which required an Excel file.
  */
-async function laporanTerbit(f: Fixture, ringkasan: string, periodeAwalBulan = '2026-08-01'): Promise<number> {
-  const d = await kirimLaporanPdt(sql, actorAm, f.platformId, periodeAwalBulan);
+async function laporanTerbit(
+  f: Fixture, ringkasan: string, periodeAwalBulan = '2026-08-01', jenis: 'bulanan' | 'mingguan' = 'bulanan',
+): Promise<number> {
+  const d = await kirimLaporanPdt(sql, actorAm, f.platformId, periodeAwalBulan, new Date(), undefined, jenis);
   await simpanInsightKiriman(sql, actorAm, d.id, {
     ringkasan, poin: ['poin klien'], rekomendasi_tinggi: [], rekomendasi_sedang: [],
     outlook: 'outlook klien', indikator: [],
@@ -437,5 +439,28 @@ describeDb('Complaint form — submit only', () => {
 
   it('refuses an employee actor outright', async () => {
     await expect(submitComplaint(sql, actorAm, { deskripsi: 'x' })).rejects.toThrow(PortalForbiddenError);
+  });
+});
+
+// PDT-MINGGUAN (2026-10-01): jenis periode ikut kunci R11.3 — laporan mingguan
+// yang mulai Senin 1 Juni tidak menyembunyikan laporan bulanan Juni, dan
+// sebaliknya; `periodeTipe` dibaca dari kolom, bukan dikunci 'bulanan'.
+describeDb('laporan — PDT-MINGGUAN (mingguan & bulanan berdampingan)', () => {
+  it('bulanan & mingguan bertanggal mulai sama ⇒ dua baris dengan periodeTipe masing-masing', async () => {
+    const a = await seedKlien();
+    const idBulanan = await laporanTerbit(a, 'BULANAN JUNI', '2026-06-01');
+    const idMingguan = await laporanTerbit(a, 'MINGGUAN 1-7 JUNI', '2026-06-01', 'mingguan');
+
+    const rows = await listReports(sql, contact(a.contactId, a.clientId));
+    const byId = new Map(rows.map((r) => [r.reportId, r]));
+    expect(rows).toHaveLength(2);
+    expect(byId.get(idBulanan)?.periodeTipe).toBe('bulanan');
+    expect(byId.get(idMingguan)?.periodeTipe).toBe('mingguan');
+    expect(byId.get(idMingguan)?.periodeAkhir).toBe('2026-06-07');
+
+    const html = await reportHtml(sql, contact(a.contactId, a.clientId), idMingguan);
+    expect(html).toContain('Weekly Report');
+    expect(html).toContain('MINGGUAN 1-7 JUNI');
+    await expect(reportHtml(sql, contact(a.contactId, a.clientId), idBulanan)).resolves.toContain('Monthly Report');
   });
 });

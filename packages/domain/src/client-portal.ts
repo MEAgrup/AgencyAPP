@@ -172,9 +172,10 @@ export async function logAccess(
  * audience — but a listing is navigation, not a scoreboard.
  *
  * Shape UNCHANGED since M14 (M20 D-02): `reportId` is now
- * `pdt_laporan_kiriman.id`, `periodeTipe` is hardcoded `'bulanan'` (every PDT
- * kiriman spans exactly one calendar month — the PDT tables carry no such
- * column at all), and `periodeAkhir` now sources from `periode_selesai`.
+ * `pdt_laporan_kiriman.id`, `periodeTipe` comes from
+ * `pdt_laporan_kiriman.jenis_periode` (`bulanan`/`mingguan`, PDT-MINGGUAN
+ * 2026-10-01 — before that column existed every kiriman was monthly), and
+ * `periodeAkhir` sources from `periode_selesai`.
  */
 export interface PortalReportRow {
   reportId: number;
@@ -191,7 +192,9 @@ const isoTs = (v: unknown): string => (v instanceof Date ? v.toISOString() : Str
 
 /**
  * List content rule (M20 PRD R11.3, owner decision 2026-09-22): one row per
- * `(client_platform_id, periode_mulai)`. The CANDIDATE for a period is its
+ * `(client_platform_id, jenis_periode, periode_mulai)` — the period TYPE is
+ * part of the key (PDT-MINGGUAN) so a weekly report starting on the 1st never
+ * hides the monthly report of that month, nor the reverse. The CANDIDATE for a period is its
  * LATEST kiriman (`dikirim_pada` desc, `id` desc as tiebreaker) — expressed
  * here as "no other kiriman of the same toko+periode was sent later". That
  * candidate is listed ONLY when its own publikasi is `[Terbit]`; an older
@@ -208,7 +211,7 @@ const isoTs = (v: unknown): string => (v instanceof Date ? v.toISOString() : Str
 export async function listReports(sql: Queryable, actor: Actor): Promise<PortalReportRow[]> {
   const scope = contactScope(actor);
   const rows = await sql<Record<string, unknown>[]>`
-    select k.id, cp.platform, k.periode_mulai, k.periode_selesai, pub.diterbitkan_pada
+    select k.id, cp.platform, k.jenis_periode, k.periode_mulai, k.periode_selesai, pub.diterbitkan_pada
       from pdt_laporan_kiriman k
       join client_platforms cp on cp.id = k.client_platform_id
       join pdt_laporan_publikasi pub on pub.kiriman_id = k.id
@@ -217,6 +220,7 @@ export async function listReports(sql: Queryable, actor: Actor): Promise<PortalR
        and not exists (
          select 1 from pdt_laporan_kiriman newer
           where newer.client_platform_id = k.client_platform_id
+            and newer.jenis_periode = k.jenis_periode
             and newer.periode_mulai = k.periode_mulai
             and (newer.dikirim_pada, newer.id) > (k.dikirim_pada, k.id)
        )
@@ -224,7 +228,7 @@ export async function listReports(sql: Queryable, actor: Actor): Promise<PortalR
   return rows.map((r) => ({
     reportId: Number(r.id),
     platform: r.platform as string,
-    periodeTipe: 'bulanan',
+    periodeTipe: r.jenis_periode as string,
     periodeMulai: dateStr(r.periode_mulai),
     periodeAkhir: dateStr(r.periode_selesai),
     diterbitkanPada: r.diterbitkan_pada == null ? null : isoTs(r.diterbitkan_pada),
@@ -271,6 +275,7 @@ export async function reportHtml(sql: Queryable, actor: Actor, reportId: number)
        and not exists (
          select 1 from pdt_laporan_kiriman newer
           where newer.client_platform_id = k.client_platform_id
+            and newer.jenis_periode = k.jenis_periode
             and newer.periode_mulai = k.periode_mulai
             and (newer.dikirim_pada, newer.id) > (k.dikirim_pada, k.id)
        )`;

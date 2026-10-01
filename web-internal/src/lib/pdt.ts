@@ -196,6 +196,42 @@ export const PDT_BATCH_STATUS_LABEL: Readonly<Record<string, string>> = {
 };
 
 /** Hari terakhir bulan `YYYY-MM-01` sebagai `YYYY-MM-DD` (kalender murni, nol zona waktu). */
+/** PDT-MINGGUAN — `bulanan` (default) | `mingguan` (Senin–Minggu, versi ringkas dari data harian). */
+export type PdtJenisPeriode = 'bulanan' | 'mingguan';
+
+function tambahHari(ymd: string, n: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+/** Hari Senin pada/sebelum `ymd` — pemilih tanggal boleh menunjuk hari apa pun, server menuntut Senin. */
+export function seninDari(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const hari = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = Minggu
+  return tambahHari(ymd, -((hari + 6) % 7));
+}
+
+/** Rentang inklusif sebuah laporan — cermin `rentangLaporan` domain. */
+export function rentangPeriodeLaporan(jenis: PdtJenisPeriode, mulai: string): { mulai: string; selesai: string } {
+  return { mulai, selesai: jenis === 'mingguan' ? tambahHari(mulai, 6) : akhirBulan(mulai) };
+}
+
+/**
+ * Cermin `batchHanyaFaktaHarian` (domain, PDT-MINGGUAN): batch ≤10 hari yang
+ * tidak mulai tanggal 1 hanya menyimpan data HARIAN — data iklan/produk/
+ * afiliasi bulan itu tidak ditimpa. Hanya untuk catatan di layar pratinjau.
+ */
+export function batchMingguanHanyaHarian(mulai: string, selesai: string): boolean {
+  if (mulai.slice(8, 10) === '01') return false;
+  const hari = (Date.parse(`${selesai}T00:00:00Z`) - Date.parse(`${mulai}T00:00:00Z`)) / 86_400_000 + 1;
+  return hari <= 10;
+}
+
+/** Senin minggu LALU (minggu penuh terakhir) dari tanggal lokal `hariIni` — default pemilih minggu. */
+export function seninMingguLalu(hariIni: string): string {
+  return tambahHari(seninDari(hariIni), -7);
+}
+
 function akhirBulan(periodeAwalBulan: string): string {
   const [y, m] = periodeAwalBulan.split('-').map(Number);
   const hari = new Date(Date.UTC(y, m, 0)).getUTCDate();
@@ -210,10 +246,11 @@ function akhirBulan(periodeAwalBulan: string): string {
  * tetap penegak satu-satunya; ini hanya supaya layar memperingatkan SEBELUM
  * tombol ditekan.
  */
-export function batchPenentuKirim(batches: readonly PdtBatchRingkas[], periodeAwalBulan: string): PdtBatchRingkas | null {
-  const selesai = akhirBulan(periodeAwalBulan);
+export function batchPenentuKirim(
+  batches: readonly PdtBatchRingkas[], periodeMulai: string, periodeSelesai: string = akhirBulan(periodeMulai),
+): PdtBatchRingkas | null {
   const kandidat = batches.filter(
-    (b) => b.status !== 'digantikan' && b.periode_mulai <= selesai && b.periode_selesai >= periodeAwalBulan,
+    (b) => b.status !== 'digantikan' && b.periode_mulai <= periodeSelesai && b.periode_selesai >= periodeMulai,
   );
   kandidat.sort((a, b) => (a.dibuat_pada === b.dibuat_pada ? b.id - a.id : a.dibuat_pada < b.dibuat_pada ? 1 : -1));
   return kandidat[0] ?? null;
@@ -640,7 +677,10 @@ export interface PdtLaporan {
   schema: string;
   platform: string;
   client_platform_id: number;
+  /** Untuk laporan mingguan ini hari Senin, bukan awal bulan. */
   periode_awal_bulan: string;
+  jenis_periode: PdtJenisPeriode;
+  periode_selesai: string | null;
   generated_at: string;
   kpi: PdtLaporanKpi;
   harian: PdtLaporanHarian | null;
@@ -693,8 +733,8 @@ export interface PdtLaporanKelengkapan {
  * (hari pertama bulan); halaman pemanggil mengonversi dari
  * `<input type="month">` ("YYYY-MM") sebelum memanggil ini.
  */
-export function getPdtLaporan(clientPlatformId: number, periode: string): Promise<PdtLaporan> {
-  const search = new URLSearchParams({ client_platform_id: String(clientPlatformId), periode });
+export function getPdtLaporan(clientPlatformId: number, periode: string, jenis: PdtJenisPeriode = 'bulanan'): Promise<PdtLaporan> {
+  const search = new URLSearchParams({ client_platform_id: String(clientPlatformId), periode, jenis });
   return api.get<PdtLaporan>(`/account/pdt/laporan?${search.toString()}`);
 }
 
@@ -705,6 +745,7 @@ export function getPdtLaporan(clientPlatformId: number, periode: string): Promis
 export interface PdtLaporanKiriman {
   id: number;
   client_platform_id: number;
+  jenis_periode: PdtJenisPeriode;
   periode_mulai: string;
   periode_selesai: string;
   parser_versi: number;
@@ -728,8 +769,10 @@ export interface PdtInsightDraft {
   indikator?: { nama: string; target: string }[];
 }
 
-export function kirimLaporanPdt(clientPlatformId: number, periode: string, insight?: PdtInsightDraft): Promise<PdtLaporanKiriman> {
-  return api.post<PdtLaporanKiriman>('/account/pdt/laporan/kirim', { client_platform_id: clientPlatformId, periode, insight });
+export function kirimLaporanPdt(
+  clientPlatformId: number, periode: string, insight?: PdtInsightDraft, jenis: PdtJenisPeriode = 'bulanan',
+): Promise<PdtLaporanKiriman> {
+  return api.post<PdtLaporanKiriman>('/account/pdt/laporan/kirim', { client_platform_id: clientPlatformId, periode, jenis, insight });
 }
 
 // G2-01 — riwayat kiriman (GET /account/pdt/laporan/kiriman, Flow B langkah
@@ -739,6 +782,7 @@ export function kirimLaporanPdt(clientPlatformId: number, periode: string, insig
 export interface PdtKirimanRingkas {
   id: number;
   client_platform_id: number;
+  jenis_periode: PdtJenisPeriode;
   periode_mulai: string;
   periode_selesai: string;
   parser_versi: number;

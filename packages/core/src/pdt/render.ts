@@ -46,6 +46,7 @@
 import { DASH, dec, esc, num, pct, rp } from '../baseline/angka';
 import { ATRIBUSI_IKON, CHART_JS, DOC_CSS, ikon as ikonSvg, PRINT_BOOT, type IconName } from '../docassets';
 import { gauge, grid, jsonForScript, kartuInternal, kosong, kpi, rekCard, rpPendek, tabel, td } from '../report/render';
+import { jenisPeriodeLaporan } from './laporan';
 import type { PdtKelengkapanBagian, PdtLaporanInsight, PdtLaporanShopee, PdtLaporanTahap, PdtLaporanTahapBlok, PdtLaporanTiktok, PdtTahapKey } from './laporan';
 import type { PdtKuadranSku } from './kuadran';
 
@@ -488,7 +489,7 @@ function bangunSeksi(p: Laporan, mode: RenderMode): [string, string, IconName][]
 
   add('Key Insights', seksiInsightPoin(p.insight), 'fa-lightbulb');
   add('Rekomendasi & Action Plan', seksiRekomendasi(p.insight), 'fa-list-check');
-  add('Outlook Periode Berikutnya', seksiOutlook(p.insight), 'fa-flag-checkered');
+  add(jenisPeriodeLaporan(p) === 'mingguan' ? 'Outlook Minggu Berikutnya' : 'Outlook Periode Berikutnya', seksiOutlook(p.insight), 'fa-flag-checkered');
   add('Kelengkapan Data (Internal)', seksiKelengkapan(p, mode), 'fa-circle-info');
 
   return seksi;
@@ -521,6 +522,18 @@ function chartData(p: Laporan): Record<string, unknown> {
   };
 }
 
+/** PDT-MINGGUAN — judul dokumen per jenis periode. */
+function judulJenis(p: Laporan): string {
+  return jenisPeriodeLaporan(p) === 'mingguan' ? 'Weekly Report' : 'Monthly Report';
+}
+
+/** Label periode: bulanan tetap tanggal awal bulan (perilaku lama); mingguan "mulai s/d selesai". */
+function labelPeriode(p: Laporan): string {
+  return jenisPeriodeLaporan(p) === 'mingguan' && p.periodeSelesai
+    ? `${p.periodeAwalBulan} s/d ${p.periodeSelesai}`
+    : p.periodeAwalBulan;
+}
+
 function renderBody(p: Laporan, mode: RenderMode): string {
   const seksi = bangunSeksi(p, mode);
   const body = seksi.map(([judul, html, ikon], i) =>
@@ -529,13 +542,13 @@ function renderBody(p: Laporan, mode: RenderMode): string {
 
   const platformLabel = p.platform === 'tiktok' ? 'TikTok Shop' : 'Shopee';
   const head = `<div class="flex items-end justify-between mb-6 flex-wrap gap-4">
-    <div><div class="flex items-center gap-3 flex-wrap"><h1 class="font-display text-2xl md:text-4xl font-bold tracking-tight text-slate-900">Monthly Report</h1>
-      <div class="px-3 py-1 bg-slate-900 text-white text-xs font-bold rounded-full">${esc(p.periodeAwalBulan)}</div>
+    <div><div class="flex items-center gap-3 flex-wrap"><h1 class="font-display text-2xl md:text-4xl font-bold tracking-tight text-slate-900">${judulJenis(p)}</h1>
+      <div class="px-3 py-1 bg-slate-900 text-white text-xs font-bold rounded-full">${esc(labelPeriode(p))}</div>
       ${mode === 'internal' ? '<div class="px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded-full">VERSI INTERNAL</div>' : ''}</div>
     <p class="text-base md:text-lg text-slate-600 mt-1">${esc(platformLabel)} — Performance &amp; Strategic Analysis</p></div></div>`;
 
   const kaki = `<div class="text-center text-xs text-slate-500 mt-8 pt-6 border-t border-slate-200">
-    <p>Dibuat oleh <span class="font-semibold">MEA CDPS Report Engine (PDT)</span> • ${esc(p.periodeAwalBulan)}</p>
+    <p>Dibuat oleh <span class="font-semibold">MEA CDPS Report Engine (PDT)</span> • ${esc(labelPeriode(p))}</p>
     <p class="mt-2 text-slate-400 text-[0.65rem]">${esc(ATRIBUSI_IKON)}</p></div>`;
 
   return head + seksiSkor(p, mode) + body + kaki;
@@ -544,7 +557,7 @@ function renderBody(p: Laporan, mode: RenderMode): string {
 /** A complete, self-contained HTML document — what the AM/client downloads or forwards. */
 export function renderLaporanHtml(laporan: PdtLaporanTiktok | PdtLaporanShopee, mode: RenderMode): string {
   const platformLabel = laporan.platform === 'tiktok' ? 'TikTok Shop' : 'Shopee';
-  const judul = `Monthly Report — ${platformLabel} ${laporan.periodeAwalBulan}`;
+  const judul = `${judulJenis(laporan)} — ${platformLabel} ${labelPeriode(laporan)}`;
   return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>${esc(judul)}${mode === 'internal' ? ' — Internal' : ''}</title>
 <style>${DOC_CSS}</style>
@@ -572,5 +585,6 @@ export function renderLaporanHtml(laporan: PdtLaporanTiktok | PdtLaporanShopee, 
  */
 export function namaBerkasLaporan(laporan: PdtLaporanTiktok | PdtLaporanShopee, mode: RenderMode): string {
   const platform = laporan.platform === 'tiktok' ? 'TikTok' : 'Shopee';
-  return `Laporan-PDT-${platform}-${laporan.clientPlatformId}-${laporan.periodeAwalBulan}-${mode}.html`;
+  const jenis = jenisPeriodeLaporan(laporan) === 'mingguan' ? '-mingguan' : '';
+  return `Laporan-PDT-${platform}-${laporan.clientPlatformId}-${laporan.periodeAwalBulan}${jenis}-${mode}.html`;
 }

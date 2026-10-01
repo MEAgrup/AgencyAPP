@@ -54,6 +54,7 @@ import { useSearchParams } from 'next/navigation';
 import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { listClients, type Client, type Platform } from '@/lib/clients';
 import {
+  batchMingguanHanyaHarian,
   commitBatchPdt,
   konfirmasiIdentitasBatchPdt,
   listPlatformPdtKlien,
@@ -556,7 +557,17 @@ function UploadPdtWorkspace() {
                     {preview.periode === null ? (
                       <p className="muted" style={{ fontSize: 12 }}>Belum bisa dibaca — nol berkas ber-status OK.</p>
                     ) : preview.periode.status === 'ok' ? (
-                      <p>{preview.periode.mulai} s/d {preview.periode.selesai}</p>
+                      <>
+                        <p>{preview.periode.mulai} s/d {preview.periode.selesai}</p>
+                        {preview.periode.mulai && preview.periode.selesai
+                          && batchMingguanHanyaHarian(preview.periode.mulai, preview.periode.selesai) && (
+                          <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                            Batch mingguan: hanya data harian (KPI, tren, cancel rate, Tokopedia) yang disimpan, untuk
+                            Laporan Mingguan. Data iklan, LIVE, video, produk dan afiliasi bulan ini tidak ditimpa — unggah
+                            export bulan berjalan (mulai tanggal 1) untuk memperbaruinya.
+                          </p>
+                        )}
+                      </>
                     ) : (
                       <p className="muted" style={{ fontSize: 12 }}>{preview.periode.pesan}</p>
                     )}

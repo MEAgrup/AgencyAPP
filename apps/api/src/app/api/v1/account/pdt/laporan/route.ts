@@ -2,7 +2,8 @@
  * GET /api/v1/account/pdt/laporan — PDT G2-01 lanjutan, Flow B langkah 1
  * ("AM membuka laporan periode X → laporan dirender dari view atas fakta",
  * PDT-21 Rule 21). Query: `client_platform_id` (positive integer) +
- * `periode` (`YYYY-MM-01`, awal bulan).
+ * `periode` (`YYYY-MM-01`, awal bulan) + opsional `jenis` (`bulanan` default |
+ * `mingguan` — PDT-MINGGUAN, `periode` lalu = hari Senin `YYYY-MM-DD`).
  *
  * `pdt.bacaLaporanPdt` menentukan platform toko dari `client_platforms`
  * sendiri (bukan dari query param) dan memilih `rakitLaporanTiktok`/
@@ -55,14 +56,16 @@ export async function GET(request: Request): Promise<Response> {
     // dan overhead framework. Satu baris log per permintaan, terbaca di
     // runtime log Vercel; `Server-Timing` membuat angka yang SAMA terlihat di
     // tab Network browser tanpa perlu akses log.
+    const jenis = pdt.parseJenisPeriode(params.get('jenis'));
+
     const t0 = performance.now();
-    const laporan = await pdt.bacaLaporanPdt(db(), actor, clientPlatformId, periode);
+    const laporan = await pdt.bacaLaporanPdt(db(), actor, clientPlatformId, periode, new Date(), jenis);
     const tRakit = performance.now() - t0;
     const wire = laporan.platform === 'tiktok' ? pdtLaporanTiktokToWire(laporan) : pdtLaporanShopeeToWire(laporan);
     const tTotal = performance.now() - t0;
 
     console.log(
-      `[pdt/laporan] cp=${clientPlatformId} periode=${periode} platform=${laporan.platform}`
+      `[pdt/laporan] cp=${clientPlatformId} periode=${periode} jenis=${jenis} platform=${laporan.platform}`
       + ` rakit=${tRakit.toFixed(0)}ms total=${tTotal.toFixed(0)}ms`,
     );
 

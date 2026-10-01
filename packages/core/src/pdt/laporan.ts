@@ -1249,6 +1249,8 @@ export interface PdtLaporanInsightInput {
   tahap: PdtLaporanTahap | null;
   skor: PdtSkorHasilTiktok | PdtSkorHasilShopee;
   benchTiktok: PdtBenchmarkTiktok | null;
+  /** Default `bulanan`. Mengubah kata "bulan depan" → "minggu depan" dan diam soal skor yang memang tidak dihitung di laporan mingguan. */
+  jenisPeriode?: PdtJenisPeriode;
 }
 
 function rekomendasiDariDimensi(dimensi: readonly PdtDimensiSkorHasil[]): { tinggi: PdtLaporanRekomendasi[]; sedang: PdtLaporanRekomendasi[] } {
@@ -1417,13 +1419,20 @@ export function bangunLaporanInsight(input: PdtLaporanInsightInput): PdtLaporanI
   const { kpi, skor } = input;
   const { tinggi, sedang } = rekomendasiDariDimensi(skor.dimensi);
 
+  const mingguan = input.jenisPeriode === 'mingguan';
+  const kalimatSkor = skor.total != null
+    ? ` Skor performa ${dec(skor.total, 1)}/10 — ${skor.label}.`
+    // Laporan mingguan sengaja tidak menghitung sebagian besar dimensi skor
+    // (faktanya bulanan) — kalimat "belum bisa dihitung" di sana menyesatkan.
+    : mingguan ? '' : ' Skor performa belum bisa dihitung — belum ada dimensi yang punya data periode ini.';
   const ringkasan = kpi.gmv == null
     ? 'Belum ada data GMV untuk periode ini.'
-    : `GMV ${rp(kpi.gmv)}${kpi.pesanan != null ? ` dari ${num(kpi.pesanan)} pesanan` : ''}.${skor.total != null ? ` Skor performa ${dec(skor.total, 1)}/10 — ${skor.label}.` : ' Skor performa belum bisa dihitung — belum ada dimensi yang punya data periode ini.'}`;
+    : `GMV ${rp(kpi.gmv)}${kpi.pesanan != null ? ` dari ${num(kpi.pesanan)} pesanan` : ''}.${kalimatSkor}`;
 
+  const berikut = mingguan ? 'minggu depan' : 'bulan depan';
   const outlook = kpi.gmv == null
-    ? 'Target GMV bulan depan belum bisa ditentukan — GMV periode ini tidak diketahui.'
-    : `Target GMV bulan depan: ${rp(kpi.gmv * 1.15)}–${rp(kpi.gmv * 1.3)} (+15–30%). Fokus: tindak lanjuti rekomendasi prioritas tinggi di atas.`;
+    ? `Target GMV ${berikut} belum bisa ditentukan — GMV periode ini tidak diketahui.`
+    : `Target GMV ${berikut}: ${rp(kpi.gmv * 1.15)}–${rp(kpi.gmv * 1.3)} (+15–30%). Fokus: tindak lanjuti rekomendasi prioritas tinggi di atas.`;
 
   return {
     ringkasan,
@@ -2054,11 +2063,32 @@ export function bangunLaporanTokopedia(input: PdtLaporanTokopediaInput | null): 
   };
 }
 
+/**
+ * PDT-MINGGUAN (pemilik 2026-10-01) — jenis periode laporan.
+ *
+ * `bulanan` = satu bulan kalender (perilaku asli). `mingguan` = tujuh hari
+ * Senin–Minggu, versi RINGKAS: hanya bagian yang bisa dipotong per tanggal
+ * dari `pdt_fact_shop_daily` (KPI, tren harian, total kanal, Tokopedia,
+ * cancel rate). Bagian agregat (iklan, live, video, produk, afiliasi, …)
+ * SELALU `null` di laporan mingguan — faktanya disimpan satu slot per bulan.
+ */
+export type PdtJenisPeriode = 'bulanan' | 'mingguan';
+
+/** Jenis periode sebuah payload. Payload beku SEBELUM PDT-MINGGUAN tidak membawa field ini — semuanya bulanan. */
+export function jenisPeriodeLaporan(l: { jenisPeriode?: PdtJenisPeriode }): PdtJenisPeriode {
+  return l.jenisPeriode ?? 'bulanan';
+}
+
 export interface PdtLaporanTiktok {
   schema: 'cdps.pdt.laporan.tiktok.v1';
   platform: 'tiktok';
   clientPlatformId: number;
+  /** Tanggal awal periode. Untuk laporan `mingguan` ini hari Senin, BUKAN awal bulan — nama field dipertahankan demi payload beku & wire. */
   periodeAwalBulan: string;
+  /** Absen di payload beku lama ⇒ `bulanan` (pakai `jenisPeriodeLaporan`). */
+  jenisPeriode?: PdtJenisPeriode;
+  /** Tanggal akhir periode (inklusif). Absen di payload beku lama. */
+  periodeSelesai?: string;
   generatedAt: string;
   kpi: PdtLaporanKpiRingkas;
   /** `null` = nol baris `pdt_fact_shop_daily` di periode ini. */
@@ -2093,7 +2123,10 @@ export interface PdtLaporanShopee {
   schema: 'cdps.pdt.laporan.shopee.v1';
   platform: 'shopee';
   clientPlatformId: number;
+  /** Lihat `PdtLaporanTiktok.periodeAwalBulan`. */
   periodeAwalBulan: string;
+  jenisPeriode?: PdtJenisPeriode;
+  periodeSelesai?: string;
   generatedAt: string;
   kpi: PdtLaporanKpiRingkas;
   /** `null` = nol baris `pdt_fact_shop_daily` di periode ini. */
@@ -2264,6 +2297,9 @@ export function bangunLaporanKelengkapan(input: PdtLaporanKelengkapanInput): Pdt
 export interface PdtLaporanTiktokOptions {
   clientPlatformId: number;
   periodeAwalBulan: string;
+  /** Default `bulanan`. */
+  jenisPeriode?: PdtJenisPeriode;
+  periodeSelesai?: string;
   generatedAt: string;
   kpi: PdtLaporanKpiInput | null;
   harian: PdtLaporanHarianInput;
@@ -2276,7 +2312,8 @@ export interface PdtLaporanTiktokOptions {
   kreator: PdtLaporanKreatorInput;
   sesiLive: PdtLaporanSesiLiveInput;
   kampanye: PdtLaporanKampanyeInput;
-  tahap: PdtLaporanTahapInput;
+  /** `null` = bagian tahap tidak dibangun sama sekali (laporan mingguan — faktanya bulanan). */
+  tahap: PdtLaporanTahapInput | null;
   /** F-01 (M20 R8) — `null` = nol baris `pdt_fact_shop_daily` kanal `'tokopedia'` periode ini. */
   tokopedia: PdtLaporanTokopediaInput | null;
   skor: PdtSkorHasilTiktok;
@@ -2288,6 +2325,9 @@ export interface PdtLaporanTiktokOptions {
 export interface PdtLaporanShopeeOptions {
   clientPlatformId: number;
   periodeAwalBulan: string;
+  /** Default `bulanan`. */
+  jenisPeriode?: PdtJenisPeriode;
+  periodeSelesai?: string;
   generatedAt: string;
   kpi: PdtLaporanKpiInput | null;
   harian: PdtLaporanHarianInput;
@@ -2314,12 +2354,14 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
   const produk = bangunLaporanProduk(opts.produk, 'tiktok');
   const kanal = bangunKanalTiktok(opts.kanal);
   const live = bangunLaporanLive(opts.live);
-  const tahap = bangunLaporanTahap(opts.tahap, kpi, iklan, afiliasi, video);
+  const tahap = opts.tahap == null ? null : bangunLaporanTahap(opts.tahap, kpi, iklan, afiliasi, video);
   return {
     schema: 'cdps.pdt.laporan.tiktok.v1',
     platform: 'tiktok',
     clientPlatformId: opts.clientPlatformId,
     periodeAwalBulan: opts.periodeAwalBulan,
+    jenisPeriode: opts.jenisPeriode ?? 'bulanan',
+    ...(opts.periodeSelesai ? { periodeSelesai: opts.periodeSelesai } : {}),
     generatedAt: opts.generatedAt,
     kpi,
     harian: bangunLaporanHarian(opts.harian),
@@ -2340,6 +2382,7 @@ export function bangunLaporanTiktok(opts: PdtLaporanTiktokOptions): PdtLaporanTi
     benchmarkVersi: opts.benchmarkVersi,
     insight: bangunLaporanInsight({
       platform: 'tiktok', kpi, kanal, iklan, live, video, afiliasi, tahap, skor: opts.skor, benchTiktok: opts.benchTiktok,
+      jenisPeriode: opts.jenisPeriode,
     }),
     kelengkapan: bangunLaporanKelengkapan({ platform: 'tiktok', kanal, iklan, tahap }),
   };
@@ -2359,6 +2402,8 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
     platform: 'shopee',
     clientPlatformId: opts.clientPlatformId,
     periodeAwalBulan: opts.periodeAwalBulan,
+    jenisPeriode: opts.jenisPeriode ?? 'bulanan',
+    ...(opts.periodeSelesai ? { periodeSelesai: opts.periodeSelesai } : {}),
     generatedAt: opts.generatedAt,
     kpi,
     harian: bangunLaporanHarian(opts.harian),
@@ -2377,6 +2422,7 @@ export function bangunLaporanShopee(opts: PdtLaporanShopeeOptions): PdtLaporanSh
     skor: opts.skor,
     insight: bangunLaporanInsight({
       platform: 'shopee', kpi, kanal, iklan, live, video, afiliasi, tahap: null, skor: opts.skor, benchTiktok: null,
+      jenisPeriode: opts.jenisPeriode,
     }),
     kelengkapan: bangunLaporanKelengkapan({ platform: 'shopee', kanal, iklan, tahap: null }),
   };

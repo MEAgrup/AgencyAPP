@@ -189,8 +189,12 @@ import {
   kirimLaporanPdt,
   listPlatformPdtKlien,
   PDT_BATCH_STATUS_LABEL,
+  rentangPeriodeLaporan,
   riwayatBatchPdt,
+  seninDari,
+  seninMingguLalu,
   type PdtBatchRingkas,
+  type PdtJenisPeriode,
   type PdtKirimanRingkas,
   type PdtLaporan,
   type PdtLaporanInsight,
@@ -314,6 +318,16 @@ function currentMonth(): string {
 /** `<input type="month">` mengembalikan "YYYY-MM"; route butuh "YYYY-MM-01". */
 function monthToPeriode(month: string): string {
   return `${month}-01`;
+}
+
+function hariIniLokal(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/** Label periode satu kiriman/laporan — mingguan menampilkan rentang, bulanan tetap tanggal awal (perilaku lama). */
+function labelPeriode(jenis: PdtJenisPeriode, mulai: string, selesai: string | null): string {
+  return jenis === 'mingguan' ? `Mingguan ${mulai} s/d ${selesai ?? '?'}` : mulai;
 }
 
 function skorBadgeClass(label: string | null): string {
@@ -492,6 +506,9 @@ export default function LaporanPdtPage() {
   const [clientId, setClientId] = useState('');
   const [platformId, setPlatformId] = useState<number | ''>('');
   const [month, setMonth] = useState(currentMonth());
+  // PDT-MINGGUAN — `minggu` selalu hari Senin (dinormalisasi saat dipilih).
+  const [jenis, setJenis] = useState<PdtJenisPeriode>('bulanan');
+  const [minggu, setMinggu] = useState(() => seninMingguLalu(hariIniLokal()));
 
   const [laporan, setLaporan] = useState<PdtLaporan | null>(null);
   const [loading, setLoading] = useState(false);
@@ -590,7 +607,7 @@ export default function LaporanPdtPage() {
     setLoading(true);
     setErr(null);
     try {
-      const res = await getPdtLaporan(platformId, monthToPeriode(month));
+      const res = await getPdtLaporan(platformId, jenis === 'mingguan' ? minggu : monthToPeriode(month), jenis);
       if (seq !== permintaanKe.current) return;
       setLaporan(res);
       setInsightDraft(res.insight);
@@ -602,7 +619,7 @@ export default function LaporanPdtPage() {
     } finally {
       if (seq === permintaanKe.current) setLoading(false);
     }
-  }, [platformId, month]);
+  }, [platformId, month, jenis, minggu]);
 
   useEffect(() => {
     void loadLaporan();
@@ -644,28 +661,32 @@ export default function LaporanPdtPage() {
     return () => { batal = true; };
   }, [platformId]);
 
-  const periodeIni = monthToPeriode(month);
+  const periodeIni = jenis === 'mingguan' ? minggu : monthToPeriode(month);
+  const rentangIni = rentangPeriodeLaporan(jenis, periodeIni);
   // Riwayat terurut terbaru dulu — kecocokan PERTAMA untuk periode ini sudah
   // pasti kiriman TERAKHIR (revisi terbaru), bukan sembarang kiriman lama.
-  const kirimanTerakhirUntukPeriodeIni = riwayat.find((k) => k.periode_mulai === periodeIni) ?? null;
-  const batchPenentu = batchPenentuKirim(batches, periodeIni);
+  // Jenis periode ikut dicocokkan: mingguan 1 Juni ≠ bulanan Juni.
+  const kirimanTerakhirUntukPeriodeIni =
+    riwayat.find((k) => k.periode_mulai === periodeIni && k.jenis_periode === jenis) ?? null;
+  const batchPenentu = batchPenentuKirim(batches, rentangIni.mulai, rentangIni.selesai);
   const batchBelumSiap = batchPenentu !== null && batchPenentu.status !== 'verified';
 
   async function handleKirim() {
     if (platformId === '' || !laporan) return;
     const platformLabel = laporan.platform === 'tiktok' ? 'TikTok Shop' : 'Shopee';
+    const periodeLabel = labelPeriode(laporan.jenis_periode, laporan.periode_awal_bulan, laporan.periode_selesai);
     const konfirmasi = kirimanTerakhirUntukPeriodeIni
-      ? `Kirim ULANG laporan ${platformLabel} periode ${laporan.periode_awal_bulan} ke klien? ` +
+      ? `Kirim ULANG laporan ${platformLabel} periode ${periodeLabel} ke klien? ` +
         `Ini akan jadi revisi baru — menggantikan kiriman #${kirimanTerakhirUntukPeriodeIni.id} ` +
         `(${formatDateTime(kirimanTerakhirUntukPeriodeIni.dikirim_pada)}), bukan menimpanya. ` +
         'Tidak meminta berkas diunggah ulang.'
-      : `Kirim laporan ${platformLabel} periode ${laporan.periode_awal_bulan} ke klien? ` +
+      : `Kirim laporan ${platformLabel} periode ${periodeLabel} ke klien? ` +
         'Snapshot akan dibekukan (tidak bisa diubah) — kirim ulang nanti membuat revisi baru, bukan menimpa.';
     if (!window.confirm(konfirmasi)) return;
     setKirimLoading(true);
     setKirimErr(null);
     try {
-      const hasil = await kirimLaporanPdt(platformId, monthToPeriode(month), insightDraft ?? undefined);
+      const hasil = await kirimLaporanPdt(platformId, periodeIni, insightDraft ?? undefined, jenis);
       setKirimHasil(hasil);
       setInsightDraft(hasil.laporan.insight);
       await loadRiwayat();
@@ -681,7 +702,7 @@ export default function LaporanPdtPage() {
       <div>
         <h1>Laporan PDT</h1>
         <p className="muted">
-          Pusat Data Toko — KPI ringkas dan skor performa satu toko klien untuk satu bulan, dihitung dari
+          Pusat Data Toko — KPI ringkas dan skor performa satu toko klien untuk satu bulan (atau satu minggu, versi ringkas), dihitung dari
           data yang sudah diunggah. Belum termasuk pengiriman ke klien.
         </p>
       </div>
@@ -733,17 +754,51 @@ export default function LaporanPdtPage() {
             </select>
           </div>
 
-          <div className="field" style={{ minWidth: 160 }}>
-            <label htmlFor="pdtLaporanPeriode">Periode</label>
-            <input
-              id="pdtLaporanPeriode"
-              type="month"
+          <div className="field" style={{ minWidth: 140 }}>
+            <label htmlFor="pdtLaporanJenis">Jenis Laporan</label>
+            <select
+              id="pdtLaporanJenis"
               className="input"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-            />
+              value={jenis}
+              onChange={(e) => setJenis(e.target.value === 'mingguan' ? 'mingguan' : 'bulanan')}
+            >
+              <option value="bulanan">Bulanan</option>
+              <option value="mingguan">Mingguan</option>
+            </select>
           </div>
+
+          {jenis === 'bulanan' ? (
+            <div className="field" style={{ minWidth: 160 }}>
+              <label htmlFor="pdtLaporanPeriode">Periode</label>
+              <input
+                id="pdtLaporanPeriode"
+                type="month"
+                className="input"
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+              />
+            </div>
+          ) : (
+            <div className="field" style={{ minWidth: 200 }}>
+              <label htmlFor="pdtLaporanMinggu">Minggu (Senin–Minggu)</label>
+              <input
+                id="pdtLaporanMinggu"
+                type="date"
+                className="input"
+                value={minggu}
+                onChange={(e) => { if (e.target.value) setMinggu(seninDari(e.target.value)); }}
+              />
+            </div>
+          )}
         </div>
+        {jenis === 'mingguan' && (
+          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+            Laporan mingguan {rentangIni.mulai} s/d {rentangIni.selesai} — versi ringkas: KPI, tren harian, cancel rate dan
+            Tokopedia (vs minggu lalu) dari data harian. Iklan, LIVE, video, produk dan afiliasi hanya ada di laporan bulanan.
+            Total Sales, Health Score dan ROAS tetap dihitung dari laporan bulanan. Unggah export toko dengan rentang
+            minggu ini (atau bulan berjalan) di Upload Data Toko.
+          </p>
+        )}
 
         {clientsErr && (
           <div className="alert alertError" role="alert" style={{ marginTop: 12 }}>
@@ -782,7 +837,8 @@ export default function LaporanPdtPage() {
               <div>
                 <h2>KPI Ringkas</h2>
                 <p className="muted">
-                  {laporan.platform === 'tiktok' ? 'TikTok Shop' : 'Shopee'} · {laporan.periode_awal_bulan}
+                  {laporan.platform === 'tiktok' ? 'TikTok Shop' : 'Shopee'} ·{' '}
+                  {labelPeriode(laporan.jenis_periode, laporan.periode_awal_bulan, laporan.periode_selesai)}
                 </p>
               </div>
               <button type="button" className="btn btnPrimary btnSm" disabled={kirimLoading || batchBelumSiap} onClick={() => void handleKirim()}>
@@ -1911,7 +1967,7 @@ export default function LaporanPdtPage() {
                     {riwayat.map((k) => (
                       <Fragment key={k.id}>
                       <tr>
-                        <td>{k.periode_mulai}</td>
+                        <td>{labelPeriode(k.jenis_periode, k.periode_mulai, k.periode_selesai)}</td>
                         <td>{formatDateTime(k.dikirim_pada)}</td>
                         <td>{k.dikirim_oleh}</td>
                         <td>

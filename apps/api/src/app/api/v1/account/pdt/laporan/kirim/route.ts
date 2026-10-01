@@ -38,6 +38,8 @@ export async function POST(request: Request): Promise<Response> {
     const body = (await request.json().catch(() => ({}))) as {
       client_platform_id?: unknown;
       periode?: unknown;
+      /** PDT-MINGGUAN — `bulanan` (default) | `mingguan`. */
+      jenis?: unknown;
       insight?: PdtInsightDraftBody;
     };
     const clientPlatformId = typeof body.client_platform_id === 'number' ? body.client_platform_id : NaN;
@@ -50,8 +52,9 @@ export async function POST(request: Request): Promise<Response> {
       throw new BadRequestError('periode is required (YYYY-MM-01)');
     }
 
+    const jenis = pdt.parseJenisPeriode(body.jenis);
     const insightDraft = body.insight === undefined ? undefined : toPdtInsightDraft(body.insight);
-    const hasil = await pdt.kirimLaporanPdt(db(), actor, clientPlatformId, periode, new Date(), insightDraft);
+    const hasil = await pdt.kirimLaporanPdt(db(), actor, clientPlatformId, periode, new Date(), insightDraft, jenis);
 
     return json(pdtLaporanKirimanToWire(hasil));
   });
