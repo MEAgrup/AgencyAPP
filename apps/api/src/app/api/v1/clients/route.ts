@@ -19,10 +19,10 @@ import { clientListRowToWire } from '@/lib/wire';
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
-    // P2 §6: paged (?limit=, ?cursor=).
+    // P2 §6: paged (?limit=, ?cursor=); ?q= mencari nama klien / nama toko.
     const params = new URL(request.url).searchParams;
     const req = page.parseRequest(params.get('limit'), params.get('cursor'));
-    const result = await readAsActor(actor, (sql) => client.listClients(sql, req));
+    const result = await readAsActor(actor, (sql) => client.listClients(sql, req, params.get('q') ?? undefined));
     return json({ data: result.rows.map(clientListRowToWire), next_cursor: result.nextCursor });
   });
 }

@@ -33,11 +33,16 @@ export default function ClientsPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  // Pencarian nama klien / toko dijalankan di server (daftar dipaginasi, jadi
+  // filter sisi-klien hanya akan melihat halaman yang sudah dimuat).
+  const [searchInput, setSearchInput] = useState('');
+  const [query, setQuery] = useState('');
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await listClients();
+      const res = await listClients({ q: query });
       setClients(res.data);
       setNextCursor(res.next_cursor);
     } catch (err) {
@@ -45,7 +50,7 @@ export default function ClientsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [query]);
 
   // Menyambung, bukan mengganti.
   async function loadMore() {
@@ -53,7 +58,7 @@ export default function ClientsPage() {
     setLoadingMore(true);
     setError(null);
     try {
-      const res = await listClients({ cursor: nextCursor });
+      const res = await listClients({ cursor: nextCursor, q: query });
       setClients((prev) => [...(prev ?? []), ...res.data]);
       setNextCursor(res.next_cursor);
     } catch (err) {
@@ -74,11 +79,44 @@ export default function ClientsPage() {
         <p className="muted">Daftar Client Record (M4) &mdash; provenance &amp; visibilitas per peran.</p>
       </div>
 
+      <form
+        className="row"
+        style={{ gap: 8 }}
+        role="search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setQuery(searchInput.trim());
+        }}
+      >
+        <input
+          type="search"
+          className="input"
+          style={{ maxWidth: 360 }}
+          placeholder="Cari nama klien / nama toko..."
+          aria-label="Cari klien berdasarkan nama klien atau nama toko"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+        />
+        <button type="submit" className="btn">Cari</button>
+        {query !== '' && (
+          <button
+            type="button"
+            className="btn btnSecondary"
+            onClick={() => {
+              setSearchInput('');
+              setQuery('');
+            }}
+          >
+            Reset
+          </button>
+        )}
+      </form>
+
       <section className="card">
         {loading && <p className="muted">Memuat...</p>}
         {error && <div className="alert alertError" role="alert">{error}</div>}
         {!loading && !error && clients && clients.length === 0 && (
-          <div className="emptyState">Belum ada klien yang terlihat untuk peran Anda.</div>
+          <div className="emptyState">{query !== '' ? `Tidak ada klien yang cocok dengan "${query}".` : 'Belum ada klien yang terlihat untuk peran Anda.'}</div>
         )}
         {!loading && !error && clients && clients.length > 0 && (
           <div className="table-wrap">

@@ -129,14 +129,15 @@ export const PAYMENT_STATUS_MENUNGGU_VERIFIKASI = '[Menunggu Verifikasi]';
  *  sekaligus, bukan salah satunya. */
 export const PLATFORM_OPTIONS = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Others'] as const;
 
-// GET /clients[?limit=&cursor=] — P2 §6: dipaginasi server-side. `next_cursor`
+// GET /clients[?limit=&cursor=&q=] (q = nama klien / nama toko) — P2 §6: dipaginasi server-side. `next_cursor`
 // null = halaman terakhir; kirim balik sebagai `cursor` untuk lanjutannya.
 export function listClients(
-  params?: { limit?: number; cursor?: string },
+  params?: { limit?: number; cursor?: string; q?: string },
 ): Promise<{ data: Client[]; next_cursor: string | null }> {
   const search = new URLSearchParams();
   if (params?.limit) search.set('limit', String(params.limit));
   if (params?.cursor) search.set('cursor', params.cursor);
+  if (params?.q) search.set('q', params.q);
   const qs = search.toString();
   return api.get<{ data: Client[]; next_cursor: string | null }>(`/clients${qs ? `?${qs}` : ''}`);
 }

@@ -1461,8 +1461,16 @@ export interface ClientListRow {
  * roster (an aggregation, an export) keeps getting it; the request path passes
  * one.
  */
-export async function listClients(sql: Queryable, pageReq?: page.PageRequest): Promise<page.Page<ClientListRow>> {
+export async function listClients(
+  sql: Queryable,
+  pageReq?: page.PageRequest,
+  search?: string,
+): Promise<page.Page<ClientListRow>> {
   const b = page.sqlBounds(pageReq);
+  // Pencarian nama klien (nama_pic) / nama toko: substring, case-insensitive.
+  // Metakarakter LIKE di-escape supaya '%' / '_' diketik apa adanya.
+  const term = (search ?? '').trim();
+  const pattern = term === '' ? null : `%${term.replace(/[\\%_]/g, '\\$&')}%`;
   const rows = await sql<
     {
       id: string; toko: string; nama_pic: string; kota: string; kategori: string;
@@ -1493,6 +1501,7 @@ export async function listClients(sql: Queryable, pageReq?: page.PageRequest): P
       limit 1
     ) ct on true
     where (c.created_at, c.id) < (${b.at}, ${b.id})
+      and (${pattern}::text is null or c.toko ilike ${pattern} or c.nama_pic ilike ${pattern})
     order by c.created_at desc, c.id desc
     limit ${b.limit}::bigint`;
   const dateStr = (v: string | Date | null): string | null => {
