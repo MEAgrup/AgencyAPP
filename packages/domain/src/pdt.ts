@@ -4513,6 +4513,44 @@ export async function bacaLaporanPdt(
 
 type PdtJsonParam = Parameters<TransactionSql['json']>[0];
 
+/** Label status batch sama persis dengan layar Riwayat Batch (`/account/pdt/upload`). */
+const LABEL_STATUS_BATCH: Readonly<Record<string, string>> = {
+  parsing: 'Diproses (menunggu berkas lengkap)',
+  identitas_belum_terikat: 'Menunggu Konfirmasi Identitas',
+  ditolak: 'Ditolak',
+};
+
+export const msgKirimBatchBelumTerverifikasi = (status: string): string =>
+  `[laporan belum bisa dikirim — batch data toko periode ini berstatus "${LABEL_STATUS_BATCH[status] ?? status}"; ` +
+  'perbaiki berkas dan unggah ulang sampai Terverifikasi]';
+
+/**
+ * PDT-KIRIM-BATCH-VERIFIED (pemilik, 2026-10-01: "Laporan bisa dikirim walau
+ * batch Ditolak"). Fakta ditulis `tulisFaktaModulTerparse` bahkan untuk batch
+ * yang akhirnya `ditolak` karena rekonsiliasi (identitas dicek lebih dulu), jadi
+ * angka batch yang ditolak IKUT muncul di laporan. Gerbangnya: batch TERBARU
+ * yang beririsan dengan bulan itu (selain `digantikan`, yang memang sudah
+ * diganti batch verified lain) harus `verified`. Batch terbaru = yang angkanya
+ * sedang ada di tabel fakta (tulis ulang per toko+periode+sumber), jadi batch
+ * verified LAMA tidak menolong bila unggahan sesudahnya ditolak.
+ *
+ * Nol batch sama sekali TIDAK diblokir di sini — perilaku lama dipertahankan
+ * (laporan kosong + bagian "Kelengkapan Data" internal yang menyebutnya).
+ */
+async function requireBatchTerverifikasiUntukKirim(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<void> {
+  const [terbaru] = await sql<{ status: string }[]>`
+    select status from pdt_upload_batch
+     where client_platform_id = ${clientPlatformId}
+       and status <> 'digantikan'
+       and periode_mulai <= (${periodeAwalBulan}::date + interval '1 month' - interval '1 day')::date
+       and periode_selesai >= ${periodeAwalBulan}::date
+     order by dibuat_pada desc, id desc
+     limit 1`;
+  if (terbaru && terbaru.status !== 'verified') {
+    throw new ValidationError(msgKirimBatchBelumTerverifikasi(terbaru.status));
+  }
+}
+
 /** Baris `pdt_laporan_kiriman` yang baru ditulis, plus laporan yang dibekukan ke dalamnya. */
 export interface PdtLaporanKirimanHasil {
   id: number;
@@ -4574,6 +4612,7 @@ export async function kirimLaporanPdt(
   insightDraft?: pdt.PdtInsightDraft,
 ): Promise<PdtLaporanKirimanHasil> {
   const laporan = await bacaLaporanPdt(sql, actor, clientPlatformId, periodeAwalBulan, now);
+  await requireBatchTerverifikasiUntukKirim(sql, clientPlatformId, periodeAwalBulan);
   if (insightDraft !== undefined) {
     try {
       laporan.insight = pdt.normalizePdtInsightDraft(insightDraft);

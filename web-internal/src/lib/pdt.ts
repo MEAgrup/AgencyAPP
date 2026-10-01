@@ -17,10 +17,37 @@ export interface PdtPreviewBerkas {
   baris_header: number | null;
   kolom_dipanen: number;
   kolom_baru: string[];
-  status: string; // 'ok' | 'perlu_pilih_modul' | 'gagal' | 'ditolak_pagar'
+  status: string; // 'ok' | 'sebagian' | 'perlu_pilih_modul' | 'gagal' | 'ditolak_pagar' — label: `PDT_BERKAS_STATUS_LABEL`
   pesan: string | null;
   sha256: string | null;
   bytes: number | null;
+}
+
+/**
+ * Label + warna badge status per berkas (layar "Hasil Deteksi"). Cermin
+ * `PdtPreviewBerkasStatus` di `packages/domain/src/pdt.ts`.
+ *
+ * `sebagian` (G1-08-SEBAGIAN): kolom WAJIB lengkap, hanya kolom opsional yang
+ * hilang — berkas TETAP dipakai untuk fakta & rekonsiliasi. Dulu tidak punya
+ * label sehingga tampil mentah "sebagian" berwarna merah, dan AM mengira
+ * berkasnya gagal. Kuning, bukan merah: perlu diperhatikan, bukan ditolak.
+ */
+export const PDT_BERKAS_STATUS_LABEL: Readonly<Record<string, string>> = {
+  ok: 'OK',
+  sebagian: 'Sebagian (tetap dipakai)',
+  perlu_pilih_modul: 'Perlu Pilih Modul',
+  gagal: 'Gagal',
+  ditolak_pagar: 'Ditolak Pagar',
+};
+
+export function pdtBerkasStatusLabel(status: string): string {
+  return PDT_BERKAS_STATUS_LABEL[status] ?? status;
+}
+
+export function pdtBerkasBadgeClass(status: string): string {
+  if (status === 'ok') return 'badge-green';
+  if (status === 'sebagian' || status === 'perlu_pilih_modul') return 'badge-amber';
+  return 'badge-red';
 }
 
 export interface PdtPreviewIdentitas {
@@ -157,6 +184,39 @@ export interface PdtBatchRingkas {
   retensi_sampai: string | null;
   // G1-12 (Rule 36) — batch LAMA yang baris ini gantikan, null bila baris ini bukan hasil supersede.
   menggantikan_batch_id: number | null;
+}
+
+/** Label status batch — sama persis dengan Riwayat Batch di `/account/pdt/upload`. */
+export const PDT_BATCH_STATUS_LABEL: Readonly<Record<string, string>> = {
+  parsing: 'Diproses (menunggu berkas lengkap)',
+  identitas_belum_terikat: 'Menunggu Konfirmasi Identitas',
+  verified: 'Terverifikasi',
+  ditolak: 'Ditolak',
+  digantikan: 'Digantikan',
+};
+
+/** Hari terakhir bulan `YYYY-MM-01` sebagai `YYYY-MM-DD` (kalender murni, nol zona waktu). */
+function akhirBulan(periodeAwalBulan: string): string {
+  const [y, m] = periodeAwalBulan.split('-').map(Number);
+  const hari = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${periodeAwalBulan.slice(0, 8)}${String(hari).padStart(2, '0')}`;
+}
+
+/**
+ * Batch yang menentukan boleh-tidaknya "Kirim ke Klien" untuk satu bulan —
+ * cermin `requireBatchTerverifikasiUntukKirim` (`packages/domain/src/pdt.ts`,
+ * PDT-KIRIM-BATCH-VERIFIED): batch TERBARU yang beririsan dengan bulan itu,
+ * selain `digantikan`. `null` = belum ada unggahan untuk bulan itu. Server
+ * tetap penegak satu-satunya; ini hanya supaya layar memperingatkan SEBELUM
+ * tombol ditekan.
+ */
+export function batchPenentuKirim(batches: readonly PdtBatchRingkas[], periodeAwalBulan: string): PdtBatchRingkas | null {
+  const selesai = akhirBulan(periodeAwalBulan);
+  const kandidat = batches.filter(
+    (b) => b.status !== 'digantikan' && b.periode_mulai <= selesai && b.periode_selesai >= periodeAwalBulan,
+  );
+  kandidat.sort((a, b) => (a.dibuat_pada === b.dibuat_pada ? b.id - a.id : a.dibuat_pada < b.dibuat_pada ? 1 : -1));
+  return kandidat[0] ?? null;
 }
 
 export async function riwayatBatchPdt(clientPlatformId: number): Promise<PdtBatchRingkas[]> {

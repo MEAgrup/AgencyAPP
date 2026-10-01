@@ -48,6 +48,7 @@ import {
   MSG_KIRIMAN_NOT_FOUND,
   MSG_LAPORAN_FORBIDDEN,
   MSG_KIRIM_ULANG_TERBIT,
+  msgKirimBatchBelumTerverifikasi,
   riwayatKirimanPdt,
   ConflictError,
   bacaInsightKiriman,
@@ -6552,6 +6553,12 @@ describeDb('kirimLaporanPdt (Flow B langkah 4) — bekukan snapshot ke pdt_lapor
         periodeMulai: '2026-07-01', periodeSelesai: '2026-07-31', retensiSampai: '2026-08-01',
         status: 'ditolak', retensiAlasan: 'ditolak',
       });
+      // PDT-KIRIM-BATCH-VERIFIED: kirim hanya boleh bila batch TERBARU periode ini verified —
+      // jadi unggahan yang ditolak itu diikuti unggahan ulang yang lolos. Batch ditolak yang
+      // lebih lama tetap overlap dan tetap harus diperpanjang (itu yang diuji di sini).
+      await insertBatch(cpId, clientId, {
+        periodeMulai: '2026-07-01', periodeSelesai: '2026-07-31', retensiSampai: '2026-08-01',
+      });
 
       await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01', new Date('2026-08-05T00:00:00.000Z'));
 
@@ -7812,5 +7819,65 @@ describeDb('PDT-ADS-BANTU-AM — divisi Ads membantu AM (unggah + sunting, bukan
     const { cpId } = await fixture('Ads');
     await expect(siapkanUploadBatch(sql, creativeActor(), cpId)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(kirimLaporanPdt(sql, creativeActor(), cpId, '2026-07-01')).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describeDb('PDT-KIRIM-BATCH-VERIFIED — Kirim ke Klien ditolak bila batch terbaru periode itu belum Terverifikasi', () => {
+  async function fixture(): Promise<{ clientId: string; cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    return { clientId, cpId };
+  }
+
+  async function batch(
+    clientId: string, cpId: number, status: string,
+    periode: { mulai: string; selesai: string } = { mulai: '2026-07-01', selesai: '2026-07-31' },
+  ): Promise<void> {
+    await sql`
+      insert into pdt_upload_batch
+        (client_id, client_platform_id, platform, periode_mulai, periode_selesai, status, alasan_ditolak,
+         parser_versi, retensi_sampai, retensi_alasan, dibuat_oleh)
+      values
+        (${clientId}, ${cpId}, 'tiktok', ${periode.mulai}::date, ${periode.selesai}::date, ${status},
+         ${status === 'ditolak' ? '[selisih rekonsiliasi GMV 3.2% melebihi ambang 0.5%]' : null},
+         1, '2027-12-31'::date, 'default', ${OWNER_AM})`;
+  }
+
+  it('batch terbaru Ditolak ⇒ ValidationError dengan label status, nol kiriman tertulis', async () => {
+    const { clientId, cpId } = await fixture();
+    await batch(clientId, cpId, 'ditolak');
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).rejects.toThrow(msgKirimBatchBelumTerverifikasi('ditolak'));
+    expect(msgKirimBatchBelumTerverifikasi('ditolak')).toContain('"Ditolak"');
+    expect(await riwayatKirimanPdt(sql, ownerActor(), cpId)).toEqual([]);
+  });
+
+  it('batch terbaru masih Diproses / Menunggu Konfirmasi Identitas ⇒ ditolak juga', async () => {
+    for (const status of ['parsing', 'identitas_belum_terikat']) {
+      const { clientId, cpId } = await fixture();
+      await batch(clientId, cpId, status);
+      await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).rejects.toBeInstanceOf(ValidationError);
+    }
+  });
+
+  it('verified LAMA tidak menolong bila unggahan SESUDAHNYA ditolak (angkanya sudah tertimpa)', async () => {
+    const { clientId, cpId } = await fixture();
+    await batch(clientId, cpId, 'verified');
+    await batch(clientId, cpId, 'ditolak');
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).rejects.toThrow(msgKirimBatchBelumTerverifikasi('ditolak'));
+  });
+
+  it('batch terbaru Terverifikasi ⇒ boleh dikirim (termasuk sesudah batch ditolak diperbaiki)', async () => {
+    const { clientId, cpId } = await fixture();
+    await batch(clientId, cpId, 'ditolak');
+    await batch(clientId, cpId, 'verified');
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).resolves.toBeTruthy();
+  });
+
+  it('batch periode LAIN yang ditolak tidak memblokir bulan ini; nol batch tetap boleh (perilaku lama)', async () => {
+    const { clientId, cpId } = await fixture();
+    await batch(clientId, cpId, 'ditolak', { mulai: '2026-08-01', selesai: '2026-08-31' });
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).resolves.toBeTruthy();
+    await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-08-01')).rejects.toBeInstanceOf(ValidationError);
   });
 });

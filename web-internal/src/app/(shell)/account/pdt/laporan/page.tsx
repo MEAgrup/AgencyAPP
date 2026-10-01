@@ -184,9 +184,13 @@ import Link from 'next/link';
 import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { listClients, type Client, type Platform } from '@/lib/clients';
 import {
+  batchPenentuKirim,
   getPdtLaporan,
   kirimLaporanPdt,
   listPlatformPdtKlien,
+  PDT_BATCH_STATUS_LABEL,
+  riwayatBatchPdt,
+  type PdtBatchRingkas,
   type PdtKirimanRingkas,
   type PdtLaporan,
   type PdtLaporanInsight,
@@ -197,6 +201,7 @@ import {
   riwayatKirimanPdt,
 } from '@/lib/pdt';
 import { formatIDR } from '@/lib/money';
+import { pdtUploadHref } from '@/lib/pdt-deeplink';
 import { GrafikBatang, GrafikDonat, GrafikGaris, GrafikGelembung,
   GrafikPeringkat, GrafikSkor } from '@/components/PdtChart';
 import PdtInsightEditor from '@/components/PdtInsightEditor';
@@ -497,6 +502,9 @@ export default function LaporanPdtPage() {
   const [insightDraft, setInsightDraft] = useState<PdtLaporanInsight | null>(null);
 
   const [kirimLoading, setKirimLoading] = useState(false);
+  // PDT-KIRIM-BATCH-VERIFIED — riwayat batch toko ini, untuk memperingatkan
+  // SEBELUM "Kirim ke Klien" bila unggahan terbaru bulan itu belum Terverifikasi.
+  const [batches, setBatches] = useState<PdtBatchRingkas[]>([]);
   const [kirimErr, setKirimErr] = useState<string | null>(null);
   const [kirimHasil, setKirimHasil] = useState<PdtLaporanKiriman | null>(null);
 
@@ -622,10 +630,26 @@ export default function LaporanPdtPage() {
     void loadRiwayat();
   }, [loadRiwayat]);
 
+  useEffect(() => {
+    if (platformId === '') {
+      setBatches([]);
+      return;
+    }
+    let batal = false;
+    riwayatBatchPdt(platformId)
+      .then((rows) => { if (!batal) setBatches(rows); })
+      // Gagal memuat riwayat batch bukan alasan menyembunyikan laporan — server
+      // tetap menolak kirim bila batch belum Terverifikasi.
+      .catch(() => { if (!batal) setBatches([]); });
+    return () => { batal = true; };
+  }, [platformId]);
+
   const periodeIni = monthToPeriode(month);
   // Riwayat terurut terbaru dulu — kecocokan PERTAMA untuk periode ini sudah
   // pasti kiriman TERAKHIR (revisi terbaru), bukan sembarang kiriman lama.
   const kirimanTerakhirUntukPeriodeIni = riwayat.find((k) => k.periode_mulai === periodeIni) ?? null;
+  const batchPenentu = batchPenentuKirim(batches, periodeIni);
+  const batchBelumSiap = batchPenentu !== null && batchPenentu.status !== 'verified';
 
   async function handleKirim() {
     if (platformId === '' || !laporan) return;
@@ -761,7 +785,7 @@ export default function LaporanPdtPage() {
                   {laporan.platform === 'tiktok' ? 'TikTok Shop' : 'Shopee'} · {laporan.periode_awal_bulan}
                 </p>
               </div>
-              <button type="button" className="btn btnPrimary btnSm" disabled={kirimLoading} onClick={() => void handleKirim()}>
+              <button type="button" className="btn btnPrimary btnSm" disabled={kirimLoading || batchBelumSiap} onClick={() => void handleKirim()}>
                 {kirimLoading ? 'Mengirim...' : kirimanTerakhirUntukPeriodeIni ? 'Kirim Ulang' : 'Kirim ke Klien'}
               </button>
             </div>
@@ -770,6 +794,16 @@ export default function LaporanPdtPage() {
                 Periode ini sudah dikirim ke klien pada {formatDateTime(kirimanTerakhirUntukPeriodeIni.dikirim_pada)}{' '}
                 oleh {kirimanTerakhirUntukPeriodeIni.dikirim_oleh}.
               </p>
+            )}
+            {batchBelumSiap && batchPenentu && (
+              <div className="alert alertError" role="alert" style={{ marginBottom: 16 }}>
+                Laporan belum bisa dikirim: batch #{batchPenentu.id} periode ini berstatus{' '}
+                <b>{PDT_BATCH_STATUS_LABEL[batchPenentu.status] ?? batchPenentu.status}</b>
+                {batchPenentu.alasan_ditolak ? ` — ${batchPenentu.alasan_ditolak}` : ''}. Perbaiki berkas dan unggah ulang
+                sampai Terverifikasi di{' '}
+                <Link href={pdtUploadHref(clientId, platformId, '/account/pdt/laporan')}>Upload Data Toko</Link>.
+                Angka di bawah ikut memuat data batch ini, jadi jangan dipakai ke klien dulu.
+              </div>
             )}
             {kirimErr && (
               <div className="alert alertError" role="alert" style={{ marginBottom: 16 }}>{kirimErr}</div>
