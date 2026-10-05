@@ -31,7 +31,7 @@
 
 ## 4. Urutan kerja
 
-1. Migrasi `20261216010000_ads_revisi_ui.sql`: `end_date` nullable, arm Lead Ads `ad_campaigns_select`, fungsi `private.ad_campaign_transisi`.
+1. Migrasi `20261217010000_ads_revisi_ui.sql`: `end_date` nullable, arm Lead Ads `ad_campaigns_select`, fungsi `private.ad_campaign_transisi`.
 2. Domain `packages/domain/src/ads.ts`: create (end opsional, KPI warisan), gate aset opsional, `hariIklanAktif`/`estimasiBudgetTerpakai`, `listCampaigns`, `targetKpiBrief`.
 3. API: `GET /campaigns`, `GET /briefs/{id}/ads-target-kpi`, wire.
 4. UI `/ads` + `/ads/[id]`.

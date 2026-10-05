@@ -1160,7 +1160,7 @@ DECLARE
   actual text[];
   expected text[] := ARRAY[
     -- `ad_campaigns_select` DIKELUARKAN dari daftar ini 2026-10-05 (migrasi
-    -- `20261216010000`, ADS-REVISI-UI R4): ia sekarang punya lengan
+    -- `20261217010000`, ADS-REVISI-UI R4): ia sekarang punya lengan
     -- `jwt_is_lead() AND jwt_division() = 'Ads'` — cermin `ads.canViewCampaign`,
     -- supaya daftar kampanye `GET /campaigns` tidak kosong untuk SPV Ads.
     -- `ad_campaign_assets_select` TETAP di sini: daftar itu tidak membaca tabelnya.

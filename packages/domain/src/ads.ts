@@ -1777,7 +1777,7 @@ export function estimasiBudget(
 
 /**
  * transisiKampanye reads the transition rows of many campaigns in ONE query via
- * the SECURITY DEFINER helper (migration 20261216010000) — `audit_log_select` is
+ * the SECURITY DEFINER helper (migration 20261217010000) — `audit_log_select` is
  * per-actor, so a plain read would show an AM none of the Advertiser's pauses.
  * Callers have already passed the campaign read gate.
  */
