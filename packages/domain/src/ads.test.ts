@@ -402,6 +402,7 @@ describeDb('Creative-Asset linkage (§4 Rule 2)', () => {
 });
 
 describeDb('lifecycle (§2 / §4 Flow 2)', () => {
+  // ADS-REVISI-UI R5: zero linked assets no longer blocks launch (ads-revisi-ui.test.ts).
   it('launch is gated on Brief [Approved] + all linked assets [Approved]; then pause/end', async () => {
     const { clientId, briefId } = await adsBrief();
     const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
@@ -623,7 +624,9 @@ describeDb('optimization log (§6)', () => {
 });
 
 describeDb('submit guard (§4 Rule 3) + reads', () => {
-  it('an Ads Brief cannot submit until a campaign with a linked asset exists', async () => {
+  // ADS-REVISI-UI R5: the linked asset is now OPTIONAL (submit needs ≥1 campaign
+  // only) — asserted in ads-revisi-ui.test.ts; linking one here still passes.
+  it('an Ads Brief cannot submit until a campaign exists', async () => {
     const { clientId, briefId } = await adsBrief();
     // Register the Advertiser as the brief PIC and drive the brief so submitTask is reachable.
     await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;

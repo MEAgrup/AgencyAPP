@@ -594,6 +594,10 @@ describe('M8 campaignToWire (Campaign + derived §5 performance view)', () => {
     iklanMulai: '2026-07-02',
     iklanSelesai: '',
     hariIklanBerjalan: 5,
+    // ADS-REVISI-UI R1 — turunan Budget Harian × hari aktif.
+    hariIklanAktif: 5,
+    estimasiBudgetTerpakai: 50000000,
+    estimasiBudgetTerpakaiDisplay: 'Rp. 50.000.000,00',
     // B-5/K-3: `''` adalah nilai yang domain benar-benar kirim saat brief setup
     // kampanye tidak menunjuk Brief Creative sumber — bukan `undefined`.
     sourceCreativeBriefId: '',
@@ -630,6 +634,9 @@ describe('M8 campaignToWire (Campaign + derived §5 performance view)', () => {
       iklan_mulai: '2026-07-02',
       iklan_selesai: '',
       hari_iklan_berjalan: 5,
+      hari_iklan_aktif: 5,
+      estimasi_budget_terpakai: 50000000,
+      estimasi_budget_terpakai_display: 'Rp. 50.000.000,00',
       // B-5/K-3 — dikirim SELALU, `''` saat brief setup tidak menunjuk sumber.
       source_creative_brief_id: '',
       total_spend: 8000000,
