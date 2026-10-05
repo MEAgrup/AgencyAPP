@@ -45,6 +45,20 @@ export interface PdtSumberBatch {
   parserVersi: number;
 }
 
+type PdtBasisShopDaily = 'net' | 'dibuat' | 'siap_dikirim' | 'dibayar';
+
+/**
+ * Kanal `pdt_fact_shop_daily` yang dibaca untuk sebuah basis. Basis `'net'`
+ * dipakai BERSAMA oleh TikTok dan Tokopedia (F-01, migrasi `20261203010000`:
+ * pembaca basis `'net'` WAJIB `and kanal = 'tiktok'`); tiga basis lain
+ * hanya pernah ditulis Shopee. Tanpa filter ini GMV/pesanan B-1 dan riwayat
+ * GMV 6 bulan (G3-07) toko TikTok yang mengunggah berkas Tokopedia menjumlah
+ * kedua kanal — bug yang sama dengan `bacaHarian` di `pdt.ts` (PDT-MINGGUAN).
+ */
+function kanalUntukBasis(basis: PdtBasisShopDaily): 'tiktok' | 'shopee' {
+  return basis === 'net' ? 'tiktok' : 'shopee';
+}
+
 export interface PdtFaktaShopDailyAgregat {
   /** Jumlah baris harian yang berkontribusi (0 ⇒ pemanggil dapat `null`, bukan objek ini). */
   hari: number;
@@ -70,7 +84,7 @@ export async function bacaFaktaShopDaily(
   sql: Queryable,
   clientPlatformId: number,
   periodeAwalBulan: string,
-  basis: 'net' | 'dibuat' | 'siap_dikirim' | 'dibayar',
+  basis: PdtBasisShopDaily,
 ): Promise<PdtFaktaShopDailyAgregat | null> {
   const [row] = await sql<
     {
@@ -103,6 +117,7 @@ export async function bacaFaktaShopDaily(
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = ${basis}
+       and kanal = ${kanalUntukBasis(basis)}
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
   if (row.hari === 0) return null;
@@ -112,6 +127,7 @@ export async function bacaFaktaShopDaily(
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = ${basis}
+       and kanal = ${kanalUntukBasis(basis)}
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')
      order by "batchId"`;
@@ -172,7 +188,7 @@ export async function bacaFaktaBatalBulan(
   sql: Queryable,
   clientPlatformId: number,
   periodeAwalBulan: string,
-  basis: 'net' | 'dibuat' | 'siap_dikirim' | 'dibayar',
+  basis: PdtBasisShopDaily,
 ): Promise<PdtFaktaBatalBulan | null> {
   const [row] = await sql<{ hari: number; dibatalkan: string; penyebut: string }[]>`
     select count(pesanan_dibatalkan)::int as hari,
@@ -182,6 +198,7 @@ export async function bacaFaktaBatalBulan(
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = ${basis}
+       and kanal = ${kanalUntukBasis(basis)}
        and tanggal >= ${periodeAwalBulan}::date
        and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
   if (!row || row.hari === 0) return null;
