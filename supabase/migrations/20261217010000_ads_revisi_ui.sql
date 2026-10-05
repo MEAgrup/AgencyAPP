@@ -47,8 +47,11 @@ COMMENT ON COLUMN ad_campaigns.budget IS
   'ADS-REVISI-UI R1 — Budget HARIAN (Rp). Estimasi Budget Terpakai = budget × hari '
   'iklan aktif, diturunkan tiap baca (tidak disimpan).';
 
-DROP POLICY IF EXISTS ad_campaigns_select ON public.ad_campaigns;
-CREATE POLICY ad_campaigns_select ON public.ad_campaigns FOR SELECT TO authenticated
+-- ALTER POLICY (bukan DROP + CREATE): perintah & peran (FOR SELECT TO
+-- authenticated) baseline tetap, hanya USING yang diganti. Juga karena DROP
+-- POLICY lewat kanal MCP `apply_migration` menggantung (timeout 60 dtk,
+-- 2026-10-05) sedangkan ALTER POLICY lolos — lihat DECISIONS 2026-10-05.
+ALTER POLICY ad_campaigns_select ON public.ad_campaigns
 USING (
   public.jwt_can_read_all()
   OR created_by = public.jwt_employee_id()
