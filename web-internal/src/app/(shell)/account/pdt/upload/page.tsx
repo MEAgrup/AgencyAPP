@@ -54,6 +54,7 @@ import { useSearchParams } from 'next/navigation';
 import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { listClients, type Client, type Platform } from '@/lib/clients';
 import {
+  batchMingguanHanyaHarian,
   commitBatchPdt,
   konfirmasiIdentitasBatchPdt,
   listPlatformPdtKlien,
@@ -62,6 +63,8 @@ import {
   type PdtCommitOverrideInput,
   type PdtKonfirmasiIdentitas,
   type PdtPreviewBatch,
+  pdtBerkasBadgeClass,
+  pdtBerkasStatusLabel,
   previewBatchPdt,
   riwayatBatchPdt,
   siapkanUploadBatchPdt,
@@ -100,19 +103,6 @@ function paketBadgeClass(paketStatus: string): string {
   if (paketStatus === 'tersedia') return 'badge-green';
   if (paketStatus === 'legal_hold') return 'badge-amber';
   return 'badge-gray';
-}
-
-const BERKAS_STATUS_LABEL: Record<string, string> = {
-  ok: 'OK',
-  perlu_pilih_modul: 'Perlu Pilih Modul',
-  gagal: 'Gagal',
-  ditolak_pagar: 'Ditolak Pagar',
-};
-
-function berkasBadgeClass(status: string): string {
-  if (status === 'ok') return 'badge-green';
-  if (status === 'perlu_pilih_modul') return 'badge-amber';
-  return 'badge-red';
 }
 
 const IDENTITAS_LABEL: Record<string, string> = {
@@ -522,7 +512,7 @@ function UploadPdtWorkspace() {
                             </select>
                           </td>
                           <td>
-                            <span className={`badge ${berkasBadgeClass(b.status)}`}>{BERKAS_STATUS_LABEL[b.status] ?? b.status}</span>
+                            <span className={`badge ${pdtBerkasBadgeClass(b.status)}`}>{pdtBerkasStatusLabel(b.status)}</span>
                           </td>
                           <td>{b.baris_header ?? '—'}</td>
                           <td>{b.kolom_dipanen}</td>
@@ -567,7 +557,17 @@ function UploadPdtWorkspace() {
                     {preview.periode === null ? (
                       <p className="muted" style={{ fontSize: 12 }}>Belum bisa dibaca — nol berkas ber-status OK.</p>
                     ) : preview.periode.status === 'ok' ? (
-                      <p>{preview.periode.mulai} s/d {preview.periode.selesai}</p>
+                      <>
+                        <p>{preview.periode.mulai} s/d {preview.periode.selesai}</p>
+                        {preview.periode.mulai && preview.periode.selesai
+                          && batchMingguanHanyaHarian(preview.periode.mulai, preview.periode.selesai) && (
+                          <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                            Batch mingguan: hanya data harian (KPI, tren, cancel rate, Tokopedia) yang disimpan, untuk
+                            Laporan Mingguan. Data iklan, LIVE, video, produk dan afiliasi bulan ini tidak ditimpa — unggah
+                            export bulan berjalan (mulai tanggal 1) untuk memperbaruinya.
+                          </p>
+                        )}
+                      </>
                     ) : (
                       <p className="muted" style={{ fontSize: 12 }}>{preview.periode.pesan}</p>
                     )}

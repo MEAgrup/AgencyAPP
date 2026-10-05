@@ -1113,6 +1113,7 @@ export async function commitUploadBatch(
         berkasShopeeAmsAfiliasi, berkasShopeeAmsProduk, berkasTtAdsProduct, berkasTtAdsLive,
         berkasTtamVideoViews, berkasTtamConsideration, berkasTtamFollows, berkasTtamShowcase, berkasTtProductAnalytics,
         berkasShopeeKesehatan, berkasShopeeChat, berkasShopeeDiskon, berkasShopeeFlashSale,
+        hanyaFaktaHarian: batchHanyaFaktaHarian(periode.mulai, periode.selesai),
       });
 
       // G4-03 Tahap 1 (Flow C langkah 1) — mesin verdict Shopee, HANYA saat batch
@@ -1228,7 +1229,38 @@ interface TulisFaktaModulTerparseInput {
   berkasShopeeChat: readonly BerkasTerparse[];
   berkasShopeeDiskon: readonly BerkasTerparse[];
   berkasShopeeFlashSale: readonly BerkasTerparse[];
+  /** PDT-MINGGUAN — lihat `batchHanyaFaktaHarian`. `true` ⇒ hanya fakta harian (+ SKU master) yang ditulis. */
+  hanyaFaktaHarian: boolean;
 }
+
+/**
+ * PDT-MINGGUAN (pemilik 2026-10-01) — batch "parsial" hanya menulis fakta HARIAN.
+ *
+ * Fakta agregat (`pdt_fact_ads`, `_sku_period`, `_creator_period`, `_content`,
+ * `_promo`, `_layanan_chat`, `_kesehatan_penalti`) disimpan SATU slot per bulan
+ * (`periode` = awal bulan, Q-3) dan ditulis ulang per toko+bulan+sumber. Batch
+ * satu minggu di tengah bulan (mis. 8–14) akan MENIMPA slot itu dengan angka
+ * seminggu — laporan bulanan lalu diam-diam memuat iklan/produk/afiliasi satu
+ * minggu saja. Laporan mingguan (ringkas) hanya membaca fakta harian, jadi
+ * batch seperti itu cukup menulis fakta harian.
+ *
+ * "Parsial" = TIDAK mulai tanggal 1 DAN rentangnya ≤ `BATAS_HARI_BATCH_MINGGUAN`
+ * hari — bentuk export mingguan (7 hari, sedikit kelonggaran). Batch yang mulai
+ * tanggal 1 (bulan-berjalan 1–7, 1–15, sebulan penuh) tetap menulis agregat
+ * seperti biasa — angkanya memang bulan-berjalan dan akan diganti unggahan
+ * sebulan penuh. Rentang panjang yang tidak mulai tanggal 1 (mis. 5–31 Jul, atau
+ * export "28 hari terakhir" 29 Jul–26 Agu yang ada di data live) juga tetap
+ * menulis agregat: perilaku lama untuk bentuk-bentuk itu tidak berubah.
+ */
+export const BATAS_HARI_BATCH_MINGGUAN = 10;
+
+export function batchHanyaFaktaHarian(periodeMulai: string, periodeSelesai: string): boolean {
+  if (periodeMulai.slice(8, 10) === '01') return false;
+  const hari = (Date.parse(`${periodeSelesai}T00:00:00Z`) - Date.parse(`${periodeMulai}T00:00:00Z`)) / 86_400_000 + 1;
+  return hari <= BATAS_HARI_BATCH_MINGGUAN;
+}
+
+const TANPA_BERKAS: readonly BerkasTerparse[] = [];
 
 /**
  * tulisFaktaModulTerparse — SEMBILAN blok penulis baris fakta tertipe (G1-09
@@ -1255,7 +1287,22 @@ interface TulisFaktaModulTerparseInput {
  * `pdt_sku_master` UPSERT murni (bukan per-periode) — reparse SKU master
  * sama amannya dengan commit pertama.
  */
-async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerparseInput): Promise<void> {
+async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModulTerparseInput): Promise<void> {
+  // PDT-MINGGUAN — batch parsial: semua sumber agregat dikosongkan (blok-bloknya
+  // dijaga `length > 0`, jadi delete-nya pun tidak jalan). `tt_orders` dan
+  // `shopee_parent_sku` TETAP diteruskan karena juga menulis SKU master dan
+  // (tt_orders) kolom batal harian; blok `sku_period` keduanya dijaga terpisah.
+  const hanyaHarian = inputAsli.hanyaFaktaHarian;
+  const input: TulisFaktaModulTerparseInput = !hanyaHarian ? inputAsli : {
+    ...inputAsli,
+    berkasAdsLive: TANPA_BERKAS, berkasAdsCpc: TANPA_BERKAS, berkasAdsSearch: TANPA_BERKAS,
+    berkasTtVideo: TANPA_BERKAS, berkasTtAffiliateVideo: TANPA_BERKAS, berkasShopeeLive: TANPA_BERKAS, berkasTtLive: TANPA_BERKAS,
+    berkasTtTransactionCreator: TANPA_BERKAS, berkasShopeeAmsAfiliasi: TANPA_BERKAS, berkasShopeeAmsProduk: TANPA_BERKAS,
+    berkasTtAdsProduct: TANPA_BERKAS, berkasTtAdsLive: TANPA_BERKAS,
+    berkasTtamVideoViews: TANPA_BERKAS, berkasTtamConsideration: TANPA_BERKAS, berkasTtamFollows: TANPA_BERKAS, berkasTtamShowcase: TANPA_BERKAS,
+    berkasTtProductAnalytics: TANPA_BERKAS, berkasShopeeKesehatan: TANPA_BERKAS, berkasShopeeChat: TANPA_BERKAS,
+    berkasShopeeDiskon: TANPA_BERKAS, berkasShopeeFlashSale: TANPA_BERKAS,
+  };
   const {
     id, clientPlatformId, periodeAwalBulan, akunKontenToko, now,
     berkasAdsLive, berkasAdsCpc, berkasAdsSearch, berkasTtVideo, berkasShopeeLive, berkasTtLive,
@@ -1674,7 +1721,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // harus ikut hilang, bukan tertinggal sebagai baris hantu. Nol tabrakan dengan
   // `shopee_ams_produk` — ia menulis basis `dibayar`, dua basis di sini tidak
   // pernah disentuhnya.
-  if (berkasParentSkuUntukMaster.length > 0) {
+  if (berkasParentSkuUntukMaster.length > 0 && !hanyaHarian) {
     await tx`
       delete from pdt_fact_sku_period
        where client_platform_id = ${clientPlatformId} and sku_id is null
@@ -1734,7 +1781,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, input: TulisFaktaModulTerp
   // dengan blok `shopee_ams_produk`: `client_platform_id` sudah per-platform, jadi satu
   // baris `pdt_fact_sku_period` untuk toko TikTok tertentu hanya pernah berasal dari SATU
   // penulis (`tt_orders` di sini) untuk (sku_id null, basis 'dibayar').
-  if (berkasTtOrders.length > 0) {
+  if (berkasTtOrders.length > 0 && !hanyaHarian) {
     await tx`
       delete from pdt_fact_sku_period
        where client_platform_id = ${clientPlatformId} and sku_id is null and basis = 'dibayar'
@@ -2880,6 +2927,7 @@ export async function reparsePdtBatch(
         berkasShopeeChat: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_chat'),
         berkasShopeeDiskon: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_diskon'),
         berkasShopeeFlashSale: terparseUntukFakta.filter((b) => b.modul.kode === 'shopee_flash_sale'),
+        hanyaFaktaHarian: batchHanyaFaktaHarian(batch.periode_mulai, batch.periode_selesai),
       });
 
       await tx`
@@ -3467,6 +3515,34 @@ export async function tambahVersiBenchmark(sql: Sql, actor: Actor, input: PdtBen
 // `kesehatanDiunggahRow`/`kesehatanPoinRow` di bawah.
 // ===========================================================================
 
+/** Dimensi pesanan-dibuat Shopee (CR + cancel rate) atas rentang tanggal mana pun — dipakai skor bulanan dan laporan mingguan. */
+async function bacaPesananDibuatShopee(
+  sql: Sql, clientPlatformId: number, rentang: PdtRentangTanggal,
+): Promise<pdt.PdtSkorInputPesananDibuatShopee | null> {
+  const [dibuatRow] = await sql<{ n: number; pesanan: string; pengunjung: string; pesanan_dibatalkan: number | null; n_batal: number }[]>`
+    select count(*)::int as n,
+           coalesce(sum(pesanan), 0) as pesanan,
+           coalesce(sum(pengunjung), 0) as pengunjung,
+           sum(pesanan_dibatalkan) as pesanan_dibatalkan,
+           count(*) filter (where pesanan_dibatalkan is not null)::int as n_batal
+      from pdt_fact_shop_daily
+     where client_platform_id = ${clientPlatformId}
+       and basis = 'dibuat'
+       and tanggal >= ${rentang.mulai}::date
+       and tanggal <= ${rentang.selesai}::date`;
+  const pengunjungTotal = Number(dibuatRow.pengunjung);
+  const pesananTotal = Number(dibuatRow.pesanan);
+  return dibuatRow.n === 0 ? null : {
+    cr: pengunjungTotal === 0 ? 0 : pesananTotal / pengunjungTotal,
+    // G2-01-SHOPEE-CANCEL-REPEAT-RATE (separuh, langkah lanjutan) — cancelRate =
+    // Σ pesanan_dibatalkan / Σ pesanan (ratio-of-sums, sama pola `cr`). `null`
+    // bila NOL baris basis ini membawa kolom sumbernya (`n_batal=0` — berkas lama
+    // sebelum kolom ini dipanen, BUKAN nol pembatalan sungguhan, G1-03).
+    repeatRate: null, // TETAP null — ditunda sengaja, lihat migrasi 20261105010000/docs/DECISIONS.md
+    cancelRate: dibuatRow.n_batal === 0 ? null : pesananTotal === 0 ? 0 : Number(dibuatRow.pesanan_dibatalkan) / pesananTotal,
+  };
+}
+
 /**
  * Rakit `PdtSkorInputShopee` dari `pdt_fact_*` untuk SATU client_platform_id +
  * SATU periode (awal bulan, format `YYYY-MM-01`). Dimensi tanpa baris fakta
@@ -3497,28 +3573,7 @@ export async function rakitInputSkorShopee(
     ctr: klik == null || tayangan == null || tayangan <= 0 ? null : klik / tayangan,
   };
 
-  const [dibuatRow] = await sql<{ n: number; pesanan: string; pengunjung: string; pesanan_dibatalkan: number | null; n_batal: number }[]>`
-    select count(*)::int as n,
-           coalesce(sum(pesanan), 0) as pesanan,
-           coalesce(sum(pengunjung), 0) as pengunjung,
-           sum(pesanan_dibatalkan) as pesanan_dibatalkan,
-           count(*) filter (where pesanan_dibatalkan is not null)::int as n_batal
-      from pdt_fact_shop_daily
-     where client_platform_id = ${clientPlatformId}
-       and basis = 'dibuat'
-       and tanggal >= ${periodeAwalBulan}::date
-       and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
-  const pengunjungTotal = Number(dibuatRow.pengunjung);
-  const pesananTotal = Number(dibuatRow.pesanan);
-  const dibuat: pdt.PdtSkorInputPesananDibuatShopee | null = dibuatRow.n === 0 ? null : {
-    cr: pengunjungTotal === 0 ? 0 : pesananTotal / pengunjungTotal,
-    // G2-01-SHOPEE-CANCEL-REPEAT-RATE (separuh, langkah lanjutan) — cancelRate =
-    // Σ pesanan_dibatalkan / Σ pesanan (ratio-of-sums, sama pola `cr`). `null`
-    // bila NOL baris basis ini membawa kolom sumbernya (`n_batal=0` — berkas lama
-    // sebelum kolom ini dipanen, BUKAN nol pembatalan sungguhan, G1-03).
-    repeatRate: null, // TETAP null — ditunda sengaja, lihat migrasi 20261105010000/docs/DECISIONS.md
-    cancelRate: dibuatRow.n_batal === 0 ? null : pesananTotal === 0 ? 0 : Number(dibuatRow.pesanan_dibatalkan) / pesananTotal,
-  };
+  const dibuat = await bacaPesananDibuatShopee(sql, clientPlatformId, rentangBulan(periodeAwalBulan));
 
   // Product Performance: SELALU null sampai G2-01-KUADRAN-SKU membangun
   // penulis `pdt_fact_sku_period.kuadran` (sama gap TikTok).
@@ -3621,7 +3676,22 @@ export async function hitungSkorShopee(
 // pemanggil (route, belum ada) yang menegakkan gerbang peran.
 // ===========================================================================
 
-async function bacaKpiShopDaily(sql: Sql, clientPlatformId: number, periodeAwalBulan: string, basis: string): Promise<pdt.PdtLaporanKpiInput | null> {
+/**
+ * PDT-MINGGUAN — rentang tanggal INKLUSIF untuk pembaca fakta HARIAN
+ * (`pdt_fact_shop_daily`). Laporan bulanan memakai `rentangBulan`; laporan
+ * mingguan memakai Senin–Minggu. Pembaca fakta agregat (slot `periode` awal
+ * bulan) TIDAK menerima rentang — faktanya memang tidak bisa dipotong.
+ */
+export interface PdtRentangTanggal {
+  mulai: string;
+  selesai: string;
+}
+
+function rentangBulan(periodeAwalBulan: string): PdtRentangTanggal {
+  return { mulai: periodeAwalBulan, selesai: tz.addDaysToDate(tz.addMonthsToDate(periodeAwalBulan, 1), -1) };
+}
+
+async function bacaKpiShopDaily(sql: Sql, clientPlatformId: number, rentang: PdtRentangTanggal, basis: string): Promise<pdt.PdtLaporanKpiInput | null> {
   // `produk_diklik` dihitung TERPISAH (`count(...)`) dari `sum(...)`-nya: kolom
   // ini opsional di sumbernya, dan `sum()` atas nol baris non-null tetap 0 —
   // 0 berarti "nol barang dibuka" sementara yang benar "tidak diketahui"
@@ -3635,15 +3705,15 @@ async function bacaKpiShopDaily(sql: Sql, clientPlatformId: number, periodeAwalB
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = ${basis}
-       and tanggal >= ${periodeAwalBulan}::date
-       and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
+       and tanggal >= ${rentang.mulai}::date
+       and tanggal <= ${rentang.selesai}::date`;
   return row.n === 0 ? null : {
     gmv: Number(row.gmv), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung),
     produkDiklik: row.diklik_n === 0 ? null : Number(row.diklik),
   };
 }
 
-async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKpiInput | null> {
+async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, rentang: PdtRentangTanggal): Promise<pdt.PdtLaporanKpiInput | null> {
   const [row] = await sql<{ n: number; gmv: string; refund: string; pesanan: string; pengunjung: string; diklik_n: number; diklik: string }[]>`
     select count(*)::int as n,
            coalesce(sum(gmv), 0) as gmv,
@@ -3655,8 +3725,8 @@ async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, periodeAwalB
      where client_platform_id = ${clientPlatformId}
        and basis = 'net'
        and kanal = 'tiktok'
-       and tanggal >= ${periodeAwalBulan}::date
-       and tanggal < (${periodeAwalBulan}::date + interval '1 month')`;
+       and tanggal >= ${rentang.mulai}::date
+       and tanggal <= ${rentang.selesai}::date`;
   if (row.n === 0) return null;
   // `produk_diklik` TERPANEN di kedua platform (`tt_shop_analytics` kolom
   // 'Klik produk', `shopee_shop_stats` kolom 'Produk Diklik'), jadi kedalaman
@@ -3686,17 +3756,22 @@ async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, periodeAwalB
 async function bacaHarian(
   sql: Sql,
   clientPlatformId: number,
-  periodeAwalBulan: string,
+  rentang: PdtRentangTanggal,
   basis: string,
   netkanRefund: boolean,
+  kanal: 'tiktok' | 'shopee',
 ): Promise<pdt.PdtLaporanHarianInput> {
   const rows = await sql<{ tanggal: string; gmv: string | null; refund: string | null; pesanan: number | null; pengunjung: number | null }[]>`
     select to_char(tanggal, 'YYYY-MM-DD') as tanggal, gmv, refund, pesanan, pengunjung
       from pdt_fact_shop_daily
      where client_platform_id = ${clientPlatformId}
        and basis = ${basis}
-       and tanggal >= ${periodeAwalBulan}::date
-       and tanggal < (${periodeAwalBulan}::date + interval '1 month')
+       -- Toko TikTok juga menyimpan baris kanal 'tokopedia' basis 'net' (F-01). Tanpa
+       -- filter ini tren harian TikTok mencampur Tokopedia (dua titik per tanggal) dan
+       -- Σ titik tidak lagi sama dengan kpi.gmv — ditemukan saat PDT-MINGGUAN.
+       and kanal = ${kanal}
+       and tanggal >= ${rentang.mulai}::date
+       and tanggal <= ${rentang.selesai}::date
      order by tanggal`;
   if (rows.length === 0) return null;
   return rows.map((r) => ({
@@ -4081,7 +4156,7 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
  * `pdt.PdtLaporanTokopediaInput`, `@cdps/core`).
  */
 async function bacaAgregatTokopedia(
-  sql: Sql, clientPlatformId: number, periodeAwalBulan: string, offsetBulan: number,
+  sql: Sql, clientPlatformId: number, rentang: PdtRentangTanggal,
 ): Promise<pdt.PdtLaporanTokopediaAgregat | null> {
   const [row] = await sql<{ n: number; gmv: string; pesanan: string; pengunjung: string; terjual_n: number; terjual: string; pembeli_n: number; pembeli: string }[]>`
     select count(*)::int as n,
@@ -4094,8 +4169,8 @@ async function bacaAgregatTokopedia(
      where client_platform_id = ${clientPlatformId}
        and basis = 'net'
        and kanal = 'tokopedia'
-       and tanggal >= ${periodeAwalBulan}::date + make_interval(months => ${offsetBulan})
-       and tanggal < ${periodeAwalBulan}::date + make_interval(months => ${offsetBulan}) + interval '1 month'`;
+       and tanggal >= ${rentang.mulai}::date
+       and tanggal <= ${rentang.selesai}::date`;
   if (row.n === 0) return null;
   return {
     gmv: Number(row.gmv), pesanan: Number(row.pesanan), pengunjung: Number(row.pengunjung),
@@ -4104,10 +4179,13 @@ async function bacaAgregatTokopedia(
   };
 }
 
-async function bacaTokopedia(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanTokopediaInput | null> {
+/** `rentangSebelumnya` = bulan lalu (laporan bulanan) atau minggu lalu (laporan mingguan). */
+async function bacaTokopedia(
+  sql: Sql, clientPlatformId: number, rentang: PdtRentangTanggal, rentangSebelumnya: PdtRentangTanggal,
+): Promise<pdt.PdtLaporanTokopediaInput | null> {
   const [kini, sebelumnya] = await Promise.all([
-    bacaAgregatTokopedia(sql, clientPlatformId, periodeAwalBulan, 0),
-    bacaAgregatTokopedia(sql, clientPlatformId, periodeAwalBulan, -1),
+    bacaAgregatTokopedia(sql, clientPlatformId, rentang),
+    bacaAgregatTokopedia(sql, clientPlatformId, rentangSebelumnya),
   ]);
   return kini == null ? null : { kini, sebelumnya };
 }
@@ -4414,8 +4492,8 @@ export async function rakitLaporanTiktok(
 ): Promise<pdt.PdtLaporanTiktok> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
   const [kpi, harian, kanal, iklan, live, video, afiliasi, kreator, sesiLive, kampanye, tahap, tokopedia, { hasil: skor, benchmarkVersi, bench }] = await Promise.all([
-    bacaKpiTiktokNet(sql, clientPlatformId, periodeAwalBulan),
-    bacaHarian(sql, clientPlatformId, periodeAwalBulan, 'net', true),
+    bacaKpiTiktokNet(sql, clientPlatformId, rentangBulan(periodeAwalBulan)),
+    bacaHarian(sql, clientPlatformId, rentangBulan(periodeAwalBulan), 'net', true, 'tiktok'),
     bacaKanalTiktok(sql, clientPlatformId, periodeAwalBulan),
     bacaIklanTiktok(sql, clientPlatformId, periodeAwalBulan),
     bacaLive(sql, clientPlatformId, periodeAwalBulan),
@@ -4425,7 +4503,7 @@ export async function rakitLaporanTiktok(
     bacaSesiLive(sql, clientPlatformId, periodeAwalBulan),
     bacaKampanye(sql, clientPlatformId, periodeAwalBulan),
     bacaTahapTiktok(sql, clientPlatformId, periodeAwalBulan),
-    bacaTokopedia(sql, clientPlatformId, periodeAwalBulan),
+    bacaTokopedia(sql, clientPlatformId, rentangBulan(periodeAwalBulan), rentangBulan(tz.addMonthsToDate(periodeAwalBulan, -1))),
     hitungSkorTiktok(sql, clientPlatformId, periodeAwalBulan),
   ]);
   // `produk` DIBACA SETELAH Promise.all di atas — hitungSkorTiktok (bagian dari
@@ -4448,8 +4526,8 @@ export async function rakitLaporanShopee(
 ): Promise<pdt.PdtLaporanShopee> {
   validasiPeriodeAwalBulan(periodeAwalBulan);
   const [kpi, harian, kanal, iklan, live, video, produk, afiliasi, kreator, sesiLive, kampanye, promo, layananBaca, kpiDibayar, { hasil: skor, input: skorInput }] = await Promise.all([
-    bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim'),
-    bacaHarian(sql, clientPlatformId, periodeAwalBulan, 'siap_dikirim', false),
+    bacaKpiShopDaily(sql, clientPlatformId, rentangBulan(periodeAwalBulan), 'siap_dikirim'),
+    bacaHarian(sql, clientPlatformId, rentangBulan(periodeAwalBulan), 'siap_dikirim', false, 'shopee'),
     bacaKanalShopee(sql, clientPlatformId, periodeAwalBulan),
     bacaIklanShopee(sql, clientPlatformId, periodeAwalBulan),
     bacaLive(sql, clientPlatformId, periodeAwalBulan),
@@ -4464,7 +4542,7 @@ export async function rakitLaporanShopee(
     // G4-03 aksi 7 — basis 'dibayar' TIDAK dipakai bagian "kpi" mana pun di atas
     // (itu 'siap_dikirim', Rule 16); `bacaKpiShopDaily` dipakai ulang apa adanya,
     // hanya `.gmv`-nya yang dipakai `layanan.gmvPesananSelesai` di bawah.
-    bacaKpiShopDaily(sql, clientPlatformId, periodeAwalBulan, 'dibayar'),
+    bacaKpiShopDaily(sql, clientPlatformId, rentangBulan(periodeAwalBulan), 'dibayar'),
     hitungSkorShopee(sql, clientPlatformId, periodeAwalBulan),
   ]);
   // G4-03 aksi 1/7 — cancelRate diteruskan dari `rakitInputSkorShopee` (via
@@ -4483,6 +4561,97 @@ export async function rakitLaporanShopee(
   });
 }
 
+// ===========================================================================
+// PDT-MINGGUAN (pemilik 2026-10-01, `docs/DECISIONS.md`) — laporan mingguan
+// RINGKAS. Isi = bagian yang bisa dipotong per tanggal dari
+// `pdt_fact_shop_daily`: KPI, tren harian, Tokopedia (vs minggu lalu), dan —
+// Shopee — cancel rate + skor dimensi pesanan-dibuat (ambang RASIO, tidak
+// perlu pro-rata). Bagian agregat (iklan, kampanye, live, video, produk,
+// afiliasi, kreator, promo, chat/kesehatan, tahap, rincian kanal) SELALU
+// `null`: faktanya disimpan satu slot per bulan dan tidak bisa dipotong.
+// Skor TikTok mingguan tidak dihitung (kartu produk butuh GMV konten bulanan).
+// ===========================================================================
+
+export type PdtJenisPeriode = pdt.PdtJenisPeriode;
+
+export const MSG_JENIS_PERIODE = "[jenis periode laporan harus 'bulanan' atau 'mingguan']";
+export const MSG_PERIODE_MINGGUAN = '[periode mingguan harus berupa tanggal hari Senin (YYYY-MM-DD)]';
+
+/** Validasi + normalisasi jenis periode dari query/body. Kosong ⇒ `bulanan` (perilaku lama). */
+export function parseJenisPeriode(raw: unknown): PdtJenisPeriode {
+  if (raw == null || raw === '') return 'bulanan';
+  if (raw === 'bulanan' || raw === 'mingguan') return raw;
+  throw new ValidationError(MSG_JENIS_PERIODE);
+}
+
+function validasiPeriodeMingguan(mulai: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(mulai)) throw new ValidationError(MSG_PERIODE_MINGGUAN);
+  const t = Date.parse(`${mulai}T00:00:00Z`);
+  if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== mulai) throw new ValidationError(MSG_PERIODE_MINGGUAN);
+  if (new Date(t).getUTCDay() !== 1) throw new ValidationError(MSG_PERIODE_MINGGUAN);
+}
+
+/** Senin–Minggu yang diawali `mulai`. */
+export function rentangMinggu(mulai: string): PdtRentangTanggal {
+  return { mulai, selesai: tz.addDaysToDate(mulai, 6) };
+}
+
+/** Rentang yang dicakup sebuah laporan — satu definisi untuk kiriman, gerbang batch, dan perakit. */
+export function rentangLaporan(jenis: PdtJenisPeriode, periodeMulai: string): PdtRentangTanggal {
+  return jenis === 'mingguan' ? rentangMinggu(periodeMulai) : rentangBulan(periodeMulai);
+}
+
+const SKOR_INPUT_TIKTOK_KOSONG: pdt.PdtSkorInputTiktok = {
+  ads: null, live: null, video: null, kartu: null, affiliate: null, produk: null,
+};
+
+export async function rakitLaporanTiktokMingguan(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeMulai: string,
+  now: Date = new Date(),
+): Promise<pdt.PdtLaporanTiktok> {
+  validasiPeriodeMingguan(periodeMulai);
+  const r = rentangMinggu(periodeMulai);
+  const [kpi, harian, tokopedia, { versi, bench }] = await Promise.all([
+    bacaKpiTiktokNet(sql, clientPlatformId, r),
+    bacaHarian(sql, clientPlatformId, r, 'net', true, 'tiktok'),
+    bacaTokopedia(sql, clientPlatformId, r, rentangMinggu(tz.addDaysToDate(periodeMulai, -7))),
+    bacaBenchmarkAktifTiktok(sql),
+  ]);
+  return pdt.bangunLaporanTiktok({
+    clientPlatformId, periodeAwalBulan: periodeMulai, jenisPeriode: 'mingguan', periodeSelesai: r.selesai,
+    generatedAt: now.toISOString(), kpi, harian, kanal: null, iklan: null, live: null, video: null, produk: null,
+    afiliasi: null, kreator: null, sesiLive: null, kampanye: null, tahap: null, tokopedia,
+    skor: pdt.computeSkorTiktok(SKOR_INPUT_TIKTOK_KOSONG, bench), benchmarkVersi: versi, benchTiktok: bench,
+  });
+}
+
+export async function rakitLaporanShopeeMingguan(
+  sql: Sql,
+  clientPlatformId: number,
+  periodeMulai: string,
+  now: Date = new Date(),
+): Promise<pdt.PdtLaporanShopee> {
+  validasiPeriodeMingguan(periodeMulai);
+  const r = rentangMinggu(periodeMulai);
+  const [kpi, harian, kpiDibayar, dibuat] = await Promise.all([
+    bacaKpiShopDaily(sql, clientPlatformId, r, 'siap_dikirim'),
+    bacaHarian(sql, clientPlatformId, r, 'siap_dikirim', false, 'shopee'),
+    bacaKpiShopDaily(sql, clientPlatformId, r, 'dibayar'),
+    bacaPesananDibuatShopee(sql, clientPlatformId, r),
+  ]);
+  const layanan: pdt.PdtLaporanLayananInput = {
+    chat: null, penalti: [], cancelRate: dibuat?.cancelRate ?? null, gmvPesananSelesai: kpiDibayar?.gmv ?? null,
+  };
+  return pdt.bangunLaporanShopee({
+    clientPlatformId, periodeAwalBulan: periodeMulai, jenisPeriode: 'mingguan', periodeSelesai: r.selesai,
+    generatedAt: now.toISOString(), kpi, harian, kanal: null, iklan: null, live: null, video: null, produk: null,
+    afiliasi: null, kreator: null, sesiLive: null, kampanye: null, promo: null, layanan,
+    skor: pdt.computeSkorShopee({ ads: null, dibuat, produk: null, live: null, kesehatan: null }),
+  });
+}
+
 /**
  * Flow B langkah 1: "AM membuka laporan periode X → laporan dirender dari
  * view atas fakta". Gerbang izin `canKirimLaporan` (Flow B satu-satunya
@@ -4497,6 +4666,7 @@ export async function bacaLaporanPdt(
   clientPlatformId: number,
   periodeAwalBulan: string,
   now: Date = new Date(),
+  jenis: PdtJenisPeriode = 'bulanan',
 ): Promise<pdt.PdtLaporanTiktok | pdt.PdtLaporanShopee> {
   const row = await loadClientPlatformUntukPdt(sql, clientPlatformId);
   if (!canKirimLaporan(actor, lingkupDari(row))) throw new ForbiddenError();
@@ -4506,6 +4676,11 @@ export async function bacaLaporanPdt(
     throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
 
+  if (jenis === 'mingguan') {
+    return platform === 'tiktok'
+      ? rakitLaporanTiktokMingguan(sql, clientPlatformId, periodeAwalBulan, now)
+      : rakitLaporanShopeeMingguan(sql, clientPlatformId, periodeAwalBulan, now);
+  }
   return platform === 'tiktok'
     ? rakitLaporanTiktok(sql, clientPlatformId, periodeAwalBulan, now)
     : rakitLaporanShopee(sql, clientPlatformId, periodeAwalBulan, now);
@@ -4513,10 +4688,50 @@ export async function bacaLaporanPdt(
 
 type PdtJsonParam = Parameters<TransactionSql['json']>[0];
 
+/** Label status batch sama persis dengan layar Riwayat Batch (`/account/pdt/upload`). */
+const LABEL_STATUS_BATCH: Readonly<Record<string, string>> = {
+  parsing: 'Diproses (menunggu berkas lengkap)',
+  identitas_belum_terikat: 'Menunggu Konfirmasi Identitas',
+  ditolak: 'Ditolak',
+};
+
+export const msgKirimBatchBelumTerverifikasi = (status: string): string =>
+  `[laporan belum bisa dikirim — batch data toko periode ini berstatus "${LABEL_STATUS_BATCH[status] ?? status}"; ` +
+  'perbaiki berkas dan unggah ulang sampai Terverifikasi]';
+
+/**
+ * PDT-KIRIM-BATCH-VERIFIED (pemilik, 2026-10-01: "Laporan bisa dikirim walau
+ * batch Ditolak"). Fakta ditulis `tulisFaktaModulTerparse` bahkan untuk batch
+ * yang akhirnya `ditolak` karena rekonsiliasi (identitas dicek lebih dulu), jadi
+ * angka batch yang ditolak IKUT muncul di laporan. Gerbangnya: batch TERBARU
+ * yang beririsan dengan bulan itu (selain `digantikan`, yang memang sudah
+ * diganti batch verified lain) harus `verified`. Batch terbaru = yang angkanya
+ * sedang ada di tabel fakta (tulis ulang per toko+periode+sumber), jadi batch
+ * verified LAMA tidak menolong bila unggahan sesudahnya ditolak.
+ *
+ * Nol batch sama sekali TIDAK diblokir di sini — perilaku lama dipertahankan
+ * (laporan kosong + bagian "Kelengkapan Data" internal yang menyebutnya).
+ */
+async function requireBatchTerverifikasiUntukKirim(sql: Queryable, clientPlatformId: number, rentang: PdtRentangTanggal): Promise<void> {
+  const [terbaru] = await sql<{ status: string }[]>`
+    select status from pdt_upload_batch
+     where client_platform_id = ${clientPlatformId}
+       and status <> 'digantikan'
+       and periode_mulai <= ${rentang.selesai}::date
+       and periode_selesai >= ${rentang.mulai}::date
+     order by dibuat_pada desc, id desc
+     limit 1`;
+  if (terbaru && terbaru.status !== 'verified') {
+    throw new ValidationError(msgKirimBatchBelumTerverifikasi(terbaru.status));
+  }
+}
+
 /** Baris `pdt_laporan_kiriman` yang baru ditulis, plus laporan yang dibekukan ke dalamnya. */
 export interface PdtLaporanKirimanHasil {
   id: number;
   clientPlatformId: number;
+  /** PDT-MINGGUAN — kiriman lama (sebelum kolom ada) bernilai `bulanan` lewat default kolom. */
+  jenisPeriode: PdtJenisPeriode;
   periodeMulai: string;
   periodeSelesai: string;
   parserVersi: number;
@@ -4572,8 +4787,11 @@ export async function kirimLaporanPdt(
   periodeAwalBulan: string,
   now: Date = new Date(),
   insightDraft?: pdt.PdtInsightDraft,
+  jenis: PdtJenisPeriode = 'bulanan',
 ): Promise<PdtLaporanKirimanHasil> {
-  const laporan = await bacaLaporanPdt(sql, actor, clientPlatformId, periodeAwalBulan, now);
+  const laporan = await bacaLaporanPdt(sql, actor, clientPlatformId, periodeAwalBulan, now, jenis);
+  const rentang = rentangLaporan(jenis, periodeAwalBulan);
+  await requireBatchTerverifikasiUntukKirim(sql, clientPlatformId, rentang);
   if (insightDraft !== undefined) {
     try {
       laporan.insight = pdt.normalizePdtInsightDraft(insightDraft);
@@ -4590,6 +4808,7 @@ export async function kirimLaporanPdt(
         from pdt_laporan_kiriman k
         left join pdt_laporan_publikasi pub on pub.kiriman_id = k.id
        where k.client_platform_id = ${clientPlatformId}
+         and k.jenis_periode = ${jenis}
          and k.periode_mulai = ${periodeAwalBulan}::date
        order by k.dikirim_pada desc
        limit 1`;
@@ -4605,6 +4824,7 @@ export async function kirimLaporanPdt(
 
     const [row] = await tx<{
       id: number;
+      jenis_periode: PdtJenisPeriode;
       periode_mulai: string;
       periode_selesai: string;
       parser_versi: number;
@@ -4614,14 +4834,13 @@ export async function kirimLaporanPdt(
       menggantikan_kiriman_id: number | null;
     }[]>`
       insert into pdt_laporan_kiriman
-        (client_platform_id, periode_mulai, periode_selesai, payload, parser_versi, benchmark_versi,
+        (client_platform_id, jenis_periode, periode_mulai, periode_selesai, payload, parser_versi, benchmark_versi,
          dikirim_pada, dikirim_oleh, menggantikan_kiriman_id)
       values
-        (${clientPlatformId}, ${periodeAwalBulan}::date,
-         (${periodeAwalBulan}::date + interval '1 month' - interval '1 day')::date,
+        (${clientPlatformId}, ${jenis}, ${rentang.mulai}::date, ${rentang.selesai}::date,
          ${tx.json(laporan as unknown as PdtJsonParam)}, ${pdt.PDT_PARSER_VERSI}, ${benchmarkVersi},
          ${now.toISOString()}, ${actor.employeeId}, ${prev?.id ?? null})
-      returning id, periode_mulai::text, periode_selesai::text, parser_versi, benchmark_versi,
+      returning id, jenis_periode, periode_mulai::text, periode_selesai::text, parser_versi, benchmark_versi,
                 dikirim_pada::text, dikirim_oleh, menggantikan_kiriman_id`;
 
     // G1-10-RETENSI-RECOMPUTE — Rule 45 baris ketiga: paket ZIP yang menopang laporan yang
@@ -4655,6 +4874,7 @@ export async function kirimLaporanPdt(
       beforeJson: null,
       afterJson: {
         client_platform_id: clientPlatformId,
+        jenis_periode: row.jenis_periode,
         periode_mulai: row.periode_mulai,
         periode_selesai: row.periode_selesai,
         parser_versi: row.parser_versi,
@@ -4667,6 +4887,7 @@ export async function kirimLaporanPdt(
     return {
       id: row.id,
       clientPlatformId,
+      jenisPeriode: row.jenis_periode,
       periodeMulai: row.periode_mulai,
       periodeSelesai: row.periode_selesai,
       parserVersi: row.parser_versi,
@@ -4703,6 +4924,7 @@ export async function riwayatKirimanPdt(sql: Sql, actor: Actor, clientPlatformId
 
   const rows = await sql<{
     id: number;
+    jenis_periode: PdtJenisPeriode;
     periode_mulai: string;
     periode_selesai: string;
     parser_versi: number;
@@ -4711,7 +4933,7 @@ export async function riwayatKirimanPdt(sql: Sql, actor: Actor, clientPlatformId
     dikirim_oleh: string;
     menggantikan_kiriman_id: number | null;
   }[]>`
-    select id, periode_mulai::text, periode_selesai::text, parser_versi, benchmark_versi,
+    select id, jenis_periode, periode_mulai::text, periode_selesai::text, parser_versi, benchmark_versi,
            dikirim_pada::text, dikirim_oleh, menggantikan_kiriman_id
       from pdt_laporan_kiriman
      where client_platform_id = ${clientPlatformId}
@@ -4720,6 +4942,7 @@ export async function riwayatKirimanPdt(sql: Sql, actor: Actor, clientPlatformId
   return rows.map((r) => ({
     id: r.id,
     clientPlatformId,
+    jenisPeriode: r.jenis_periode,
     periodeMulai: r.periode_mulai,
     periodeSelesai: r.periode_selesai,
     parserVersi: r.parser_versi,
@@ -4923,14 +5146,17 @@ async function ensureInsightSeed(tx: TransactionSql, kirimanId: number): Promise
 
 async function loadKirimanScope(
   sql: Queryable, kirimanId: number,
-): Promise<{ clientPlatformId: number; clientId: string; platform: string; periodeMulai: string; lingkup: PdtLingkupKlien }> {
-  const [row] = await sql<{ client_platform_id: number; periode_mulai: string }[]>`
-    select client_platform_id, periode_mulai::text as periode_mulai from pdt_laporan_kiriman where id = ${kirimanId}`;
+): Promise<{
+  clientPlatformId: number; clientId: string; platform: string; periodeMulai: string; jenisPeriode: PdtJenisPeriode; lingkup: PdtLingkupKlien;
+}> {
+  const [row] = await sql<{ client_platform_id: number; periode_mulai: string; jenis_periode: PdtJenisPeriode }[]>`
+    select client_platform_id, periode_mulai::text as periode_mulai, jenis_periode
+      from pdt_laporan_kiriman where id = ${kirimanId}`;
   if (!row) throw new NotFoundError(MSG_KIRIMAN_NOT_FOUND);
   const cp = await loadClientPlatformUntukPdt(sql, row.client_platform_id);
   return {
     clientPlatformId: row.client_platform_id, clientId: cp.client_id, platform: cp.platform,
-    periodeMulai: row.periode_mulai, lingkup: lingkupDari(cp),
+    periodeMulai: row.periode_mulai, jenisPeriode: row.jenis_periode, lingkup: lingkupDari(cp),
   };
 }
 
@@ -5165,6 +5391,22 @@ async function runPdtLaporanTransition(tx: TransactionSql, actor: Actor, kiriman
  * periode (house rule #3); keputusan pemilik `docs/DECISIONS.md`
  * `M20-R6-HEALTH-SCORE-SNAPSHOT-LAMA`.
  */
+/**
+ * PDT-MINGGUAN — keputusan pemilik 2026-10-01: Total Sales, Health Score dan
+ * ROAS tetap HANYA dari laporan BULANAN. Laporan mingguan tampil di portal
+ * klien, tapi menerbitkan/mencabutnya tidak menyentuh angka turunan apa pun
+ * (kedua recompute di bawah juga menyaring `jenis_periode = 'bulanan'`, jadi
+ * kiriman mingguan yang terbit tidak pernah ikut terhitung).
+ */
+async function recomputeTurunanPdt(
+  tx: TransactionSql, actor: Actor,
+  k: { clientId: string; clientPlatformId: number; platform: string; periodeMulai: string; jenisPeriode: PdtJenisPeriode },
+): Promise<void> {
+  if (k.jenisPeriode !== 'bulanan') return;
+  await recomputeTotalSalesPdt(tx, actor, k.clientId);
+  await recomputeAdsMetricEntriesPdt(tx, actor, k.clientPlatformId, k.clientId, k.platform, k.periodeMulai);
+}
+
 async function recomputeTotalSalesPdt(tx: TransactionSql, actor: Actor, clientId: string): Promise<void> {
   const before = await tx<{ total_sales: string }[]>`select total_sales from clients where id = ${clientId}`;
   const prev = before[0]?.total_sales ?? '0';
@@ -5175,6 +5417,7 @@ async function recomputeTotalSalesPdt(tx: TransactionSql, actor: Actor, clientId
         join client_platforms cp on cp.id = k.client_platform_id
         join pdt_laporan_publikasi pub on pub.kiriman_id = k.id
        where cp.client_id = ${clientId} and cp.active = true and pub.status = ${PDT_LAPORAN_STATES.terbit}
+         and k.jenis_periode = 'bulanan'
        order by k.client_platform_id, k.periode_mulai desc, k.dikirim_pada desc, k.id desc
     ) t`;
   const total = agg[0].total;
@@ -5252,6 +5495,7 @@ async function recomputeAdsMetricEntriesPdt(
       select 1 from pdt_laporan_kiriman k
         join pdt_laporan_publikasi pub on pub.kiriman_id = k.id
        where k.client_platform_id = ${clientPlatformId} and k.periode_mulai = ${periodeMulai}::date
+         and k.jenis_periode = 'bulanan'
          and pub.status = ${PDT_LAPORAN_STATES.terbit}
     ) as ada`;
   if (!current.ada) return; // nol kiriman terbit untuk periode ini — nol entri PDT
@@ -5315,9 +5559,8 @@ export async function terbitkanKiriman(sql: Sql, actor: Actor, kirimanId: number
          set insight_revisi = ${terbaru}, diterbitkan_pada = now(), diterbitkan_oleh = ${actor.employeeId}, alasan_cabut = null
        where kiriman_id = ${kirimanId}
       returning *`;
-    const { clientId, clientPlatformId, platform, periodeMulai } = await loadKirimanScope(tx, kirimanId);
-    await recomputeTotalSalesPdt(tx, actor, clientId);
-    await recomputeAdsMetricEntriesPdt(tx, actor, clientPlatformId, clientId, platform, periodeMulai);
+    const { clientId, clientPlatformId, platform, periodeMulai, jenisPeriode } = await loadKirimanScope(tx, kirimanId);
+    await recomputeTurunanPdt(tx, actor, { clientId, clientPlatformId, platform, periodeMulai, jenisPeriode });
     return publikasiRowFromDb(row);
   });
 }
@@ -5352,9 +5595,8 @@ export async function terbitkanUlangKiriman(sql: Sql, actor: Actor, kirimanId: n
          set insight_revisi = ${terbaru}, diterbitkan_pada = now(), diterbitkan_oleh = ${actor.employeeId}, alasan_cabut = null
        where kiriman_id = ${kirimanId}
       returning *`;
-    const { clientId, clientPlatformId, platform, periodeMulai } = await loadKirimanScope(tx, kirimanId);
-    await recomputeTotalSalesPdt(tx, actor, clientId);
-    await recomputeAdsMetricEntriesPdt(tx, actor, clientPlatformId, clientId, platform, periodeMulai);
+    const { clientId, clientPlatformId, platform, periodeMulai, jenisPeriode } = await loadKirimanScope(tx, kirimanId);
+    await recomputeTurunanPdt(tx, actor, { clientId, clientPlatformId, platform, periodeMulai, jenisPeriode });
     return publikasiRowFromDb(row);
   });
 }
@@ -5394,9 +5636,8 @@ export async function cabutKiriman(sql: Sql, actor: Actor, kirimanId: number, al
     await tx`update pdt_laporan_publikasi set alasan_cabut = ${alasanTrim} where kiriman_id = ${kirimanId}`;
     await runPdtLaporanTransition(tx, actor, kirimanId, PDT_LAPORAN_STATES.dicabut);
     const [row] = await tx<PublikasiDbRow[]>`select * from pdt_laporan_publikasi where kiriman_id = ${kirimanId}`;
-    const { clientId, clientPlatformId, platform, periodeMulai } = await loadKirimanScope(tx, kirimanId);
-    await recomputeTotalSalesPdt(tx, actor, clientId);
-    await recomputeAdsMetricEntriesPdt(tx, actor, clientPlatformId, clientId, platform, periodeMulai);
+    const { clientId, clientPlatformId, platform, periodeMulai, jenisPeriode } = await loadKirimanScope(tx, kirimanId);
+    await recomputeTurunanPdt(tx, actor, { clientId, clientPlatformId, platform, periodeMulai, jenisPeriode });
     return publikasiRowFromDb(row);
   });
 }
