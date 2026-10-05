@@ -13,11 +13,11 @@
 //  - roas is *float64 → JSON `null` when total_spend == 0; always display via
 //    roas_display (already handles div-by-zero → "—", house rule #7).
 //
-// M8 has NO list-campaigns / edit-campaign / delete endpoints (m8 brief
-// "TIDAK TERSEDIA"): campaigns are created under a Brief and read by id only.
-// The /ads landing therefore sources Ads Briefs from the verified M6/M12
-// division brief-queue (used already by lib/tasks.ts) to let advertisers create
-// campaigns and open them by id. CTR/CVR are accepted on POST metric but never
+// M8 has NO edit-campaign / delete endpoints (m8 brief "TIDAK TERSEDIA"):
+// campaigns are created under a Brief. ADS-REVISI-UI R4 (2026-10-05) added the
+// list read `GET /campaigns`, so an advertiser no longer has to remember an
+// ADC- id; the /ads landing still sources Ads Briefs from the verified M6/M12
+// division brief-queue (used already by lib/tasks.ts) to create campaigns. CTR/CVR are accepted on POST metric but never
 // returned by any M8 read (gotcha #9), so no CTR/CVR read-back exists here.
 
 import { api } from '@/lib/api';
@@ -36,10 +36,10 @@ export interface Campaign {
   client_id: string;
   platform: string;
   objective: string;
-  budget: number;
+  budget: number; // ADS-REVISI-UI R1 — Budget HARIAN
   budget_display: string;
   start_date: string; // "YYYY-MM-DD"
-  end_date: string; // "YYYY-MM-DD"
+  end_date: string; // "YYYY-MM-DD" | '' (ADS-REVISI-UI R2 — rencana selesai opsional)
   target_kpi: string;
   status: string; // [Setting] | [Active] | [Paused] | [Ended] (M16 LT-40)
   tipe_iklan: string; // M16 LT-41 — GMV Max Product | GMV Max Live | TTAM
@@ -50,6 +50,11 @@ export interface Campaign {
   iklan_mulai: string;
   iklan_selesai: string;
   hari_iklan_berjalan: number | null; // turunan, inklusif; null = belum pernah mulai
+  // ADS-REVISI-UI R1 — turunan read-only: hari berjalan − hari jeda, dan
+  // Budget Harian × hari aktif (rencana, BUKAN spend aktual). null/'—' = belum mulai.
+  hari_iklan_aktif: number | null;
+  estimasi_budget_terpakai: number | null;
+  estimasi_budget_terpakai_display: string;
   // B-5 / K-3 — Brief Creative SUMBER brief setup kampanye ini
   // (`briefs.source_creative_brief_id`, kolom F-4), atau `''`. `AssetPicker`
   // menyaring ke nilai ini; `''` ⇒ seluruh aset [Approved] milik klien
@@ -69,6 +74,39 @@ export interface Campaign {
   escalation_flagged: boolean; // streak >= 2
   created_by: string;
   created_at: string; // RFC3339
+}
+
+// ADS-REVISI-UI R4 — one row of GET /campaigns (the advertiser's campaign list).
+export interface CampaignListRow {
+  id: string;
+  brief_id: string;
+  client_id: string;
+  client_nama: string; // clients.nama_pic ('' bila tak terbaca)
+  client_toko: string; // clients.toko
+  platform: string;
+  tipe_iklan: string;
+  objective: string;
+  budget: number; // Budget HARIAN
+  budget_display: string;
+  start_date: string;
+  end_date: string; // '' = belum ditentukan
+  status: string;
+  iklan_mulai: string;
+  iklan_selesai: string;
+  hari_iklan_berjalan: number | null;
+  hari_iklan_aktif: number | null;
+  estimasi_budget_terpakai: number | null;
+  estimasi_budget_terpakai_display: string;
+  created_by: string;
+  created_by_nama: string;
+  created_at: string; // RFC3339
+}
+
+// ADS-REVISI-UI R3 — GET /briefs/{id}/ads-target-kpi. sumber '' = brief tidak
+// membawa KPI, Advertiser mengisi manual.
+export interface AdsTargetKpi {
+  target_kpi: string;
+  sumber: string; // 'strategi' | 'plan' | ''
 }
 
 // M16 LT-42 — Ads Management Date. end_date is a READ-ONLY derivation, never
@@ -199,16 +237,32 @@ export function isRoasTarget(targetKpi: string): boolean {
 export interface CampaignInput {
   platform: string;
   objective: string;
-  budget: string; // decimal string
+  budget: string; // decimal string — Budget HARIAN (ADS-REVISI-UI R1)
   start_date: string; // "YYYY-MM-DD"
-  end_date: string; // "YYYY-MM-DD"
-  target_kpi: string;
+  end_date: string | null; // "YYYY-MM-DD" | null = belum ditentukan (R2)
+  target_kpi: string; // diabaikan server bila brief membawa KPI (R3)
   tipe_iklan: string; // M16 LT-41 — mandatory server-side, see TIPE_IKLAN_OPTIONS
 }
 
 // POST /briefs/{id}/campaigns → Campaign (object directly, not wrapped).
 export function createCampaign(briefId: string, input: CampaignInput): Promise<Campaign> {
   return api.post<Campaign>(`/briefs/${briefId}/campaigns`, input);
+}
+
+// GET /campaigns → {data: CampaignListRow[]} (ADS-REVISI-UI R4). Staff Ads
+// always get their own; `advertiser` filters for Lead Ads/Director/OD; `q`
+// searches nama klien / nama toko / ID kampanye.
+export function listCampaigns(params: { advertiser?: string; q?: string } = {}): Promise<{ data: CampaignListRow[] }> {
+  const qs = new URLSearchParams();
+  if (params.advertiser) qs.set('advertiser', params.advertiser);
+  if (params.q) qs.set('q', params.q);
+  const tail = qs.toString();
+  return api.get<{ data: CampaignListRow[] }>(`/campaigns${tail ? `?${tail}` : ''}`);
+}
+
+// GET /briefs/{id}/ads-target-kpi → AdsTargetKpi (ADS-REVISI-UI R3).
+export function getBriefTargetKpi(briefId: string): Promise<AdsTargetKpi> {
+  return api.get<AdsTargetKpi>(`/briefs/${briefId}/ads-target-kpi`);
 }
 
 // GET /campaigns/{id} → Campaign (object directly).

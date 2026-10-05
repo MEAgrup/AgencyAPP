@@ -348,7 +348,7 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
             <div>{campaign.objective}</div>
           </div>
           <div>
-            <div className="muted" style={{ fontSize: 12 }}>Budget</div>
+            <div className="muted" style={{ fontSize: 12 }}>Budget Harian</div>
             <div>{campaign.budget_display}</div>
           </div>
           <div>
@@ -361,7 +361,7 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Rencana Selesai</div>
-            <div>{formatDate(campaign.end_date)}</div>
+            <div>{campaign.end_date ? formatDate(campaign.end_date) : 'Belum ditentukan'}</div>
           </div>
           {/* ADS-PERIODE-IKLAN-AKTUAL (Improvement Req Account butir 6) — periode
               iklan SUNGGUHAN, terpisah dari rencana & durasi kontrak. */}
@@ -382,6 +382,19 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
               Lama Iklan Berjalan &middot; <span title="Dihitung dari tanggal mulai s/d selesai (atau hari ini)">🔒 read-only</span>
             </div>
             <div>{campaign.hari_iklan_berjalan === null ? '—' : `${campaign.hari_iklan_berjalan} hari`}</div>
+          </div>
+          {/* ADS-REVISI-UI R1 — Budget Harian × hari iklan aktif (hari berjalan − hari jeda). */}
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>
+              Hari Iklan Aktif &middot; <span title="Hari iklan berjalan dikurangi hari jeda (Pause)">🔒 read-only</span>
+            </div>
+            <div>{campaign.hari_iklan_aktif === null ? '—' : `${campaign.hari_iklan_aktif} hari`}</div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>
+              Estimasi Budget Terpakai &middot; <span title="Budget Harian × Hari Iklan Aktif — dihitung otomatis, bukan spend aktual">🔒 read-only</span>
+            </div>
+            <div>{campaign.estimasi_budget_terpakai_display}</div>
           </div>
         </div>
       </section>
@@ -424,14 +437,16 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
       {/* Aset kreatif tertaut + guardrail launch */}
       <section className="card">
         <div className="cardHeader">
-          <h2>Aset Kreatif Tertaut</h2>
+          <h2>Aset Kreatif Tertaut <span className="muted" style={{ fontSize: 12 }}>(opsional)</span></h2>
         </div>
 
+        {/* ADS-REVISI-UI R5 — ID Creative opsional: Shopee Ads tidak memakainya dan
+            tidak semua TikTok Ads memakainya. Aset yang DITAUTKAN tetap harus [Approved]. */}
         {canLaunch && !hasLinkedAssets && (
-          <div className="alert alertError" role="alert">
-            Belum ada aset kreatif tertaut. Kampanye tidak dapat diluncurkan sebelum minimal satu aset
-            kreatif [Approved] ditautkan.
-          </div>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Tautkan aset kreatif hanya bila iklan ini memakai creative dari tim Creative (mis. video TikTok).
+            Kampanye tetap bisa diluncurkan tanpa aset.
+          </p>
         )}
         {canLaunch && brief && brief.status !== '[Approved]' && (
           <div className="alert alertError" role="alert">

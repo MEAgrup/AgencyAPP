@@ -1101,9 +1101,11 @@ export interface CampaignWire {
   client_id: string;
   platform: string;
   objective: string;
+  /** ADS-REVISI-UI R1 — Budget HARIAN. */
   budget: number;
   budget_display: string;
   start_date: string;
+  /** ADS-REVISI-UI R2 — `''` kalau rencana selesai belum ditentukan. */
   end_date: string;
   target_kpi: string;
   status: string;
@@ -1116,6 +1118,11 @@ export interface CampaignWire {
   iklan_selesai: string;
   /** Hari kalender iklan berjalan (inklusif), `null` kalau belum pernah dimulai. Turunan. */
   hari_iklan_berjalan: number | null;
+  /** ADS-REVISI-UI R1 — hari berjalan − hari jeda; `null` kalau belum pernah dimulai. Turunan. */
+  hari_iklan_aktif: number | null;
+  /** ADS-REVISI-UI R1 — Budget Harian × Hari Iklan Aktif (rencana). Turunan. */
+  estimasi_budget_terpakai: number | null;
+  estimasi_budget_terpakai_display: string;
   /**
    * B-5 / K-3 — Brief Creative sumber brief setup kampanye ini
    * (`briefs.source_creative_brief_id`, kolom F-4), atau `''`. Selalu dikirim:
@@ -1144,6 +1151,8 @@ export function campaignToWire(c: ads.Campaign): CampaignWire {
     budget: c.budget, budget_display: c.budgetDisplay, start_date: c.startDate, end_date: c.endDate,
     target_kpi: c.targetKpi, status: c.status, tipe_iklan: c.tipeIklan, additional_days: c.additionalDays,
     iklan_mulai: c.iklanMulai, iklan_selesai: c.iklanSelesai, hari_iklan_berjalan: c.hariIklanBerjalan,
+    hari_iklan_aktif: c.hariIklanAktif, estimasi_budget_terpakai: c.estimasiBudgetTerpakai,
+    estimasi_budget_terpakai_display: c.estimasiBudgetTerpakaiDisplay,
     source_creative_brief_id: c.sourceCreativeBriefId,
     total_spend: c.totalSpend, total_spend_display: c.totalSpendDisplay,
     total_gmv: c.totalGmv, total_gmv_display: c.totalGmvDisplay, roas: c.roas, roas_display: c.roasDisplay,
@@ -1151,6 +1160,51 @@ export function campaignToWire(c: ads.Campaign): CampaignWire {
     underperforming_streak: c.underperformingStreak, escalation_flagged: c.escalationFlagged,
     created_by: c.createdBy, created_at: c.createdAt.toISOString(),
   };
+}
+
+/** ADS-REVISI-UI R4 — satu baris daftar kampanye (`GET /campaigns`). */
+export interface CampaignListRowWire {
+  id: string;
+  brief_id: string;
+  client_id: string;
+  client_nama: string;
+  client_toko: string;
+  platform: string;
+  tipe_iklan: string;
+  objective: string;
+  budget: number;
+  budget_display: string;
+  start_date: string;
+  end_date: string;
+  status: string;
+  iklan_mulai: string;
+  iklan_selesai: string;
+  hari_iklan_berjalan: number | null;
+  hari_iklan_aktif: number | null;
+  estimasi_budget_terpakai: number | null;
+  estimasi_budget_terpakai_display: string;
+  created_by: string;
+  created_by_nama: string;
+  created_at: string;
+}
+
+export function campaignListRowToWire(c: ads.CampaignListRow): CampaignListRowWire {
+  return {
+    id: c.id, brief_id: c.briefId, client_id: c.clientId, client_nama: c.clientNama, client_toko: c.clientToko,
+    platform: c.platform, tipe_iklan: c.tipeIklan, objective: c.objective, budget: c.budget,
+    budget_display: c.budgetDisplay, start_date: c.startDate, end_date: c.endDate, status: c.status,
+    iklan_mulai: c.iklanMulai, iklan_selesai: c.iklanSelesai, hari_iklan_berjalan: c.hariIklanBerjalan,
+    hari_iklan_aktif: c.hariIklanAktif, estimasi_budget_terpakai: c.estimasiBudgetTerpakai,
+    estimasi_budget_terpakai_display: c.estimasiBudgetTerpakaiDisplay,
+    created_by: c.createdBy, created_by_nama: c.createdByNama, created_at: c.createdAt.toISOString(),
+  };
+}
+
+/** ADS-REVISI-UI R3 — Target KPI warisan brief (`GET /briefs/{id}/ads-target-kpi`). */
+export interface AdsTargetKpiWire {
+  target_kpi: string;
+  /** 'strategi' | 'plan' | '' — `''` = brief tidak membawa KPI, Advertiser mengisi manual. */
+  sumber: string;
 }
 
 /** module16_ads.AdsManagementDate — Ads Management Date, LT-42 (end_date turunan). */
@@ -1211,12 +1265,12 @@ export function optimizationToWire(o: ads.Optimization): OptimizationWire {
 
 /** Request body → CampaignInput. */
 export function toCampaignInput(b: {
-  platform?: string; objective?: string; budget?: string; start_date?: string; end_date?: string; target_kpi?: string;
+  platform?: string; objective?: string; budget?: string; start_date?: string; end_date?: string | null; target_kpi?: string;
   tipe_iklan?: string;
 }): ads.CampaignInput {
   return {
     platform: b.platform ?? '', objective: b.objective ?? '', budget: b.budget ?? '',
-    startDate: b.start_date ?? '', endDate: b.end_date ?? '', targetKpi: b.target_kpi ?? '',
+    startDate: b.start_date ?? '', endDate: b.end_date ?? null, targetKpi: b.target_kpi ?? '',
     tipeIklan: b.tipe_iklan ?? '',
   };
 }

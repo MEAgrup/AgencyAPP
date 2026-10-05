@@ -1420,7 +1420,8 @@ export async function listShopeeAdsCampaignsForPeriod(
     objective: r.objective as string,
     tipeIklan: r.tipe_iklan as string,
     startDate: dateStr(r.start_date),
-    endDate: dateStr(r.end_date),
+    // ADS-REVISI-UI R2: rencana selesai opsional — NULL dikirim `''`, bukan "null".
+    endDate: r.end_date === null ? '' : dateStr(r.end_date),
     budget: money.format(money.parse(String(r.budget))),
   }));
 }

@@ -204,7 +204,10 @@ export function parseGmvTarget(target: string): money.Money | null {
   if (!low.includes('gmv')) {
     return null;
   }
-  const m = low.match(/\d[\d.,\s]*/); // first run starting at a digit
+  // ADS-REVISI-UI R3: an inherited KPI may carry several targets
+  // ("GMV ≥ Rp 20.000.000 / ROAS ≥ 4x"), so read the number AFTER the keyword
+  // first; the whole string stays the fallback ("Rp 20.000.000 GMV").
+  const m = low.slice(low.indexOf('gmv')).match(/\d[\d.,\s]*/) ?? low.match(/\d[\d.,\s]*/); // first run starting at a digit
   if (!m) {
     return null;
   }
@@ -242,10 +245,16 @@ export function gmvTargetBelowStandard(targetKpi: string, gmvBaseline: money.Mon
 export interface CampaignInput {
   platform: string;
   objective: string;
-  budget: string; // decimal string
+  /** ADS-REVISI-UI R1 — Budget HARIAN (Rp), decimal string. */
+  budget: string;
   startDate: string; // YYYY-MM-DD
-  endDate: string; // YYYY-MM-DD
-  targetKpi: string;
+  /** ADS-REVISI-UI R2 — opsional; kosong/absen = rencana selesai belum ditentukan. */
+  endDate?: string | null;
+  /**
+   * ADS-REVISI-UI R3 — opsional. Diabaikan bila brief membawa Target KPI
+   * (Strategy STR- / baris Plan M6B — `kpiWarisanBrief`); wajib hanya bila tidak.
+   */
+  targetKpi?: string;
   /** Tipe Iklan (M16 LT-41) — GMV Max Product | GMV Max Live | TTAM. Wajib. */
   tipeIklan: string;
 }
@@ -257,9 +266,11 @@ export interface Campaign {
   clientId: string;
   platform: string;
   objective: string;
+  /** ADS-REVISI-UI R1 — Budget HARIAN. */
   budget: number;
   budgetDisplay: string;
   startDate: string;
+  /** ADS-REVISI-UI R2 — `''` kalau rencana selesai belum ditentukan. */
   endDate: string;
   targetKpi: string;
   status: string;
@@ -280,6 +291,14 @@ export interface Campaign {
    * kalau iklan belum pernah dimulai. Turunan, tidak disimpan.
    */
   hariIklanBerjalan: number | null;
+  /**
+   * ADS-REVISI-UI R1 — hari iklan berjalan dikurangi hari jeda (`hitungHariJeda`);
+   * `null` kalau iklan belum pernah dimulai. Turunan, tidak disimpan.
+   */
+  hariIklanAktif: number | null;
+  /** ADS-REVISI-UI R1 — Budget Harian × Hari Iklan Aktif (rencana, bukan spend aktual). */
+  estimasiBudgetTerpakai: number | null;
+  estimasiBudgetTerpakaiDisplay: string; // "Rp. X.XXX.XXX,00" | "—"
   /**
    * B-5 / ketokan K-3 — Brief Creative yang menjadi SUMBER brief setup kampanye
    * ini (`briefs.source_creative_brief_id`, kolom F-4), atau `''` kalau brief
@@ -411,10 +430,13 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
     }
     const platform = (input.platform ?? '').trim();
     const objective = (input.objective ?? '').trim();
-    const targetKpi = (input.targetKpi ?? '').trim();
+    // ADS-REVISI-UI R3: Target KPI diwarisi dari brief (AM-approved, M8-OA-4);
+    // input manual hanya dipakai bila brief tidak membawa KPI.
+    const kpiWarisan = await kpiWarisanBrief(tx, briefId);
+    const targetKpi = kpiWarisan !== '' ? kpiWarisan : (input.targetKpi ?? '').trim();
     const tipeIklan = (input.tipeIklan ?? '').trim();
     if (platform === '' || objective === '' || targetKpi === '' || tipeIklan === '' ||
-      (input.budget ?? '').trim() === '' || (input.startDate ?? '').trim() === '' || (input.endDate ?? '').trim() === '') {
+      (input.budget ?? '').trim() === '' || (input.startDate ?? '').trim() === '') {
       throw new ValidationError(bi.INCOMPLETE_DATA);
     }
     if (!VALID_PLATFORMS.has(platform)) {
@@ -440,8 +462,10 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
     // unaffected. The baseline is the HIGHER of the static onboarding
     // `gmv_baseline` and the live monthly run-rate (`total_sales`, written by the
     // C1 report engine) — the floor tracks real performance, never below onboarding.
+    // ADS-REVISI-UI R3: an INHERITED target was set by the AM (Strategy/Plan) —
+    // the AM sign-off this gate asks for is already its provenance.
     const baseline = effectiveGmvBaseline(money.parse(brief.gmv_baseline), money.parse(brief.total_sales));
-    if (!hasKpiSignOff(actor, brief.assigned_am_id ?? '') && gmvTargetBelowStandard(targetKpi, baseline)) {
+    if (kpiWarisan === '' && !hasKpiSignOff(actor, brief.assigned_am_id ?? '') && gmvTargetBelowStandard(targetKpi, baseline)) {
       throw new ForbiddenError(MSG_KPI_BELOW_STANDARD);
     }
 
@@ -457,8 +481,9 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
     });
     return {
       id, briefId, clientId: brief.client_id, platform, objective, budget: Number(budget) / 100,
-      budgetDisplay: money.format(budget), startDate: start, endDate: end, targetKpi, status: STATUS_SETTING,
+      budgetDisplay: money.format(budget), startDate: start, endDate: end ?? '', targetKpi, status: STATUS_SETTING,
       tipeIklan, additionalDays: 0, iklanMulai: '', iklanSelesai: '', hariIklanBerjalan: null,
+      hariIklanAktif: null, estimasiBudgetTerpakai: null, estimasiBudgetTerpakaiDisplay: '—',
       sourceCreativeBriefId: brief.source_creative_brief_id ?? '',
       totalSpend: 0, totalSpendDisplay: money.format(0n), totalGmv: 0, totalGmvDisplay: money.format(0n),
       roas: null, roasDisplay: '—', linkedAssetIds: [], metricEntryCount: 0, optimizationCount: 0,
@@ -539,7 +564,7 @@ async function activate(sql: Sql, actor: Actor, campaignId: string, opts: Tangga
     if (briefStatus !== BRIEF_STATUS_APPROVED) {
       throw new ConflictError(MSG_LAUNCH_BRIEF_NOT_APPROVED);
     }
-    if (!(await allLinkedAssetsApproved(tx, r.id))) {
+    if (!(await linkedAssetsAllApproved(tx, r.id))) {
       throw new ConflictError(MSG_LAUNCH_ASSETS_NOT_APPROVED);
     }
     const tanggal = tanggalIklan(opts);
@@ -730,16 +755,22 @@ async function computeTotalHariHold(sql: Queryable, campaignId: string): Promise
   return total;
 }
 
-/** allLinkedAssetsApproved: at least one currently-linked Asset AND all approved (§4 Rule 2 / §12). */
-async function allLinkedAssetsApproved(tx: Queryable, campaignId: string): Promise<boolean> {
+/**
+ * linkedAssetsAllApproved: every currently-linked Asset is approved (§4 Rule 2 / §12).
+ *
+ * ADS-REVISI-UI R5 (deviasi §4 Rule 2 / §9.3, DECISIONS 2026-10-05): linking a
+ * Creative Asset is OPTIONAL — Shopee Ads never uses one and not every TikTok
+ * ad does. Zero linked Assets therefore passes; a linked one must still be
+ * [Approved] (the attribution loop §7 must never credit an unapproved Asset).
+ */
+async function linkedAssetsAllApproved(tx: Queryable, campaignId: string): Promise<boolean> {
   const rows = await tx<{ total: string; approved: string }[]>`
     select count(*) as total,
            coalesce(sum(case when a.status = ${ASSET_STATUS_APPROVED} then 1 else 0 end), 0) as approved
       from ad_campaign_assets aca
       join assets a on a.id = aca.asset_id
      where aca.campaign_id = ${campaignId} and aca.unlinked_at is null`;
-  const total = Number(rows[0].total);
-  return total > 0 && total === Number(rows[0].approved);
+  return Number(rows[0].total) === Number(rows[0].approved);
 }
 
 // --- Creative Asset linkage (§4 Rule 2) ---
@@ -1083,7 +1114,7 @@ export async function findOverlappingShopeeAdsCampaigns(
     select c.id, cl.assigned_am_id
       from ad_campaigns c join clients cl on cl.id = c.client_id
      where c.client_id = ${clientId} and c.platform = 'Shopee Ads' and c.status = ${STATUS_ACTIVE}
-       and c.start_date <= ${periodeAkhir} and c.end_date >= ${periodeMulai}
+       and c.start_date <= ${periodeAkhir} and (c.end_date is null or c.end_date >= ${periodeMulai})
      order by c.id`;
   return rows.map((r) => ({ id: r.id, ownerAm: r.assigned_am_id }));
 }
@@ -1122,7 +1153,7 @@ export async function findOverlappingAdCampaignsPdt(
       from ad_campaigns c join clients cl on cl.id = c.client_id
      where c.client_id = ${clientId} and c.platform = ${platform} and c.status = ${STATUS_ACTIVE}
        and c.start_date <= (${periodeMulaiBulan}::date + interval '1 month' - interval '1 day')::date
-       and c.end_date >= ${periodeMulaiBulan}::date
+       and (c.end_date is null or c.end_date >= ${periodeMulaiBulan}::date)
      order by c.id`;
   return rows.map((r) => ({ id: r.id, ownerAm: r.assigned_am_id }));
 }
@@ -1239,7 +1270,7 @@ async function recomputeAssetAttribution(tx: Queryable, assetId: string): Promis
 export async function getCampaign(sql: Queryable, actor: Actor, campaignId: string): Promise<Campaign> {
   const rows = await sql<
     { id: string; brief_id: string; client_id: string; platform: string; objective: string; budget: string;
-      start_date: string | Date; end_date: string | Date; target_kpi: string; status: string; created_by: string;
+      start_date: string | Date; end_date: string | Date | null; target_kpi: string; status: string; created_by: string;
       created_at: Date; assigned_am_id: string | null; tipe_iklan: string; additional_days: number;
       source_creative_brief_id: string | null; iklan_mulai: string | Date | null; iklan_selesai: string | Date | null }[]
   >`
@@ -1269,14 +1300,204 @@ export async function getCampaign(sql: Queryable, actor: Actor, campaignId: stri
   }
   const budget = money.parse(row.budget);
   const derived = await fillDerived(sql, campaignId, row.target_kpi);
+  const now = new Date();
+  const periode = periodeIklan(row.iklan_mulai, row.iklan_selesai, now);
   return {
     id: row.id, briefId: row.brief_id, clientId: row.client_id, platform: row.platform, objective: row.objective,
     budget: Number(budget) / 100, budgetDisplay: money.format(budget), startDate: dateStr(row.start_date),
-    endDate: dateStr(row.end_date), targetKpi: row.target_kpi, status: row.status, createdBy: row.created_by,
-    createdAt: row.created_at, tipeIklan: row.tipe_iklan, additionalDays: Number(row.additional_days),
-    ...periodeIklan(row.iklan_mulai, row.iklan_selesai, new Date()),
+    endDate: row.end_date === null ? '' : dateStr(row.end_date), targetKpi: row.target_kpi, status: row.status,
+    createdBy: row.created_by, createdAt: row.created_at, tipeIklan: row.tipe_iklan,
+    additionalDays: Number(row.additional_days),
+    ...periode,
+    ...estimasiBudget(budget, periode, (await transisiKampanye(sql, [campaignId])).get(campaignId) ?? [], now),
     sourceCreativeBriefId: row.source_creative_brief_id ?? '', ...derived,
   };
+}
+
+// --- Target KPI warisan brief (ADS-REVISI-UI R3) ---
+
+/** Where an inherited Target KPI came from: the STR- Strategy, the M6B Plan row, or nowhere. */
+export type SumberKpi = 'strategi' | 'plan' | '';
+
+/** Whole-rupiah "Rp 20.000.000" — no decimals, so `parseGmvTarget` reads it back exactly. */
+function rupiahBulat(m: money.Money): string {
+  const whole = (m < 0n ? -m : m) / 100n;
+  return `Rp ${whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
+}
+
+/** Trim a numeric column value ("4.00" → "4", "2.500" → "2.5"). */
+function angkaRingkas(v: string): string {
+  const n = Number(v);
+  return Number.isFinite(n) ? String(n) : v.trim();
+}
+
+/**
+ * formatKpiWarisan composes the campaign Target KPI text from a brief's AM-set
+ * targets. Structured Strategy points win (in the fixed GMV/ROAS/CTR/CVR order,
+ * " / "-joined so `parseGmvTarget`/`parseRoasTarget` read each one); the
+ * Strategy's free-text catatan is used only when it has no structured point;
+ * then the M6B Plan row's Hasil Diharapkan (PC-11). `''` = the brief carries no
+ * KPI and the Advertiser must type one. Exported for tests.
+ */
+export function formatKpiWarisan(r: {
+  targetGmv: string | null; targetRoas: string | null; targetCtr: string | null; targetCvr: string | null;
+  catatanKpi: string | null; hasilDiharapkan: string | null;
+}): { teks: string; sumber: SumberKpi } {
+  const parts: string[] = [];
+  if (r.targetGmv !== null && r.targetGmv.trim() !== '') parts.push(`GMV ≥ ${rupiahBulat(money.parse(r.targetGmv))}`);
+  if (r.targetRoas !== null && r.targetRoas.trim() !== '') parts.push(`ROAS ≥ ${angkaRingkas(r.targetRoas)}x`);
+  if (r.targetCtr !== null && r.targetCtr.trim() !== '') parts.push(`CTR ≥ ${angkaRingkas(r.targetCtr)}%`);
+  if (r.targetCvr !== null && r.targetCvr.trim() !== '') parts.push(`CVR ≥ ${angkaRingkas(r.targetCvr)}%`);
+  if (parts.length > 0) {
+    return { teks: parts.join(' / '), sumber: 'strategi' };
+  }
+  const catatan = (r.catatanKpi ?? '').trim();
+  if (catatan !== '') {
+    return { teks: catatan, sumber: 'strategi' };
+  }
+  const hasil = (r.hasilDiharapkan ?? '').trim();
+  if (hasil !== '') {
+    return { teks: hasil, sumber: 'plan' };
+  }
+  return { teks: '', sumber: '' };
+}
+
+async function kpiWarisan(sql: Queryable, briefId: string): Promise<{ teks: string; sumber: SumberKpi }> {
+  const rows = await sql<{
+    target_gmv: string | null; target_roas: string | null; target_ctr: string | null; target_cvr: string | null;
+    target_kpi: string | null; hasil_diharapkan: string | null;
+  }[]>`
+    select sp.target_gmv, sp.target_roas, sp.target_ctr, sp.target_cvr, sp.target_kpi, pr.hasil_diharapkan
+      from briefs b
+      left join strategy_plans sp on sp.id = b.strategy_id
+      left join plan_row pr on pr.id = b.plan_row_id
+     where b.id = ${briefId}`;
+  if (rows.length === 0) {
+    return { teks: '', sumber: '' };
+  }
+  const r = rows[0];
+  return formatKpiWarisan({
+    targetGmv: r.target_gmv, targetRoas: r.target_roas, targetCtr: r.target_ctr, targetCvr: r.target_cvr,
+    catatanKpi: r.target_kpi, hasilDiharapkan: r.hasil_diharapkan,
+  });
+}
+
+/** kpiWarisanBrief — the inherited Target KPI text createCampaign stores (`''` = none). */
+async function kpiWarisanBrief(tx: Queryable, briefId: string): Promise<string> {
+  return (await kpiWarisan(tx, briefId)).teks;
+}
+
+/**
+ * targetKpiBrief (GET /briefs/{id}/ads-target-kpi) — the Target KPI the create
+ * form shows read-only. Runs service-role (Strategy/Plan rows are not readable by
+ * Ads under RLS) behind the campaign gates: an Ads Brief, read by whoever may
+ * create (`canManageCampaign`) or view (`canViewCampaign`) its campaigns.
+ */
+export async function targetKpiBrief(sql: Queryable, actor: Actor, briefId: string): Promise<{ targetKpi: string; sumber: SumberKpi }> {
+  const rows = await sql<{ assigned_division: string; assigned_am_id: string | null }[]>`
+    select b.assigned_division, cl.assigned_am_id
+      from briefs b join services sv on sv.id = b.service_id join clients cl on cl.id = sv.client_id
+     where b.id = ${briefId}`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
+  }
+  if (rows[0].assigned_division !== ADS_DIVISION) {
+    throw new ConflictError(MSG_NOT_ADS_BRIEF);
+  }
+  if (!canManageCampaign(actor) && !canViewCampaign(actor, rows[0].assigned_am_id ?? '')) {
+    throw new ForbiddenError(MSG_CAMPAIGN_VIEW_FORBIDDEN);
+  }
+  const k = await kpiWarisan(sql, briefId);
+  return { targetKpi: k.teks, sumber: k.sumber };
+}
+
+// --- Daftar kampanye (ADS-REVISI-UI R4) ---
+
+/** One row of the campaign list (`GET /campaigns`). */
+export interface CampaignListRow {
+  id: string;
+  briefId: string;
+  clientId: string;
+  /** clients.nama_pic — "nama klien"; `''` bila baris klien tak terbaca. */
+  clientNama: string;
+  /** clients.toko — "toko klien". */
+  clientToko: string;
+  platform: string;
+  tipeIklan: string;
+  objective: string;
+  budget: number;
+  budgetDisplay: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  iklanMulai: string;
+  iklanSelesai: string;
+  hariIklanBerjalan: number | null;
+  hariIklanAktif: number | null;
+  estimasiBudgetTerpakai: number | null;
+  estimasiBudgetTerpakaiDisplay: string;
+  createdBy: string;
+  createdByNama: string;
+  createdAt: Date;
+}
+
+export interface ListCampaignsOpts {
+  /** Filter pembuat (employee id). Diabaikan untuk staff Ads — mereka selalu melihat milik sendiri. */
+  advertiser?: string;
+  /** Cari nama klien / nama toko / ID kampanye (substring, case-insensitive). */
+  q?: string;
+  now?: Date;
+}
+
+const LIST_CAMPAIGNS_LIMIT = 500;
+
+/**
+ * listCampaigns — the Ad Campaigns visible to the actor, newest first (R4: "list
+ * semua campaign yang sudah dibuat per orang dengan detail nama klien, toko klien,
+ * tanggal buat campaign"). Row scope is RLS (`ad_campaigns_select`: read-all /
+ * pembuat / AM pemilik / Lead Ads); on top of it an Ads STAFF actor is pinned to
+ * their own campaigns (Phase 0 §4: staff = own data). Run under `readAsActor`.
+ */
+export async function listCampaigns(sql: Queryable, actor: Actor, opts: ListCampaignsOpts = {}): Promise<CampaignListRow[]> {
+  const isAdsStaff = actor.role.division === ADS_DIVISION && actor.role.level === permission.LevelStaff &&
+    !actor.role.director && !permission.canReadAll(actor);
+  const advertiser = isAdsStaff ? actor.employeeId : (opts.advertiser ?? '').trim();
+  const term = (opts.q ?? '').trim();
+  const pattern = term === '' ? null : `%${term.replace(/[\\%_]/g, '\\$&')}%`;
+  const rows = await sql<{
+    id: string; brief_id: string; client_id: string; client_nama: string | null; client_toko: string | null;
+    platform: string; tipe_iklan: string; objective: string; budget: string; start_date: string | Date;
+    end_date: string | Date | null; status: string; iklan_mulai: string | Date | null; iklan_selesai: string | Date | null;
+    created_by: string; created_by_nama: string | null; created_at: Date;
+  }[]>`
+    select c.id, c.brief_id, c.client_id, cl.nama_pic as client_nama, private.client_toko(c.client_id) as client_toko,
+           c.platform, c.tipe_iklan, c.objective, c.budget, c.start_date, c.end_date, c.status,
+           c.iklan_mulai, c.iklan_selesai, c.created_by,
+           private.employee_display_name(c.created_by) as created_by_nama, c.created_at
+      from ad_campaigns c
+      left join clients cl on cl.id = c.client_id
+     where (${advertiser === '' ? null : advertiser}::text is null or c.created_by = ${advertiser})
+       and (${pattern}::text is null
+            or cl.nama_pic ilike ${pattern}
+            or private.client_toko(c.client_id) ilike ${pattern}
+            or c.id ilike ${pattern})
+     order by c.created_at desc, c.id desc
+     limit ${LIST_CAMPAIGNS_LIMIT}`;
+  const now = opts.now ?? new Date();
+  const transisi = await transisiKampanye(sql, rows.map((r) => r.id));
+  return rows.map((r) => {
+    const budget = money.parse(r.budget);
+    const periode = periodeIklan(r.iklan_mulai, r.iklan_selesai, now);
+    return {
+      id: r.id, briefId: r.brief_id, clientId: r.client_id, clientNama: r.client_nama ?? '',
+      clientToko: r.client_toko ?? '', platform: r.platform, tipeIklan: r.tipe_iklan, objective: r.objective,
+      budget: Number(budget) / 100, budgetDisplay: money.format(budget), startDate: dateStr(r.start_date),
+      endDate: r.end_date === null ? '' : dateStr(r.end_date), status: r.status,
+      ...periode,
+      ...estimasiBudget(budget, periode, transisi.get(r.id) ?? [], now),
+      createdBy: r.created_by, createdByNama: r.created_by_nama ?? '', createdAt: r.created_at,
+    };
+  });
 }
 
 /** listMetricEntries returns a campaign's Metric Entries in period order (§5), view-gated. */
@@ -1394,6 +1615,13 @@ export function parseRoasTarget(target: string): number | null {
   if (!low.includes('roas')) {
     return null;
   }
+  // ADS-REVISI-UI R3: read the number AFTER the keyword first (an inherited KPI
+  // may lead with "GMV ≥ Rp …"); the whole string stays the fallback ("4x ROAS").
+  const afterKeyword = firstNumber(low.slice(low.indexOf('roas')));
+  return afterKeyword ?? firstNumber(low);
+}
+
+function firstNumber(low: string): number | null {
   let s = '';
   let started = false;
   for (const ch of low) {
@@ -1420,19 +1648,19 @@ function formatRoas(v: number): string {
 
 /**
  * validateBriefSubmit is the §4 Rule 3 gate M12 calls before an Ads Brief-as-task
- * enters [Submitted]: at least one Ad Campaign must exist for the Brief WITH a
- * currently-linked Creative Asset. A non-Ads division is a no-op. Throws
- * ConflictError with the verbatim PRD string when incomplete.
+ * enters [Submitted]: at least one Ad Campaign must exist for the Brief. A
+ * non-Ads division is a no-op. Throws ConflictError with the verbatim PRD string
+ * when incomplete.
+ *
+ * ADS-REVISI-UI R5: the "WITH a currently-linked Creative Asset" half was dropped
+ * — linking a Creative Asset is optional (see `linkedAssetsAllApproved`).
  */
 export async function validateBriefSubmit(tx: Queryable, briefId: string, division: string): Promise<void> {
   if (division !== ADS_DIVISION) {
     return;
   }
   const rows = await tx<{ n: string }[]>`
-    select count(*) as n
-      from ad_campaigns c
-      join ad_campaign_assets a on a.campaign_id = c.id and a.unlinked_at is null
-     where c.brief_id = ${briefId}`;
+    select count(*) as n from ad_campaigns c where c.brief_id = ${briefId}`;
   if (Number(rows[0].n) === 0) {
     throw new ConflictError(MSG_CAMPAIGN_INCOMPLETE_FOR_SUBMIT);
   }
@@ -1489,21 +1717,110 @@ export function periodeIklan(
   return { iklanMulai: m, iklanSelesai: s, hariIklanBerjalan: Math.max(hari, 0) };
 }
 
+/** One status transition of an Ad Campaign, from the immutable audit log. */
+export interface TransisiKampanye {
+  action: string; // 'transition:[A]->[B]'
+  createdAt: Date;
+}
+
+/**
+ * hitungHariJeda (ADS-REVISI-UI R1) — calendar days an Ad Campaign spent
+ * `[Paused]`, derived from its transition log (house rule #4: recomputable,
+ * never stored). A hold closed by `->[Active]` counts resume − pause (the resume
+ * day itself is a running day); a hold still open, or closed by `->[Ended]`,
+ * counts every day through `batas` inclusive (the ad never ran again). Dates are
+ * WIB calendar days. Exported for tests.
+ */
+export function hitungHariJeda(transisi: readonly TransisiKampanye[], batas: string): number {
+  const hari = (ymd: string): number => Date.parse(`${ymd}T00:00:00Z`) / 86400000;
+  let total = 0;
+  let jedaSejak: string | null = null;
+  for (const t of transisi) {
+    const tgl = tz.dateString(t.createdAt);
+    if (t.action.endsWith('->[Paused]')) {
+      jedaSejak = jedaSejak ?? tgl;
+    } else if (jedaSejak !== null && t.action.startsWith('transition:[Paused]->')) {
+      total += t.action.endsWith('->[Active]')
+        ? Math.max(0, hari(tgl) - hari(jedaSejak))
+        : Math.max(0, hari(batas) - hari(jedaSejak) + 1);
+      jedaSejak = null;
+    }
+  }
+  if (jedaSejak !== null) {
+    total += Math.max(0, hari(batas) - hari(jedaSejak) + 1);
+  }
+  return total;
+}
+
+/**
+ * estimasiBudget (ADS-REVISI-UI R1) — "berapa ads spent semenjak dinyalakan sampai
+ * dimatikan", from the DAILY budget: Hari Iklan Aktif = hari iklan berjalan − hari
+ * jeda, and Estimasi Budget Terpakai = Budget Harian × Hari Iklan Aktif. Both are
+ * `null` until the ad has ever started. A PLANNED figure — Total Spend (from
+ * Metric Entries) stays the ACTUAL one. Exported for tests.
+ */
+export function estimasiBudget(
+  budgetHarian: money.Money,
+  periode: { iklanSelesai: string; hariIklanBerjalan: number | null },
+  transisi: readonly TransisiKampanye[],
+  now: Date,
+): { hariIklanAktif: number | null; estimasiBudgetTerpakai: number | null; estimasiBudgetTerpakaiDisplay: string } {
+  if (periode.hariIklanBerjalan === null) {
+    return { hariIklanAktif: null, estimasiBudgetTerpakai: null, estimasiBudgetTerpakaiDisplay: '—' };
+  }
+  const batas = periode.iklanSelesai !== '' ? periode.iklanSelesai : tz.dateString(now);
+  const jeda = hitungHariJeda(transisi, batas);
+  const aktif = Math.min(periode.hariIklanBerjalan, Math.max(0, periode.hariIklanBerjalan - jeda));
+  const est = budgetHarian * BigInt(aktif);
+  return { hariIklanAktif: aktif, estimasiBudgetTerpakai: Number(est) / 100, estimasiBudgetTerpakaiDisplay: money.format(est) };
+}
+
+/**
+ * transisiKampanye reads the transition rows of many campaigns in ONE query via
+ * the SECURITY DEFINER helper (migration 20261217010000) — `audit_log_select` is
+ * per-actor, so a plain read would show an AM none of the Advertiser's pauses.
+ * Callers have already passed the campaign read gate.
+ */
+async function transisiKampanye(sql: Queryable, campaignIds: string[]): Promise<Map<string, TransisiKampanye[]>> {
+  const out = new Map<string, TransisiKampanye[]>();
+  if (campaignIds.length === 0) {
+    return out;
+  }
+  const rows = await sql<{ campaign_id: string; action: string; created_at: Date }[]>`
+    select campaign_id, action, created_at from private.ad_campaign_transisi(${campaignIds}::text[])`;
+  for (const r of rows) {
+    const list = out.get(r.campaign_id) ?? [];
+    list.push({ action: r.action, createdAt: r.created_at });
+    out.set(r.campaign_id, list);
+  }
+  return out;
+}
+
 /** dateStr normalizes a postgres date value (string or Date) to YYYY-MM-DD. */
 function dateStr(v: string | Date): string {
   return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
 }
 
-/** parseDateRange validates two YYYY-MM-DD dates with end >= start (→ InvalidCampaignDates). */
-function parseDateRange(startStr: string, endStr: string): [string, string] {
+/**
+ * parseDateRange validates a YYYY-MM-DD start and an OPTIONAL end with end >= start
+ * (→ InvalidCampaignDates). ADS-REVISI-UI R2: a blank end returns `null` — the
+ * planned end date is no longer mandatory at creation.
+ */
+function parseDateRange(startStr: string, endStr: string | null | undefined): [string, string | null] {
   const start = (startStr ?? '').trim();
   const end = (endStr ?? '').trim();
-  if (!RE_DATE.test(start) || !RE_DATE.test(end)) {
+  if (!RE_DATE.test(start) || (end !== '' && !RE_DATE.test(end))) {
     throw new ValidationError(MSG_INVALID_CAMPAIGN_DATES);
   }
   const s = Date.parse(`${start}T00:00:00Z`);
+  if (Number.isNaN(s)) {
+    throw new ValidationError(MSG_INVALID_CAMPAIGN_DATES);
+  }
+  if (end === '') {
+    return [start, null];
+  }
   const e = Date.parse(`${end}T00:00:00Z`);
-  if (Number.isNaN(s) || Number.isNaN(e) || e < s) {
+  if (Number.isNaN(e) || e < s) {
     throw new ValidationError(MSG_INVALID_CAMPAIGN_DATES);
   }
   return [start, end];

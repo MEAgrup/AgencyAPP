@@ -480,6 +480,7 @@ describe('M8 ads wire mappers', () => {
       budget: 8000000, budgetDisplay: 'Rp. 8.000.000,00', startDate: '2026-07-01', endDate: '2026-08-31',
       targetKpi: 'ROAS ≥ 4x', status: '[Active]', tipeIklan: 'GMV Max Product', additionalDays: 0,
       iklanMulai: '2026-07-03', iklanSelesai: '2026-07-20', hariIklanBerjalan: 18, // ADS-PERIODE-IKLAN-AKTUAL
+      hariIklanAktif: 16, estimasiBudgetTerpakai: 128000000, estimasiBudgetTerpakaiDisplay: 'Rp. 128.000.000,00', // ADS-REVISI-UI R1
       sourceCreativeBriefId: 'BRF-202607-0009', // B-5/K-3
       totalSpend: 1000000, totalSpendDisplay: 'Rp. 1.000.000,00',
       totalGmv: 4000000, totalGmvDisplay: 'Rp. 4.000.000,00', roas: 4, roasDisplay: '4x', linkedAssetIds: ['AST-1'],
@@ -498,6 +499,9 @@ describe('M8 ads wire mappers', () => {
     expect(w.iklan_mulai).toBe('2026-07-03');
     expect(w.iklan_selesai).toBe('2026-07-20');
     expect(w.hari_iklan_berjalan).toBe(18);
+    expect(w.hari_iklan_aktif).toBe(16);
+    expect(w.estimasi_budget_terpakai).toBe(128000000);
+    expect(w.estimasi_budget_terpakai_display).toBe('Rp. 128.000.000,00');
   });
 
   it('metricEntryToWire + optimizationToWire map their records', () => {

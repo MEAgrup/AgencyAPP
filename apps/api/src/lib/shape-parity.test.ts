@@ -675,6 +675,9 @@ const WIRE_TO_FE: Record<string, string> = {
   ScanHoursReminderResultWire: 'creative.ts::ReminderScanResult',
   // M8 ads
   CampaignWire: 'ads.ts::Campaign',
+  // ADS-REVISI-UI R4/R3 (2026-10-05) — daftar kampanye + Target KPI warisan brief.
+  CampaignListRowWire: 'ads.ts::CampaignListRow',
+  AdsTargetKpiWire: 'ads.ts::AdsTargetKpi',
   MetricEntryWire: 'ads.ts::MetricEntry',
   OptimizationWire: 'ads.ts::Optimization',
   // M8 laporan mingguan Advertiser (follow-up PR #172, pemilik 2026-08-19)
