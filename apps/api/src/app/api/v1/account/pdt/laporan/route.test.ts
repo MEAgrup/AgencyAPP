@@ -139,6 +139,27 @@ describeDb('GET /pdt/laporan — real DB', () => {
     expect(res.status).toBe(400);
   });
 
+  it('PDT-MINGGUAN: jenis=mingguan ⇒ 200 dengan jenis_periode + periode_selesai; jenis asing / bukan Senin ⇒ 400 BI', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, 'ZZ-PDTLAP-AM');
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    const ok = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-06', jenis: 'mingguan' }));
+    expect(ok.status).toBe(200);
+    const body = (await ok.json()) as { jenis_periode: string; periode_awal_bulan: string; periode_selesai: string | null; iklan: unknown };
+    expect(body.jenis_periode).toBe('mingguan');
+    expect(body.periode_awal_bulan).toBe('2026-07-06');
+    expect(body.periode_selesai).toBe('2026-07-12');
+    expect(body.iklan).toBeNull();
+
+    const bukanSenin = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-07', jenis: 'mingguan' }));
+    expect(bukanSenin.status).toBe(400);
+    const asing = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01', jenis: 'harian' }));
+    expect(asing.status).toBe(400);
+
+    const bulanan = await GET(req(owner, { client_platform_id: String(cpId), periode: '2026-07-01' }));
+    expect(((await bulanan.json()) as { jenis_periode: string }).jenis_periode).toBe('bulanan');
+  });
+
   it('200 TikTok: KPI basis net (GMV−refund) + skor + benchmark_versi, wire snake_case', async () => {
     const clientId = nextClientId();
     await insertClient(clientId, 'ZZ-PDTLAP-AM');

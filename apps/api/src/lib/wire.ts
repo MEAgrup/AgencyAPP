@@ -9559,7 +9559,12 @@ export interface PdtLaporanWire {
   schema: string;
   platform: string;
   client_platform_id: number;
+  /** Tanggal awal periode — untuk laporan `mingguan` ini hari Senin (nama field dipertahankan). */
   periode_awal_bulan: string;
+  /** PDT-MINGGUAN — `bulanan` | `mingguan`; payload beku lama ⇒ `bulanan`. */
+  jenis_periode: string;
+  /** Tanggal akhir periode (inklusif); `null` di payload beku lama. */
+  periode_selesai: string | null;
   generated_at: string;
   kpi: PdtLaporanKpiWire;
   harian: PdtLaporanHarianWire | null;
@@ -9872,6 +9877,8 @@ export function pdtLaporanTiktokToWire(l: pdtCore.PdtLaporanTiktok): PdtLaporanW
     platform: l.platform,
     client_platform_id: l.clientPlatformId,
     periode_awal_bulan: l.periodeAwalBulan,
+    jenis_periode: l.jenisPeriode ?? 'bulanan',
+    periode_selesai: l.periodeSelesai ?? null,
     generated_at: l.generatedAt,
     kpi: pdtLaporanKpiToWire(l.kpi),
     harian: pdtLaporanHarianToWire(l.harian),
@@ -9901,6 +9908,8 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
     platform: l.platform,
     client_platform_id: l.clientPlatformId,
     periode_awal_bulan: l.periodeAwalBulan,
+    jenis_periode: l.jenisPeriode ?? 'bulanan',
+    periode_selesai: l.periodeSelesai ?? null,
     generated_at: l.generatedAt,
     kpi: pdtLaporanKpiToWire(l.kpi),
     harian: pdtLaporanHarianToWire(l.harian),
@@ -9931,6 +9940,8 @@ export function pdtLaporanShopeeToWire(l: pdtCore.PdtLaporanShopee): PdtLaporanW
 export interface PdtLaporanKirimanWire {
   id: number;
   client_platform_id: number;
+  /** PDT-MINGGUAN — `bulanan` | `mingguan`. */
+  jenis_periode: string;
   periode_mulai: string;
   periode_selesai: string;
   parser_versi: number;
@@ -9947,6 +9958,7 @@ export function pdtLaporanKirimanToWire(k: pdt.PdtLaporanKirimanHasil): PdtLapor
   return {
     id: k.id,
     client_platform_id: k.clientPlatformId,
+    jenis_periode: k.jenisPeriode,
     periode_mulai: k.periodeMulai,
     periode_selesai: k.periodeSelesai,
     parser_versi: k.parserVersi,
@@ -9966,6 +9978,8 @@ export function pdtLaporanKirimanToWire(k: pdt.PdtLaporanKirimanHasil): PdtLapor
 export interface PdtKirimanRingkasWire {
   id: number;
   client_platform_id: number;
+  /** PDT-MINGGUAN — `bulanan` | `mingguan`. */
+  jenis_periode: string;
   periode_mulai: string;
   periode_selesai: string;
   parser_versi: number;
@@ -9979,6 +9993,7 @@ export function pdtKirimanRingkasToWire(k: pdt.PdtKirimanRingkas): PdtKirimanRin
   return {
     id: k.id,
     client_platform_id: k.clientPlatformId,
+    jenis_periode: k.jenisPeriode,
     periode_mulai: k.periodeMulai,
     periode_selesai: k.periodeSelesai,
     parser_versi: k.parserVersi,
