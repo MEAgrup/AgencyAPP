@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type Sql } from '@cdps/db';
 import {
   bacaFaktaAds,
+  bacaFaktaBatalBulan,
   bacaFaktaContent,
   bacaFaktaCreatorPeriode,
   bacaFaktaKesehatanPenalti,
@@ -161,6 +162,32 @@ describeDb('bacaFaktaShopDaily (G3-01) — agregasi bulanan + sumberBatch', () =
     await insertClient(clientId);
     const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
     expect(await bacaFaktaShopDaily(sql, cpId, PERIODE, 'net')).toBeNull();
+  });
+
+  // Basis 'net' dipakai bersama TikTok dan Tokopedia (F-01). B-1 dan riwayat GMV 6 bulan
+  // (G3-07) toko TikTok tidak boleh ikut menjumlah baris kanal 'tokopedia'.
+  it("basis 'net' hanya membaca kanal 'tiktok' — baris Tokopedia tidak ikut terjumlah", async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    // Satu batch membawa kedua berkas (`tt_shop_analytics` + `tt_shop_analytics_tokopedia`), persis seperti di live.
+    const batchId = await insertBatch(clientId, cpId, 'tiktok');
+
+    await sql`
+      insert into pdt_fact_shop_daily (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi, gmv, pesanan, pesanan_dibatalkan)
+      values (${cpId}, '2026-08-05', 'net', 'tiktok', ${batchId}, 1, '500000.00', 5, 1),
+             (${cpId}, '2026-08-06', 'net', 'tiktok', ${batchId}, 1, '300000.00', 3, 0),
+             (${cpId}, '2026-08-05', 'net', 'tokopedia', ${batchId}, 1, '9000000.00', 90, 45)`;
+
+    const hasil = await bacaFaktaShopDaily(sql, cpId, PERIODE, 'net');
+    expect(hasil).not.toBeNull();
+    expect(hasil!.hari).toBe(2);
+    expect(hasil!.gmv).toBe(800000);
+    expect(hasil!.pesanan).toBe(8);
+    expect(hasil!.sumberBatch).toEqual([{ batchId, parserVersi: 1 }]);
+
+    const batal = await bacaFaktaBatalBulan(sql, cpId, PERIODE, 'net');
+    expect(batal).toEqual({ hari: 2, pesananDibatalkan: 1, penyebut: 8, persen: 12.5 });
   });
 });
 
