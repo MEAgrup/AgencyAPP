@@ -1166,11 +1166,9 @@ DECLARE
     -- `ad_campaign_assets_select` TETAP di sini: daftar itu tidak membaca tabelnya.
     'ad_campaign_assets_select','campaigns_select',
     -- `client_platforms_select` DIKELUARKAN dari daftar ini 2026-10-01
-    -- (migrasi `20261215010000`, PDT-ADS-BANTU-AM): ia sekarang punya lengan
-    -- `jwt_division() = 'Ads' AND private.jwt_client_has_ads_brief(client_id)`
-    -- — predikat yang sama dengan arm Ads `clients_select` (§45), supaya tim
-    -- Ads yang membantu AM di halaman PDT melihat toko klien yang memang
-    -- sudah terlihat olehnya. Diuji di §45 di bawah.
+    -- (migrasi `20261215010000`, PDT-ADS-BANTU-AM). Sejak `20261218010000`
+    -- (PDT-ADS-SEMUA-KLIEN) ia cermin penuh `clients_select` — arm lead
+    -- Account/lead Sales/Finance/Ads — dan invariannya diuji di §45.
     'client_report_insight_sel_portal',
     'client_report_publikasi_sel_portal','client_reports_sel_portal',
     -- `client_sales_allocations_select` DIKELUARKAN dari daftar ini 2026-09-10
@@ -1435,33 +1433,29 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 45. SCR-UI-1 — arm Ads di `clients_select` (migrasi 20260913010000).
+-- 45. Arm Ads di `clients_select` + cermin `client_platforms_select`.
 --
---     Keputusan pemilik 2026-09-06, dua jawaban yang bersama-sama membentuk
---     predikatnya: penanda "layanan Ads" adalah **adanya brief Ads**, dan klien
---     yang layanan Ads-nya sudah selesai **tetap boleh dibaca riwayatnya**.
+--     Riwayat: SCR-UI-1 (migrasi 20260913010000, keputusan pemilik 2026-09-06)
+--     membatasi divisi Ads ke klien yang punya brief Ads. PDT-ADS-SEMUA-KLIEN
+--     (migrasi 20261218010000, keputusan pemilik 2026-10-19) MENCABUT batas
+--     itu: divisi Ads — staff maupun lead — membaca SELURUH klien, sama dengan
+--     Lead Account. Pemicunya klien yang tercatat dua kali (brief Ads di satu
+--     record, toko Shopee aktif di record lain).
 --
---     Dua arah yang harus dijaga sekaligus, dan melewatkan salah satunya
---     membuat arm ini berbahaya atau tak berguna:
---
---       * kurang lebar ⇒ picker klien di /ads/screening & /ads/scanner jadi
---         daftar KOSONG, dan gejalanya terlihat seperti bug UI, bukan RLS;
---       * kelewat lebar ⇒ staff Ads membaca SELURUH klien, yang justru pilihan
---         yang pemilik TOLAK.
---
---     Plus dua batas yang paling mudah bocor: divisi lain tidak ikut kebagian,
---     dan klien yang brief-nya milik divisi LAIN tidak ikut terbawa.
+--     Migrasi yang sama menutup butir 6 feedback: `client_platforms_select`
+--     kehilangan arm lead Account/lead Sales/Finance yang dimiliki
+--     `clients_select`, sehingga Head Account melihat klien tetapi NOL toko.
+--     Invariannya diuji per peran: toko terlihat ⇔ kliennya terlihat.
 -- ---------------------------------------------------------------------------
 RESET ROLE;
 
 -- Empat klien, semuanya dimiliki orang lain (sales_pic/commission/created_by =
--- EMP-RLS-OWNER, bukan aktor Ads) — supaya satu-satunya jalan aktor Ads bisa
--- melihatnya adalah arm baru itu sendiri, bukan arm kepemilikan yang sudah ada.
+-- EMP-RLS-OWNER, bukan aktor uji) — supaya satu-satunya jalan aktor Ads bisa
+-- melihatnya adalah arm divisi, bukan arm kepemilikan.
 INSERT INTO clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline,
                      target_gmv, sales_pic_id, commission_payment_pic_id, created_by)
 VALUES
   ('CLI-RLS-ADS-AKTIF','PIC A', 'Toko Ads Aktif','Jakarta', 'http://x/a', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
-  ('CLI-RLS-ADS-DONE', 'PIC B', 'Toko Ads Done', 'Jakarta', 'http://x/b', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
   ('CLI-RLS-ADS-LAIN', 'PIC C', 'Toko Brief Lain','Jakarta','http://x/c', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
   ('CLI-RLS-ADS-NOL',  'PIC D', 'Toko Tanpa Brief','Jakarta','http://x/d','Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER');
 
@@ -1469,23 +1463,21 @@ INSERT INTO services (id, client_id, master_service_id, master_version_no, name,
                       standard_price, commission_rule, status, created_by)
 VALUES
   ('SVC-RLS-AKTIF', 'CLI-RLS-ADS-AKTIF', 'MS-RLS', 1, 'Jasa Iklan', 0, 'none', '[In Execution]', 'EMP-RLS-OWNER'),
-  -- Layanan yang SUDAH SELESAI. Pembedanya HANYA status; brief Ads-nya identik.
-  -- Klien ini WAJIB tetap terlihat — itu jawaban "history" dari pemilik.
-  ('SVC-RLS-DONE',  'CLI-RLS-ADS-DONE',  'MS-RLS', 1, 'Jasa Iklan', 0, 'none', 'Done', 'EMP-RLS-OWNER'),
-  ('SVC-RLS-LAIN',  'CLI-RLS-ADS-LAIN',  'MS-RLS', 1, 'Jasa Konten',0, 'none', '[In Execution]', 'EMP-RLS-OWNER'),
-  -- Punya layanan, tapi NOL brief sama sekali.
-  ('SVC-RLS-NOL',   'CLI-RLS-ADS-NOL',   'MS-RLS', 1, 'Jasa Iklan', 0, 'none', '[In Execution]', 'EMP-RLS-OWNER');
+  ('SVC-RLS-LAIN',  'CLI-RLS-ADS-LAIN',  'MS-RLS', 1, 'Jasa Konten',0, 'none', '[In Execution]', 'EMP-RLS-OWNER');
 
 INSERT INTO briefs (id, service_id, title, status, assigned_division, created_by)
 VALUES
   ('BRF-RLS-ADS1', 'SVC-RLS-AKTIF', 'brief ads',      '[Draft]', 'Ads',      'EMP-RLS-OWNER'),
-  ('BRF-RLS-ADS2', 'SVC-RLS-DONE',  'brief ads lama', '[Draft]', 'Ads',      'EMP-RLS-OWNER'),
-  -- Brief milik divisi LAIN: klien ini tidak boleh ikut terbawa.
   ('BRF-RLS-CRE',  'SVC-RLS-LAIN',  'brief creative', '[Draft]', 'Creative', 'EMP-RLS-OWNER');
+
+INSERT INTO client_platforms (client_id, platform, active, created_by)
+VALUES ('CLI-RLS-ADS-AKTIF', 'TikTok Shop', true, 'EMP-RLS-OWNER'),
+       ('CLI-RLS-ADS-LAIN',  'TikTok Shop', true, 'EMP-RLS-OWNER'),
+       ('CLI-RLS-ADS-NOL',   'Shopee',      true, 'EMP-RLS-OWNER');
 
 SET LOCAL ROLE authenticated;
 
--- Staff Ads (bukan lead, bukan pemilik satu pun klien di atas).
+-- Staff Ads melihat ketiganya — brief Ads, brief divisi lain, maupun nol brief.
 SELECT set_config('request.jwt.claims',
   '{"app_metadata":{"employee_id":"EMP-RLS-ADS","division":"Ads","level":"staff"}}', true);
 DO $$
@@ -1493,72 +1485,60 @@ DECLARE terlihat text;
 BEGIN
   SELECT string_agg(id, ', ' ORDER BY id) INTO terlihat
     FROM clients WHERE id LIKE 'CLI-RLS-ADS-%';
-  IF terlihat IS DISTINCT FROM 'CLI-RLS-ADS-AKTIF, CLI-RLS-ADS-DONE' THEN
+  IF terlihat IS DISTINCT FROM 'CLI-RLS-ADS-AKTIF, CLI-RLS-ADS-LAIN, CLI-RLS-ADS-NOL' THEN
     RAISE EXCEPTION
-      'SCR-UI-1 clients_select arm Ads: staff Ads harus melihat PERSIS klien yang punya brief Ads (termasuk yang layanannya sudah Done) — terlihat: %', coalesce(terlihat, '(nol)');
+      'PDT-ADS-SEMUA-KLIEN clients_select arm Ads: staff Ads harus melihat SELURUH klien — terlihat: %', coalesce(terlihat, '(nol)');
   END IF;
 END $$;
 
--- Batas 1: divisi lain TIDAK ikut kebagian arm ini.
+-- Divisi lain TIDAK ikut kebagian arm ini, staff maupun lead.
 SELECT set_config('request.jwt.claims',
   '{"app_metadata":{"employee_id":"EMP-RLS-CRE","division":"Creative","level":"staff"}}', true);
 DO $$ BEGIN
   IF (SELECT count(*) FROM clients WHERE id LIKE 'CLI-RLS-ADS-%') <> 0
-  THEN RAISE EXCEPTION 'SCR-UI-1: staff non-Ads tidak boleh ikut melihat klien lewat arm Ads'; END IF;
+  THEN RAISE EXCEPTION 'PDT-ADS-SEMUA-KLIEN: staff non-Ads tidak boleh ikut melihat klien lewat arm Ads'; END IF;
 END $$;
-
--- Batas 2: LEAD divisi lain pun tidak — arm ini digerbang divisi, bukan level.
 SELECT set_config('request.jwt.claims',
   '{"app_metadata":{"employee_id":"EMP-RLS-CRE2","division":"Creative","level":"lead"}}', true);
 DO $$ BEGIN
   IF (SELECT count(*) FROM clients WHERE id LIKE 'CLI-RLS-ADS-%') <> 0
-  THEN RAISE EXCEPTION 'SCR-UI-1: lead non-Ads tidak boleh ikut melihat klien lewat arm Ads'; END IF;
+  THEN RAISE EXCEPTION 'PDT-ADS-SEMUA-KLIEN: lead non-Ads tidak boleh ikut melihat klien lewat arm Ads'; END IF;
 END $$;
 
--- Assert per-alasan, supaya pesan gagalnya menyebut PENYEBABNYA, bukan cuma
--- jumlah yang tidak cocok.
-SELECT set_config('request.jwt.claims',
-  '{"app_metadata":{"employee_id":"EMP-RLS-ADS","division":"Ads","level":"staff"}}', true);
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-LAIN')
-  THEN RAISE EXCEPTION 'SCR-UI-1: klien yang brief-nya milik divisi LAIN tidak boleh terlihat'; END IF;
-  IF EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-NOL')
-  THEN RAISE EXCEPTION 'SCR-UI-1: klien tanpa brief Ads sama sekali tidak boleh terlihat'; END IF;
-  -- Arah sebaliknya, dan ini yang paling mudah hilang kalau seseorang
-  -- "membersihkan" predikatnya dengan menambah filter status:
-  IF NOT EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-DONE')
-  THEN RAISE EXCEPTION 'SCR-UI-1: klien yang layanan Ads-nya sudah Done HARUS tetap terlihat (keputusan pemilik 2026-09-06: riwayat tetap terbaca)'; END IF;
-END $$;
-
--- PDT-ADS-BANTU-AM (migrasi 20261215010000): toko (`client_platforms`) klien
--- yang sama ikut terlihat oleh divisi Ads — dan HANYA itu. Picker toko di
--- halaman PDT membaca tabel ini di bawah RLS; tanpa arm ini staff Ads melihat
--- klien tapi daftar tokonya kosong.
-RESET ROLE;
-INSERT INTO client_platforms (client_id, platform, active, created_by)
-VALUES ('CLI-RLS-ADS-AKTIF', 'TikTok Shop', true, 'EMP-RLS-OWNER'),
-       ('CLI-RLS-ADS-LAIN',  'TikTok Shop', true, 'EMP-RLS-OWNER'),
-       ('CLI-RLS-ADS-NOL',   'Shopee',      true, 'EMP-RLS-OWNER');
-SET LOCAL ROLE authenticated;
-
-SELECT set_config('request.jwt.claims',
-  '{"app_metadata":{"employee_id":"EMP-RLS-ADS","division":"Ads","level":"staff"}}', true);
+-- Cermin: untuk setiap peran, klien yang tokonya terlihat = klien yang terlihat.
 DO $$
-DECLARE terlihat text;
+DECLARE
+  klaim text;
+  k text;
+  t text;
 BEGIN
-  SELECT string_agg(client_id, ', ' ORDER BY client_id) INTO terlihat
-    FROM client_platforms WHERE client_id LIKE 'CLI-RLS-ADS-%';
-  IF terlihat IS DISTINCT FROM 'CLI-RLS-ADS-AKTIF' THEN
-    RAISE EXCEPTION
-      'PDT-ADS-BANTU-AM client_platforms_select arm Ads: staff Ads harus melihat PERSIS toko klien ber-brief Ads — terlihat: %', coalesce(terlihat, '(nol)');
-  END IF;
+  FOREACH klaim IN ARRAY ARRAY[
+    '{"app_metadata":{"employee_id":"EMP-RLS-ADS","division":"Ads","level":"staff"}}',
+    '{"app_metadata":{"employee_id":"EMP-RLS-ACCL","division":"Account","level":"lead"}}',
+    '{"app_metadata":{"employee_id":"EMP-RLS-SLSL","division":"Sales","level":"lead"}}',
+    '{"app_metadata":{"employee_id":"EMP-RLS-FIN","division":"Finance","level":"staff"}}',
+    '{"app_metadata":{"employee_id":"EMP-RLS-OWNER","division":"Account","level":"staff"}}',
+    '{"app_metadata":{"employee_id":"EMP-RLS-CRE","division":"Creative","level":"staff"}}',
+    '{"app_metadata":{"employee_id":"EMP-RLS-ACC","division":"Account","level":"staff"}}'
+  ] LOOP
+    PERFORM set_config('request.jwt.claims', klaim, true);
+    SELECT string_agg(id, ', ' ORDER BY id) INTO k FROM clients WHERE id LIKE 'CLI-RLS-ADS-%';
+    SELECT string_agg(DISTINCT client_id, ', ' ORDER BY client_id) INTO t
+      FROM client_platforms WHERE client_id LIKE 'CLI-RLS-ADS-%';
+    IF k IS DISTINCT FROM t THEN
+      RAISE EXCEPTION
+        'PDT-ADS-SEMUA-KLIEN: client_platforms_select harus cermin clients_select — klaim %: klien [%] vs toko [%]',
+        klaim, coalesce(k, '(nol)'), coalesce(t, '(nol)');
+    END IF;
+  END LOOP;
 END $$;
 
+-- Butir 6 secara eksplisit: Head Account BENAR-BENAR melihat toko.
 SELECT set_config('request.jwt.claims',
-  '{"app_metadata":{"employee_id":"EMP-RLS-CRE","division":"Creative","level":"staff"}}', true);
+  '{"app_metadata":{"employee_id":"EMP-RLS-ACCL","division":"Account","level":"lead"}}', true);
 DO $$ BEGIN
-  IF (SELECT count(*) FROM client_platforms WHERE client_id LIKE 'CLI-RLS-ADS-%') <> 0
-  THEN RAISE EXCEPTION 'PDT-ADS-BANTU-AM: staff non-Ads tidak boleh ikut melihat toko lewat arm Ads'; END IF;
+  IF (SELECT count(DISTINCT client_id) FROM client_platforms WHERE client_id LIKE 'CLI-RLS-ADS-%') <> 3
+  THEN RAISE EXCEPTION 'PDT-ADS-SEMUA-KLIEN: Head Account harus melihat toko seluruh klien (butir 6 — picker toko PDT terkunci)'; END IF;
 END $$;
 
 -- ---------------------------------------------------------------------------

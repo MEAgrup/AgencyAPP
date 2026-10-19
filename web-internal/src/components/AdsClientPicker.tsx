@@ -12,7 +12,8 @@ import { opsiPicker, type AdsClientRow } from '@/lib/ads-client-picker';
  * klien: gerbang bacanya berbasis kepemilikan Account, jadi daftar apa pun akan
  * kosong dan yang tersisa hanyalah mengetik ID yang harus dicari di halaman
  * lain. Keputusan pemilik + migrasi `20260913010000` membuka daftarnya —
- * dibatasi ke klien yang punya BRIEF ADS.
+ * dibatasi ke klien yang punya BRIEF ADS; sejak `20261218010000`
+ * (PDT-ADS-SEMUA-KLIEN, 2026-10-19) divisi Ads melihat SELURUH klien.
  *
  * SCOPE-nya BUKAN urusan komponen ini. Ia memanggil `GET /clients` apa adanya;
  * baris yang balik sudah disaring RLS sesuai peran pembaca. Menyaring lagi di
@@ -81,7 +82,7 @@ export default function AdsClientPicker({ value, onChange, label = 'Klien' }: Pr
       )}
       {!err && !loading && clients.length === 0 && (
         <span className="muted" style={{ fontSize: 12 }}>
-          Belum ada klien dengan brief Ads untuk akun ini.
+          Belum ada klien yang bisa dilihat akun ini.
         </span>
       )}
     </div>

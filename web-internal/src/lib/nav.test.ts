@@ -263,7 +263,7 @@ describe('visibleNav — Account', () => {
     expect(hrefs(role('Account', 'staff'))).toContain('/account/pdt/laporan');
     expect(hrefs(role('Account', 'lead'))).toContain('/account/pdt/laporan');
     // Ads membantu AM menyunting laporan — gerbang baris sesungguhnya
-    // (`canKirimLaporan`: klien ber-brief Ads) ada di server.
+    // (`canKirimLaporan`: divisi Ads, seluruh klien) ada di server.
     expect(hrefs(role('Ads', 'staff'))).toContain('/account/pdt/laporan');
     expect(hrefs(role('Ads', 'lead'))).toContain('/account/pdt/laporan');
     for (const division of ['Sales', 'Marketing', 'Finance', 'Creative', 'KOL', 'Live Stream']) {
