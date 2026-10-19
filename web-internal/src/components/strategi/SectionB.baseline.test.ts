@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { baselineDraftToBody, monthsWithData, type BaselineMonthDraft } from './SectionB';
+import {
+  baselineDraftToBody,
+  monthsWithData,
+  provenanceInherited,
+  type BaselineMonthDraft,
+} from './SectionB';
 
 // Regression for the Section B "isian lengkap tapi tak bisa disimpan" bug: the
 // form built baseline rows with a 0-based month_index while the DB CHECK is
@@ -87,5 +92,42 @@ describe('monthsWithData (a month with ANY figure typed is sent, not just fully-
       roas: 0,
       acos: 0,
     });
+  });
+});
+
+// Regression for feedback B4 (AM Lela, Linda Hijab CLI-202609-0038 /
+// SVC-202609-0048): B-0.6 locked BOTH provenance fields as soon as a Riset Awal
+// suggestion existed. A PDT-sourced baseline carries `sumber_data: null` (no
+// `riset_awal_sumber_berkas`), so "Sumber data" rendered blank AND read-only and
+// the submit gate B-0.6/<channel> (MSG_BASELINE_WINDOW_REQUIRED) could never be
+// met. The lock is now per field: only a field the suggestion actually fills.
+describe('provenanceInherited (B-0.6 lock is per field, not per suggestion)', () => {
+  it('PDT suggestion with null sumber_data: Sumber data editable, filled tanggal stays locked', () => {
+    const lock = provenanceInherited({ sumber_data: null, tanggal_ambil_data: '2026-10-02' });
+    expect(lock.sumber).toBe(false);
+    expect(lock.tanggal).toBe(true);
+  });
+
+  it('blank / whitespace values do not lock either', () => {
+    expect(provenanceInherited({ sumber_data: '  ', tanggal_ambil_data: '' })).toEqual({
+      sumber: false,
+      tanggal: false,
+    });
+  });
+
+  it('a filled sumber_data with a null tanggal locks only Sumber data', () => {
+    expect(
+      provenanceInherited({ sumber_data: 'export_shopee.xlsx', tanggal_ambil_data: null }),
+    ).toEqual({ sumber: true, tanggal: false });
+  });
+
+  it('both filled → both inherited read-only (RAB-19 unchanged)', () => {
+    expect(
+      provenanceInherited({ sumber_data: 'export_shopee.xlsx', tanggal_ambil_data: '2026-10-02' }),
+    ).toEqual({ sumber: true, tanggal: true });
+  });
+
+  it('no suggestion → nothing locked', () => {
+    expect(provenanceInherited(null)).toEqual({ sumber: false, tanggal: false });
   });
 });
