@@ -297,7 +297,7 @@ function SkuScreenerWorkspace() {
           {clientId && <span className="badge badge-blue">{clientId}</span>}
         </div>
         <span className="muted" style={{ fontSize: 12 }}>
-          Daftar berisi klien yang punya brief Ads. Tautan
+          Daftar berisi seluruh klien. Tautan
           <code> /ads/screening?client=…</code> memilihkannya otomatis.
         </span>
       </section>

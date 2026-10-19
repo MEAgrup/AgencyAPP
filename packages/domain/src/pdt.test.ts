@@ -93,8 +93,8 @@ const directorDiSales = () => ({ employeeId: 'ZPDT-DS', role: permission.makeRol
 const adsStaff = () => ({ employeeId: 'ZPDT-ADS', role: permission.makeRole({ division: 'Ads', level: 'staff' }) });
 const adsLead = () => ({ employeeId: 'ZPDT-ADSL', role: permission.makeRole({ division: 'Ads', level: 'lead' }) });
 const creative = () => ({ employeeId: 'ZPDT-CRE', role: permission.makeRole({ division: 'Creative', level: 'staff' }) });
-/** Lingkup klien gerbang PDT; `adaBriefAds` default false = klien tanpa brief Ads. */
-const lk = (ownerAm: string | null, adaBriefAds = false) => ({ ownerAm, adaBriefAds });
+/** Lingkup klien gerbang PDT. */
+const lk = (ownerAm: string | null) => ({ ownerAm });
 
 describe('canUploadBatch — AM pemilik klien, atau lead/Director Account', () => {
   it('AM pemilik klien boleh mengunggah batch kliennya', () => {
@@ -125,25 +125,20 @@ describe('canUploadBatch — AM pemilik klien, atau lead/Director Account', () =
   });
 });
 
-describe('PDT-ADS-BANTU-AM — divisi Ads membantu AM untuk klien ber-brief Ads', () => {
-  it('staff DAN lead Ads boleh unggah + kirim/sunting laporan klien yang punya brief Ads', () => {
+describe('PDT-ADS-BANTU-AM + PDT-ADS-SEMUA-KLIEN — divisi Ads membantu AM untuk seluruh klien', () => {
+  it('staff DAN lead Ads boleh unggah + kirim/sunting laporan klien mana pun (2026-10-19: tanpa syarat brief Ads)', () => {
     for (const a of [adsStaff(), adsLead()]) {
-      expect(canUploadBatch(a, lk(OWNER, true))).toBe(true);
-      expect(canKirimLaporan(a, lk(OWNER, true))).toBe(true);
+      expect(canUploadBatch(a, lk(OWNER))).toBe(true);
+      expect(canKirimLaporan(a, lk(OWNER))).toBe(true);
+      // Klien tanpa AM pun — sama dengan lead Account.
+      expect(canUploadBatch(a, lk(null))).toBe(true);
     }
   });
 
-  it('Ads TIDAK boleh untuk klien tanpa brief Ads — batasnya himpunan klien, bukan jabatan', () => {
-    for (const a of [adsStaff(), adsLead()]) {
-      expect(canUploadBatch(a, lk(OWNER, false))).toBe(false);
-      expect(canKirimLaporan(a, lk(OWNER, false))).toBe(false);
-    }
-  });
-
-  it('klien ber-brief Ads TIDAK membuka akses divisi lain (Creative, Sales, OD murni)', () => {
+  it('pelebaran Ads TIDAK membuka akses divisi lain (Creative, Sales, OD murni)', () => {
     for (const a of [creative(), sales(), od()]) {
-      expect(canUploadBatch(a, lk(OWNER, true))).toBe(false);
-      expect(canKirimLaporan(a, lk(OWNER, true))).toBe(false);
+      expect(canUploadBatch(a, lk(OWNER))).toBe(false);
+      expect(canKirimLaporan(a, lk(OWNER))).toBe(false);
     }
   });
 
@@ -7893,22 +7888,26 @@ describeDb('PDT-ADS-BANTU-AM — divisi Ads membantu AM (unggah + sunting, bukan
     await expect(kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01')).resolves.toBeTruthy();
   });
 
-  it('klien TANPA brief Ads (nol brief, atau brief divisi lain): Ads ditolak di semua verba', async () => {
+  it('PDT-ADS-SEMUA-KLIEN: klien TANPA brief Ads (nol brief, atau brief divisi lain) pun boleh dibantu Ads', async () => {
+    // Keputusan pemilik 2026-10-19 — kasus nyata: Linda Hijab tercatat dua kali,
+    // brief Ads di satu record dan toko Shopee aktif di record lain.
     for (const divisi of [null, 'Creative'] as const) {
       const { cpId } = await fixture(divisi);
-      await expect(siapkanUploadBatch(sql, adsActor(), cpId)).rejects.toBeInstanceOf(ForbiddenError);
-      await expect(bacaLaporanPdt(sql, adsActor(), cpId, '2026-07-01')).rejects.toBeInstanceOf(ForbiddenError);
-      await expect(kirimLaporanPdt(sql, adsActor(), cpId, '2026-07-01')).rejects.toBeInstanceOf(ForbiddenError);
-      const { id: kirimanId } = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
-      await expect(bacaInsightKiriman(sql, adsActor(), kirimanId)).rejects.toThrow(MSG_LAPORAN_FORBIDDEN);
-      await expect(simpanInsightKiriman(sql, adsActor(), kirimanId, DRAFT)).rejects.toThrow(MSG_LAPORAN_FORBIDDEN);
+      await expect(siapkanUploadBatch(sql, adsActor(), cpId)).resolves.toMatchObject({ clientPlatformId: cpId });
+      await expect(bacaLaporanPdt(sql, adsActor(), cpId, '2026-07-01')).resolves.toBeTruthy();
+      const { id: kirimanId } = await kirimLaporanPdt(sql, adsActor(), cpId, '2026-07-01');
+      await expect(simpanInsightKiriman(sql, adsActor(), kirimanId, DRAFT)).resolves.toMatchObject({ revisi: 1 });
+      // Terbitkan tetap di AM/Lead Account.
+      await expect(terbitkanKiriman(sql, adsActor(), kirimanId)).rejects.toThrow(MSG_LAPORAN_FORBIDDEN);
     }
   });
 
-  it('brief Ads TIDAK membuka akses divisi lain (Creative)', async () => {
-    const { cpId } = await fixture('Ads');
-    await expect(siapkanUploadBatch(sql, creativeActor(), cpId)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(kirimLaporanPdt(sql, creativeActor(), cpId, '2026-07-01')).rejects.toBeInstanceOf(ForbiddenError);
+  it('pelebaran Ads TIDAK membuka akses divisi lain (Creative), ber-brief Ads atau tidak', async () => {
+    for (const divisi of ['Ads', null] as const) {
+      const { cpId } = await fixture(divisi);
+      await expect(siapkanUploadBatch(sql, creativeActor(), cpId)).rejects.toBeInstanceOf(ForbiddenError);
+      await expect(kirimLaporanPdt(sql, creativeActor(), cpId, '2026-07-01')).rejects.toBeInstanceOf(ForbiddenError);
+    }
   });
 });
 
