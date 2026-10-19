@@ -1,24 +1,23 @@
 /**
- * SCR-UI-1 — divisi Ads me-LIST klien, dibatasi ke klien yang punya BRIEF ADS.
+ * Lingkup baca klien divisi Ads + cermin `client_platforms_select`.
  *
- * Keputusan pemilik 2026-09-06, dua jawaban: penanda "layanan Ads" adalah
- * **adanya brief Ads**, dan klien yang layanan Ads-nya sudah selesai **tetap
- * boleh dibaca riwayatnya** — jadi nol filter status. Yang diuji di sini adalah **himpunan baris yang
- * benar-benar dikembalikan RLS** per peran, bukan sebuah predikat TS: untuk arm
- * ini memang TIDAK ADA cermin TS, dan itu disengaja. Jalur bacanya
- * `GET /api/v1/clients` → `readAsActor` → `client.listClients`, yang scope-nya
- * murni RLS; menuliskan ulang aturannya di TS akan menciptakan sumber kebenaran
- * KEDUA untuk aturan yang sudah ditegakkan DB — persis yang `CLAUDE.md` larang
- * ("Penegakan aturan ada di DB, bukan cuma di TS").
+ * Riwayat: SCR-UI-1 (keputusan pemilik 2026-09-06) membatasi Ads ke klien yang
+ * punya BRIEF ADS. PDT-ADS-SEMUA-KLIEN (keputusan pemilik 2026-10-19, migrasi
+ * 20261218010000) MENCABUT batas itu: divisi Ads — staff maupun lead — melihat
+ * SELURUH klien, sama dengan Lead Account. Pemicunya klien yang tercatat dua
+ * kali (brief Ads di satu record, toko Shopee aktif di record lain), sehingga
+ * tim Ads tidak bisa memilih toko yang benar di halaman PDT.
  *
- * Jadi kontraknya ditulis apa adanya: **peran X melihat PERSIS klien-klien ini**.
- * Itu yang bisa salah, dan salahnya mahal ke dua arah — daftar kosong yang
- * terlihat seperti bug UI, atau staff Ads membaca seluruh klien.
+ * Yang diuji di sini adalah **himpunan baris yang benar-benar dikembalikan
+ * RLS** per peran, bukan sebuah predikat TS. Jalur bacanya `GET /api/v1/clients`
+ * → `readAsActor` → `client.listClients`, yang scope-nya murni RLS.
  *
- * Berpasangan dengan `supabase/tests/rls_checks.sql` §45, yang menguji hal yang
- * sama di lapisan SQL. Dua-duanya ada dengan alasan yang sama seperti
- * `interview.rls.test.ts`: satu berjalan di CI DB, satu di suite domain, dan
- * keduanya harus setuju.
+ * Plus satu invarian yang lahir dari butir 6 feedback yang sama: **toko sebuah
+ * klien terlihat ⇔ kliennya terlihat**. Sebelum migrasi itu, Head Account
+ * melihat klien (arm lead Account di `clients_select`) tetapi NOL toko (arm itu
+ * hilang dari `client_platforms_select`), dan picker toko PDT terkunci.
+ *
+ * Berpasangan dengan `supabase/tests/rls_checks.sql` §45.
  *
  * Dilewati kalau `DATABASE_URL` tidak diset. Baris di-namespace `ZAD-`/`CLI-ZAD-`
  * dan di-COMMIT (RLS berjalan di transaksinya sendiri), dibersihkan di afterAll.
@@ -38,8 +37,6 @@ const CLI_DONE = 'CLI-ZAD-DONE';   // brief Ads, layanan sudah Done — WAJIB te
 const CLI_LAIN = 'CLI-ZAD-LAIN';   // brief-nya milik divisi lain
 const CLI_NOL = 'CLI-ZAD-NOL';     // punya layanan, NOL brief sama sekali
 const SEMUA = [CLI_AKTIF, CLI_DONE, CLI_LAIN, CLI_NOL];
-/** Yang boleh dilihat divisi Ads — dan hanya ini. */
-const TERLIHAT_ADS = [CLI_AKTIF, CLI_DONE];
 
 const claims = (o: { employeeId: string; division?: string; level?: string; od?: boolean; director?: boolean }): string =>
   JSON.stringify({
@@ -60,6 +57,15 @@ async function terlihat(claim: Claim): Promise<string[]> {
     tx<{ id: string }[]>`select id from clients where id like 'CLI-ZAD-%' order by id`,
   );
   return rows.map((r) => r.id);
+}
+
+/** Klien `ZAD-` yang TOKO-nya terlihat oleh sebuah claim set, terurut. */
+async function tokoTerlihat(claim: Claim): Promise<string[]> {
+  const rows = await withClaims(sql, claims(claim), (tx) =>
+    tx<{ client_id: string }[]>`
+      select distinct client_id from client_platforms where client_id like 'CLI-ZAD-%' order by client_id`,
+  );
+  return rows.map((r) => r.client_id);
 }
 
 beforeAll(async () => {
@@ -98,56 +104,53 @@ beforeAll(async () => {
   // Brief milik divisi LAIN — klien ini tidak boleh ikut terbawa.
   await brief('BRF-ZAD-CRE', 'SVC-ZAD-LAIN', 'Creative');
   // CLI_NOL sengaja nol brief.
+
+  // Satu toko per klien, dibuat OWNER — supaya arm `created_by` tidak pernah
+  // menjadi jalan aktor uji melihatnya.
+  for (const id of SEMUA) {
+    await sql`
+      insert into client_platforms (client_id, platform, active, created_by)
+      select ${id}, 'Shopee', true, ${OWNER}
+       where not exists (select 1 from client_platforms where client_id = ${id})`;
+  }
 });
 
 afterAll(async () => {
   if (!sql) return;
+  await sql`delete from client_platforms where client_id like 'CLI-ZAD-%'`;
   await sql`delete from briefs where id like 'BRF-ZAD-%'`;
   await sql`delete from services where id like 'SVC-ZAD-%'`;
   await sql`delete from clients where id like 'CLI-ZAD-%'`;
   await sql.end();
 });
 
-dDb('SCR-UI-1 — arm Ads di clients_select', () => {
-  it('staff Ads melihat PERSIS klien yang punya brief Ads', async () => {
-    expect(await terlihat({ employeeId: 'EMP-ZAD-ADS', division: 'Ads', level: 'staff' }))
-      .toEqual(TERLIHAT_ADS);
+const ADS_STAFF: Claim = { employeeId: 'EMP-ZAD-ADS', division: 'Ads', level: 'staff' };
+const ADS_LEAD: Claim = { employeeId: 'EMP-ZAD-ADSLEAD', division: 'Ads', level: 'lead' };
+
+dDb('PDT-ADS-SEMUA-KLIEN — arm Ads di clients_select', () => {
+  it('staff Ads melihat SELURUH klien — termasuk yang tanpa brief Ads atau brief-nya milik divisi lain', async () => {
+    expect(await terlihat(ADS_STAFF)).toEqual(SEMUA);
   });
 
   it('lead Ads melihat himpunan yang SAMA — arm ini digerbang divisi, bukan level', async () => {
-    // Sengaja tidak memakai `jwt_is_lead()`: pembatasnya himpunan klien, bukan
-    // jabatan. Staff Ads yang menjalankan scan butuh daftar ini, bukan cuma Head.
-    expect(await terlihat({ employeeId: 'EMP-ZAD-ADSLEAD', division: 'Ads', level: 'lead' }))
-      .toEqual(TERLIHAT_ADS);
+    expect(await terlihat(ADS_LEAD)).toEqual(SEMUA);
   });
 
-  it('klien yang brief-nya milik divisi LAIN tidak terlihat', async () => {
-    const v = await terlihat({ employeeId: 'EMP-ZAD-ADS', division: 'Ads', level: 'staff' });
-    expect(v).not.toContain(CLI_LAIN);
-  });
-
-  it('klien tanpa brief sama sekali tidak terlihat', async () => {
-    const v = await terlihat({ employeeId: 'EMP-ZAD-ADS', division: 'Ads', level: 'staff' });
-    expect(v).not.toContain(CLI_NOL);
-  });
-
-  it('klien yang layanan Ads-nya sudah Done TETAP terlihat — riwayat harus terbaca', async () => {
-    // Keputusan pemilik 2026-09-06. Ini yang paling mudah hilang tanpa sadar:
-    // menambahkan filter status ke predikat terasa seperti "membersihkan", dan
-    // efeknya adalah riwayat Ads lenyap dari picker tanpa satu pun galat.
-    const v = await terlihat({ employeeId: 'EMP-ZAD-ADS', division: 'Ads', level: 'staff' });
-    expect(v).toContain(CLI_DONE);
+  it('daftar klien Ads SAMA dengan daftar Head Account (butir 1 feedback 2026-10-19)', async () => {
+    const headAccount = await terlihat({ employeeId: 'EMP-ZAD-ACCLEAD', division: 'Account', level: 'lead' });
+    expect(await terlihat(ADS_STAFF)).toEqual(headAccount);
   });
 
   it.each([
     ['staff Creative', { employeeId: 'EMP-ZAD-CRE', division: 'Creative', level: 'staff' }],
     ['lead Creative', { employeeId: 'EMP-ZAD-CRE2', division: 'Creative', level: 'lead' }],
     ['staff KOL', { employeeId: 'EMP-ZAD-KOL', division: 'KOL', level: 'staff' }],
+    ['staff Account bukan pemilik', { employeeId: 'EMP-ZAD-ACC', division: 'Account', level: 'staff' }],
   ] as [string, Claim][])('%s tidak ikut kebagian arm Ads', async (_n, claim) => {
     expect(await terlihat(claim)).toEqual([]);
   });
 
-  it('OD dan Director tetap membaca keempatnya — arm baru tidak mempersempit siapa pun', async () => {
+  it('OD dan Director tetap membaca keempatnya', async () => {
     expect(await terlihat({ employeeId: 'EMP-ZAD-OD', od: true })).toEqual(SEMUA);
     expect(await terlihat({ employeeId: 'EMP-ZAD-DIR', director: true })).toEqual(SEMUA);
   });
@@ -161,5 +164,29 @@ dDb('SCR-UI-1 — arm Ads di clients_select', () => {
     // adalah mode gagal yang nyata — dan senyap, karena tes Ads tetap hijau.
     const v = await terlihat({ employeeId: OWNER, division: 'Account', level: 'staff' });
     expect(v).toEqual(SEMUA);
+  });
+});
+
+dDb('PDT-ADS-SEMUA-KLIEN — client_platforms_select cermin clients_select', () => {
+  // Butir 6 feedback 2026-10-19: Head Account melihat klien tapi NOL toko, jadi
+  // picker toko PDT terkunci. Invariannya diuji per peran, bukan per arm, supaya
+  // arm yang kelak ditambah ke salah satu policy saja langsung tertangkap.
+  it.each([
+    ['Head Account', { employeeId: 'EMP-ZAD-ACCLEAD', division: 'Account', level: 'lead' }],
+    ['Head Sales', { employeeId: 'EMP-ZAD-SLSLEAD', division: 'Sales', level: 'lead' }],
+    ['staff Finance', { employeeId: 'EMP-ZAD-FIN', division: 'Finance', level: 'staff' }],
+    ['staff Ads', ADS_STAFF],
+    ['lead Ads', ADS_LEAD],
+    ['AM pemilik', { employeeId: OWNER, division: 'Account', level: 'staff' }],
+    ['OD', { employeeId: 'EMP-ZAD-OD', od: true }],
+    ['staff Creative', { employeeId: 'EMP-ZAD-CRE', division: 'Creative', level: 'staff' }],
+    ['staff Account bukan pemilik', { employeeId: 'EMP-ZAD-ACC', division: 'Account', level: 'staff' }],
+    ['klaim kosong', { employeeId: '' }],
+  ] as [string, Claim][])('%s: toko terlihat ⇔ kliennya terlihat', async (_n, claim) => {
+    expect(await tokoTerlihat(claim)).toEqual(await terlihat(claim));
+  });
+
+  it('Head Account benar-benar melihat toko (bukan cuma setara-kosong)', async () => {
+    expect(await tokoTerlihat({ employeeId: 'EMP-ZAD-ACCLEAD', division: 'Account', level: 'lead' })).toEqual(SEMUA);
   });
 });

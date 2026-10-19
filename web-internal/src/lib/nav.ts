@@ -226,8 +226,9 @@ const KLIEN: NavNode[] = [
   // (kepala berkas ini: "hiding something reachable = a silent regression").
   // PDT-ADS-BANTU-AM (keputusan pemilik 2026-10-01): divisi Ads ikut melihat
   // dua menu PDT supaya bisa membantu AM mengunggah data dan menyunting
-  // laporan. Gerbang baris server: klien yang punya brief Ads (sama dengan
-  // arm Ads `clients_select`); Terbitkan/Cabut tetap AM/Lead Account.
+  // laporan. Sejak PDT-ADS-SEMUA-KLIEN (2026-10-19) untuk SELURUH klien, sama
+  // dengan Lead Account (arm Ads `clients_select`); Terbitkan/Cabut tetap
+  // AM/Lead Account.
   { href: '/account/pdt/laporan', label: 'Laporan PDT', access: ownedBy(ACCOUNT, ADS) },
   // G1-09 sub-langkah 3 — halaman upload batch PDT (Flow A langkah 2-6).
   // Gerbang baris sesungguhnya (`canUploadBatch`: AM pemilik toko, atau

@@ -19,37 +19,37 @@ import * as ads from './ads';
 import * as pdtVerdict from './pdt-verdict';
 
 /**
- * Lingkup sebuah klien yang dibutuhkan gerbang PDT: AM pemiliknya, dan apakah
- * klien itu punya brief Ads (`private.jwt_client_has_ads_brief` — predikat
- * yang SAMA dengan arm Ads di `clients_select`, SCR-UI-1). Dibaca bersama di
- * `loadClientPlatformUntukPdt`, jadi tidak ada call site yang bisa lupa salah
- * satunya.
+ * Lingkup sebuah klien yang dibutuhkan gerbang PDT: AM pemiliknya. Dibaca di
+ * `loadClientPlatformUntukPdt`, satu-satunya lookup baris toko untuk gerbang.
  */
 export interface PdtLingkupKlien {
   ownerAm: string | null;
-  adaBriefAds: boolean;
 }
 
 /**
  * PDT-ADS-BANTU-AM (keputusan pemilik 2026-10-01): divisi Ads — staff maupun
- * lead — boleh membantu AM mengunggah data toko dan menyunting laporan PDT,
- * DIBATASI ke klien yang punya brief Ads. Batasnya HIMPUNAN KLIEN, bukan level
- * jabatan, sama persis dengan arm Ads di `clients_select` (SCR-UI-1): klien di
- * luar himpunan itu memang tidak muncul di picker klien seorang staff Ads.
+ * lead — boleh membantu AM mengunggah data toko dan menyunting laporan PDT.
+ *
+ * PDT-ADS-SEMUA-KLIEN (keputusan pemilik 2026-10-19): batas "hanya klien yang
+ * punya brief Ads" DICABUT — divisi Ads melihat dan membantu SELURUH klien,
+ * sama dengan Lead Account. Pemicunya klien yang tercatat dua kali (brief Ads
+ * di satu record, toko Shopee aktif di record lain), sehingga Ads tidak bisa
+ * memilih toko yang benar. Cermin arm `jwt_division() = 'Ads'` di
+ * `clients_select`/`client_platforms_select` (migrasi 20261218010000).
  */
-function bantuanAds(actor: Actor, lingkup: PdtLingkupKlien): boolean {
-  return actor.role.division === ads.ADS_DIVISION && lingkup.adaBriefAds;
+function bantuanAds(actor: Actor): boolean {
+  return actor.role.division === ads.ADS_DIVISION;
 }
 
 /**
  * canUploadBatch — siapa yang boleh mengunggah batch PDT untuk sebuah toko
  * klien (Flow A langkah 1-2). AM pemilik klien, lead/Director Account, atau
- * divisi Ads untuk klien yang punya brief Ads (PDT-ADS-BANTU-AM).
+ * divisi Ads (PDT-ADS-BANTU-AM, PDT-ADS-SEMUA-KLIEN).
  */
 export function canUploadBatch(actor: Actor, lingkup: PdtLingkupKlien): boolean {
   if (permission.isLead(actor, ACCOUNT_DIVISION)) return true; // Director membawa lead di mana pun
   if (lingkup.ownerAm !== null && lingkup.ownerAm === actor.employeeId) return true;
-  return bantuanAds(actor, lingkup);
+  return bantuanAds(actor);
 }
 
 /**
@@ -440,11 +440,10 @@ interface ClientPlatformRow {
   shop_id: string | null;
   akun_konten_toko: string[] | null;
   assigned_am_id: string | null;
-  ada_brief_ads: boolean;
 }
 
 function lingkupDari(row: ClientPlatformRow): PdtLingkupKlien {
-  return { ownerAm: row.assigned_am_id, adaBriefAds: row.ada_brief_ads };
+  return { ownerAm: row.assigned_am_id };
 }
 
 /**
@@ -455,8 +454,7 @@ function lingkupDari(row: ClientPlatformRow): PdtLingkupKlien {
  */
 async function loadClientPlatformUntukPdt(sql: Queryable, clientPlatformId: number): Promise<ClientPlatformRow> {
   const rows = await sql<ClientPlatformRow[]>`
-    select cp.id, cp.client_id, cp.platform, cp.shop_id, cp.akun_konten_toko, c.assigned_am_id,
-           private.jwt_client_has_ads_brief(c.id) as ada_brief_ads
+    select cp.id, cp.client_id, cp.platform, cp.shop_id, cp.akun_konten_toko, c.assigned_am_id
       from client_platforms cp
       join clients c on c.id = cp.client_id
      where cp.id = ${clientPlatformId}`;

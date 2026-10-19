@@ -252,7 +252,7 @@ function AdsScannerWorkspace() {
             {clientId && <span className="badge badge-blue">{clientId}</span>}
           </div>
           <span className="muted" style={{ fontSize: 12 }}>
-            Daftar berisi klien yang punya brief Ads. Tombol &ldquo;scan baru&rdquo; di tab
+            Daftar berisi seluruh klien. Tombol &ldquo;scan baru&rdquo; di tab
             Portofolio dan tautan <code>/ads/scanner?client=…</code> memilihkannya otomatis.
           </span>
         </section>
