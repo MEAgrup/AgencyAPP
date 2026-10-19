@@ -3118,7 +3118,7 @@ function validasiPeriodeAwalBulan(periodeAwalBulan: string): void {
  * barisnya. Nol perubahan semantik: baris yang sama menerima nilai yang sama,
  * dan fungsinya tetap idempotent.
  */
-async function tulisKuadranSkuMassal(sql: Sql, hasil: readonly pdt.PdtKuadranSkuHasil[]): Promise<void> {
+async function tulisKuadranSkuMassal(sql: Queryable, hasil: readonly pdt.PdtKuadranSkuHasil[]): Promise<void> {
   if (hasil.length === 0) return;
   await sql`
     update pdt_fact_sku_period f
@@ -3153,7 +3153,7 @@ async function tulisKuadranSkuMassal(sql: Sql, hasil: readonly pdt.PdtKuadranSku
  * + ambang konstanta, jadi memanggilnya dua kali menulis nilai yang sama.
  */
 export async function klasifikasiUlangKuadranSkuShopee(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   periodeAwalBulan: string,
 ): Promise<void> {
@@ -3175,7 +3175,7 @@ export async function klasifikasiUlangKuadranSkuShopee(
  * menerima hasil ini — bukan ditebak angka netral di sini).
  */
 export async function rakitInputSkorTiktok(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   periodeAwalBulan: string,
 ): Promise<pdt.PdtSkorInputTiktok> {
@@ -3328,7 +3328,7 @@ export interface PdtBenchmarkAktifTiktok {
 }
 
 /** Baca versi `pdt_benchmark` TikTok aktif TERTINGGI. Melempar `ValidationError` bila belum ada satu pun (G2-02 belum menyeed). */
-export async function bacaBenchmarkAktifTiktok(sql: Sql): Promise<PdtBenchmarkAktifTiktok> {
+export async function bacaBenchmarkAktifTiktok(sql: Queryable): Promise<PdtBenchmarkAktifTiktok> {
   const rows = await sql<{ versi: number; nilai: pdt.PdtBenchmarkTiktok & pdt.PdtBenchmarkKuadranTiktok }[]>`
     select versi, nilai from pdt_benchmark
      where platform = 'tiktok' and aktif = true
@@ -3356,7 +3356,7 @@ export async function bacaBenchmarkAktifTiktok(sql: Sql): Promise<PdtBenchmarkAk
  * (sama pola `bacaBenchmarkAktifTiktok`, ditangani pemanggil bersama).
  */
 export async function klasifikasiUlangKuadranSkuTiktok(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   periodeAwalBulan: string,
   bench: pdt.PdtBenchmarkKuadranTiktok,
@@ -3388,7 +3388,7 @@ export async function klasifikasiUlangKuadranSkuTiktok(
  * dependensi berurutan, bukan lagi murni-baca paralel.
  */
 export async function hitungSkorTiktok(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   periodeAwalBulan: string,
 ): Promise<{ hasil: pdt.PdtSkorHasilTiktok; benchmarkVersi: number; bench: pdt.PdtBenchmarkTiktok }> {
@@ -3599,7 +3599,7 @@ export async function tambahVersiBenchmark(sql: Sql, actor: Actor, input: PdtBen
 
 /** Dimensi pesanan-dibuat Shopee (CR + cancel rate) atas rentang tanggal mana pun — dipakai skor bulanan dan laporan mingguan. */
 async function bacaPesananDibuatShopee(
-  sql: Sql, clientPlatformId: number, rentang: PdtRentangTanggal,
+  sql: Queryable, clientPlatformId: number, rentang: PdtRentangTanggal,
 ): Promise<pdt.PdtSkorInputPesananDibuatShopee | null> {
   const [dibuatRow] = await sql<{ n: number; pesanan: string; pengunjung: string; pesanan_dibatalkan: number | null; n_batal: number }[]>`
     select count(*)::int as n,
@@ -3631,7 +3631,7 @@ async function bacaPesananDibuatShopee(
  * sama sekali ⇒ `null` (Rule 12 ditegakkan di `computeSkorShopee`).
  */
 export async function rakitInputSkorShopee(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   periodeAwalBulan: string,
 ): Promise<pdt.PdtSkorInputShopee> {
@@ -3722,7 +3722,7 @@ export async function rakitInputSkorShopee(
  * Conversion & Retention, satu sumber kebenaran.
  */
 export async function hitungSkorShopee(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   periodeAwalBulan: string,
 ): Promise<{ hasil: pdt.PdtSkorHasilShopee; input: pdt.PdtSkorInputShopee }> {
@@ -3773,7 +3773,7 @@ function rentangBulan(periodeAwalBulan: string): PdtRentangTanggal {
   return { mulai: periodeAwalBulan, selesai: tz.addDaysToDate(tz.addMonthsToDate(periodeAwalBulan, 1), -1) };
 }
 
-async function bacaKpiShopDaily(sql: Sql, clientPlatformId: number, rentang: PdtRentangTanggal, basis: string): Promise<pdt.PdtLaporanKpiInput | null> {
+async function bacaKpiShopDaily(sql: Queryable, clientPlatformId: number, rentang: PdtRentangTanggal, basis: string): Promise<pdt.PdtLaporanKpiInput | null> {
   // `produk_diklik` dihitung TERPISAH (`count(...)`) dari `sum(...)`-nya: kolom
   // ini opsional di sumbernya, dan `sum()` atas nol baris non-null tetap 0 —
   // 0 berarti "nol barang dibuka" sementara yang benar "tidak diketahui"
@@ -3795,7 +3795,7 @@ async function bacaKpiShopDaily(sql: Sql, clientPlatformId: number, rentang: Pdt
   };
 }
 
-async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, rentang: PdtRentangTanggal): Promise<pdt.PdtLaporanKpiInput | null> {
+async function bacaKpiTiktokNet(sql: Queryable, clientPlatformId: number, rentang: PdtRentangTanggal): Promise<pdt.PdtLaporanKpiInput | null> {
   const [row] = await sql<{ n: number; gmv: string; refund: string; pesanan: string; pengunjung: string; diklik_n: number; diklik: string }[]>`
     select count(*)::int as n,
            coalesce(sum(gmv), 0) as gmv,
@@ -3836,7 +3836,7 @@ async function bacaKpiTiktokNet(sql: Sql, clientPlatformId: number, rentang: Pdt
  * lihat docblock bagian itu (`@cdps/core` `pdt/laporan.ts`) untuk alasannya.
  */
 async function bacaHarian(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   rentang: PdtRentangTanggal,
   basis: string,
@@ -3878,7 +3878,7 @@ async function bacaHarian(
  * (tidak diketahui, BUKAN nol GMV) — `bangunKanalTiktok` yang menegakkan
  * null-aware `kartu`.
  */
-async function bacaKanalTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKanalInputTiktok | null> {
+async function bacaKanalTiktok(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKanalInputTiktok | null> {
   const [shopRow] = await sql<{ n: number; gmv: string }[]>`
     select count(*)::int as n, coalesce(sum(gmv), 0) as gmv
       from pdt_fact_shop_daily
@@ -3920,7 +3920,7 @@ async function bacaKanalTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
  * search/live), `affiliate` dari `pdt_fact_creator_period` — `null` = nol
  * baris sumber terkait (tidak diketahui, BUKAN nol).
  */
-async function bacaKanalShopee(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKanalInputShopee | null> {
+async function bacaKanalShopee(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKanalInputShopee | null> {
   const [shopRow] = await sql<{ n: number; gmv: string }[]>`
     select count(*)::int as n, coalesce(sum(gmv), 0) as gmv
       from pdt_fact_shop_daily
@@ -3960,7 +3960,7 @@ async function bacaKanalShopee(sql: Sql, clientPlatformId: number, periodeAwalBu
  * lihat docblock core), `count(durasi_detik) = 0` menegakkan itu jadi
  * `jam: null`, BUKAN 0 jam yang mengarang durasi.
  */
-async function bacaLive(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanLiveInput | null> {
+async function bacaLive(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanLiveInput | null> {
   const [row] = await sql<{
     sesi: number;
     gmv_n: number; gmv: string;
@@ -3998,7 +3998,7 @@ async function bacaLive(sql: Sql, clientPlatformId: number, periodeAwalBulan: st
  * `pengikut_baru`/`produk_dilihat` TIDAK PERNAH (sengaja tidak diikutkan,
  * lihat docblock core).
  */
-async function bacaVideo(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanVideoInput | null> {
+async function bacaVideo(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanVideoInput | null> {
   const [row] = await sql<{
     total: number;
     gmv_n: number; gmv: string;
@@ -4039,7 +4039,7 @@ async function bacaVideo(sql: Sql, clientPlatformId: number, periodeAwalBulan: s
  * (tidak diketahui, BUKAN nol) — `bangunIklanTiktok` yang menegakkan
  * null-aware total.
  */
-async function bacaIklanTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanIklanInputTiktok | null> {
+async function bacaIklanTiktok(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanIklanInputTiktok | null> {
   const rows = await sql<{ sumber: string; n: number; biaya: string; gmv_n: number; gmv: string }[]>`
     select sumber, count(*)::int as n,
            coalesce(sum(biaya), 0) as biaya,
@@ -4066,7 +4066,7 @@ async function bacaIklanTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
  * `shopee_ads_cpc`/`search`/`live`, DIPISAH per sumber — beda dari
  * `rakitInputSkorShopee`'s dimensi `ads` yang menjumlah ketiganya.
  */
-async function bacaIklanShopee(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanIklanInputShopee | null> {
+async function bacaIklanShopee(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanIklanInputShopee | null> {
   const rows = await sql<{ sumber: string; n: number; biaya: string; gmv_n: number; gmv: string }[]>`
     select sumber, count(*)::int as n,
            coalesce(sum(biaya), 0) as biaya,
@@ -4098,7 +4098,7 @@ async function bacaIklanShopee(sql: Sql, clientPlatformId: number, periodeAwalBu
  * cermin PERSIS `rakitInputSkorTiktok`'s dimensi Affiliate
  * (`coalesce(gmv, 0) > 0`).
  */
-async function bacaAfiliasi(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanAfiliasiInput | null> {
+async function bacaAfiliasi(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanAfiliasiInput | null> {
   const [row] = await sql<{
     total: number; produktif: number;
     gmv_n: number; gmv: string;
@@ -4153,7 +4153,7 @@ async function bacaAfiliasi(sql: Sql, clientPlatformId: number, periodeAwalBulan
  *    SENGAJA tidak dibaca — nol konsumen report (lihat `PdtBarisAdsTtamUpperFunnel`
  *    docblock, `fakta.ts`).
  */
-async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanTahapInput> {
+async function bacaTahapTiktok(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanTahapInput> {
   const [[cp], [klikRow], [adsRow], [affRow], [vvRow], [folRow], [scRow]] = await Promise.all([
     sql<{ tahap_fokus: string | null }[]>`select tahap_fokus from client_platforms where id = ${clientPlatformId}`,
     sql<{ n: number; klik: string }[]>`
@@ -4238,7 +4238,7 @@ async function bacaTahapTiktok(sql: Sql, clientPlatformId: number, periodeAwalBu
  * `pdt.PdtLaporanTokopediaInput`, `@cdps/core`).
  */
 async function bacaAgregatTokopedia(
-  sql: Sql, clientPlatformId: number, rentang: PdtRentangTanggal,
+  sql: Queryable, clientPlatformId: number, rentang: PdtRentangTanggal,
 ): Promise<pdt.PdtLaporanTokopediaAgregat | null> {
   const [row] = await sql<{ n: number; gmv: string; pesanan: string; pengunjung: string; terjual_n: number; terjual: string; pembeli_n: number; pembeli: string }[]>`
     select count(*)::int as n,
@@ -4263,7 +4263,7 @@ async function bacaAgregatTokopedia(
 
 /** `rentangSebelumnya` = bulan lalu (laporan bulanan) atau minggu lalu (laporan mingguan). */
 async function bacaTokopedia(
-  sql: Sql, clientPlatformId: number, rentang: PdtRentangTanggal, rentangSebelumnya: PdtRentangTanggal,
+  sql: Queryable, clientPlatformId: number, rentang: PdtRentangTanggal, rentangSebelumnya: PdtRentangTanggal,
 ): Promise<pdt.PdtLaporanTokopediaInput | null> {
   const [kini, sebelumnya] = await Promise.all([
     bacaAgregatTokopedia(sql, clientPlatformId, rentang),
@@ -4281,7 +4281,7 @@ async function bacaTokopedia(
  * di dalam `hitungSkorTiktok`, membaca sebelum itu akan melihat `kuadran`
  * basi/`null` dari klasifikasi periode lain atau belum pernah sama sekali.
  */
-async function bacaProdukTiktok(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
+async function bacaProdukTiktok(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
   const rows = await sql<{ kuadran: string | null; nama_produk: string | null; platform_product_id: string | null; gmv: string | null; klik: number | null; ctor: string | null; pesanan_sku: number | null; impresi: number | null }[]>`
     select kuadran, nama_produk, platform_product_id, gmv, klik, ctor, pesanan_sku, impresi
       from pdt_fact_sku_period
@@ -4316,7 +4316,7 @@ async function bacaProdukTiktok(sql: Sql, clientPlatformId: number, periodeAwalB
  * baris diskon di SQL adalah persis dobel-hitung yang constraint tabelnya
  * dibuat untuk mencegah.
  */
-async function bacaPromo(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanPromoInput> {
+async function bacaPromo(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanPromoInput> {
   const rows = await sql<{
     jenis: string; tipe_promosi: string | null;
     penjualan_dibuat: string | null; penjualan_siap_dikirim: string | null;
@@ -4353,7 +4353,7 @@ async function bacaPromo(sql: Sql, clientPlatformId: number, periodeAwalBulan: s
  * tidak membawa kolom itu tidak menarik rata-ratanya ke bawah.
  */
 /** Chat + penalti saja — `cancelRate`/`gmvPesananSelesai` (G4-03 aksi 1/7) datang dari promise SAUDARA di `rakitLaporanShopee`, digabung di sana ke bentuk penuh `pdt.PdtLaporanLayananInput`. */
-async function bacaLayanan(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<Pick<pdt.PdtLaporanLayananInput, 'chat' | 'penalti'> | null> {
+async function bacaLayanan(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<Pick<pdt.PdtLaporanLayananInput, 'chat' | 'penalti'> | null> {
   const [[chatRow], penaltiRows] = await Promise.all([
     sql<{
       baris: number;
@@ -4416,7 +4416,7 @@ async function bacaLayanan(sql: Sql, clientPlatformId: number, periodeAwalBulan:
  * `kontribusiTop` (Σ top ÷ Σ semua) dan `totalKreator`. Jumlah kreator per
  * toko per bulan berorde puluhan, bukan puluhan ribu.
  */
-async function bacaKreator(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKreatorInput> {
+async function bacaKreator(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKreatorInput> {
   const rows = await sql<{
     creator_handle: string; gmv: string | null; gmv_live: string | null; gmv_video: string | null;
     pesanan_teratribusi: number | null; jumlah_live: number | null; jumlah_video: number | null;
@@ -4446,7 +4446,7 @@ async function bacaKreator(sql: Sql, clientPlatformId: number, periodeAwalBulan:
  * `pdt_fact_creator_period`), memakai batas bulan yang SAMA dengan
  * `bacaLive` supaya kedua bagian tidak pernah menghitung sesi yang berbeda.
  */
-async function bacaSesiLive(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanSesiLiveInput> {
+async function bacaSesiLive(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanSesiLiveInput> {
   const rows = await sql<{
     platform_content_id: string; creator_handle: string | null; is_akun_toko: boolean;
     waktu_posting: Date | string | null; durasi_detik: number | null; vv: number | null;
@@ -4487,7 +4487,7 @@ async function bacaSesiLive(sql: Sql, clientPlatformId: number, periodeAwalBulan
  * benar setelah baris digabung: rata-rata dari rasio bukan rasio dari
  * jumlah).
  */
-async function bacaKampanye(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKampanyeInput> {
+async function bacaKampanye(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanKampanyeInput> {
   const rows = await sql<{
     sumber: string; kampanye_id: string; biaya: string;
     gmv_n: number; gmv: string;
@@ -4543,7 +4543,7 @@ async function bacaKampanye(sql: Sql, clientPlatformId: number, periodeAwalBulan
  * `'Produk Diklik'` untuk kolom tabel. Dua angka berbeda, dua konsumen
  * berbeda — mode relatif memakai `traffic`, tampilan memakai `klik`.
  */
-async function bacaProdukShopee(sql: Sql, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
+async function bacaProdukShopee(sql: Queryable, clientPlatformId: number, periodeAwalBulan: string): Promise<pdt.PdtLaporanProdukInput> {
   const rows = await sql<{
     nama_produk: string | null; platform_product_id: string | null; kuadran: string | null;
     gmv: string | null; pengunjung: number | null; klik: number | null; pesanan: number | null; impresi: number | null;
@@ -4567,7 +4567,7 @@ async function bacaProdukShopee(sql: Sql, clientPlatformId: number, periodeAwalB
 
 /** Rakit payload laporan TikTok v1: KPI ringkas basis `'net'` (Rule 15) + harian + kanal + iklan + live + video + produk + afiliasi + tahap + `hitungSkorTiktok`. */
 export async function rakitLaporanTiktok(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   periodeAwalBulan: string,
   now: Date = new Date(),
@@ -4601,7 +4601,7 @@ export async function rakitLaporanTiktok(
 
 /** Rakit payload laporan Shopee v1: KPI ringkas basis `'siap_dikirim'` (Rule 16) + harian + kanal + iklan + live + video + afiliasi + `hitungSkorShopee`. */
 export async function rakitLaporanShopee(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   periodeAwalBulan: string,
   now: Date = new Date(),
@@ -4688,7 +4688,7 @@ const SKOR_INPUT_TIKTOK_KOSONG: pdt.PdtSkorInputTiktok = {
 };
 
 export async function rakitLaporanTiktokMingguan(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   periodeMulai: string,
   now: Date = new Date(),
@@ -4710,7 +4710,7 @@ export async function rakitLaporanTiktokMingguan(
 }
 
 export async function rakitLaporanShopeeMingguan(
-  sql: Sql,
+  sql: Queryable,
   clientPlatformId: number,
   periodeMulai: string,
   now: Date = new Date(),
@@ -4758,14 +4758,27 @@ export async function bacaLaporanPdt(
     throw new ValidationError(`[platform toko '${row.platform}' tidak didukung PDT — Tokopedia/Lazada/Others tetap manual (PDT-22)]`);
   }
 
-  if (jenis === 'mingguan') {
+  // PDT-LAPORAN-HANG (2026-10-19) — perakitan berjalan di SATU transaksi, jadi
+  // ±15 query paralelnya antre di SATU koneksi ter-reserve, bukan menyebar ke
+  // seluruh pool. Lewat `db()` langsung, `Promise.all` perakit menghabiskan
+  // kelima koneksi (`CDPS_PG_MAX`) dan postgres.js lalu mem-pipeline query
+  // autocommit ke koneksi yang masih menunggu balasan; di pooler Supavisor mode
+  // transaksi backend dilepas begitu satu pernyataan autocommit selesai, dan
+  // balasan query yang menumpang hilang — request menggantung sampai batas 300
+  // detik Vercel (log Supavisor: "Client socket closed while state was idle",
+  // berpasangan 1:1 dengan setiap timeout). Di dalam transaksi backend tetap
+  // dipegang sampai COMMIT, jadi pipelining di sana aman. `UPDATE` kuadran oleh
+  // `hitungSkor*` ikut transaksi yang sama dan terbaca oleh `bacaProduk*` sesudahnya.
+  return withTransaction(sql, (tx): Promise<pdt.PdtLaporanTiktok | pdt.PdtLaporanShopee> => {
+    if (jenis === 'mingguan') {
+      return platform === 'tiktok'
+        ? rakitLaporanTiktokMingguan(tx, clientPlatformId, periodeAwalBulan, now)
+        : rakitLaporanShopeeMingguan(tx, clientPlatformId, periodeAwalBulan, now);
+    }
     return platform === 'tiktok'
-      ? rakitLaporanTiktokMingguan(sql, clientPlatformId, periodeAwalBulan, now)
-      : rakitLaporanShopeeMingguan(sql, clientPlatformId, periodeAwalBulan, now);
-  }
-  return platform === 'tiktok'
-    ? rakitLaporanTiktok(sql, clientPlatformId, periodeAwalBulan, now)
-    : rakitLaporanShopee(sql, clientPlatformId, periodeAwalBulan, now);
+      ? rakitLaporanTiktok(tx, clientPlatformId, periodeAwalBulan, now)
+      : rakitLaporanShopee(tx, clientPlatformId, periodeAwalBulan, now);
+  });
 }
 
 type PdtJsonParam = Parameters<TransactionSql['json']>[0];

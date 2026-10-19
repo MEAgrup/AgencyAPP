@@ -9,6 +9,7 @@
  * menyambungkan `@cdps/core` `pdt` ke baris `client_platforms`/`clients`
  * sungguhan. Baris di-namespace `ZPDT-`.
  */
+import net from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { pdt as pdtCore, permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
@@ -6440,6 +6441,54 @@ describeDb('bacaLaporanPdt (sesi 34 lanjutan) — gerbang izin + pemilihan platf
     const hasil = await bacaLaporanPdt(sql, am(), cpId, '2026-07-01');
     expect(hasil.schema).toBe('cdps.pdt.laporan.shopee.v1');
     expect('benchmarkVersi' in hasil).toBe(false);
+  });
+
+  // PDT-LAPORAN-HANG (docs/DECISIONS.md 2026-10-19) — perakitan wajib memakai
+  // SATU koneksi (satu transaksi). Lewat pool biasa, `Promise.all` perakit
+  // menghabiskan seluruh `max` koneksi lalu postgres.js mem-pipeline query
+  // autocommit ke koneksi yang masih sibuk — di pooler Supavisor itulah yang
+  // menggantungkan laporan sampai batas 300 detik Vercel. Proxy TCP di depan
+  // Postgres menghitung koneksi yang benar-benar dibuka client ber-`max: 5`.
+  describe('PDT-LAPORAN-HANG — seluruh perakitan di SATU koneksi', () => {
+    async function denganProxyPenghitung<T>(fn: (proxied: Sql) => Promise<T>): Promise<{ hasil: T; koneksi: number }> {
+      const target = new globalThis.URL(URL as string);
+      let koneksi = 0;
+      const sockets = new Set<net.Socket>();
+      const server = net.createServer((client) => {
+        koneksi++;
+        const upstream = net.connect(Number(target.port || 5432), target.hostname);
+        sockets.add(client).add(upstream);
+        client.pipe(upstream).pipe(client);
+        client.on('error', () => upstream.destroy());
+        upstream.on('error', () => client.destroy());
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const lewatProxy = new globalThis.URL(URL as string);
+      lewatProxy.hostname = '127.0.0.1';
+      lewatProxy.port = String((server.address() as net.AddressInfo).port);
+      const proxied = createClient(lewatProxy.toString(), { overrides: { max: 5 } });
+      try {
+        return { hasil: await fn(proxied), koneksi };
+      } finally {
+        await proxied.end({ timeout: 1 });
+        for (const s of sockets) s.destroy();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    }
+
+    it('kontrol: Promise.all biasa lewat client yang sama MENYEBAR ke banyak koneksi', async () => {
+      const { koneksi } = await denganProxyPenghitung((p) =>
+        Promise.all(Array.from({ length: 6 }, (_, i) => p`select pg_sleep(0.05), ${i}::int as i`)),
+      );
+      expect(koneksi).toBeGreaterThan(1);
+    });
+
+    it.each(['TikTok Shop', 'Shopee'] as const)('%s: bacaLaporanPdt hanya membuka 1 koneksi', async (platform) => {
+      const { cpId } = await fixture(platform);
+      const { hasil, koneksi } = await denganProxyPenghitung((p) => bacaLaporanPdt(p, am(), cpId, '2026-07-01'));
+      expect(hasil.platform).toBe(platform === 'Shopee' ? 'shopee' : 'tiktok');
+      expect(koneksi).toBe(1);
+    });
   });
 });
 
