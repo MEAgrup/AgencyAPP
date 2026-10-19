@@ -3119,6 +3119,89 @@ describeDb('commitUploadBatch (G1-09 sub-langkah 2b-ii, modul KETIGA) — tt_ord
   });
 });
 
+describeDb('PDT-SIMPAN-BATCH-MASSAL — fakta ditulis lewat INSERT multi-baris (feedback trial Ads 2026-10-19 butir 3)', () => {
+  async function fixture(): Promise<number> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    return insertClientPlatform(clientId, 'TikTok Shop', null, ['KR-1']);
+  }
+
+  /** Klien terpisah yang menghitung statement `insert into <tabel>` yang benar-benar dikirim ke server. */
+  function klienPenghitung(tabel: string): { sql: Sql; jumlah: () => number } {
+    let n = 0;
+    const pola = new RegExp(`insert into ${tabel}\\b`);
+    const s = createClient(URL!, { overrides: { max: 1, debug: (_k: number, q: string) => { if (pola.test(q)) n += 1; } } });
+    return { sql: s, jumlah: () => n };
+  }
+
+  it('1.200 baris tt_video ⇒ 3 statement INSERT (500/statement), bukan 1.200 — dan ID Video ganda: baris TERAKHIR menang', async () => {
+    const cpId = await fixture();
+    const baris: [string, string, string, string, string, string, string][] = [];
+    for (let i = 1; i <= 1200; i += 1) {
+      baris.push(['KR-1', `V${String(i).padStart(4, '0')}`, String(i), '1', '0', '0', '1000']);
+    }
+    // ID ganda di AKHIR berkas: rangkaian upsert per-baris lama membuat yang terakhir menang.
+    baris.push(['KR-1', 'V0007', '777777', '9', '9', '9', '5000']);
+    const berkas = ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', baris);
+
+    const hitung = klienPenghitung('pdt_fact_content');
+    try {
+      await commitUploadBatch(hitung.sql, ownerActor(), cpId, [berkas], []);
+    } finally {
+      await hitung.sql.end();
+    }
+    expect(hitung.jumlah()).toBe(3);
+
+    const rows = await loadFactContent(cpId);
+    expect(rows).toHaveLength(1200);
+    const v7 = rows.find((r) => r.platform_content_id === 'V0007')!;
+    expect(v7).toMatchObject({ vv: 777777, likes: 9, dibagikan: 9, klik_produk: 9 });
+    expect(Number(v7.gmv)).toBe(5000);
+    expect(rows.find((r) => r.platform_content_id === 'V1200')!.vv).toBe(1200);
+  });
+
+  it('pdt_sku_master, SATU berkas: SKU berulang dikerucutkan ekstraktor (baris terakhir, termasuk sel kosong) — perilaku lama dipertahankan', async () => {
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasLengkap('video.xlsx', '01/07/2026 - 31/07/2026', [['KR-1', 'V1', '100', '10', '1', '5', '200000']]),
+      ttOrdersBerkas('orders.xlsx', [
+        ['SKU-1', 'SLR-1', 'Kaos Polos', 'Merah / L', '50.000', 'Fashion Pria'],
+        ['SKU-1', '', 'Kaos Polos Baru', '', '60.000', ''],
+        ['SKU-2', 'SLR-2', 'Topi', 'Hitam', '20.000', 'Aksesoris'],
+      ]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadSkuMaster(cpId);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      platform_product_id: 'SKU-1', seller_sku: null, nama_produk: 'Kaos Polos Baru',
+      nama_variasi: null, kategori_platform: null, status_listing: 'aktif',
+    });
+    expect(Number(rows[0].harga_satuan_terakhir)).toBe(60000);
+    expect(rows[1]).toMatchObject({ platform_product_id: 'SKU-2', seller_sku: 'SLR-2' });
+  });
+
+  it('pdt_sku_master, DUA berkas tt_orders dengan SKU sama: kolom opsional = nilai non-kosong TERAKHIR (lipatan coalesce upsert per-baris lama)', async () => {
+    // Batch MINGGUAN (PDT-MINGGUAN): blok `pdt_fact_sku_period` dilewati, jadi dua berkas
+    // tt_orders ber-SKU sama sah di sini — di batch bulanan keduanya bertabrakan di
+    // `uq_pdt_fact_sku_period_produk` (perilaku lama, tidak disentuh). SKU master tetap ditulis.
+    const cpId = await fixture();
+    const berkas = [
+      ttVideoBerkasLengkap('video.xlsx', '08/07/2026 - 14/07/2026', [['KR-1', 'V1', '100', '10', '1', '5', '200000']]),
+      ttOrdersBerkas('orders-1.xlsx', [['SKU-1', 'SLR-1', 'Kaos Polos', 'Merah / L', '50.000', 'Fashion Pria']]),
+      ttOrdersBerkas('orders-2.xlsx', [['SKU-1', '', 'Kaos Polos Baru', '', '60.000', '']]),
+    ];
+    await commitUploadBatch(sql, ownerActor(), cpId, berkas, []);
+    const rows = await loadSkuMaster(cpId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      platform_product_id: 'SKU-1', seller_sku: 'SLR-1', nama_produk: 'Kaos Polos Baru',
+      nama_variasi: 'Merah / L', kategori_platform: 'Fashion Pria', status_listing: 'aktif',
+    });
+    expect(Number(rows[0].harga_satuan_terakhir)).toBe(60000);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // commitUploadBatch (PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR, `docs/backlog/PX_M3_BACKLOG.md`)
 // — tt_orders → pdt_fact_sku_period, basis 'dibayar'. Sisi TikTok untuk tabel
