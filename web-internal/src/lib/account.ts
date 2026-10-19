@@ -384,6 +384,27 @@ export function getService(serviceId: string): Promise<ServiceQueueRow> {
   return api.get<ServiceQueueRow>(`/services/${serviceId}`);
 }
 
+/**
+ * "Ubah Jalur Eksekusi (Plan-gated ↔ Direct)" — the M6-OA-1 override form on the
+ * Service hub (feedback B1–B3). Mirrors domain `setStrategyRequirement`: owner AM
+ * / Account lead / Director, only at [Awaiting Onboarding], never under an Aktif
+ * STRG-, and Direct is locked for `plan_wajib` until Hans decides otherwise.
+ * UI gating only — the server repeats every check.
+ */
+export function jalurEksekusiGate(
+  service: Pick<ServiceQueueRow, 'status' | 'plan_tier' | 'assigned_am_id'>,
+  role: Role | null,
+  employeeId: string | null,
+  strgAktif: boolean,
+): { tampil: boolean; directTerkunci: boolean } {
+  const isOwnerAm = isAccountStaff(role) && !!employeeId && employeeId === service.assigned_am_id;
+  const berwenang = isOwnerAm || isAccountLead(role) || !!role?.director;
+  return {
+    tampil: berwenang && service.status === SERVICE_AWAITING_ONBOARDING && !strgAktif,
+    directTerkunci: service.plan_tier === 'plan_wajib',
+  };
+}
+
 /** Service lifecycle labels (STATE_MACHINES §6) — UI gating only. */
 export const SERVICE_AWAITING_ONBOARDING = '[Awaiting Onboarding]';
 export const SERVICE_STRATEGY_APPROVED = '[Strategy Approved]';
