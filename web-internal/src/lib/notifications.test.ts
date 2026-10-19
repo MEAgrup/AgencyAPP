@@ -9,7 +9,7 @@
  * inbox.
  */
 import { describe, expect, it } from 'vitest';
-import { eventLabel, notificationHref } from './notifications';
+import { eventLabel, notificationDetail, notificationHref } from './notifications';
 
 const n = (entity_type: string, entity_id: string) => ({ entity_type, entity_id });
 
@@ -80,5 +80,33 @@ describe('eventLabel', () => {
 
   it('falls back to the raw identifier for an event this build does not know', () => {
     expect(eventLabel('m99.future.event')).toBe('m99.future.event');
+  });
+});
+
+describe('Laporan PDT siap terbit (P7, katalog v22)', () => {
+  const link = '/account/pdt/laporan?klien=CLI-202607-0001&platform=12&jenis=bulanan&periode=2026-07-01&nama=Toko+Alpha';
+  const pdtN = (deep_link: string) => ({ entity_type: 'pdt_laporan_kiriman', entity_id: '42', deep_link });
+
+  it('opens the Laporan PDT page on the kiriman toko+periode from deep_link', () => {
+    expect(notificationHref(pdtN(link))).toBe(link);
+  });
+
+  it('never follows a deep_link that points elsewhere — falls back to the bare page', () => {
+    expect(notificationHref(pdtN('https://evil.example/account/pdt/laporan?x=1'))).toBe('/account/pdt/laporan');
+    expect(notificationHref(pdtN('/admin?x=1'))).toBe('/account/pdt/laporan');
+    expect(notificationHref({ entity_type: 'pdt_laporan_kiriman', entity_id: '42' })).toBe('/account/pdt/laporan');
+  });
+
+  it('shows client name and period, falling back to the id', () => {
+    expect(notificationDetail(pdtN(link))).toBe('Toko Alpha · periode 2026-07-01');
+    expect(notificationDetail(pdtN('/account/pdt/laporan?klien=CLI-1&jenis=mingguan&periode=2026-07-06'))).toBe(
+      'CLI-1 · minggu 2026-07-06',
+    );
+    expect(notificationDetail(pdtN(''))).toBe('42');
+    expect(notificationDetail({ entity_type: 'brief', entity_id: 'BRF-1', deep_link: '/brief/BRF-1' })).toBe('BRF-1');
+  });
+
+  it('has a human label', () => {
+    expect(eventLabel('pdt.laporan.siap_terbit')).toBe('Laporan PDT siap diterbitkan');
   });
 });

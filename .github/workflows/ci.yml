@@ -288,12 +288,15 @@ jobs:
       # BRIEF-KEMBALI-SIKLUS (20261213010000_brief_kembali_revisi_kirim_ulang.sql):
       # +1 event katalog v21 `m16.brief.dikirim_ulang` (82→83) — AM merevisi &
       # mengirim ulang brief yang dikembalikan divisi. sm_machines TETAP 36.
-      - name: Verify migration seed counts (36 machines, 83 events, catalog registry consistent)
+      # P7 (20261219010000_pdt_laporan_siap_terbit_notif.sql): +1 event katalog
+      # v22 `pdt.laporan.siap_terbit` (83→84) — Laporan PDT [Draf] menunggu
+      # Terbitkan → AM pemilik + lead Account. Nol tabel/mesin baru.
+      - name: Verify migration seed counts (36 machines, 84 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 36 then raise exception 'expected 36 machines'; end if;
-               if (select count(*) from notif_events) <> 83 then raise exception 'expected 83 events'; end if;
+               if (select count(*) from notif_events) <> 84 then raise exception 'expected 84 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;
