@@ -1261,6 +1261,74 @@ export function batchHanyaFaktaHarian(periodeMulai: string, periodeSelesai: stri
 const TANPA_BERKAS: readonly BerkasTerparse[] = [];
 
 /**
+ * PDT-SIMPAN-BATCH-MASSAL (feedback trial tim Ads 2026-10-19 butir 3: "Simpan
+ * Batch ±5 menit per klien, makin lama kalau tim Ads lain ikut mengunggah").
+ *
+ * Dulu setiap baris fakta adalah SATU `INSERT` sendiri. Dengan `prepare: false`
+ * (wajib di pooler transaction-mode, `@cdps/db` `createClient`) postgres.js
+ * mengirim setiap query berparameter sebagai Parse/Describe lalu Bind/Execute —
+ * DUA round trip, dan tidak pernah di-pipeline. Ribuan baris (`tt_orders`,
+ * `tt_video`) × dua round trip ke pooler = menit, semuanya di dalam SATU
+ * transaksi yang menahan koneksi pooler dan kunci batch sepanjang itu.
+ *
+ * Sekarang baris dikumpulkan per blok lalu ditulis dengan `INSERT` multi-baris,
+ * `BARIS_PER_INSERT` per statement (20 kolom × 500 = 10.000 parameter, jauh di
+ * bawah batas 65.535 protokol). Urutan antar-blok TIDAK berubah — setiap blok
+ * menulis seluruh barisnya sebelum blok berikutnya mulai, jadi DELETE scope,
+ * penulis kedua tabel yang sama, dan `UPDATE` batal-harian tetap melihat
+ * keadaan yang sama seperti sebelumnya.
+ */
+const BARIS_PER_INSERT = 500;
+
+/** Satu baris `INSERT`: nama kolom → nilai. Kunci objek = daftar kolom. */
+type BarisInsert = Record<string, string | number | boolean | Date | null>;
+
+async function insertMassal(baris: readonly BarisInsert[], tulis: (potongan: BarisInsert[]) => Promise<unknown>): Promise<void> {
+  for (let i = 0; i < baris.length; i += BARIS_PER_INSERT) {
+    await tulis(baris.slice(i, i + BARIS_PER_INSERT));
+  }
+}
+
+/**
+ * Satu baris per kunci konflik, untuk blok `ON CONFLICT ... DO UPDATE`.
+ *
+ * Postgres menolak satu `INSERT ... ON CONFLICT DO UPDATE` yang menyentuh baris
+ * yang sama dua kali ("command cannot affect row a second time"). Versi per-
+ * baris dulu MENERIMA kunci ganda dalam satu batch dan hasilnya "yang terakhir
+ * menang" — itu yang direproduksi `gabung` default di sini. Aman karena di
+ * setiap blok pemakainya, kolom yang TIDAK ada di `DO UPDATE SET` adalah kunci
+ * atau konstanta blok, jadi baris terakhir = hasil rangkaian upsert per-baris.
+ * `pdt_sku_master` (SET ber-`coalesce`) memakai `gabungSkuMaster`.
+ */
+function satuPerKunci(
+  baris: readonly BarisInsert[],
+  kunci: (r: BarisInsert) => readonly unknown[],
+  gabung: (lama: BarisInsert, baru: BarisInsert) => BarisInsert = (_lama, baru) => baru,
+): BarisInsert[] {
+  const per = new Map<string, BarisInsert>();
+  for (const r of baris) {
+    const k = JSON.stringify(kunci(r));
+    const lama = per.get(k);
+    per.set(k, lama === undefined ? r : gabung(lama, r));
+  }
+  return [...per.values()];
+}
+
+/** Kolom `pdt_sku_master` yang di-upsert `coalesce(excluded.x, lama.x)`. */
+const KOLOM_COALESCE_SKU_MASTER = ['seller_sku', 'nama_produk', 'nama_variasi', 'kategori_platform', 'harga_satuan_terakhir'] as const;
+
+/**
+ * Lipatan rangkaian upsert `pdt_sku_master` per-baris: tiap kolom opsional =
+ * nilai non-null TERAKHIR (`coalesce(baru, lama)` berturut-turut); bila semua
+ * null, tetap null sehingga `coalesce` di DB menjaga nilai yang sudah tersimpan.
+ */
+function gabungSkuMaster(lama: BarisInsert, baru: BarisInsert): BarisInsert {
+  const hasil: BarisInsert = { ...baru };
+  for (const k of KOLOM_COALESCE_SKU_MASTER) hasil[k] = baru[k] ?? lama[k];
+  return hasil;
+}
+
+/**
  * tulisFaktaModulTerparse — SEMBILAN blok penulis baris fakta tertipe (G1-09
  * sub-langkah 2b-ii), diekstrak dari `commitUploadBatch` sesi G1-11 supaya
  * `reparsePdtBatch` (Flow D, di bawah) bisa memakai SQL yang PERSIS SAMA
@@ -1322,23 +1390,23 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // batch yang sedang di-commit (replace-on-recommit) — sah karena baris fakta adalah
   // data TURUNAN yang selalu bisa dihitung ulang (aturan rumah #4), bukan riwayat
   // immutable (itu tanggung jawab `audit_log`, di pemanggil).
+  const barisAdsLive: BarisInsert[] = [];
   if (berkasAdsLive.length > 0) {
     await tx`
       delete from pdt_fact_ads
        where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_live' and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasAdsLive) {
       for (const baris of pdt.ekstrakBarisShopeeAdsLive(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_ads
-            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
-          values
-            (${clientPlatformId}, 'shopee_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
-             ${baris.tipeKampanyeSumber}, 'lower')`;
+        barisAdsLive.push({
+          client_platform_id: clientPlatformId, sumber: 'shopee_ads_live', kampanye_id: baris.kampanyeId, sku_id: null,
+          content_id: null, periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI,
+          biaya: baris.biaya, tayangan: baris.tayangan, klik: null, pesanan_sku: baris.pesananSku, gmv: baris.gmv,
+          roas: baris.roas, tipe_kampanye_sumber: baris.tipeKampanyeSumber, tujuan: 'lower',
+        });
       }
     }
   }
+  await insertMassal(barisAdsLive, (p) => tx`insert into pdt_fact_ads ${tx(p)}`);
 
   // G1-09 sub-langkah 2b-ii — modul KEENAM, `shopee_ads_cpc` → `pdt_fact_ads`
   // (lihat docblock `ekstrakBarisShopeeAdsCpc`, `@cdps/core` `pdt/fakta.ts`).
@@ -1350,23 +1418,24 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // `platform_product_id` DIISI sesi 23 (`G1-09-2BII-ADS-CPC-SKU` DITUTUP
   // — pemilik: "kebutuhan hanya GMV per produk bukan sampai varian") —
   // salinan identitas `Kode Produk`, bukan lookup.
+  const barisAdsCpc: BarisInsert[] = [];
   if (berkasAdsCpc.length > 0) {
     await tx`
       delete from pdt_fact_ads
        where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_cpc' and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasAdsCpc) {
       for (const baris of pdt.ekstrakBarisShopeeAdsCpc(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_ads
-            (client_platform_id, sumber, kampanye_id, platform_product_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
-          values
-            (${clientPlatformId}, 'shopee_ads_cpc', ${baris.kampanyeId}, ${baris.platformProductId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
-             ${baris.tipeKampanyeSumber}, 'lower')`;
+        barisAdsCpc.push({
+          client_platform_id: clientPlatformId, sumber: 'shopee_ads_cpc', kampanye_id: baris.kampanyeId,
+          platform_product_id: baris.platformProductId, sku_id: null, content_id: null, periode: periodeAwalBulan,
+          batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI, biaya: baris.biaya, tayangan: baris.tayangan,
+          klik: baris.klik, pesanan_sku: baris.pesananSku, gmv: baris.gmv, roas: baris.roas,
+          tipe_kampanye_sumber: baris.tipeKampanyeSumber, tujuan: 'lower',
+        });
       }
     }
   }
+  await insertMassal(barisAdsCpc, (p) => tx`insert into pdt_fact_ads ${tx(p)}`);
 
   // G1-09 sub-langkah 2b-ii — modul KETUJUH (sesi 22), `shopee_ads_search` → `pdt_fact_ads`
   // (lihat docblock `ekstrakBarisShopeeAdsSearch`, `@cdps/core` `pdt/fakta.ts`). Sama pola
@@ -1375,23 +1444,23 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // whitelist). `kampanye_id` KOMPOSIT (`nama iklan :: kata pencarian`, bukan nama iklan
   // polos) — lihat docblock kepala berkas `fakta.ts` untuk alasan (satu iklan search bisa
   // punya banyak baris keyword per periode, belum terbukti aman disamakan ke `shopee_ads_cpc`).
+  const barisAdsSearch: BarisInsert[] = [];
   if (berkasAdsSearch.length > 0) {
     await tx`
       delete from pdt_fact_ads
        where client_platform_id = ${clientPlatformId} and sumber = 'shopee_ads_search' and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasAdsSearch) {
       for (const baris of pdt.ekstrakBarisShopeeAdsSearch(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_ads
-            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
-          values
-            (${clientPlatformId}, 'shopee_ads_search', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
-             ${baris.tipeKampanyeSumber}, 'lower')`;
+        barisAdsSearch.push({
+          client_platform_id: clientPlatformId, sumber: 'shopee_ads_search', kampanye_id: baris.kampanyeId,
+          sku_id: null, content_id: null, periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI,
+          biaya: baris.biaya, tayangan: baris.tayangan, klik: baris.klik, pesanan_sku: baris.pesananSku,
+          gmv: baris.gmv, roas: baris.roas, tipe_kampanye_sumber: baris.tipeKampanyeSumber, tujuan: 'lower',
+        });
       }
     }
   }
+  await insertMassal(barisAdsSearch, (p) => tx`insert into pdt_fact_ads ${tx(p)}`);
 
   // G1-09 sub-langkah 2b-ii — modul KEDUA, `tt_video` → `pdt_fact_content` (lihat
   // docblock `ekstrakBarisTtVideo`, `@cdps/core` `pdt/fakta.ts`). Beda dari
@@ -1404,26 +1473,28 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // format kolom `Waktu` — lihat docblock `ekstrakBarisTtVideo`). `periode` — AWAL BULAN
   // batch (Q-3, migrasi sesi 34) — video yang GMV-nya masih berjalan di bulan berikutnya
   // menulis baris BARU untuk periode itu, TIDAK menimpa baris bulan sebelumnya.
+  const barisTtVideo: BarisInsert[] = [];
   if (berkasTtVideo.length > 0) {
     for (const b of berkasTtVideo) {
       for (const baris of pdt.ekstrakBarisTtVideo(b.aoa, b.barisHeader, akunKontenToko)) {
-        await tx`
-          insert into pdt_fact_content
-            (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis,
-             creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
-             vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
-          values
-            (${clientPlatformId}, ${baris.platformContentId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'video',
-             ${baris.creatorPlatformId}, ${baris.creatorHandle}, ${baris.isAkunToko}, null, null,
-             ${baris.vv}, ${baris.likes}, null, ${baris.dibagikan}, null, null, ${baris.klikProduk}, ${baris.gmv}, null)
-          on conflict (client_platform_id, platform_content_id, periode) do update set
-            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-            creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
-            is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, likes = excluded.likes,
-            dibagikan = excluded.dibagikan, klik_produk = excluded.klik_produk, gmv = excluded.gmv`;
+        barisTtVideo.push({
+          client_platform_id: clientPlatformId, platform_content_id: baris.platformContentId,
+          periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI, jenis: 'video',
+          creator_platform_id: baris.creatorPlatformId, creator_handle: baris.creatorHandle,
+          is_akun_toko: baris.isAkunToko, waktu_posting: null, sku_id: null, vv: baris.vv, likes: baris.likes,
+          komentar: null, dibagikan: baris.dibagikan, pengikut_baru: null, produk_dilihat: null,
+          klik_produk: baris.klikProduk, gmv: baris.gmv, durasi_detik: null,
+        });
       }
     }
   }
+  await insertMassal(satuPerKunci(barisTtVideo, (r) => [r.client_platform_id, r.platform_content_id, r.periode]), (p) => tx`
+    insert into pdt_fact_content ${tx(p)}
+    on conflict (client_platform_id, platform_content_id, periode) do update set
+      batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+      creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
+      is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, likes = excluded.likes,
+      dibagikan = excluded.dibagikan, klik_produk = excluded.klik_produk, gmv = excluded.gmv`);
 
   // M9-OA-4 (`docs/DECISIONS.md` 2026-09-17) — `tt_affiliate_video` → `pdt_fact_content`
   // (lihat docblock `ekstrakBarisTtAffiliateVideo`, `@cdps/core` `pdt/fakta.ts`): sumber
@@ -1439,26 +1510,27 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // DILEWATI, bukan menggagalkan batch — satu berkas salah-tempel tidak boleh menulis
   // GMV toko lain ke toko ini. Bila `shop_id` klien belum terikat (NULL), gerbangnya
   // tidak menyaring apa pun (pola sama `usulkan_ikat` Rule 2).
+  const barisTtAffiliateVideo: BarisInsert[] = [];
   if (berkasTtAffiliateVideo.length > 0) {
     for (const b of berkasTtAffiliateVideo) {
       for (const baris of pdt.ekstrakBarisTtAffiliateVideo(b.aoa, b.barisHeader)) {
         if (shopIdTersimpan != null && baris.shopId != null && baris.shopId !== shopIdTersimpan) continue;
-        await tx`
-          insert into pdt_fact_content
-            (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis,
-             creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
-             vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
-          values
-            (${clientPlatformId}, ${baris.platformContentId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'video',
-             null, ${baris.creatorHandle}, false, null, null,
-             ${baris.vv}, ${baris.likes}, null, null, null, null, null, ${baris.gmv}, ${baris.durasiDetik})
-          on conflict (client_platform_id, platform_content_id, periode) do update set
-            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-            creator_handle = excluded.creator_handle, vv = excluded.vv, likes = excluded.likes,
-            gmv = excluded.gmv, durasi_detik = excluded.durasi_detik`;
+        barisTtAffiliateVideo.push({
+          client_platform_id: clientPlatformId, platform_content_id: baris.platformContentId,
+          periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI, jenis: 'video',
+          creator_platform_id: null, creator_handle: baris.creatorHandle, is_akun_toko: false, waktu_posting: null,
+          sku_id: null, vv: baris.vv, likes: baris.likes, komentar: null, dibagikan: null, pengikut_baru: null,
+          produk_dilihat: null, klik_produk: null, gmv: baris.gmv, durasi_detik: baris.durasiDetik,
+        });
       }
     }
   }
+  await insertMassal(satuPerKunci(barisTtAffiliateVideo, (r) => [r.client_platform_id, r.platform_content_id, r.periode]), (p) => tx`
+    insert into pdt_fact_content ${tx(p)}
+    on conflict (client_platform_id, platform_content_id, periode) do update set
+      batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+      creator_handle = excluded.creator_handle, vv = excluded.vv, likes = excluded.likes,
+      gmv = excluded.gmv, durasi_detik = excluded.durasi_detik`);
 
   // G1-09 sub-langkah 2b-ii — modul KESEMBILAN (sesi 24), `shopee_live` → `pdt_fact_content`
   // (lihat docblock `ekstrakBarisShopeeLive`, `@cdps/core` `pdt/fakta.ts`). Sama pola
@@ -1469,24 +1541,25 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // tidak punya identitas produk maupun kreator terpisah); `is_akun_toko` SELALU `true`
   // (sesi live Shopee secara struktural HANYA akun toko sendiri, bukan afiliasi). `periode`
   // — AWAL BULAN batch (sama pola `tt_video` di atas, migrasi sesi 34).
+  const barisShopeeLive: BarisInsert[] = [];
   if (berkasShopeeLive.length > 0) {
     for (const b of berkasShopeeLive) {
       for (const baris of pdt.ekstrakBarisShopeeLive(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_content
-            (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis,
-             creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
-             vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
-          values
-            (${clientPlatformId}, ${baris.platformContentId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'live',
-             null, null, true, ${baris.waktuPosting}, null,
-             ${baris.vv}, null, null, null, null, null, null, ${baris.gmv}, null)
-          on conflict (client_platform_id, platform_content_id, periode) do update set
-            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-            waktu_posting = excluded.waktu_posting, vv = excluded.vv, gmv = excluded.gmv`;
+        barisShopeeLive.push({
+          client_platform_id: clientPlatformId, platform_content_id: baris.platformContentId,
+          periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI, jenis: 'live',
+          creator_platform_id: null, creator_handle: null, is_akun_toko: true, waktu_posting: baris.waktuPosting,
+          sku_id: null, vv: baris.vv, likes: null, komentar: null, dibagikan: null, pengikut_baru: null,
+          produk_dilihat: null, klik_produk: null, gmv: baris.gmv, durasi_detik: null,
+        });
       }
     }
   }
+  await insertMassal(satuPerKunci(barisShopeeLive, (r) => [r.client_platform_id, r.platform_content_id, r.periode]), (p) => tx`
+    insert into pdt_fact_content ${tx(p)}
+    on conflict (client_platform_id, platform_content_id, periode) do update set
+      batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+      waktu_posting = excluded.waktu_posting, vv = excluded.vv, gmv = excluded.gmv`);
 
   // G1-09 sub-langkah 2b-ii — modul KESEPULUH, `tt_live` → `pdt_fact_content` (lihat
   // docblock `ekstrakBarisTtLive`, `@cdps/core` `pdt/fakta.ts`) — `G1-09-2BII-TTLIVE`
@@ -1497,26 +1570,28 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // SELALU NULL (zona waktu dashboard TikTok belum terverifikasi, lihat docblock
   // `ekstrakBarisTtLive`), `durasi_detik` TERISI (`Durasi` "Xh Ymin" → detik). `periode`
   // — AWAL BULAN batch (sama pola dua modul di atas, migrasi sesi 34).
+  const barisTtLive: BarisInsert[] = [];
   if (berkasTtLive.length > 0) {
     for (const b of berkasTtLive) {
       for (const baris of pdt.ekstrakBarisTtLive(b.aoa, b.barisHeader, akunKontenToko)) {
-        await tx`
-          insert into pdt_fact_content
-            (client_platform_id, platform_content_id, periode, batch_id, parser_versi, jenis,
-             creator_platform_id, creator_handle, is_akun_toko, waktu_posting, sku_id,
-             vv, likes, komentar, dibagikan, pengikut_baru, produk_dilihat, klik_produk, gmv, durasi_detik)
-          values
-            (${clientPlatformId}, ${baris.platformContentId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'live',
-             ${baris.creatorPlatformId}, ${baris.creatorHandle}, ${baris.isAkunToko}, null, null,
-             ${baris.vv}, null, null, null, null, null, null, ${baris.gmv}, ${baris.durasiDetik})
-          on conflict (client_platform_id, platform_content_id, periode) do update set
-            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-            creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
-            is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, gmv = excluded.gmv,
-            durasi_detik = excluded.durasi_detik`;
+        barisTtLive.push({
+          client_platform_id: clientPlatformId, platform_content_id: baris.platformContentId,
+          periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI, jenis: 'live',
+          creator_platform_id: baris.creatorPlatformId, creator_handle: baris.creatorHandle,
+          is_akun_toko: baris.isAkunToko, waktu_posting: null, sku_id: null, vv: baris.vv, likes: null, komentar: null,
+          dibagikan: null, pengikut_baru: null, produk_dilihat: null, klik_produk: null, gmv: baris.gmv,
+          durasi_detik: baris.durasiDetik,
+        });
       }
     }
   }
+  await insertMassal(satuPerKunci(barisTtLive, (r) => [r.client_platform_id, r.platform_content_id, r.periode]), (p) => tx`
+    insert into pdt_fact_content ${tx(p)}
+    on conflict (client_platform_id, platform_content_id, periode) do update set
+      batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+      creator_platform_id = excluded.creator_platform_id, creator_handle = excluded.creator_handle,
+      is_akun_toko = excluded.is_akun_toko, vv = excluded.vv, gmv = excluded.gmv,
+      durasi_detik = excluded.durasi_detik`);
 
   // Sesi 34 (riset G2-01) — `tt_shop_analytics` → `pdt_fact_shop_daily`, basis 'net'
   // (lihat docblock `ekstrakBarisShopDailyTiktok`, `@cdps/core` `pdt/fakta.ts`, untuk
@@ -1524,50 +1599,52 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // nol pemanggil sejak lahir, luput dari seluruh sesi G1-09 sub-langkah 2b-ii).
   // Kunci unik (`client_platform_id, tanggal, basis`) nol komponen NULL — `ON CONFLICT
   // DO UPDATE` sungguhan, pola sama `pdt_fact_content`.
+  const barisShopStatsTiktok: BarisInsert[] = [];
   if (berkasShopStatsTiktok.length > 0) {
     for (const b of berkasShopStatsTiktok) {
       for (const baris of pdt.ekstrakBarisShopDailyTiktok(b.aoa)) {
-        await tx`
-          insert into pdt_fact_shop_daily
-            (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi,
-             gmv, pesanan, produk_terjual, pengunjung, produk_diklik, cr, pembeli, refund)
-          values
-            (${clientPlatformId}, ${baris.tanggal}::date, 'net', 'tiktok', ${id}, ${pdt.PDT_PARSER_VERSI},
-             ${baris.gmv}, ${baris.pesanan}, ${baris.produkTerjual}, ${baris.pengunjung}, ${baris.produkDiklik},
-             ${baris.cr}, ${baris.pembeli}, ${baris.refund})
-          on conflict (client_platform_id, tanggal, basis, kanal) do update set
-            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-            gmv = excluded.gmv, pesanan = excluded.pesanan, produk_terjual = excluded.produk_terjual,
-            pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
-            pembeli = excluded.pembeli, refund = excluded.refund`;
+        barisShopStatsTiktok.push({
+          client_platform_id: clientPlatformId, tanggal: baris.tanggal, basis: 'net', kanal: 'tiktok', batch_id: id,
+          parser_versi: pdt.PDT_PARSER_VERSI, gmv: baris.gmv, pesanan: baris.pesanan,
+          produk_terjual: baris.produkTerjual, pengunjung: baris.pengunjung, produk_diklik: baris.produkDiklik,
+          cr: baris.cr, pembeli: baris.pembeli, refund: baris.refund,
+        });
       }
     }
   }
+  await insertMassal(satuPerKunci(barisShopStatsTiktok, (r) => [r.client_platform_id, r.tanggal, r.basis, r.kanal]), (p) => tx`
+    insert into pdt_fact_shop_daily ${tx(p)}
+    on conflict (client_platform_id, tanggal, basis, kanal) do update set
+      batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+      gmv = excluded.gmv, pesanan = excluded.pesanan, produk_terjual = excluded.produk_terjual,
+      pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
+      pembeli = excluded.pembeli, refund = excluded.refund`);
 
   // F-01 (M20 R8) — `tt_shop_analytics_tokopedia` → `pdt_fact_shop_daily`, `kanal = 'tokopedia'`,
   // basis `'net'` (docblock `ekstrakBarisShopDailyTokopedia`, `@cdps/core` `pdt/fakta.ts`, dan
   // migrasi `20261203010000` untuk kenapa `kanal` ada di kunci unik: berkas ini berbagi
   // `client_platform_id`+`tanggal`+`basis` yang SAMA dengan `tt_shop_analytics` di atas —
   // tanpa `kanal`, ON CONFLICT keduanya akan saling menimpa).
+  const barisShopStatsTokopedia: BarisInsert[] = [];
   if (berkasShopStatsTokopedia.length > 0) {
     for (const b of berkasShopStatsTokopedia) {
       for (const baris of pdt.ekstrakBarisShopDailyTokopedia(b.aoa)) {
-        await tx`
-          insert into pdt_fact_shop_daily
-            (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi,
-             gmv, pesanan, produk_terjual, pengunjung, produk_diklik, cr, pembeli, refund)
-          values
-            (${clientPlatformId}, ${baris.tanggal}::date, 'net', 'tokopedia', ${id}, ${pdt.PDT_PARSER_VERSI},
-             ${baris.gmv}, ${baris.pesanan}, ${baris.produkTerjual}, ${baris.pengunjung}, ${baris.produkDiklik},
-             ${baris.cr}, ${baris.pembeli}, ${baris.refund})
-          on conflict (client_platform_id, tanggal, basis, kanal) do update set
-            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-            gmv = excluded.gmv, pesanan = excluded.pesanan, produk_terjual = excluded.produk_terjual,
-            pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
-            pembeli = excluded.pembeli, refund = excluded.refund`;
+        barisShopStatsTokopedia.push({
+          client_platform_id: clientPlatformId, tanggal: baris.tanggal, basis: 'net', kanal: 'tokopedia', batch_id: id,
+          parser_versi: pdt.PDT_PARSER_VERSI, gmv: baris.gmv, pesanan: baris.pesanan,
+          produk_terjual: baris.produkTerjual, pengunjung: baris.pengunjung, produk_diklik: baris.produkDiklik,
+          cr: baris.cr, pembeli: baris.pembeli, refund: baris.refund,
+        });
       }
     }
   }
+  await insertMassal(satuPerKunci(barisShopStatsTokopedia, (r) => [r.client_platform_id, r.tanggal, r.basis, r.kanal]), (p) => tx`
+    insert into pdt_fact_shop_daily ${tx(p)}
+    on conflict (client_platform_id, tanggal, basis, kanal) do update set
+      batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+      gmv = excluded.gmv, pesanan = excluded.pesanan, produk_terjual = excluded.produk_terjual,
+      pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
+      pembeli = excluded.pembeli, refund = excluded.refund`);
 
   // Sesi 34 lanjutan (G1-09-2BII-SHOPDAILY-SHOPEE) — `shopee_shop_stats` → `pdt_fact_shop_daily`,
   // TIGA basis Rule 16 sekaligus dari SATU berkas (lihat docblock `ekstrakBarisShopDailyShopee`,
@@ -1582,30 +1659,31 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
     ['Pesanan Siap Dikirim', 'siap_dikirim'],
     ['Pesanan Dibayar', 'dibayar'],
   ]);
+  const barisShopStatsShopee: BarisInsert[] = [];
   if (berkasShopStatsShopee.length > 0) {
     for (const b of berkasShopStatsShopee) {
       for (const [namaSheet, basis] of BASIS_SHEET_SHOPEE) {
         const aoaBasis = b.sheets?.get(namaSheet);
         if (!aoaBasis) continue;
         for (const baris of pdt.ekstrakBarisShopDailyShopee(aoaBasis)) {
-          await tx`
-            insert into pdt_fact_shop_daily
-              (client_platform_id, tanggal, basis, kanal, batch_id, parser_versi,
-               gmv, pesanan, pengunjung, produk_diklik, cr, pembeli, pembeli_baru, refund, pesanan_dibatalkan)
-            values
-              (${clientPlatformId}, ${baris.tanggal}::date, ${basis}, 'shopee', ${id}, ${pdt.PDT_PARSER_VERSI},
-               ${baris.gmv}, ${baris.pesanan}, ${baris.pengunjung}, ${baris.produkDiklik},
-               ${baris.cr}, ${baris.pembeli}, ${baris.pembeliBaru}, ${baris.refund}, ${baris.pesananDibatalkan})
-            on conflict (client_platform_id, tanggal, basis, kanal) do update set
-              batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-              gmv = excluded.gmv, pesanan = excluded.pesanan,
-              pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
-              pembeli = excluded.pembeli, pembeli_baru = excluded.pembeli_baru, refund = excluded.refund,
-              pesanan_dibatalkan = excluded.pesanan_dibatalkan`;
+          barisShopStatsShopee.push({
+            client_platform_id: clientPlatformId, tanggal: baris.tanggal, basis: basis, kanal: 'shopee', batch_id: id,
+            parser_versi: pdt.PDT_PARSER_VERSI, gmv: baris.gmv, pesanan: baris.pesanan, pengunjung: baris.pengunjung,
+            produk_diklik: baris.produkDiklik, cr: baris.cr, pembeli: baris.pembeli, pembeli_baru: baris.pembeliBaru,
+            refund: baris.refund, pesanan_dibatalkan: baris.pesananDibatalkan,
+          });
         }
       }
     }
   }
+  await insertMassal(satuPerKunci(barisShopStatsShopee, (r) => [r.client_platform_id, r.tanggal, r.basis, r.kanal]), (p) => tx`
+    insert into pdt_fact_shop_daily ${tx(p)}
+    on conflict (client_platform_id, tanggal, basis, kanal) do update set
+      batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+      gmv = excluded.gmv, pesanan = excluded.pesanan,
+      pengunjung = excluded.pengunjung, produk_diklik = excluded.produk_diklik, cr = excluded.cr,
+      pembeli = excluded.pembeli, pembeli_baru = excluded.pembeli_baru, refund = excluded.refund,
+      pesanan_dibatalkan = excluded.pesanan_dibatalkan`);
 
   // G1-09 sub-langkah 2b-ii — modul KETIGA, `pdt_sku_master` (lihat docblock
   // `ekstrakBarisSkuMasterShopeeParentSku`/`ekstrakBarisSkuMasterTtOrders`,
@@ -1620,30 +1698,31 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // 'aktif' di sini — SKU yang muncul di batch berarti masih terlihat; transisi ke
   // 'nonaktif'/'dihapus_platform' (SKU yang BERHENTI muncul) butuh perbandingan lintas
   // batch yang belum ada mesinnya (`G1-09-2BII-SKU-STATUS-TRANSISI`, Open baru).
+  const barisSkuMaster: BarisInsert[] = [];
   for (const b of [...berkasParentSkuUntukMaster, ...berkasTtOrders]) {
     const ekstrak = b.modul.kode === 'shopee_parent_sku'
       ? pdt.ekstrakBarisSkuMasterShopeeParentSku(b.aoa, b.barisHeader)
       : pdt.ekstrakBarisSkuMasterTtOrders(b.aoa, b.barisHeader);
     for (const baris of ekstrak) {
-      await tx`
-        insert into pdt_sku_master
-          (client_platform_id, platform_product_id, platform_variation_id, seller_sku,
-           nama_produk, nama_variasi, kategori_platform, harga_satuan_terakhir,
-           status_listing, first_seen_at, last_seen_at)
-        values
-          (${clientPlatformId}, ${baris.platformProductId}, ${baris.platformVariationId}, ${baris.sellerSku},
-           ${baris.namaProduk}, ${baris.namaVariasi}, ${baris.kategoriPlatform}, ${baris.hargaSatuanTerakhir},
-           'aktif', ${now.toISOString()}, ${now.toISOString()})
-        on conflict (client_platform_id, platform_product_id, platform_variation_id) do update set
-          seller_sku = coalesce(excluded.seller_sku, pdt_sku_master.seller_sku),
-          nama_produk = coalesce(excluded.nama_produk, pdt_sku_master.nama_produk),
-          nama_variasi = coalesce(excluded.nama_variasi, pdt_sku_master.nama_variasi),
-          kategori_platform = coalesce(excluded.kategori_platform, pdt_sku_master.kategori_platform),
-          harga_satuan_terakhir = coalesce(excluded.harga_satuan_terakhir, pdt_sku_master.harga_satuan_terakhir),
-          status_listing = 'aktif',
-          last_seen_at = excluded.last_seen_at`;
+      barisSkuMaster.push({
+        client_platform_id: clientPlatformId, platform_product_id: baris.platformProductId,
+        platform_variation_id: baris.platformVariationId, seller_sku: baris.sellerSku, nama_produk: baris.namaProduk,
+        nama_variasi: baris.namaVariasi, kategori_platform: baris.kategoriPlatform,
+        harga_satuan_terakhir: baris.hargaSatuanTerakhir, status_listing: 'aktif', first_seen_at: now.toISOString(),
+        last_seen_at: now.toISOString(),
+      });
     }
   }
+  await insertMassal(satuPerKunci(barisSkuMaster, (r) => [r.client_platform_id, r.platform_product_id, r.platform_variation_id], gabungSkuMaster), (p) => tx`
+    insert into pdt_sku_master ${tx(p)}
+    on conflict (client_platform_id, platform_product_id, platform_variation_id) do update set
+      seller_sku = coalesce(excluded.seller_sku, pdt_sku_master.seller_sku),
+      nama_produk = coalesce(excluded.nama_produk, pdt_sku_master.nama_produk),
+      nama_variasi = coalesce(excluded.nama_variasi, pdt_sku_master.nama_variasi),
+      kategori_platform = coalesce(excluded.kategori_platform, pdt_sku_master.kategori_platform),
+      harga_satuan_terakhir = coalesce(excluded.harga_satuan_terakhir, pdt_sku_master.harga_satuan_terakhir),
+      status_listing = 'aktif',
+      last_seen_at = excluded.last_seen_at`);
 
   // G1-09 sub-langkah 2b-ii — modul KEEMPAT, `tt_transaction_creator` → `pdt_fact_creator_period`
   // (lihat docblock `ekstrakBarisKreatorTtTransactionCreator`, `@cdps/core` `pdt/fakta.ts`).
@@ -1651,23 +1730,25 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // TIDAK pernah punya komponen NULL (baris ber-`Creator name` kosong sudah dilewati di
   // ekstraksi) — `ON CONFLICT ... DO UPDATE` sungguhan AMAN, sama pola `pdt_fact_content`
   // (bukan delete-then-insert seperti `pdt_fact_ads`).
+  const barisTtTransactionCreator: BarisInsert[] = [];
   if (berkasTtTransactionCreator.length > 0) {
     for (const b of berkasTtTransactionCreator) {
       for (const baris of pdt.ekstrakBarisKreatorTtTransactionCreator(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_creator_period
-            (client_platform_id, creator_handle, periode, batch_id, parser_versi,
-             gmv, gmv_live, gmv_video, pesanan_teratribusi, aov, ctor, jumlah_live, jumlah_video, sampel_terkirim)
-          values
-            (${clientPlatformId}, ${baris.creatorHandle}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
-             ${baris.gmv}, null, null, ${baris.pesananTeratribusi}, ${baris.aov}, ${baris.ctor}, ${baris.jumlahLive}, ${baris.jumlahVideo}, null)
-          on conflict (client_platform_id, creator_handle, periode) do update set
-            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-            gmv = excluded.gmv, pesanan_teratribusi = excluded.pesanan_teratribusi,
-            aov = excluded.aov, ctor = excluded.ctor, jumlah_live = excluded.jumlah_live, jumlah_video = excluded.jumlah_video`;
+        barisTtTransactionCreator.push({
+          client_platform_id: clientPlatformId, creator_handle: baris.creatorHandle, periode: periodeAwalBulan,
+          batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI, gmv: baris.gmv, gmv_live: null, gmv_video: null,
+          pesanan_teratribusi: baris.pesananTeratribusi, aov: baris.aov, ctor: baris.ctor,
+          jumlah_live: baris.jumlahLive, jumlah_video: baris.jumlahVideo, sampel_terkirim: null,
+        });
       }
     }
   }
+  await insertMassal(satuPerKunci(barisTtTransactionCreator, (r) => [r.client_platform_id, r.creator_handle, r.periode]), (p) => tx`
+    insert into pdt_fact_creator_period ${tx(p)}
+    on conflict (client_platform_id, creator_handle, periode) do update set
+      batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+      gmv = excluded.gmv, pesanan_teratribusi = excluded.pesanan_teratribusi,
+      aov = excluded.aov, ctor = excluded.ctor, jumlah_live = excluded.jumlah_live, jumlah_video = excluded.jumlah_video`);
 
   // G1-09 sub-langkah 2b-ii — modul KELIMA, `shopee_ams_afiliasi` → `pdt_fact_creator_period`
   // (lihat docblock `ekstrakBarisKreatorShopeeAmsAfiliasi`, `@cdps/core` `pdt/fakta.ts`) —
@@ -1676,22 +1757,24 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // disentuh (COALESCE tidak dipakai di sini — modul ini tidak membawanya sama sekali, dan
   // beda dari `pdt_sku_master`, tabel fakta ini tidak butuh field opsional dijaga dari
   // penimpaan lintas-platform karena Shopee/TikTok selalu punya `client_platform_id` berbeda).
+  const barisShopeeAmsAfiliasi: BarisInsert[] = [];
   if (berkasShopeeAmsAfiliasi.length > 0) {
     for (const b of berkasShopeeAmsAfiliasi) {
       for (const baris of pdt.ekstrakBarisKreatorShopeeAmsAfiliasi(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_creator_period
-            (client_platform_id, creator_handle, periode, batch_id, parser_versi,
-             gmv, gmv_live, gmv_video, pesanan_teratribusi, aov, ctor, jumlah_live, jumlah_video, sampel_terkirim)
-          values
-            (${clientPlatformId}, ${baris.creatorHandle}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
-             ${baris.gmv}, null, null, ${baris.pesananTeratribusi}, null, null, null, null, null)
-          on conflict (client_platform_id, creator_handle, periode) do update set
-            batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
-            gmv = excluded.gmv, pesanan_teratribusi = excluded.pesanan_teratribusi`;
+        barisShopeeAmsAfiliasi.push({
+          client_platform_id: clientPlatformId, creator_handle: baris.creatorHandle, periode: periodeAwalBulan,
+          batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI, gmv: baris.gmv, gmv_live: null, gmv_video: null,
+          pesanan_teratribusi: baris.pesananTeratribusi, aov: null, ctor: null, jumlah_live: null, jumlah_video: null,
+          sampel_terkirim: null,
+        });
       }
     }
   }
+  await insertMassal(satuPerKunci(barisShopeeAmsAfiliasi, (r) => [r.client_platform_id, r.creator_handle, r.periode]), (p) => tx`
+    insert into pdt_fact_creator_period ${tx(p)}
+    on conflict (client_platform_id, creator_handle, periode) do update set
+      batch_id = excluded.batch_id, parser_versi = excluded.parser_versi,
+      gmv = excluded.gmv, pesanan_teratribusi = excluded.pesanan_teratribusi`);
 
   // B33-PARENT-SKU (`docs/DECISIONS.md` 2026-09-20) — `shopee_parent_sku` →
   // `pdt_fact_sku_period` (lihat docblock `ekstrakBarisFaktaSkuShopeeParentSku`,
@@ -1719,6 +1802,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // harus ikut hilang, bukan tertinggal sebagai baris hantu. Nol tabrakan dengan
   // `shopee_ams_produk` — ia menulis basis `dibayar`, dua basis di sini tidak
   // pernah disentuhnya.
+  const barisSkuParentSku: BarisInsert[] = [];
   if (berkasParentSkuUntukMaster.length > 0 && !hanyaHarian) {
     await tx`
       delete from pdt_fact_sku_period
@@ -1731,18 +1815,17 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
           ['dibuat', baris.gmvDibuat, baris.produkTerjualDibuat, baris.pesananDibuat],
           ['siap_dikirim', baris.gmvSiapDikirim, baris.produkTerjualSiapDikirim, baris.pesananSiapDikirim],
         ] as const) {
-          await tx`
-            insert into pdt_fact_sku_period
-              (sku_id, client_platform_id, platform_product_id, nama_produk, periode, basis,
-               batch_id, parser_versi, gmv, produk_terjual, pesanan, impresi, klik, pengunjung)
-            values
-              (null, ${clientPlatformId}, ${baris.platformProductId}, ${baris.namaProduk},
-               ${periodeAwalBulan}::date, ${basis}, ${id}, ${pdt.PDT_PARSER_VERSI},
-               ${gmv}, ${produkTerjual}, ${pesanan}, ${baris.dilihat}, ${baris.klik}, ${baris.pengunjung})`;
+          barisSkuParentSku.push({
+            sku_id: null, client_platform_id: clientPlatformId, platform_product_id: baris.platformProductId,
+            nama_produk: baris.namaProduk, periode: periodeAwalBulan, basis: basis, batch_id: id,
+            parser_versi: pdt.PDT_PARSER_VERSI, gmv: gmv, produk_terjual: produkTerjual, pesanan: pesanan,
+            impresi: baris.dilihat, klik: baris.klik, pengunjung: baris.pengunjung,
+          });
         }
       }
     }
   }
+  await insertMassal(barisSkuParentSku, (p) => tx`insert into pdt_fact_sku_period ${tx(p)}`);
 
   // G1-09 sub-langkah 2b-ii — modul KEDELAPAN (sesi 23), `shopee_ams_produk` →
   // `pdt_fact_sku_period` (lihat docblock `ekstrakBarisShopeeAmsProduk`, `@cdps/core`
@@ -1753,6 +1836,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // per baris — `ON CONFLICT` pada unique index PARSIAL `uq_pdt_fact_sku_period_produk`
   // tidak menutupi kasus itu. `basis = 'dibayar'` LITERAL (bukan dari kolom manapun di
   // berkas — keputusan pemilik, lihat docblock `ekstrakBarisShopeeAmsProduk`).
+  const barisShopeeAmsProduk: BarisInsert[] = [];
   if (berkasShopeeAmsProduk.length > 0) {
     await tx`
       delete from pdt_fact_sku_period
@@ -1760,16 +1844,15 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
          and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasShopeeAmsProduk) {
       for (const baris of pdt.ekstrakBarisShopeeAmsProduk(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_sku_period
-            (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id,
-             parser_versi, gmv, produk_terjual, pesanan)
-          values
-            (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'dibayar', ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.produkTerjual}, ${baris.pesanan})`;
+        barisShopeeAmsProduk.push({
+          sku_id: null, client_platform_id: clientPlatformId, platform_product_id: baris.platformProductId,
+          periode: periodeAwalBulan, basis: 'dibayar', batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI,
+          gmv: baris.gmv, produk_terjual: baris.produkTerjual, pesanan: baris.pesanan,
+        });
       }
     }
   }
+  await insertMassal(barisShopeeAmsProduk, (p) => tx`insert into pdt_fact_sku_period ${tx(p)}`);
 
   // PDT-TIKET-TT-ORDERS-FAKTA-DIBAYAR (`docs/backlog/PX_M3_BACKLOG.md`) — `tt_orders` →
   // `pdt_fact_sku_period` (lihat docblock `ekstrakBarisFaktaSkuTtOrders`, `@cdps/core`
@@ -1779,6 +1862,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // dengan blok `shopee_ams_produk`: `client_platform_id` sudah per-platform, jadi satu
   // baris `pdt_fact_sku_period` untuk toko TikTok tertentu hanya pernah berasal dari SATU
   // penulis (`tt_orders` di sini) untuk (sku_id null, basis 'dibayar').
+  const barisSkuTtOrders: BarisInsert[] = [];
   if (berkasTtOrders.length > 0 && !hanyaHarian) {
     await tx`
       delete from pdt_fact_sku_period
@@ -1786,17 +1870,16 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
          and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasTtOrders) {
       for (const baris of pdt.ekstrakBarisFaktaSkuTtOrders(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_sku_period
-            (sku_id, client_platform_id, platform_product_id, periode, basis, batch_id,
-             parser_versi, gmv, gmv_dari_kreator, pesanan_sku, produk_terjual)
-          values
-            (null, ${clientPlatformId}, ${baris.platformProductId}, ${periodeAwalBulan}::date, 'dibayar', ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.gmvDariKreator}, ${baris.pesananSku},
-             ${baris.produkTerjual})`;
+        barisSkuTtOrders.push({
+          sku_id: null, client_platform_id: clientPlatformId, platform_product_id: baris.platformProductId,
+          periode: periodeAwalBulan, basis: 'dibayar', batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI,
+          gmv: baris.gmv, gmv_dari_kreator: baris.gmvDariKreator, pesanan_sku: baris.pesananSku,
+          produk_terjual: baris.produkTerjual,
+        });
       }
     }
   }
+  await insertMassal(barisSkuTtOrders, (p) => tx`insert into pdt_fact_sku_period ${tx(p)}`);
 
   // B1-BATAL-TIKTOK (`docs/DECISIONS.md` 2026-09-20, ketokan pemilik) — `tt_orders` →
   // `pdt_fact_shop_daily`, PENULIS KEDUA ke tabel yang sama. Sampai sekarang setiap
@@ -1850,6 +1933,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // shop-level, dan `tt_shop_analytics` → `pdt_fact_shop_daily` sudah memakai `basis = 'net'`
   // (lihat docblock `ekstrakBarisShopDailyTiktok`) — kesetaraan angka yang sudah dibuktikan
   // sample asli, bukan basis baru yang diasumsikan.
+  const barisTtProductAnalytics: BarisInsert[] = [];
   if (berkasTtProductAnalytics.length > 0) {
     await tx`
       delete from pdt_fact_sku_period
@@ -1857,63 +1941,62 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
          and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasTtProductAnalytics) {
       for (const baris of pdt.ekstrakBarisTtProductAnalytics(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_sku_period
-            (sku_id, client_platform_id, platform_product_id, nama_produk, periode, basis, batch_id,
-             parser_versi, gmv, gmv_dari_kreator, gmv_video_penjual, gmv_live_penjual,
-             pesanan_sku, produk_terjual, impresi, klik, ctr, ctor)
-          values
-            (null, ${clientPlatformId}, ${baris.platformProductId}, ${baris.namaProduk}, ${periodeAwalBulan}::date, 'net', ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.gmv}, ${baris.gmvDariKreator}, ${baris.gmvVideoPenjual},
-             ${baris.gmvLivePenjual}, ${baris.pesananSku}, ${baris.produkTerjual}, ${baris.impresi}, ${baris.klik},
-             ${baris.ctr}, ${baris.ctor})`;
+        barisTtProductAnalytics.push({
+          sku_id: null, client_platform_id: clientPlatformId, platform_product_id: baris.platformProductId,
+          nama_produk: baris.namaProduk, periode: periodeAwalBulan, basis: 'net', batch_id: id,
+          parser_versi: pdt.PDT_PARSER_VERSI, gmv: baris.gmv, gmv_dari_kreator: baris.gmvDariKreator,
+          gmv_video_penjual: baris.gmvVideoPenjual, gmv_live_penjual: baris.gmvLivePenjual,
+          pesanan_sku: baris.pesananSku, produk_terjual: baris.produkTerjual, impresi: baris.impresi, klik: baris.klik,
+          ctr: baris.ctr, ctor: baris.ctor,
+        });
       }
     }
   }
+  await insertMassal(barisTtProductAnalytics, (p) => tx`insert into pdt_fact_sku_period ${tx(p)}`);
 
   // G2-01-SHOPEE-KESEHATAN-WRITER — `shopee_kesehatan` → `pdt_fact_kesehatan_penalti`
   // (lihat docblock `ekstrakBarisKesehatanShopee`, `@cdps/core` `pdt/fakta.ts`). Nol
   // identitas natural per-baris di sumber (sama alasan `pdt_fact_ads`) — replace-on-
   // recommit: DELETE scope (client_platform_id+periode) lalu INSERT ulang seluruh
   // baris dari batch yang sedang di-commit.
+  const barisShopeeKesehatan: BarisInsert[] = [];
   if (berkasShopeeKesehatan.length > 0) {
     await tx`
       delete from pdt_fact_kesehatan_penalti
        where client_platform_id = ${clientPlatformId} and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasShopeeKesehatan) {
       for (const baris of pdt.ekstrakBarisKesehatanShopee(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_kesehatan_penalti
-            (client_platform_id, periode, batch_id, parser_versi, poin, deskripsi, durasi)
-          values
-            (${clientPlatformId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
-             ${baris.poin}, ${baris.deskripsi}, ${baris.durasi})`;
+        barisShopeeKesehatan.push({
+          client_platform_id: clientPlatformId, periode: periodeAwalBulan, batch_id: id,
+          parser_versi: pdt.PDT_PARSER_VERSI, poin: baris.poin, deskripsi: baris.deskripsi, durasi: baris.durasi,
+        });
       }
     }
   }
+  await insertMassal(barisShopeeKesehatan, (p) => tx`insert into pdt_fact_kesehatan_penalti ${tx(p)}`);
 
   // G3-02a — `shopee_chat` → `pdt_fact_layanan_chat` (lihat docblock
   // `ekstrakBarisLayananChatShopee`, `@cdps/core` `pdt/fakta.ts`). Nol
   // identitas natural per-baris di sumber (satu baris ringkasan per
   // unggahan) — replace-on-recommit, pola sama `pdt_fact_kesehatan_penalti`.
+  const barisShopeeChat: BarisInsert[] = [];
   if (berkasShopeeChat.length > 0) {
     await tx`
       delete from pdt_fact_layanan_chat
        where client_platform_id = ${clientPlatformId} and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasShopeeChat) {
       for (const baris of pdt.ekstrakBarisLayananChatShopee(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_layanan_chat
-            (client_platform_id, periode, batch_id, parser_versi, pengunjung, chat_masuk,
-             chat_dibalas, waktu_respon_detik, csat_persen, total_pesanan, penjualan,
-             tingkat_konversi_chat_dibalas)
-          values
-            (${clientPlatformId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI},
-             ${baris.pengunjung}, ${baris.chatMasuk}, ${baris.chatDibalas}, ${baris.waktuResponDetik},
-             ${baris.csatPersen}, ${baris.totalPesanan}, ${baris.penjualan}, ${baris.tingkatKonversiChatDibalas})`;
+        barisShopeeChat.push({
+          client_platform_id: clientPlatformId, periode: periodeAwalBulan, batch_id: id,
+          parser_versi: pdt.PDT_PARSER_VERSI, pengunjung: baris.pengunjung, chat_masuk: baris.chatMasuk,
+          chat_dibalas: baris.chatDibalas, waktu_respon_detik: baris.waktuResponDetik, csat_persen: baris.csatPersen,
+          total_pesanan: baris.totalPesanan, penjualan: baris.penjualan,
+          tingkat_konversi_chat_dibalas: baris.tingkatKonversiChatDibalas,
+        });
       }
     }
   }
+  await insertMassal(barisShopeeChat, (p) => tx`insert into pdt_fact_layanan_chat ${tx(p)}`);
 
   // G4-03 aksi 4 — `shopee_diskon`/`shopee_flash_sale` → `pdt_fact_promo`.
   // Replace-on-recommit per (toko, jenis, periode), pola sama blok-blok di atas.
@@ -1924,41 +2007,42 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // bisa membawa beberapa tipe promosi). Menjumlahkan seluruh baris = bug kelas
   // `G1-07-SHOPEE-DOBEL-HITUNG`; lihat docblock ekstraktornya untuk angka nyata
   // yang membuktikannya (Σ komponen 25% di atas baris 'Semua' pada satu klien).
+  const barisShopeeDiskon: BarisInsert[] = [];
   if (berkasShopeeDiskon.length > 0) {
     await tx`
       delete from pdt_fact_promo
        where client_platform_id = ${clientPlatformId} and jenis = 'diskon' and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasShopeeDiskon) {
       for (const baris of pdt.ekstrakBarisPromoDiskonShopee(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_promo
-            (client_platform_id, periode, batch_id, parser_versi, jenis, tipe_promosi,
-             penjualan_dibuat, penjualan_siap_dikirim, pesanan_dibuat, pesanan_siap_dikirim)
-          values
-            (${clientPlatformId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'diskon', ${baris.tipePromosi},
-             ${baris.penjualanDibuat}, ${baris.penjualanSiapDikirim}, ${baris.pesananDibuat}, ${baris.pesananSiapDikirim})`;
+        barisShopeeDiskon.push({
+          client_platform_id: clientPlatformId, periode: periodeAwalBulan, batch_id: id,
+          parser_versi: pdt.PDT_PARSER_VERSI, jenis: 'diskon', tipe_promosi: baris.tipePromosi,
+          penjualan_dibuat: baris.penjualanDibuat, penjualan_siap_dikirim: baris.penjualanSiapDikirim,
+          pesanan_dibuat: baris.pesananDibuat, pesanan_siap_dikirim: baris.pesananSiapDikirim,
+        });
       }
     }
   }
+  await insertMassal(barisShopeeDiskon, (p) => tx`insert into pdt_fact_promo ${tx(p)}`);
 
+  const barisShopeeFlashSale: BarisInsert[] = [];
   if (berkasShopeeFlashSale.length > 0) {
     await tx`
       delete from pdt_fact_promo
        where client_platform_id = ${clientPlatformId} and jenis = 'flash_sale' and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasShopeeFlashSale) {
       for (const baris of pdt.ekstrakBarisPromoFlashSaleShopee(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_promo
-            (client_platform_id, periode, batch_id, parser_versi, jenis, tipe_promosi,
-             penjualan_dibuat, penjualan_siap_dikirim, pesanan_dibuat, pesanan_siap_dikirim,
-             produk_dilihat, produk_diklik)
-          values
-            (${clientPlatformId}, ${periodeAwalBulan}::date, ${id}, ${pdt.PDT_PARSER_VERSI}, 'flash_sale', null,
-             ${baris.penjualanDibuat}, ${baris.penjualanSiapDikirim}, ${baris.pesananDibuat}, ${baris.pesananSiapDikirim},
-             ${baris.produkDilihat}, ${baris.produkDiklik})`;
+        barisShopeeFlashSale.push({
+          client_platform_id: clientPlatformId, periode: periodeAwalBulan, batch_id: id,
+          parser_versi: pdt.PDT_PARSER_VERSI, jenis: 'flash_sale', tipe_promosi: null,
+          penjualan_dibuat: baris.penjualanDibuat, penjualan_siap_dikirim: baris.penjualanSiapDikirim,
+          pesanan_dibuat: baris.pesananDibuat, pesanan_siap_dikirim: baris.pesananSiapDikirim,
+          produk_dilihat: baris.produkDilihat, produk_diklik: baris.produkDiklik,
+        });
       }
     }
   }
+  await insertMassal(barisShopeeFlashSale, (p) => tx`insert into pdt_fact_promo ${tx(p)}`);
 
   // 2026-09-16 — `tt_ads_product` → `pdt_fact_ads` (lihat docblock
   // `ekstrakBarisTtAdsProduct`, `@cdps/core` `pdt/fakta.ts`, untuk kenapa `roas`
@@ -1967,6 +2051,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // tidak aman dipakai lewat `uq_pdt_fact_ads`). `tayangan`/`klik` diisi 2026-09-16
   // (`G1-09-2BII-TTADS-SAMPLE` DITUTUP — sample asli mengonfirmasi `Impresi iklan
   // produk`/`Jumlah klik iklan produk` sebagai kolom nyata).
+  const barisTtAdsProduct: BarisInsert[] = [];
   if (berkasTtAdsProduct.length > 0) {
     await tx`
       delete from pdt_fact_ads
@@ -1975,17 +2060,16 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
     for (const b of formatLamaDulu(berkasTtAdsProduct)) {
       for (const baris of pdt.ekstrakBarisTtAdsProduct(b.aoa, b.barisHeader)) {
         if (lewatiKampanyeGanda(b.modul.kode, baris.kampanyeId, kampanyeTertulis)) continue;
-        await tx`
-          insert into pdt_fact_ads
-            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
-          values
-            (${clientPlatformId}, 'tt_ads_product', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
-             ${baris.tipeKampanyeSumber}, 'lower')`;
+        barisTtAdsProduct.push({
+          client_platform_id: clientPlatformId, sumber: 'tt_ads_product', kampanye_id: baris.kampanyeId, sku_id: null,
+          content_id: null, periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI,
+          biaya: baris.biaya, tayangan: baris.tayangan, klik: baris.klik, pesanan_sku: baris.pesananSku,
+          gmv: baris.gmv, roas: baris.roas, tipe_kampanye_sumber: baris.tipeKampanyeSumber, tujuan: 'lower',
+        });
       }
     }
   }
+  await insertMassal(barisTtAdsProduct, (p) => tx`insert into pdt_fact_ads ${tx(p)}`);
 
   // 2026-09-16 — `tt_ads_live` → `pdt_fact_ads` (lihat docblock `ekstrakBarisTtAdsLive`,
   // `@cdps/core` `pdt/fakta.ts` — sama alasan `tt_ads_product` di atas untuk `roas`
@@ -1997,6 +2081,7 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // `strategi.petakanTipeKampanye` mengembalikan 'live_ads' dari `sumber` saja untuk
   // `tt_ads_live`; kolomnya sengaja dibiarkan NULL supaya tidak ada nilai yang TAMPAK
   // dipanen dari berkas padahal berasal dari identitas modul. Satu rumah untuk asumsi itu.
+  const barisTtAdsLive: BarisInsert[] = [];
   if (berkasTtAdsLive.length > 0) {
     await tx`
       delete from pdt_fact_ads
@@ -2005,17 +2090,16 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
     for (const b of formatLamaDulu(berkasTtAdsLive)) {
       for (const baris of pdt.ekstrakBarisTtAdsLive(b.aoa, b.barisHeader)) {
         if (lewatiKampanyeGanda(b.modul.kode, baris.kampanyeId, kampanyeTertulis)) continue;
-        await tx`
-          insert into pdt_fact_ads
-            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan)
-          values
-            (${clientPlatformId}, 'tt_ads_live', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, ${baris.pesananSku}, ${baris.gmv}, ${baris.roas},
-             null, 'lower')`;
+        barisTtAdsLive.push({
+          client_platform_id: clientPlatformId, sumber: 'tt_ads_live', kampanye_id: baris.kampanyeId, sku_id: null,
+          content_id: null, periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI,
+          biaya: baris.biaya, tayangan: baris.tayangan, klik: null, pesanan_sku: baris.pesananSku, gmv: baris.gmv,
+          roas: baris.roas, tipe_kampanye_sumber: null, tujuan: 'lower',
+        });
       }
     }
   }
+  await insertMassal(barisTtAdsLive, (p) => tx`insert into pdt_fact_ads ${tx(p)}`);
 
   // F-03 (M20 R9) — EMPAT modul TTAM → `pdt_fact_ads`, `tujuan = 'upper'`
   // LITERAL untuk keempatnya (lihat docblock `ekstrakBarisTtamVideoViews`/
@@ -2048,77 +2132,77 @@ async function tulisFaktaModulTerparse(tx: Queryable, inputAsli: TulisFaktaModul
   // (PERMANEN null, nol konsumen report), `follows`/`showcase` →
   // `baris.hasil` (Paid follows / Adds to cart (Shop)). Konsumen tunggal:
   // `bacaTahapTiktok` di bawah.
+  const barisTtamVideoViews: BarisInsert[] = [];
   if (berkasTtamVideoViews.length > 0) {
     await tx`
       delete from pdt_fact_ads
        where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_manager_videoviews' and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasTtamVideoViews) {
       for (const baris of pdt.ekstrakBarisTtamVideoViews(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_ads
-            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan, hasil)
-          values
-            (${clientPlatformId}, 'tt_ads_manager_videoviews', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, null, null, null, null,
-             null, 'upper', ${baris.videoViews})`;
+        barisTtamVideoViews.push({
+          client_platform_id: clientPlatformId, sumber: 'tt_ads_manager_videoviews', kampanye_id: baris.kampanyeId,
+          sku_id: null, content_id: null, periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI,
+          biaya: baris.biaya, tayangan: baris.tayangan, klik: null, pesanan_sku: null, gmv: null, roas: null,
+          tipe_kampanye_sumber: null, tujuan: 'upper', hasil: baris.videoViews,
+        });
       }
     }
   }
+  await insertMassal(barisTtamVideoViews, (p) => tx`insert into pdt_fact_ads ${tx(p)}`);
 
+  const barisTtamConsideration: BarisInsert[] = [];
   if (berkasTtamConsideration.length > 0) {
     await tx`
       delete from pdt_fact_ads
        where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_manager_consideration' and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasTtamConsideration) {
       for (const baris of pdt.ekstrakBarisTtamConsideration(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_ads
-            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan, hasil)
-          values
-            (${clientPlatformId}, 'tt_ads_manager_consideration', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, null, null, null,
-             null, 'upper', ${baris.hasil})`;
+        barisTtamConsideration.push({
+          client_platform_id: clientPlatformId, sumber: 'tt_ads_manager_consideration', kampanye_id: baris.kampanyeId,
+          sku_id: null, content_id: null, periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI,
+          biaya: baris.biaya, tayangan: baris.tayangan, klik: baris.klik, pesanan_sku: null, gmv: null, roas: null,
+          tipe_kampanye_sumber: null, tujuan: 'upper', hasil: baris.hasil,
+        });
       }
     }
   }
+  await insertMassal(barisTtamConsideration, (p) => tx`insert into pdt_fact_ads ${tx(p)}`);
 
+  const barisTtamFollows: BarisInsert[] = [];
   if (berkasTtamFollows.length > 0) {
     await tx`
       delete from pdt_fact_ads
        where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_manager_follows' and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasTtamFollows) {
       for (const baris of pdt.ekstrakBarisTtamFollows(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_ads
-            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan, hasil)
-          values
-            (${clientPlatformId}, 'tt_ads_manager_follows', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, null, null, null,
-             null, 'upper', ${baris.hasil})`;
+        barisTtamFollows.push({
+          client_platform_id: clientPlatformId, sumber: 'tt_ads_manager_follows', kampanye_id: baris.kampanyeId,
+          sku_id: null, content_id: null, periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI,
+          biaya: baris.biaya, tayangan: baris.tayangan, klik: baris.klik, pesanan_sku: null, gmv: null, roas: null,
+          tipe_kampanye_sumber: null, tujuan: 'upper', hasil: baris.hasil,
+        });
       }
     }
   }
+  await insertMassal(barisTtamFollows, (p) => tx`insert into pdt_fact_ads ${tx(p)}`);
 
+  const barisTtamShowcase: BarisInsert[] = [];
   if (berkasTtamShowcase.length > 0) {
     await tx`
       delete from pdt_fact_ads
        where client_platform_id = ${clientPlatformId} and sumber = 'tt_ads_manager_showcase' and periode = ${periodeAwalBulan}::date`;
     for (const b of berkasTtamShowcase) {
       for (const baris of pdt.ekstrakBarisTtamShowcase(b.aoa, b.barisHeader)) {
-        await tx`
-          insert into pdt_fact_ads
-            (client_platform_id, sumber, kampanye_id, sku_id, content_id, periode, batch_id,
-             parser_versi, biaya, tayangan, klik, pesanan_sku, gmv, roas, tipe_kampanye_sumber, tujuan, hasil)
-          values
-            (${clientPlatformId}, 'tt_ads_manager_showcase', ${baris.kampanyeId}, null, null, ${periodeAwalBulan}::date, ${id},
-             ${pdt.PDT_PARSER_VERSI}, ${baris.biaya}, ${baris.tayangan}, ${baris.klik}, null, null, null,
-             null, 'upper', ${baris.hasil})`;
+        barisTtamShowcase.push({
+          client_platform_id: clientPlatformId, sumber: 'tt_ads_manager_showcase', kampanye_id: baris.kampanyeId,
+          sku_id: null, content_id: null, periode: periodeAwalBulan, batch_id: id, parser_versi: pdt.PDT_PARSER_VERSI,
+          biaya: baris.biaya, tayangan: baris.tayangan, klik: baris.klik, pesanan_sku: null, gmv: null, roas: null,
+          tipe_kampanye_sumber: null, tujuan: 'upper', hasil: baris.hasil,
+        });
       }
     }
   }
+  await insertMassal(barisTtamShowcase, (p) => tx`insert into pdt_fact_ads ${tx(p)}`);
 }
 
 /**
