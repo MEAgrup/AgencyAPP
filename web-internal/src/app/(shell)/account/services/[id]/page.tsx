@@ -22,7 +22,6 @@ import {
   isAccountLead,
   isAccountStaff,
   isReadOnlyOD,
-  jalurEksekusiGate,
   listServiceBriefs,
   listStrategies,
   nextOnboardingStep,
@@ -78,7 +77,7 @@ function taskIsMoney(divisi: string, jenis: string): boolean {
 export default function ServiceHubPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const { role, employee } = useAuth();
+  const { role } = useAuth();
   const readOnly = isReadOnlyOD(role);
   // Write forms (create Strategy/Brief, requirement override) belong to the
   // Account division (owner AM/lead) or Director — strategy.go:220-223,
@@ -378,9 +377,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // answer — hiding a control that would have worked is the worse failure.
   const awaitingOnboarding = service ? service.status === SERVICE_AWAITING_ONBOARDING : true;
   const step = service ? nextOnboardingStep(service) : null;
-  // "Ubah Jalur Eksekusi" (M6-OA-1, feedback B1–B3): the form f307485b dropped
-  // together with the STR- blocks. Same gate as setStrategyRequirement.
-  const jalur = service ? jalurEksekusiGate(service, role, employee?.employee_id ?? null, strgAktif) : null;
 
   async function handleOpenInterview() {
     if (!service) return;
@@ -842,52 +838,6 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
-      {service && jalur?.tampil && !strategy && !service.plan_determination_pending && (
-        <section className="card">
-          <div className="cardHeader">
-            <h2>Ubah Jalur Eksekusi (Plan-gated &harr; Direct)</h2>
-          </div>
-          <p className="muted" style={{ fontSize: 13 }}>
-            Hanya bisa saat layanan masih [Awaiting Onboarding] dan belum ada Strategi aktif. Alasan wajib dan
-            tercatat di audit. Pin Master Service List tidak berubah &mdash; perubahan ini berlaku untuk
-            engagement ini saja (M6-OA-1). Tidak perlu Void Service untuk mengganti jalur.
-          </p>
-          <form className="form" onSubmit={handleOverride}>
-            {reqError && <div className="alert alertError" role="alert">{reqError}</div>}
-            {reqMessage && <div className="alert alertSuccess" role="status">{reqMessage}</div>}
-            <label className="row" style={{ gap: 8, fontSize: 13 }}>
-              <input type="radio" name="req-jalur" checked={reqValue} onChange={() => setReqValue(true)} />
-              Plan-gated &mdash; Interview &rarr; Buat Strategi &rarr; Plan &rarr; Brief
-            </label>
-            <label className="row" style={{ gap: 8, fontSize: 13 }}>
-              <input
-                type="radio"
-                name="req-jalur"
-                checked={!reqValue}
-                disabled={jalur.directTerkunci}
-                onChange={() => setReqValue(false)}
-              />
-              Direct &mdash; Interview &rarr; Buat Brief
-              {jalur.directTerkunci && (
-                <span className="muted"> (tier Plan Wajib &mdash; butuh persetujuan Hans)</span>
-              )}
-            </label>
-            <div className="field">
-              <label htmlFor="req-reason">Alasan</label>
-              <input id="req-reason" required value={reqReason} onChange={(e) => setReqReason(e.target.value)} />
-            </div>
-            <div>
-              <button
-                type="submit"
-                className="btn btnSecondary"
-                disabled={reqSubmitting || reqValue === service.requires_strategy_plan}
-              >
-                {reqSubmitting ? 'Menyimpan...' : 'Simpan Jalur Eksekusi'}
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
 
       {/* A voided Service (M4-OA-5) has no live path left — createBrief rejects it
           with [brief tidak dapat dibuat untuk layanan pada status ini]. */}

@@ -19,7 +19,6 @@ import {
   STRATEGY_SUBMITTED,
   canEditClientProfile,
   groupServiceQueueByClient,
-  jalurEksekusiGate,
   needsOnboarding,
   nextOnboardingStep,
   type ServiceQueueRow,
@@ -312,38 +311,5 @@ describe('groupServiceQueueByClient — Antrean Layanan Klien grouping', () => {
 
   it('returns an empty list for an empty queue', () => {
     expect(groupServiceQueueByClient([])).toEqual([]);
-  });
-});
-
-describe('jalurEksekusiGate — form "Ubah Jalur Eksekusi" (B1–B3)', () => {
-  const am = role({ division: 'Account', level: 'staff' });
-  const lead = role({ division: 'Account', level: 'lead' });
-  const dir = role({ division: 'Management', director: true });
-
-  it('shows for the owner AM, Account lead and Director at [Awaiting Onboarding]', () => {
-    const s = svc({ plan_tier: 'ditentukan_am' });
-    expect(jalurEksekusiGate(s, am, 'EMP-0002', false).tampil).toBe(true);
-    expect(jalurEksekusiGate(s, lead, 'EMP-0099', false).tampil).toBe(true);
-    expect(jalurEksekusiGate(s, dir, 'EMP-0001', false).tampil).toBe(true);
-  });
-
-  it('hides for other AMs, other divisions, OD, and other statuses', () => {
-    const s = svc({ plan_tier: 'ditentukan_am' });
-    expect(jalurEksekusiGate(s, am, 'EMP-0003', false).tampil).toBe(false);
-    expect(jalurEksekusiGate(s, role({ level: 'lead' }), 'EMP-0002', false).tampil).toBe(false);
-    expect(jalurEksekusiGate(s, role({ division: 'Management', od: true }), 'EMP-0002', false).tampil).toBe(false);
-    expect(jalurEksekusiGate(svc({ status: SERVICE_BRIEFED }), lead, null, false).tampil).toBe(false);
-  });
-
-  it('hides once a Strategi (STRG-) is Aktif', () => {
-    expect(jalurEksekusiGate(svc({ plan_tier: 'ditentukan_am' }), lead, null, true).tampil).toBe(false);
-  });
-
-  it('locks the Direct option for plan_wajib (butuh persetujuan Hans)', () => {
-    expect(jalurEksekusiGate(svc({ plan_tier: 'plan_wajib' }), dir, null, false)).toEqual({
-      tampil: true,
-      directTerkunci: true,
-    });
-    expect(jalurEksekusiGate(svc({ plan_tier: 'ditentukan_am' }), dir, null, false).directTerkunci).toBe(false);
   });
 });
