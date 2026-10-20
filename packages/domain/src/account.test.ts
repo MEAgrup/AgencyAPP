@@ -64,6 +64,10 @@ import {
   MSG_BRIEF_SUMBER_TIDAK_ADA,
   MSG_BRIEF_ASSETS_NOT_APPROVED,
   MSG_PIC_BUKAN_WEWENANG_AM,
+  MSG_OVERRIDE_FORBIDDEN,
+  MSG_OVERRIDE_NOT_AWAITING,
+  MSG_OVERRIDE_PLAN_WAJIB,
+  MSG_STRATEGY_EXISTS,
   type BriefInput,
   type StrategyInput,
 } from './account';
@@ -189,6 +193,8 @@ afterEach(async () => {
   await sql`delete from assets where created_by like 'ZZ-%'`;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from strategy_plans where created_by like 'ZZ-%'`;
+  // B1–B3 fixtures: an Aktif STRG- holds its contract (fk), so it goes first.
+  await sql`delete from strategi where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -856,6 +862,78 @@ describeDb('guardBriefCreation (§6) + setStrategyRequirement (M6-OA-1)', () => 
     const late = nextSvcId();
     await insertService(late, clientId, false, '[Strategy Approved]');
     await expect(setStrategyRequirement(sql, accountLead(), late, true, 'x')).rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
+// Feedback B1–B3 (Radjakolam SVC-202609-0008): the form "Ubah Jalur Eksekusi" is
+// back on the Service hub, so the server gate it calls must hold on its own —
+// including the two guards the pre-STRG version never had.
+describeDb('setStrategyRequirement — Ubah Jalur Eksekusi (B1–B3)', () => {
+  /** Service on a contract, with an explicit catalog tier (pin follows the tier CHECK). */
+  async function tieredService(
+    tier: 'plan_wajib' | 'ditentukan_am' | 'tanpa_plan',
+    status = '[Awaiting Onboarding]',
+  ): Promise<{ svcId: string; contractId: string; clientId: string }> {
+    const { clientId } = await planGatedFixture();
+    const contractId = `ZZ-CTR-${Date.now() % 100000}-${svcSeq++}`;
+    await sql`
+      insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, created_by)
+      values (${contractId}, ${clientId}, 6, '2026-09-01', '2027-03-01', 'ZZ-TEST')`;
+    const svcId = nextSvcId();
+    await sql`
+      insert into services (id, client_id, contract_id, master_service_id, master_version_no, name,
+        standard_price, commission_rule, status, requires_strategy_plan, plan_tier, created_by)
+      values (${svcId}, ${clientId}, ${contractId}, 'MSV-X', 1, 'Layanan uji', '10000000.00', 'rule',
+        ${status}, ${tier === 'plan_wajib'}, ${tier}, 'ZZ-TEST')`;
+    return { svcId, contractId, clientId };
+  }
+
+  it('owner AM, Account lead and Director may switch the path at [Awaiting Onboarding]', async () => {
+    const a = await tieredService('ditentukan_am');
+    const r1 = await setStrategyRequirement(sql, accountStaff('ZZ-SINTA'), a.svcId, true, 'klien butuh strategi');
+    expect(r1.requiresStrategyPlan).toBe(true);
+    const r2 = await setStrategyRequirement(sql, accountLead(), a.svcId, false, 'cukup brief langsung');
+    expect(r2.requiresStrategyPlan).toBe(false);
+    const r3 = await setStrategyRequirement(sql, director(), a.svcId, true, 'kembali ke plan');
+    expect(r3.requiresStrategyPlan).toBe(true);
+  });
+
+  it('other roles and other statuses are rejected', async () => {
+    const a = await tieredService('ditentukan_am');
+    await expect(setStrategyRequirement(sql, accountStaff('ZZ-OTHER'), a.svcId, false, 'x')).rejects.toThrow(
+      MSG_OVERRIDE_FORBIDDEN,
+    );
+    await expect(setStrategyRequirement(sql, od(), a.svcId, false, 'x')).rejects.toThrow(MSG_OVERRIDE_FORBIDDEN);
+    await expect(setStrategyRequirement(sql, creativeLead(), a.svcId, false, 'x')).rejects.toThrow(
+      MSG_OVERRIDE_FORBIDDEN,
+    );
+    const late = await tieredService('ditentukan_am', '[Briefed]');
+    await expect(setStrategyRequirement(sql, accountLead(), late.svcId, false, 'x')).rejects.toThrow(
+      MSG_OVERRIDE_NOT_AWAITING,
+    );
+  });
+
+  it('is rejected once a Strategi (STRG-) on the contract is Aktif', async () => {
+    const a = await tieredService('ditentukan_am');
+    await sql`
+      insert into strategi (id, contract_id, client_id, status, created_by)
+      values (${`ZZ-STRG-${Date.now() % 100000}-${svcSeq++}`}, ${a.contractId}, ${a.clientId}, 'Aktif', 'ZZ-TEST')`;
+    await expect(setStrategyRequirement(sql, accountLead(), a.svcId, false, 'ganti ke direct')).rejects.toThrow(
+      MSG_STRATEGY_EXISTS,
+    );
+    expect(
+      (await sql`select requires_strategy_plan_override from services where id = ${a.svcId}`)[0]
+        .requires_strategy_plan_override,
+    ).toBeNull();
+  });
+
+  it('a plan_wajib Service cannot be switched to Direct (pending Hans)', async () => {
+    const a = await tieredService('plan_wajib');
+    await expect(setStrategyRequirement(sql, director(), a.svcId, false, 'direct saja')).rejects.toThrow(
+      MSG_OVERRIDE_PLAN_WAJIB,
+    );
+    // Confirming the locked-on path stays allowed (no-op on the effective gate).
+    await expect(setStrategyRequirement(sql, director(), a.svcId, true, 'tetap plan')).resolves.toBeTruthy();
   });
 });
 

@@ -40,6 +40,7 @@ import { onBriefReachedTerminal, validateBriefApproval } from './board';
 import * as stage from './stage';
 import {
   effectiveGate,
+  TIER_PLAN_WAJIB,
   type GateDecision,
   type PlanTier,
 } from './plangate_rules';
@@ -514,6 +515,13 @@ export const MSG_OVERRIDE_REASON_REQUIRED = '[alasan perubahan kebutuhan Strateg
 /** The plan-flag may only be overridden while the Service is [Awaiting Onboarding]. */
 export const MSG_OVERRIDE_NOT_AWAITING =
   '[kebutuhan Strategy & Plan hanya dapat diubah saat layanan berstatus Awaiting Onboarding]';
+/**
+ * A `plan_wajib` Service cannot be switched to Direct by override (M6C S4: the
+ * tier is "locked on"). Whether that lock may ever be lifted is an open question
+ * for Hans (B1–B3, 2026-10-19) — until he answers, the server refuses it.
+ */
+export const MSG_OVERRIDE_PLAN_WAJIB =
+  '[layanan ber-tier Plan Wajib tidak dapat diubah ke jalur Direct tanpa persetujuan]';
 /** A structured Target KPI value (GMV/ROAS/CTR/CVR) or a task quota is not a valid number. */
 export const MSG_INVALID_KPI = '[nilai Target KPI tidak valid]';
 /** A division task-satuan references a division/jenis outside TASK_CATALOG. */
@@ -1511,9 +1519,21 @@ export async function setStrategyRequirement(
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     const rows = await tx<
-      { status: string; requires_strategy_plan: boolean; requires_strategy_plan_override: boolean | null; assigned_am_id: string | null }[]
+      {
+        status: string;
+        requires_strategy_plan: boolean;
+        requires_strategy_plan_override: boolean | null;
+        plan_tier: string | null;
+        assigned_am_id: string | null;
+        strategi_aktif: boolean;
+      }[]
     >`
-      select sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override, c.assigned_am_id
+      select sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override, sv.plan_tier,
+             c.assigned_am_id,
+             exists (
+               select 1 from strategi s
+                where s.contract_id = sv.contract_id and s.status = 'Aktif'
+             ) as strategi_aktif
         from services sv join clients c on c.id = sv.client_id
        where sv.id = ${serviceId} for update`;
     if (rows.length === 0) {
@@ -1531,6 +1551,15 @@ export async function setStrategyRequirement(
     const existing = await tx<{ id: string }[]>`select id from strategy_plans where service_id = ${serviceId}`;
     if (existing.length > 0) {
       throw new ConflictError(MSG_STRATEGY_EXISTS);
+    }
+    // Since STR- retired (2026-09-08) the live Strategy is STRG-, keyed by the
+    // contract — the strategy_plans check above alone never sees it. Flipping the
+    // path under an Aktif Strategi would detach a Service from an agreed Plan.
+    if (svc.strategi_aktif) {
+      throw new ConflictError(MSG_STRATEGY_EXISTS);
+    }
+    if (!requires && svc.plan_tier === TIER_PLAN_WAJIB) {
+      throw new ConflictError(MSG_OVERRIDE_PLAN_WAJIB);
     }
 
     const before = effectiveRequiresPlan(svc.requires_strategy_plan, svc.requires_strategy_plan_override);
