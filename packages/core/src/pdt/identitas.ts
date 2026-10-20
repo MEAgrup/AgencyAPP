@@ -192,18 +192,10 @@ export function kolomTerbanyak(
   barisHeader: number,
   namaKolom: string,
 ): PdtKolomTerbanyakHasil | null {
-  const header = aoa[barisHeader - 1] ?? [];
-  const idx = header.findIndex((c) => normLabel(c) === normLabel(namaKolom));
-  if (idx === -1) return null;
-
-  const hitung = new Map<string, number>();
+  const hitung = hitungNilaiKolom(aoa, barisHeader, namaKolom);
+  if (!hitung) return null;
   let total = 0;
-  for (const row of aoa.slice(barisHeader)) {
-    const v = String(row?.[idx] ?? '').trim();
-    if (v === '') continue;
-    total += 1;
-    hitung.set(v, (hitung.get(v) ?? 0) + 1);
-  }
+  for (const jumlah of hitung.values()) total += jumlah;
   if (total === 0) return null;
 
   let nilaiTerbanyak = '';
@@ -215,6 +207,66 @@ export function kolomTerbanyak(
     }
   }
   return { nilai: nilaiTerbanyak, jumlah: jumlahTerbanyak, totalBaris: total };
+}
+
+/** Hitungan nilai non-kosong kolom `namaKolom` di bawah `barisHeader`; `null` bila kolomnya tidak ada. */
+function hitungNilaiKolom(
+  aoa: readonly (readonly unknown[])[],
+  barisHeader: number,
+  namaKolom: string,
+): Map<string, number> | null {
+  const header = aoa[barisHeader - 1] ?? [];
+  const idx = header.findIndex((c) => normLabel(c) === normLabel(namaKolom));
+  if (idx === -1) return null;
+  const hitung = new Map<string, number>();
+  for (const row of aoa.slice(barisHeader)) {
+    const v = String(row?.[idx] ?? '').trim();
+    if (v === '') continue;
+    hitung.set(v, (hitung.get(v) ?? 0) + 1);
+  }
+  return hitung;
+}
+
+export interface PdtKolomTerbanyakLintasHasil {
+  nilai: string;
+  /** Jumlah baris (Σ seluruh berkas) yang membawa `nilai`. */
+  jumlahBaris: number;
+  /** Jumlah berkas yang membawa `nilai` minimal satu baris. */
+  jumlahBerkas: number;
+}
+
+/**
+ * Rule 3-4 LINTAS berkas (keputusan Yohan 2026-10-20,
+ * `docs/decisions/2026-10-20-pdt-identitas-tiktok-koreksi.md`): hitungan
+ * `namaKolom` dijumlahkan dari SEMUA berkas yang diberikan, bukan berkas
+ * pertama saja — berkas `tt_live` 5 baris tidak boleh mengalahkan `tt_video`
+ * 200 baris hanya karena urutannya di ZIP. Seri ⇒ nilai terkecil (urut
+ * string) supaya hasilnya tidak bergantung urutan berkas. Pemanggil yang
+ * memilih berkas mana yang ikut dihitung (berkas afiliasi milik kreator lain
+ * TIDAK diberikan). `null` bila tidak ada satu pun baris berisi.
+ */
+export function kolomTerbanyakLintasBerkas(
+  berkas: readonly { aoa: readonly (readonly unknown[])[]; barisHeader: number }[],
+  namaKolom: string,
+): PdtKolomTerbanyakLintasHasil | null {
+  const baris = new Map<string, number>();
+  const jumlahBerkas = new Map<string, number>();
+  for (const b of berkas) {
+    const hitung = hitungNilaiKolom(b.aoa, b.barisHeader, namaKolom);
+    if (!hitung) continue;
+    for (const [nilai, jumlah] of hitung) {
+      baris.set(nilai, (baris.get(nilai) ?? 0) + jumlah);
+      jumlahBerkas.set(nilai, (jumlahBerkas.get(nilai) ?? 0) + 1);
+    }
+  }
+
+  let terbaik: string | null = null;
+  for (const [nilai, jumlah] of baris) {
+    const jumlahTerbaik = terbaik == null ? -1 : (baris.get(terbaik) as number);
+    if (jumlah > jumlahTerbaik || (jumlah === jumlahTerbaik && nilai < (terbaik as string))) terbaik = nilai;
+  }
+  if (terbaik == null) return null;
+  return { nilai: terbaik, jumlahBaris: baris.get(terbaik) as number, jumlahBerkas: jumlahBerkas.get(terbaik) as number };
 }
 
 /**

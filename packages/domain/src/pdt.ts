@@ -370,11 +370,12 @@ function bangunSatuPreviewBerkas(input: PdtPreviewBerkasInput): { hasil: PdtPrev
 }
 
 /**
- * Rule 2/4 — identitas dari berkas 'ok' pertama yang membawa sinyalnya (bukan
- * diketik AM). `sumber` (bentuk `pdt_upload_batch.identitas_sumber`, dipakai
- * HANYA oleh `commitUploadBatch`) terisi untuk verdict `cocok`/`usulkan_ikat`
- * — bukti apa yang divalidasi/diusulkan; `null` untuk `tolak`/
- * `tidak_dapat_divalidasi` (nol identitas yang tervalidasi untuk disimpan).
+ * Rule 2/4 — identitas dari berkas yang membawa sinyalnya (bukan diketik AM;
+ * Shopee: berkas Ads pertama, TikTok: `ID Kreator` terbanyak lintas berkas).
+ * `sumber` (bentuk `pdt_upload_batch.identitas_sumber`) terisi untuk verdict
+ * `cocok`/`usulkan_ikat` — bukti apa yang divalidasi/diusulkan — dan untuk
+ * `tolak` TikTok (usulan koreksi Lead Account); `null` untuk `tolak` Shopee/
+ * `tidak_dapat_divalidasi`.
  */
 function resolveIdentitasDanSumber(
   platform: pdt.PdtPlatform,
@@ -391,16 +392,21 @@ function resolveIdentitasDanSumber(
     const verdict = pdt.validasiIdentitasShopee(preamble, shopId);
     return { verdict, sumber: verdict.status === 'tolak' ? null : pdt.bangunIdentitasSumberShopee(preamble) };
   }
-  // tiktok — cari berkas 'ok' PERTAMA yang modulnya benar-benar membawa kolom 'ID Kreator' (Rule 3),
-  // bukan dua kode modul hardcode — supaya penambahan modul TikTok baru yang juga membawa kolom ini
-  // otomatis ikut jadi kandidat, tanpa perlu menyentuh fungsi ini lagi.
-  for (const berkas of terparse) {
-    if (!berkas.modul.kolomDipanen.some((k) => k.toLowerCase() === KOLOM_ID_KREATOR.toLowerCase())) continue;
-    const terbanyak = pdt.kolomTerbanyak(berkas.aoa, berkas.barisHeader, KOLOM_ID_KREATOR);
-    if (terbanyak) {
-      const verdict = pdt.validasiIdentitasTiktok(terbanyak.nilai, akunKontenToko);
-      return { verdict, sumber: verdict.status === 'tolak' ? null : { id_kreator: terbanyak.nilai } };
-    }
+  // tiktok — kandidat = SEMUA berkas yang modulnya benar-benar membawa kolom 'ID Kreator' (Rule 3),
+  // bukan kode modul hardcode — modul TikTok baru yang membawa kolom ini otomatis ikut; berkas
+  // afiliasi (`tt_affiliate_video`, kreator lain) tidak memanennya jadi tidak pernah ikut dihitung.
+  // Nilai terbanyak dihitung LINTAS berkas, bukan berkas pertama (keputusan Yohan 2026-10-20,
+  // `docs/decisions/2026-10-20-pdt-identitas-tiktok-koreksi.md`).
+  const kandidat = terparse.filter((b) => b.modul.kolomDipanen.some((k) => k.toLowerCase() === KOLOM_ID_KREATOR.toLowerCase()));
+  const terbanyak = pdt.kolomTerbanyakLintasBerkas(kandidat, KOLOM_ID_KREATOR);
+  if (terbanyak) {
+    const verdict = pdt.validasiIdentitasTiktok(terbanyak.nilai, akunKontenToko);
+    // Disimpan juga untuk `tolak` — usulan yang dipakai Lead Account/Director untuk koreksi
+    // `akun_konten_toko` dari batch yang ditolak (`konfirmasiIdentitasBatch` mode tambah/ganti).
+    return {
+      verdict,
+      sumber: { id_kreator: terbanyak.nilai, jumlah_baris: terbanyak.jumlahBaris, jumlah_berkas: terbanyak.jumlahBerkas },
+    };
   }
   return { verdict: { status: 'tidak_dapat_divalidasi', pesan: "[tidak ada berkas TikTok yang membawa kolom 'ID Kreator' terparse untuk validasi identitas toko]" }, sumber: null };
 }
