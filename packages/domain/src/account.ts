@@ -40,6 +40,7 @@ import { onBriefReachedTerminal, validateBriefApproval } from './board';
 import * as stage from './stage';
 import {
   effectiveGate,
+  MSG_TIER_LOCKED,
   TIER_PLAN_WAJIB,
   type GateDecision,
   type PlanTier,
@@ -516,12 +517,12 @@ export const MSG_OVERRIDE_REASON_REQUIRED = '[alasan perubahan kebutuhan Strateg
 export const MSG_OVERRIDE_NOT_AWAITING =
   '[kebutuhan Strategy & Plan hanya dapat diubah saat layanan berstatus Awaiting Onboarding]';
 /**
- * A `plan_wajib` Service cannot be switched to Direct by override (M6C S4: the
- * tier is "locked on"). Whether that lock may ever be lifted is an open question
- * for Hans (B1–B3, 2026-10-19) — until he answers, the server refuses it.
+ * The path cannot be switched once a Strategi (STRG-) on the Service's contract
+ * is submitted, active or under revision (B1–B3). Not `strategi.MSG_STRATEGI_EXISTS`
+ * — that one refuses a SECOND Strategi; this one refuses a path change.
  */
-export const MSG_OVERRIDE_PLAN_WAJIB =
-  '[layanan ber-tier Plan Wajib tidak dapat diubah ke jalur Direct tanpa persetujuan]';
+export const MSG_STRATEGI_EXISTS =
+  '[layanan ini sudah punya Strategi (STRG-) yang diajukan/aktif — jalur tidak bisa diubah]';
 /** A structured Target KPI value (GMV/ROAS/CTR/CVR) or a task quota is not a valid number. */
 export const MSG_INVALID_KPI = '[nilai Target KPI tidak valid]';
 /** A division task-satuan references a division/jenis outside TASK_CATALOG. */
@@ -1501,7 +1502,8 @@ export async function guardBriefCreation(sql: Queryable, serviceId: string): Pro
  * setStrategyRequirement overrides a Service's "Requires Strategy Plan" flag for
  * this engagement (M6-OA-1). The pinned MSL flag is never mutated; an explicit
  * per-Service override column supersedes it. Permitted for the owning AM, the
- * Account lead/SPV, or a Director. Only while the Service is still [Awaiting
+ * Account lead/SPV, or a Director — but only the lead/SPV or a Director may turn
+ * the Plan OFF (de-escalation, M6C Rule 12). Only while the Service is still [Awaiting
  * Onboarding] and before any Strategy & Plan exists (exempting a drafted Plan
  * would orphan it). An audited before→after field edit (+ reason), not a machine.
  */
@@ -1524,18 +1526,17 @@ export async function setStrategyRequirement(
         requires_strategy_plan: boolean;
         requires_strategy_plan_override: boolean | null;
         plan_tier: string | null;
+        contract_id: string | null;
+        keputusan_am: string | null;
         assigned_am_id: string | null;
-        strategi_aktif: boolean;
       }[]
     >`
       select sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override, sv.plan_tier,
-             c.assigned_am_id,
-             exists (
-               select 1 from strategi s
-                where s.contract_id = sv.contract_id and s.status = 'Aktif'
-             ) as strategi_aktif
-        from services sv join clients c on c.id = sv.client_id
-       where sv.id = ${serviceId} for update`;
+             sv.contract_id, g.keputusan_am, c.assigned_am_id
+        from services sv
+        join clients c on c.id = sv.client_id
+        left join service_plan_gate g on g.service_id = sv.id
+       where sv.id = ${serviceId} for update of sv, c`;
     if (rows.length === 0) {
       throw new NotFoundError(MSG_SERVICE_NOT_FOUND);
     }
@@ -1553,22 +1554,46 @@ export async function setStrategyRequirement(
       throw new ConflictError(MSG_STRATEGY_EXISTS);
     }
     // Since STR- retired (2026-09-08) the live Strategy is STRG-, keyed by the
-    // contract — the strategy_plans check above alone never sees it. Flipping the
-    // path under an Aktif Strategi would detach a Service from an agreed Plan.
-    if (svc.strategi_aktif) {
-      throw new ConflictError(MSG_STRATEGY_EXISTS);
+    // contract — the strategy_plans check above alone never sees it. Once a
+    // Strategi is submitted, active or under revision, flipping the path would
+    // detach the Service from a Plan someone is reviewing or has agreed. A bare
+    // Draft does not bind yet; it is named in the audit so nobody loses it.
+    const strategi = svc.contract_id === null ? [] : await tx<{ id: string; status: string }[]>`
+      select id, status from strategi where contract_id = ${svc.contract_id} order by id`;
+    // strategi.STRATEGI_DIAJUKAN / Aktif / STRATEGI_DRAFT_REVISI (account never imports strategi).
+    if (strategi.some((r) => ['Diajukan', 'Aktif', 'Draft Revisi'].includes(r.status))) {
+      throw new ConflictError(MSG_STRATEGI_EXISTS);
     }
+    // M6C S4: `plan_wajib` is locked on — the catalog decided, no manual answer.
     if (!requires && svc.plan_tier === TIER_PLAN_WAJIB) {
-      throw new ConflictError(MSG_OVERRIDE_PLAN_WAJIB);
+      throw new ConflictError(MSG_TIER_LOCKED);
     }
+    // Dropping the Plan is a de-escalation, and de-escalation is SPV/Head Account
+    // or Director authority (M6C Rule 12) — the owning AM may still ADD a Plan.
+    // Same predicate as `plangate.canApproveDeescalation`, which cannot be
+    // imported here (plangate imports account).
+    if (!requires && !(actor.role.director || permission.isLead(actor, ACCOUNT_DIVISION))) {
+      throw new ForbiddenError(MSG_OVERRIDE_FORBIDDEN);
+    }
+    const strategiDraftId = strategi.find((r) => r.status === 'Draft')?.id ?? null;
 
-    const before = effectiveRequiresPlan(svc.requires_strategy_plan, svc.requires_strategy_plan_override);
+    // `before` is what the gate actually enforced, not the bare MSL pin: on a
+    // tiered Service the pin alone misreads a G-B `butuh_plan` as Direct.
+    const before = effectiveRequiresPlan(
+      svc.requires_strategy_plan,
+      svc.requires_strategy_plan_override,
+      svc.plan_tier,
+      svc.keputusan_am,
+    );
     await tx`update services set requires_strategy_plan_override = ${requires} where id = ${serviceId}`;
     await ex.audit.insertAudit({
       entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
       action: 'strategy_requirement_override',
       beforeJson: { requires_strategy_plan: before },
-      afterJson: { requires_strategy_plan: requires, set_by: actor.employeeId, reason: why },
+      afterJson: {
+        requires_strategy_plan: requires, set_by: actor.employeeId, reason: why,
+        ...(strategiDraftId === null ? {} : { strategi_draft_id: strategiDraftId }),
+      },
       createdBy: actor.employeeId,
     });
     return {

@@ -66,8 +66,13 @@ export const SALES_DIVISION = 'Sales';
 // module-local per bi.ts scope note (only engine-shared strings live in core).
 // ---------------------------------------------------------------------------
 
-/** A won lead is already a client — blocks on every door. */
-export const MSG_ALREADY_CLIENT = '[lead sudah menjadi klien]';
+/**
+ * A won lead is already a client — blocks on every door. The tail names the
+ * door that IS open (B1–B3: after a Void, CRO tried to re-register the client
+ * through Leads). Deviates from M1-OA-4's bare string — DECISIONS 2026-10-20.
+ */
+export const MSG_ALREADY_CLIENT =
+  '[lead sudah menjadi klien — tambahkan layanan lewat Perpanjangan/Cross Sell di halaman klien]';
 /** A Pool record is claimed through the Pool flow, not re-registered. */
 export const MSG_DUPLICATE_POOL = '[lead sudah ada & sedang diproses, tidak diimport]';
 /** The actor already holds an open attempt on this lead (cannot double-open). */

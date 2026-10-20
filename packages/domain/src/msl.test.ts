@@ -6,6 +6,8 @@
  *   chain → effective read against a migrated Postgres. Each test namespaces its
  *   actor ids with `ZZ-` and afterEach deletes the rows it made.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { bi, money, permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
@@ -292,7 +294,10 @@ afterEach(async () => {
   // `trg_master_services_hapus_terjaga` justru MENOLAK hapus induk selagi
   // salah satunya masih menunjuk ke sana — kalau dibalik, pembersihan tes
   // ini gagal dengan pesan BI dan mencemari test berikutnya.
+  await sql`delete from service_plan_gate where created_by like 'ZZ-%'`;
+  await sql`delete from strategi where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
+  await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from master_service_versions where created_by like 'ZZ-%'`;
   await sql`delete from master_services where created_by like 'ZZ-%'`;
@@ -456,6 +461,160 @@ describeDb('updateService', () => {
     await expect(updateService(sql, salesLead(), 'MSV-209901-9999', {
       name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100', effectiveFrom: '2020-01-01',
     })).rejects.toBeInstanceOf(ServiceNotFoundError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Re-pin tier on Services that have not started (feedback B1–B3, 2026-10-20).
+//
+// A tier corrected in the catalog used to stop at the catalog: every Service
+// already sold kept its old pin and kept asking for a Strategi. Only a Service
+// nobody has acted on moves; the five fixtures below are one of each.
+// ---------------------------------------------------------------------------
+describeDb('updateService — re-pin tier Service yang belum mulai', () => {
+  const svcIds = ['ZZ-SVC-A', 'ZZ-SVC-B', 'ZZ-SVC-C', 'ZZ-SVC-D', 'ZZ-SVC-E'] as const;
+
+  // audit_log is immutable: rows from earlier runs on the same fixture ids stay,
+  // so every audit read is scoped to rows written since the fixture was seeded.
+  let since: Date;
+
+  async function seedTierFixtures(): Promise<string> {
+    since = (await sql<{ now: Date }[]>`select now() as now`)[0].now;
+    const ms = await createService(sql, salesLead(), {
+      name: 'ZZ-MS-1', standardPrice: '5000000', commissionRule: '10% of standard price',
+      effectiveFrom: '2020-01-01', active: true, planTier: 'plan_wajib',
+    });
+    await sql`
+      insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, created_by)
+      values ('ZZ-CLI-RP', 'PIC', 'Toko', 'Jakarta', 'https://x.id', 'Fashion', 0, 0,
+              'ZZ-SLEAD', 'ZZ-SLEAD', 'ZZ-SLEAD')`;
+    // One contract per Service, so B's STRG- Draft scopes to B alone.
+    for (const id of svcIds) {
+      const ctr = `ZZ-CTR-${id.slice(-1)}`;
+      await sql`
+        insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, created_by)
+        values (${ctr}, 'ZZ-CLI-RP', 6, '2026-09-01', '2027-03-01', 'ZZ-SLEAD')`;
+      await sql`
+        insert into services (id, client_id, contract_id, master_service_id, master_version_no, name,
+                              standard_price, commission_rule, status, requires_strategy_plan, plan_tier,
+                              requires_strategy_plan_override, created_by)
+        values (${id}, 'ZZ-CLI-RP', ${ctr}, ${ms}, 1, 'ZZ-MS-1', 5000000, '10% of standard price',
+                ${id === 'ZZ-SVC-D' ? '[Briefed]' : '[Awaiting Onboarding]'}, true, 'plan_wajib',
+                ${id === 'ZZ-SVC-C' ? true : null}, 'ZZ-SLEAD')`;
+    }
+    await sql`
+      insert into strategi (id, contract_id, client_id, status, created_by)
+      values ('ZZ-STRG-RP-B', 'ZZ-CTR-B', 'ZZ-CLI-RP', 'Draft', 'ZZ-SLEAD')`;
+    await sql`
+      insert into service_plan_gate
+        (service_id, tier_katalog, divisi_terlibat, deliverable, berulang,
+         sequence_dependency, laporan_periodik, pemicu_keras, pemicu_lunak,
+         config_version_no, rekomendasi, keputusan_am, kesesuaian,
+         tanggal_tinjau_ulang, decided_by, created_by)
+      values
+        ('ZZ-SVC-E', 'plan_wajib', 'Ads', 'kampanye', true,
+         false, false, '{}'::jsonb, '{}'::jsonb,
+         1, 'butuh_plan', 'butuh_plan', 'sesuai',
+         '2027-01-01', 'ZZ-SLEAD', 'ZZ-SLEAD')`;
+    return ms;
+  }
+
+  async function tiers(): Promise<Record<string, string>> {
+    const rows = await sql<{ id: string; plan_tier: string }[]>`
+      select id, plan_tier from services where id in ${sql(svcIds as unknown as string[])}`;
+    return Object.fromEntries(rows.map((r) => [r.id, r.plan_tier]));
+  }
+
+  it('re-pins only the untouched [Awaiting Onboarding] Service, with one plan_tier_repin audit', async () => {
+    const ms = await seedTierFixtures();
+    const next = await updateService(sql, salesLead(), ms, {
+      name: 'ZZ-MS-1', standardPrice: '5000000', commissionRule: '10% of standard price',
+      effectiveFrom: TODAY, active: true, planTier: 'tanpa_plan',
+    });
+    expect(next).toBe(2);
+    expect(await tiers()).toEqual({
+      'ZZ-SVC-A': 'tanpa_plan',
+      'ZZ-SVC-B': 'plan_wajib', // STRG- Draft on its contract
+      'ZZ-SVC-C': 'plan_wajib', // M6-OA-1 override
+      'ZZ-SVC-D': 'plan_wajib', // already [Briefed]
+      'ZZ-SVC-E': 'plan_wajib', // G-B determination on record
+    });
+    const a = await sql<{ requires_strategy_plan: boolean; master_version_no: number; standard_price: string }[]>`
+      select requires_strategy_plan, master_version_no, standard_price from services where id = 'ZZ-SVC-A'`;
+    expect(a[0].requires_strategy_plan).toBe(false);
+    // Only the gate moves — the sold version and price stay.
+    expect(a[0].master_version_no).toBe(1);
+    expect(money.parse(a[0].standard_price)).toBe(money.parse('5000000'));
+
+    const audits = await sql<{ entity_id: string; actor_employee_id: string; before_json: unknown; after_json: unknown }[]>`
+      select entity_id, actor_employee_id, before_json, after_json from audit_log
+       where entity_type = 'service' and action = 'plan_tier_repin'
+         and entity_id in ${sql(svcIds as unknown as string[])}
+         and created_by = 'ZZ-SLEAD' and created_at >= ${since}`;
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      entity_id: 'ZZ-SVC-A', actor_employee_id: 'ZZ-SLEAD',
+      before_json: { plan_tier: 'plan_wajib', requires_strategy_plan: true },
+      after_json: { plan_tier: 'tanpa_plan', requires_strategy_plan: false, master_service_version: 2 },
+    });
+  });
+
+  it('a future-dated version does not re-pin yet', async () => {
+    const ms = await seedTierFixtures();
+    await updateService(sql, salesLead(), ms, {
+      name: 'ZZ-MS-1', standardPrice: '5000000', commissionRule: '10% of standard price',
+      effectiveFrom: tz.addDaysToDate(TODAY, 1), active: true, planTier: 'tanpa_plan',
+    });
+    expect((await tiers())['ZZ-SVC-A']).toBe('plan_wajib');
+  });
+
+  it('migrasi backfill 20261220010000: re-pin yang tertinggal, jalan kedua 0 baris', async () => {
+    const ms = await seedTierFixtures();
+    // A tier change written before updateService re-pinned: version 2 lands in
+    // the catalog directly, the Services keep their version-1 pin.
+    await sql`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, pricing_mode, apply_ppn,
+         active, requires_strategy_plan, plan_tier, effective_from, created_by)
+      values (${ms}, 2, 'ZZ-MS-1', 5000000, '10% of standard price', 'fixed', false,
+              true, false, 'tanpa_plan', ${TODAY}, 'ZZ-SLEAD')`;
+    const migration = readFileSync(
+      join(__dirname, '../../../supabase/migrations/20261220010000_plan_tier_repin_backfill.sql'), 'utf8');
+    const repinAudits = async (q: typeof sql) => Number((await q<{ n: string }[]>`
+      select count(*) as n from audit_log
+       where action = 'plan_tier_repin' and created_by = 'SISTEM'
+         and entity_id in ${q(svcIds as unknown as string[])} and created_at >= ${since}`)[0].n);
+
+    // Rolled back at the end: the migration scans every Service, and this DB
+    // also holds the seed — the test must leave no trace beyond its fixtures.
+    const rollback = new Error('rollback');
+    await expect(sql.begin(async (tx) => {
+      const q = tx as unknown as typeof sql;
+      await q.unsafe(migration);
+      expect(await repinAudits(q)).toBe(1);
+      const after = await q<{ id: string; plan_tier: string }[]>`
+        select id, plan_tier from services where id in ${q(svcIds as unknown as string[])} order by id`;
+      expect(after.map((r) => r.plan_tier)).toEqual(
+        ['tanpa_plan', 'plan_wajib', 'plan_wajib', 'plan_wajib', 'plan_wajib']);
+      await q.unsafe(migration);
+      expect(await repinAudits(q)).toBe(1); // second run: 0 new rows
+      throw rollback;
+    })).rejects.toBe(rollback);
+  });
+
+  it('the new_version audit carries plan_tier', async () => {
+    const ms = await seedTierFixtures();
+    await updateService(sql, salesLead(), ms, {
+      name: 'ZZ-MS-1', standardPrice: '5000000', commissionRule: '10% of standard price',
+      effectiveFrom: TODAY, active: true, planTier: 'tanpa_plan',
+    });
+    const rows = await sql<{ after_json: { plan_tier?: string } }[]>`
+      select after_json from audit_log
+       where entity_type = 'master_service' and entity_id = ${ms} and action = 'new_version'
+         and created_at >= ${since}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].after_json.plan_tier).toBe('tanpa_plan');
   });
 });
 

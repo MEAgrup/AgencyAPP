@@ -86,6 +86,10 @@ describe('decide', () => {
     const d = decide(CHANNEL_SINGLE_REG, m, 'ZZ-BUDI');
     expect(d.outcome).toBe('block');
     expect(d.message).toBe(MSG_ALREADY_CLIENT);
+    // B1–B3: the message points at the door that is still open.
+    expect(d.message).toBe(
+      '[lead sudah menjadi klien — tambahkan layanan lewat Perpanjangan/Cross Sell di halaman klien]',
+    );
   });
 
   it('single-reg on a lead the actor already holds -> block', () => {
