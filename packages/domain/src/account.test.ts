@@ -66,11 +66,12 @@ import {
   MSG_PIC_BUKAN_WEWENANG_AM,
   MSG_OVERRIDE_FORBIDDEN,
   MSG_OVERRIDE_NOT_AWAITING,
-  MSG_OVERRIDE_PLAN_WAJIB,
-  MSG_STRATEGY_EXISTS,
+  MSG_STRATEGI_EXISTS,
+  MSG_STRATEGY_REQUIRED,
   type BriefInput,
   type StrategyInput,
 } from './account';
+import { MSG_TIER_LOCKED } from './plangate_rules';
 import { assignPic } from './task';
 
 const accountLead = (): Actor => ({
@@ -195,6 +196,7 @@ afterEach(async () => {
   await sql`delete from strategy_plans where created_by like 'ZZ-%'`;
   // B1–B3 fixtures: an Aktif STRG- holds its contract (fk), so it goes first.
   await sql`delete from strategi where created_by like 'ZZ-%'`;
+  await sql`delete from service_plan_gate where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -913,27 +915,88 @@ describeDb('setStrategyRequirement — Ubah Jalur Eksekusi (B1–B3)', () => {
     );
   });
 
-  it('is rejected once a Strategi (STRG-) on the contract is Aktif', async () => {
-    const a = await tieredService('ditentukan_am');
+  async function addStrategi(contractId: string, clientId: string, status: string): Promise<string> {
+    const id = `ZZ-STRG-${Date.now() % 100000}-${svcSeq++}`;
     await sql`
       insert into strategi (id, contract_id, client_id, status, created_by)
-      values (${`ZZ-STRG-${Date.now() % 100000}-${svcSeq++}`}, ${a.contractId}, ${a.clientId}, 'Aktif', 'ZZ-TEST')`;
-    await expect(setStrategyRequirement(sql, accountLead(), a.svcId, false, 'ganti ke direct')).rejects.toThrow(
-      MSG_STRATEGY_EXISTS,
+      values (${id}, ${contractId}, ${clientId}, ${status}, 'ZZ-TEST')`;
+    return id;
+  }
+
+  /** Rule 1a's footprint: `ditentukan_am` with override=true and no gate row. */
+  async function rule1aService(): Promise<{ svcId: string; contractId: string; clientId: string }> {
+    const f = await tieredService('ditentukan_am');
+    await sql`update services set requires_strategy_plan_override = true where id = ${f.svcId}`;
+    return f;
+  }
+
+  const overrideAudit = async (svcId: string) =>
+    (await sql<{ before_json: { requires_strategy_plan: boolean }; after_json: Record<string, unknown> }[]>`
+      select before_json, after_json from audit_log
+       where entity_type = 'service' and entity_id = ${svcId} and action = 'strategy_requirement_override'
+       order by id desc limit 1`)[0];
+
+  it('ZZ-SVC-F: rejected once the contract has a Strategi (STRG-) Aktif', async () => {
+    const f = await rule1aService();
+    await addStrategi(f.contractId, f.clientId, 'Aktif');
+    await expect(setStrategyRequirement(sql, accountLead(), f.svcId, false, 'x')).rejects.toThrow(
+      MSG_STRATEGI_EXISTS,
     );
     expect(
-      (await sql`select requires_strategy_plan_override from services where id = ${a.svcId}`)[0]
+      (await sql`select requires_strategy_plan_override from services where id = ${f.svcId}`)[0]
         .requires_strategy_plan_override,
-    ).toBeNull();
+    ).toBe(true);
   });
 
-  it('a plan_wajib Service cannot be switched to Direct (pending Hans)', async () => {
-    const a = await tieredService('plan_wajib');
-    await expect(setStrategyRequirement(sql, director(), a.svcId, false, 'direct saja')).rejects.toThrow(
-      MSG_OVERRIDE_PLAN_WAJIB,
+  it('Diajukan and Draft Revisi lock the path too; a bare Draft does not and is named in the audit', async () => {
+    for (const status of ['Diajukan', 'Draft Revisi']) {
+      const f = await rule1aService();
+      await addStrategi(f.contractId, f.clientId, status);
+      await expect(setStrategyRequirement(sql, accountLead(), f.svcId, false, 'x')).rejects.toThrow(
+        MSG_STRATEGI_EXISTS,
+      );
+    }
+    const d = await rule1aService();
+    const draftId = await addStrategi(d.contractId, d.clientId, 'Draft');
+    await setStrategyRequirement(sql, accountLead(), d.svcId, false, 'cukup brief');
+    expect((await overrideAudit(d.svcId)).after_json.strategi_draft_id).toBe(draftId);
+  });
+
+  it('ZZ-SVC-H: a plan_wajib Service cannot be switched to Direct (M6C S4, MSG_TIER_LOCKED)', async () => {
+    const h = await tieredService('plan_wajib');
+    await expect(setStrategyRequirement(sql, director(), h.svcId, false, 'direct saja')).rejects.toThrow(
+      MSG_TIER_LOCKED,
     );
     // Confirming the locked-on path stays allowed (no-op on the effective gate).
-    await expect(setStrategyRequirement(sql, director(), a.svcId, true, 'tetap plan')).resolves.toBeTruthy();
+    await expect(setStrategyRequirement(sql, director(), h.svcId, true, 'tetap plan')).resolves.toBeTruthy();
+  });
+
+  it('ZZ-SVC-G: Rule 1a service without STRG- switches to Direct; audit before = effective gate; Brief unblocked', async () => {
+    const g = await rule1aService();
+    await expect(guardBriefCreation(sql, g.svcId)).rejects.toThrow(MSG_STRATEGY_REQUIRED);
+    const r = await setStrategyRequirement(sql, accountLead(), g.svcId, false, 'cukup brief langsung');
+    expect(r.requiresStrategyPlan).toBe(false);
+    const audit = await overrideAudit(g.svcId);
+    expect(audit.before_json.requires_strategy_plan).toBe(true);
+    expect(audit.after_json).not.toHaveProperty('strategi_draft_id');
+    await expect(guardBriefCreation(sql, g.svcId)).resolves.toBeUndefined();
+  });
+
+  it('audit before reads the G-B decision, not the bare pin (ditentukan_am + butuh_plan)', async () => {
+    const a = await tieredService('ditentukan_am');
+    await sql`
+      insert into service_plan_gate
+        (service_id, tier_katalog, divisi_terlibat, deliverable, berulang,
+         sequence_dependency, laporan_periodik, pemicu_keras, pemicu_lunak,
+         config_version_no, rekomendasi, keputusan_am, kesesuaian,
+         tanggal_tinjau_ulang, decided_by, created_by)
+      values
+        (${a.svcId}, 'ditentukan_am', 'Ads', 'kampanye', true,
+         false, false, '{}'::jsonb, '{}'::jsonb,
+         1, 'butuh_plan', 'butuh_plan', 'sesuai',
+         '2027-01-01', 'ZZ-TEST', 'ZZ-TEST')`;
+    await setStrategyRequirement(sql, accountLead(), a.svcId, false, 'cukup brief langsung');
+    expect((await overrideAudit(a.svcId)).before_json.requires_strategy_plan).toBe(true);
   });
 });
 
