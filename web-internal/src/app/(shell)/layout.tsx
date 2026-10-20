@@ -9,22 +9,31 @@ import AdopsiTracker from '@/components/AdopsiTracker';
 import styles from '@/components/Shell.module.css';
 
 export default function ShellLayout({ children }: { children: React.ReactNode }) {
-  const { employee, role, loading } = useAuth();
+  const { employee, role, loading, connectionIssue } = useAuth();
   const router = useRouter();
 
+  // Hanya sesi yang DITOLAK server (401/403) yang dilempar ke /login. Saat /me
+  // tak terjangkau (timeout/jaringan/5xx) sesi dipertahankan dan dicoba ulang.
   useEffect(() => {
-    if (!loading && !employee) {
+    if (!loading && !employee && !connectionIssue) {
       router.replace('/login');
     }
-  }, [loading, employee, router]);
+  }, [loading, employee, connectionIssue, router]);
+
+  const connectionBanner = connectionIssue ? (
+    <div className="alert alertWarning" role="status">
+      Koneksi bermasalah, mencoba menghubungkan kembali...
+    </div>
+  ) : null;
 
   if (loading) {
     return <div className="pageLoading">Memuat...</div>;
   }
 
   if (!employee) {
-    // Redirect effect above will kick in; render nothing meanwhile.
-    return null;
+    // Tanpa sesi tersimpan dan /me belum terjangkau: tampilkan pesan, jangan
+    // ke /login. Selain itu efek redirect di atas yang bekerja.
+    return connectionBanner ? <div className="pageLoading">{connectionBanner}</div> : null;
   }
 
   return (
@@ -36,7 +45,10 @@ export default function ShellLayout({ children }: { children: React.ReactNode })
       <Sidebar role={role} />
       <div className={styles.main}>
         <Header employee={employee} role={role} />
-        <main className={styles.content}>{children}</main>
+        <main className={styles.content}>
+          {connectionBanner}
+          {children}
+        </main>
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, refreshSession } from '@/lib/api';
+import { checkSession, retryDelayMs } from '@/lib/session-check';
 import type { Employee, MeResponse, Role } from '@/lib/types';
 
 interface AuthState {
@@ -9,6 +10,8 @@ interface AuthState {
   role: Role | null;
   /** True while the initial GET /me check is in flight. */
   loading: boolean;
+  /** True while /me cannot be reached (timeout/network/5xx); the session is kept and retried. */
+  connectionIssue: boolean;
   refresh: () => Promise<void>;
   setSession: (session: MeResponse) => void;
   logout: () => Promise<void>;
@@ -89,20 +92,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
-    try {
-      const me = await api.get<MeResponse>('/me');
-      setEmployee(me.employee);
-      setRole(me.role);
-      writeCachedSession(me);
-    } catch {
+  const [connectionIssue, setConnectionIssue] = useState(false);
+  const retryAttempt = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
+
+  // Sesi hanya dihapus kalau /me MENOLAK (401/403). Timeout, galat jaringan,
+  // dan 5xx mempertahankan sesi lalu mencoba lagi dengan backoff — lihat
+  // `session-check.ts` (insiden pool DB habis 2026-10-19).
+  const refresh = useCallback(async (): Promise<void> => {
+    clearTimeout(retryTimer.current);
+    const result = await checkSession();
+    if (result.kind === 'valid') {
+      setEmployee(result.me.employee);
+      setRole(result.me.role);
+      writeCachedSession(result.me);
+      setConnectionIssue(false);
+      retryAttempt.current = 0;
+    } else if (result.kind === 'rejected') {
       setEmployee(null);
       setRole(null);
       writeCachedSession(null);
-    } finally {
-      setLoading(false);
+      setConnectionIssue(false);
+      retryAttempt.current = 0;
+    } else {
+      setConnectionIssue(true);
+      retryTimer.current = setTimeout(() => void refreshRef.current(), retryDelayMs(retryAttempt.current++));
     }
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    refreshRef.current = refresh;
+    return () => clearTimeout(retryTimer.current);
+  }, [refresh]);
 
   useEffect(() => {
     // Paint from the cached session immediately so the shell stops blocking and
@@ -182,6 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setEmployee(session.employee);
     setRole(session.role);
     writeCachedSession(session);
+    setConnectionIssue(false);
     setLoading(false);
   }, []);
 
@@ -192,11 +216,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setEmployee(null);
       setRole(null);
       writeCachedSession(null);
+      setConnectionIssue(false);
+      clearTimeout(retryTimer.current);
     }
   }, []);
 
   return (
-    <AuthContext.Provider value={{ employee, role, loading, refresh, setSession, logout }}>
+    <AuthContext.Provider value={{ employee, role, loading, connectionIssue, refresh, setSession, logout }}>
       {children}
     </AuthContext.Provider>
   );
