@@ -673,6 +673,23 @@ const STUDIO_LABELS: Record<string, string> = {
  *  second Strategi copy — the same rule as the interview dedup (M6 Interview §7).
  *  The value itself is seeded into the draft by the page (`mergeBaselinePrefill`),
  *  so a normal Section B save still persists it and the DB gate stays satisfied. */
+/** B-0.6 provenance lock, PER FIELD (feedback B4, Linda Hijab CLI-202609-0038).
+ *  A suggestion existing is not the same as it carrying a value: a PDT-sourced
+ *  baseline has no `riset_awal_sumber_berkas`, so `sumber_data` arrives null
+ *  while `tanggal_ambil_data` is filled from the batch. Locking a field the
+ *  suggestion left empty leaves it blank AND read-only, and the submit gate
+ *  (B-0.6/<channel>) can then never be met. Only a field with a sourced value is
+ *  inherited; the other stays the AM's to type. */
+export function provenanceInherited(
+  sugg: Pick<StrategiChannelBaselineSuggestion, 'sumber_data' | 'tanggal_ambil_data'> | null,
+): { sumber: boolean; tanggal: boolean } {
+  const terisi = (v: string | null | undefined) => (v ?? '').trim() !== '';
+  return {
+    sumber: sugg !== null && terisi(sugg.sumber_data),
+    tanggal: sugg !== null && terisi(sugg.tanggal_ambil_data),
+  };
+}
+
 function InheritedChip() {
   return (
     <span className="badge badge-gray" style={{ fontWeight: 400, fontSize: 11 }} title="Nilai dari Riset Awal — perbaiki di Riset Awal, bukan di sini.">
@@ -902,7 +919,7 @@ export default function SectionB({
         (ch.channel !== 'Lainnya' || (s.channel_lain ?? '') === (ch.channel_lain ?? '')),
     ) ?? null;
   const suggMonth = (i: number) => sugg?.baseline_bulan.find((m) => m.month_index === i) ?? null;
-  const provInherited = sugg !== null;
+  const provInherited = provenanceInherited(sugg);
   const periodeInherited = sugg !== null && sugg.periode_baseline_bulan != null;
 
   const isEksisting = ch.status_channel !== 'Belum Aktif';
@@ -1141,23 +1158,23 @@ export default function SectionB({
         <div className="formRow" style={{ marginTop: 8 }}>
           <label className="field">
             <span className="muted" style={{ fontSize: 12 }}>
-              Sumber data (B-0.6) {provInherited && <InheritedChip />}
+              Sumber data (B-0.6) {provInherited.sumber && <InheritedChip />}
             </span>
             <input
               placeholder="Seller Center export, screenshot, dll."
               value={ch.sumber_data}
-              disabled={disabled || provInherited}
+              disabled={disabled || provInherited.sumber}
               onChange={(e) => setCh({ sumber_data: e.target.value })}
             />
           </label>
           <label className="field">
             <span className="muted" style={{ fontSize: 12 }}>
-              Tanggal ambil data {provInherited && <InheritedChip />}
+              Tanggal ambil data {provInherited.tanggal && <InheritedChip />}
             </span>
             <input
               type="date"
               value={ch.tanggal_ambil_data}
-              disabled={disabled || provInherited}
+              disabled={disabled || provInherited.tanggal}
               onChange={(e) => setCh({ tanggal_ambil_data: e.target.value })}
             />
           </label>
