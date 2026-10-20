@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { eventLabel, notificationHref } from '@/lib/notifications';
+import { eventLabel, notificationDetail, notificationHref } from '@/lib/notifications';
 import type { NotificationsResponse } from '@/lib/types';
 
 export default function NotificationsPage() {
@@ -97,7 +97,7 @@ export default function NotificationsPage() {
                       {eventLabel(n.event_type)}
                     </div>
                     <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                      {n.entity_id} &middot; oleh {n.actor} &middot;{' '}
+                      {notificationDetail(n)} &middot; oleh {n.actor} &middot;{' '}
                       {new Date(n.created_at).toLocaleString('id-ID')}
                       {!href && ' · tidak ada halaman rinci'}
                     </div>

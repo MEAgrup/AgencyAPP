@@ -109,7 +109,39 @@ const EVENT_LABELS: Record<string, string> = {
   penugasan_mendekati_jatuh_tempo: 'Penugasan jatuh tempo besok',
   penugasan_jatuh_tempo: 'Penugasan lewat jatuh tempo',
   penugasan_dibatalkan: 'Penugasan dibatalkan',
+  // P7 (katalog v22) — kiriman [Draf] menunggu Terbitkan AM pemilik / Lead Account.
+  'pdt.laporan.siap_terbit': 'Laporan PDT siap diterbitkan',
 };
+
+/**
+ * Laporan PDT (P7) is the one entity whose page is keyed by QUERY (klien,
+ * toko, jenis, periode), not by the kiriman id the notification carries — so
+ * its `deep_link`, written by `kirimLaporanPdt`, IS read here, but only when it
+ * points at that page. Anything else falls back to the bare page.
+ */
+const PDT_LAPORAN_PATH = '/account/pdt/laporan';
+
+function pdtLaporanLink(deepLink: string | undefined): URL | null {
+  if (!deepLink?.startsWith(`${PDT_LAPORAN_PATH}?`)) return null;
+  return new URL(deepLink, 'http://cdps.local');
+}
+
+/**
+ * notificationDetail is the inbox's second line: the entity id for most events,
+ * "nama klien · periode" for a Laporan PDT notification (read from its deep link).
+ */
+export function notificationDetail(n: Pick<NotificationItem, 'entity_type' | 'entity_id' | 'deep_link'>): string {
+  if (n.entity_type === 'pdt_laporan_kiriman') {
+    const link = pdtLaporanLink(n.deep_link);
+    const nama = link?.searchParams.get('nama') ?? link?.searchParams.get('klien');
+    const periode = link?.searchParams.get('periode');
+    if (nama && periode) {
+      const jenis = link?.searchParams.get('jenis') === 'mingguan' ? 'minggu' : 'periode';
+      return `${nama} · ${jenis} ${periode}`;
+    }
+  }
+  return n.entity_id;
+}
 
 /**
  * eventLabel renders an event type for humans, falling back to the raw
@@ -127,9 +159,13 @@ export function eventLabel(eventType: string): string {
  * `deep_link` is not used.
  */
 export function notificationHref(
-  n: Pick<NotificationItem, 'entity_type' | 'entity_id'>,
+  n: Pick<NotificationItem, 'entity_type' | 'entity_id'> & { deep_link?: string },
   viewerEmployeeId?: string | null,
 ): string | null {
+  if (n.entity_type === 'pdt_laporan_kiriman') {
+    const link = pdtLaporanLink(n.deep_link);
+    return link ? `${link.pathname}${link.search}` : PDT_LAPORAN_PATH;
+  }
   if (VIEWER_KEYED.has(n.entity_type)) {
     const me = (viewerEmployeeId ?? '').trim();
     return me === '' ? '/performance' : `/performance/${encodeURIComponent(me)}`;

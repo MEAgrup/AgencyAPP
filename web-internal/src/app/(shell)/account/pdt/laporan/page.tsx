@@ -550,6 +550,26 @@ export default function LaporanPdtPage() {
     void loadClients();
   }, [loadClients]);
 
+  // P7 — deeplink notifikasi `pdt.laporan.siap_terbit`
+  // (`?klien=&platform=&jenis=&periode=`): buka langsung toko+periode kiriman itu.
+  // Sekali saat halaman dibuka; sesudahnya pilihan tetap di tangan pengguna.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const klien = q.get('klien');
+    const platform = Number(q.get('platform'));
+    const periode = q.get('periode') ?? '';
+    if (!klien || !Number.isInteger(platform) || platform <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(periode)) return;
+    setClientId(klien);
+    setPlatformId(platform);
+    if (q.get('jenis') === 'mingguan') {
+      setJenis('mingguan');
+      setMinggu(seninDari(periode));
+    } else {
+      setJenis('bulanan');
+      setMonth(periode.slice(0, 7));
+    }
+  }, []);
+
   const selectedClient = useMemo(
     () => clients.find((c) => c.id === clientId) ?? null,
     [clients, clientId],

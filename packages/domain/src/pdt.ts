@@ -4827,6 +4827,26 @@ export interface PdtLaporanKirimanHasil {
 }
 
 /**
+ * deepLinkLaporanPdt — tautan notifikasi `pdt.laporan.siap_terbit` ke halaman
+ * Laporan PDT, membuka toko+periode kiriman itu. `nama` (nama toko klien) hanya
+ * untuk ditampilkan inbox; dibuang bila tautan melewati `notifications.deep_link`
+ * varchar(255) — `klien`/`platform`/`jenis`/`periode` sudah cukup untuk membuka laporan.
+ */
+export function deepLinkLaporanPdt(
+  clientId: string,
+  clientPlatformId: number,
+  jenis: PdtJenisPeriode,
+  periodeMulai: string,
+  namaKlien: string,
+): string {
+  const q = new URLSearchParams({ klien: clientId, platform: String(clientPlatformId), jenis, periode: periodeMulai });
+  const tanpaNama = `/account/pdt/laporan?${q.toString()}`;
+  q.set('nama', namaKlien);
+  const lengkap = `/account/pdt/laporan?${q.toString()}`;
+  return lengkap.length <= 255 ? lengkap : tanpaNama;
+}
+
+/**
  * Flow B langkah 4: "AM menekan Kirim ke klien ⇒ snapshot beku ditulis ke
  * `pdt_laporan_kiriman`" (Rule 22). Menghitung ULANG laporan lewat
  * `bacaLaporanPdt` (gerbang `canKirimLaporan` + pemilihan platform sudah
@@ -4964,6 +4984,24 @@ export async function kirimLaporanPdt(
         menggantikan_kiriman_id: row.menggantikan_kiriman_id,
       },
       createdBy: actor.employeeId,
+    });
+
+    // P7 (katalog v22): kiriman lahir `[Draf]` — beri tahu dua pihak yang boleh
+    // Terbitkan (`canTerbitkanLaporan`): AM pemilik (explicit) + lead Account
+    // (resolver). `notify_emit` mengecualikan aktor dan men-dedup penerima.
+    const [klien] = await tx<{ client_id: string; toko: string; assigned_am_id: string | null }[]>`
+      select c.id as client_id, c.toko, c.assigned_am_id
+        from client_platforms cp
+        join clients c on c.id = cp.client_id
+       where cp.id = ${clientPlatformId}`;
+    await notification.emit(executors(tx).notify, {
+      event: notification.EVENTS.PdtLaporanSiapTerbit,
+      entityType: 'pdt_laporan_kiriman',
+      entityId: String(row.id),
+      actor: actor.employeeId,
+      division: ACCOUNT_DIVISION,
+      explicitRecipients: klien.assigned_am_id ? [klien.assigned_am_id] : [],
+      deepLink: deepLinkLaporanPdt(klien.client_id, clientPlatformId, row.jenis_periode, row.periode_mulai, klien.toko),
     });
 
     return {

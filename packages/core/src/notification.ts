@@ -222,6 +222,14 @@ export const EVENTS = {
   // packages/domain/src/pdt.ts planPdtPurgeTick().
   PdtPurgeGuardExceeded: 'pdt.purge.guard_exceeded', // -> Directors
 
+  // ----- catalog v22 (P7 — Laporan PDT siap diterbitkan) — 1 event -----
+  // "Kirim" melahirkan kiriman `[Draf]`; hanya AM pemilik atau Lead Account
+  // yang boleh Terbitkan (`canTerbitkanLaporan`). Sejak PDT-ADS-BANTU-AM divisi
+  // Ads ikut mengirim, dan tanpa event ini tidak ada yang tahu ada draf yang
+  // menunggu — laporan menumpuk tanpa diterbitkan. Konvensi `pdt.*` (sama v18).
+  // Emitter: packages/domain/src/pdt.ts kirimLaporanPdt().
+  PdtLaporanSiapTerbit: 'pdt.laporan.siap_terbit', // -> AM pemilik + lead Account
+
   // ----- catalog v19 (O75 — Service closure two-step) — 3 event -----
   // Mirrors v8 Hold exactly, but the approver is Director only (owner
   // decision, narrower than Hold's Head-of-Account-or-Director) — so the
@@ -398,6 +406,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'BRIEF-KEMBALI-SIKLUS — 1 event (m16.brief.dikirim_ulang): AM merevisi & mengirim ulang brief yang dikembalikan divisi.',
     eventCount: 1,
     decisionRef: 'docs/DECISIONS.md 2026-09-30 (BRIEF-KEMBALI-SIKLUS)',
+  },
+  {
+    version: 22,
+    description:
+      'P7 — 1 event (pdt.laporan.siap_terbit): Laporan PDT dikirim sebagai [Draf] dan menunggu Terbitkan — ke AM pemilik klien + lead Account (aktor dikecualikan).',
+    eventCount: 1,
+    decisionRef: 'docs/DECISIONS.md 2026-10-19 (P7 — notifikasi Laporan PDT siap terbit, disetujui Yohan)',
   },
 ] as const;
 
@@ -630,6 +645,16 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
     description: 'AM merevisi & mengirim ulang brief yang dikembalikan — ke divisi (penolak + PIC)',
     resolver: 'explicit',
     version: 21,
+  },
+
+  // --- v22 (P7 — Laporan PDT siap terbit). Description/resolver WAJIB sama persis
+  // dengan seed migrasi 20261219010000_pdt_laporan_siap_terbit_notif.sql.
+  // 'explicitOrLeads': AM pemilik dipasok kirimLaporanPdt, lead Account
+  // di-resolve dari division 'Account' — dua pihak yang boleh Terbitkan. ---
+  [EVENTS.PdtLaporanSiapTerbit]: {
+    description: 'Laporan PDT dikirim [Draf] dan menunggu Terbitkan — ke AM pemilik klien + lead Account',
+    resolver: 'explicitOrLeads',
+    version: 22,
   },
 };
 

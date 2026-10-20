@@ -7911,6 +7911,114 @@ describeDb('PDT-ADS-BANTU-AM — divisi Ads membantu AM (unggah + sunting, bukan
   });
 });
 
+// ---------------------------------------------------------------------------
+// P7 (katalog v22) — "Kirim" melahirkan kiriman `[Draf]`; AM pemilik dan Lead
+// Account (satu-satunya yang boleh Terbitkan) wajib diberi tahu lewat
+// `pdt.laporan.siap_terbit`. Aktor tidak pernah menerima notifikasinya sendiri,
+// dan penerima yang terpilih dua kali (AM yang juga lead Account) hanya sekali.
+// ---------------------------------------------------------------------------
+describeDb('P7 — kirimLaporanPdt memberi tahu AM pemilik + Lead Account (pdt.laporan.siap_terbit)', () => {
+  const ADS_P7 = 'ZPDT-ADS-P7';
+  const LEAD_P7 = 'ZPDT-SPV-P7';
+  const adsP7 = () => ({ employeeId: ADS_P7, role: permission.makeRole({ division: 'Ads', level: 'staff' }) });
+  const leadP7 = () => ({ employeeId: LEAD_P7, role: permission.makeRole({ division: 'Account', level: 'lead' }) });
+
+  beforeAll(async () => {
+    if (!sql) return;
+    // Jabatan 'Account Lead' ⇒ role_mappings level 'lead' ⇒ penerima resolver lead Account.
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values
+        (${ADS_P7}, 'Ads Uji P7', 'zpdt-ads-p7@mea.co.id', 'Ads', 'Ads Specialist', true, 'SYSTEM'),
+        (${LEAD_P7}, 'Lead Uji P7', 'zpdt-spv-p7@mea.co.id', 'Account', 'Account Lead', true, 'SYSTEM')
+      on conflict (employee_id) do nothing`;
+  });
+
+  // WAJIB dihapus lagi — lead uji yang tertinggal menjadi penerima kedua setiap
+  // event lead Account di berkas tes lain (lihat afterAll Gelombang C di atas).
+  afterAll(async () => {
+    if (!sql) return;
+    await sql`delete from employees where employee_id in (${ADS_P7}, ${LEAD_P7})`;
+  });
+
+  async function fixture(ownerAm: string): Promise<{ clientId: string; cpId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, ownerAm);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    return { clientId, cpId };
+  }
+
+  async function penerima(kirimanId: number): Promise<{ recipient: string; actor: string; deep_link: string }[]> {
+    return sql<{ recipient: string; actor: string; deep_link: string }[]>`
+      select recipient_employee_id as recipient, actor_employee_id as actor, deep_link
+        from notifications
+       where event_type = 'pdt.laporan.siap_terbit'
+         and entity_type = 'pdt_laporan_kiriman'
+         and entity_id = ${String(kirimanId)}`;
+  }
+
+  it('Ads mengirim ⇒ AM pemilik DAN Lead Account diberi tahu; Ads tidak', async () => {
+    const { clientId, cpId } = await fixture(OWNER_AM);
+    const { id } = await kirimLaporanPdt(sql, adsP7(), cpId, '2026-07-01');
+
+    const rows = await penerima(id);
+    const ids = rows.map((r) => r.recipient);
+    expect(ids).toContain(OWNER_AM);
+    expect(ids).toContain(LEAD_P7);
+    expect(ids).not.toContain(ADS_P7);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const r of rows) {
+      expect(r.actor).toBe(ADS_P7);
+      // Deeplink membuka toko+periode kiriman ini di halaman Laporan PDT, dengan nama klien.
+      const url = new globalThis.URL(r.deep_link, 'http://x');
+      expect(url.pathname).toBe('/account/pdt/laporan');
+      expect(url.searchParams.get('klien')).toBe(clientId);
+      expect(url.searchParams.get('platform')).toBe(String(cpId));
+      expect(url.searchParams.get('jenis')).toBe('bulanan');
+      expect(url.searchParams.get('periode')).toBe('2026-07-01');
+      expect(url.searchParams.get('nama')).toBe(clientId); // insertClient: toko = id
+    }
+  });
+
+  it('AM pemilik mengirim ⇒ AM tidak menerima notifikasi untuk dirinya sendiri; Lead Account tetap', async () => {
+    const { cpId } = await fixture(OWNER_AM);
+    const { id } = await kirimLaporanPdt(sql, ownerActor(), cpId, '2026-07-01');
+
+    const ids = (await penerima(id)).map((r) => r.recipient);
+    expect(ids).not.toContain(OWNER_AM);
+    expect(ids).toContain(LEAD_P7);
+  });
+
+  it('Lead Account mengirim ⇒ lead itu sendiri tidak diberi tahu; AM pemilik tetap', async () => {
+    const { cpId } = await fixture(OWNER_AM);
+    const { id } = await kirimLaporanPdt(sql, leadP7(), cpId, '2026-07-01');
+
+    const ids = (await penerima(id)).map((r) => r.recipient);
+    expect(ids).not.toContain(LEAD_P7);
+    expect(ids).toContain(OWNER_AM);
+  });
+
+  it('AM pemilik yang JUGA Lead Account ⇒ satu notifikasi, bukan dua', async () => {
+    const { cpId } = await fixture(LEAD_P7);
+    const { id } = await kirimLaporanPdt(sql, adsP7(), cpId, '2026-07-01');
+
+    const ids = (await penerima(id)).map((r) => r.recipient);
+    expect(ids.filter((e) => e === LEAD_P7)).toHaveLength(1);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('kirim ulang ⇒ satu notifikasi baru per kiriman (entity = kiriman baru)', async () => {
+    const { cpId } = await fixture(OWNER_AM);
+    const pertama = await kirimLaporanPdt(sql, adsP7(), cpId, '2026-07-01');
+    const kedua = await kirimLaporanPdt(sql, adsP7(), cpId, '2026-07-01');
+
+    const r1 = (await penerima(pertama.id)).filter((r) => r.recipient === OWNER_AM);
+    const r2 = (await penerima(kedua.id)).filter((r) => r.recipient === OWNER_AM);
+    expect(r1).toHaveLength(1);
+    expect(r2).toHaveLength(1);
+  });
+});
+
 describeDb('PDT-KIRIM-BATCH-VERIFIED — Kirim ke Klien ditolak bila batch terbaru periode itu belum Terverifikasi', () => {
   async function fixture(): Promise<{ clientId: string; cpId: number }> {
     const clientId = nextClientId();

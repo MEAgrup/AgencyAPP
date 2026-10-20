@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 21, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(21);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+  it('is at version 22, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(22);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -69,6 +69,14 @@ describe('frozen catalog', () => {
     expect(CATALOG['m6.brief.selesai'].resolver).toBe('explicit');
     expect(CATALOG['m9.booking.jatuh_tempo'].resolver).toBe('explicitOrLeads');
     expect(CATALOG['m9.campaign.mendekati_akhir'].resolver).toBe('explicitOrLeads');
+  });
+
+  it('registers the one v22 event (P7 — Laporan PDT siap terbit) by name and recipient', () => {
+    // Asserted by literal, same reason as v15: the web inbox names this event by
+    // its wire value, so a rename via EVENTS.* must not pass silently.
+    expect(eventsOfVersion(22)).toEqual(['pdt.laporan.siap_terbit']);
+    // AM pemilik comes in as `explicit`, Lead Account resolves from `division`.
+    expect(CATALOG['pdt.laporan.siap_terbit'].resolver).toBe('explicitOrLeads');
   });
 
   it('registers the one v16 event (Bridge MSDPS→CDPS Fase 1) by name and recipient', () => {
