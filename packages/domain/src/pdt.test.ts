@@ -9,6 +9,7 @@
  * menyambungkan `@cdps/core` `pdt` ke baris `client_platforms`/`clients`
  * sungguhan. Baris di-namespace `ZPDT-`.
  */
+import net from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { pdt as pdtCore, permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
@@ -6400,6 +6401,92 @@ describeDb('rakitLaporanTiktok/Shopee — bagian "produk" (G2-01-KUADRAN-SKU lan
 });
 
 // ---------------------------------------------------------------------------
+// Proxy TCP pengurai protokol di depan Postgres nyata (PDT-LAPORAN-HANG).
+// Menghitung (1) koneksi yang dibuka client dan (2) `pipelineAutocommit`:
+// berapa kali `ReadyForQuery` berstatus 'I' (di luar transaksi) tiba sementara
+// client SUDAH mengirim query lain di koneksi yang sama. Di pooler mode
+// transaksi itulah detik backend dikembalikan ke pool di bawah query yang
+// menumpang — balasannya hilang dan request menggantung. Balasan server ditunda
+// `latensiMs` (meniru RTT pooler; Postgres lokal menjawab dalam mikrodetik
+// sehingga tanpa jeda jendela pipelining hampir tidak pernah terbuka).
+// ---------------------------------------------------------------------------
+function pengurai(onPesan: (tipe: string, isi: Buffer) => void, adaStartup: boolean): (chunk: Buffer) => void {
+  let sisa = Buffer.alloc(0);
+  let startup = adaStartup;
+  return (chunk) => {
+    sisa = Buffer.concat([sisa, chunk]);
+    for (;;) {
+      if (startup) {
+        if (sisa.length < 4) return;
+        const len = sisa.readInt32BE(0);
+        if (sisa.length < len) return;
+        sisa = sisa.subarray(len);
+        startup = false;
+        continue;
+      }
+      if (sisa.length < 5) return;
+      const len = sisa.readInt32BE(1);
+      if (sisa.length < 1 + len) return;
+      onPesan(String.fromCharCode(sisa[0]), sisa.subarray(5, 1 + len));
+      sisa = sisa.subarray(1 + len);
+    }
+  };
+}
+
+async function denganProxyPengurai<T>(
+  fn: (proxied: Sql) => Promise<T>,
+  latensiMs = 0,
+  maxKoneksi = 5,
+): Promise<{ hasil: T; koneksi: number; pipelineAutocommit: number }> {
+  const target = new globalThis.URL(URL as string);
+  let koneksi = 0;
+  let pipelineAutocommit = 0;
+  const sockets = new Set<net.Socket>();
+  const server = net.createServer((client) => {
+    koneksi++;
+    let terkirim = 0; // query (Parse/Query sederhana) yang belum dijawab ReadyForQuery
+    const upstream = net.connect(Number(target.port || 5432), target.hostname);
+    sockets.add(client).add(upstream);
+    const dariClient = pengurai((tipe) => {
+      if (tipe === 'P' || tipe === 'Q') terkirim++;
+    }, true);
+    const dariServer = pengurai((tipe, isi) => {
+      if (tipe !== 'Z') return;
+      terkirim = Math.max(0, terkirim - 1);
+      if (String.fromCharCode(isi[0]) === 'I' && terkirim > 0) pipelineAutocommit++;
+    }, false);
+    client.on('data', (chunk: Buffer) => {
+      dariClient(chunk);
+      upstream.write(chunk);
+    });
+    // Jeda konstan per potongan ⇒ urutan tetap terjaga (setTimeout FIFO).
+    upstream.on('data', (chunk: Buffer) => {
+      const kirim = () => {
+        dariServer(chunk);
+        client.write(chunk);
+      };
+      if (latensiMs > 0) setTimeout(kirim, latensiMs);
+      else kirim();
+    });
+    client.on('close', () => upstream.destroy());
+    client.on('error', () => upstream.destroy());
+    upstream.on('error', () => client.destroy());
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const lewatProxy = new globalThis.URL(URL as string);
+  lewatProxy.hostname = '127.0.0.1';
+  lewatProxy.port = String((server.address() as net.AddressInfo).port);
+  const proxied = createClient(lewatProxy.toString(), { overrides: { max: maxKoneksi } });
+  try {
+    return { hasil: await fn(proxied), koneksi, pipelineAutocommit };
+  } finally {
+    await proxied.end({ timeout: 1 });
+    for (const so of sockets) so.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // bacaLaporanPdt (sesi 34 lanjutan, Flow B langkah 1) — gerbang izin
 // `canKirimLaporan` + pemilihan platform dari `client_platforms.platform`
 // (bukan parameter caller), pola sama `previewUploadBatch`/`commitUploadBatch`.
@@ -6440,6 +6527,36 @@ describeDb('bacaLaporanPdt (sesi 34 lanjutan) — gerbang izin + pemilihan platf
     const hasil = await bacaLaporanPdt(sql, am(), cpId, '2026-07-01');
     expect(hasil.schema).toBe('cdps.pdt.laporan.shopee.v1');
     expect('benchmarkVersi' in hasil).toBe(false);
+  });
+
+  // PDT-LAPORAN-HANG (docs/DECISIONS.md 2026-10-19) — perakitan wajib berjalan
+  // di SATU transaksi. Lewat pool biasa, query TANPA parameter (mis.
+  // `bacaBenchmarkAktifTiktok`) membuat koneksinya tetap "busy" di postgres.js,
+  // query berikutnya menumpang di belakangnya, dan di pooler mode transaksi
+  // backend dilepas saat query pertama selesai — balasan yang menumpang hilang.
+  describe('PDT-LAPORAN-HANG — perakitan di SATU transaksi', () => {
+    it('kontrol: detektor menangkap pipelining autocommit (query tanpa parameter lalu query berparameter, max: 1)', async () => {
+      const { pipelineAutocommit } = await denganProxyPengurai(
+        async (p) => {
+          await p`select 1`; // koneksi hangat — query pertama koneksi baru berjalan sebagai `initial`, tidak ter-pipeline
+          return Promise.all([p`select pg_sleep(0.05)`, p`select ${1}::int as satu`]);
+        },
+        3,
+        1,
+      );
+      expect(pipelineAutocommit).toBeGreaterThanOrEqual(1);
+    });
+
+    it.each(['TikTok Shop', 'Shopee'] as const)('%s: bacaLaporanPdt hanya 1 koneksi dan NOL pipelining autocommit', async (platform) => {
+      const { cpId } = await fixture(platform);
+      const { hasil, koneksi, pipelineAutocommit } = await denganProxyPengurai(
+        (p) => bacaLaporanPdt(p, am(), cpId, '2026-07-01'),
+        3,
+      );
+      expect(hasil.platform).toBe(platform === 'Shopee' ? 'shopee' : 'tiktok');
+      expect(koneksi).toBe(1);
+      expect(pipelineAutocommit).toBe(0);
+    });
   });
 });
 
