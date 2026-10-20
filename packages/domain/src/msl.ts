@@ -918,30 +918,103 @@ export async function createService(sql: Sql, actor: Actor, inp: ServiceInput, n
  * updateService appends a new immutable version to an existing service (+ audit).
  * Every change is a new version; nothing is mutated in place. Throws
  * ServiceNotFoundError when the service id has no versions yet.
+ *
+ * When the new version changes the plan tier and is already in force (WIB),
+ * Services that have not started yet are re-pinned to it — see
+ * `repinUnstartedServices`.
  */
-export async function updateService(sql: Sql, actor: Actor, serviceId: string, inp: ServiceInput): Promise<number> {
+export async function updateService(
+  sql: Sql,
+  actor: Actor,
+  serviceId: string,
+  inp: ServiceInput,
+  now: Date = new Date(),
+): Promise<number> {
   if (!canEditMasterServices(actor)) {
     throw new ForbiddenError();
   }
   const norm = normalizeInput(inp);
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const rows = await tx<{ max: number | null }[]>`
-      select max(version_no) as max from master_service_versions where service_id = ${serviceId}`;
-    const max = rows[0]?.max;
-    if (max === null || max === undefined) {
+    const rows = await tx<{ version_no: number; plan_tier: string }[]>`
+      select version_no, plan_tier from master_service_versions
+       where service_id = ${serviceId}
+       order by version_no desc limit 1`;
+    if (rows.length === 0) {
       throw new ServiceNotFoundError(serviceId);
     }
-    const next = Number(max) + 1;
+    const prevTier = rows[0].plan_tier;
+    const next = Number(rows[0].version_no) + 1;
     await insertVersion(tx, serviceId, next, norm, actor.employeeId);
     await ex.audit.insertAudit({
       entityType: 'master_service', entityId: serviceId, actorEmployeeId: actor.employeeId,
       action: 'new_version', beforeJson: null,
-      afterJson: { version_no: next, name: norm.name, standard_price: norm.standardPrice, pricing_mode: norm.pricingMode },
+      afterJson: {
+        version_no: next, name: norm.name, standard_price: norm.standardPrice, pricing_mode: norm.pricingMode,
+        plan_tier: norm.planTier,
+      },
       createdBy: actor.employeeId,
     });
+    if (norm.planTier !== prevTier && norm.effectiveFrom <= tz.dateString(now)) {
+      await repinUnstartedServices(tx, actor, serviceId, next, norm);
+    }
     return next;
   });
+}
+
+/**
+ * repinUnstartedServices carries a catalog tier change onto the Services that
+ * have not started yet (DECISIONS 2026-10-20 PLAN-TIER-REPIN, feedback B1–B3).
+ *
+ * A Service pins the tier of the MSL version it was closed on (M6 §2), so a tier
+ * corrected in the catalog never reached Services already sold — they kept
+ * asking for a Strategi the catalog no longer requires. Only a Service nobody
+ * has acted on is re-pinned: still `[Awaiting Onboarding]`, no M6-OA-1 override,
+ * no G-B determination, no STR-, and no STRG- on its contract. Anything past
+ * that point is a decision already taken, and the pin exists to protect it.
+ *
+ * `master_version_no` and the price stay as sold — only the gate moves. One
+ * audit row per Service; no status changes, so no transition.
+ */
+async function repinUnstartedServices(
+  tx: Queryable,
+  actor: Actor,
+  serviceId: string,
+  versionNo: number,
+  norm: NormalizedInput,
+): Promise<void> {
+  const ex = executors(tx);
+  const moved = await tx<{ id: string; old_tier: string; old_requires: boolean }[]>`
+    with target as (
+      select sv.id, sv.plan_tier as old_tier, sv.requires_strategy_plan as old_requires
+        from services sv
+       where sv.master_service_id = ${serviceId}
+         -- sales.SERVICE_STATUS_AWAITING_ONBOARDING (msl never imports sales).
+         and sv.status = '[Awaiting Onboarding]'
+         and sv.requires_strategy_plan_override is null
+         and sv.plan_tier <> ${norm.planTier}
+         and not exists (select 1 from service_plan_gate g where g.service_id = sv.id)
+         and not exists (select 1 from strategy_plans sp where sp.service_id = sv.id)
+         and not exists (select 1 from strategi s where s.contract_id = sv.contract_id)
+       for update of sv
+    )
+    update services sv
+       set plan_tier = ${norm.planTier}, requires_strategy_plan = ${norm.requiresStrategyPlan}
+      from target t
+     where sv.id = t.id
+    returning sv.id, t.old_tier, t.old_requires`;
+  for (const m of moved) {
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: m.id, actorEmployeeId: actor.employeeId,
+      action: 'plan_tier_repin',
+      beforeJson: { plan_tier: m.old_tier, requires_strategy_plan: m.old_requires },
+      afterJson: {
+        plan_tier: norm.planTier, requires_strategy_plan: norm.requiresStrategyPlan,
+        master_service_version: versionNo,
+      },
+      createdBy: actor.employeeId,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
