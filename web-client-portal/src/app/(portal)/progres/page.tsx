@@ -11,9 +11,15 @@
  * reads `In Production` while anything is still in production. That is
  * deliberately conservative: reading `Completed` while two pieces are still
  * being made would be worse than reading a cautious label.
+ *
+ * DITANGGUHKAN 2026-10-20 (`docs/decisions/2026-10-20-portal-progres-layanan-nonaktif.md`):
+ * while `progresAktif()` is false this route redirects to Ringkasan before the
+ * inner component mounts, so nothing is fetched.
  */
 import { useEffect, useState } from 'react';
+import { redirect } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
+import { progresAktif } from '@/lib/fitur';
 import { getServiceProgress } from '@/lib/portal-data';
 import { type PortalServiceProgress } from '@/lib/types';
 
@@ -26,6 +32,11 @@ function tone(label: string): string {
 }
 
 export default function ProgresPage() {
+  if (!progresAktif()) redirect('/');
+  return <ProgresLayanan />;
+}
+
+function ProgresLayanan() {
   const [rows, setRows] = useState<PortalServiceProgress[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
