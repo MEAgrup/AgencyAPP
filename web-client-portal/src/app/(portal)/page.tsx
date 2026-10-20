@@ -16,9 +16,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { usePortalAuth } from '@/lib/portal-auth-context';
-import {
-  getHealthSummary, getReports, getServiceProgress, labelPeriode, labelTipe, toneBand,
-} from '@/lib/portal-data';
+import { progresAktif } from '@/lib/fitur';
+import { labelPeriode, labelTipe, toneBand } from '@/lib/portal-data';
+import { muatRingkasan } from '@/lib/ringkasan';
 import { type PortalHealthSummary, type PortalReportRow, type PortalServiceProgress } from '@/lib/types';
 
 const TONE_CLASS: Record<string, string> = {
@@ -35,6 +35,9 @@ const TONE_NOTE: Record<string, string> = {
   none: 'Ringkasan kesehatan akun belum tersedia — biasanya muncul setelah satu bulan penuh berjalan.',
 };
 
+// Build-time constant (NEXT_PUBLIC_*), so the same value on every render.
+const PROGRES_AKTIF = progresAktif();
+
 export default function PortalHomePage() {
   const { contact } = usePortalAuth();
   const [health, setHealth] = useState<PortalHealthSummary | null>(null);
@@ -43,16 +46,14 @@ export default function PortalHomePage() {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    // Settled independently: one failing surface must not blank the other two.
-    // A client landing on an empty page cannot tell "nothing yet" from "broken".
-    void Promise.allSettled([getHealthSummary(), getReports(), getServiceProgress()])
-      .then(([h, r, s]) => {
-        if (h.status === 'fulfilled') setHealth(h.value);
-        if (r.status === 'fulfilled') setReports(r.value);
-        if (s.status === 'fulfilled') setServices(s.value);
-        const gagal = [h, r, s].find((x) => x.status === 'rejected');
-        if (gagal && gagal.status === 'rejected') setErr(errorMessage(gagal.reason));
-      });
+    // Settled independently (see `muatRingkasan`). Progres Layanan is not even
+    // requested while its switch is off (decision 2026-10-20).
+    void muatRingkasan(PROGRES_AKTIF).then((x) => {
+      setHealth(x.health);
+      setReports(x.reports);
+      setServices(x.services);
+      if (x.adaGagal) setErr(errorMessage(x.gagal));
+    });
   }, []);
 
   const tone = toneBand(health?.label ?? null);
@@ -98,18 +99,24 @@ export default function PortalHomePage() {
         )}
       </div>
 
-      <div className="card">
-        <strong>Progres layanan</strong>
-        <p className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-          {berjalan === 0
-            ? 'Belum ada layanan yang berjalan.'
-            : `${berjalan} layanan sedang berjalan.`}
-        </p>
-        <div style={{ marginTop: 10 }}>
-          <Link className="btn btnSecondary" href="/progres">Lihat progres</Link>{' '}
+      {PROGRES_AKTIF ? (
+        <div className="card">
+          <strong>Progres layanan</strong>
+          <p className="muted" style={{ marginTop: 6, fontSize: 13 }}>
+            {berjalan === 0
+              ? 'Belum ada layanan yang berjalan.'
+              : `${berjalan} layanan sedang berjalan.`}
+          </p>
+          <div style={{ marginTop: 10 }}>
+            <Link className="btn btnSecondary" href="/progres">Lihat progres</Link>{' '}
+            <Link className="btn btnSecondary" href="/komplain">Ajukan komplain</Link>
+          </div>
+        </div>
+      ) : (
+        <div>
           <Link className="btn btnSecondary" href="/komplain">Ajukan komplain</Link>
         </div>
-      </div>
+      )}
     </div>
   );
 }

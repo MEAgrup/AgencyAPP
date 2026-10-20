@@ -24,22 +24,15 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { usePortalAuth } from '@/lib/portal-auth-context';
 import { checkIdleExpired } from '@/lib/idle-timeout';
+import { progresAktif } from '@/lib/fitur';
+import { navItems } from '@/lib/nav';
 import styles from './portal.module.css';
 
 const PASSWORD_PATH = '/akun/password';
 const IDLE_CHECK_INTERVAL_MS = 60_000;
 
-/**
- * The whole portal, in four links. This IS the allow-list made visible: there
- * is no invoice page, no team page, no complaint history — not hidden behind a
- * permission, simply not built (spec §4.2, OQ-6, M15 Rule 6).
- */
-const NAV = [
-  { href: '/', label: 'Ringkasan' },
-  { href: '/laporan', label: 'Laporan' },
-  { href: '/progres', label: 'Progres Layanan' },
-  { href: '/komplain', label: 'Ajukan Komplain' },
-];
+/** The portal's links (allow-list made visible — see `@/lib/nav`). */
+const NAV = navItems(progresAktif());
 
 // NOTE: `PortalAuthProvider` is mounted once in the ROOT layout
 // (src/app/layout.tsx), not here — unlike web-internal (which needs an

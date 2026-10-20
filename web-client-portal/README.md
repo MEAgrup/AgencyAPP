@@ -49,6 +49,14 @@ endpoint exists yet to gate).
 
 **Served under `app.meagency.co.id/klien/*`** (2026-09-01 follow-up, owner decision — `docs/DECISIONS.md`), not its own domain: `basePath: '/klien'` here (`next.config.ts`) + a matching path rewrite in `web-internal/next.config.ts` (Next.js "multi zones" — the exact proxy technique this repo already uses for the `apps/api` backend, just fronting a second Next.js app instead). `web-client-portal.vercel.app` itself is still live and still works (Vercel domain, unchanged) — it's now also reachable at `app.meagency.co.id/klien/*` via the proxy. **Every route in this app moved** (`/klien/login`, `/klien/`, `/klien/akun/password`, `/klien/lupa-password`, `/klien/reset-password`) — `next/link`/`useRouter` handle the prefix automatically; the few plain `<a href>` tags that predate this were switched to `next/link` since a raw anchor is NOT basePath-aware. **Session cookie split**: since Client Portal now shares a host with `web-internal`, `apps/api` gives the client-contact realm its own cookie (`CLIENT_PORTAL_SESSION_COOKIE`, distinct from employee/vendor's `SESSION_COOKIE`) so an AM with an internal session open who also logs into the Portal in the same browser doesn't silently log one or the other out — see `apps/api/src/lib/auth.ts`'s doc comments on `CLIENT_PORTAL_SESSION_COOKIE`/`requireClientContactActor`.
 
+**Saklar fitur (build-time env)** — `src/lib/fitur.ts`:
+
+| Env | Default | Efek |
+|---|---|---|
+| `NEXT_PUBLIC_PORTAL_PROGRES_AKTIF` | tidak di-set = **MATI** | `1`/`true` menampilkan tab "Progres Layanan", kartu progres di Ringkasan, dan rute `/progres`. Nilai lain (`0`, `false`, kosong) = mati: tab & kartu disembunyikan, `/progres` redirect ke `/`, dan `/client-portal/service-progress` tidak dipanggil. Ditangguhkan 2026-10-20 — `docs/decisions/2026-10-20-portal-progres-layanan-nonaktif.md`. |
+
+`NEXT_PUBLIC_*` di-inline saat `next build`: mengubah nilainya di Vercel baru berlaku setelah **redeploy** (tanpa ubah kode).
+
 **Infra prerequisites NOT satisfiable from this repo** (owner action):
 self-service email reset needs SMTP configured on the Supabase project
 (`CDPS SG`) plus the redirect URL added to the project's allowed list —
