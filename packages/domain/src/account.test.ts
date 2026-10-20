@@ -962,6 +962,18 @@ describeDb('setStrategyRequirement — Ubah Jalur Eksekusi (B1–B3)', () => {
     expect((await overrideAudit(d.svcId)).after_json.strategi_draft_id).toBe(draftId);
   });
 
+  it('only the Account lead/SPV or a Director may turn the Plan off; the owner AM may only add it', async () => {
+    const g = await rule1aService();
+    await expect(setStrategyRequirement(sql, accountStaff('ZZ-SINTA'), g.svcId, false, 'x')).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+    const a = await tieredService('ditentukan_am');
+    await expect(
+      setStrategyRequirement(sql, accountStaff('ZZ-SINTA'), a.svcId, true, 'klien butuh strategi'),
+    ).resolves.toBeTruthy();
+    await expect(setStrategyRequirement(sql, director(), a.svcId, false, 'cukup brief')).resolves.toBeTruthy();
+  });
+
   it('ZZ-SVC-H: a plan_wajib Service cannot be switched to Direct (M6C S4, MSG_TIER_LOCKED)', async () => {
     const h = await tieredService('plan_wajib');
     await expect(setStrategyRequirement(sql, director(), h.svcId, false, 'direct saja')).rejects.toThrow(

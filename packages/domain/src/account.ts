@@ -1502,7 +1502,8 @@ export async function guardBriefCreation(sql: Queryable, serviceId: string): Pro
  * setStrategyRequirement overrides a Service's "Requires Strategy Plan" flag for
  * this engagement (M6-OA-1). The pinned MSL flag is never mutated; an explicit
  * per-Service override column supersedes it. Permitted for the owning AM, the
- * Account lead/SPV, or a Director. Only while the Service is still [Awaiting
+ * Account lead/SPV, or a Director — but only the lead/SPV or a Director may turn
+ * the Plan OFF (de-escalation, M6C Rule 12). Only while the Service is still [Awaiting
  * Onboarding] and before any Strategy & Plan exists (exempting a drafted Plan
  * would orphan it). An audited before→after field edit (+ reason), not a machine.
  */
@@ -1566,6 +1567,13 @@ export async function setStrategyRequirement(
     // M6C S4: `plan_wajib` is locked on — the catalog decided, no manual answer.
     if (!requires && svc.plan_tier === TIER_PLAN_WAJIB) {
       throw new ConflictError(MSG_TIER_LOCKED);
+    }
+    // Dropping the Plan is a de-escalation, and de-escalation is SPV/Head Account
+    // or Director authority (M6C Rule 12) — the owning AM may still ADD a Plan.
+    // Same predicate as `plangate.canApproveDeescalation`, which cannot be
+    // imported here (plangate imports account).
+    if (!requires && !(actor.role.director || permission.isLead(actor, ACCOUNT_DIVISION))) {
+      throw new ForbiddenError(MSG_OVERRIDE_FORBIDDEN);
     }
     const strategiDraftId = strategi.find((r) => r.status === 'Draft')?.id ?? null;
 
