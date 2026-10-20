@@ -117,6 +117,8 @@ afterEach(() => { globalThis.fetch = prevFetch; });
 
 const owner = sign({ employeeId: 'ZZ-PDTKI-AM', division: 'Account', level: 'staff', od: false, director: false });
 const otherAm = sign({ employeeId: 'ZZ-PDTKI-LAIN', division: 'Account', level: 'staff', od: false, director: false });
+const leadAcc = sign({ employeeId: 'ZZ-PDTKI-AM', division: 'Account', level: 'lead', od: false, director: false });
+const adsStaff = sign({ employeeId: 'ZZ-PDTKI-ADS', division: 'Ads', level: 'staff', od: false, director: false });
 
 describe('POST /pdt/batches/konfirmasi-identitas — gagal sebelum DB tersentuh', () => {
   it('batch_id hilang ⇒ 400', async () => {
@@ -126,6 +128,11 @@ describe('POST /pdt/batches/konfirmasi-identitas — gagal sebelum DB tersentuh'
 
   it('batch_id bukan integer positif ⇒ 400', async () => {
     const res = await POST(req(owner, { batch_id: -1 }));
+    expect(res.status).toBe(400);
+  });
+
+  it("mode bukan 'tambah'/'ganti' ⇒ 400", async () => {
+    const res = await POST(req(owner, { batch_id: 1, mode: 'hapus', alasan: 'x' }));
     expect(res.status).toBe(400);
   });
 });
@@ -250,5 +257,55 @@ describeDb('POST /pdt/batches/konfirmasi-identitas — real DB', () => {
        where entity_type = 'client_platforms' and entity_id = ${String(cpId)}
          and action = 'pdt_identitas_dikonfirmasi'`;
     expect(Number(audit[0].n)).toBe(1);
+  });
+});
+
+// P8/RC-6 F2 — koreksi akun_konten_toko dari batch TikTok yang DITOLAK karena identitas
+// (keputusan Yohan 2026-10-20). Domain memegang cakupan izin/validasi penuh; di sini bukti
+// route meneruskan `mode`+`alasan` dan menjalankan reparse yang sama sesudahnya.
+describeDb('POST /pdt/batches/konfirmasi-identitas — koreksi (mode/alasan)', () => {
+  async function batchDitolak(): Promise<{ cpId: number; batchId: number; zipBuf: Buffer }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, 'ZZ-PDTKI-AM');
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop');
+    await sql`update client_platforms set akun_konten_toko = '["7329668450138162177"]'::jsonb where id = ${cpId}`;
+    const zipBuf = await ttVideoZip('7494549916237546503');
+    stubStorage(zipBuf);
+    const resCommit = await COMMIT(reqCommit(owner, { client_platform_id: cpId, storage_path: STORAGE_PATH }));
+    const bodyCommit = await resCommit.json();
+    expect(bodyCommit.status).toBe('ditolak');
+    return { cpId, batchId: bodyCommit.batch_id, zipBuf };
+  }
+
+  it('lead Account mode ganti ⇒ 200, akun_konten_toko diganti, batch direparse keluar dari ditolak', async () => {
+    const { cpId, batchId, zipBuf } = await batchDitolak();
+    stubStorage(zipBuf);
+    const res = await POST(req(leadAcc, { batch_id: batchId, mode: 'ganti', alasan: 'salah ikat' }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      batch_id: batchId,
+      client_platform_id: cpId,
+      platform: 'tiktok',
+      nilai_diikat: '7494549916237546503',
+      status_setelah_reparse: 'parsing',
+    });
+    const cp = await sql<{ akun_konten_toko: string[] }[]>`select akun_konten_toko from client_platforms where id = ${cpId}`;
+    expect(cp[0].akun_konten_toko).toEqual(['7494549916237546503']);
+  });
+
+  it('AM pemilik / Ads ⇒ 403; alasan hilang ⇒ 400 BI', async () => {
+    const { batchId } = await batchDitolak();
+    expect((await POST(req(owner, { batch_id: batchId, mode: 'tambah', alasan: 'x' }))).status).toBe(403);
+    expect((await POST(req(adsStaff, { batch_id: batchId, mode: 'tambah', alasan: 'x' }))).status).toBe(403);
+    const res = await POST(req(leadAcc, { batch_id: batchId, mode: 'tambah' }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('[alasan koreksi akun konten toko wajib diisi]');
+  });
+
+  it('tanpa mode pada batch ditolak ⇒ perilaku lama (400 tidak menunggu konfirmasi)', async () => {
+    const { batchId } = await batchDitolak();
+    const res = await POST(req(leadAcc, { batch_id: batchId }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('[batch ini tidak sedang menunggu konfirmasi identitas]');
   });
 });

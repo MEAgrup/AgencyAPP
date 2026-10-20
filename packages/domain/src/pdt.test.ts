@@ -7668,6 +7668,7 @@ describeDb('listRiwayatBatchPdt (G1-09 sub-langkah 3) — riwayat batch + status
       paketStatus: 'tersedia',
       retensiSampai: '2030-06-15',
       menggantikanBatchId: null,
+      koreksiIdentitas: null,
     }]);
   });
 
@@ -7819,6 +7820,143 @@ describeDb('konfirmasiIdentitasBatch (G1-09-KONFIRMASI-IDENTITAS) — Rule 2/4, 
     expect(Number(audit[0].n)).toBe(1);
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// P8/RC-6 — identitas TikTok lintas berkas (F1) + koreksi akun_konten_toko dari
+// batch yang ditolak karena identitas (F2). Keputusan Yohan 2026-10-20,
+// `docs/decisions/2026-10-20-pdt-identitas-tiktok-koreksi.md`. Fixture meniru
+// kasus Medikam (batch #38): seluruh baris ekspor ber-ID Kreator
+// 7494549916237546503 sementara yang terikat 7329668450138162177.
+// ---------------------------------------------------------------------------
+const ID_TERIKAT_LAMA = '7329668450138162177';
+const ID_BERKAS = '7494549916237546503';
+
+/** `tt_video` ber-preamble periode Juli 2026 dengan `n` baris, semua ber-ID Kreator `idKreator`. */
+function ttVideoBanyak(nama: string, idKreator: string, n: number): PdtPreviewBerkasInput {
+  return ttVideoBerkasLengkap(
+    nama,
+    '01/07/2026 - 31/07/2026',
+    Array.from({ length: n }, (_, i) => [idKreator, `V${i}`, '100', '10', '2', '5', '50000'] as [string, string, string, string, string, string, string]),
+  );
+}
+
+function ttLiveBanyak(nama: string, idKreator: string, n: number): PdtPreviewBerkasInput {
+  return ttLiveBerkas(
+    nama,
+    Array.from({ length: n }, (_, i) => [idKreator, 'Toko', `2026/07/${String((i % 28) + 1).padStart(2, '0')}/ ${String(i % 24).padStart(2, '0')}:06`, '0h 5min', '100', '0', '10', '0%'] as [string, string, string, string, string, string, string, string]),
+  );
+}
+
+describeDb('P8/RC-6 F1 — ID Kreator terbanyak LINTAS berkas TikTok (bukan berkas pertama)', () => {
+  it('batch campuran: tt_live 5 baris A lebih dulu, tt_video 200 baris B, + tt_affiliate_video kreator lain ⇒ usulan B', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, null);
+    const aff = ttAffiliateVideoBerkas('[aff]-video.xlsx', Array.from({ length: 300 }, (_, i) => barisAffiliate({ 5: `kreator-aff-${i % 3}`, 12: `VA-${i}` })));
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [ttLiveBanyak('live.xlsx', 'A', 5), ttVideoBanyak('video.xlsx', 'B', 200), aff], []);
+    expect(persiapan.identitas).toEqual({ status: 'usulkan_ikat', usulan: 'B' });
+    const row = await loadBatch(persiapan.batchId);
+    expect(row.identitas_sumber).toEqual({ id_kreator: 'B', jumlah_baris: 200, jumlah_berkas: 1 });
+  });
+
+  it('Medikam: tt_video 242 + tt_live 49 baris ber-ID baru vs akun terikat lama ⇒ ditolak, usulan tersimpan', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, [ID_TERIKAT_LAMA]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [ttVideoBanyak('[bisnis]-Video.xlsx', ID_BERKAS, 242), ttLiveBanyak('[bisnis]-Live.xlsx', ID_BERKAS, 49)], []);
+    expect(persiapan.status).toBe('ditolak');
+    const row = await loadBatch(persiapan.batchId);
+    expect(row.alasan_ditolak).toBe(`[ID Kreator di berkas (${ID_BERKAS}) tidak terdaftar di akun_konten_toko klien (${ID_TERIKAT_LAMA})]`);
+    expect(row.identitas_sumber).toEqual({ id_kreator: ID_BERKAS, jumlah_baris: 291, jumlah_berkas: 2 });
+
+    const riwayat = await listRiwayatBatchPdt(sql, ownerActor(), cpId);
+    expect(riwayat[0].koreksiIdentitas).toEqual({ usulan: ID_BERKAS, akunKontenToko: [ID_TERIKAT_LAMA] });
+  });
+
+  it('berkas tt_affiliate_video saja tidak memberi sinyal identitas (kreator lain)', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, [ID_TERIKAT_LAMA]);
+    const aff = ttAffiliateVideoBerkas('[aff]-video.xlsx', [barisAffiliate({ 12: 'VA-1' })]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [aff], []);
+    expect(persiapan.identitas.status).toBe('tidak_dapat_divalidasi');
+  });
+});
+
+describeDb('P8/RC-6 F2 — koreksi akun_konten_toko dari batch ditolak-identitas (Lead Account/Director)', () => {
+  const leadAcc = leadActor;
+
+  async function batchMedikam(): Promise<{ cpId: number; batchId: number }> {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'TikTok Shop', null, [ID_TERIKAT_LAMA]);
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [ttVideoBanyak('[bisnis]-Video.xlsx', ID_BERKAS, 242), ttLiveBanyak('[bisnis]-Live.xlsx', ID_BERKAS, 49)], []);
+    expect(persiapan.status).toBe('ditolak');
+    return { cpId, batchId: Number(persiapan.batchId) }; // bigint datang sebagai string dari driver
+  }
+
+  async function akunKonten(cpId: number): Promise<string[]> {
+    const rows = await sql<{ akun_konten_toko: string[] }[]>`select akun_konten_toko from client_platforms where id = ${cpId}`;
+    return rows[0].akun_konten_toko;
+  }
+
+  it('lead_acc mode ganti ⇒ akun_konten_toko = [ID berkas], audit akun_konten_toko_koreksi, reparse ⇒ batch tidak lagi ditolak', async () => {
+    const { cpId, batchId } = await batchMedikam();
+    const hasil = await konfirmasiIdentitasBatch(sql, leadAcc(), batchId, { mode: 'ganti', alasan: 'akun lama salah ikat' });
+    expect(hasil).toMatchObject({ batchId, clientPlatformId: Number(cpId), platform: 'tiktok', nilaiDiikat: ID_BERKAS });
+    expect(await akunKonten(cpId)).toEqual([ID_BERKAS]);
+
+    const audit = await sql<{ before_json: unknown; after_json: unknown; actor_employee_id: string }[]>`
+      select before_json, after_json, actor_employee_id from audit_log
+       where entity_type = 'client_platform' and entity_id = ${String(cpId)} and action = 'akun_konten_toko_koreksi'`;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].before_json).toEqual({ akun_konten_toko: [ID_TERIKAT_LAMA] });
+    expect(audit[0].after_json).toEqual({ akun_konten_toko: [ID_BERKAS], mode: 'ganti', batch_id: batchId, alasan: 'akun lama salah ikat' });
+    expect(audit[0].actor_employee_id).toBe('ZPDT-SPV-DB');
+
+    // Jalur proses ulang yang SAMA dengan sesudah konfirmasi identitas_belum_terikat (route memanggil reparsePdtBatch).
+    const reparse = await reparsePdtBatch(sql, batchId, [ttVideoBanyak('[bisnis]-Video.xlsx', ID_BERKAS, 242), ttLiveBanyak('[bisnis]-Live.xlsx', ID_BERKAS, 49)]);
+    expect(reparse.status).toBe('parsing'); // identitas cocok; tanpa pasangan rekonsiliasi berhenti di parsing
+    const row = await loadBatch(batchId);
+    expect(row.status).toBe('parsing');
+    expect(row.alasan_ditolak).toBeNull();
+    expect((await listRiwayatBatchPdt(sql, ownerActor(), cpId))[0].koreksiIdentitas).toBeNull();
+  });
+
+  it('director mode tambah ⇒ kedua nilai, tanpa duplikat bila diulang', async () => {
+    const { cpId, batchId } = await batchMedikam();
+    await konfirmasiIdentitasBatch(sql, director(), batchId, { mode: 'tambah', alasan: 'akun kedua sah' });
+    expect(await akunKonten(cpId)).toEqual([ID_TERIKAT_LAMA, ID_BERKAS]);
+    await konfirmasiIdentitasBatch(sql, director(), batchId, { mode: 'tambah', alasan: 'klik ulang' });
+    expect(await akunKonten(cpId)).toEqual([ID_TERIKAT_LAMA, ID_BERKAS]);
+  });
+
+  it('am_owner dan ads_staff ⇒ ForbiddenError, akun_konten_toko tidak berubah', async () => {
+    const { cpId, batchId } = await batchMedikam();
+    await expect(konfirmasiIdentitasBatch(sql, ownerActor(), batchId, { mode: 'ganti', alasan: 'x' })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(konfirmasiIdentitasBatch(sql, adsStaff(), batchId, { mode: 'ganti', alasan: 'x' })).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await akunKonten(cpId)).toEqual([ID_TERIKAT_LAMA]);
+  });
+
+  it('alasan kosong ⇒ ValidationError; mode tidak dikenal ⇒ ValidationError', async () => {
+    const { cpId, batchId } = await batchMedikam();
+    await expect(konfirmasiIdentitasBatch(sql, leadAcc(), batchId, { mode: 'ganti', alasan: '   ' }))
+      .rejects.toThrow('[alasan koreksi akun konten toko wajib diisi]');
+    await expect(konfirmasiIdentitasBatch(sql, leadAcc(), batchId, { mode: 'hapus' as never, alasan: 'x' }))
+      .rejects.toBeInstanceOf(ValidationError);
+    expect(await akunKonten(cpId)).toEqual([ID_TERIKAT_LAMA]);
+  });
+
+  it('batch ditolak BUKAN karena identitas TikTok (Shopee ID Toko) ⇒ ValidationError', async () => {
+    const clientId = nextClientId();
+    await insertClient(clientId, OWNER_AM);
+    const cpId = await insertClientPlatform(clientId, 'Shopee', 'SHOP-LAMA');
+    const persiapan = await commitUploadBatch(sql, ownerActor(), cpId, [shopeeAdsCpcBerkas('a.xlsx', '938284780', '01/07/2026 - 31/07/2026')], []);
+    expect(persiapan.status).toBe('ditolak');
+    await expect(konfirmasiIdentitasBatch(sql, leadAcc(), persiapan.batchId, { mode: 'ganti', alasan: 'x' }))
+      .rejects.toThrow('[batch ini tidak ditolak karena ID Kreator TikTok — koreksi akun konten toko tidak berlaku]');
+  });
 });
 
 // ---------------------------------------------------------------------------

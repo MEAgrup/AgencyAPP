@@ -5,6 +5,7 @@ import {
   ekstrakPeriodePreambleTiktok,
   ekstrakPreambleShopee,
   kolomTerbanyak,
+  kolomTerbanyakLintasBerkas,
   parseRentangTanggal,
   parseRentangTanggalTiktok,
   parseTanggalId,
@@ -167,6 +168,34 @@ describe('kolomTerbanyak (Rule 4 — ID Kreator terbanyak TikTok)', () => {
 
   it('null bila tidak ada baris data terisi', () => {
     expect(kolomTerbanyak([['ID Kreator']], 1, 'ID Kreator')).toBeNull();
+  });
+});
+
+describe('kolomTerbanyakLintasBerkas (Rule 3-4 lintas berkas — keputusan Yohan 2026-10-20)', () => {
+  const berkas = (nilai: string, n: number, barisHeader = 1) => ({
+    aoa: [...Array.from({ length: barisHeader - 1 }, () => []), ['ID Kreator', 'X'], ...Array.from({ length: n }, () => [nilai, '-'])],
+    barisHeader,
+  });
+
+  it('berkas pertama 5 baris A, berkas kedua 200 baris B ⇒ B (bukan berkas pertama)', () => {
+    expect(kolomTerbanyakLintasBerkas([berkas('A', 5), berkas('B', 200, 3)], 'ID Kreator'))
+      .toEqual({ nilai: 'B', jumlahBaris: 200, jumlahBerkas: 1 });
+  });
+
+  it('menjumlahkan nilai yang sama lintas berkas', () => {
+    expect(kolomTerbanyakLintasBerkas([berkas('B', 242, 3), berkas('A', 100), berkas('B', 49)], 'ID Kreator'))
+      .toEqual({ nilai: 'B', jumlahBaris: 291, jumlahBerkas: 2 });
+  });
+
+  it('seri ⇒ nilai terkecil, tidak bergantung urutan berkas', () => {
+    expect(kolomTerbanyakLintasBerkas([berkas('Z', 3), berkas('M', 3)], 'ID Kreator')?.nilai).toBe('M');
+    expect(kolomTerbanyakLintasBerkas([berkas('M', 3), berkas('Z', 3)], 'ID Kreator')?.nilai).toBe('M');
+  });
+
+  it('berkas tanpa kolom dilewati; nol baris berisi ⇒ null', () => {
+    expect(kolomTerbanyakLintasBerkas([{ aoa: [['Lain'], ['v']], barisHeader: 1 }, berkas('A', 1)], 'ID Kreator')?.nilai).toBe('A');
+    expect(kolomTerbanyakLintasBerkas([{ aoa: [['ID Kreator']], barisHeader: 1 }], 'ID Kreator')).toBeNull();
+    expect(kolomTerbanyakLintasBerkas([], 'ID Kreator')).toBeNull();
   });
 });
 

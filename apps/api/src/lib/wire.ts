@@ -9136,6 +9136,8 @@ export interface PdtBatchRingkasWire {
   retensi_sampai: string | null;
   /** G1-12 (Rule 36) — batch LAMA yang baris ini gantikan, `null` bila bukan hasil supersede. */
   menggantikan_batch_id: number | null;
+  /** Batch TikTok ditolak karena identitas: usulan ID Kreator + `akun_konten_toko` tersimpan sekarang (koreksi Lead Account/Director). `null` selain itu. */
+  koreksi_identitas: { usulan: string; akun_konten_toko: string[] } | null;
 }
 
 export function pdtBatchRingkasToWire(b: pdt.PdtBatchRingkas): PdtBatchRingkasWire {
@@ -9153,6 +9155,9 @@ export function pdtBatchRingkasToWire(b: pdt.PdtBatchRingkas): PdtBatchRingkasWi
     paket_status: b.paketStatus,
     retensi_sampai: b.retensiSampai,
     menggantikan_batch_id: b.menggantikanBatchId,
+    koreksi_identitas: b.koreksiIdentitas
+      ? { usulan: b.koreksiIdentitas.usulan, akun_konten_toko: b.koreksiIdentitas.akunKontenToko }
+      : null,
   };
 }
 

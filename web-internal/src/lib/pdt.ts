@@ -7,6 +7,7 @@
 
 import { api } from '@/lib/api';
 import { getClient, type Platform } from '@/lib/clients';
+import type { Role } from '@/lib/types';
 
 export interface PdtPreviewBerkas {
   nama: string;
@@ -161,8 +162,16 @@ export interface PdtKonfirmasiIdentitas {
   status_setelah_reparse: string | null;
 }
 
-export function konfirmasiIdentitasBatchPdt(batchId: number): Promise<PdtKonfirmasiIdentitas> {
-  return api.post<PdtKonfirmasiIdentitas>('/account/pdt/batches/konfirmasi-identitas', { batch_id: batchId });
+/** Gerbang tampilan tombol koreksi akun konten toko — Lead Account atau Director (server tetap otoritas, `permission.isLead`). */
+export function bolehKoreksiAkunKonten(role: Role | null): boolean {
+  return Boolean(role?.director) || (role?.division === 'Account' && role?.level === 'lead');
+}
+
+export function konfirmasiIdentitasBatchPdt(
+  batchId: number,
+  koreksi?: { mode: 'tambah' | 'ganti'; alasan: string },
+): Promise<PdtKonfirmasiIdentitas> {
+  return api.post<PdtKonfirmasiIdentitas>('/account/pdt/batches/konfirmasi-identitas', { batch_id: batchId, ...koreksi });
 }
 
 // G1-09 sub-langkah 3, bullet 4 — riwayat batch toko ini (GET
@@ -184,6 +193,9 @@ export interface PdtBatchRingkas {
   retensi_sampai: string | null;
   // G1-12 (Rule 36) — batch LAMA yang baris ini gantikan, null bila baris ini bukan hasil supersede.
   menggantikan_batch_id: number | null;
+  // Batch TikTok ditolak karena identitas — usulan ID Kreator + akun_konten_toko tersimpan
+  // sekarang; null bila batch ini tidak bisa dikoreksi (tombol koreksi hanya untuk ini).
+  koreksi_identitas: { usulan: string; akun_konten_toko: string[] } | null;
 }
 
 /** Label status batch — sama persis dengan Riwayat Batch di `/account/pdt/upload`. */

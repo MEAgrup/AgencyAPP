@@ -39,6 +39,12 @@
  * untuk batch yang sama — AM melihat batch pindah status tanpa menunggu tick
  * harian besok (`konfirmasiIdentitasBatchPdt`).
  *
+ * **Koreksi akun konten toko** (keputusan Yohan 2026-10-20): batch TikTok yang
+ * ditolak karena ID Kreator tidak terdaftar menampilkan tombol "Koreksi akun
+ * konten toko" untuk Lead Account/Director — Tambah atau Ganti
+ * `akun_konten_toko` dengan usulan batch itu, alasan wajib, lalu batch
+ * diproses ulang lewat endpoint konfirmasi yang sama.
+ *
  * **Tautan-dalam `?client=…&platform=…`** (G1-09-TAUTAN-STRATEGI): Section B
  * Strategi menunjuk ke sini dengan klien + toko sudah terpilih, supaya AM yang
  * sedang mengisi STRG tidak perlu mencari ulang kliennya di dua dropdown.
@@ -52,9 +58,11 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { listClients, type Client, type Platform } from '@/lib/clients';
 import {
   batchMingguanHanyaHarian,
+  bolehKoreksiAkunKonten,
   commitBatchPdt,
   konfirmasiIdentitasBatchPdt,
   listPlatformPdtKlien,
@@ -176,6 +184,12 @@ function UploadPdtWorkspace() {
   const [konfirmasiLoading, setKonfirmasiLoading] = useState<Record<number, boolean>>({});
   const [konfirmasiErr, setKonfirmasiErr] = useState<string | null>(null);
   const [konfirmasiHasil, setKonfirmasiHasil] = useState<PdtKonfirmasiIdentitas | null>(null);
+
+  // Koreksi akun konten toko — satu form terbuka per kali (batch_id), Lead Account/Director saja.
+  const { role } = useAuth();
+  const [koreksiBatchId, setKoreksiBatchId] = useState<number | null>(null);
+  const [koreksiMode, setKoreksiMode] = useState<'tambah' | 'ganti'>('ganti');
+  const [koreksiAlasan, setKoreksiAlasan] = useState('');
 
   const loadClients = useCallback(async () => {
     setClientsLoading(true);
@@ -325,6 +339,22 @@ function UploadPdtWorkspace() {
       setCommitErr(errorMessage(e));
     } finally {
       setCommitLoading(false);
+    }
+  }
+
+  async function handleKoreksiAkunKonten(batchId: number) {
+    setKonfirmasiLoading((prev) => ({ ...prev, [batchId]: true }));
+    setKonfirmasiErr(null);
+    try {
+      const hasil = await konfirmasiIdentitasBatchPdt(batchId, { mode: koreksiMode, alasan: koreksiAlasan });
+      setKonfirmasiHasil(hasil);
+      setKoreksiBatchId(null);
+      setKoreksiAlasan('');
+      await loadRiwayat();
+    } catch (e) {
+      setKonfirmasiErr(errorMessage(e));
+    } finally {
+      setKonfirmasiLoading((prev) => ({ ...prev, [batchId]: false }));
     }
   }
 
@@ -734,6 +764,43 @@ function UploadPdtWorkspace() {
                               {konfirmasiLoading[b.id] ? 'Mengonfirmasi...' : 'Konfirmasi Identitas'}
                             </button>
                           )}
+                          {b.koreksi_identitas && bolehKoreksiAkunKonten(role) && (koreksiBatchId === b.id ? (
+                            <div className="stack" style={{ gap: 6, minWidth: 260 }}>
+                              <p style={{ fontSize: 12 }}>
+                                {b.koreksi_identitas.akun_konten_toko.join(', ') || '—'} →{' '}
+                                <strong>
+                                  {koreksiMode === 'ganti'
+                                    ? b.koreksi_identitas.usulan
+                                    : [...new Set([...b.koreksi_identitas.akun_konten_toko, b.koreksi_identitas.usulan])].join(', ')}
+                                </strong>
+                              </p>
+                              <select className="input" value={koreksiMode} onChange={(e) => setKoreksiMode(e.target.value as 'tambah' | 'ganti')}>
+                                <option value="ganti">Ganti (hapus akun lama)</option>
+                                <option value="tambah">Tambah (akun kedua)</option>
+                              </select>
+                              <input
+                                className="input"
+                                placeholder="Alasan koreksi (wajib)"
+                                value={koreksiAlasan}
+                                onChange={(e) => setKoreksiAlasan(e.target.value)}
+                              />
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  className="btn btnPrimary btnSm"
+                                  disabled={Boolean(konfirmasiLoading[b.id]) || koreksiAlasan.trim() === ''}
+                                  onClick={() => void handleKoreksiAkunKonten(b.id)}
+                                >
+                                  {konfirmasiLoading[b.id] ? 'Menyimpan...' : 'Simpan & Proses Ulang'}
+                                </button>
+                                <button type="button" className="btn btnGhost btnSm" onClick={() => setKoreksiBatchId(null)}>Batal</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button type="button" className="btn btnGhost btnSm" onClick={() => { setKoreksiBatchId(b.id); setKoreksiAlasan(''); }}>
+                              Koreksi akun konten toko
+                            </button>
+                          ))}
                         </td>
                       </tr>
                     ))}

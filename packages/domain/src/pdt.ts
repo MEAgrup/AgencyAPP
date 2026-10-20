@@ -370,11 +370,12 @@ function bangunSatuPreviewBerkas(input: PdtPreviewBerkasInput): { hasil: PdtPrev
 }
 
 /**
- * Rule 2/4 — identitas dari berkas 'ok' pertama yang membawa sinyalnya (bukan
- * diketik AM). `sumber` (bentuk `pdt_upload_batch.identitas_sumber`, dipakai
- * HANYA oleh `commitUploadBatch`) terisi untuk verdict `cocok`/`usulkan_ikat`
- * — bukti apa yang divalidasi/diusulkan; `null` untuk `tolak`/
- * `tidak_dapat_divalidasi` (nol identitas yang tervalidasi untuk disimpan).
+ * Rule 2/4 — identitas dari berkas yang membawa sinyalnya (bukan diketik AM;
+ * Shopee: berkas Ads pertama, TikTok: `ID Kreator` terbanyak lintas berkas).
+ * `sumber` (bentuk `pdt_upload_batch.identitas_sumber`) terisi untuk verdict
+ * `cocok`/`usulkan_ikat` — bukti apa yang divalidasi/diusulkan — dan untuk
+ * `tolak` TikTok (usulan koreksi Lead Account); `null` untuk `tolak` Shopee/
+ * `tidak_dapat_divalidasi`.
  */
 function resolveIdentitasDanSumber(
   platform: pdt.PdtPlatform,
@@ -391,16 +392,21 @@ function resolveIdentitasDanSumber(
     const verdict = pdt.validasiIdentitasShopee(preamble, shopId);
     return { verdict, sumber: verdict.status === 'tolak' ? null : pdt.bangunIdentitasSumberShopee(preamble) };
   }
-  // tiktok — cari berkas 'ok' PERTAMA yang modulnya benar-benar membawa kolom 'ID Kreator' (Rule 3),
-  // bukan dua kode modul hardcode — supaya penambahan modul TikTok baru yang juga membawa kolom ini
-  // otomatis ikut jadi kandidat, tanpa perlu menyentuh fungsi ini lagi.
-  for (const berkas of terparse) {
-    if (!berkas.modul.kolomDipanen.some((k) => k.toLowerCase() === KOLOM_ID_KREATOR.toLowerCase())) continue;
-    const terbanyak = pdt.kolomTerbanyak(berkas.aoa, berkas.barisHeader, KOLOM_ID_KREATOR);
-    if (terbanyak) {
-      const verdict = pdt.validasiIdentitasTiktok(terbanyak.nilai, akunKontenToko);
-      return { verdict, sumber: verdict.status === 'tolak' ? null : { id_kreator: terbanyak.nilai } };
-    }
+  // tiktok — kandidat = SEMUA berkas yang modulnya benar-benar membawa kolom 'ID Kreator' (Rule 3),
+  // bukan kode modul hardcode — modul TikTok baru yang membawa kolom ini otomatis ikut; berkas
+  // afiliasi (`tt_affiliate_video`, kreator lain) tidak memanennya jadi tidak pernah ikut dihitung.
+  // Nilai terbanyak dihitung LINTAS berkas, bukan berkas pertama (keputusan Yohan 2026-10-20,
+  // `docs/decisions/2026-10-20-pdt-identitas-tiktok-koreksi.md`).
+  const kandidat = terparse.filter((b) => b.modul.kolomDipanen.some((k) => k.toLowerCase() === KOLOM_ID_KREATOR.toLowerCase()));
+  const terbanyak = pdt.kolomTerbanyakLintasBerkas(kandidat, KOLOM_ID_KREATOR);
+  if (terbanyak) {
+    const verdict = pdt.validasiIdentitasTiktok(terbanyak.nilai, akunKontenToko);
+    // Disimpan juga untuk `tolak` — usulan yang dipakai Lead Account/Director untuk koreksi
+    // `akun_konten_toko` dari batch yang ditolak (`konfirmasiIdentitasBatch` mode tambah/ganti).
+    return {
+      verdict,
+      sumber: { id_kreator: terbanyak.nilai, jumlah_baris: terbanyak.jumlahBaris, jumlah_berkas: terbanyak.jumlahBerkas },
+    };
   }
   return { verdict: { status: 'tidak_dapat_divalidasi', pesan: "[tidak ada berkas TikTok yang membawa kolom 'ID Kreator' terparse untuk validasi identitas toko]" }, sumber: null };
 }
@@ -2258,19 +2264,29 @@ export interface PdtKonfirmasiIdentitasHasil {
  * pernah menyentuh Storage/ZIP, pola sama `commitUploadBatch`) — pemanggil (route)
  * yang menjalankan ulang pipeline reparse (G1-11) SEGERA setelah ini sukses, supaya
  * batch pindah dari `identitas_belum_terikat` tanpa menunggu tick harian.
+ *
+ * `koreksi` diisi ⇒ jalur koreksi Lead Account/Director untuk batch TikTok yang
+ * DITOLAK karena identitas (`koreksiAkunKontenToko`, keputusan Yohan 2026-10-20);
+ * tanpa `koreksi` perilakunya persis seperti di atas.
  */
-export async function konfirmasiIdentitasBatch(sql: Sql, actor: Actor, batchId: number): Promise<PdtKonfirmasiIdentitasHasil> {
+export async function konfirmasiIdentitasBatch(
+  sql: Sql,
+  actor: Actor,
+  batchId: number,
+  koreksi?: PdtKoreksiAkunKontenInput,
+): Promise<PdtKonfirmasiIdentitasHasil> {
   return withTransaction(sql, async (tx) => {
     const rows = await tx<{
       id: number;
       client_platform_id: number;
       platform: string;
       status: PdtCommitStatus;
+      alasan_ditolak: string | null;
       identitas_sumber: Record<string, unknown> | null;
       raw_path: string | null;
       raw_dihapus_pada: string | null;
     }[]>`
-      select id, client_platform_id, platform, status, identitas_sumber, raw_path, raw_dihapus_pada
+      select id, client_platform_id, platform, status, alasan_ditolak, identitas_sumber, raw_path, raw_dihapus_pada
         from pdt_upload_batch
        where id = ${batchId}
        for update`;
@@ -2278,6 +2294,7 @@ export async function konfirmasiIdentitasBatch(sql: Sql, actor: Actor, batchId: 
     if (!batch) throw new NotFoundError('[batch PDT tidak ditemukan]');
 
     const cpRow = await loadClientPlatformUntukPdt(tx, batch.client_platform_id);
+    if (koreksi !== undefined) return koreksiAkunKontenToko(tx, actor, batch, cpRow, koreksi);
     if (!canUploadBatch(actor, lingkupDari(cpRow))) throw new ForbiddenError();
 
     if (batch.status !== 'identitas_belum_terikat') {
@@ -2332,6 +2349,92 @@ export async function konfirmasiIdentitasBatch(sql: Sql, actor: Actor, batchId: 
   });
 }
 
+export type PdtModeKoreksiAkunKonten = 'tambah' | 'ganti';
+
+/** Koreksi `akun_konten_toko` dari batch TikTok yang DITOLAK karena identitas (keputusan Yohan 2026-10-20). */
+export interface PdtKoreksiAkunKontenInput {
+  mode: PdtModeKoreksiAkunKonten;
+  alasan: string;
+}
+
+/**
+ * Usulan `ID Kreator` batch TikTok yang ditolak KARENA identitas (Rule 3: nilai
+ * berkas tidak terdaftar di `akun_konten_toko`) — `null` untuk penolakan lain
+ * (rekonsiliasi, kolom hilang, Shopee). Satu definisi dipakai gerbang koreksi
+ * dan riwayat batch, supaya tombol UI muncul persis di batch yang diterima server.
+ */
+function usulanKoreksiAkunKonten(b: {
+  platform: string;
+  status: PdtCommitStatus;
+  alasan_ditolak: string | null;
+  identitas_sumber: Record<string, unknown> | null;
+}): string | null {
+  if (b.platform !== 'tiktok' || b.status !== 'ditolak') return null;
+  if (!b.alasan_ditolak?.startsWith('[ID Kreator di berkas (')) return null;
+  const usulan = b.identitas_sumber?.id_kreator;
+  return typeof usulan === 'string' && usulan !== '' ? usulan : null;
+}
+
+/**
+ * Jalur koreksi `konfirmasiIdentitasBatch` (dipanggil di dalam transaksinya,
+ * baris batch sudah terkunci `for update`). PDT Rule 3-4 dilonggarkan Yohan
+ * 2026-10-20 (`docs/decisions/2026-10-20-pdt-identitas-tiktok-koreksi.md`):
+ * Lead Account/Director boleh MENAMBAH (`tambah`) atau MENGGANTI (`ganti`)
+ * `akun_konten_toko` memakai usulan batch yang ditolak, dengan alasan wajib dan
+ * satu baris audit. Batch-nya diproses ulang oleh pemanggil (route), sama
+ * persis seperti sesudah konfirmasi `identitas_belum_terikat`.
+ */
+async function koreksiAkunKontenToko(
+  tx: TransactionSql,
+  actor: Actor,
+  batch: {
+    id: number;
+    client_platform_id: number;
+    platform: string;
+    status: PdtCommitStatus;
+    alasan_ditolak: string | null;
+    identitas_sumber: Record<string, unknown> | null;
+    raw_path: string | null;
+    raw_dihapus_pada: string | null;
+  },
+  cpRow: ClientPlatformRow,
+  koreksi: PdtKoreksiAkunKontenInput,
+): Promise<PdtKonfirmasiIdentitasHasil> {
+  if (!permission.isLead(actor, ACCOUNT_DIVISION)) throw new ForbiddenError();
+  if (koreksi.mode !== 'tambah' && koreksi.mode !== 'ganti') {
+    throw new ValidationError("[mode koreksi harus 'tambah' atau 'ganti']");
+  }
+  const alasan = koreksi.alasan.trim();
+  if (alasan === '') throw new ValidationError('[alasan koreksi akun konten toko wajib diisi]');
+
+  const nilai = usulanKoreksiAkunKonten(batch);
+  if (nilai == null) {
+    throw new ValidationError('[batch ini tidak ditolak karena ID Kreator TikTok — koreksi akun konten toko tidak berlaku]');
+  }
+
+  const sebelum = cpRow.akun_konten_toko ?? [];
+  const setelah = koreksi.mode === 'ganti' ? [nilai] : sebelum.includes(nilai) ? sebelum : [...sebelum, nilai];
+  await tx`update client_platforms set akun_konten_toko = ${tx.json(setelah as never)} where id = ${cpRow.id}`;
+  await executors(tx).audit.insertAudit({
+    entityType: 'client_platform',
+    entityId: String(cpRow.id),
+    actorEmployeeId: actor.employeeId,
+    action: 'akun_konten_toko_koreksi',
+    beforeJson: { akun_konten_toko: sebelum },
+    afterJson: { akun_konten_toko: setelah, mode: koreksi.mode, batch_id: Number(batch.id), alasan },
+    createdBy: actor.employeeId,
+  });
+
+  return {
+    batchId: Number(batch.id),
+    clientPlatformId: Number(batch.client_platform_id),
+    platform: 'tiktok',
+    nilaiDiikat: nilai,
+    rawPath: batch.raw_path,
+    rawDihapusPada: batch.raw_dihapus_pada,
+  };
+}
+
 /** Status paket TAMPILAN (G1-09 bullet 4) — turunan dari tiga kolom DB, bukan kolom baru. */
 export type PdtPaketStatus = 'tersedia' | 'kedaluwarsa' | 'legal_hold';
 
@@ -2352,6 +2455,8 @@ export interface PdtBatchRingkas {
   retensiSampai: string | null;
   /** `pdt_upload_batch.menggantikan_batch_id` (G1-12, Rule 36) — batch LAMA yang baris ini gantikan, `null` bila baris ini bukan hasil supersede. */
   menggantikanBatchId: number | null;
+  /** Usulan koreksi `akun_konten_toko` (batch TikTok ditolak karena identitas) + nilai tersimpan sekarang; `null` bila batch ini tidak bisa dikoreksi. */
+  koreksiIdentitas: { usulan: string; akunKontenToko: string[] } | null;
 }
 
 /**
@@ -2393,8 +2498,9 @@ export async function listRiwayatBatchPdt(sql: Sql, actor: Actor, clientPlatform
     raw_dihapus_pada: string | null;
     retensi_sampai: string | null;
     menggantikan_batch_id: string | null;
+    identitas_sumber: Record<string, unknown> | null;
   }[]>`
-    select id, client_platform_id, platform, status, alasan_ditolak, reconcile_delta_pct,
+    select id, client_platform_id, platform, status, alasan_ditolak, reconcile_delta_pct, identitas_sumber,
            to_char(periode_mulai, 'YYYY-MM-DD') as periode_mulai,
            to_char(periode_selesai, 'YYYY-MM-DD') as periode_selesai,
            dibuat_pada::text as dibuat_pada, dibuat_oleh, legal_hold, raw_dihapus_pada,
@@ -2403,21 +2509,25 @@ export async function listRiwayatBatchPdt(sql: Sql, actor: Actor, clientPlatform
      where client_platform_id = ${clientPlatformId}
      order by id desc`;
 
-  return rows.map((r) => ({
-    id: Number(r.id),
-    clientPlatformId: Number(r.client_platform_id),
-    platform: r.platform as pdt.PdtPlatform,
-    status: r.status,
-    alasanDitolak: r.alasan_ditolak,
-    reconcileDeltaPct: r.reconcile_delta_pct == null ? null : Number(r.reconcile_delta_pct),
-    periodeMulai: r.periode_mulai,
-    periodeSelesai: r.periode_selesai,
-    dibuatPada: r.dibuat_pada,
-    dibuatOleh: r.dibuat_oleh,
-    paketStatus: r.legal_hold ? 'legal_hold' : r.raw_dihapus_pada != null ? 'kedaluwarsa' : 'tersedia',
-    retensiSampai: r.raw_dihapus_pada != null ? null : r.retensi_sampai,
-    menggantikanBatchId: r.menggantikan_batch_id == null ? null : Number(r.menggantikan_batch_id),
-  }));
+  return rows.map((r) => {
+    const usulan = usulanKoreksiAkunKonten(r);
+    return {
+      id: Number(r.id),
+      clientPlatformId: Number(r.client_platform_id),
+      platform: r.platform as pdt.PdtPlatform,
+      status: r.status,
+      alasanDitolak: r.alasan_ditolak,
+      reconcileDeltaPct: r.reconcile_delta_pct == null ? null : Number(r.reconcile_delta_pct),
+      periodeMulai: r.periode_mulai,
+      periodeSelesai: r.periode_selesai,
+      dibuatPada: r.dibuat_pada,
+      dibuatOleh: r.dibuat_oleh,
+      paketStatus: r.legal_hold ? 'legal_hold' : r.raw_dihapus_pada != null ? 'kedaluwarsa' : 'tersedia',
+      retensiSampai: r.raw_dihapus_pada != null ? null : r.retensi_sampai,
+      menggantikanBatchId: r.menggantikan_batch_id == null ? null : Number(r.menggantikan_batch_id),
+      koreksiIdentitas: usulan == null ? null : { usulan, akunKontenToko: row.akun_konten_toko ?? [] },
+    };
+  });
 }
 
 // ===========================================================================

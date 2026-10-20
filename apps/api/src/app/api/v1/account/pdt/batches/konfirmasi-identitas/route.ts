@@ -4,7 +4,11 @@
  * ditutup sesi ini), Rule 2 (Shopee)/Rule 4 (TikTok): AM mengonfirmasi SEKALI
  * usulan identitas batch `identitas_belum_terikat`.
  *
- * Body: JSON `{ batch_id }`.
+ * Body: JSON `{ batch_id, mode?, alasan? }`. `mode` (`'tambah'`/`'ganti'`) +
+ * `alasan` ⇒ koreksi `akun_konten_toko` oleh Lead Account/Director dari batch
+ * TikTok yang DITOLAK karena identitas (keputusan Yohan 2026-10-20,
+ * `docs/decisions/2026-10-20-pdt-identitas-tiktok-koreksi.md`); reparse
+ * sesudahnya memakai jalur yang sama di bawah. Tanpa `mode` = perilaku lama.
  *
  * Dua langkah: (1) `pdt.konfirmasiIdentitasBatch` mengikat nilai yang
  * diusulkan sistem ke `client_platforms.shop_id`/`akun_konten_toko` PERMANEN
@@ -36,13 +40,19 @@ const { PDT_MODULES } = pdt;
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
-    const body = (await request.json().catch(() => ({}))) as { batch_id?: unknown };
+    const body = (await request.json().catch(() => ({}))) as { batch_id?: unknown; mode?: unknown; alasan?: unknown };
     const batchId = typeof body.batch_id === 'number' ? body.batch_id : NaN;
     if (!Number.isInteger(batchId) || batchId <= 0) {
       throw new BadRequestError('batch_id is required (positive integer)');
     }
+    let koreksi: pdtDomain.PdtKoreksiAkunKontenInput | undefined;
+    if (body.mode !== undefined) {
+      if (body.mode !== 'tambah' && body.mode !== 'ganti') throw new BadRequestError("mode must be 'tambah' or 'ganti'");
+      // Alasan kosong/hilang divalidasi domain (pesan BI), bukan di sini.
+      koreksi = { mode: body.mode, alasan: typeof body.alasan === 'string' ? body.alasan : '' };
+    }
 
-    const ikat = await pdtDomain.konfirmasiIdentitasBatch(db(), actor, batchId);
+    const ikat = await pdtDomain.konfirmasiIdentitasBatch(db(), actor, batchId, koreksi);
 
     // Paket belum pernah selesai diunggah (nol raw_path) atau sudah dipurge — identitas
     // sudah terikat, tapi reparse langsung tidak mungkin. AM perlu unggah ulang batch baru.
