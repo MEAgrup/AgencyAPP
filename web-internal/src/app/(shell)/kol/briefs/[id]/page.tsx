@@ -26,6 +26,17 @@ import RollupBlockerPanel from '@/components/RollupBlockerPanel';
 import StatusBadge from '@/components/StatusBadge';
 import { briefDisplayStatus } from '@/lib/brief';
 import StageTimelinePanel from '@/components/StageTimelinePanel';
+import {
+  BATCH_MAX,
+  BOOKING_TEMPLATE_CSV,
+  emptyRow,
+  isRowBlank,
+  parseBookingRows,
+  readBookingFile,
+  validateRow,
+  type CreatorRow,
+  type ParseResult,
+} from '@/lib/kol-booking-paste';
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
@@ -33,47 +44,8 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 // Batch creator entry (M9 §4): one brief = one platform + one source pool + one
-// coordinator; up to 20 creators per submit, each with its own rate + qty.
-const BATCH_MAX = 20;
-
-interface CreatorRow {
-  key: number;
-  creator_name: string;
-  creator_handle: string;
-  niche: string;
-  agreed_rate: string; // decimal string
-  qty_video: string; // integer string ("" => 0)
-  qty_live: string; // integer string ("" => 0)
-}
-
-function emptyRow(key: number): CreatorRow {
-  return { key, creator_name: '', creator_handle: '', niche: '', agreed_rate: '', qty_video: '', qty_live: '' };
-}
-
-/** A row with nothing typed is skipped silently at submit (not an error). */
-function isRowBlank(r: CreatorRow): boolean {
-  return (
-    r.creator_name.trim() === '' &&
-    r.creator_handle.trim() === '' &&
-    r.niche.trim() === '' &&
-    r.agreed_rate.trim() === '' &&
-    r.qty_video.trim() === '' &&
-    r.qty_live.trim() === ''
-  );
-}
-
-/** Client-side validation of one intended row; returns a BI-style message or null. */
-function validateRow(r: CreatorRow): string | null {
-  if (r.creator_name.trim() === '') return '[nama creator wajib diisi]';
-  const rate = Number(r.agreed_rate);
-  if (r.agreed_rate.trim() === '' || !Number.isFinite(rate) || rate <= 0) return '[agreed rate wajib diisi & lebih dari 0]';
-  for (const q of [r.qty_video, r.qty_live]) {
-    if (q.trim() === '') continue;
-    const n = Number(q);
-    if (!Number.isInteger(n) || n < 0) return '[jumlah video/live harus bilangan bulat tidak negatif]';
-  }
-  return null;
-}
+// coordinator; up to BATCH_MAX creators per submit, each with its own rate + qty.
+// Row type, validation and the paste/upload parser live in `@/lib/kol-booking-paste`.
 
 function qtyOrUndefined(v: string): number | undefined {
   return v.trim() === '' ? undefined : Number(v);
@@ -105,6 +77,12 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
   const [creatorRows, setCreatorRows] = useState<CreatorRow[]>(() => [emptyRow(0), emptyRow(1), emptyRow(2)]);
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
   const rowKeyCounter = useRef(3);
+  // Tempel/unggah Excel — hanya mengisi grid; simpan tetap lewat "Buat Booking".
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Coordinator candidates = active KOL STAFF (`kol.validateKolStaff`). Declared
   // here, above the loading early-return, because hooks must run every render.
@@ -163,10 +141,72 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
     });
   }
 
+  /** Sisa kapasitas grid = BATCH_MAX dikurangi baris yang sudah terisi. */
+  function importCapacity(): number {
+    return BATCH_MAX - creatorRows.filter((r) => !isRowBlank(r)).length;
+  }
+
+  /**
+   * Isi grid dari hasil parse: baris kosong diganti, sisanya ditambahkan.
+   * Baris yang gagal validasi tetap dimasukkan (dengan pesannya) supaya bisa
+   * diperbaiki di tempat; tidak ada yang disimpan otomatis.
+   */
+  function applyImport(result: ParseResult) {
+    const incoming = [
+      ...result.rows.map((row) => ({ row, error: null as string | null })),
+      ...result.errors.flatMap((e) => (e.row ? [{ row: e.row, error: `Baris ${e.baris} di Excel: ${e.pesan}` }] : [])),
+    ].map(({ row, error }) => ({ row: { ...row, key: rowKeyCounter.current++ }, error }));
+    if (incoming.length > 0) {
+      setCreatorRows((rows) => [...rows.filter((r) => !isRowBlank(r)), ...incoming.map((i) => i.row)]);
+      setRowErrors((errs) => {
+        const next = { ...errs };
+        for (const i of incoming) if (i.error) next[i.row.key] = i.error;
+        return next;
+      });
+    }
+    setImportErrors(result.errors.map((e) => `Baris ${e.baris}: ${e.pesan}`));
+    setImportMessage(
+      incoming.length === 0
+        ? 'Tidak ada baris creator yang terbaca.'
+        : `${result.rows.length} baris siap disimpan${
+            result.errors.some((e) => e.row) ? `, ${result.errors.filter((e) => e.row).length} baris perlu diperbaiki` : ''
+          }. Periksa grid lalu tekan "Buat Booking".`,
+    );
+  }
+
+  function handlePasteImport() {
+    applyImport(parseBookingRows(pasteText, importCapacity()));
+    setPasteText('');
+    setPasteOpen(false);
+  }
+
+  async function handleFileImport(file: File | undefined) {
+    if (!file) return;
+    try {
+      applyImport(await readBookingFile(file, importCapacity()));
+    } catch (err) {
+      setImportMessage(null);
+      setImportErrors([`Berkas tidak bisa dibaca: ${errorMessage(err)}`]);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  function downloadTemplate() {
+    const url = URL.createObjectURL(new Blob([BOOKING_TEMPLATE_CSV], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'template-booking-kol.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function handleCreateBooking(e: FormEvent) {
     e.preventDefault();
     setCreateError(null);
     setCreateMessage(null);
+    setImportMessage(null);
+    setImportErrors([]);
 
     if (platform.trim() === '') {
       setCreateError('[platform brief wajib diisi]');
@@ -419,7 +459,10 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
           <p className="muted" style={{ fontSize: 13 }}>
             Satu brief = satu <strong>Platform</strong> + satu <strong>Source Pool</strong> + satu{' '}
             <strong>Coordinator</strong> (otomatis Anda; Team Leader boleh menetapkan lain). Isi banyak
-            creator sekaligus (maks {BATCH_MAX} baris) lalu simpan sekali. Urutan prioritas sourcing:
+            creator sekaligus (maks {BATCH_MAX} baris) lalu simpan sekali &mdash; ketik di grid, atau{' '}
+            <strong>Tempel dari Excel</strong> / <strong>Unggah Excel/CSV</strong>{' '}dengan kolom Nama Creator,
+            Handle, Niche, Agreed Rate, Qty Video, Qty Live (Platform, Source Pool &amp; Coordinator tetap
+            diisi di form). Hasilnya hanya mengisi grid; periksa lalu tekan Buat Booking. Urutan prioritas sourcing:
             MCN MEA Roster &rarr; KOL External Pool &rarr; Ad-hoc New (last resort).
           </p>
           <form className="form" onSubmit={handleCreateBooking}>
@@ -469,6 +512,55 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
                 emptyHint="Belum ada staff KOL aktif. Biarkan kosong — staff yang membuat Booking menjadi Coordinator-nya."
               />
             </div>
+
+            {/* Tempel/unggah Excel — mengisi grid di bawah, tidak menyimpan apa pun. */}
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button type="button" className="btn btnSecondary btnSm" onClick={() => setPasteOpen((o) => !o)}>
+                Tempel dari Excel
+              </button>
+              <button type="button" className="btn btnSecondary btnSm" onClick={() => fileInputRef.current?.click()}>
+                Unggah Excel/CSV
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                aria-label="Unggah Excel/CSV"
+                style={{ display: 'none' }}
+                onChange={(e) => handleFileImport(e.target.files?.[0])}
+              />
+              <button type="button" className="btn btnGhost btnSm" onClick={downloadTemplate}>
+                Unduh template
+              </button>
+            </div>
+            {pasteOpen && (
+              <div className="field">
+                <label htmlFor="paste-excel">Tempel baris dari Excel/Google Sheets (boleh dengan baris header)</label>
+                <textarea
+                  id="paste-excel"
+                  rows={5}
+                  placeholder={'Nama Creator\tHandle\tNiche\tAgreed Rate\tQty Video\tQty Live'}
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                />
+                <div className="row" style={{ gap: 8, marginTop: 6 }}>
+                  <button type="button" className="btn btnPrimary btnSm" onClick={handlePasteImport} disabled={pasteText.trim() === ''}>
+                    Masukkan ke grid
+                  </button>
+                  <button type="button" className="btn btnSecondary btnSm" onClick={() => { setPasteOpen(false); setPasteText(''); }}>
+                    Batal
+                  </button>
+                </div>
+              </div>
+            )}
+            {importMessage && <div className="alert alertInfo" role="status">{importMessage}</div>}
+            {importErrors.length > 0 && (
+              <div className="alert alertError" role="alert">
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {importErrors.map((m) => <li key={m}>{m}</li>)}
+                </ul>
+              </div>
+            )}
 
             {/* Per-creator rows — Nama & Agreed Rate wajib; qty & lainnya opsional. */}
             <div className="table-wrap">
