@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-07-29 | **Vote Director `[Bermasalah]` diselaraskan ke literal Go `'Director'` (sebelumnya `'Management'`) — bug yang membuat `director_vote` selalu kosong.** `resolveBermasalah` menulis divisi `'Management'` untuk Director, sedangkan reader Go (dan karenanya port-nya) mengunci `director_vote` pada `'Director'`. Akibatnya keputusan Director **tidak pernah** muncul di status, dan `escalated` bisa tetap `true` **setelah** Director menolak — tepatnya kasus yang paling butuh kejelasan. Aman diubah tanpa migrasi data: `transaction_issue_approvals` **nol baris** di `CDPS SG` saat perubahan (diverifikasi), dan tabelnya tidak punya CHECK pada `division`. Reader tetap menerima `'Management'` untuk baris pra-penyelarasan. Regresi diuji eksplisit. | Nol data yang perlu dipindahkan, dan membiarkannya berarti alur ACC sengketa uang menampilkan status yang salah di produksi. | Pemilik (Nerissa), 2026-07-29 — instruksi sesi cutover 12 |

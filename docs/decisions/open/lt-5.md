@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Open -->
+
+| # | Item | Needed from | Blocking? |
+|---|---|---|---|
+| LT-5 | ✅ **RESOLVED 2026-08-29 (lihat Decided) — Live Stream diberi gerbang intake `stage_code='Cek Brief AM'` / `label='Terima Brief AM'` (migrasi `20260901040000`).** Teks asli: 🟡 **BARU 2026-08-31 (M16, Akun A) — Live Stream sengaja TIDAK diberi state `Cek Brief AM`, mengikuti tabel pipeline STATE_MACHINES §18 secara literal, walau PRD §2 Rule 10 bilang gerbang itu "wajib di semua divisi".** `brief_review` tetap universal (divisi Live Stream tetap bisa mengisinya) tapi `stage.reviewBrief` hanya menjalankan `sm_transition` kalau `production_stage` brief persis `'Cek Brief AM'` — untuk Live Stream (`initial_state='Terima Sampel'`) itu tidak pernah benar, jadi `reviewBrief` menulis baris `brief_review` saja tanpa menggerakkan mesin. Perlu konfirmasi: apakah ini pengecualian sengaja, atau kelalaian tabel yang perlu ditambal (nol dampak kode TS — hanya migrasi seed). | Pemilik | **Tidak** memblokir — Rule 10 (keputusan) dan tabel pipeline (state) sama-sama terpenuhi tanpa kontradiksi |

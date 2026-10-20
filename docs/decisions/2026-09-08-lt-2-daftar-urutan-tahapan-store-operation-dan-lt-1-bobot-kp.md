@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-08 | **🟡 LT-2 (daftar & urutan tahapan Store Operation) dan LT-1 (bobot KPI Store Operation/AI Optimizer, tetap Σ=0) DITANYAKAN ULANG dengan opsi konkret** (kirim daftarnya sekarang / pasang pipeline minimal ber-`Cek Brief AM` saja / tetapkan bobotnya sekarang) — **pemilik memilih MENAHAN keduanya.** Rinciannya di `docs/backlog/LEADTIME_BACKLOG.md` baris LT-1/LT-2/LT-8 dan `HANDOFF_WAVE3_STORE_OPS_LANJUTAN_20260908.md`. | Statusnya sekarang **"diputuskan menunggu"**, bukan "belum sempat dijawab" — perbedaan yang mencegah sesi berikutnya menanyakan ulang atau, lebih buruk, menebak sendiri. Biaya menunggu nol (keduanya sudah terdaftar dengan pipeline/bobot kosong dan tidak memblokir apa pun berjalan); biaya menebak = mengarang proses kerja atau bobot penilaian orang lain lalu menanamkannya di DB. **Jangan tanyakan ulang** kecuali pemilik yang membawanya. | Pemilik (Yohan), `AskUserQuestion` 2026-09-08 |

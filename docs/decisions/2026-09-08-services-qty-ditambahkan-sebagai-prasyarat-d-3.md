@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-08 | **🟡 `services.qty` DITAMBAHKAN sebagai prasyarat D-3 — dan qty TIDAK diturunkan dari harga.** `services` tidak pernah menyimpan qty (closing hanya menuliskan subtotal baris), padahal **dua pertiga layanan live** memakai versi katalog `qty_menambah='durasi'`, yang artinya qty MENGGANDAKAN masa layanan. Kolomnya **NULLABLE tanpa `DEFAULT 1`**; backfill hanya menyentuh baris yang punya tepat satu baris Form Qualified dengan subtotal sama persis. | Menurunkan qty dari harga diuji ke data live lebih dulu dan **ditolak oleh datanya**: satu layanan berharga nego memberi rasio 0,8, dua layanan ber-katalog Rp 0 memberi pembagian nol — dan yang paling berbahaya adalah yang tidak kelihatan, yaitu pembelian 3 unit berdiskon sepertiga yang menghasilkan rasio **tepat 2,0**, bilangan bulat yang lolos setiap penyaringan dan salah. `DEFAULT 1` akan mengisi setiap baris lama dengan tebakan yang lalu tidak bisa dibedakan dari fakta (aturan rumah #4). Layanan ber-qty NULL muncul sebagai `tidak_terhitung` di snapshot, dengan sebabnya. | Claude |

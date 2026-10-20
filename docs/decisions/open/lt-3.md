@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Open -->
+
+| # | Item | Needed from | Blocking? |
+|---|---|---|---|
+| LT-3 | ✅ **RESOLVED 2026-08-29 (lihat Decided) — 14 hk hanya untuk `Follow up Video Creator`; `QC & Approval Video Creator` = 1 hk (migrasi `20260901020000`).** Teks asli: 🟡 **BARU 2026-08-28 (M16) — apakah target 14 hari kerja untuk dua tahap KOL terakhir berlaku MASING-MASING atau untuk gabungan keduanya.** Pemilik menetapkan "point 7 dan 8 tetap perlu dibuat deadline, buat deadline 14 hari kerja" untuk `Follow up Video Creator` dan `QC & Approval Video Creator`. Diterapkan **secara harfiah: 14 hk pada masing-masing tahap**. Kalau yang dimaksud adalah 14 hk untuk seluruh ekor (follow-up sampai QC selesai), gantinya cukup satu angka di seed `stage_definition` — bukan perubahan desain, nol migrasi struktural. Perlu dicatat bahwa 14 hk untuk QC internal terasa longgar dibanding QC lain yang semuanya 1 hk, jadi kemungkinan besar maksudnya memang jendela gabungan untuk menunggu creator. | Pemilik | **Tidak** memblokir — target sudah terpasang; mengubahnya = satu nilai di seed |

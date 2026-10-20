@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-08-31 | **🟡 LT-61 follow-up (`provision_vendor_account`) hardened against the `email_change` NULL bug below BEFORE it ever shipped.** While preparing to merge the vendor-account-provisioning branch (previous row same day), `main` picked up the fix for `import_employee_credentials()` leaving `auth.users.email_change` NULL (production login 500 — see the row directly below). `provision_vendor_account` (`20260904010000_lt61_vendor_account_admin_ui.sql`) copies that exact INSERT shape, so it carried the identical latent bug. Caught by reading the fix commit during the pre-merge rebase, not by incident — the migration had not yet been applied anywhere, so the file was edited in place (not patched with a second migration; nothing to stay immutable for). | Reading a sibling bugfix on `main` before merging is cheaper than reproducing the same production incident a second time for a near-duplicate function. | Claude Code |

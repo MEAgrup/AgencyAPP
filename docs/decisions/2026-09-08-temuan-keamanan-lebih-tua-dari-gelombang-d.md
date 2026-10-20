@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-08 | **🔴 TEMUAN KEAMANAN (LEBIH TUA dari Gelombang D) — `sm_transition` kehilangan `SECURITY DEFINER` sejak `20260908020000`.** `CREATE OR REPLACE FUNCTION` mengembalikan atribut opsional yang tidak disebut ulang ke nilai bakunya; migrasi itu menulis ulang fungsinya tanpa menyebut `SECURITY DEFINER`, jadi atributnya diam-diam kembali ke `SECURITY INVOKER`. Kedua saudaranya (`ident_next`, `notify_emit`) masih `prosecdef = true`; `sm_transition` sendirian `false`. **Dipulihkan di `20260925010000`.** | Tidak ada yang rusak karenanya — CDPS memanggilnya lewat `service_role`, yang melewati RLS apa pun — jadi ini pemulihan niat yang tertulis, bukan perbaikan kerusakan yang sedang berjalan. Disebut apa adanya supaya tidak dibaca sebagai temuan Gelombang D. Ditemukan dengan **membandingkan `proacl`/`prosecdef` terhadap dua saudaranya**, bukan dengan membaca kode. Perilaku `CREATE OR REPLACE` diverifikasi langsung di psql, bukan diingat dari dokumentasi. | Claude |

@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Wave 2 kickoff — interview keputusan manusia (2026-07-12) -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-07-19 | **FE M15-C1 Team Portal (internal): 3 halaman `/portal`, `/portal/team`, `/portal/management` + seksi nav Portal.** Lapisan FE untuk tiga surface read-model M15-C1 (backend UAT PASS W3, entri W3-M15-C1): `lib/portal.ts` typed 1:1 (reuse tipe M11 `Card`/M14 `Snapshot`,`TeamRollup`/M12 `PendingBlockRequest` — nol duplikasi), urutan SLA-risk open-tasks dipertahankan dari server (tidak diurut ulang FE), gate cermin FE: `/portal/team` lead divisi ber-skor M14 saja + Director wajib pilih divisi (edge 404 divisi non-scored TIDAK ditembak), `/portal/management` Director+OD saja; aksi block-request tetap DELEGASI ke halaman M12 `/tasks/block-requests` (portal read-only, satu pintu decide). Nol string BI baru, nol endpoint baru. | Gap FE tersisa Wave 3 (backend sudah ada sejak W3-M15-C1); melengkapi surface internal penuh sebelum M15-C2 (tetap ditunda O4/O5). | Orchestrator (Fable), sesi 2026-07-19C |

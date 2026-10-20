@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-08 | **🟡 TAFSIR D-1 YANG DIPILIH — pro-rate hangus dihitung per IRISAN BULANAN, bukan atas seluruh masa layanan.** D-1 menyebut HARI ("hanya untuk hari yang sudah jalan") sementara D-KOM menyebut RATA per periode ("diakui rata sepanjang `durasi_bulan`). Yang dibangun: pendapatan dibagi rata ke irisan satu bulan; **hanya irisan yang memuat tanggal void** yang di-pro-rate per hari; irisan sebelumnya utuh, sesudahnya nol. | **Alasannya bukan selera, tapi D-3.** Kalau seluruh masa layanan di-pro-rate per hari sebagai satu blok, void di bulan ke-5 akan MENGUBAH angka bulan ke-1..ke-4 — dan bulan-bulan itu mungkin sudah DITUTUP, sementara D-3 bilang bulan tertutup tidak bisa diedit sama sekali. Jadi bentuk itu bukan pilihan yang lebih buruk; ia tidak bisa dipakai. Ada tesnya (`void TIDAK menjangkau ke belakang`). **Kalau pemilik membacanya lain, ini yang harus dikoreksi lebih dulu** — sisa mesinnya tidak berubah. | Claude (tafsir, menunggu konfirmasi pemilik) |

@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Wave 2 kickoff — interview keputusan manusia (2026-07-12) -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-07-13 | **Interview Wave 2 sesi 2 — dua provisional dikonfirmasi FINAL tanpa perubahan kode.** (1) **Model klaim M12** (entry W2-M12-C1 butir 4): pra-PIC semua staf/lead divisi target boleh menggerakkan edge eksekusi; pasca-PIC terkunci PIC + lead divisi + Director; AM tidak pernah ikut edge eksekusi; assign PIC & SLA = lead divisi + Director. (2) **O26 birth-status ADC**: lahir `[Paused]` + aksi Launch eksplisit (`[Paused]`→`[Active]`) ber-gate brief setup `[Approved]` + semua aset tertaut `[Approved]`; alternatif auto-flip/born-`[Active]` DITOLAK. Pacing sesi: lanjut otomatis M9 → M10 → wiring httpapi, push per klaster. Item manusia Wave 1: belum ada yang siap diserahkan (status tetap menunggu). | Konfirmasi langsung Nerissa via interview terstruktur 2026-07-13; implementasi provisional sudah teruji sehingga nol perubahan kode. | Nerissa (interview 2026-07-13) |

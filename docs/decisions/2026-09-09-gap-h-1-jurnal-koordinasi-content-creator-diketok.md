@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Wave 2 kickoff — interview keputusan manusia (2026-07-12) -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-09 | **Gap H-1 (jurnal koordinasi Content Creator) DIKETOK — "jalan rekomendasi": ia satu KATEGORI di dalam modul SCS, BUKAN entitas ketiga.** D7 sudah mengetok "satu peran, bukan dipecah"; yang belum adalah BENTUK jurnalnya. Worksheet Boy Ginting berisi baris bebas seperti *"koordinasi dengan Rani soal properti shoot"* dan *"Bikin Jadwal VG buat Hari Selasa"* — isinya bukan deliverable yang di-review siapa pun, jadi Gap H-1 menyarankan checklist sederhana alih-alih entitas Task-Execution. Karena `M19-SCS-ENGINE` jatuh ke opsi (b), rekomendasi itu berhenti butuh entitas apa pun: jurnalnya cukup satu baris `scs_kategori` — **`KOORDINASI`, `is_standing = true`, nol SLA** (Speed Score N/A). Hak tulisnya atas kalender sudah ada sejak M19 (ia menumpang `lead` Creative). Nol tabel baru, nol prefix baru, nol mesin baru untuk butir ini. Yohan. |

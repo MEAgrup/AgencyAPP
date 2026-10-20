@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-14 | **Permintaan "Brand Strategy tidak perlu dicantumkan untuk klien CRO" DITOLAK pemilik — klien CRO tetap mengikuti SEMUA langkah.** Pemilik sekaligus mengoreksi premis permintaannya: **klien mana yang butuh dokumen strategi ditentukan dari PAKET JASA, bukan dari siapa yang memegang klien (AM atau CRO).** Kode memang sudah bekerja begitu: `master_service_versions.plan_tier` (`plan_wajib` \| `ditentukan_am` \| `tanpa_plan`, `20260806061000_m6c_plan_gate.sql`) disalin ke `services.plan_tier` saat deal ditutup, dan tidak satu pun jalur membaca jabatan pemegangnya. **Nol kode.** | Menambahkan pengecualian ber-jabatan akan menciptakan aturan KEDUA tentang kewajiban strategi yang bertabrakan dengan gerbang paket jasa yang sudah berjalan — dan SLA langkah 3 itu KPI yang angkanya ditetapkan pemilik sendiri (2026-08-13, menutup RA-1). Dicatat di sini supaya permintaan yang sama tidak lahir lagi di putaran feedback berikutnya. | Pemilik (2026-09-14) |

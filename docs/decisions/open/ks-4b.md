@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Open -->
+
+| # | Item | Needed from | Blocking? |
+|---|---|---|---|
+| KS-4b | ✅ **DIJAWAB PEMILIK 2026-09-05 — YA, daftarkan `Sales` ke M14.** Jalur aman: daftarkan dengan bobot **0** dulu (preseden LT-32/LT-33, Rule 6 meredistribusi ⇒ nol skor berubah), lalu isi bobotnya begitu daftar komponen + angkanya disepakati. Guardrail X-12/LT-1 tetap berlaku: jangan mengarang bobot. Lihat Decided 2026-09-05. _Konteks asli:_ 🟡 **BARU 2026-08-29 (Kinerja Sales) — role type `Sales` di M14 + skor `PERF-` belum didaftarkan** (pertanyaan KS-4 asli, belum terjawab oleh contoh OKR di atas — itu menjawab pertanyaan yang beda). Setelah `salesperf.ts` (S-03) mendarat, role type Sales bisa masuk `perf_kpi_weights`/`perf_period_targets` dengan **bobot 0** mengikuti preseden LT-32/LT-33 (guardrail X-12/LT-1: jangan mengarang bobot sebelum ditandatangani) — Kinerja Sales hari ini SENGAJA berdiri sendiri dari kerangka skor M14 (lihat Decided Kinerja Sales #2), bukan menunggu ini. | Pemilik (kapan pun nyaman) | **Tidak** memblokir — `sales_targets`/`salesperf.ts` berfungsi penuh tanpa M14 |

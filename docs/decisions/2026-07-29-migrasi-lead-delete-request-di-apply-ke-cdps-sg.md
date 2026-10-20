@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-07-29 | **Migrasi `lead_delete_request` di-apply ke `CDPS SG` — live kini 40 migrasi / 54 tabel / 17 event, tercatat `20260729162101_lead_delete_request`.** Dijalankan **sesudah** merge PR #72 ke `main` (HEAD `7bbd5e1`), bukan sebelum: urutan itu yang dituntut handoff sesi 10/11 supaya `main` selalu menggambarkan live, bukan mendahuluinya. Lewat **`apply_migration`**, bukan `psql -f` — hanya jalur itu yang menuliskan baris ke `supabase_migrations.schema_migrations`, dan justru `psql -f` yang dulu melahirkan drift O38. Terverifikasi pasca-apply: 4 edge masuk `[Deleted]` semuanya `require_lead = true`, **nol** edge keluar, `[Deleted]` terdaftar terminal, 5 indeks (termasuk parsial `uq_ldr_one_pending`), RLS aktif dengan 1 policy SELECT, dan grant sesuai §4 migrasi (`anon` nol, `authenticated` SELECT saja, INSERT ditolak). | Pemilik (Nerissa), 2026-07-29 — instruksi sesi cutover 12 |

@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-05 | **🟠 LT-2 / LT-8 / LT-1 sisa TETAP TERBUKA — belum ada feedback dari tim Store Operation & AI Optimizer.** Dinyatakan pemilik 2026-09-05. Konsekuensi yang berlaku sampai ada: pipeline `STORE_OPS` tetap **kosong** (M16 Rule 12) dan bobot `role_type` Store Operation + AI Optimizer tetap **Σ=0** — Rule 6 meredistribusi, jadi nol skor siapa pun terpengaruh. Dicatat sebagai status sadar, bukan kelalaian, supaya sesi berikutnya tidak menganggapnya pertanyaan yang terlewat dan tidak mengisinya dengan tebakan. | Mengisi pipeline atau bobot tanpa masukan tim yang menjalankannya berarti mengarang proses kerja orang lain — persis kelas kesalahan yang guardrail X-12/LT-1 ada untuk mencegah. Biaya menunggu = nol (keduanya sudah terdaftar dengan bobot 0 dan tidak memblokir apa pun); biaya menebak = proses kerja yang salah, tertanam di DB, lalu dipakai menilai orang. | Pemilik — menunggu tim |

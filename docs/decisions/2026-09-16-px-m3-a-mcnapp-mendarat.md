@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-16 | **PX-M3-A (`mcnapp`) mendarat — M3-05-PUSH-TRIGGER ditutup.** Sesi terpisah di `yohanagustian-del/mcnapp` (PR #23, squash `9158b11`) membangun eksporter `src/lib/px/coverage-push.ts`, dipicu dari akhir pipeline ingest yang sudah ada (step 10, setelah recompute kapabilitas PX-M1), nol scheduler baru. Kontrak `docs/BRIDGE_PRODUCT_EXCHANGE_CONTRACT.md` + fixture disalin byte-identik dari repo ini. Baris Open `M3-05-PUSH-TRIGGER` diperbarui jadi ✅ tertutup (lihat baris itu di bawah). **Kedua sisi bridge (M3-A pengirim, M3-B penerima) sekarang SELESAI DIBANGUN** — yang tersisa murni gerbang non-kode: aktivasi M3-B (PX-M3-AKTIVASI-1/2, menunggu ≥10 klien PDT G1 `verified`), dan tiga Open masih terbuka yang butuh keputusan Hans (`M3-01-REGION`, `M3-02-PRICE-SEGMENT-VALUES`, `M3-03-KATEGORI-MAPPING`) sebelum push SUNGGUHAN ke CDPS live bisa dipercaya bentuknya. Nol kode CDPS diubah sesi ini selain baris dokumentasi ini + M3-05. | Yohan Agustian (instruksi sesi: mark ready + merge PR #23 begitu CI hijau) |

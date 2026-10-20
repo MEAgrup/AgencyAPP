@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-10-05 | **Migrasi #538 DITERAPKAN ke live `CDPS SG` (egddxfcnrtecheiykhlf) bersama merge #538** — lewat `apply_migration` (`pdt_laporan_kiriman_jenis_periode`, berkas `20261216010000`), atas persetujuan pemilik ("merge dan terapkan migrasi"); diterapkan SEBELUM merge sesuai catatan PR. Audit pra-terap: kolom `jenis_periode` belum ada; 2 kiriman PDT, semuanya mulai tanggal 1 (bulanan). Verifikasi pasca-terap: default `'bulanan'`, constraint `ck_pdt_laporan_kiriman_jenis_periode` dan `ck_pdt_laporan_kiriman_mingguan_senin` ada, indeks `idx_pdt_laporan_kiriman_jenis_mulai` ada, kedua baris lama terbaca `bulanan`. | Kode #538 membaca/menulis kolom ini (kirim, riwayat, portal R11.3); tanpa migrasi, Kirim dan portal gagal. Migrasinya aditif (ADD COLUMN ber-default konstan, tidak menulis ulang baris, trigger frozen tidak tersentuh), jadi aman mendahului kode. Pola sama dengan #533/#535 (baris di bawah). | Yohan Agustian (persetujuan langsung, 2026-10-05) |
