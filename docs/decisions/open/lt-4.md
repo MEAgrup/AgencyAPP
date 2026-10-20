@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Open -->
+
+| # | Item | Needed from | Blocking? |
+|---|---|---|---|
+| LT-4 | ✅ **RESOLVED 2026-08-29 (lihat Decided) — opsi (b) dijalankan: edge balik ke `Cek Brief AM` pada 4 pipeline, gerbang `gate_pihak='AM'` (migrasi `20260901030000`).** Teks asli: 🟡 **BARU 2026-08-31 (M16, Akun A) — `Brief Dikembalikan ke AM` adalah dead-end tak-terdaftar (bukan terminal resmi di `sm_terminal_states`), dan tidak punya edge KELUAR.** PRD tidak menspesifikasikan alur "AM memperbaiki brief lalu minta divisi meninjau ulang" — Brief yang dikembalikan mandek permanen di tahap itu sampai ada keputusan lanjutan (mis. re-dispatch bikin Brief baru, atau edge balik ke `Cek Brief AM` ditambah lewat migrasi susulan). Tidak memblokir merge: divisi tetap bisa memakai `brief_review` + alasan untuk mengomunikasikan penolakan; hanya "kirim ulang otomatis" yang belum ada. | Pemilik | **Tidak** memblokir — jalur komunikasi penolakan sudah ada; hanya re-dispatch otomatis yang belum |

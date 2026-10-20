@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Open -->
+
+| # | Item | Needed from | Blocking? |
+|---|---|---|---|
+| KS-2 | ✅ **DIJAWAB 2026-08-29 (pemilik) — kredit alokasi jatuh ke sales yang MENGEKSEKUSI transaksi perpanjangan, BUKAN sales yang closing awal; komisi TIDAK butuh skema khusus** — `services.commission_rule` (MSL) dipakai apa adanya, dihitung Finance seperti closing biasa lewat `finance.commissionAchievement` yang sudah ada, nol logika baru. **Ini MEMBUKA R-03/R-04, dan KEDUANYA SUDAH DIBANGUN** (`renewal.ts` + route API + UI `RenewalPanel.tsx`, 25 tes `renewal.test.ts` termasuk verifikasi eksplisit penggantian alokasi + notifikasi katalog v13) — prasyarat teknis "pekerjaan Account Service mendarat di `main`" ternyata tidak pernah relevan untuk desain yang dipakai (lihat `DECISIONS.md` Kinerja Sales #5/#6). _Konteks asli:_ siapa dapat kredit `client_sales_allocations` saat kontrak diperpanjang; apakah komisi perpanjangan sama dengan penjualan baru. | Ditutup — Pemilik | Tidak lagi memblokir — R-03 dan R-04 selesai |

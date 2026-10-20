@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-20 | **`tt_ads_live` nol baris di `pdt_fact_ads` BUKAN cacat — berkasnya memang kosong.** Diperiksa atas permintaan pemilik; nol perubahan kode. | Produksi menunjukkan seluruh 2.093 baris `pdt_fact_ads` TikTok berasal dari `tt_ads_product`, nol dari `tt_ads_live`, walau berkas "livestream data for live campaigns" ada di batch dan ter-parse `ok` — pola yang PERSIS sama dengan `tt_orders`, jadi wajar dicurigai. Ternyata beda: berkas aslinya dibuka dan isinya **tepat 1 baris, header saja** (`['Nama LIVE']`), nol baris data. Klien ini memang tidak menjalankan kampanye iklan LIVE bulan itu. Ekstraktornya juga tidak punya filter kondisional apa pun selain melewati baris ber-`ID Campaign` kosong. Docblock `ekstrakBarisTtAdsLive` sudah mencatat hal yang sama sejak `G1-09-2BII-TTADS-SAMPLE` (2026-09-16) untuk sample yang sama. | Claude Code (verifikasi, atas permintaan Yohan) |

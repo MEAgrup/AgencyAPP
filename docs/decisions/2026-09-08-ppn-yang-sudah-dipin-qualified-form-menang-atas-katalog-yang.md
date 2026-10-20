@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-08 | **🟢 PPN yang sudah DIPIN Qualified Form menang atas katalog yang berubah sesudahnya.** Ditemukan lewat **mutasi yang tetap hijau**: `standardLines` sudah membawa `ppn` pinnya, tapi `resolveProposalLine` memperlakukan baris berharga sebagai custom dan **menghitung ulang PPN dari katalog hari itu** — sehingga field pinnya tidak pernah terpakai. Diperbaiki: pin menang; `submitNegotiation` MEMBUANG `pinnedPPN` dari baris kiriman wire supaya klien tidak bisa menamai pajaknya sendiri (CLAUDE.md #4). | Tanpa perbaikan ini, admin yang mematikan `apply_ppn` antara kualifikasi dan closing diam-diam mengubah tagihan sebuah deal yang **sudah disepakati** — dan seluruh barisnya tetap terlihat konsisten sesudahnya. Ini persis alasan snapshot di-pin (aturan rumah #3), dan PPN sempat jadi satu-satunya angka yang lolos dari pin itu. **Pelajarannya**: mutasi yang tetap hijau wajib dijelaskan, bukan diabaikan — jawabannya bisa "kodenya berlebihan" ATAU "ada field yang tidak pernah terpakai", dan yang kedua adalah bug. | Claude (build) |

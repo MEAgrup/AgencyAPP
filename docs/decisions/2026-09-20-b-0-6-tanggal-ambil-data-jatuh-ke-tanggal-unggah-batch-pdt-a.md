@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-20 | **B-0.6 `tanggal_ambil_data` jatuh ke tanggal unggah batch PDT acuan bila `riset_awal_sumber_berkas.tanggal_ambil` null.** `bacaPeriodeTerverifikasiTerbaru` kini ikut membawa `tanggalUnggah` (`pdt_upload_batch.dibuat_pada` di zona Asia/Jakarta), dan `getBaselinePrefill` memakainya sebagai fallback. | Jalur PDT TIDAK PERNAH mengisi `riset_awal_sumber_berkas.tanggal_ambil` (15/15 baris null pada `ITV-202609-0013`), sedangkan B-0.6 menggerbangi submit atas periode + tanggal + sumber data + lampiran. Akibatnya `[jendela baseline … wajib dilengkapi untuk channel Eksisting]` muncul selamanya untuk SETIAP toko yang baseline-nya datang dari PDT, tanpa satu pun cara mengisinya otomatis. Batch ITULAH sumbernya, jadi tanggal unggahnya adalah jawaban yang jujur — immutable dan bisa dihitung ulang dari `pdt_upload_batch`, sesuai house rule #4. | Yohan (laporan), Claude Code |

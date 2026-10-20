@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-03 | **🟢 UAT SH-07 dengan export Shopee ASLI (Fim Motor, Juli 2026, 15 berkas) — engine LOLOS.** Laporan terbentuk penuh lewat jalur produksi (`createReportShopee`), skor 5,7 KRITIS, benchmark Shopee versi 1. Setiap angka dicek ulang ke berkas mentah dan **cocok persis**: GMV Rp 1.624.937.476, 13.568 pesanan, CR 2,46%, batal 2.785 pesanan/Rp 359.295.534, ads spend Rp 133.342.120, omzet Rp 1.284.165.288, ROAS 9,63× dan ACOS 10,38% (keduanya dihitung ulang tangan). Laporan lengkap: `docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md`. Menutup sisa Gelombang 1 (verifikasi selalu memakai fixture) untuk sisi ENGINE — penerbitan ke kontak klien sungguhan masih milik pemilik. | Fixture tidak pernah membuktikan parser tahan terhadap export sungguhan. UAT ini juga yang memunculkan tiga keputusan pemilik di tabel Open (SHP-1..SHP-3) — semuanya pilihan bisnis yang selama ini diambil diam-diam oleh implementasi, bukan bug. | Nerissa (COO) |

@@ -67,10 +67,10 @@ Standalone internal system covering MEA Agency's full client lifecycle: lead int
 8. **Notifications:** in-app only (v1), derived from the audit log, event catalog in Phase 0 v2 §9. Never deletable, only read/unread.
 
 ## Where truth lives
-- `docs/prd/` — the PRD files (18 asli + M16/M17/M18, manifest lengkapnya `CDPS_Build_Plan.md` §1). **The PRD is the spec.** If code and PRD disagree, the PRD wins; if the PRD is ambiguous or two modules conflict, STOP and flag it in `docs/DECISIONS.md` as an open question — do not silently pick an interpretation.
+- `docs/prd/` — the PRD files (18 asli + M16/M17/M18, manifest lengkapnya `CDPS_Build_Plan.md` §1). **The PRD is the spec.** If code and PRD disagree, the PRD wins; if the PRD is ambiguous or two modules conflict, STOP and flag it as an open question — a new file in `docs/decisions/open/` (see `docs/DECISIONS.md`) — do not silently pick an interpretation.
 - `docs/DATA_MODEL.md` — entity registry, relations, key fields.
 - `docs/STATE_MACHINES.md` — consolidated transition tables (source for the transition-engine config).
-- `docs/DECISIONS.md` — decision log. Any deviation from the PRD requires an entry (date, decision, reason, approved by).
+- `docs/DECISIONS.md` — decision log index + rules. Any deviation from the PRD requires an entry (date, decision, reason, approved by). **One decision = one NEW file** `docs/decisions/YYYY-MM-DD-<slug>.md` (open questions: `docs/decisions/open/<ID>.md`). Never append rows to a shared table — that caused merge conflicts on every PR. References like "DECISIONS.md 2026-09-17" in code/docs mean: look in `docs/decisions/` for that date.
 - `docs/backlog/` — ticket breakdowns per wave (start with `SPRINT0_BACKLOG.md`).
 - `docs/backlog/CUTOVER_BACKLOG.md` — cutover Go/MySQL → TS/Supabase. `docs/handoff/HANDOFF_CUTOVER_SESI*.md` adalah rantai handoff-nya; **baca yang bernomor tertinggi lebih dulu** untuk tahu posisi sebenarnya.
 

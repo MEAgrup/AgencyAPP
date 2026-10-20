@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Open -->
+
+| # | Item | Needed from | Blocking? |
+|---|---|---|---|
+| SHP-2 | ✅ **RESOLVED 2026-09-03 — pemilik memilih (a): BIARKAN sesuai ambang.** Nol perubahan kode; ambang `skor.ts` (≥8 SEHAT / ≥6 PERLU PERHATIAN / <6 KRITIS) tetap port apa adanya dari alat pemilik, dan toko dengan skor 5,7 tetap dilabeli KRITIS ke klien. _Konteks asli:_ 🟡 ~~**TERBUKA 2026-09-03 — toko dengan ROAS 9,63× dan ketiga flag iklan hijau dilabeli KRITIS ke klien; label itu yang dikehendaki?** Skor 5,7 vs ambang `skor.ts` (`<6` = KRITIS). Penariknya Conversion & Retention 0,9/10 (CR 2,46%, repeat 13,0%, batal 20,5%) dan Live Streaming 5/10, sementara ROAS & Channel 10/10. Isi skornya jujur — batal 20,5% memang parah — yang dipertanyakan adalah KATA yang dibaca klien di laporan bulanan, justru saat iklannya performa terbaiknya. Opsi: (a) biarkan, (b) geser ambang, (c) pisahkan label internal vs label klien. Ambang ini port apa adanya dari alat pemilik, jadi TIDAK diubah sesi ini.~~ | Yohan (Director) | Tidak |

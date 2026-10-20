@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-14 | **`AI Optimizer` dan `Store Operation` dibuka di picker `/admin/role-mappings` (`web-internal/src/lib/types.ts` `DIVISIONS`).** Keduanya sudah ada di `division_registry`/`core/division.ts` (urutan 7-8, `brief_assignable = true`) dan sudah diskor M14 (`lib/performance.ts`), tapi tidak pernah ikut masuk daftar yang mengisi `role_mappings.division` — dan `upsertRoleMapping` tidak memvalidasi kanon, jadi daftar FE itu satu-satunya penjaga. | Akibat nyata di live, bukan teori: kedua divisi berdiri dengan **nol baris mapping dan nol orang**, dan dua Brief klien menganggur di `[To Do]` tanpa PIC — `BRF-202609-0003` (divisi `Ops`, 12 hari) dan `BRF-202609-0013` (divisi `AI Optimizer`, 4 hari). Director pun tidak bisa memperbaikinya lewat UI karena nilainya tidak ada di dropdown. Bukan penambahan divisi baru: nol baris `division_registry` berubah. Cakupan sempit — `admin/role-mappings/page.tsx` satu-satunya pengimpor `DIVISIONS` dari `@/lib/types`. | **Nerissa (COO/Director)** |

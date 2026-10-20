@@ -1,0 +1,5 @@
+<!-- Section asal docs/DECISIONS.md: Decided -->
+
+| Date | Decision | Reason / trade-off | Approved by |
+|---|---|---|---|
+| 2026-09-08 | **🟠 CACAT RILIS YANG DITANGKAP SEBELUM MENDARAT — `DROP FUNCTION` sempat satu migrasi dengan `CREATE`.** Versi pertama `20260925010000` menambah `sm_transition` 11-argumen **dan** membuang yang 10-argumen sekaligus. Karena tanda tangan baru = fungsi baru, itu menciptakan jendela di mana **setiap transisi status di seluruh sistem** gagal — kode lama + fungsi baru ⇒ `function does not exist`, kode baru + fungsi lama ⇒ galat yang sama arah sebaliknya. Dipisah jadi `20260925050000`, diterapkan sesudah deploy kode. | Aturan rilis rumah ini sudah menyebutnya (aditif boleh mendahului kode, DROP wajib mengikutinya) dan tetap dilanggar — ditemukan saat **menuliskan urutan rilisnya ke handoff**, bukan saat menulis migrasinya. Menulis prosedur rilis yang jujur memaksa membaca akibatnya; itu langkah yang berdiri sendiri, bukan formalitas. Nol ambiguitas selama keduanya hidup karena parameter ke-11 sengaja tanpa `DEFAULT`. | Claude |
