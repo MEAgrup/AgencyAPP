@@ -60,6 +60,7 @@ export interface PerformanceModifier {
 // Individual snapshot per staff
 export interface Snapshot {
   staff_id: string;
+  staff_nama: string; // nama tampilan; jatuh ke staff_id bila karyawan tak ditemukan
   role_type: string; // Creative | Ads | KOL | AM
   period_start: string; // YYYY-MM-DD
   period_end: string; // YYYY-MM-DD
@@ -85,6 +86,7 @@ export interface TeamRollup {
 
 export interface TeamMember {
   staff_id: string;
+  staff_nama: string; // nama tampilan; jatuh ke staff_id bila karyawan tak ditemukan
   role_type: string; // Creative | Ads | KOL | AM
   final_score: number | null;
   score_display: string;

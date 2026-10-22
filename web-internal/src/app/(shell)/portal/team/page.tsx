@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
+import { CatatanSkorAkhir, NamaKaryawan } from '@/components/PerformaTim';
 import { useAuth } from '@/lib/auth-context';
 import { formatPeriodLabel } from '@/lib/performance';
 import { PORTAL_TEAM_DIVISIONS, getTeamPortalFull, type TeamPortalFull } from '@/lib/portal';
@@ -133,7 +134,7 @@ export default function TeamPortalPage() {
                   <tbody>
                     {portal.performance_rollup.members.map((m) => (
                       <tr key={m.staff_id}>
-                        <td><Link href={`/performance/${m.staff_id}`}>{m.staff_id}</Link></td>
+                        <td><Link href={`/performance/${m.staff_id}`}><NamaKaryawan nama={m.staff_nama} id={m.staff_id} /></Link></td>
                         <td>{m.role_type}</td>
                         <td>{m.score_display}</td>
                       </tr>
@@ -142,6 +143,7 @@ export default function TeamPortalPage() {
                 </table>
               </div>
             )}
+            {portal.performance_rollup.members.length > 0 && <CatatanSkorAkhir />}
           </section>
 
           <section className="card">
@@ -166,7 +168,7 @@ export default function TeamPortalPage() {
                       <tr key={c.client_id}>
                         <td><Link href={`/clients/${c.client_id}`}>{c.client_id}</Link></td>
                         <td>{c.client_name}</td>
-                        <td>{c.assigned_am || '—'}</td>
+                        <td><NamaKaryawan nama={c.assigned_am_nama} id={c.assigned_am} /></td>
                         <td><Link href={`/clients/${c.client_id}#board`}>Client Board &rarr;</Link></td>
                       </tr>
                     ))}

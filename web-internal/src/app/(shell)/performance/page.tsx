@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
+import { CatatanSkorAkhir, NamaKaryawan } from '@/components/PerformaTim';
 import { useAuth } from '@/lib/auth-context';
 import {
   DIVISIONS,
@@ -223,7 +224,7 @@ export default function PerformancePage() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Staff ID</th>
+                    <th>Karyawan</th>
                     <th>Role</th>
                     <th style={{ textAlign: 'right' }}>Skor Akhir</th>
                     {rollup.division === 'Account' && (
@@ -238,7 +239,7 @@ export default function PerformancePage() {
                     <tr key={member.staff_id}>
                       <td>
                         <Link href={`/performance/${member.staff_id}`}>
-                          {member.staff_id}
+                          <NamaKaryawan nama={member.staff_nama} id={member.staff_id} />
                         </Link>
                       </td>
                       <td>{member.role_type}</td>
@@ -255,6 +256,7 @@ export default function PerformancePage() {
                 </tbody>
               </table>
             </div>
+            <CatatanSkorAkhir />
             {rollup.division === 'Account' && (
               <p className="muted" style={{ fontSize: '12px', marginTop: '8px' }}>
                 "Realisasi Belum Lengkap" = jumlah insiden GMV manual belum diisi 5 hari
