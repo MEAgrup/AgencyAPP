@@ -89,6 +89,7 @@ export const MSG_PAYMENT_BOOKING_NOT_PASSED = '[permintaan pembayaran hanya dapa
 export const MSG_PAYMENT_DETAILS_REQUIRED = '[detail pembayaran kreator wajib diisi]';
 export const MSG_PAYMENT_AMOUNT_MISMATCH = '[jumlah pembayaran harus sama dengan Agreed Rate booking]';
 export const MSG_PAYMENT_ALREADY_REQUESTED = '[permintaan pembayaran untuk booking ini sudah ada]';
+export const MSG_PAYMENT_BARTER = '[booking barter (agreed rate 0) tidak memerlukan permintaan pembayaran]';
 export const MSG_PAYMENT_REQUEST_NOT_FOUND = '[permintaan pembayaran tidak ditemukan]';
 export const MSG_PAYMENT_MANAGE_FORBIDDEN = '[anda tidak memiliki akses untuk membuat permintaan pembayaran booking ini]';
 export const MSG_FINANCE_FORBIDDEN = '[anda tidak memiliki akses untuk memproses permintaan pembayaran ini]';
@@ -430,7 +431,8 @@ export async function createBooking(sql: Sql, actor: Actor, briefId: string, inp
     } catch {
       throw new ValidationError(bi.INCOMPLETE_DATA);
     }
-    if (rate <= 0n) {
+    // 0 sah: creator barter (dibayar produk, bukan uang) — DECISIONS 2026-10-23.
+    if (rate < 0n) {
       throw new ValidationError(bi.INCOMPLETE_DATA);
     }
     const qtyVideo = normQty(input.qtyVideo);
@@ -776,7 +778,8 @@ export async function recordAttributedGmv(sql: Sql, actor: Actor, bookingId: str
 /**
  * createPaymentRequest opens a CPR once a Booking is [QC Passed] (§8 Rule 2). The
  * Amount MUST equal the Booking's Agreed Rate; details mandatory. Coordinator/
- * Director. Blocks if an active (non-[Rejected]) request already exists.
+ * Director. Blocks if an active (non-[Rejected]) request already exists, and for a
+ * barter Booking (Agreed Rate 0) — nothing to pay.
  */
 export async function createPaymentRequest(sql: Sql, actor: Actor, bookingId: string, amountStr: string, paymentDetails: string): Promise<PaymentRequest> {
   const now = new Date();
@@ -789,11 +792,15 @@ export async function createPaymentRequest(sql: Sql, actor: Actor, bookingId: st
     if (r.status !== BKG_QC_PASSED) {
       throw new ConflictError(MSG_PAYMENT_BOOKING_NOT_PASSED);
     }
+    const rateStr = (await tx<{ agreed_rate: string }[]>`select agreed_rate from creator_bookings where id = ${bookingId}`)[0].agreed_rate;
+    const rate = money.parse(rateStr);
+    // Barter (Agreed Rate 0): tidak ada uang yang dibayar → tidak ada CPR (DECISIONS 2026-10-23).
+    if (rate === 0n) {
+      throw new ConflictError(MSG_PAYMENT_BARTER);
+    }
     if ((paymentDetails ?? '').trim() === '') {
       throw new ValidationError(MSG_PAYMENT_DETAILS_REQUIRED);
     }
-    const rateStr = (await tx<{ agreed_rate: string }[]>`select agreed_rate from creator_bookings where id = ${bookingId}`)[0].agreed_rate;
-    const rate = money.parse(rateStr);
     let amount: money.Money;
     try {
       amount = money.parse(amountStr);

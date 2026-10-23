@@ -51,7 +51,8 @@ export function isRowBlank(r: CreatorRowInput): boolean {
 export function validateRow(r: CreatorRowInput): string | null {
   if (r.creator_name.trim() === '') return '[nama creator wajib diisi]';
   const rate = Number(r.agreed_rate);
-  if (r.agreed_rate.trim() === '' || !Number.isFinite(rate) || rate <= 0) return '[agreed rate wajib diisi & lebih dari 0]';
+  // 0 sah: creator barter (dibayar produk) — DECISIONS 2026-10-23.
+  if (r.agreed_rate.trim() === '' || !Number.isFinite(rate) || rate < 0) return '[agreed rate wajib diisi & tidak boleh negatif]';
   for (const q of [r.qty_video, r.qty_live]) {
     if (q.trim() === '') continue;
     const n = Number(q);
