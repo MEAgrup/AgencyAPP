@@ -44,6 +44,7 @@ import {
   perfSnapshotToWire,
   perfTargetToWire,
   perfTeamRollupToWire,
+  teamPortalToWire,
   perfWeightToWire,
   roasToggleToWire,
   scanHoursReminderResultToWire,
@@ -1147,6 +1148,7 @@ describe('M14 perfSnapshotToWire (Team-member Performance snapshot)', () => {
   const full: performance.Snapshot = {
     id: 'PERF-202607-0001',
     staffId: '2409230432',
+    staffNama: 'Rina Kreatif',
     roleType: 'Creative',
     periodStart: '2026-07-01',
     periodEnd: '2026-07-31',
@@ -1165,6 +1167,7 @@ describe('M14 perfSnapshotToWire (Team-member Performance snapshot)', () => {
     expect(perfSnapshotToWire(full)).toEqual({
       id: 'PERF-202607-0001',
       staff_id: '2409230432',
+      staff_nama: 'Rina Kreatif',
       role_type: 'Creative',
       period_start: '2026-07-01',
       period_end: '2026-07-31',
@@ -1215,7 +1218,7 @@ describe('M14 perfTeamRollupToWire (division roll-up, §2 Rule 5)', () => {
   const full: performance.TeamRollup = {
     division: 'Creative',
     period: '202607',
-    members: [{ staffId: '2409230432', roleType: 'Creative', finalScore: 88.4, scoreDisplay: '88.40', realisasiBelumLengkapCount: null }],
+    members: [{ staffId: '2409230432', staffNama: 'Rina Kreatif', roleType: 'Creative', finalScore: 88.4, scoreDisplay: '88.40', realisasiBelumLengkapCount: null }],
     teamAverage: 88.4,
     averageDisplay: '88.40',
   };
@@ -1224,7 +1227,7 @@ describe('M14 perfTeamRollupToWire (division roll-up, §2 Rule 5)', () => {
     expect(perfTeamRollupToWire(full)).toEqual({
       division: 'Creative',
       period: '202607',
-      members: [{ staff_id: '2409230432', role_type: 'Creative', final_score: 88.4, score_display: '88.40', realisasi_belum_lengkap_count: null }],
+      members: [{ staff_id: '2409230432', staff_nama: 'Rina Kreatif', role_type: 'Creative', final_score: 88.4, score_display: '88.40', realisasi_belum_lengkap_count: null }],
       team_average: 88.4,
       average_display: '88.40',
     });
@@ -1234,7 +1237,7 @@ describe('M14 perfTeamRollupToWire (division roll-up, §2 Rule 5)', () => {
   it('sends team_average:null and member final_score:null when no member has a score', () => {
     const wire = perfTeamRollupToWire({
       ...full,
-      members: [{ staffId: '2409230432', roleType: 'Creative', finalScore: null, scoreDisplay: '—', realisasiBelumLengkapCount: null }],
+      members: [{ staffId: '2409230432', staffNama: '2409230432', roleType: 'Creative', finalScore: null, scoreDisplay: '—', realisasiBelumLengkapCount: null }],
       teamAverage: null, averageDisplay: '—',
     });
     expect(wire.team_average).toBeNull();
@@ -1245,10 +1248,32 @@ describe('M14 perfTeamRollupToWire (division roll-up, §2 Rule 5)', () => {
     const wire = perfTeamRollupToWire({
       division: 'Account',
       period: '202607',
-      members: [{ staffId: 'EMP-AM01', roleType: 'AM', finalScore: 80, scoreDisplay: '80.00', realisasiBelumLengkapCount: 2 }],
+      members: [{ staffId: 'EMP-AM01', staffNama: 'EMP-AM01', roleType: 'AM', finalScore: 80, scoreDisplay: '80.00', realisasiBelumLengkapCount: 2 }],
       teamAverage: 80, averageDisplay: '80.00',
     });
     expect(wire.members[0].realisasi_belum_lengkap_count).toBe(2);
+  });
+});
+
+describe('M15 teamPortalToWire (Portal Tim — nama staf & AM, feedback OD 2026-10-22)', () => {
+  it('carries staff_nama on rollup members and assigned_am_nama on client shortcuts, additively', () => {
+    const wire = teamPortalToWire({
+      division: 'Ads',
+      rollup: {
+        division: 'Ads', period: '202609',
+        members: [{ staffId: '2609010726', staffNama: 'Rina Kreatif', roleType: 'Ads', finalScore: 80, scoreDisplay: '80.00', realisasiBelumLengkapCount: null }],
+        teamAverage: 80, averageDisplay: '80.00',
+      },
+      clients: [
+        { clientId: 'CLI-202609-0005', clientName: 'radjakolam', assignedAm: '2609010726', assignedAmNama: 'Dewi Account', boardRef: '/api/v1/board?client=CLI-202609-0005' },
+        { clientId: 'CLI-202609-0007', clientName: 'philipericci.ladies', assignedAm: '', assignedAmNama: '', boardRef: '/api/v1/board?client=CLI-202609-0007' },
+      ],
+      blockQueue: [],
+    });
+    expect(wire.performance_rollup.members[0]).toMatchObject({ staff_id: '2609010726', staff_nama: 'Rina Kreatif' });
+    expect(wire.client_shortcuts[0]).toMatchObject({ assigned_am: '2609010726', assigned_am_nama: 'Dewi Account' });
+    expect(wire.client_shortcuts[1]).toMatchObject({ assigned_am: '', assigned_am_nama: '' });
+    expectNoCamelKeys(wire);
   });
 });
 

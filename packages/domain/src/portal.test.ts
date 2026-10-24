@@ -195,6 +195,26 @@ describeDb('team portal (Rule 10)', () => {
     expect(await pendingBlockRequests(sql, creativeLead())).toHaveLength(0);
   });
 
+  // Feedback OD 2026-10-22: kolom AM Klien Divisi menampilkan nama, bukan ID saja.
+  it('client shortcuts carry the AM display name; an empty AM stays empty', async () => {
+    await sql`insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values ('ZZ-AMNAMA', 'Dewi Account', 'zz-amnama@mea.id', 'Account', 'ZZ-AM-Jab', true, 'ZZ-TEST')`;
+    await insClient('ZZ-CLI-N1', 'ZZ-AMNAMA');
+    await insClient('ZZ-CLI-N2', 'ZZ-AM-TANPA-BARIS'); // AM tanpa baris employees ⇒ jatuh ke id
+    await sql`insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+        total_sales, sales_pic_id, commission_payment_pic_id, created_by)
+      values ('ZZ-CLI-N3', 'PIC', 'ZZ-CLI-N3', 'Bandung', 'link', 'Fashion', '0.00', '0.00', '0.00', 'ZZ-BUDI', 'ZZ-BUDI', 'ZZ-TEST')`;
+    for (const c of ['N1', 'N2', 'N3']) {
+      await insService(`ZZ-SVC-${c}`, `ZZ-CLI-${c}`);
+      await insBrief(`ZZ-BRF-${c}`, `ZZ-SVC-${c}`, 'Ads', 'ZZ-ADS', '[In Progress]', '2026-08-01');
+    }
+    const team = await teamPortal(sql, adsLead(), '', '');
+    const by = new Map(team.clients.map((c) => [c.clientId, c]));
+    expect(by.get('ZZ-CLI-N1')).toMatchObject({ assignedAm: 'ZZ-AMNAMA', assignedAmNama: 'Dewi Account' });
+    expect(by.get('ZZ-CLI-N2')).toMatchObject({ assignedAm: 'ZZ-AM-TANPA-BARIS', assignedAmNama: 'ZZ-AM-TANPA-BARIS' });
+    expect(by.get('ZZ-CLI-N3')).toMatchObject({ assignedAm: '', assignedAmNama: '' });
+  });
+
   it('gate: staff denied; a lead cannot view another division\'s team', async () => {
     await expect(teamPortal(sql, adsStaff('ZZ-ADS'), '', '')).rejects.toBeInstanceOf(ForbiddenError);
     await expect(teamPortal(sql, adsLead(), 'Creative', '')).rejects.toBeInstanceOf(ForbiddenError);

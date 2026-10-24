@@ -1582,6 +1582,8 @@ function perfModifierToWire(m: performance.Modifier): PerfModifierWire {
 export interface PerfSnapshotWire {
   id: string;
   staff_id: string;
+  /** Nama tampilan staf, jatuh ke id (feedback OD 2026-10-22, aditif). */
+  staff_nama: string;
   role_type: string;
   period_start: string;
   period_end: string;
@@ -1600,6 +1602,7 @@ export function perfSnapshotToWire(s: performance.Snapshot): PerfSnapshotWire {
   return {
     id: s.id,
     staff_id: s.staffId,
+    staff_nama: s.staffNama,
     role_type: s.roleType,
     period_start: s.periodStart,
     period_end: s.periodEnd,
@@ -1619,6 +1622,8 @@ export function perfSnapshotToWire(s: performance.Snapshot): PerfSnapshotWire {
 /** One member row of a division rollup — web-internal's `TeamMember`. */
 export interface PerfTeamMemberWire {
   staff_id: string;
+  /** Nama tampilan staf, jatuh ke id (feedback OD 2026-10-22, aditif). */
+  staff_nama: string;
   role_type: string;
   final_score: number | null;
   score_display: string;
@@ -1640,6 +1645,7 @@ export function perfTeamRollupToWire(r: performance.TeamRollup): PerfTeamRollupW
     period: r.period,
     members: r.members.map((m) => ({
       staff_id: m.staffId,
+      staff_nama: m.staffNama,
       role_type: m.roleType,
       final_score: m.finalScore,
       score_display: m.scoreDisplay,
@@ -2289,6 +2295,8 @@ export interface ClientShortcutWire {
   client_id: string;
   client_name: string;
   assigned_am: string;
+  /** Nama tampilan AM; '' bila AM kosong (feedback OD 2026-10-22, aditif). */
+  assigned_am_nama: string;
   board_ref: string;
 }
 
@@ -2305,7 +2313,8 @@ export function teamPortalToWire(t: portal.TeamPortal): TeamPortalWire {
     division: t.division,
     performance_rollup: perfTeamRollupToWire(t.rollup),
     client_shortcuts: t.clients.map((c) => ({
-      client_id: c.clientId, client_name: c.clientName, assigned_am: c.assignedAm, board_ref: c.boardRef,
+      client_id: c.clientId, client_name: c.clientName, assigned_am: c.assignedAm, assigned_am_nama: c.assignedAmNama,
+      board_ref: c.boardRef,
     })),
     block_queue: t.blockQueue.map(pendingBlockRequestToWire),
   };

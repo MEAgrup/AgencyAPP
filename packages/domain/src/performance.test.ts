@@ -857,6 +857,27 @@ describeDb('team rollup (Rule 5 simple average, derived on read)', () => {
     await expect(teamRollup(sql, creativeLead, 'Ads', JUNE)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
+  // Feedback OD 2026-10-22: Ringkasan Tim butuh NAMA karyawan, bukan ID saja.
+  it('members carry staffNama (employee_display_name), falling back to the id when the name is unresolvable', async () => {
+    const known = uid('EMP-NM');
+    const tanpaNama = uid('EMP-NONAME'); // nama kosong di HRIS
+    await sql`insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values (${known}, 'Rina Kreatif', ${known + '@mea.id'}, 'Ads', 'ZZ-Ads-Spec', true, 'ZZ-TEST'),
+             (${tanpaNama}, ${tanpaNama}, ${tanpaNama + '@mea.id'}, 'Ads', 'ZZ-Ads-Spec', true, 'ZZ-TEST')`;
+    await sql`insert into performance_snapshots (id, staff_id, role_type, period_start, period_end, profile_score, modifier_value, final_score, components_json, computed_by)
+      values (${'PERF-202606-NM01'}, ${known}, 'Ads', '2026-06-01', '2026-06-30', 75, 0, 75, '{"components":[]}'::jsonb, 'system'),
+             (${'PERF-202606-NM02'}, ${tanpaNama}, 'Ads', '2026-06-01', '2026-06-30', 65, 0, 65, '{"components":[]}'::jsonb, 'system')`;
+    const roll = await teamRollup(sql, director(), 'Ads', JUNE);
+    expect(roll.members.find((m) => m.staffId === known)?.staffNama).toBe('Rina Kreatif');
+    expect(roll.members.find((m) => m.staffId === tanpaNama)?.staffNama).toBe(tanpaNama);
+    // fk_perf_staff menjamin staf ber-snapshot selalu punya baris employees; fallback
+    // resolver (karyawan tak ditemukan ⇒ id sendiri) tetap kontrak yang dipakai di sini.
+    const ghost = uid('EMP-GHOST');
+    expect((await sql<{ n: string }[]>`select private.employee_display_name(${ghost}) as n`)[0].n).toBe(ghost);
+    // Header /performance/[id] — snapshot tunggal membawa nama yang sama.
+    expect((await getSnapshot(sql, director(), known, JUNE)).staffNama).toBe('Rina Kreatif');
+  });
+
   // X-12 Opsi B (pemilik, 2026-09-08): hitungan insiden "realisasi belum
   // lengkap" per AM di rollup Account, informasional — TIDAK memengaruhi
   // finalScore (batas eksplisit M6ABC_BACKLOG.md X-12).

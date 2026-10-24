@@ -1632,6 +1632,8 @@ const PERF_PREFIX = 'PERF';
 export interface Snapshot {
   id: string;
   staffId: string;
+  /** Nama tampilan staf (`private.employee_display_name`, jatuh ke id) — feedback OD 2026-10-22. */
+  staffNama: string;
   roleType: string;
   periodStart: string;
   periodEnd: string;
@@ -1788,11 +1790,11 @@ export async function getSnapshot(sql: Queryable, actor: Actor, staffID: string,
   }
   const rows = periodID !== ''
     ? await sql<SnapshotRow[]>`
-        select id, staff_id, role_type, period_start, period_end, profile_score, modifier_value, final_score, components_json, computed_at, computed_by
+        select id, staff_id, private.employee_display_name(staff_id) as staff_nama, role_type, period_start, period_end, profile_score, modifier_value, final_score, components_json, computed_at, computed_by
           from performance_snapshots where staff_id = ${staffID} and to_char(period_start, 'YYYYMM') = ${periodID}
          order by period_start desc limit 1`
     : await sql<SnapshotRow[]>`
-        select id, staff_id, role_type, period_start, period_end, profile_score, modifier_value, final_score, components_json, computed_at, computed_by
+        select id, staff_id, private.employee_display_name(staff_id) as staff_nama, role_type, period_start, period_end, profile_score, modifier_value, final_score, components_json, computed_at, computed_by
           from performance_snapshots where staff_id = ${staffID}
          order by period_start desc limit 1`;
   if (rows.length === 0) {
@@ -1826,8 +1828,9 @@ export async function previewCurrent(sql: Queryable, actor: Actor, staffID: stri
   }
   const per = monthPeriod(now);
   const c = await computeFor(sql, staffID, roleType, per);
+  const nama = await sql<{ n: string }[]>`select private.employee_display_name(${staffID}) as n`;
   return {
-    id: '', staffId: staffID, roleType, periodStart: per.startDate, periodEnd: per.endDate,
+    id: '', staffId: staffID, staffNama: nama[0].n, roleType, periodStart: per.startDate, periodEnd: per.endDate,
     profileScore: c.profile, modifier: c.modifier, finalScore: c.final, scoreDisplay: scoreDisplay(c.final),
     components: c.components, targetsPlaceholder: c.placeholder, computedAt: null, computedBy: '', preview: true,
   };
@@ -1860,7 +1863,7 @@ export async function trend(sql: Queryable, actor: Actor, staffID: string): Prom
     throw new ForbiddenError();
   }
   const rows = await sql<SnapshotRow[]>`
-    select id, staff_id, role_type, period_start, period_end, profile_score, modifier_value, final_score, components_json, computed_at, computed_by
+    select id, staff_id, private.employee_display_name(staff_id) as staff_nama, role_type, period_start, period_end, profile_score, modifier_value, final_score, components_json, computed_at, computed_by
       from performance_snapshots where staff_id = ${staffID} order by period_start asc`;
   const out: Snapshot[] = [];
   let visible = false;
@@ -1882,6 +1885,8 @@ export async function trend(sql: Queryable, actor: Actor, staffID: string): Prom
 /** One member's line in the team rollup. */
 export interface TeamRow {
   staffId: string;
+  /** Nama tampilan staf (`private.employee_display_name`, jatuh ke id) — feedback OD 2026-10-22. */
+  staffNama: string;
   roleType: string;
   finalScore: number | null;
   scoreDisplay: string;
@@ -1926,8 +1931,8 @@ export async function teamRollup(sql: Queryable, actor: Actor, division: string,
   if (periodID === '') {
     return { division, period: periodID, members: [], teamAverage: null, averageDisplay: '—' };
   }
-  const rows = await sql<{ staff_id: string; role_type: string; final_score: string | null }[]>`
-    select staff_id, role_type, final_score
+  const rows = await sql<{ staff_id: string; staff_nama: string; role_type: string; final_score: string | null }[]>`
+    select staff_id, private.employee_display_name(staff_id) as staff_nama, role_type, final_score
       from performance_snapshots
      where role_type = ${roleType} and to_char(period_start, 'YYYYMM') = ${periodID}
      order by staff_id`;
@@ -1950,7 +1955,7 @@ export async function teamRollup(sql: Queryable, actor: Actor, division: string,
       scored++;
     }
     members.push({
-      staffId: r.staff_id, roleType: r.role_type, finalScore: final, scoreDisplay: scoreDisplay(final),
+      staffId: r.staff_id, staffNama: r.staff_nama, roleType: r.role_type, finalScore: final, scoreDisplay: scoreDisplay(final),
       // null = "tidak berlaku" (bukan AM); 0 = "berlaku, nol insiden" — DUA
       // hal berbeda, bukan sama-sama null (AM tanpa insiden bukan "AM tanpa
       // metrik ini").
@@ -1985,6 +1990,7 @@ function roleTypeOfDivision(division: string): string | null {
 interface SnapshotRow {
   id: string;
   staff_id: string;
+  staff_nama: string;
   role_type: string;
   period_start: string | Date;
   period_end: string | Date;
@@ -2010,7 +2016,7 @@ function scanSnapshot(r: SnapshotRow): Snapshot {
     targetsPlaceholder = payload.targetsPlaceholder ?? false;
   }
   return {
-    id: r.id, staffId: r.staff_id, roleType: r.role_type,
+    id: r.id, staffId: r.staff_id, staffNama: r.staff_nama, roleType: r.role_type,
     periodStart: dateStr(r.period_start), periodEnd: dateStr(r.period_end),
     profileScore: profile, modifier, finalScore: final, scoreDisplay: scoreDisplay(final),
     components, targetsPlaceholder, computedAt: r.computed_at, computedBy: r.computed_by, preview: false,

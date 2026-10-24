@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
+import { NamaKaryawan } from '@/components/PerformaTim';
 import {
   COMPONENT_LABELS,
   formatPeriodLabel,
@@ -118,9 +119,11 @@ export default function PerformanceDetailPage({ params }: { params: Promise<{ id
         <div className="grid2">
           <div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
-              Staff ID
+              Karyawan
             </div>
-            <div style={{ fontSize: '16px', fontWeight: '600' }}>{snapshot.staff_id}</div>
+            <div style={{ fontSize: '16px', fontWeight: '600' }}>
+              <NamaKaryawan nama={snapshot.staff_nama} id={snapshot.staff_id} />
+            </div>
           </div>
           <div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>

@@ -25,6 +25,7 @@ export interface ClientShortcut {
   client_id: string;
   client_name: string;
   assigned_am: string;
+  assigned_am_nama: string; // nama tampilan AM; '' bila AM kosong
   board_ref: string; // deep-link hint ke Client Board (M11)
 }
 

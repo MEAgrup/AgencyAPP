@@ -151,6 +151,8 @@ export interface ClientShortcut {
   clientId: string;
   clientName: string;
   assignedAm: string;
+  /** Nama tampilan AM (`private.employee_display_name`); '' bila AM kosong — feedback OD 2026-10-22. */
+  assignedAmNama: string;
   boardRef: string; // deep-link hint into the Client Board (M11)
 }
 
@@ -189,10 +191,13 @@ export async function teamPortal(sql: Queryable, actor: Actor, divisionArg: stri
 async function teamClients(sql: Queryable, division: string): Promise<ClientShortcut[]> {
   const rows =
     division === ACCOUNT_DIVISION
-      ? await sql<{ id: string; toko: string; assigned_am_id: string | null }[]>`
-          select id, toko, coalesce(assigned_am_id, '') as assigned_am_id from clients order by id`
-      : await sql<{ id: string; toko: string; assigned_am_id: string | null }[]>`
-          select distinct c.id, c.toko, coalesce(c.assigned_am_id, '') as assigned_am_id
+      ? await sql<{ id: string; toko: string; assigned_am_id: string | null; assigned_am_nama: string }[]>`
+          select id, toko, coalesce(assigned_am_id, '') as assigned_am_id,
+                 coalesce(private.employee_display_name(nullif(assigned_am_id, '')), '') as assigned_am_nama
+            from clients order by id`
+      : await sql<{ id: string; toko: string; assigned_am_id: string | null; assigned_am_nama: string }[]>`
+          select distinct c.id, c.toko, coalesce(c.assigned_am_id, '') as assigned_am_id,
+                 coalesce(private.employee_display_name(nullif(c.assigned_am_id, '')), '') as assigned_am_nama
             from clients c
             join services sv on sv.client_id = c.id
             join briefs b on b.service_id = sv.id
@@ -202,6 +207,7 @@ async function teamClients(sql: Queryable, division: string): Promise<ClientShor
     clientId: r.id,
     clientName: r.toko,
     assignedAm: r.assigned_am_id ?? '',
+    assignedAmNama: r.assigned_am_nama,
     boardRef: `/api/v1/board?client=${r.id}`,
   }));
 }
