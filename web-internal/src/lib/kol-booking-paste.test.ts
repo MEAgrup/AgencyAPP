@@ -2,7 +2,7 @@
  * P9 / RC-8 — tempel/unggah Excel ke grid "Buat Booking Baru" KOL.
  *
  * Fixture-nya persis contoh dari tim KOL: dua baris valid, satu tanpa nama,
- * satu ber-rate 0. Nomor baris di error adalah nomor baris DATA (1 = baris
+ * satu ber-rate negatif (rate 0 = barter, SAH sejak DECISIONS 2026-10-23). Nomor baris di error adalah nomor baris DATA (1 = baris
  * pertama sesudah header), supaya cocok dengan yang dilihat staff.
  */
 import { describe, expect, it } from 'vitest';
@@ -22,7 +22,7 @@ const TSV = [
   'Sari Beauty\t@saribeauty\tBeauty\tRp 1.500.000\t2\t0',
   'Dimas Gadget\t@dimasgadget\tTech\t750000\t1\t1',
   '\t@tanpanama\tFood\t500000\t1\t0',
-  'Rina Hijab\t@rinahijab\tFashion\t0\t1\t0',
+  'Rina Hijab\t@rinahijab\tFashion\t-500000\t1\t0',
 ].join('\n');
 
 const EXPECTED_ROWS = [
@@ -32,7 +32,7 @@ const EXPECTED_ROWS = [
 
 const EXPECTED_ERRORS = [
   { baris: 3, pesan: '[nama creator wajib diisi]' },
-  { baris: 4, pesan: '[agreed rate wajib diisi & lebih dari 0]' },
+  { baris: 4, pesan: '[agreed rate wajib diisi & tidak boleh negatif]' },
 ];
 
 function errorsOf(r: { errors: { baris: number; pesan: string }[] }) {
@@ -126,7 +126,7 @@ describe('CSV & .xlsx → hasil sama dengan TSV', () => {
     'Sari Beauty,@saribeauty,Beauty,"Rp 1.500.000",2,0',
     'Dimas Gadget,@dimasgadget,Tech,750000,1,1',
     ',@tanpanama,Food,500000,1,0',
-    'Rina Hijab,@rinahijab,Fashion,0,1,0',
+    'Rina Hijab,@rinahijab,Fashion,-500000,1,0',
   ].join('\r\n');
 
   it('CSV koma (dengan sel ber-kutip)', () => {
@@ -186,5 +186,37 @@ describe('template', () => {
   it('header template = header yang dikenali parser', () => {
     expect(BOOKING_TEMPLATE_CSV.trim()).toBe(BOOKING_COLUMNS.join(','));
     expect(parseBookingRows(BOOKING_TEMPLATE_CSV)).toEqual({ rows: [], errors: [] });
+  });
+});
+
+describe('Agreed Rate 0 = creator barter (feedback KOL 2026-10-23)', () => {
+  const base = { creator_name: 'X', creator_handle: '', niche: '', qty_video: '', qty_live: '' };
+  const NEG = '[agreed rate wajib diisi & tidak boleh negatif]';
+
+  it('validateRow menerima 0; tetap menolak kosong, negatif, dan teks', () => {
+    expect(validateRow({ ...base, agreed_rate: '0' })).toBeNull();
+    expect(validateRow({ ...base, agreed_rate: '' })).toBe(NEG);
+    expect(validateRow({ ...base, agreed_rate: '  ' })).toBe(NEG);
+    expect(validateRow({ ...base, agreed_rate: '-1' })).toBe(NEG);
+    expect(validateRow({ ...base, agreed_rate: 'abc' })).toBe(NEG);
+  });
+
+  it.each([['0'], ['Rp 0'], ['0,00'], ['Rp. 0,00']])('rate %s → "0"', (input) => {
+    expect(normalizeRate(input)).toBe('0');
+  });
+
+  it('CSV contoh dari tim KOL (BRF-202609-0025) → 2 baris valid', () => {
+    const csv = [
+      'Nama Creator,Handle,Niche,Agreed Rate,Qty Video,Qty Live',
+      'triscalufi_r,fatiya,fashion hijab,10000,5,0',
+      'antiinovita18,fatiya,fashion hijab,0,5,0',
+    ].join('\r\n');
+    expect(parseBookingRows(csv)).toEqual({
+      rows: [
+        { creator_name: 'triscalufi_r', creator_handle: 'fatiya', niche: 'fashion hijab', agreed_rate: '10000', qty_video: '5', qty_live: '0' },
+        { creator_name: 'antiinovita18', creator_handle: 'fatiya', niche: 'fashion hijab', agreed_rate: '0', qty_video: '5', qty_live: '0' },
+      ],
+      errors: [],
+    });
   });
 });

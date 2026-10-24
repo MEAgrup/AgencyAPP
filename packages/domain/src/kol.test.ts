@@ -35,6 +35,7 @@ import {
   logHours,
   markPaid,
   monthlyKolReport,
+  MSG_PAYMENT_BARTER,
   NotFoundError,
   passQC,
   runKolReminderTick,
@@ -192,8 +193,8 @@ const briefStatus = async (id: string): Promise<string> =>
   (await sql<{ status: string }[]>`select status from briefs where id = ${id}`)[0].status;
 
 /** Drives a booking through to [QC Passed]. */
-async function toQcPassed(briefId: string): Promise<string> {
-  const b = await createBooking(sql, kolStaff('ZZ-COORD'), briefId, goodInput());
+async function toQcPassed(briefId: string, input: BookingInput = goodInput()): Promise<string> {
+  const b = await createBooking(sql, kolStaff('ZZ-COORD'), briefId, input);
   const c = kolStaff('ZZ-COORD');
   await book(sql, c, b.id);
   await startContent(sql, c, b.id);
@@ -244,6 +245,17 @@ describeDb('createBooking (§4)', () => {
     expect((await getBooking(sql, kolStaff('ZZ-COORD'), b.id)).qtyLive).toBe(1);
     await expect(createBooking(sql, kolStaff('ZZ-COORD'), briefId, { ...goodInput(), qtyVideo: -1 })).rejects.toBeInstanceOf(ValidationError);
     await expect(createBooking(sql, kolStaff('ZZ-COORD'), briefId, { ...goodInput(), qtyLive: 2.5 })).rejects.toBeInstanceOf(ValidationError);
+  });
+  it('Agreed Rate 0 (creator barter) is accepted; empty/negative/garbage still rejected', async () => {
+    const { briefId } = await kolBrief(2);
+    const b = await createBooking(sql, kolStaff('ZZ-COORD'), briefId, { ...goodInput(), agreedRate: '0' });
+    expect(b.status).toBe('[Sourcing]');
+    expect(b.agreedRate).toBe(0);
+    expect(b.agreedRateDisplay).toBe('Rp. 0,00');
+    expect((await getBooking(sql, kolStaff('ZZ-COORD'), b.id)).agreedRateDisplay).toBe('Rp. 0,00');
+    for (const agreedRate of ['', '  ', '-1', 'abc']) {
+      await expect(createBooking(sql, kolStaff('ZZ-COORD'), briefId, { ...goodInput(), agreedRate })).rejects.toBeInstanceOf(ValidationError);
+    }
   });
   it('gates: non-KOL brief, invalid source pool, permission', async () => {
     const { briefId } = await kolBrief();
@@ -419,6 +431,23 @@ describeDb('payment request (§8) + attributed GMV + creator list (§6)', () => 
     expect((await markPaid(sql, finance(), cpr.id)).ok).toBe(true);
     // The Booking reflects [Paid].
     expect((await getBooking(sql, kolStaff('ZZ-COORD'), id)).paymentStatus).toBe('[Paid]');
+  });
+
+  it('barter booking (Agreed Rate 0) reaches [QC Passed] but gets no CPR; Σ spend counts it as 0', async () => {
+    const { briefId } = await kolBrief(2);
+    const barter = await toQcPassed(briefId, { ...goodInput(), agreedRate: '0' });
+    expect(await bkgStatus(barter)).toBe('[QC Passed]');
+    const err = await createPaymentRequest(sql, kolStaff('ZZ-COORD'), barter, '0', 'BCA 123').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictError);
+    expect((err as Error).message).toBe(MSG_PAYMENT_BARTER);
+    expect((await getBooking(sql, kolStaff('ZZ-COORD'), barter)).paymentStatus).toBe('');
+    // A paid booking on the same brief is unaffected.
+    const paid = await toQcPassed(briefId);
+    expect((await createPaymentRequest(sql, kolStaff('ZZ-COORD'), paid, '1500000', 'BCA 123')).amountDisplay).toBe('Rp. 1.500.000,00');
+    const now = new Date(Date.now() + 7 * 3600_000); // WIB month
+    const rep = await monthlyKolReport(sql, kolLead(), 'ZZ-COORD', now.getUTCFullYear(), now.getUTCMonth() + 1);
+    expect(rep.totalSpendDisplay).toBe('Rp. 1.500.000,00');
+    expect(rep.qcPassedCount).toBe(2);
   });
 
   it('reject needs a reason and sends it back to KOL', async () => {

@@ -440,6 +440,8 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
   const canFinance = canFinanceAction(role);
   const revisionCapReached = booking.revision_count >= REVISION_CAP;
   const hasActivePaymentRequest = booking.payment_status !== '' && booking.payment_status !== '[Rejected]';
+  // Barter (Agreed Rate 0): tidak ada CPR — domain menolaknya (DECISIONS 2026-10-23).
+  const isBarter = booking.agreed_rate === 0;
 
   const readOnlyNote = isODOnly(role) ? (
     <div className="alert alertInfo" role="status">
@@ -1000,7 +1002,7 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
           cari langsung by ID di halaman KOL.
         </p>
 
-        {isQCPassed && canExecute && !hasActivePaymentRequest && (
+        {isQCPassed && canExecute && !hasActivePaymentRequest && !isBarter && (
           <form className="form" onSubmit={handleCreatePaymentRequest}>
             {prError && <div className="alert alertError" role="alert">{prError}</div>}
             <div className="formRow">
@@ -1026,7 +1028,12 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
           </form>
         )}
 
-        {!isQCPassed && (
+        {isBarter && (
+          <div className="alert alertInfo" role="status">
+            Booking barter (Agreed Rate {booking.agreed_rate_display}) tidak memerlukan Payment Request.
+          </div>
+        )}
+        {!isQCPassed && !isBarter && (
           <div className="alert alertInfo" role="status">
             Payment Request hanya dapat dibuat setelah booking berstatus [QC Passed].
           </div>
