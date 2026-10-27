@@ -151,6 +151,8 @@ export interface PoolRow {
   stale: boolean;
   open_attempt_count: number;
   my_open_attempt: boolean;
+  // WEBSITE-LEAD (docs/DECISIONS.md 2026-10-27): badge "Lead Website".
+  website_lead: boolean;
 }
 
 // GET /leads[?status=&q=] row.
@@ -174,6 +176,8 @@ export interface LeadRow {
   // "Didaftarkan oleh" (issue #64 / O40) — pendaftar pertama, tak pernah berubah.
   created_by: string;
   created_by_nama: string;
+  // WEBSITE-LEAD (docs/DECISIONS.md 2026-10-27): badge "Lead Website".
+  website_lead: boolean;
 }
 
 // One row in GET /leads/{id}'s attempts list (the "kontes" for this lead).
@@ -192,8 +196,27 @@ export interface LeadDetail {
   // Kolom peran ikut di-omit bersama rollup: ia menjawab "apa hubungan PEMBACA
   // dengan baris ini" untuk kolom Peran di tab Lead Saya, sedangkan halaman
   // detail sudah menampilkan seluruh kontes attempt lengkap dengan namanya.
-  lead: Omit<LeadRow, 'open_attempt_count' | 'registered_by_me' | 'claimed_by_me'>;
+  lead: Omit<LeadRow, 'open_attempt_count' | 'registered_by_me' | 'claimed_by_me' | 'website_lead'>;
   attempts: LeadAttemptRow[];
+  // WEBSITE-LEAD: asal form website (tanda terima terbaru), null bila bukan lead website.
+  website: LeadWebsiteOrigin | null;
+}
+
+// WEBSITE-LEAD — blok "Asal form website" di detail lead. `kiriman` = berapa
+// kali nomor ini mengisi form; `hasil` = dibuat | dibuka_ulang | duplikat.
+export interface LeadWebsiteOrigin {
+  site: string;
+  sumber_form: string;
+  halaman_asal: string;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  link_toko: string;
+  omzet: string;
+  layanan: string;
+  hasil: string;
+  diterima_pada: string;
+  kiriman: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,11 +295,12 @@ export function claimLead(leadId: string): Promise<{ attempt: AttemptStub }> {
 // telepon (substring, case-insensitive); source menyaring persis satu nilai
 // dari SOURCES. P2 §6: dipaginasi server-side, lihat catatan di `listLeads`.
 export function listPool(
-  params?: { q?: string; source?: string; limit?: number; cursor?: string },
+  params?: { q?: string; source?: string; website?: boolean; limit?: number; cursor?: string },
 ): Promise<{ data: PoolRow[]; next_cursor: string | null }> {
   const search = new URLSearchParams();
   if (params?.q) search.set('q', params.q);
   if (params?.source) search.set('source', params.source);
+  if (params?.website) search.set('website', '1');
   if (params?.limit) search.set('limit', String(params.limit));
   if (params?.cursor) search.set('cursor', params.cursor);
   const qs = search.toString();
@@ -305,12 +329,15 @@ export const MINE_MODE_LABELS: Record<MineMode, string> = {
 // nilai itu sebagai `cursor` untuk mengambil lanjutannya. Cursor bersifat
 // buram — jangan diurai atau dibangun sendiri di FE.
 export function listLeads(
-  params?: { status?: string; q?: string; source?: string; mine?: MineMode; limit?: number; cursor?: string },
+  params?: {
+    status?: string; q?: string; source?: string; mine?: MineMode; website?: boolean; limit?: number; cursor?: string;
+  },
 ): Promise<{ data: LeadRow[]; next_cursor: string | null }> {
   const search = new URLSearchParams();
   if (params?.status) search.set('status', params.status);
   if (params?.q) search.set('q', params.q);
   if (params?.source) search.set('source', params.source);
+  if (params?.website) search.set('website', '1');
   if (params?.mine) search.set('mine', params.mine);
   if (params?.limit) search.set('limit', String(params.limit));
   if (params?.cursor) search.set('cursor', params.cursor);

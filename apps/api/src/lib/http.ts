@@ -118,6 +118,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   StoreOpsValidationError: 400, // storeops.ValidationError
   TaskValidationError: 400, // task.ValidationError
   TooManySalespeopleError: 400, // sales.TooManySalespeopleError
+  WebsiteLeadValidationError: 400, // websiteLead.ValidationError (payload mea.website_lead.v1)
   TutupBukuValidationError: 400, // tutupbuku.ValidationError
   ValidationError: 400, // notification.ValidationError
   // 401 — OldPasswordError is 401 like Go's handleChangePassword: the request

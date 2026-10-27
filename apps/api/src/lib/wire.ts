@@ -148,6 +148,8 @@ export interface PoolRowWire {
   stale: boolean;
   open_attempt_count: number;
   my_open_attempt: boolean;
+  /** WEBSITE-LEAD: badge "Lead Website" (ada tanda terima form website). */
+  website_lead: boolean;
 }
 
 export function poolRowToWire(r: leads.PoolBoardRow): PoolRowWire {
@@ -161,6 +163,7 @@ export function poolRowToWire(r: leads.PoolBoardRow): PoolRowWire {
     stale: r.stale,
     open_attempt_count: r.openAttemptCount,
     my_open_attempt: r.myOpenAttempt,
+    website_lead: r.websiteLead,
   };
 }
 
@@ -183,6 +186,8 @@ export interface LeadRowWire {
   /** "Didaftarkan oleh" (issue #64 / O40) — id lalu nama tampilan pendaftar pertama. */
   created_by: string;
   created_by_nama: string;
+  /** WEBSITE-LEAD: badge "Lead Website" (ada tanda terima form website). */
+  website_lead: boolean;
 }
 
 export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
@@ -203,6 +208,7 @@ export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
     claimed_by_me: r.claimedByMe,
     created_by: r.createdBy,
     created_by_nama: r.createdByNama,
+    website_lead: r.websiteLead,
   };
 }
 
@@ -225,9 +231,27 @@ export interface LeadAttemptWire {
  * Peran column, and the detail page already renders the full attempt contest —
  * which says who owns what by name, for everyone, not just the reader.
  */
+/** WEBSITE-LEAD: asal form website (tanda terima terbaru) di detail lead. */
+export interface LeadWebsiteOriginWire {
+  site: string;
+  sumber_form: string;
+  halaman_asal: string;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  link_toko: string;
+  omzet: string;
+  layanan: string;
+  hasil: string;
+  diterima_pada: string;
+  kiriman: number;
+}
+
 export interface LeadDetailWire {
-  lead: Omit<LeadRowWire, 'open_attempt_count' | 'registered_by_me' | 'claimed_by_me'>;
+  lead: Omit<LeadRowWire, 'open_attempt_count' | 'registered_by_me' | 'claimed_by_me' | 'website_lead'>;
   attempts: LeadAttemptWire[];
+  /** WEBSITE-LEAD: null bila lead ini tidak berasal/tersentuh dari form website. */
+  website: LeadWebsiteOriginWire | null;
 }
 
 // --- M6 Account & Service, Cluster 1 (intake & AM assignment) ---
@@ -730,6 +754,20 @@ export function leadDetailToWire(d: leads.LeadDetailView): LeadDetailWire {
       status: a.status,
       claimed_at: a.claimedAt.toISOString(),
     })),
+    website: d.website === null ? null : {
+      site: d.website.site,
+      sumber_form: d.website.sumberForm,
+      halaman_asal: d.website.halamanAsal,
+      utm_source: d.website.utmSource,
+      utm_medium: d.website.utmMedium,
+      utm_campaign: d.website.utmCampaign,
+      link_toko: d.website.linkToko,
+      omzet: d.website.omzet,
+      layanan: d.website.layanan,
+      hasil: d.website.hasil,
+      diterima_pada: d.website.diterimaPada.toISOString(),
+      kiriman: d.website.kiriman,
+    },
   };
 }
 

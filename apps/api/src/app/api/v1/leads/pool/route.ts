@@ -31,6 +31,8 @@ export async function GET(request: Request): Promise<Response> {
     const result = await readAsActor(actor, (sql) => leads.poolBoard(sql, actor.employeeId, {
       q: params.get('q') ?? undefined,
       source: params.get('source') ?? undefined,
+      // WEBSITE-LEAD: ?website=1 → hanya lead dari form website.
+      website: params.get('website') === '1',
       page: page.parseRequest(params.get('limit'), params.get('cursor')),
     }));
     return json({ data: result.rows.map(poolRowToWire), next_cursor: result.nextCursor });

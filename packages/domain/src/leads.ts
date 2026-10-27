@@ -1117,6 +1117,8 @@ export interface PoolBoardRow {
   stale: boolean;
   openAttemptCount: number;
   myOpenAttempt: boolean;
+  /** WEBSITE-LEAD: lead ini punya tanda terima form website (badge "Lead Website"). */
+  websiteLead: boolean;
 }
 
 /**
@@ -1132,18 +1134,20 @@ export interface PoolBoardRow {
 export async function poolBoard(
   sql: Queryable,
   actorEmployeeId: string,
-  filter: { q?: string; source?: string; page?: page.PageRequest } = {},
+  filter: { q?: string; source?: string; website?: boolean; page?: page.PageRequest } = {},
 ): Promise<page.Page<PoolBoardRow>> {
   const q = filter.q?.trim() ?? '';
   const like = `%${q}%`;
   const source = filter.source?.trim() ?? '';
+  const website = filter.website === true;
   const b = page.sqlBounds(filter.page);
   const rows = await sql<{
     id: string; lead_name: string; phone_number: string; source: string;
     origin_campaign_id: string | null; created_at: Date;
-    stale: boolean; open_attempt_count: string; my_open_attempt: boolean;
+    stale: boolean; open_attempt_count: string; my_open_attempt: boolean; website_lead: boolean;
   }[]>`
     select l.id, l.lead_name, l.phone_number, l.source, l.origin_campaign_id, l.created_at,
+           exists(select 1 from website_lead_inbox w where w.lead_id = l.id) as website_lead,
            (l.created_at < now() - interval '24 hours') as stale,
            (select count(*) from prospect_attempts pa
              where pa.lead_id = l.id and pa.status <> all(${OPEN_ATTEMPT_TERMINAL})) as open_attempt_count,
@@ -1154,6 +1158,7 @@ export async function poolBoard(
     where l.record_status = ${RECORD_POOL}
       and (${q} = '' or l.lead_name ilike ${like} or l.phone_number ilike ${like})
       and (${source} = '' or l.source = ${source})
+      and (${website} = false or exists(select 1 from website_lead_inbox w2 where w2.lead_id = l.id))
       and (l.created_at, l.id) < (${b.at}, ${b.id})
     order by l.created_at desc, l.id desc
     limit ${b.limit}::bigint`;
@@ -1161,6 +1166,7 @@ export async function poolBoard(
     id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, source: r.source,
     originCampaignId: r.origin_campaign_id, createdAt: r.created_at,
     stale: r.stale, openAttemptCount: Number(r.open_attempt_count), myOpenAttempt: r.my_open_attempt,
+    websiteLead: r.website_lead,
   }));
   return page.paginate(mapped, filter.page, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }
@@ -1218,6 +1224,8 @@ export interface LeadsDbRow {
    */
   createdBy: string;
   createdByNama: string;
+  /** WEBSITE-LEAD: lead ini punya tanda terima form website (badge "Lead Website"). */
+  websiteLead: boolean;
 }
 
 /**
@@ -1260,10 +1268,13 @@ export async function leadsDatabase(
   filter: {
     status?: string; q?: string; source?: string;
     mineEmployeeId?: string; mineMode?: MineMode;
+    /** WEBSITE-LEAD: "Hanya lead website (otomatis)". */
+    website?: boolean;
     page?: page.PageRequest;
   } = {},
 ): Promise<page.Page<LeadsDbRow>> {
   const status = filter.status?.trim() ?? '';
+  const website = filter.website === true;
   const q = filter.q?.trim() ?? '';
   const like = `%${q}%`;
   const source = filter.source?.trim() ?? '';
@@ -1280,10 +1291,11 @@ export async function leadsDatabase(
     last_touch_campaign_id: string | null; record_status: string;
     winning_attempt_id: string | null; created_at: Date; open_attempt_count: string;
     registered_by_me: boolean; claimed_by_me: boolean;
-    created_by: string; created_by_nama: string;
+    created_by: string; created_by_nama: string; website_lead: boolean;
   }[]>`
     select l.id, l.lead_name, l.phone_number, l.email, l.source, l.origin_division,
            l.origin_campaign_id, l.last_touch_campaign_id, l.record_status, l.winning_attempt_id, l.created_at,
+           exists(select 1 from website_lead_inbox w where w.lead_id = l.id) as website_lead,
            (select count(*) from prospect_attempts pa
              where pa.lead_id = l.id and pa.status <> all(${OPEN_ATTEMPT_TERMINAL})) as open_attempt_count,
            (${mine} <> '' and l.created_by = ${mine}) as registered_by_me,
@@ -1301,6 +1313,7 @@ export async function leadsDatabase(
            or (${wantClaimed} and exists(
                  select 1 from prospect_attempts pa3
                   where pa3.lead_id = l.id and pa3.owner_employee_id = ${mine})))
+      and (${website} = false or exists(select 1 from website_lead_inbox w2 where w2.lead_id = l.id))
       and (l.created_at, l.id) < (${b.at}, ${b.id})
     order by l.created_at desc, l.id desc
     limit ${b.limit}::bigint`;
@@ -1312,6 +1325,7 @@ export async function leadsDatabase(
     openAttemptCount: Number(r.open_attempt_count),
     registeredByMe: r.registered_by_me, claimedByMe: r.claimed_by_me,
     createdBy: r.created_by, createdByNama: r.created_by_nama,
+    websiteLead: r.website_lead,
   }));
   return page.paginate(mapped, filter.page, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }
@@ -1334,10 +1348,33 @@ export interface LeadCoreView {
   createdByNama: string;
 }
 
+/**
+ * WEBSITE-LEAD: asal form website satu lead — tanda terima TERBARU di
+ * `website_lead_inbox` (satu nomor bisa mengisi form lebih dari sekali; tiap
+ * kiriman tercatat, `kiriman` menghitungnya). Link toko, omzet, dan layanan
+ * dibaca dari payload yang tersimpan, karena `leads` tidak punya kolomnya.
+ */
+export interface LeadWebsiteOrigin {
+  site: string;
+  sumberForm: string;
+  halamanAsal: string;
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
+  linkToko: string;
+  omzet: string;
+  layanan: string;
+  hasil: string;
+  diterimaPada: Date;
+  kiriman: number;
+}
+
 /** Lead detail: the record plus its attempt contest (oldest first). */
 export interface LeadDetailView {
   lead: LeadCoreView;
   attempts: LeadAttemptRow[];
+  /** WEBSITE-LEAD: null bila lead ini tidak lahir/tersentuh dari form website. */
+  website: LeadWebsiteOrigin | null;
 }
 
 /** leadDetailView returns a lead + its attempt contest (NotFoundError if absent). */
@@ -1369,7 +1406,28 @@ export async function leadDetailView(sql: Queryable, id: string): Promise<LeadDe
     from prospect_attempts pa
     where pa.lead_id = ${id}
     order by pa.created_at, pa.id`;
+  const web = await sql<{
+    site: string; sumber_form: string; halaman_asal: string;
+    utm_source: string | null; utm_medium: string | null; utm_campaign: string | null;
+    link_toko: string | null; omzet: string | null; layanan: string | null;
+    hasil: string; diterima_pada: Date; kiriman: string;
+  }[]>`
+    select w.site, w.sumber_form, w.halaman_asal, w.utm_source, w.utm_medium, w.utm_campaign,
+           w.payload->>'link_toko' as link_toko, w.payload->>'omzet' as omzet,
+           w.payload->>'layanan' as layanan, w.hasil, w.diterima_pada,
+           (select count(*) from website_lead_inbox w2 where w2.lead_id = w.lead_id) as kiriman
+    from website_lead_inbox w
+    where w.lead_id = ${id}
+    order by w.diterima_pada desc, w.id desc
+    limit 1`;
+  const w = web[0];
   return {
+    website: w === undefined ? null : {
+      site: w.site, sumberForm: w.sumber_form, halamanAsal: w.halaman_asal,
+      utmSource: w.utm_source, utmMedium: w.utm_medium, utmCampaign: w.utm_campaign,
+      linkToko: w.link_toko ?? '', omzet: w.omzet ?? '', layanan: w.layanan ?? '',
+      hasil: w.hasil, diterimaPada: w.diterima_pada, kiriman: Number(w.kiriman),
+    },
     lead: {
       id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, email: r.email,
       source: r.source, originDivision: r.origin_division, originCampaignId: r.origin_campaign_id,
@@ -2136,74 +2194,138 @@ async function importOneRow(
         source = gate.source;
       }
 
-      const match = await matchByPhone(tx, phoneNorm);
-      // Empty actor id on purpose — see the section header (M1-OA-6).
-      const decision = decide(CHANNEL_IMPORT, match, '');
-      const campaignArg = campaignId === '' ? null : campaignId;
-
-      switch (decision.outcome) {
-        case 'reopen': {
-          // Terminal -> [Pool] only; the Marketing door spawns no attempt.
-          const moved = await statemachine.transition(ex.sm, {
-            machine: LEAD_MACHINE, entityType: 'lead', table: 'leads',
-            statusColumn: 'record_status', entityId: decision.reopenLeadId,
-            to: RECORD_POOL, actor,
-          });
-          if (!moved.ok) {
-            return { ...base, reason: MSG_ROW_INCOMPLETE };
-          }
-          await ex.audit.insertAudit({
-            entityType: 'lead', entityId: decision.reopenLeadId, actorEmployeeId: actor.employeeId,
-            action: 'dedup_reopen', beforeJson: null,
-            afterJson: { channel: 'bulk_import', source }, createdBy: actor.employeeId,
-          });
-          // M1 §5: a campaign-scoped reopen TOUCHES an existing lead, so it moves
-          // last-touch only — origin stays whatever it was born under.
-          await updateLastTouch(tx, ex, decision.reopenLeadId, campaignId, actor);
-          return { ...base, imported: true, reopened: true, leadId: decision.reopenLeadId };
-        }
-
-        case 'block': {
-          // Attribution attempt is LOGGED on the existing record but never
-          // counted (M1-OA-6); the existing record itself is not mutated.
-          if (match !== null) {
-            await ex.audit.insertAudit({
-              entityType: 'lead', entityId: match.id, actorEmployeeId: actor.employeeId,
-              action: 'dedup_blocked', beforeJson: null,
-              afterJson: { channel: 'bulk_import', row_index: rowNumber, message: decision.message },
-              createdBy: actor.employeeId,
-            });
-          }
-          return { ...base, reason: decision.message };
-        }
-
-        default: {
-          // Create: a lead born under a Campaign gets origin = last-touch = that
-          // Campaign (origin immutable hereafter); both NULL without one.
-          const leadId = await ex.ident.identNext('LEAD', now);
-          await tx`
-            insert into leads
-              (id, lead_name, phone_number, phone_norm, email, source, origin_division,
-               origin_campaign_id, last_touch_campaign_id, record_status, created_by)
-            values
-              (${leadId}, ${leadName}, ${phoneNumber}, ${phoneNorm}, ${email === '' ? null : email},
-               ${source}, ${MARKETING_DIVISION}, ${campaignArg}, ${campaignArg}, ${RECORD_POOL},
-               ${actor.employeeId})`;
-          await ex.audit.insertAudit({
-            entityType: 'lead', entityId: leadId, actorEmployeeId: actor.employeeId,
-            action: 'create', beforeJson: null,
-            afterJson: {
-              record_status: RECORD_POOL, source, channel: 'bulk_import',
-              origin_campaign_id: campaignArg,
-            },
-            createdBy: actor.employeeId,
-          });
-          return { ...base, imported: true, leadId };
-        }
+      const res = await poolIntake(tx, ex, actor, {
+        leadName, phoneNumber, phoneNorm, email, source,
+        originDivision: MARKETING_DIVISION, campaignId,
+        channel: 'bulk_import', rowIndex: rowNumber,
+      }, now);
+      if (res.outcome === 'reopen') {
+        return { ...base, imported: true, reopened: true, leadId: res.leadId };
       }
+      if (res.outcome === 'block') {
+        return { ...base, reason: res.message };
+      }
+      return { ...base, imported: true, leadId: res.leadId };
     });
   } catch {
     return { ...base, reason: MSG_ROW_INCOMPLETE };
+  }
+}
+
+/** Input of the shared Pool intake door (Marketing import + website intake). */
+export interface PoolIntakeInput {
+  leadName: string;
+  phoneNumber: string;
+  /** normalizePhone(phoneNumber), already checked non-empty by the caller. */
+  phoneNorm: string;
+  email: string;
+  source: string;
+  /** `leads.origin_division` for a CREATED lead (reopen keeps the old value). */
+  originDivision: string;
+  /** '' = no campaign; otherwise already gated by the caller. */
+  campaignId: string;
+  /** Audit `channel` label: 'bulk_import' | 'website'. */
+  channel: string;
+  /** Import row number, written into the block audit only when given. */
+  rowIndex?: number;
+}
+
+/** Outcome of the shared Pool intake door. */
+export interface PoolIntakeResult {
+  outcome: 'create' | 'reopen' | 'block';
+  /** The new lead (create), the reopened lead (reopen), or the matched lead (block; '' when none). */
+  leadId: string;
+  /** Verbatim BI message on block, '' otherwise. */
+  message: string;
+  /** The phone match the decision was taken on (null on create). */
+  match: ExistingLead | null;
+}
+
+/**
+ * poolIntake is the Marketing import door's dedup + write step (M1 §3 / §5),
+ * shared by `bulkImport` and the website intake (`website-lead.ts`,
+ * docs/DECISIONS.md 2026-10-27 WEBSITE-LEAD) so the duplicate, reopen and audit
+ * rules exist exactly once. Runs inside the CALLER's transaction; never throws
+ * for a dedup block — it returns the verdict.
+ *
+ *   create → new LEAD- in `[Pool]` (origin = last-touch = campaign, or NULL)
+ *   reopen → terminal record back to `[Pool]` through the engine (no attempt)
+ *   block  → nothing written except the attribution audit on the matched lead
+ */
+export async function poolIntake(
+  tx: Queryable,
+  ex: ReturnType<typeof executors>,
+  actor: Actor,
+  input: PoolIntakeInput,
+  now: Date = new Date(),
+): Promise<PoolIntakeResult> {
+  const { leadName, phoneNumber, phoneNorm, email, source, campaignId, channel } = input;
+  const match = await matchByPhone(tx, phoneNorm);
+  // Empty actor id on purpose — see the section header (M1-OA-6).
+  const decision = decide(CHANNEL_IMPORT, match, '');
+  const campaignArg = campaignId === '' ? null : campaignId;
+
+  switch (decision.outcome) {
+    case 'reopen': {
+      // Terminal -> [Pool] only; the Marketing door spawns no attempt.
+      const moved = await statemachine.transition(ex.sm, {
+        machine: LEAD_MACHINE, entityType: 'lead', table: 'leads',
+        statusColumn: 'record_status', entityId: decision.reopenLeadId,
+        to: RECORD_POOL, actor,
+      });
+      if (!moved.ok) {
+        return { outcome: 'block', leadId: decision.reopenLeadId, message: MSG_ROW_INCOMPLETE, match };
+      }
+      await ex.audit.insertAudit({
+        entityType: 'lead', entityId: decision.reopenLeadId, actorEmployeeId: actor.employeeId,
+        action: 'dedup_reopen', beforeJson: null,
+        afterJson: { channel, source }, createdBy: actor.employeeId,
+      });
+      // M1 §5: a campaign-scoped reopen TOUCHES an existing lead, so it moves
+      // last-touch only — origin stays whatever it was born under.
+      await updateLastTouch(tx, ex, decision.reopenLeadId, campaignId, actor);
+      return { outcome: 'reopen', leadId: decision.reopenLeadId, message: '', match };
+    }
+
+    case 'block': {
+      // Attribution attempt is LOGGED on the existing record but never
+      // counted (M1-OA-6); the existing record itself is not mutated.
+      if (match !== null) {
+        await ex.audit.insertAudit({
+          entityType: 'lead', entityId: match.id, actorEmployeeId: actor.employeeId,
+          action: 'dedup_blocked', beforeJson: null,
+          afterJson: input.rowIndex === undefined
+            ? { channel, message: decision.message }
+            : { channel, row_index: input.rowIndex, message: decision.message },
+          createdBy: actor.employeeId,
+        });
+      }
+      return { outcome: 'block', leadId: match?.id ?? '', message: decision.message, match };
+    }
+
+    default: {
+      // Create: a lead born under a Campaign gets origin = last-touch = that
+      // Campaign (origin immutable hereafter); both NULL without one.
+      const leadId = await ex.ident.identNext('LEAD', now);
+      await tx`
+        insert into leads
+          (id, lead_name, phone_number, phone_norm, email, source, origin_division,
+           origin_campaign_id, last_touch_campaign_id, record_status, created_by)
+        values
+          (${leadId}, ${leadName}, ${phoneNumber}, ${phoneNorm}, ${email === '' ? null : email},
+           ${source}, ${input.originDivision}, ${campaignArg}, ${campaignArg}, ${RECORD_POOL},
+           ${actor.employeeId})`;
+      await ex.audit.insertAudit({
+        entityType: 'lead', entityId: leadId, actorEmployeeId: actor.employeeId,
+        action: 'create', beforeJson: null,
+        afterJson: {
+          record_status: RECORD_POOL, source, channel,
+          origin_campaign_id: campaignArg,
+        },
+        createdBy: actor.employeeId,
+      });
+      return { outcome: 'create', leadId, message: '', match: null };
+    }
   }
 }
 
