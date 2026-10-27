@@ -980,6 +980,8 @@ describe('M4 clientListRowToWire (the roster page read res.data)', () => {
     contractDurasiBulan: 12,
     contractTanggalMulai: '2026-01-01',
     contractTanggalAkhir: '2027-01-01',
+    tanggalClosing: new Date('2026-07-01T03:00:00.000Z'),
+    lamaMenungguHari: 5,
   };
 
   it('maps to snake_case', () => {
@@ -998,7 +1000,15 @@ describe('M4 clientListRowToWire (the roster page read res.data)', () => {
       contract_durasi_bulan: 12,
       contract_tanggal_mulai: '2026-01-01',
       contract_tanggal_akhir: '2027-01-01',
+      tanggal_closing: '2026-07-01T03:00:00.000Z',
+      lama_menunggu_hari: 5,
     });
+  });
+
+  it('tanggal closing / lama menunggu: null eksplisit, bukan kunci hilang (feedback OD 27-10)', () => {
+    const wire = clientListRowToWire({ ...row, tanggalClosing: null, lamaMenungguHari: null });
+    expect(wire).toHaveProperty('tanggal_closing', null);
+    expect(wire).toHaveProperty('lama_menunggu_hari', null);
   });
 
   it('a client with no contract yet renders all three as null (FS-5b)', () => {
@@ -1015,6 +1025,7 @@ describe('M4 clientListRowToWire (the roster page read res.data)', () => {
     for (const key of [
       'id', 'toko', 'kota', 'kategori', 'sales_pic_id', 'payment_intent', 'released_to_account_at',
       'contract_durasi_bulan', 'contract_tanggal_mulai', 'contract_tanggal_akhir',
+      'tanggal_closing', 'lama_menunggu_hari',
     ]) {
       expect(wire).toHaveProperty(key);
     }

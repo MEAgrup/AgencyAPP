@@ -48,6 +48,7 @@ import {
   MSG_PLATFORM_TIDAK_VALID,
   MSG_SERVICE_CLOSURE_BRIEFS_INCOMPLETE,
   NotFoundError,
+  parseListFilter,
   PLATFORM_VOCAB,
   PlatformDuplicateError,
   PlatformInvalidError,
@@ -58,7 +59,11 @@ import {
   resumeService,
   ServiceStateError,
   setPaymentIntent,
+  STATUS_RILIS_DIRILIS,
+  STATUS_RILIS_MENUNGGU,
+  URUT_TERLAMA,
   type Actor,
+  type ClientListFilter,
   type ClientPatch,
   updateClient,
   updatePlatform,
@@ -1060,6 +1065,113 @@ describeDb('listClients — keyset pagination (P2 §6)', () => {
     }
     expect(seen).toEqual(allIds);
     expect(new Set(seen).size).toBe(seen.length);
+  });
+});
+
+describeDb('listClients — tanggal closing & status rilis (feedback OD 27-10-2026)', () => {
+  // Dua klien closing di tanggal berbeda: satu dirilis, satu Menunggu Finance.
+  // `created_at` digeser langsung (seperti label() di atas) supaya rentang
+  // tanggal diuji terlepas dari jam dinding saat tes jalan.
+  const tag = `zcl${Date.now()}`;
+  const closedOn = async (iso: string, released: boolean): Promise<string> => {
+    const id = await closedClient();
+    await sql`update clients set toko = ${`Toko ${tag}`}, created_at = ${new Date(iso)},
+      released_to_account_at = ${released ? new Date('2026-10-20T03:00:00Z') : null} where id = ${id}`;
+    return id;
+  };
+  const ids = async (f: ClientListFilter, now?: Date): Promise<string[]> =>
+    (await listClients(sql, undefined, tag, f, now)).rows.map((r) => r.id);
+
+  it('tanggal closing = saat Closed-Success (= transactions.created_at, satu transaksi DB)', async () => {
+    const id = await closedClient();
+    const [t] = await sql<{ created_at: Date }[]>`
+      select t.created_at from transactions t join clients c on c.transaction_id = t.id where c.id = ${id}`;
+    const row = (await listClients(sql)).rows.find((r) => r.id === id);
+    expect(row!.tanggalClosing).not.toBeNull();
+    expect(row!.tanggalClosing!.getTime()).toBe(t.created_at.getTime());
+  });
+
+  it('klien yang tidak lahir dari closing CDPS: tanggal closing & lama menunggu null', async () => {
+    const id = await closedClient();
+    await sql`update clients set winning_attempt_id = null where id = ${id}`;
+    const row = (await listClients(sql)).rows.find((r) => r.id === id);
+    expect(row!.tanggalClosing).toBeNull();
+    expect(row!.lamaMenungguHari).toBeNull();
+    // Filter tanggal closing hanya untuk klien hasil closing.
+    expect((await listClients(sql, undefined, undefined, { closingDari: '2000-01-01' })).rows.map((r) => r.id))
+      .not.toContain(id);
+  });
+
+  it('lama menunggu (hari kalender WIB) hanya saat Menunggu Finance', async () => {
+    const menunggu = await closedOn('2026-10-01T16:30:00Z', false); // 23.30 WIB 1 Okt
+    const dirilis = await closedOn('2026-09-15T03:00:00Z', true);
+    const now = new Date('2026-10-27T03:30:00Z'); // 10.30 WIB 27 Okt
+    const rows = (await listClients(sql, undefined, tag, {}, now)).rows;
+    expect(rows.find((r) => r.id === menunggu)!.lamaMenungguHari).toBe(26);
+    expect(rows.find((r) => r.id === dirilis)!.lamaMenungguHari).toBeNull();
+    expect(rows.find((r) => r.id === dirilis)!.tanggalClosing).not.toBeNull();
+  });
+
+  it('filter rentang tanggal closing: inklusif kedua ujung, dalam tanggal WIB', async () => {
+    const a = await closedOn('2026-09-30T17:30:00Z', true); // 00.30 WIB 1 Okt
+    const b = await closedOn('2026-10-10T16:59:00Z', false); // 23.59 WIB 10 Okt
+    const c = await closedOn('2026-10-10T17:00:00Z', false); // 00.00 WIB 11 Okt
+
+    expect(await ids({ closingDari: '2026-10-01', closingSampai: '2026-10-10' })).toEqual([b, a]);
+    expect(await ids({ closingDari: '2026-10-11' })).toEqual([c]);
+    expect(await ids({ closingSampai: '2026-09-30' })).toEqual([]);
+  });
+
+  it('filter status rilis: Menunggu Finance / Dirilis / semua', async () => {
+    const rilis = await closedOn('2026-10-02T03:00:00Z', true);
+    const tunggu = await closedOn('2026-10-05T03:00:00Z', false);
+    expect(await ids({ statusRilis: STATUS_RILIS_MENUNGGU })).toEqual([tunggu]);
+    expect(await ids({ statusRilis: STATUS_RILIS_DIRILIS })).toEqual([rilis]);
+    expect(await ids({})).toEqual([tunggu, rilis]);
+  });
+
+  it('urut terlama = paling lama menunggu dulu, dan paginasi keyset tetap benar', async () => {
+    const lama = await closedOn('2026-09-01T03:00:00Z', false);
+    const tengah = await closedOn('2026-09-20T03:00:00Z', false);
+    await closedOn('2026-09-10T03:00:00Z', true);
+    const baru = await closedOn('2026-10-20T03:00:00Z', false);
+
+    const f: ClientListFilter = { statusRilis: STATUS_RILIS_MENUNGGU, urut: URUT_TERLAMA };
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 10; guard++) {
+      const p: page.Page<{ id: string }> = await listClients(
+        sql, { limit: 1, cursor: cursor === null ? null : page.decodeCursor(cursor) }, tag, f,
+      );
+      seen.push(...p.rows.map((r) => r.id));
+      if (p.nextCursor === null) break;
+      cursor = p.nextCursor;
+    }
+    expect(seen).toEqual([lama, tengah, baru]);
+
+    // Default (terbaru) dipaginasi + difilter rentang: urutan terbalik, tanpa duplikat.
+    const seenDesc: string[] = [];
+    cursor = null;
+    for (let guard = 0; guard < 10; guard++) {
+      const p: page.Page<{ id: string }> = await listClients(
+        sql, { limit: 1, cursor: cursor === null ? null : page.decodeCursor(cursor) }, tag,
+        { closingDari: '2026-09-15', statusRilis: STATUS_RILIS_MENUNGGU },
+      );
+      seenDesc.push(...p.rows.map((r) => r.id));
+      if (p.nextCursor === null) break;
+      cursor = p.nextCursor;
+    }
+    expect(seenDesc).toEqual([baru, tengah]);
+  });
+
+  it('nilai filter tidak valid ditolak dengan pesan BI baku', () => {
+    for (const f of [
+      { closingDari: '27-10-2026' }, { closingSampai: '2026-02-30' }, { statusRilis: 'released' }, { urut: 'asc' },
+    ] as ClientListFilter[]) {
+      expect(() => parseListFilter(f)).toThrow(IncompleteError);
+      expect(() => parseListFilter(f)).toThrow('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+    }
+    expect(() => parseListFilter({ closingDari: '', statusRilis: '', urut: '' })).not.toThrow();
   });
 });
 

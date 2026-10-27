@@ -29,7 +29,7 @@
  * Reference: archive/backend-go/internal/module4_client/{edit,locks,reads,intent}.go.
  */
 
-import { bi, money, notification, page, permission, statemachine } from '@cdps/core';
+import { bi, money, notification, page, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import * as finance from './finance';
 
@@ -1451,6 +1451,86 @@ export interface ClientListRow {
   contractDurasiBulan: number | null;
   contractTanggalMulai: string | null;
   contractTanggalAkhir: string | null;
+  /**
+   * Feedback OD 27-10-2026 — saat closing (Closed-Success) klien ini. =
+   * `clients.created_at`: `sales.close` melahirkan klien, transaksi, dan transisi
+   * Closed-Success dalam SATU transaksi DB (`now()` sama). `null` = klien tidak
+   * lahir dari closing CDPS (mis. Bridge MSDPS). DECISIONS 2026-10-27
+   * "direktori-klien-tanggal-closing".
+   */
+  tanggalClosing: Date | null;
+  /** Hari kalender WIB sejak closing — HANYA saat masih Menunggu Finance, selain itu `null`. */
+  lamaMenungguHari: number | null;
+}
+
+/** Status Rilis di Direktori Klien: Menunggu Finance (`released_to_account_at` kosong) / Dirilis. */
+export const STATUS_RILIS_MENUNGGU = 'menunggu_finance';
+export const STATUS_RILIS_DIRILIS = 'dirilis';
+/** Urutan roster: closing terbaru dulu (default) / terlama dulu (= paling lama menunggu). */
+export const URUT_TERBARU = 'terbaru';
+export const URUT_TERLAMA = 'terlama';
+
+/** Filter server-side Direktori Klien (feedback OD 27-10-2026). Semua opsional. */
+export interface ClientListFilter {
+  /** `YYYY-MM-DD`, tanggal kalender WIB, inklusif. */
+  closingDari?: string;
+  /** `YYYY-MM-DD`, tanggal kalender WIB, inklusif. */
+  closingSampai?: string;
+  statusRilis?: string;
+  urut?: string;
+}
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+/** WIB midnight of a `YYYY-MM-DD` as an instant; IncompleteError for anything else. */
+function wibMidnight(ymd: string): Date {
+  if (!YMD.test(ymd)) throw new IncompleteError();
+  const t = new Date(`${ymd}T00:00:00+07:00`);
+  // Round-trip guards impossible dates ('2026-02-30' rolls over in Date).
+  if (Number.isNaN(t.getTime()) || tz.dateString(t) !== ymd) throw new IncompleteError();
+  return t;
+}
+
+/**
+ * The far-past twin of `page.NO_CURSOR_AT`, for the ascending (`terlama`)
+ * keyset: `(created_at, id) > (at, id)` is TRUE for every real row.
+ */
+const NO_CURSOR_AT_ASC = new Date('0001-01-01T00:00:00.000Z');
+
+/** A validated ClientListFilter, as binds. */
+interface ParsedClientListFilter {
+  asc: boolean;
+  statusRilis: string | null;
+  filterByClosing: boolean;
+  /** Inklusif: 00:00 WIB tanggal "dari". */
+  closingFrom: Date;
+  /** Eksklusif: 00:00 WIB sehari sesudah "sampai". */
+  closingTo: Date;
+}
+
+/**
+ * parseListFilter validates a ClientListFilter. Nilai tak dikenal / tanggal tak
+ * valid ⇒ IncompleteError (400). Dipanggil route SEBELUM membuka koneksi
+ * (galat parameter tidak perlu DB), dan lagi di listClients untuk pemanggil lain.
+ * Sentinel jauh = tanpa batas, pola sama dengan NO_CURSOR_AT (bind ber-tipe,
+ * tanpa cabang SQL).
+ */
+export function parseListFilter(filter: ClientListFilter = {}): ParsedClientListFilter {
+  const urut = filter.urut || URUT_TERBARU;
+  if (urut !== URUT_TERBARU && urut !== URUT_TERLAMA) throw new IncompleteError();
+  const statusRilis = filter.statusRilis || null;
+  if (statusRilis !== null && statusRilis !== STATUS_RILIS_MENUNGGU && statusRilis !== STATUS_RILIS_DIRILIS) {
+    throw new IncompleteError();
+  }
+  return {
+    asc: urut === URUT_TERLAMA,
+    statusRilis,
+    filterByClosing: Boolean(filter.closingDari || filter.closingSampai),
+    closingFrom: filter.closingDari ? wibMidnight(filter.closingDari) : NO_CURSOR_AT_ASC,
+    closingTo: filter.closingSampai
+      ? new Date(wibMidnight(filter.closingSampai).getTime() + 24 * 60 * 60 * 1000)
+      : page.NO_CURSOR_AT,
+  };
 }
 
 /**
@@ -1460,17 +1540,32 @@ export interface ClientListRow {
  * id desc` ordering. Absent = unbounded, so any caller that needs the whole
  * roster (an aggregation, an export) keeps getting it; the request path passes
  * one.
+ *
+ * `filter` (feedback OD 27-10-2026): rentang tanggal closing, status rilis, dan
+ * urutan. `urut = terlama` membalik keyset ke `created_at asc, id asc` — kolom
+ * dan index yang sama, kursor yang sama bentuknya.
  */
 export async function listClients(
   sql: Queryable,
   pageReq?: page.PageRequest,
   search?: string,
+  filter: ClientListFilter = {},
+  now: Date = new Date(),
 ): Promise<page.Page<ClientListRow>> {
   const b = page.sqlBounds(pageReq);
   // Pencarian nama klien (nama_pic) / nama toko: substring, case-insensitive.
   // Metakarakter LIKE di-escape supaya '%' / '_' diketik apa adanya.
   const term = (search ?? '').trim();
   const pattern = term === '' ? null : `%${term.replace(/[\\%_]/g, '\\$&')}%`;
+  const { asc, statusRilis, filterByClosing, closingFrom, closingTo } = parseListFilter(filter);
+  const curAt = pageReq?.cursor?.createdAt ?? (asc ? NO_CURSOR_AT_ASC : page.NO_CURSOR_AT);
+  const curId = pageReq?.cursor?.id ?? page.NO_CURSOR_ID;
+  // Dua fragmen statis (bukan CASE) supaya planner tetap memakai
+  // idx_clients_created_at di kedua arah.
+  const keyset = asc
+    ? sql`(c.created_at, c.id) > (${curAt}, ${curId})`
+    : sql`(c.created_at, c.id) < (${curAt}, ${curId})`;
+  const orderBy = asc ? sql`c.created_at asc, c.id asc` : sql`c.created_at desc, c.id desc`;
   const rows = await sql<
     {
       id: string; toko: string; nama_pic: string; kota: string; kategori: string;
@@ -1479,11 +1574,13 @@ export async function listClients(
       contract_durasi_bulan: number | null;
       contract_tanggal_mulai: string | Date | null;
       contract_tanggal_akhir: string | Date | null;
+      hasil_closing: boolean;
     }[]
   >`
     select c.id, c.toko, c.nama_pic, c.kota, c.kategori, c.sales_pic_id,
            private.employee_display_name(c.sales_pic_id) as sales_pic_nama, c.assigned_am_id,
            c.payment_intent, c.released_to_account_at, c.created_at,
+           (c.winning_attempt_id is not null) as hasil_closing,
            ct.durasi_bulan as contract_durasi_bulan,
            ct.tanggal_mulai as contract_tanggal_mulai,
            ct.tanggal_akhir as contract_tanggal_akhir
@@ -1500,9 +1597,15 @@ export async function listClients(
       order by ct.tanggal_mulai desc, ct.id desc
       limit 1
     ) ct on true
-    where (c.created_at, c.id) < (${b.at}, ${b.id})
+    where ${keyset}
       and (${pattern}::text is null or c.toko ilike ${pattern} or c.nama_pic ilike ${pattern})
-    order by c.created_at desc, c.id desc
+      and (not ${filterByClosing}::boolean
+           or (c.winning_attempt_id is not null
+               and c.created_at >= ${closingFrom} and c.created_at < ${closingTo}))
+      and (${statusRilis}::text is null
+           or (${statusRilis}::text = ${STATUS_RILIS_MENUNGGU} and c.released_to_account_at is null)
+           or (${statusRilis}::text = ${STATUS_RILIS_DIRILIS} and c.released_to_account_at is not null))
+    order by ${orderBy}
     limit ${b.limit}::bigint`;
   const dateStr = (v: string | Date | null): string | null => {
     if (v === null) return null;
@@ -1515,6 +1618,9 @@ export async function listClients(
     contractDurasiBulan: r.contract_durasi_bulan === null ? null : Number(r.contract_durasi_bulan),
     contractTanggalMulai: dateStr(r.contract_tanggal_mulai),
     contractTanggalAkhir: dateStr(r.contract_tanggal_akhir),
+    tanggalClosing: r.hasil_closing ? r.created_at : null,
+    lamaMenungguHari:
+      r.hasil_closing && r.released_to_account_at === null ? Math.max(0, tz.daysBetween(r.created_at, now)) : null,
   }));
   return page.paginate(mapped, pageReq, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }
