@@ -188,6 +188,10 @@ export * as scs from './scs';
 // reuse — preseden `renewal.ts`. Lihat header `bridge.ts` untuk amandemen
 // D5/§4.3 terhadap rencana bridging asli.
 export * as bridge from './bridge';
+// WEBSITE-LEAD — lead form website (WordPress `mea-leads`, kontrak
+// `mea.website_lead.v1`) masuk Pool lewat pintu import Marketing yang sama
+// (`leads.poolIntake`). Otoritas: docs/DECISIONS.md 2026-10-27.
+export * as websiteLead from './website-lead';
 // PX-M2a — Shop ID Gate & Eligibility Policy (Product Exchange, sisi MEA
 // Agency). Modul consent PRD asli (`px_consents`) DIHAPUS oleh ketokan
 // pemilik 2026-09-12 — `client_platforms.shop_id` adalah gerbangnya sekarang.

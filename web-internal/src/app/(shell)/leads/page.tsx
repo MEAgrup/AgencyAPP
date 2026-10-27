@@ -63,6 +63,17 @@ const TAB_LABELS: Record<TabKey, string> = {
   deleteQueue: 'Permintaan Hapus',
 };
 
+// WEBSITE-LEAD (docs/DECISIONS.md 2026-10-27): lead yang masuk otomatis dari
+// form website. Turunan dari tanda terima di CDPS, bukan kolom yang diketik.
+function WebsiteBadge({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <span className="badge badge-blue" style={{ marginLeft: 6 }} title="Masuk otomatis dari form website">
+      Lead Website
+    </span>
+  );
+}
+
 export default function LeadsPage() {
   const { role } = useAuth();
 
@@ -372,7 +383,7 @@ function MineTab({ canRequestDelete }: { canRequestDelete: boolean }) {
                     <td>
                       <Link href={`/leads/${r.id}`}>{r.id}</Link>
                     </td>
-                    <td>{r.lead_name}</td>
+                    <td>{r.lead_name}<WebsiteBadge show={r.website_lead} /></td>
                     <td><WaButton phone={r.phone_number} nama={r.lead_name} /></td>
                     <td>{r.source}</td>
                     <td>{r.origin_campaign_id || '—'}</td>
@@ -465,8 +476,10 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
   // menyembunyikan bahwa yang dimuat cuma sebagian.
   const [qInput, setQInput] = useState('');
   const [sourceInput, setSourceInput] = useState('');
+  const [websiteInput, setWebsiteInput] = useState(false);
   const [appliedQ, setAppliedQ] = useState('');
   const [appliedSource, setAppliedSource] = useState('');
+  const [appliedWebsite, setAppliedWebsite] = useState(false);
 
   // P2 §6: server memaginasi. `nextCursor` null = sudah halaman terakhir.
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -476,7 +489,11 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await listPool({ q: appliedQ || undefined, source: appliedSource || undefined });
+      const res = await listPool({
+        q: appliedQ || undefined,
+        source: appliedSource || undefined,
+        website: appliedWebsite,
+      });
       setRows(res.data);
       setNextCursor(res.next_cursor);
     } catch (err) {
@@ -484,7 +501,7 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [appliedQ, appliedSource]);
+  }, [appliedQ, appliedSource, appliedWebsite]);
 
   // Menyambung, bukan mengganti — dan cursor selalu dari respons TERAKHIR, jadi
   // ganti filter (yang memanggil `load` ulang) otomatis mereset paginasinya.
@@ -496,6 +513,7 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
       const res = await listPool({
         q: appliedQ || undefined,
         source: appliedSource || undefined,
+        website: appliedWebsite,
         cursor: nextCursor,
       });
       setRows((prev) => [...(prev ?? []), ...res.data]);
@@ -515,6 +533,7 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
     e.preventDefault();
     setAppliedQ(qInput.trim());
     setAppliedSource(sourceInput);
+    setAppliedWebsite(websiteInput);
   }
 
   async function handleClaim(leadId: string) {
@@ -569,6 +588,17 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
           </select>
         </div>
         <div className="field" style={{ justifyContent: 'flex-end' }}>
+          <label htmlFor="pool-website">
+            <input
+              id="pool-website"
+              type="checkbox"
+              checked={websiteInput}
+              onChange={(e) => setWebsiteInput(e.target.checked)}
+            />{' '}
+            Hanya lead website (otomatis)
+          </label>
+        </div>
+        <div className="field" style={{ justifyContent: 'flex-end' }}>
           <label>&nbsp;</label>
           <button type="submit" className="btn btnSecondary btnSm">
             Terapkan
@@ -600,7 +630,7 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className={r.stale ? 'flaggedRow' : ''}>
-                  <td>{r.lead_name}</td>
+                  <td>{r.lead_name}<WebsiteBadge show={r.website_lead} /></td>
                   <td><WaButton phone={r.phone_number} nama={r.lead_name} /></td>
                   <td>{r.source}</td>
                   <td>{r.origin_campaign_id || '—'}</td>
@@ -663,9 +693,11 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
   const [qInput, setQInput] = useState('');
   const [statusInput, setStatusInput] = useState('');
   const [sourceInput, setSourceInput] = useState('');
+  const [websiteInput, setWebsiteInput] = useState(false);
   const [appliedQ, setAppliedQ] = useState('');
   const [appliedStatus, setAppliedStatus] = useState('');
   const [appliedSource, setAppliedSource] = useState('');
+  const [appliedWebsite, setAppliedWebsite] = useState(false);
 
   // P2 §6: server memaginasi. `nextCursor` null = sudah halaman terakhir.
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -679,6 +711,7 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
         status: appliedStatus || undefined,
         q: appliedQ || undefined,
         source: appliedSource || undefined,
+        website: appliedWebsite,
       });
       setRows(res.data);
       setNextCursor(res.next_cursor);
@@ -687,7 +720,7 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
     } finally {
       setLoading(false);
     }
-  }, [appliedStatus, appliedQ, appliedSource]);
+  }, [appliedStatus, appliedQ, appliedSource, appliedWebsite]);
 
   // Menyambung, bukan mengganti — dan cursor selalu dari respons TERAKHIR, jadi
   // ganti filter (yang memanggil `load` ulang) otomatis mereset paginasinya.
@@ -700,6 +733,7 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
         status: appliedStatus || undefined,
         q: appliedQ || undefined,
         source: appliedSource || undefined,
+        website: appliedWebsite,
         cursor: nextCursor,
       });
       setRows((prev) => [...(prev ?? []), ...res.data]);
@@ -720,6 +754,7 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
     setAppliedQ(qInput.trim());
     setAppliedStatus(statusInput);
     setAppliedSource(sourceInput);
+    setAppliedWebsite(websiteInput);
   }
 
   async function submitDeleteRequest(e: FormEvent, leadId: string) {
@@ -795,6 +830,17 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
           </select>
         </div>
         <div className="field" style={{ justifyContent: 'flex-end' }}>
+          <label htmlFor="db-website">
+            <input
+              id="db-website"
+              type="checkbox"
+              checked={websiteInput}
+              onChange={(e) => setWebsiteInput(e.target.checked)}
+            />{' '}
+            Hanya lead website (otomatis)
+          </label>
+        </div>
+        <div className="field" style={{ justifyContent: 'flex-end' }}>
           <label>&nbsp;</label>
           <button type="submit" className="btn btnSecondary btnSm">
             Terapkan
@@ -859,7 +905,7 @@ function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolea
                     <td>
                       <Link href={`/leads/${r.id}`}>{r.id}</Link>
                     </td>
-                    <td>{r.lead_name}</td>
+                    <td>{r.lead_name}<WebsiteBadge show={r.website_lead} /></td>
                     <td><WaButton phone={r.phone_number} nama={r.lead_name} /></td>
                     <td>{r.email || '—'}</td>
                     <td>{r.source}</td>

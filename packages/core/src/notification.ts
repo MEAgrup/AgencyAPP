@@ -241,6 +241,13 @@ export const EVENTS = {
   ServiceClosed: 'service_closed', // -> owning AM
   ServiceClosureRejected: 'service_closure_rejected', // -> owning AM
 
+  // ----- catalog v23 (WEBSITE-LEAD) — 1 event -----
+  // Lead dari form website (WordPress mea-leads) diterima pintu mesin
+  // `/internal/website-leads`. Ke lead Sales; bila nomornya sudah diproses,
+  // juga ke pemilik attempt terbuka (explicit). Emitter:
+  // packages/domain/src/website-lead.ts intake().
+  LeadWebsiteMasuk: 'm1.lead.website_masuk', // -> lead Sales (+ pemilik attempt)
+
 } as const;
 
 /** A cataloged event type. */
@@ -413,6 +420,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'P7 — 1 event (pdt.laporan.siap_terbit): Laporan PDT dikirim sebagai [Draf] dan menunggu Terbitkan — ke AM pemilik klien + lead Account (aktor dikecualikan).',
     eventCount: 1,
     decisionRef: 'docs/DECISIONS.md 2026-10-19 (P7 — notifikasi Laporan PDT siap terbit, disetujui Yohan)',
+  },
+  {
+    version: 23,
+    description:
+      'WEBSITE-LEAD — 1 event (m1.lead.website_masuk): lead dari form website diterima — ke lead Sales, plus pemilik attempt terbuka bila nomornya sudah diproses.',
+    eventCount: 1,
+    decisionRef: 'docs/DECISIONS.md 2026-10-27 (WEBSITE-LEAD — lead form website masuk Pool, disetujui Yohan)',
   },
 ] as const;
 
@@ -655,6 +669,16 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
     description: 'Laporan PDT dikirim [Draf] dan menunggu Terbitkan — ke AM pemilik klien + lead Account',
     resolver: 'explicitOrLeads',
     version: 22,
+  },
+
+  // --- v23 (WEBSITE-LEAD). Description/resolver WAJIB sama persis dengan seed
+  // migrasi 20261221010000_website_lead_inbox.sql. 'explicitOrLeads': pemilik
+  // attempt terbuka dipasok intake() saat nomornya duplikat, lead Sales
+  // di-resolve dari division 'Sales'. ---
+  [EVENTS.LeadWebsiteMasuk]: {
+    description: 'Lead website baru — ke lead Sales (+ pemilik attempt bila nomor sudah diproses)',
+    resolver: 'explicitOrLeads',
+    version: 23,
   },
 };
 

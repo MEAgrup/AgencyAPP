@@ -50,6 +50,8 @@ export async function GET(request: Request): Promise<Response> {
       source: params.get('source') ?? undefined,
       mineEmployeeId: mine ? actor.employeeId : undefined,
       mineMode: leads.parseMineMode(mine),
+      // WEBSITE-LEAD: ?website=1 → "Hanya lead website (otomatis)".
+      website: params.get('website') === '1',
       page: req,
     }));
     return json({ data: result.rows.map(leadRowToWire), next_cursor: result.nextCursor });

@@ -1297,7 +1297,16 @@ DECLARE
     -- melihatnya. Baris KERJA-nya (`prod_slots`, `pic_unavailability`) TETAP
     -- ber-lengan lead/divisi dan karena itu tidak ada di daftar ini.
     'studios_select',
-    'vendors_select'
+    'vendors_select',
+    -- `website_lead_inbox_select` (WEBSITE-LEAD, migrasi 20261221010000) masuk
+    -- daftar ini DENGAN SENGAJA, dicatat di `docs/DECISIONS.md` 2026-10-27
+    -- (`2026-10-27-website-lead-intake.md`) — bukan ditambahkan agar tes hijau.
+    -- Predikatnya `EXISTS (SELECT 1 FROM leads l WHERE l.id = lead_id)`: baris
+    -- inbox terbaca tepat oleh siapa pun yang boleh membaca lead-nya, karena
+    -- subquery itu dievaluasi di bawah `leads_select` milik pemanggil. Arm
+    -- lead/divisi-nya ADA, satu tingkat lebih dalam di `leads_select`; menyalin
+    -- arm itu ke sini justru melahirkan aturan kedua yang bisa berselisih.
+    'website_lead_inbox_select'
   ];
   gained text[];
   lost   text[];

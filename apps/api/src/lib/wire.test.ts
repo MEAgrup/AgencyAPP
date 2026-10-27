@@ -134,12 +134,14 @@ describe('leads wire mappers', () => {
     const row: leads.PoolBoardRow = {
       id: 'LEAD-1', leadName: 'X', phoneNumber: '08', source: 'Scouting',
       originCampaignId: null, createdAt: new Date('2026-07-01T00:00:00.000Z'),
-      stale: true, openAttemptCount: 2, myOpenAttempt: false,
+      stale: true, openAttemptCount: 2, myOpenAttempt: false, websiteLead: true,
     };
     expect(poolRowToWire(row)).toEqual({
       id: 'LEAD-1', lead_name: 'X', phone_number: '08', source: 'Scouting',
       origin_campaign_id: null, created_at: '2026-07-01T00:00:00.000Z',
       stale: true, open_attempt_count: 2, my_open_attempt: false,
+      // WEBSITE-LEAD: badge — boolean eksplisit, tidak pernah dihilangkan.
+      website_lead: true,
     });
   });
 
@@ -150,7 +152,7 @@ describe('leads wire mappers', () => {
       recordStatus: 'active', winningAttemptId: null,
       createdAt: new Date('2026-07-01T00:00:00.000Z'), openAttemptCount: 1,
       registeredByMe: true, claimedByMe: false,
-      createdBy: 'EMP-1', createdByNama: 'Budi',
+      createdBy: 'EMP-1', createdByNama: 'Budi', websiteLead: false,
     };
     expect(leadRowToWire(row)).toEqual({
       id: 'LEAD-1', lead_name: 'X', phone_number: '08', email: null, source: 'Scouting',
@@ -162,6 +164,8 @@ describe('leads wire mappers', () => {
       registered_by_me: true, claimed_by_me: false,
       // "Didaftarkan oleh" (issue #64 / O40).
       created_by: 'EMP-1', created_by_nama: 'Budi',
+      // WEBSITE-LEAD: false dikirim eksplisit (kunci hilang = badge kosong, O43).
+      website_lead: false,
     });
   });
 
@@ -179,6 +183,7 @@ describe('leads wire mappers', () => {
           claimedAt: new Date('2026-07-02T00:00:00.000Z'), bersamaDenganAttemptId: null,
         },
       ],
+      website: null,
     };
     const wire = leadDetailToWire(detail);
     expect(wire.lead).not.toHaveProperty('open_attempt_count');
@@ -192,6 +197,21 @@ describe('leads wire mappers', () => {
         claimed_at: '2026-07-02T00:00:00.000Z', bersama_dengan_attempt_id: null,
       },
     ]);
+    // WEBSITE-LEAD: lead non-website mengirim `website: null` eksplisit.
+    expect(wire.website).toBeNull();
+    const web = leadDetailToWire({
+      ...detail,
+      website: {
+        site: 'meagency.co.id', sumberForm: 'home', halamanAsal: '/', utmSource: 'instagram',
+        utmMedium: null, utmCampaign: null, linkToko: '', omzet: '<100jt', layanan: '',
+        hasil: 'dibuat', diterimaPada: new Date('2026-10-27T03:00:00.000Z'), kiriman: 2,
+      },
+    });
+    expect(web.website).toEqual({
+      site: 'meagency.co.id', sumber_form: 'home', halaman_asal: '/', utm_source: 'instagram',
+      utm_medium: null, utm_campaign: null, link_toko: '', omzet: '<100jt', layanan: '',
+      hasil: 'dibuat', diterima_pada: '2026-10-27T03:00:00.000Z', kiriman: 2,
+    });
   });
 });
 

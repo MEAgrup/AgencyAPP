@@ -111,7 +111,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     );
   }
 
-  const { lead, attempts } = leadDetail;
+  const { lead, attempts, website } = leadDetail;
 
   /**
    * FS-3 — attempt yang termasuk prospek bersama: yang MENAUTKAN dirinya, dan
@@ -226,6 +226,49 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
       </section>
+
+      {/* WEBSITE-LEAD (docs/DECISIONS.md 2026-10-27): asal form website */}
+      {website && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>
+              Asal form website <span className="badge badge-blue">Lead Website</span>
+            </h2>
+          </div>
+          <div className="grid2">
+            {(
+              [
+                ['Situs', website.site],
+                ['Sumber form', website.sumber_form],
+                ['Halaman asal', website.halaman_asal],
+                ['Link toko', website.link_toko || '—'],
+                ['Omzet per bulan', website.omzet || '—'],
+                ['Layanan diminati', website.layanan || 'Belum tahu, minta saran'],
+                ['UTM source', website.utm_source || '—'],
+                ['UTM medium', website.utm_medium || '—'],
+                ['UTM campaign', website.utm_campaign || '—'],
+                ['Diterima', formatDateTime(website.diterima_pada)],
+                ['Jumlah kiriman form', String(website.kiriman)],
+                [
+                  'Hasil di CDPS',
+                  website.hasil === 'duplikat'
+                    ? 'Nomor sudah diproses — perlu ditinjau'
+                    : website.hasil === 'dibuka_ulang'
+                      ? 'Lead lama dibuka ulang ke Pool'
+                      : 'Lead baru di Pool',
+                ],
+              ] as const
+            ).map(([label, value]) => (
+              <div key={label}>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {label}
+                </div>
+                <div>{value}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Lanjutkan proses penjualan — jalan keluar dari halaman lead */}
       <SalesProcessPanel

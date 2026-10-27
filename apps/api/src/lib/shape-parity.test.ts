@@ -462,6 +462,7 @@ const WIRE_TO_FE: Record<string, string> = {
   PoolRowWire: 'leads.ts::PoolRow',
   LeadRowWire: 'leads.ts::LeadRow',
   LeadDetailWire: 'leads.ts::LeadDetail',
+  LeadWebsiteOriginWire: 'leads.ts::LeadWebsiteOrigin',
   LeadAttemptWire: 'leads.ts::LeadAttemptRow',
   DeleteRequestWire: 'leads.ts::DeleteRequest',
   DeleteRequestQueueRowWire: 'leads.ts::DeleteRequestQueueRow',
