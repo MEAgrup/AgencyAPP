@@ -760,6 +760,8 @@ const SERVICE_VOIDED = '[Cancelled — Service Voided]';
 export interface DealServiceFullRow {
   transactionId: string;
   serviceId: string;
+  /** `services.name` — snapshot nama saat penjualan; dibaca rekap klien Laporan Penjualan (feedback 27-10). */
+  name: string;
   standardPrice: string;
   commissionRule: string;
   status: string;
@@ -779,9 +781,9 @@ export interface DealServiceFullRow {
 export async function dealServiceRows(sql: Queryable, transactionIds: readonly string[]): Promise<DealServiceFullRow[]> {
   if (transactionIds.length === 0) return [];
   const rows = await sql<{
-    transaction_id: string; service_id: string; standard_price: string; commission_rule: string; status: string;
+    transaction_id: string; service_id: string; name: string; standard_price: string; commission_rule: string; status: string;
   }[]>`
-    select tt.id as transaction_id, s.id as service_id, s.standard_price, s.commission_rule, s.status
+    select tt.id as transaction_id, s.id as service_id, s.name, s.standard_price, s.commission_rule, s.status
       from transactions tt
       join services s
         on s.client_id = tt.client_id
@@ -806,7 +808,7 @@ export async function dealServiceRows(sql: Queryable, transactionIds: readonly s
              )
            )`;
   return rows.map((r) => ({
-    transactionId: r.transaction_id, serviceId: r.service_id,
+    transactionId: r.transaction_id, serviceId: r.service_id, name: r.name,
     standardPrice: r.standard_price, commissionRule: r.commission_rule, status: r.status,
   }));
 }

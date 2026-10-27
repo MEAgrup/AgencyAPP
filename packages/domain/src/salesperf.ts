@@ -41,6 +41,13 @@
  *     contract per client; R-03 will make this the moment a renewal/cross-sell
  *     contract itself was written, which is the right bucket for "this month's
  *     book of business" either way.
+ *   - Status rilis (feedback Sales/OD 27-10-2026, `docs/decisions/
+ *     2026-10-27-kinerja-sales-menunggu-finance.md`): sebuah deal "Disetujui
+ *     Finance" bila `transactions.released_to_account_at IS NOT NULL` (gerbang
+ *     rute M5 §5 — verifikasi pembayaran PERTAMA transaksi itu), selain itu
+ *     "Menunggu Finance". Statusnya dibaca SAAT INI (waktu baca), bukan per
+ *     akhir periode; bucket deal-nya tetap `transactions.created_at` seperti
+ *     omzet. Kotor = Dirilis + Menunggu Finance, persis.
  *   - OKR fields (`targetOmzet`/`pencapaianPct`/`sisaTarget*`/`momPct`) only
  *     populate for a SINGLE calendar month filter (`period.from === period.to`)
  *     — an OKR is inherently monthly/yearly, not a range; a multi-month or
@@ -196,6 +203,18 @@ export interface SalesPerfRow {
   nilaiVoidIdr: string;
   omzetBersih: string;
   omzetBersihIdr: string;
+  /**
+   * Feedback Sales/OD 27-10-2026 — omzet Kotor dipecah menurut status rilis
+   * Finance (lihat header berkas, "Status rilis"). `omzetDirilis` +
+   * `omzetMenungguFinance` = `omzetKotor` PERSIS; `klienDirilis` +
+   * `klienMenungguFinance` = `klien` (dibobot alokasi, konvensi sama).
+   */
+  klienDirilis: string;
+  klienMenungguFinance: string;
+  omzetDirilis: string;
+  omzetDirilisIdr: string;
+  omzetMenungguFinance: string;
+  omzetMenungguFinanceIdr: string;
   komisiKontrak: string;
   komisiKontrakIdr: string;
   komisiDiakui: string;
@@ -589,6 +608,9 @@ interface Accumulator {
   nilaiVoid: money.Money;
   /** Paket V — Σ alloc fraction of a deal whose LAST remaining service was voided in THIS bucket's month (Q-V3). Fraction-weighted, same convention as `klienBaruFrac` et al — NOT the distinct-client count `SalesReportTotal` uses (see that type's own header). */
   klienVoidFrac: number;
+  /** Feedback 27-10 — bagian `omzet`/klien dari deal yang `released_to_account_at`-nya masih NULL. Bagian Dirilis = total − ini, jadi keduanya tidak bisa menyimpang dari omzet. */
+  omzetMenungguFinance: money.Money;
+  klienMenungguFinanceFrac: number;
 }
 
 function emptyAcc(): Accumulator {
@@ -600,6 +622,7 @@ function emptyAcc(): Accumulator {
     klienBaruFrac: 0, klienPerpanjanganFrac: 0, klienCrossSellFrac: 0, totalDeal: 0,
     omzet: 0n, komisiKontrak: 0n, komisiDiakui: 0n,
     nilaiVoid: 0n, klienVoidFrac: 0,
+    omzetMenungguFinance: 0n, klienMenungguFinanceFrac: 0,
   };
 }
 
@@ -729,7 +752,12 @@ async function gather(
       else if (d.jenis === 'perpanjangan') a.klienPerpanjanganFrac += frac;
       else if (d.jenis === 'cross_sell') a.klienCrossSellFrac += frac;
       a.totalDeal += 1;
-      a.omzet += money.proRata(d.totalAgreedValue, BigInt(alloc.basisPoints), 10000n);
+      const omzet = money.proRata(d.totalAgreedValue, BigInt(alloc.basisPoints), 10000n);
+      a.omzet += omzet;
+      if (d.releasedAt === null) {
+        a.omzetMenungguFinance += omzet;
+        a.klienMenungguFinanceFrac += frac;
+      }
       a.komisiKontrak += money.proRata(d.totalDealCommission, BigInt(alloc.basisPoints), 10000n);
       a.komisiDiakui += d.recognized.get(alloc.salespersonId) ?? 0n;
     }
@@ -854,6 +882,10 @@ interface DealFact {
   jenis: string;
   /** `transactions.created_at` — momen uangnya lahir. */
   at: Date;
+  /** `transactions.released_to_account_at` — `null` = "Menunggu Finance" (feedback 27-10, lihat header berkas). */
+  releasedAt: Date | null;
+  /** Layanan deal ini lewat predikat `finance.dealServiceRows` (sama dengan komisi & Paket V), untuk rekap per klien. */
+  services: readonly { name: string; voided: boolean }[];
   totalAgreedValue: money.Money;
   totalDealCommission: money.Money;
   /** Komisi diakui per salesperson — sudah dibobot alokasi oleh `commissionAchievementBatch`. */
@@ -893,10 +925,11 @@ async function loadDealFacts(sql: Queryable, ids: readonly string[]): Promise<De
   // 20261005010000) melarang satu transaksi dipakai dua kontrak. Jadi join ini
   // tidak bisa mekar — kelas bug yang PR-5 tabrak di sisi Qualified.
   const dealRows = await sql<{
-    transaction_id: string; client_id: string; contract_id: string | null; jenis: string; at: Date;
+    transaction_id: string; client_id: string; contract_id: string | null; jenis: string; at: Date; released_at: Date | null;
   }[]>`
     select t.id as transaction_id, t.client_id, ctr.id as contract_id,
-           coalesce(rr.jenis, ctr.jenis, 'baru') as jenis, t.created_at as at
+           coalesce(rr.jenis, ctr.jenis, 'baru') as jenis, t.created_at as at,
+           t.released_to_account_at as released_at
       from transactions t
       left join renewal_requests rr on rr.transaction_id = t.id
       left join contracts ctr on ctr.transaction_id = t.id
@@ -968,6 +1001,8 @@ async function loadDealFacts(sql: Queryable, ids: readonly string[]): Promise<De
         contractId: d.contract_id,
         jenis: d.jenis,
         at: d.at,
+        releasedAt: d.released_at,
+        services: svcs.map((s) => ({ name: s.name, voided: s.status === SERVICE_STATUS_VOIDED })),
         totalAgreedValue,
         totalDealCommission: ach === undefined ? 0n : money.parse(ach.totalDealCommission),
         recognized: new Map((ach?.shares ?? []).map((sh) => [sh.salespersonId, money.parse(sh.recognizedCommission)])),
@@ -1049,10 +1084,23 @@ function finalizeRow(salespersonId: string, roster: ReadonlyMap<string, RosterEn
     nilaiVoidIdr: money.format(a.nilaiVoid),
     omzetBersih: money.decimal(a.omzet - a.nilaiVoid),
     omzetBersihIdr: money.format(a.omzet - a.nilaiVoid),
+    ...rilisSplit(a.klienBaruFrac + a.klienPerpanjanganFrac + a.klienCrossSellFrac, a.klienMenungguFinanceFrac, a.omzet, a.omzetMenungguFinance),
     komisiKontrak: money.decimal(a.komisiKontrak),
     komisiKontrakIdr: money.format(a.komisiKontrak),
     komisiDiakui: money.decimal(a.komisiDiakui),
     komisiDiakuiIdr: money.format(a.komisiDiakui),
+  };
+}
+
+/** rilisSplit — enam kolom Dirilis/Menunggu Finance (feedback 27-10). Bagian Dirilis selalu = total − Menunggu, jadi Σ keduanya = Kotor persis. */
+function rilisSplit(klien: number, klienMenunggu: number, omzet: money.Money, omzetMenunggu: money.Money) {
+  return {
+    klienDirilis: fmtFrac(klien - klienMenunggu),
+    klienMenungguFinance: fmtFrac(klienMenunggu),
+    omzetDirilis: money.decimal(omzet - omzetMenunggu),
+    omzetDirilisIdr: money.format(omzet - omzetMenunggu),
+    omzetMenungguFinance: money.decimal(omzetMenunggu),
+    omzetMenungguFinanceIdr: money.format(omzetMenunggu),
   };
 }
 
@@ -1331,6 +1379,13 @@ export interface SalesReportRow {
   nilaiVoidIdr: string;
   omzetBersih: string;
   omzetBersihIdr: string;
+  /** Feedback 27-10 — sama persis dengan pecahan rilis pada `SalesPerfRow` (dibobot alokasi; Σ = `klien`/`omzetKotor`). */
+  klienDirilis: string;
+  klienMenungguFinance: string;
+  omzetDirilis: string;
+  omzetDirilisIdr: string;
+  omzetMenungguFinance: string;
+  omzetMenungguFinanceIdr: string;
   komisiKontrak: string;
   komisiKontrakIdr: string;
   komisiDiakui: string;
@@ -1366,10 +1421,69 @@ export interface SalesReportTotal {
   nilaiVoidIdr: string;
   omzetBersih: string;
   omzetBersihIdr: string;
+  /**
+   * Feedback 27-10 — level TOTAL, DISTINCT seperti `klienCount`. Sebuah klien
+   * "Menunggu Finance" bila SATU saja deal-nya di periode ini belum dirilis;
+   * `klienDirilis` = `klienCount` − itu, jadi keduanya selalu menjumlah ke
+   * `klienCount`. Omzet: Σ bagian, `omzetDirilis` + `omzetMenungguFinance` =
+   * `omzetKotor` persis.
+   */
+  klienDirilis: number;
+  klienMenungguFinance: number;
+  omzetDirilis: string;
+  omzetDirilisIdr: string;
+  omzetMenungguFinance: string;
+  omzetMenungguFinanceIdr: string;
   komisiKontrak: string;
   komisiKontrakIdr: string;
   komisiDiakui: string;
   komisiDiakuiIdr: string;
+}
+
+/** Label BI untuk `DealFact.jenis` — dipakai layar & ekspor rekap klien. */
+export const JENIS_DEAL_LABEL: Readonly<Record<string, string>> = {
+  baru: 'Baru',
+  perpanjangan: 'Perpanjangan',
+  cross_sell: 'Cross Sell',
+};
+
+/** Status rilis deal pada rekap klien — cermin badge Direktori Klien, tapi per TRANSAKSI. */
+export type StatusRilis = 'Dirilis' | 'Menunggu Finance';
+
+/**
+ * SalesReportClientRow — rekap klien closing (feedback Head of Sales
+ * 26-10-2026): SATU baris per DEAL (transaksi) di periode/filter, dari
+ * `loadDealFacts` yang sama dengan baris per sales. Satu klien yang closing
+ * lalu diperpanjang di periode yang sama muncul DUA kali — dua deal, jenis
+ * berbeda.
+ *
+ * `omzet` = bagian deal milik sales DALAM CAKUPAN (Σ pro-rata alokasi yang
+ * lolos filter), sehingga Σ `omzet` seluruh baris = `SalesReportTotal.omzet`
+ * persis. `nilaiDeal` = `total_agreed_value` utuh, untuk deal yang dijual
+ * berdua. Paket V: baris TIDAK hilang saat layanannya di-void (closing tidak
+ * ditulis ulang, Q-V2); `layananVoid`/`bulanSemuaVoid` yang menandainya.
+ */
+export interface SalesReportClientRow {
+  transactionId: string;
+  clientId: string;
+  /** `clients.toko`; `null` bila RLS tidak memberi baris kliennya (mis. co-seller staf yang bukan PIC). */
+  namaKlien: string | null;
+  /** Seluruh alokasi deal (Σ basisPoints = 10000), nama dari roster. */
+  salesPic: { salespersonId: string; nama: string; basisPoints: number }[];
+  jenis: string;
+  layanan: string[];
+  layananVoid: string[];
+  nilaiDeal: string;
+  nilaiDealIdr: string;
+  omzet: string;
+  omzetIdr: string;
+  /** "YYYY-MM-DD" WIB dari `transactions.created_at` — stempel yang sama dengan bucket periode. */
+  tanggalClosing: string;
+  statusRilis: StatusRilis;
+  /** "YYYY-MM-DD" WIB `released_to_account_at`, atau null. */
+  tanggalRilis: string | null;
+  /** Paket V — "YYYYMM" bila SEMUA layanan deal ini sudah di-void, selain itu null. */
+  bulanSemuaVoid: string | null;
 }
 
 export interface SalesReportServiceRow {
@@ -1387,6 +1501,8 @@ export interface SalesReport {
   rows: SalesReportRow[];
   total: SalesReportTotal;
   services: SalesReportServiceRow[];
+  /** Rekap klien closing (feedback 26-10) — lihat `SalesReportClientRow`. */
+  clients: SalesReportClientRow[];
 }
 
 /**
@@ -1418,10 +1534,12 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
     omzet: money.Money; komisiKontrak: money.Money; komisiDiakui: money.Money;
     nilaiVoid: money.Money;
     klienVoidFrac: number;
+    omzetMenungguFinance: money.Money;
+    klienMenungguFinanceFrac: number;
   }
   const emptyBucket = (): Bucket => ({
     totalDeal: 0, baru: 0, perpanjangan: 0, crossSell: 0, omzet: 0n, komisiKontrak: 0n, komisiDiakui: 0n,
-    nilaiVoid: 0n, klienVoidFrac: 0,
+    nilaiVoid: 0n, klienVoidFrac: 0, omzetMenungguFinance: 0n, klienMenungguFinanceFrac: 0,
   });
   const per = new Map<string, Bucket>();
   const bucket = (id: string): Bucket => {
@@ -1444,14 +1562,19 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
   // (atau di luar filter sama sekali) — Nilai Void/klien-void dibuku ke
   // bulan VOID-nya sendiri, bukan bulan closing (Q-V2).
   const distinctVoidedClients = new Set<string>();
+  // Feedback 27-10 — klien DISTINCT yang punya ≥1 deal belum dirilis di periode ini.
+  const distinctPendingClients = new Set<string>();
+  const clientRows: (Omit<SalesReportClientRow, 'namaKlien'> & { at: Date })[] = [];
 
   let totalOmzet = 0n;
+  let totalOmzetMenunggu = 0n;
   let totalKomisiKontrak = 0n;
   let totalKomisiDiakui = 0n;
   let totalNilaiVoid = 0n;
   for (const d of facts.deals) {
     if (!inPeriod(f.period, d.at)) continue;
     let counted = false;
+    let dealOmzet = 0n;
     for (const alloc of d.allocs) {
       if (!idSet.has(alloc.salespersonId)) continue;
       const b = bucket(alloc.salespersonId);
@@ -1466,6 +1589,12 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
       b.omzet += omzet;
       b.komisiKontrak += komisiKontrak;
       b.komisiDiakui += komisiDiakui;
+      if (d.releasedAt === null) {
+        b.omzetMenungguFinance += omzet;
+        b.klienMenungguFinanceFrac += frac;
+        totalOmzetMenunggu += omzet;
+      }
+      dealOmzet += omzet;
       totalOmzet += omzet;
       totalKomisiKontrak += komisiKontrak;
       totalKomisiDiakui += komisiDiakui;
@@ -1474,6 +1603,26 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
     if (counted) {
       distinctDeals.add(d.transactionId);
       distinctClients.add(d.clientId);
+      if (d.releasedAt === null) distinctPendingClients.add(d.clientId);
+      clientRows.push({
+        transactionId: d.transactionId,
+        clientId: d.clientId,
+        salesPic: d.allocs.map((a) => ({
+          salespersonId: a.salespersonId, nama: rosterMap.get(a.salespersonId)?.nama ?? a.salespersonId, basisPoints: a.basisPoints,
+        })),
+        jenis: d.jenis,
+        layanan: d.services.filter((s) => !s.voided).map((s) => s.name),
+        layananVoid: d.services.filter((s) => s.voided).map((s) => s.name),
+        nilaiDeal: money.decimal(d.totalAgreedValue),
+        nilaiDealIdr: money.format(d.totalAgreedValue),
+        omzet: money.decimal(dealOmzet),
+        omzetIdr: money.format(dealOmzet),
+        tanggalClosing: tz.dateString(d.at),
+        statusRilis: d.releasedAt === null ? 'Menunggu Finance' : 'Dirilis',
+        tanggalRilis: d.releasedAt === null ? null : tz.dateString(d.releasedAt),
+        bulanSemuaVoid: d.bulanSemuaVoid,
+        at: d.at,
+      });
     }
   }
 
@@ -1528,6 +1677,7 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
       nilaiVoidIdr: money.format(b.nilaiVoid),
       omzetBersih: money.decimal(b.omzet - b.nilaiVoid),
       omzetBersihIdr: money.format(b.omzet - b.nilaiVoid),
+      ...rilisSplit(klien, b.klienMenungguFinanceFrac, b.omzet, b.omzetMenungguFinance),
       komisiKontrak: money.decimal(b.komisiKontrak),
       komisiKontrakIdr: money.format(b.komisiKontrak),
       komisiDiakui: money.decimal(b.komisiDiakui),
@@ -1536,6 +1686,8 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
   }).sort((a, b) => money.parse(b.omzet) > money.parse(a.omzet) ? 1 : money.parse(b.omzet) < money.parse(a.omzet) ? -1 : a.nama.localeCompare(b.nama));
 
   const services = await serviceRecap(sql, [...distinctClients]);
+  const namaKlien = await clientNames(sql, [...distinctClients]);
+  clientRows.sort((x, y) => (y.at.getTime() - x.at.getTime()) || x.transactionId.localeCompare(y.transactionId));
 
   return {
     rows,
@@ -1553,13 +1705,28 @@ export async function salesReport(sql: Queryable, actor: Actor, f: SalesPerfFilt
       nilaiVoidIdr: money.format(totalNilaiVoid),
       omzetBersih: money.decimal(totalOmzet - totalNilaiVoid),
       omzetBersihIdr: money.format(totalOmzet - totalNilaiVoid),
+      klienDirilis: distinctClients.size - distinctPendingClients.size,
+      klienMenungguFinance: distinctPendingClients.size,
+      omzetDirilis: money.decimal(totalOmzet - totalOmzetMenunggu),
+      omzetDirilisIdr: money.format(totalOmzet - totalOmzetMenunggu),
+      omzetMenungguFinance: money.decimal(totalOmzetMenunggu),
+      omzetMenungguFinanceIdr: money.format(totalOmzetMenunggu),
       komisiKontrak: money.decimal(totalKomisiKontrak),
       komisiKontrakIdr: money.format(totalKomisiKontrak),
       komisiDiakui: money.decimal(totalKomisiDiakui),
       komisiDiakuiIdr: money.format(totalKomisiDiakui),
     },
     services,
+    clients: clientRows.map(({ at: _at, ...r }) => ({ ...r, namaKlien: namaKlien.get(r.clientId) ?? null })),
   };
+}
+
+/** clientNames — `clients.toko` per id, lewat RLS aktor (baris yang tak terbaca → tidak ada di peta → `null`). */
+async function clientNames(sql: Queryable, clientIds: readonly string[]): Promise<Map<string, string>> {
+  if (clientIds.length === 0) return new Map();
+  const rows = await sql<{ id: string; toko: string }[]>`
+    select id, toko from clients where id = any(${[...clientIds]})`;
+  return new Map(rows.map((r) => [r.id, r.toko]));
 }
 
 /**

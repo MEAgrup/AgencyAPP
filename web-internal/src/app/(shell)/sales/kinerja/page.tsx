@@ -30,6 +30,14 @@ function dash(v: string | number | null): string {
   return v === null ? '—' : String(v);
 }
 
+/** Label jenis deal — cermin `salesperf.JENIS_DEAL_LABEL`. */
+const JENIS_LABEL: Record<string, string> = { baru: 'Baru', perpanjangan: 'Perpanjangan', cross_sell: 'Cross Sell' };
+
+/** Badge status rilis — warna sama dengan kolom Status Rilis di Direktori Klien. */
+function RilisBadge({ status }: { status: string }) {
+  return <span className={`badge ${status === 'Dirilis' ? 'badge-green' : 'badge-amber'}`}>{status}</span>;
+}
+
 /** Renders a metric-keyed OKR value in its own unit: Rupiah when the server sent an `_idr` sibling, a percentage for the ratio metric, a plain count otherwise. Never re-derives the unit from the metric_key string itself — that stays server-decided. */
 function formatMetricValue(value: string | null, valueIdr: string | null, metricKey: string): string {
   if (value === null) return '—';
@@ -251,6 +259,31 @@ export default function KinerjaSalesPage() {
             <div className="emptyState">Tidak ada data untuk filter ini.</div>
           ) : (
             <>
+              {/* Feedback Sales/OD 27-10: Omzet Kotor dipecah menurut status
+                  rilis Finance. Kedua angka datang dari server dan menjumlah
+                  ke Omzet Kotor persis — layar tidak menghitung ulang. */}
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+                <div className="card" style={{ flex: '1 1 240px' }}>
+                  <div className="muted">Disetujui Finance (sudah dirilis)</div>
+                  <h3 style={{ margin: '4px 0' }}>{report.total.omzet_dirilis_idr}</h3>
+                  <div>{report.total.klien_dirilis} klien</div>
+                </div>
+                <div className="card" style={{ flex: '1 1 240px' }}>
+                  <div className="muted">Closed-Success, Menunggu Finance</div>
+                  <h3 style={{ margin: '4px 0' }}>{report.total.omzet_menunggu_finance_idr}</h3>
+                  <div>{report.total.klien_menunggu_finance} klien</div>
+                </div>
+                <div className="card" style={{ flex: '1 1 240px' }}>
+                  <div className="muted">Total Omzet Kotor</div>
+                  <h3 style={{ margin: '4px 0' }}>{report.total.omzet_kotor_idr}</h3>
+                  <div>{report.total.klien_count} klien</div>
+                </div>
+              </div>
+              <p className="muted">
+                Status rilis dibaca saat ini: deal &quot;Menunggu Finance&quot; pindah ke &quot;Disetujui
+                Finance&quot; begitu Finance memverifikasi pembayaran pertamanya. Satu klien dihitung
+                Menunggu Finance bila salah satu deal-nya di periode ini belum dirilis.
+              </p>
               <div className="table-wrap">
                 <table className="table">
                   <thead>
@@ -259,6 +292,8 @@ export default function KinerjaSalesPage() {
                       <th>Klien Baru</th><th>Perpanjangan</th><th>Cross Sell</th>
                       <th>Klien</th><th>Klien Void</th><th>Klien Bersih</th>
                       <th>Omzet Kotor</th><th>Nilai Void</th><th>Omzet Bersih</th>
+                      <th>Klien Disetujui Finance</th><th>Omzet Disetujui Finance</th>
+                      <th>Klien Menunggu Finance</th><th>Omzet Menunggu Finance</th>
                       <th>Komisi Kontrak</th><th>Komisi Diakui</th>
                     </tr>
                   </thead>
@@ -277,6 +312,10 @@ export default function KinerjaSalesPage() {
                         <td>{r.omzet_kotor_idr}</td>
                         <td>{r.nilai_void_idr}</td>
                         <td>{r.omzet_bersih_idr}</td>
+                        <td>{r.klien_dirilis}</td>
+                        <td>{r.omzet_dirilis_idr}</td>
+                        <td>{r.klien_menunggu_finance}</td>
+                        <td>{r.omzet_menunggu_finance_idr}</td>
                         <td>{r.komisi_kontrak_idr}</td>
                         <td>{r.komisi_diakui_idr}</td>
                       </tr>
@@ -301,6 +340,10 @@ export default function KinerjaSalesPage() {
                       <th>{report.total.omzet_kotor_idr}</th>
                       <th>{report.total.nilai_void_idr}</th>
                       <th>{report.total.omzet_bersih_idr}</th>
+                      <th>{report.total.klien_dirilis}</th>
+                      <th>{report.total.omzet_dirilis_idr}</th>
+                      <th>{report.total.klien_menunggu_finance}</th>
+                      <th>{report.total.omzet_menunggu_finance_idr}</th>
                       <th>{report.total.komisi_kontrak_idr}</th>
                       <th>{report.total.komisi_diakui_idr}</th>
                     </tr>
@@ -330,6 +373,56 @@ export default function KinerjaSalesPage() {
                   </table>
                 </div>
               )}
+
+              {/* Feedback Head of Sales 26-10: klien MANA yang closing. Satu
+                  baris per deal (transaksi); Σ kolom "Omzet (porsi)" sama
+                  dengan Omzet Kotor di baris TOTAL di atas. */}
+              <h3 style={{ marginTop: 24 }}>Rekap Klien Closing</h3>
+              {report.clients.length === 0 ? (
+                <div className="emptyState">Belum ada klien closing untuk filter ini.</div>
+              ) : (
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Tanggal Closing</th><th>Client ID</th><th>Nama Klien</th><th>Sales PIC</th>
+                        <th>Jenis</th><th>Paket / Layanan</th><th>Nilai Deal</th><th>Omzet (porsi)</th>
+                        <th>Status Rilis</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {report.clients.map((c) => (
+                        <tr key={c.transaction_id}>
+                          <td>{c.tanggal_closing}</td>
+                          <td>{c.client_id} <span className="muted">({c.transaction_id})</span></td>
+                          <td>{c.nama_klien ?? '—'}</td>
+                          <td>
+                            {c.sales_pic.map((p) => (
+                              <div key={p.salesperson_id}>
+                                {p.nama}{c.sales_pic.length > 1 && <span className="muted"> ({p.basis_points / 100}%)</span>}
+                              </div>
+                            ))}
+                          </td>
+                          <td>{JENIS_LABEL[c.jenis] ?? c.jenis}</td>
+                          <td>
+                            {c.layanan.length === 0 && c.layanan_void.length === 0 ? '—' : c.layanan.join(', ')}
+                            {c.layanan_void.length > 0 && (
+                              <div className="muted">Void: {c.layanan_void.join(', ')}</div>
+                            )}
+                          </td>
+                          <td>{c.nilai_deal_idr}</td>
+                          <td>{c.omzet_idr}</td>
+                          <td>
+                            <RilisBadge status={c.status_rilis} />
+                            {c.tanggal_rilis && <div className="muted">{c.tanggal_rilis}</div>}
+                            {c.bulan_semua_void && <div><span className="badge badge-red">Void {c.bulan_semua_void}</span></div>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </>
           )
         )}
@@ -350,6 +443,8 @@ export default function KinerjaSalesPage() {
                     <th>Klien Baru</th><th>Perpanjangan</th><th>Cross Sell</th>
                     <th>Klien</th><th>Klien Void</th><th>Klien Bersih</th>
                     <th>Omzet Kotor</th><th>Nilai Void</th><th>Omzet Bersih</th>
+                    <th>Klien Disetujui Finance</th><th>Omzet Disetujui Finance</th>
+                    <th>Klien Menunggu Finance</th><th>Omzet Menunggu Finance</th>
                     <th>Komisi Kontrak</th><th>Komisi Diakui</th>
                     <th>Target</th><th>Pencapaian</th><th>Sisa Target</th><th>MoM</th>
                   </tr>
@@ -383,6 +478,10 @@ export default function KinerjaSalesPage() {
                       <td>{r.omzet_kotor_idr}</td>
                       <td>{r.nilai_void_idr}</td>
                       <td>{r.omzet_bersih_idr}</td>
+                      <td>{r.klien_dirilis}</td>
+                      <td>{r.omzet_dirilis_idr}</td>
+                      <td>{r.klien_menunggu_finance}</td>
+                      <td>{r.omzet_menunggu_finance_idr}</td>
                       <td>{r.komisi_kontrak_idr}</td>
                       <td>{r.komisi_diakui_idr}</td>
                       <td>{dash(r.target_omzet_idr)}</td>

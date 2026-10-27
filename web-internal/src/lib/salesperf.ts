@@ -60,6 +60,14 @@ export interface SalesPerfRow {
   nilai_void_idr: string;
   omzet_bersih: string;
   omzet_bersih_idr: string;
+  // Feedback 27-10 — Kotor dipecah per status rilis Finance (dibobot
+  // alokasi). Σ Dirilis + Menunggu Finance = Kotor persis.
+  klien_dirilis: string;
+  klien_menunggu_finance: string;
+  omzet_dirilis: string;
+  omzet_dirilis_idr: string;
+  omzet_menunggu_finance: string;
+  omzet_menunggu_finance_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -125,6 +133,14 @@ export interface SalesReportRow {
   nilai_void_idr: string;
   omzet_bersih: string;
   omzet_bersih_idr: string;
+  // Feedback 27-10 — Kotor dipecah per status rilis Finance (dibobot
+  // alokasi). Σ Dirilis + Menunggu Finance = Kotor persis.
+  klien_dirilis: string;
+  klien_menunggu_finance: string;
+  omzet_dirilis: string;
+  omzet_dirilis_idr: string;
+  omzet_menunggu_finance: string;
+  omzet_menunggu_finance_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -153,6 +169,14 @@ export interface SalesReportTotal {
   nilai_void_idr: string;
   omzet_bersih: string;
   omzet_bersih_idr: string;
+  // Feedback 27-10 — DISTINCT: klien Menunggu Finance = punya ≥1 deal belum
+  // dirilis di periode ini; klien_dirilis + klien_menunggu_finance = klien_count.
+  klien_dirilis: number;
+  klien_menunggu_finance: number;
+  omzet_dirilis: string;
+  omzet_dirilis_idr: string;
+  omzet_menunggu_finance: string;
+  omzet_menunggu_finance_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -167,10 +191,38 @@ export interface SalesReportServiceRow {
   nilai_idr: string;
 }
 
+export interface SalesReportClientPic {
+  salesperson_id: string;
+  nama: string;
+  basis_points: number;
+}
+
+// Rekap klien closing (feedback Head of Sales 26-10) — satu baris per DEAL
+// (transaksi). `omzet` = bagian sales dalam cakupan filter, jadi Σ-nya sama
+// dengan `total.omzet`; `nilai_deal` = nilai deal utuh.
+export interface SalesReportClientRow {
+  transaction_id: string;
+  client_id: string;
+  nama_klien: string | null;
+  sales_pic: SalesReportClientPic[];
+  jenis: string;
+  layanan: string[];
+  layanan_void: string[];
+  nilai_deal: string;
+  nilai_deal_idr: string;
+  omzet: string;
+  omzet_idr: string;
+  tanggal_closing: string;
+  status_rilis: string;
+  tanggal_rilis: string | null;
+  bulan_semua_void: string | null;
+}
+
 export interface SalesReport {
   rows: SalesReportRow[];
   total: SalesReportTotal;
   services: SalesReportServiceRow[];
+  clients: SalesReportClientRow[];
 }
 
 // Sales OKR metric catalog (mirrors salesperf.METRIC_KEYS — a closed list,

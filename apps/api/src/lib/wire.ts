@@ -7462,6 +7462,13 @@ export interface SalesPerfRowWire {
   nilai_void_idr: string;
   omzet_bersih: string;
   omzet_bersih_idr: string;
+  /** Feedback 27-10 — Kotor dipecah per status rilis Finance (dibobot alokasi); Σ Dirilis + Menunggu = Kotor persis. */
+  klien_dirilis: string;
+  klien_menunggu_finance: string;
+  omzet_dirilis: string;
+  omzet_dirilis_idr: string;
+  omzet_menunggu_finance: string;
+  omzet_menunggu_finance_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -7495,6 +7502,9 @@ export function salesPerfRowToWire(r: salesperf.SalesPerfRow): SalesPerfRowWire 
     omzet_kotor: r.omzetKotor, omzet_kotor_idr: r.omzetKotorIdr,
     nilai_void: r.nilaiVoid, nilai_void_idr: r.nilaiVoidIdr,
     omzet_bersih: r.omzetBersih, omzet_bersih_idr: r.omzetBersihIdr,
+    klien_dirilis: r.klienDirilis, klien_menunggu_finance: r.klienMenungguFinance,
+    omzet_dirilis: r.omzetDirilis, omzet_dirilis_idr: r.omzetDirilisIdr,
+    omzet_menunggu_finance: r.omzetMenungguFinance, omzet_menunggu_finance_idr: r.omzetMenungguFinanceIdr,
     komisi_kontrak: r.komisiKontrak, komisi_kontrak_idr: r.komisiKontrakIdr,
     komisi_diakui: r.komisiDiakui, komisi_diakui_idr: r.komisiDiakuiIdr,
     target_omzet: r.targetOmzet, target_omzet_idr: r.targetOmzetIdr, pencapaian_pct: r.pencapaianPct,
@@ -7602,6 +7612,13 @@ export interface SalesReportRowWire {
   nilai_void_idr: string;
   omzet_bersih: string;
   omzet_bersih_idr: string;
+  /** Feedback 27-10 — Kotor dipecah per status rilis Finance (dibobot alokasi); Σ Dirilis + Menunggu = Kotor persis. */
+  klien_dirilis: string;
+  klien_menunggu_finance: string;
+  omzet_dirilis: string;
+  omzet_dirilis_idr: string;
+  omzet_menunggu_finance: string;
+  omzet_menunggu_finance_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -7625,6 +7642,13 @@ export interface SalesReportTotalWire {
   nilai_void_idr: string;
   omzet_bersih: string;
   omzet_bersih_idr: string;
+  /** Feedback 27-10 — DISTINCT di level TOTAL: klien Menunggu = punya ≥1 deal belum dirilis; klien_dirilis + klien_menunggu_finance = klien_count. */
+  klien_dirilis: number;
+  klien_menunggu_finance: number;
+  omzet_dirilis: string;
+  omzet_dirilis_idr: string;
+  omzet_menunggu_finance: string;
+  omzet_menunggu_finance_idr: string;
   komisi_kontrak: string;
   komisi_kontrak_idr: string;
   komisi_diakui: string;
@@ -7639,10 +7663,36 @@ export interface SalesReportServiceRowWire {
   nilai_idr: string;
 }
 
+export interface SalesReportClientPicWire {
+  salesperson_id: string;
+  nama: string;
+  basis_points: number;
+}
+
+/** Rekap klien closing (feedback Head of Sales 26-10) — satu baris per deal; Σ `omzet` = `SalesReportTotalWire.omzet`. */
+export interface SalesReportClientRowWire {
+  transaction_id: string;
+  client_id: string;
+  nama_klien: string | null;
+  sales_pic: SalesReportClientPicWire[];
+  jenis: string;
+  layanan: string[];
+  layanan_void: string[];
+  nilai_deal: string;
+  nilai_deal_idr: string;
+  omzet: string;
+  omzet_idr: string;
+  tanggal_closing: string;
+  status_rilis: string;
+  tanggal_rilis: string | null;
+  bulan_semua_void: string | null;
+}
+
 export interface SalesReportWire {
   rows: SalesReportRowWire[];
   total: SalesReportTotalWire;
   services: SalesReportServiceRowWire[];
+  clients: SalesReportClientRowWire[];
 }
 
 export function salesReportRowToWire(r: salesperf.SalesReportRow): SalesReportRowWire {
@@ -7656,6 +7706,9 @@ export function salesReportRowToWire(r: salesperf.SalesReportRow): SalesReportRo
     omzet_kotor: r.omzetKotor, omzet_kotor_idr: r.omzetKotorIdr,
     nilai_void: r.nilaiVoid, nilai_void_idr: r.nilaiVoidIdr,
     omzet_bersih: r.omzetBersih, omzet_bersih_idr: r.omzetBersihIdr,
+    klien_dirilis: r.klienDirilis, klien_menunggu_finance: r.klienMenungguFinance,
+    omzet_dirilis: r.omzetDirilis, omzet_dirilis_idr: r.omzetDirilisIdr,
+    omzet_menunggu_finance: r.omzetMenungguFinance, omzet_menunggu_finance_idr: r.omzetMenungguFinanceIdr,
     komisi_kontrak: r.komisiKontrak, komisi_kontrak_idr: r.komisiKontrakIdr,
     komisi_diakui: r.komisiDiakui, komisi_diakui_idr: r.komisiDiakuiIdr,
   };
@@ -7673,12 +7726,24 @@ export function salesReportToWire(r: salesperf.SalesReport): SalesReportWire {
       omzet_kotor: r.total.omzetKotor, omzet_kotor_idr: r.total.omzetKotorIdr,
       nilai_void: r.total.nilaiVoid, nilai_void_idr: r.total.nilaiVoidIdr,
       omzet_bersih: r.total.omzetBersih, omzet_bersih_idr: r.total.omzetBersihIdr,
+      klien_dirilis: r.total.klienDirilis, klien_menunggu_finance: r.total.klienMenungguFinance,
+      omzet_dirilis: r.total.omzetDirilis, omzet_dirilis_idr: r.total.omzetDirilisIdr,
+      omzet_menunggu_finance: r.total.omzetMenungguFinance, omzet_menunggu_finance_idr: r.total.omzetMenungguFinanceIdr,
       komisi_kontrak: r.total.komisiKontrak, komisi_kontrak_idr: r.total.komisiKontrakIdr,
       komisi_diakui: r.total.komisiDiakui, komisi_diakui_idr: r.total.komisiDiakuiIdr,
     },
     services: r.services.map((s) => ({
       master_service_id: s.masterServiceId, nama: s.nama, jumlah: s.jumlah,
       nilai: s.nilai, nilai_idr: s.nilaiIdr,
+    })),
+    clients: r.clients.map((c) => ({
+      transaction_id: c.transactionId, client_id: c.clientId, nama_klien: c.namaKlien,
+      sales_pic: c.salesPic.map((p) => ({ salesperson_id: p.salespersonId, nama: p.nama, basis_points: p.basisPoints })),
+      jenis: c.jenis, layanan: c.layanan, layanan_void: c.layananVoid,
+      nilai_deal: c.nilaiDeal, nilai_deal_idr: c.nilaiDealIdr,
+      omzet: c.omzet, omzet_idr: c.omzetIdr,
+      tanggal_closing: c.tanggalClosing, status_rilis: c.statusRilis,
+      tanggal_rilis: c.tanggalRilis, bulan_semua_void: c.bulanSemuaVoid,
     })),
   };
 }
