@@ -20,7 +20,7 @@
  * ── Kenapa SATU berkas berisi tiga blok ───────────────────────────────────
  *
  * Laporannya memang tiga hal: baris per sales, satu baris TOTAL, dan rekap
- * layanan. Memecahnya jadi tiga unduhan memindahkan pekerjaan menyatukan
+ * layanan — ditambah blok keempat, rekap klien closing (feedback 26-10). Memecahnya jadi tiga unduhan memindahkan pekerjaan menyatukan
  * kembali ke pembacanya. Blok dipisah satu baris kosong dan diberi judul
  * sendiri — bentuk yang dibaca Excel apa adanya.
  *
@@ -45,9 +45,17 @@ const HEADER_SALES = [
   // position, so a consumer that parses this CSV by column index (rather
   // than by header name) does not silently misread an existing column.
   'klien_void', 'klien_bersih', 'omzet_kotor', 'nilai_void', 'omzet_bersih',
+  // Feedback 27-10 — juga DITAMBAHKAN di ujung, alasan yang sama.
+  'klien_dirilis', 'klien_menunggu_finance', 'omzet_dirilis', 'omzet_menunggu_finance',
 ] as const;
 
 const HEADER_LAYANAN = ['master_service_id', 'nama_layanan', 'jumlah', 'nilai'] as const;
+
+/** Rekap klien closing (feedback Head of Sales 26-10) — blok keempat, satu baris per deal. */
+const HEADER_KLIEN = [
+  'transaction_id', 'client_id', 'nama_klien', 'sales_pic', 'jenis', 'layanan', 'layanan_void',
+  'nilai_deal', 'omzet', 'tanggal_closing', 'status_rilis', 'tanggal_rilis', 'bulan_semua_void',
+] as const;
 
 /** Satu baris CSV — `;` sebagai pemisah (Excel locale Indonesia), lihat `lib/csv.ts`. */
 function line(cells: readonly string[]): string {
@@ -64,6 +72,7 @@ export function renderSalesReportCsv(r: salesperf.SalesReport): string {
       row.klienBaru, row.klienPerpanjangan, row.klienCrossSell, row.klienCount,
       row.omzet, row.komisiKontrak, row.komisiDiakui,
       row.klienVoid, row.klienBersih, row.omzetKotor, row.nilaiVoid, row.omzetBersih,
+      row.klienDirilis, row.klienMenungguFinance, row.omzetDirilis, row.omzetMenungguFinance,
     ]));
   }
   lines.push(line([
@@ -71,12 +80,25 @@ export function renderSalesReportCsv(r: salesperf.SalesReport): string {
     '', '', '', String(r.total.klienCount),
     r.total.omzet, r.total.komisiKontrak, r.total.komisiDiakui,
     String(r.total.klienVoid), String(r.total.klienBersih), r.total.omzetKotor, r.total.nilaiVoid, r.total.omzetBersih,
+    String(r.total.klienDirilis), String(r.total.klienMenungguFinance), r.total.omzetDirilis, r.total.omzetMenungguFinance,
   ]));
   lines.push('');
   lines.push(line(['Rekap Layanan Terjual']));
   lines.push(line(HEADER_LAYANAN));
   for (const s of r.services) {
     lines.push(line([s.masterServiceId, s.nama, String(s.jumlah), s.nilai]));
+  }
+  lines.push('');
+  lines.push(line(['Rekap Klien Closing']));
+  lines.push(line(HEADER_KLIEN));
+  for (const c of r.clients) {
+    lines.push(line([
+      c.transactionId, c.clientId, c.namaKlien ?? '',
+      c.salesPic.map((p) => `${p.nama} (${p.basisPoints / 100}%)`).join(', '),
+      salesperf.JENIS_DEAL_LABEL[c.jenis] ?? c.jenis,
+      c.layanan.join(', '), c.layananVoid.join(', '),
+      c.nilaiDeal, c.omzet, c.tanggalClosing, c.statusRilis, c.tanggalRilis ?? '', c.bulanSemuaVoid ?? '',
+    ]));
   }
   return CSV_BOM + lines.join('\r\n') + '\r\n';
 }

@@ -153,6 +153,26 @@ describeDb('GET /sales/report + /export — DB sungguhan', () => {
     expect((await GET_PERF(req('/sales/performance', financeLead))).status).toBe(403);
   });
 
+  it('feedback 27-10: deal belum dirilis Finance terpisah, dan rekap klien closing ikut di wire', async () => {
+    const res = await GET_REPORT(req('/sales/report', financeStaff, '?from=2026-06&to=2026-06'));
+    const body = await res.json() as {
+      data: {
+        total: { omzet_kotor: string; omzet_dirilis: string; omzet_menunggu_finance: string; klien_menunggu_finance: number };
+        clients: { transaction_id: string; client_id: string; nama_klien: string | null; jenis: string; layanan: string[]; omzet: string; tanggal_closing: string; status_rilis: string; tanggal_rilis: string | null; sales_pic: { salesperson_id: string; basis_points: number }[] }[];
+      };
+    };
+    // TRX fixture `released_to_account_at` NULL → seluruhnya Menunggu Finance.
+    const c = body.data.clients.find((x) => x.transaction_id === TRX);
+    expect(c).toEqual(expect.objectContaining({
+      client_id: CLI, nama_klien: 'ZZRPT; Toko', jenis: 'baru', layanan: ['ZZRPT; Layanan'],
+      omzet: '5000000.00', tanggal_closing: '2026-06-10', status_rilis: 'Menunggu Finance', tanggal_rilis: null,
+    }));
+    expect(c!.sales_pic).toEqual([expect.objectContaining({ salesperson_id: SLS, basis_points: 10000 })]);
+    expect(BigInt(body.data.total.omzet_dirilis.replace('.', '')) + BigInt(body.data.total.omzet_menunggu_finance.replace('.', '')))
+      .toBe(BigInt(body.data.total.omzet_kotor.replace('.', '')));
+    expect(body.data.total.klien_menunggu_finance).toBeGreaterThanOrEqual(1);
+  });
+
   it('ekspor: 200 text/csv ber-BOM, `;` sebagai pemisah, dan baris TOTAL ada di dalamnya', async () => {
     const res = await GET_EXPORT(req('/sales/report/export', financeLead, '?from=2026-06&to=2026-06'));
     expect(res.status).toBe(200);
@@ -167,7 +187,7 @@ describeDb('GET /sales/report + /export — DB sungguhan', () => {
 
     const lines = (await res.text()).split('\r\n');
     expect(lines[0]).toBe('Laporan Penjualan — per Sales');
-    expect(lines[1]).toBe('salesperson_id;nama;level_sales;total_deal;klien_baru;klien_perpanjangan;klien_cross_sell;klien_count;omzet;komisi_kontrak;komisi_diakui;klien_void;klien_bersih;omzet_kotor;nilai_void;omzet_bersih');
+    expect(lines[1]).toBe('salesperson_id;nama;level_sales;total_deal;klien_baru;klien_perpanjangan;klien_cross_sell;klien_count;omzet;komisi_kontrak;komisi_diakui;klien_void;klien_bersih;omzet_kotor;nilai_void;omzet_bersih;klien_dirilis;klien_menunggu_finance;omzet_dirilis;omzet_menunggu_finance');
     expect(lines.some((l) => l.startsWith(`${SLS};`))).toBe(true);
     const total = lines.find((l) => l.startsWith('TOTAL;'));
     expect(total).toBeDefined();
@@ -202,12 +222,14 @@ describe('renderSalesReportCsv — baris TOTAL tidak pernah dihitung dari kolom 
           salespersonId: 'A', nama: 'Aa', levelSales: 'Junior', totalDeal: 1, klienBaru: '0.60', klienPerpanjangan: '0.00', klienCrossSell: '0.00', klienCount: '0.60',
           klien: '0.60', klienVoid: '0.00', klienBersih: '0.60',
           omzet: '600.00', omzetIdr: 'Rp. 600,00', omzetKotor: '600.00', omzetKotorIdr: 'Rp. 600,00', nilaiVoid: '0.00', nilaiVoidIdr: 'Rp. 0,00', omzetBersih: '600.00', omzetBersihIdr: 'Rp. 600,00',
+          klienDirilis: '0.60', klienMenungguFinance: '0.00', omzetDirilis: '600.00', omzetDirilisIdr: 'Rp. 600,00', omzetMenungguFinance: '0.00', omzetMenungguFinanceIdr: 'Rp. 0,00',
           komisiKontrak: '0.00', komisiKontrakIdr: 'Rp. 0,00', komisiDiakui: '0.00', komisiDiakuiIdr: 'Rp. 0,00',
         },
         {
           salespersonId: 'B', nama: 'Bb', levelSales: 'Head', totalDeal: 1, klienBaru: '0.40', klienPerpanjangan: '0.00', klienCrossSell: '0.00', klienCount: '0.40',
           klien: '0.40', klienVoid: '0.00', klienBersih: '0.40',
           omzet: '400.00', omzetIdr: 'Rp. 400,00', omzetKotor: '400.00', omzetKotorIdr: 'Rp. 400,00', nilaiVoid: '0.00', nilaiVoidIdr: 'Rp. 0,00', omzetBersih: '400.00', omzetBersihIdr: 'Rp. 400,00',
+          klienDirilis: '0.40', klienMenungguFinance: '0.00', omzetDirilis: '400.00', omzetDirilisIdr: 'Rp. 400,00', omzetMenungguFinance: '0.00', omzetMenungguFinanceIdr: 'Rp. 0,00',
           komisiKontrak: '0.00', komisiKontrakIdr: 'Rp. 0,00', komisiDiakui: '0.00', komisiDiakuiIdr: 'Rp. 0,00',
         },
       ],
@@ -215,12 +237,24 @@ describe('renderSalesReportCsv — baris TOTAL tidak pernah dihitung dari kolom 
         salespersonCount: 2, totalDeal: 1, klienCount: 1, klienVoid: 0, klienBersih: 1,
         omzet: '1000.00', omzetIdr: 'Rp. 1.000,00',
         omzetKotor: '1000.00', omzetKotorIdr: 'Rp. 1.000,00', nilaiVoid: '0.00', nilaiVoidIdr: 'Rp. 0,00', omzetBersih: '1000.00', omzetBersihIdr: 'Rp. 1.000,00',
+        klienDirilis: 1, klienMenungguFinance: 0, omzetDirilis: '1000.00', omzetDirilisIdr: 'Rp. 1.000,00', omzetMenungguFinance: '0.00', omzetMenungguFinanceIdr: 'Rp. 0,00',
         komisiKontrak: '0.00', komisiKontrakIdr: 'Rp. 0,00',
         komisiDiakui: '0.00', komisiDiakuiIdr: 'Rp. 0,00',
       },
       services: [{ masterServiceId: 'MS-1', nama: 'Satu', jumlah: 1, nilai: '1000.00', nilaiIdr: 'Rp. 1.000,00' }],
+      clients: [{
+        transactionId: 'TRX-1', clientId: 'CLI-1', namaKlien: 'Toko; Satu',
+        salesPic: [{ salespersonId: 'A', nama: 'Aa', basisPoints: 6000 }, { salespersonId: 'B', nama: 'Bb', basisPoints: 4000 }],
+        jenis: 'baru', layanan: ['Satu'], layananVoid: [],
+        nilaiDeal: '1000.00', nilaiDealIdr: 'Rp. 1.000,00', omzet: '1000.00', omzetIdr: 'Rp. 1.000,00',
+        tanggalClosing: '2026-06-10', statusRilis: 'Dirilis', tanggalRilis: '2026-06-11', bulanSemuaVoid: null,
+      }],
     });
-    const total = csv.split('\r\n').find((l) => l.startsWith('TOTAL;'))!;
-    expect(total).toBe('TOTAL;2 sales;;1;;;;1;1000.00;0.00;0.00;0;1;1000.00;0.00;1000.00');
+    const lines = csv.split('\r\n');
+    const total = lines.find((l) => l.startsWith('TOTAL;'))!;
+    expect(total).toBe('TOTAL;2 sales;;1;;;;1;1000.00;0.00;0.00;0;1;1000.00;0.00;1000.00;1;0;1000.00;0.00');
+    // Blok keempat (feedback 26-10): rekap klien closing, satu baris per deal.
+    expect(lines).toContain('Rekap Klien Closing');
+    expect(lines).toContain('TRX-1;CLI-1;"Toko; Satu";"Aa (60%), Bb (40%)";Baru;Satu;;1000.00;1000.00;2026-06-10;Dirilis;2026-06-11;');
   });
 });

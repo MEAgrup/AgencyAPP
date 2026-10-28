@@ -388,6 +388,8 @@ const WIRE_TO_FE: Record<string, string> = {
   SalesReportTotalWire: 'salesperf.ts::SalesReportTotal',
   SalesReportServiceRowWire: 'salesperf.ts::SalesReportServiceRow',
   SalesReportWire: 'salesperf.ts::SalesReport',
+  SalesReportClientRowWire: 'salesperf.ts::SalesReportClientRow',
+  SalesReportClientPicWire: 'salesperf.ts::SalesReportClientPic',
   // M0 sales — quote preview, attempt list/detail
   LineQuoteWire: 'sales.ts::LineQuote',
   QuoteWire: 'sales.ts::Quote',

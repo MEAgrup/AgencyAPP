@@ -1311,3 +1311,141 @@ describeDb('bucketOf recognizes [Unrespon] (L5, Revisi Sales/Creative/Performa)'
     expect(r.nqBreakdown).toEqual({ '[Tidak ada respon]': 1 });
   });
 });
+
+// ===========================================================================
+// Feedback Sales/OD 27-10-2026 (RC-2) + Head of Sales 26-10-2026 (RC-3) —
+// `docs/decisions/2026-10-27-kinerja-sales-menunggu-finance.md`.
+//
+// Bulan fixture SENGAJA 2019-04: tidak ada fixture lain di repo yang memakai
+// bulan itu, jadi angka agensi (filter tanpa salesperson) tetap milik blok ini.
+//   RIL1 — Rp 7.000.000, 100% SLS1, SUDAH dirilis Finance.
+//   RIL2 — Rp 3.000.000, 60/40 SLS1/SLSLEAD, Closed-Success tapi MENUNGGU FINANCE.
+//   RIL3 — Rp 2.000.000, 100% SLSLEAD, dirilis; layanannya di-void 2019-05.
+// ===========================================================================
+
+describeDb('Kinerja Sales — Disetujui vs Menunggu Finance + rekap klien closing (feedback 27-10)', () => {
+  const P = { from: '2019-04', to: '2019-04' };
+  const FX = [
+    { cli: 'CLI-ZZSP-RIL1', trx: 'TRX-ZZSP-RIL1', svc: 'SVC-ZZSP-RIL1', nilai: '7000000.00', released: '2019-04-12 03:00:00+00', alloc: [[SLS1, 10000]] as const, at: '2019-04-10 03:00:00+00' },
+    { cli: 'CLI-ZZSP-RIL2', trx: 'TRX-ZZSP-RIL2', svc: 'SVC-ZZSP-RIL2', nilai: '3000000.00', released: null, alloc: [[SLS1, 6000], [SLSLEAD, 4000]] as const, at: '2019-04-20 03:00:00+00' },
+    { cli: 'CLI-ZZSP-RIL3', trx: 'TRX-ZZSP-RIL3', svc: 'SVC-ZZSP-RIL3', nilai: '2000000.00', released: '2019-04-26 03:00:00+00', alloc: [[SLSLEAD, 10000]] as const, at: '2019-04-25 03:00:00+00' },
+  ];
+  const minor = (s: string): bigint => BigInt(s.replace('.', ''));
+
+  beforeAll(async () => {
+    if (!sql) return;
+    for (const f of FX) {
+      await sql`
+        insert into clients (id, nama_pic, toko, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                             sales_pic_id, commission_payment_pic_id, transaction_id, released_to_account_at, created_at, created_by)
+        values (${f.cli}, 'PIC', ${`Toko ${f.cli}`}, 'Bandung', 'Fashion', 'https://x.example', '0.00', '0.00',
+                ${f.alloc[0][0]}, ${f.alloc[0][0]}, ${f.trx}, ${f.released}, ${f.at}, ${SLS1})`;
+      for (const [sp, bp] of f.alloc) {
+        await sql`insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by) values (${f.cli}, ${sp}, ${bp}, ${SLS1})`;
+      }
+      await sql`
+        insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status,
+                                  released_to_account_at, created_at, created_by)
+        values (${f.trx}, ${f.cli}, '[Lunas]', ${f.nilai}, ${f.released === null ? '[Menunggu Verifikasi]' : '[Terverifikasi - Penuh]'},
+                ${f.released}, ${f.at}, ${SLS1})`;
+      await sql`
+        insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                              commission_rule, status, created_by)
+        values (${f.svc}, ${f.cli}, 'MSV-ZZSP-RIL', 1, ${`Paket ${f.cli}`}, ${f.nilai}, '10% of standard price', '[Ongoing]', ${SLS1})`;
+    }
+    await sql`update services set status = '[Cancelled — Service Voided]' where id = 'SVC-ZZSP-RIL3'`;
+    await sql`
+      insert into audit_log (entity_type, entity_id, actor_employee_id, action, after_json, created_at, created_by)
+      values ('service', 'SVC-ZZSP-RIL3', ${SLSLEAD}, 'transition:[Ongoing]->[Cancelled — Service Voided]',
+              '{"status": "[Cancelled — Service Voided]"}'::jsonb, '2019-05-03 03:00:00+00', ${SLSLEAD})`;
+  });
+
+  afterAll(async () => {
+    if (!sql) return;
+    for (const f of FX) {
+      await sql`delete from services where id = ${f.svc}`;
+      await sql`delete from transactions where id = ${f.trx}`;
+      await sql`delete from client_sales_allocations where client_id = ${f.cli}`;
+      await sql`delete from clients where id = ${f.cli}`;
+    }
+  });
+
+  it('per sales: omzet & klien Disetujui Finance / Menunggu Finance terpisah, dan Σ keduanya = omzet sekarang', async () => {
+    const f = { period: P, salespersonId: SLS1, source: null, campaignId: null };
+    const [perf] = await bySalesperson(sql, director('ZZSP-DIR'), f);
+    expect(perf.omzet).toBe('8800000.00'); // 7.000.000 + 60% × 3.000.000 — tidak berubah oleh fitur ini
+    expect(perf.omzetDirilis).toBe('7000000.00');
+    expect(perf.omzetMenungguFinance).toBe('1800000.00');
+    expect(perf.omzetMenungguFinanceIdr).toBe('Rp. 1.800.000,00');
+    expect(minor(perf.omzetDirilis) + minor(perf.omzetMenungguFinance)).toBe(minor(perf.omzet));
+    expect(perf.klienDirilis).toBe('1.00');
+    expect(perf.klienMenungguFinance).toBe('0.60');
+    expect(perf.klien).toBe('1.60');
+
+    // Laporan Penjualan menyebut angka yang SAMA per orang.
+    const rep = (await salesReport(sql, director('ZZSP-DIR'), f)).rows[0];
+    expect(rep.omzetDirilis).toBe(perf.omzetDirilis);
+    expect(rep.omzetMenungguFinance).toBe(perf.omzetMenungguFinance);
+    expect(rep.klienMenungguFinance).toBe(perf.klienMenungguFinance);
+  });
+
+  it('TOTAL agensi: klien DISTINCT terbagi Dirilis/Menunggu, omzet Dirilis + Menunggu = Omzet Kotor', async () => {
+    const r = await salesReport(sql, director('ZZSP-DIR'), { period: P, salespersonId: null, source: null, campaignId: null });
+    expect(r.total.omzet).toBe('12000000.00');
+    expect(r.total.omzetDirilis).toBe('9000000.00');
+    expect(r.total.omzetMenungguFinance).toBe('3000000.00');
+    expect(r.total.klienCount).toBe(3);
+    expect(r.total.klienDirilis).toBe(2);
+    expect(r.total.klienMenungguFinance).toBe(1);
+  });
+
+  it('rekap klien: satu baris per deal (client id, layanan, nominal, status rilis), Σ nominal = total omzet; void ikut Paket V', async () => {
+    const r = await salesReport(sql, director('ZZSP-DIR'), { period: P, salespersonId: null, source: null, campaignId: null });
+    expect(r.clients.map((c) => c.transactionId)).toEqual(['TRX-ZZSP-RIL3', 'TRX-ZZSP-RIL2', 'TRX-ZZSP-RIL1']); // terbaru dulu
+    const sum = r.clients.reduce((n, c) => n + minor(c.omzet), 0n);
+    expect(sum).toBe(minor(r.total.omzet));
+
+    const ril2 = r.clients.find((c) => c.transactionId === 'TRX-ZZSP-RIL2')!;
+    expect(ril2).toEqual(expect.objectContaining({
+      clientId: 'CLI-ZZSP-RIL2', namaKlien: 'Toko CLI-ZZSP-RIL2', jenis: 'baru',
+      layanan: ['Paket CLI-ZZSP-RIL2'], layananVoid: [],
+      nilaiDeal: '3000000.00', omzet: '3000000.00', tanggalClosing: '2019-04-20',
+      statusRilis: 'Menunggu Finance', tanggalRilis: null, bulanSemuaVoid: null,
+    }));
+    expect(ril2.salesPic.map((p) => [p.salespersonId, p.basisPoints])).toEqual(expect.arrayContaining([[SLS1, 6000], [SLSLEAD, 4000]]));
+    const ril1 = r.clients.find((c) => c.transactionId === 'TRX-ZZSP-RIL1')!;
+    expect(ril1.statusRilis).toBe('Dirilis');
+    expect(ril1.tanggalRilis).toBe('2019-04-12');
+
+    // Paket V: closing April TIDAK ditulis ulang oleh void Mei — barisnya
+    // tetap (Kotor), ditandai; void-nya dibuku di bulan Mei.
+    const ril3 = r.clients.find((c) => c.transactionId === 'TRX-ZZSP-RIL3')!;
+    expect(ril3.omzet).toBe('2000000.00');
+    expect(ril3.layanan).toEqual([]);
+    expect(ril3.layananVoid).toEqual(['Paket CLI-ZZSP-RIL3']);
+    expect(ril3.bulanSemuaVoid).toBe('201905');
+    const mei = await salesReport(sql, director('ZZSP-DIR'), { period: { from: '2019-05', to: '2019-05' }, salespersonId: null, source: null, campaignId: null });
+    expect(mei.clients.find((c) => c.transactionId === 'TRX-ZZSP-RIL3')).toBeUndefined();
+    expect(mei.total.klienVoid).toBe(1);
+  });
+
+  it('filter satu sales: nominal per klien = porsinya, Σ tetap = total omzet laporan itu', async () => {
+    const r = await salesReport(sql, director('ZZSP-DIR'), { period: P, salespersonId: SLS1, source: null, campaignId: null });
+    expect(r.clients.map((c) => c.transactionId).sort()).toEqual(['TRX-ZZSP-RIL1', 'TRX-ZZSP-RIL2']);
+    const ril2 = r.clients.find((c) => c.transactionId === 'TRX-ZZSP-RIL2')!;
+    expect(ril2.nilaiDeal).toBe('3000000.00');
+    expect(ril2.omzet).toBe('1800000.00');
+    expect(r.clients.reduce((n, c) => n + minor(c.omzet), 0n)).toBe(minor(r.total.omzet));
+  });
+
+  it('scope: Sales STAFF hanya melihat klien miliknya; Head Sales melihat se-divisi', async () => {
+    const f = { period: P, salespersonId: null, source: null, campaignId: null };
+    const own = await salesReport(sql, salesStaff(SLS1), f);
+    expect(own.clients.map((c) => c.transactionId).sort()).toEqual(['TRX-ZZSP-RIL1', 'TRX-ZZSP-RIL2']);
+    expect(own.clients.some((c) => c.transactionId === 'TRX-ZZSP-RIL3')).toBe(false);
+    await expect(salesReport(sql, salesStaff(SLS1), { ...f, salespersonId: SLSLEAD })).rejects.toThrow(MSG_FORBIDDEN);
+
+    const lead = await salesReport(sql, salesLead(SLSLEAD), f);
+    expect(lead.clients.map((c) => c.transactionId)).toEqual(expect.arrayContaining(['TRX-ZZSP-RIL1', 'TRX-ZZSP-RIL2', 'TRX-ZZSP-RIL3']));
+  });
+});
