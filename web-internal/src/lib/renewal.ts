@@ -9,6 +9,45 @@ import type { ClosingInstallmentInput, ClosingParties, ProposalLineInput } from 
 
 export const SALES_DIVISION = 'Sales';
 
+/**
+ * Batas qty yang dianggap wajar sebelum panel memperingatkan. Bukan aturan
+ * server (server menolak hanya bila totalnya tidak muat kolom) — ini rambu
+ * untuk kesalahan yang memicu feedback Sales 27-10: NOMINAL rupiah diketik di
+ * kolom JUMLAH jasa ber-harga tetap, jadi Rp 12 jt terbaca 12 juta paket.
+ */
+export const QTY_WAJAR_MAKS = 100;
+
+export interface RingkasanQty {
+  /** Harga per unit dari katalog (atau opsi tenor terpilih). */
+  hargaSatuan: number;
+  /** harga × jumlah — hanya untuk pricing `flat`; mode lain dihitung server. */
+  subtotal: number | null;
+  /** Pesan peringatan BI bila jumlahnya mencurigakan, else `null`. */
+  peringatan: string | null;
+}
+
+/**
+ * ringkasanQty menghitung pratinjau baris jasa non-passthrough: harga per unit,
+ * subtotal live, dan peringatan bila qty > `QTY_WAJAR_MAKS`. Server tetap yang
+ * menghitung harga sebenarnya (`resolveProposalLine`); ini hanya supaya Sales
+ * melihat angkanya SEBELUM menekan Ajukan.
+ */
+export function ringkasanQty(
+  svc: { standard_price: string; pricing_mode: string; unit: string; durasi_options?: { durasi_bulan: number; harga: string }[] },
+  quantity: string,
+  durasiBulan: string,
+): RingkasanQty {
+  const tenor = (svc.durasi_options ?? []).find((o) => String(o.durasi_bulan) === durasiBulan);
+  const hargaSatuan = Number(tenor ? tenor.harga : svc.standard_price);
+  const q = Number(quantity);
+  const qty = Number.isFinite(q) && q > 0 ? Math.trunc(q) : 1;
+  const flat = svc.pricing_mode === '' || svc.pricing_mode === 'flat';
+  const peringatan = qty > QTY_WAJAR_MAKS
+    ? `Jumlah ${qty.toLocaleString('id-ID')} ${svc.unit || 'unit'} — kolom ini JUMLAH, bukan nominal rupiah. Harga jasa ini sudah tetap per ${svc.unit || 'unit'}.`
+    : null;
+  return { hargaSatuan, subtotal: flat ? hargaSatuan * qty : null, peringatan };
+}
+
 export function isSalesLead(role: Role | null): boolean {
   return !!role && role.division === SALES_DIVISION && role.level === 'lead';
 }

@@ -1475,11 +1475,15 @@ export async function resolveProposalLine(
     if (price === '' || rule === '') {
       throw new IncompleteError();
     }
+    let usulan: money.Money;
     try {
-      money.parse(price);
+      usulan = money.parse(price);
     } catch {
       throw new IncompleteError();
     }
+    // Harga usulan mendarat di `proposed_price numeric(15,2)` — dijaga di sini,
+    // bukan dibiarkan tumpah (SQLSTATE 22003 → 500) di dalam transaksi.
+    pastikanMuatKolomUang('harga usulan', usulan);
     parseCommissionRule(rule); // throws BadCommissionRuleError on a bad shape
     // A negotiated price is non-PPN, like every other price (D-4). There is no
     // tax to resolve here at all — the invoice decides that later, once.
@@ -1497,7 +1501,13 @@ export async function resolveProposalLine(
     : await sellableAt(tx, l.masterServiceId, today);
   const qty = l.quantity && l.quantity > 0 ? BigInt(Math.trunc(l.quantity)) : 0n;
   const line = lineFromView(view, qty, l.amount ?? '', l.durasiBulan);
-  return { price: money.decimal(lineSubtotal(line)), rule: line.rule.raw, durasiBulan: line.durasiBulan };
+  // `subtotal` DIHITUNG (quantity × harga), jadi ia bisa melampaui kolomnya walau
+  // kedua masukannya sendiri masuk akal — penjaga yang sama dengan
+  // `submitQualifiedForm`. Insiden Cross Sell 2026-10-26: Nominal Rp 12 jt yang
+  // diketik di kolom QTY jasa flat Rp 6 jt ⇒ 7,2×10¹³ ⇒ 22003 ⇒ 500 mentah.
+  const subtotal = lineSubtotal(line);
+  pastikanMuatKolomUang(`total jasa '${line.name}'`, subtotal);
+  return { price: money.decimal(subtotal), rule: line.rule.raw, durasiBulan: line.durasiBulan };
 }
 
 /**

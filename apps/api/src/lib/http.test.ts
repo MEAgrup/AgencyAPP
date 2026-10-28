@@ -11,6 +11,7 @@ import {
   handle,
   json,
   mapError,
+  MSG_ANGKA_TERLALU_BESAR,
   readJson,
   transitionResponse,
 } from './http';
@@ -55,6 +56,18 @@ describe('mapError', () => {
     const res = mapError(new Error('secret internals'));
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: 'internal server error' });
+  });
+
+  it('maps a Postgres numeric overflow (SQLSTATE 22003) to 400 with a BI message, not 500', async () => {
+    const pgErr = Object.assign(new Error('numeric field overflow'), { name: 'PostgresError', code: '22003' });
+    const res = mapError(pgErr);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: MSG_ANGKA_TERLALU_BESAR });
+  });
+
+  it('keeps other Postgres errors an opaque 500', () => {
+    const pgErr = Object.assign(new Error('boom'), { name: 'PostgresError', code: '23503' });
+    expect(mapError(pgErr).status).toBe(500);
   });
 
   it('maps M6 account errors to their canonical status (verbatim BI)', async () => {

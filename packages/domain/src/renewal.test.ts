@@ -49,6 +49,8 @@ import {
   submitNegotiation,
   submitQualifiedForm,
   type Actor,
+  MSG_UANG_TERLALU_BESAR,
+  ValidationError,
 } from './sales';
 
 const budi = (): Actor => ({
@@ -884,5 +886,84 @@ describeDb('FS-6b — tenor pada perpanjangan', () => {
       select durasi_bulan, standard_price from services where contract_id = ${res.contractId}`;
     expect(svcRows[0].durasi_bulan).toBeNull();
     expect(svcRows[0].standard_price).toBe('10200000.00');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feedback Sales 27-10 — Cross Sell dengan jasa yang belum pernah diambil klien
+// membalas 500 `internal server error`. Akar masalah TERVERIFIKASI (prod
+// 2026-10-28, SELECT baca-saja): "Jasa Pengajuan Shopee Mall" ber-pricing
+// `flat` Rp 6 jt/paket, jadi "12000000" yang diketik di kolom QTY/NOMINAL
+// adalah QUANTITY ⇒ subtotal 7,2×10¹³ ⇒ `proposed_price numeric(15,2)` tumpah
+// (SQLSTATE 22003). "Jasa berbeda" kebetulan: kasus suksesnya qty kecil.
+// ---------------------------------------------------------------------------
+describeDb('Cross Sell jasa baru (feedback Sales 27-10)', () => {
+  it('cross_sell no-nego dengan jasa yang TIDAK ada di kontrak klien ⇒ Auto Approved, harga MSL × qty tersimpan', async () => {
+    const a = await seedService('SVC-ZZ-XS-A');
+    const shopeeMall = await seedService('SVC-ZZ-XS-SM', '6000000.00');
+    const clientId = await closedClient(budi(), a);
+    const rn = await proposeRenewal(sql, budi(), clientId, JENIS_CROSS_SELL,
+      [{ masterServiceId: shopeeMall, proposedPrice: '', commissionRule: '', quantity: 1 }], true);
+    expect(rn.status).toBe(STATUS_AUTO_APPROVED);
+    const d = await getRenewalDetail(sql, budi(), rn.id);
+    expect(d.lines.map((l) => [l.masterServiceId, l.proposedPrice])).toEqual([[shopeeMall, '6000000.00']]);
+  });
+
+  it('dua jasa baru sekaligus (Shopee Mall + TikTok Mall) ⇒ sukses, lalu eksekusi melahirkan CTR/SVC/TRX untuk keduanya', async () => {
+    const a = await seedService('SVC-ZZ-XS2-A');
+    const sm = await seedService('SVC-ZZ-XS2-SM', '6000000.00');
+    const tm = await seedService('SVC-ZZ-XS2-TM', '10000000.00');
+    const clientId = await closedClient(budi(), a);
+    const rn = await proposeRenewal(sql, budi(), clientId, JENIS_CROSS_SELL,
+      [{ masterServiceId: sm, quantity: 2 }, { masterServiceId: tm, quantity: 1 }], true);
+    expect(rn.status).toBe(STATUS_AUTO_APPROVED);
+
+    const res = await executeRenewal(sql, budi(), rn.id, {
+      durasiBulan: 1, tanggalMulai: '2026-11-01', tanggalAkhir: '2026-12-01',
+      parties: { primarySalespersonId: budi().employeeId, allocations: [{ salespersonId: budi().employeeId, basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    expect(res.contractId).toMatch(/^CTR-/);
+    const svcs = await sql<{ master_service_id: string; standard_price: string }[]>`
+      select master_service_id, standard_price from services where contract_id = ${res.contractId} order by master_service_id`;
+    expect(svcs.map((r) => [r.master_service_id, r.standard_price])).toEqual([[sm, '12000000.00'], [tm, '10000000.00']]);
+    const trx = await sql<{ total_agreed_value: string }[]>`
+      select total_agreed_value from transactions where id = ${res.transactionId}`;
+    expect(trx[0].total_agreed_value).toBe('22000000.00');
+    const c = await sql<{ jenis: string }[]>`select jenis from contracts where id = ${res.contractId}`;
+    expect(c[0].jenis).toBe(JENIS_CROSS_SELL);
+  });
+
+  it('qty raksasa (Rp 12 jt diketik di kolom QTY jasa flat) ⇒ ValidationError BI, bukan 22003/500, dan tidak ada RNW- tersimpan', async () => {
+    const a = await seedService('SVC-ZZ-XS3-A');
+    const sm = await seedService('SVC-ZZ-XS3-SM', '6000000.00');
+    const clientId = await closedClient(budi(), a);
+    const err = await proposeRenewal(sql, budi(), clientId, JENIS_CROSS_SELL,
+      [{ masterServiceId: sm, quantity: 12000000 }], true).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect((err as Error).message).toBe(MSG_UANG_TERLALU_BESAR(`total jasa 'Svc ${sm}'`));
+    const n = await sql<{ n: number }[]>`select count(*)::int as n from renewal_requests where client_id = ${clientId}`;
+    expect(n[0].n).toBe(0);
+  });
+
+  it('harga usulan custom raksasa ⇒ ValidationError BI (bukan 500)', async () => {
+    const a = await seedService('SVC-ZZ-XS4-A');
+    const clientId = await closedClient(budi(), a);
+    await expect(proposeRenewal(sql, budi(), clientId, JENIS_CROSS_SELL,
+      [{ masterServiceId: a, proposedPrice: '72000000000000', commissionRule: '10% of standard price' }], false))
+      .rejects.toThrow(MSG_UANG_TERLALU_BESAR('harga usulan'));
+  });
+
+  it('jalur Negosiasi punya lubang yang sama — qty raksasa ⇒ ValidationError BI', async () => {
+    const svc = await seedService('SVC-ZZ-XS5', '6000000.00');
+    const { attempt } = await leads.register(sql, budi(), { leadName: 'Nego Overflow Co', phoneNumber: uniquePhone() });
+    await markContacted(sql, budi(), attempt.id);
+    await submitQualifiedForm(sql, budi(), attempt.id, {
+      namaPic: 'Ibu Nego', toko: 'Nego Overflow Co', kota: 'Bandung', linkToko: 'https://shopee/nego',
+      kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '50000000', targetGmv: '80000000',
+      services: [{ masterServiceId: svc, quantity: 1 }],
+    });
+    await expect(submitNegotiation(sql, budi(), attempt.id, [{ masterServiceId: svc, quantity: 12000000 }], true))
+      .rejects.toThrow(MSG_UANG_TERLALU_BESAR(`total jasa 'Svc ${svc}'`));
   });
 });

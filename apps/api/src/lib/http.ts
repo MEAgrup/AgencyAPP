@@ -249,6 +249,23 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ClientPortalRateLimitedError: 429, // clientPortal.PortalRateLimitedError
 };
 
+/**
+ * Backstop SQLSTATE 22003 (numeric value out of range) untuk SEMUA route.
+ *
+ * Angka yang tumpah dari kolom `numeric(p,s)` hampir selalu masukan pengguna
+ * yang kelebihan nol (insiden Cross Sell 2026-10-26: Rp 12 jt diketik di
+ * kolom QTY ⇒ subtotal 7,2×10¹³). Penjaga utamanya tetap di domain
+ * (`pastikanMuatKolomUang`) dengan label field-nya; ini hanya jaring terakhir
+ * supaya kolom yang belum dijaga membalas 400 berpesan BI, bukan 500 buta.
+ * Galat aslinya tetap dicatat di log server.
+ */
+export const MSG_ANGKA_TERLALU_BESAR =
+  '[ada nilai angka yang terlalu besar untuk disimpan, data tidak tersimpan — periksa kembali jumlah/nominal yang diisi]';
+
+function isNumericOutOfRange(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '22003';
+}
+
 export function mapError(err: unknown): Response {
   if (err instanceof UnauthorizedError) {
     return errorJson(err.message, 401);
@@ -261,6 +278,10 @@ export function mapError(err: unknown): Response {
     if (status !== undefined) {
       return errorJson(err.message, status);
     }
+  }
+  if (isNumericOutOfRange(err)) {
+    console.warn('[api] SQLSTATE 22003 →400:', err);
+    return errorJson(MSG_ANGKA_TERLALU_BESAR, 400);
   }
   // Unmapped throw → 500. Log the real error server-side (never in the client
   // body) so production 500s are diagnosable in the platform logs.

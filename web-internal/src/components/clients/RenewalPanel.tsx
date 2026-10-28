@@ -38,6 +38,7 @@ import {
   listRenewals,
   proposeRenewal,
   resubmitRenewal,
+  ringkasanQty,
   STATUS_APPROVED,
   STATUS_AUTO_APPROVED,
   STATUS_PENDING,
@@ -161,7 +162,7 @@ function LinesEditor({
             <tr>
               <th>Jasa</th>
               <th>Durasi</th>
-              <th>Qty / Nominal</th>
+              <th>Jumlah / Nominal</th>
               {custom && <th>Proposed Price</th>}
               {custom && <th>Commission Rule</th>}
               <th></th>
@@ -214,13 +215,30 @@ function LinesEditor({
                         style={{ width: 150 }}
                       />
                     ) : (
-                      <input
-                        aria-label={`Quantity baris ${idx + 1}`}
-                        type="number" min="0" step="1" placeholder="Quantity"
-                        value={l.quantity} disabled={disabled}
-                        onChange={(e) => update(idx, 'quantity', e.target.value)}
-                        style={{ width: 110 }}
-                      />
+                      <>
+                        <input
+                          aria-label={`Jumlah baris ${idx + 1}`}
+                          type="number" min="0" step="1"
+                          placeholder={`Jumlah (${svc?.unit || 'paket/bulan sesuai unit'})`}
+                          value={l.quantity} disabled={disabled}
+                          onChange={(e) => update(idx, 'quantity', e.target.value)}
+                          style={{ width: 150 }}
+                        />
+                        {svc && (() => {
+                          const r = ringkasanQty(svc, l.quantity, l.durasi_bulan || String(tenorDefault(svc) ?? ''));
+                          return (
+                            <>
+                              <div className="muted" style={{ fontSize: 12 }}>
+                                {formatIDR(r.hargaSatuan)} / {svc.unit || 'unit'}
+                                {r.subtotal !== null && <> · Subtotal {formatIDR(r.subtotal)}</>}
+                              </div>
+                              {r.peringatan && (
+                                <div role="alert" style={{ fontSize: 12, color: 'var(--danger, #b42318)' }}>{r.peringatan}</div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </>
                     )}
                   </td>
                   {custom && (
