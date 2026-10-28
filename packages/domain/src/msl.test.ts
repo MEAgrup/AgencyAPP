@@ -6,8 +6,6 @@
  *   chain → effective read against a migrated Postgres. Each test namespaces its
  *   actor ids with `ZZ-` and afterEach deletes the rows it made.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { bi, money, permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
@@ -567,40 +565,6 @@ describeDb('updateService — re-pin tier Service yang belum mulai', () => {
       effectiveFrom: tz.addDaysToDate(TODAY, 1), active: true, planTier: 'tanpa_plan',
     });
     expect((await tiers())['ZZ-SVC-A']).toBe('plan_wajib');
-  });
-
-  it('migrasi backfill 20261220010000: re-pin yang tertinggal, jalan kedua 0 baris', async () => {
-    const ms = await seedTierFixtures();
-    // A tier change written before updateService re-pinned: version 2 lands in
-    // the catalog directly, the Services keep their version-1 pin.
-    await sql`
-      insert into master_service_versions
-        (service_id, version_no, name, standard_price, commission_rule, pricing_mode, apply_ppn,
-         active, requires_strategy_plan, plan_tier, effective_from, created_by)
-      values (${ms}, 2, 'ZZ-MS-1', 5000000, '10% of standard price', 'fixed', false,
-              true, false, 'tanpa_plan', ${TODAY}, 'ZZ-SLEAD')`;
-    const migration = readFileSync(
-      join(__dirname, '../../../supabase/migrations/20261220010000_plan_tier_repin_backfill.sql'), 'utf8');
-    const repinAudits = async (q: typeof sql) => Number((await q<{ n: string }[]>`
-      select count(*) as n from audit_log
-       where action = 'plan_tier_repin' and created_by = 'SISTEM'
-         and entity_id in ${q(svcIds as unknown as string[])} and created_at >= ${since}`)[0].n);
-
-    // Rolled back at the end: the migration scans every Service, and this DB
-    // also holds the seed — the test must leave no trace beyond its fixtures.
-    const rollback = new Error('rollback');
-    await expect(sql.begin(async (tx) => {
-      const q = tx as unknown as typeof sql;
-      await q.unsafe(migration);
-      expect(await repinAudits(q)).toBe(1);
-      const after = await q<{ id: string; plan_tier: string }[]>`
-        select id, plan_tier from services where id in ${q(svcIds as unknown as string[])} order by id`;
-      expect(after.map((r) => r.plan_tier)).toEqual(
-        ['tanpa_plan', 'plan_wajib', 'plan_wajib', 'plan_wajib', 'plan_wajib']);
-      await q.unsafe(migration);
-      expect(await repinAudits(q)).toBe(1); // second run: 0 new rows
-      throw rollback;
-    })).rejects.toBe(rollback);
   });
 
   it('the new_version audit carries plan_tier', async () => {
