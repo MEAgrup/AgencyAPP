@@ -70,6 +70,13 @@ export interface Client {
   contract_durasi_bulan: number | null;
   contract_tanggal_mulai: string | null;
   contract_tanggal_akhir: string | null;
+  /**
+   * Feedback OD 27-10-2026 — saat closing (Closed-Success), ISO. Hanya diisi
+   * `GET /clients` (roster). `null` = klien tidak lahir dari closing CDPS.
+   */
+  tanggal_closing: string | null;
+  /** Hari sejak closing selama masih Menunggu Finance; selain itu `null`. */
+  lama_menunggu_hari: number | null;
 }
 
 export interface FieldChange {
@@ -129,16 +136,35 @@ export const PAYMENT_STATUS_MENUNGGU_VERIFIKASI = '[Menunggu Verifikasi]';
  *  sekaligus, bukan salah satunya. */
 export const PLATFORM_OPTIONS = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Others'] as const;
 
-// GET /clients[?limit=&cursor=&q=] (q = nama klien / nama toko) — P2 §6: dipaginasi server-side. `next_cursor`
-// null = halaman terakhir; kirim balik sebagai `cursor` untuk lanjutannya.
-export function listClients(
-  params?: { limit?: number; cursor?: string; q?: string },
-): Promise<{ data: Client[]; next_cursor: string | null }> {
+/** Filter Status Rilis Direktori Klien ('' = semua). */
+export type StatusRilisFilter = '' | 'menunggu_finance' | 'dirilis';
+/** Urutan Direktori Klien: closing terbaru dulu / terlama dulu (= paling lama menunggu). */
+export type UrutClients = 'terbaru' | 'terlama';
+
+// GET /clients[?limit=&cursor=&q=&closing_dari=&closing_sampai=&status_rilis=&urut=]
+// (q = nama klien / nama toko; closing_* = YYYY-MM-DD WIB, inklusif) — P2 §6:
+// dipaginasi server-side. `next_cursor` null = halaman terakhir; kirim balik
+// sebagai `cursor` (bersama filter yang sama) untuk lanjutannya.
+export interface ListClientsParams {
+  limit?: number; cursor?: string; q?: string;
+  closing_dari?: string; closing_sampai?: string; status_rilis?: StatusRilisFilter; urut?: UrutClients;
+}
+
+/** clientsQueryString — query string `GET /clients`; field kosong tidak dikirim. */
+export function clientsQueryString(params?: ListClientsParams): string {
   const search = new URLSearchParams();
   if (params?.limit) search.set('limit', String(params.limit));
   if (params?.cursor) search.set('cursor', params.cursor);
   if (params?.q) search.set('q', params.q);
-  const qs = search.toString();
+  if (params?.closing_dari) search.set('closing_dari', params.closing_dari);
+  if (params?.closing_sampai) search.set('closing_sampai', params.closing_sampai);
+  if (params?.status_rilis) search.set('status_rilis', params.status_rilis);
+  if (params?.urut && params.urut !== 'terbaru') search.set('urut', params.urut);
+  return search.toString();
+}
+
+export function listClients(params?: ListClientsParams): Promise<{ data: Client[]; next_cursor: string | null }> {
+  const qs = clientsQueryString(params);
   return api.get<{ data: Client[]; next_cursor: string | null }>(`/clients${qs ? `?${qs}` : ''}`);
 }
 

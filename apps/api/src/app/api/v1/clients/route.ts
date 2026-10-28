@@ -20,9 +20,19 @@ export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
     // P2 §6: paged (?limit=, ?cursor=); ?q= mencari nama klien / nama toko.
+    // Feedback OD 27-10-2026: ?closing_dari= / ?closing_sampai= (YYYY-MM-DD WIB),
+    // ?status_rilis= (menunggu_finance | dirilis), ?urut= (terbaru | terlama).
     const params = new URL(request.url).searchParams;
     const req = page.parseRequest(params.get('limit'), params.get('cursor'));
-    const result = await readAsActor(actor, (sql) => client.listClients(sql, req, params.get('q') ?? undefined));
+    const filter: client.ClientListFilter = {
+      closingDari: params.get('closing_dari') ?? undefined,
+      closingSampai: params.get('closing_sampai') ?? undefined,
+      statusRilis: params.get('status_rilis') ?? undefined,
+      urut: params.get('urut') ?? undefined,
+    };
+    client.parseListFilter(filter); // 400 sebelum membuka koneksi
+    const result = await readAsActor(actor, (sql) =>
+      client.listClients(sql, req, params.get('q') ?? undefined, filter));
     return json({ data: result.rows.map(clientListRowToWire), next_cursor: result.nextCursor });
   });
 }

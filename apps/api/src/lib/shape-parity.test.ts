@@ -923,8 +923,13 @@ const APPROVED_DIVERGENCE: Record<string, { keys: string[]; decision: string }> 
    * fact. See FS-5b.
    */
   ClientDetailWire: {
-    keys: ['contract_durasi_bulan', 'contract_tanggal_mulai', 'contract_tanggal_akhir'],
-    decision: 'DECISIONS FS-5b, 2026-09-09',
+    keys: [
+      'contract_durasi_bulan', 'contract_tanggal_mulai', 'contract_tanggal_akhir',
+      // Kolom Tanggal Closing / lama menunggu roster `/clients` — cerita yang sama:
+      // hanya daftar yang membacanya; Client Record punya Riwayat Audit lengkap.
+      'tanggal_closing', 'lama_menunggu_hari',
+    ],
+    decision: 'DECISIONS FS-5b, 2026-09-09; 2026-10-27 direktori-klien-tanggal-closing',
   },
 };
 

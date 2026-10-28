@@ -2965,6 +2965,10 @@ export interface ClientListRowWire {
   contract_durasi_bulan: number | null;
   contract_tanggal_mulai: string | null;
   contract_tanggal_akhir: string | null;
+  /** Feedback OD 27-10-2026 — saat Closed-Success; null = bukan hasil closing CDPS. */
+  tanggal_closing: string | null;
+  /** Hari sejak closing, hanya saat Menunggu Finance; selain itu null. */
+  lama_menunggu_hari: number | null;
 }
 
 export function clientListRowToWire(r: client.ClientListRow): ClientListRowWire {
@@ -2983,6 +2987,8 @@ export function clientListRowToWire(r: client.ClientListRow): ClientListRowWire 
     contract_durasi_bulan: r.contractDurasiBulan,
     contract_tanggal_mulai: r.contractTanggalMulai,
     contract_tanggal_akhir: r.contractTanggalAkhir,
+    tanggal_closing: r.tanggalClosing ? r.tanggalClosing.toISOString() : null,
+    lama_menunggu_hari: r.lamaMenungguHari,
   };
 }
 
