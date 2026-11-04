@@ -301,6 +301,22 @@ export function ringkasanPembayaranOrder(rawPayload: unknown): RingkasanPembayar
   return null;
 }
 
+/**
+ * snapshotPembayaran — kolom `client_external_billing` BRIDGE-DP dari hasil
+ * parse. Persen dicetak MSDPS berkoma ("33,3") → numeric ("33.3"); LUNAS
+ * selalu 100. Nilai di luar 0..100 (teks rusak) dibuang ke null alih-alih
+ * menggagalkan accept lewat CHECK — info ini bantuan, bukan gerbang.
+ */
+export function snapshotPembayaran(
+  r: RingkasanPembayaran | null,
+): { persen: string | null; nominal: string | null } {
+  if (r === null) return { persen: null, nominal: null };
+  const persen = r.status === 'LUNAS' ? '100' : r.persen.replace(',', '.');
+  const n = Number(persen);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return { persen: null, nominal: r.dibayar };
+  return { persen, nominal: r.dibayar };
+}
+
 // ---------------------------------------------------------------------------
 // Shape
 // ---------------------------------------------------------------------------
@@ -446,6 +462,68 @@ export async function candidates(sql: Queryable, orderId: string): Promise<Bridg
   push(fuzzy, 'fuzzy');
 
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// BRIDGE-DP (opsi b) — daftar follow-up Finance
+// ---------------------------------------------------------------------------
+
+/** Satu klien MEAGO yang order-nya diterima saat pembayaran belum lunas. */
+export interface KlienBelumLunas {
+  clientId: string;
+  toko: string;
+  kota: string;
+  externalDealCode: string;
+  /** Total kontrak (attestation.nilai), string desimal, atau null. */
+  nilai: string | null;
+  persenTerbayar: string;
+  nominalTerbayar: string | null;
+  /** Kapan MSDPS memverifikasi pembayaran pertama (ISO). */
+  diverifikasiPada: string;
+  /** Kapan order diterima di CDPS (baris atestasi ditulis, ISO). */
+  diterimaPada: string;
+}
+
+interface BelumLunasRow {
+  client_id: string;
+  toko: string;
+  kota: string;
+  external_deal_code: string;
+  nilai: string | null;
+  persen_terbayar_saat_diteruskan: string;
+  nominal_terbayar_saat_diteruskan: string | null;
+  diverifikasi_pada: Date;
+  created_at: Date;
+}
+
+/**
+ * listBelumLunas — klien MEAGO yang diterima dengan pembayaran < 100% saat
+ * diteruskan, terbaru dulu. Row scope = RLS (`client_external_billing_select`:
+ * read-all, lead Account, Finance semua level, AM pemilik) — dipanggil lewat
+ * `readAsActor`, tanpa gerbang TS tambahan. SNAPSHOT: MSDPS Fase 1 tidak
+ * mengirim pelunasan, jadi daftar ini tidak menyusut dengan sendirinya.
+ */
+export async function listBelumLunas(sql: Queryable): Promise<KlienBelumLunas[]> {
+  const rows = await sql<BelumLunasRow[]>`
+    select b.client_id, c.toko, c.kota, b.external_deal_code, b.nilai::text as nilai,
+           b.persen_terbayar_saat_diteruskan::text as persen_terbayar_saat_diteruskan,
+           b.nominal_terbayar_saat_diteruskan::text as nominal_terbayar_saat_diteruskan,
+           b.diverifikasi_pada, b.created_at
+      from client_external_billing b
+      join clients c on c.id = b.client_id
+     where b.persen_terbayar_saat_diteruskan < 100
+     order by b.created_at desc`;
+  return rows.map((r) => ({
+    clientId: r.client_id,
+    toko: r.toko,
+    kota: r.kota,
+    externalDealCode: r.external_deal_code,
+    nilai: r.nilai,
+    persenTerbayar: r.persen_terbayar_saat_diteruskan,
+    nominalTerbayar: r.nominal_terbayar_saat_diteruskan,
+    diverifikasiPada: r.diverifikasi_pada.toISOString(),
+    diterimaPada: r.created_at.toISOString(),
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -643,16 +721,21 @@ export async function accept(
       values (${clientId}, ${SUMBER_MEAGO}, ${payload.merchant.externalId}, ${actor.employeeId})`;
 
     // client_external_billing — the attestation, verbatim from the stored
-    // (immutable) payload.
+    // (immutable) payload. BRIDGE-DP (opsi b, 2026-11-04): the payment
+    // snapshot MSDPS 0377 writes into lines[].catatan is stored alongside it,
+    // so Finance can follow up clients forwarded while still on DP. Null when
+    // the order carries no such text (pre-0377) — accept never fails on it.
+    const bayar = snapshotPembayaran(ringkasanPembayaranOrder(order.payload));
     await tx`
       insert into client_external_billing
         (client_id, sumber, external_deal_code, external_trx_ref, bentuk_kerjasama, nilai,
-         nilai_cross_charge, diverifikasi_pada, diverifikasi_oleh_external, dilaporkan_oleh)
+         nilai_cross_charge, diverifikasi_pada, diverifikasi_oleh_external, dilaporkan_oleh,
+         persen_terbayar_saat_diteruskan, nominal_terbayar_saat_diteruskan)
       values
         (${clientId}, ${SUMBER_MEAGO}, ${payload.dealCode}, ${payload.attestation.externalTrxRef},
          'Berbayar', ${payload.attestation.nilai}, ${sumCrossCharge(payload.lines)},
          ${payload.attestation.diverifikasiPada}::timestamptz, ${payload.attestation.diverifikasiOlehExternal},
-         ${actor.employeeId})`;
+         ${actor.employeeId}, ${bayar.persen}, ${bayar.nominal})`;
 
     // One CTR- carrying the merchant's own contract window (payload), one
     // SVC- per bridged line hanging off it — both branches (new/attach)

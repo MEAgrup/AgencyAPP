@@ -9013,6 +9013,33 @@ export function bridgeOrderSummaryToWire(o: bridge.BridgeOrderSummary): BridgeOr
   };
 }
 
+/** bridge.KlienBelumLunas as web-internal's `KlienBelumLunas` expects it (BRIDGE-DP). */
+export interface KlienBelumLunasWire {
+  client_id: string;
+  toko: string;
+  kota: string;
+  external_deal_code: string;
+  nilai: string | null;
+  persen_terbayar: string;
+  nominal_terbayar: string | null;
+  diverifikasi_pada: string;
+  diterima_pada: string;
+}
+
+export function klienBelumLunasToWire(k: bridge.KlienBelumLunas): KlienBelumLunasWire {
+  return {
+    client_id: k.clientId,
+    toko: k.toko,
+    kota: k.kota,
+    external_deal_code: k.externalDealCode,
+    nilai: k.nilai,
+    persen_terbayar: k.persenTerbayar,
+    nominal_terbayar: k.nominalTerbayar,
+    diverifikasi_pada: k.diverifikasiPada,
+    diterima_pada: k.diterimaPada,
+  };
+}
+
 /** bridge.BridgeOrderDetail as web-internal's `BridgeOrderDetail` expects it. */
 export interface BridgeOrderDetailWire extends BridgeOrderSummaryWire {
   payload_versi: number;

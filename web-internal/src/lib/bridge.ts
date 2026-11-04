@@ -74,6 +74,29 @@ export interface BridgeOrderDetail extends BridgeOrderSummary {
   payload: BridgeOrderPayload;
 }
 
+/**
+ * BRIDGE-DP (opsi b, 2026-11-04) — klien MEAGO yang diterima saat pembayaran
+ * klien belum lunas (snapshot saat diteruskan MSDPS), untuk follow-up Finance.
+ */
+export interface KlienBelumLunas {
+  client_id: string;
+  toko: string;
+  kota: string;
+  external_deal_code: string;
+  /** Total kontrak. */
+  nilai: string | null;
+  /** Persen terbayar saat diteruskan, mis. "30.0". */
+  persen_terbayar: string;
+  nominal_terbayar: string | null;
+  diverifikasi_pada: string;
+  diterima_pada: string;
+}
+
+/** GET /bridge/belum-lunas → {data: KlienBelumLunas[]}. */
+export function listKlienBelumLunas(): Promise<{ data: KlienBelumLunas[] }> {
+  return api.get<{ data: KlienBelumLunas[] }>('/bridge/belum-lunas');
+}
+
 export interface BridgeCandidate {
   client_id: string;
   toko: string;

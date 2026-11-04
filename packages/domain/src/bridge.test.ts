@@ -482,3 +482,70 @@ describeDb('bridge — order DP/LUNAS sejak MSDPS 0377 masuk [Masuk] dan bisa di
     expect(svc.map((r) => r.master_service_id)).toEqual([msvLive]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// BRIDGE-DP (opsi b, keputusan pemilik 2026-11-04) — accept menyimpan snapshot
+// pembayaran; Finance mem-follow-up klien yang diterima saat baru DP.
+// ---------------------------------------------------------------------------
+
+describe('bridge.snapshotPembayaran (murni, tanpa DB)', () => {
+  it('DP berkoma → numeric bertitik; LUNAS → 100; tanpa info → null; persen mustahil → null tanpa menggagalkan accept', () => {
+    expect(bridge.snapshotPembayaran(bridge.parseRingkasanPembayaran(NOTE_DP_DESIMAL))).toEqual({ persen: '33.3', nominal: '1' });
+    expect(bridge.snapshotPembayaran(bridge.parseRingkasanPembayaran(NOTE_DP))).toEqual({ persen: '30', nominal: '4500000' });
+    expect(bridge.snapshotPembayaran(bridge.parseRingkasanPembayaran(NOTE_LUNAS))).toEqual({ persen: '100', nominal: '15000000' });
+    expect(bridge.snapshotPembayaran(null)).toEqual({ persen: null, nominal: null });
+    expect(
+      bridge.snapshotPembayaran({ status: 'DP', persen: '130', dibayar: '1', total: '1', teks: 'x' }),
+    ).toEqual({ persen: null, nominal: '1' });
+  });
+});
+
+describeDb('bridge.accept — BRIDGE-DP snapshot + daftar follow-up Finance', () => {
+  it('DP → persen/nominal tersimpan & muncul di listBelumLunas; LUNAS → 100 & tidak muncul; order lama → null & tidak muncul', async () => {
+    await insEmployees();
+    const msv = await seedMasterService('Paket Account Uji DP');
+    await insServiceMap('Account', msv);
+    const line = (catatan: string | null) => [{ jenis: 'Account', qty: 1, catatan, alasan_non_roster: null, nilai_cross_charge: null }];
+
+    const dp = rawPayload({ lines: line(`paket 3 bulan ${NOTE_DP}`) });
+    const lunas = rawPayload({ lines: line(NOTE_LUNAS) });
+    const lama = rawPayload({ lines: line('catatan lama') });
+    const terima = async (p: Record<string, unknown>) => {
+      const { ordCode } = await bridge.intake(sql, p, `${p.deal_code as string}:1`);
+      return (await bridge.accept(sql, leadAccount(), ordCode, acceptInput())).clientId as string;
+    };
+    const cliDp = await terima(dp);
+    const cliLunas = await terima(lunas);
+    const cliLama = await terima(lama);
+
+    const billing = await sql<{ client_id: string; persen: string | null; nominal: string | null }[]>`
+      select client_id, persen_terbayar_saat_diteruskan::text as persen, nominal_terbayar_saat_diteruskan::text as nominal
+        from client_external_billing where client_id in (${cliDp}, ${cliLunas}, ${cliLama})`;
+    const by = Object.fromEntries(billing.map((b) => [b.client_id, b]));
+    expect(by[cliDp]).toMatchObject({ persen: '30.0', nominal: '4500000.00' });
+    expect(by[cliLunas]).toMatchObject({ persen: '100.0', nominal: '15000000.00' });
+    expect(by[cliLama]).toMatchObject({ persen: null, nominal: null });
+
+    const daftar = (await bridge.listBelumLunas(sql)).filter((k) => [cliDp, cliLunas, cliLama].includes(k.clientId));
+    expect(daftar).toHaveLength(1);
+    expect(daftar[0]).toMatchObject({
+      clientId: cliDp,
+      externalDealCode: dp.deal_code,
+      nilai: '15000000.00',
+      persenTerbayar: '30.0',
+      nominalTerbayar: '4500000.00',
+    });
+  });
+
+  it('snapshot ikut imutabel: kolom BRIDGE-DP tidak bisa di-UPDATE (follow-up tidak menulis ulang atestasi)', async () => {
+    await insEmployees();
+    const msv = await seedMasterService('Paket Account Uji DP imutabel');
+    await insServiceMap('Account', msv);
+    const p = rawPayload({ lines: [{ jenis: 'Account', qty: 1, catatan: NOTE_DP, alasan_non_roster: null, nilai_cross_charge: null }] });
+    const { ordCode } = await bridge.intake(sql, p, `${p.deal_code as string}:1`);
+    const r = await bridge.accept(sql, leadAccount(), ordCode, acceptInput());
+    await expect(
+      sql`update client_external_billing set persen_terbayar_saat_diteruskan = 100 where client_id = ${r.clientId}`,
+    ).rejects.toThrow(/append-only/);
+  });
+});

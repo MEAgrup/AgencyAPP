@@ -379,6 +379,7 @@ const WIRE_TO_FE: Record<string, string> = {
   // Bridge MSDPS→CDPS Fase 1 — bridge.ts.
   BridgeOrderSummaryWire: 'bridge.ts::BridgeOrderSummary',
   BridgeRingkasanPembayaranWire: 'bridge.ts::BridgeRingkasanPembayaran',
+  KlienBelumLunasWire: 'bridge.ts::KlienBelumLunas',
   BridgeOrderDetailWire: 'bridge.ts::BridgeOrderDetail',
   BridgeOrderPayloadWire: 'bridge.ts::BridgeOrderPayload',
   BridgeMerchantWire: 'bridge.ts::BridgeMerchant',

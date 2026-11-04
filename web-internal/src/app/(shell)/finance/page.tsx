@@ -17,6 +17,7 @@ import {
   type Permintaan,
 } from '@/lib/permintaan';
 import StatusBadge from '@/components/StatusBadge';
+import KlienBelumLunasPanel from '@/components/bridge/KlienBelumLunasPanel';
 
 export default function FinanceQueuePage() {
   const [trxs, setTrxs] = useState<Transaction[] | null>(null);
@@ -314,6 +315,10 @@ export default function FinanceQueuePage() {
           </div>
         )}
       </section>
+
+      {/* BRIDGE-DP (opsi b, 2026-11-04) — klien MEAGO yang diterima saat baru DP.
+          Daftar pantauan untuk follow-up, di bawah antrean verifikasi CDPS. */}
+      <KlienBelumLunasPanel />
     </div>
   );
 }
