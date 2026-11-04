@@ -27,6 +27,7 @@ import {
 } from '@/lib/bridge';
 import { formatIDR } from '@/lib/money';
 import StatusBadge from '@/components/StatusBadge';
+import PembayaranBadge, { pembayaranTooltip } from '@/components/bridge/PembayaranBadge';
 import { MetaGrid } from '@/components/persetujuan/ApprovalCard';
 
 function formatDateTime(value: string | null | undefined) {
@@ -144,7 +145,10 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
           <h1>{order.id}</h1>
           <p className="muted">{p.deal_code} — MSDPS (MEAGO!/MCN MEA)</p>
         </div>
-        <StatusBadge status={order.status} />
+        <span className="row" style={{ gap: 6 }}>
+          <PembayaranBadge pembayaran={order.pembayaran} />
+          <StatusBadge status={order.status} />
+        </span>
       </div>
 
       <section className="card" style={{ padding: 14 }}>
@@ -172,7 +176,11 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
           items={[
             { label: 'Bentuk kerjasama', value: p.attestation.bentuk_kerjasama },
             { label: 'Ref transaksi MSDPS', value: p.attestation.external_trx_ref },
-            { label: 'Nilai', value: p.attestation.nilai ? formatIDR(p.attestation.nilai) : '—' },
+            { label: 'Nilai kontrak', value: p.attestation.nilai ? formatIDR(p.attestation.nilai) : '—' },
+            {
+              label: 'Pembayaran saat diteruskan',
+              value: order.pembayaran ? pembayaranTooltip(order.pembayaran) : '—',
+            },
             { label: 'Diverifikasi pada', value: formatDateTime(p.attestation.diverifikasi_pada) },
             { label: 'Diverifikasi/dibawa oleh', value: p.attestation.diverifikasi_oleh_external ?? '—' },
           ]}

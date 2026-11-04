@@ -8976,6 +8976,17 @@ export interface BridgeOrderSummaryWire {
   ditolak_alasan: string | null;
   diputus_oleh: string | null;
   diputus_pada: string | null;
+  /** Turunan read-only dari lines[].catatan (MSDPS 0377) — null bila tak ada info. */
+  pembayaran: BridgeRingkasanPembayaranWire | null;
+}
+
+/** bridge.RingkasanPembayaran as web-internal's `BridgeRingkasanPembayaran` expects it. */
+export interface BridgeRingkasanPembayaranWire {
+  status: string;
+  persen: string;
+  dibayar: string | null;
+  total: string | null;
+  teks: string;
 }
 
 export function bridgeOrderSummaryToWire(o: bridge.BridgeOrderSummary): BridgeOrderSummaryWire {
@@ -8989,6 +9000,16 @@ export function bridgeOrderSummaryToWire(o: bridge.BridgeOrderSummary): BridgeOr
     ditolak_alasan: o.ditolakAlasan,
     diputus_oleh: o.diputusOleh,
     diputus_pada: o.diputusPada,
+    pembayaran:
+      o.pembayaran === null
+        ? null
+        : {
+            status: o.pembayaran.status,
+            persen: o.pembayaran.persen,
+            dibayar: o.pembayaran.dibayar,
+            total: o.pembayaran.total,
+            teks: o.pembayaran.teks,
+          },
   };
 }
 

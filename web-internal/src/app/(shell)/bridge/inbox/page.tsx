@@ -21,6 +21,7 @@ import { errorMessage, isForbidden } from '@/lib/api';
 import { listBridgeOrders, ORDER_MASUK, type BridgeOrderSummary } from '@/lib/bridge';
 import StatusBadge from '@/components/StatusBadge';
 import ApprovalCard from '@/components/persetujuan/ApprovalCard';
+import PembayaranBadge, { pembayaranTooltip } from '@/components/bridge/PembayaranBadge';
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
@@ -67,8 +68,11 @@ export default function BridgeInboxPage() {
         <p className="muted">
           Order dari MEAGO!/MCN MEA yang perlu diterima atau ditolak sebelum masuk
           eksekusi divisi. Hanya deal berbayar yang pembayaran pertamanya sudah
-          diverifikasi MSDPS Finance yang bisa sampai ke sini (D4+D13) — tidak ada
-          gerbang tambahan yang perlu dicek di sini.
+          diverifikasi MSDPS Finance yang bisa sampai ke sini (D4+D13). Sejak
+          4 Nov 2026 order dikirim otomatis begitu pembayaran pertama terverifikasi
+          — <strong>DP pun cukup</strong>. Badge &quot;DP x%&quot; / &quot;Lunas&quot; menunjukkan
+          kondisi pembayaran saat order diteruskan (pelunasan berikutnya tidak
+          dikirim ulang).
         </p>
       </div>
 
@@ -98,9 +102,15 @@ export default function BridgeInboxPage() {
             id={o.id}
             href={`/bridge/inbox/${o.id}`}
             title={o.external_deal_code}
-            badge={<StatusBadge status={o.status} />}
+            badge={
+              <span className="row" style={{ gap: 6 }}>
+                <PembayaranBadge pembayaran={o.pembayaran} />
+                <StatusBadge status={o.status} />
+              </span>
+            }
             meta={[
               { label: 'Diterima', value: formatDateTime(o.diterima_pada) },
+              { label: 'Pembayaran klien', value: o.pembayaran ? pembayaranTooltip(o.pembayaran) : '—' },
               { label: 'Klien', value: o.client_id ?? '—' },
               { label: 'Diputus oleh', value: o.diputus_oleh ?? '—' },
               { label: 'Alasan tolak', value: o.ditolak_alasan ?? '—' },

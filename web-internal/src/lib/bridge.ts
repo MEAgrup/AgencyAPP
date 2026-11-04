@@ -49,6 +49,24 @@ export interface BridgeOrderSummary {
   ditolak_alasan: string | null;
   diputus_oleh: string | null;
   diputus_pada: string | null;
+  /** Ringkasan pembayaran klien dari lines[].catatan (MSDPS 0377) — null untuk order lama/tanpa info. */
+  pembayaran: BridgeRingkasanPembayaran | null;
+}
+
+/**
+ * Turunan read-only (server-side, `bridge.ringkasanPembayaranOrder`) dari teks
+ * yang MSDPS tempelkan ke `lines[].catatan` sejak 2026-11-04. Hanya untuk
+ * ditampilkan — tidak mengubah apa pun pada payload atau gerbang accept.
+ */
+export interface BridgeRingkasanPembayaran {
+  /** 'DP' | 'LUNAS'. */
+  status: string;
+  /** Persen seperti tercetak MSDPS, mis. "30" atau "33,3". */
+  persen: string;
+  dibayar: string | null;
+  total: string | null;
+  /** Teks asli (dengan kurung siku) — untuk tooltip. */
+  teks: string;
 }
 
 export interface BridgeOrderDetail extends BridgeOrderSummary {

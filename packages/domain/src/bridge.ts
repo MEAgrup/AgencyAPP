@@ -226,6 +226,82 @@ export function parsePayloadV1(raw: unknown): BridgeOrderPayloadV1 {
 }
 
 // ---------------------------------------------------------------------------
+// Ringkasan pembayaran klien di `lines[].catatan` (MSDPS 0377, 2026-11-04).
+//
+// Sejak MSDPS 0377 order masuk OTOMATIS begitu Finance MSDPS memverifikasi
+// pembayaran PERTAMA — DP pun cukup. Kontrak v1 TIDAK berubah (nol kunci
+// baru): MSDPS menempelkan ringkasan pembayaran di ujung setiap
+// `lines[].catatan`, dibangun oleh `paymentSummaryText` di MSDPS
+// `lib/bridge/payload.ts`:
+//
+//   "[Pembayaran klien saat diteruskan: DP 30% — Rp 4.500.000 dari Rp 15.000.000]"
+//   "[Pembayaran klien: LUNAS 100% — Rp 15.000.000]"
+//
+// Ini TEKS UNTUK MANUSIA, bukan field kontrak — jadi parser di bawah toleran
+// penuh: catatan tanpa pola (order sebelum 2026-11-04, atau catatan null)
+// menghasilkan `null`, tidak pernah melempar. Hasilnya hanya untuk
+// ditampilkan di antrean; payload tersimpan tidak disentuh (imutabel), dan
+// tidak ada keputusan otomatis yang bergantung padanya. `docs/decisions/
+// 2026-11-03-amandemen-bridge-fase1-order-otomatis-sejak-dp.md`.
+// ---------------------------------------------------------------------------
+
+export interface RingkasanPembayaran {
+  /** 'DP' (sebagian) | 'LUNAS'. */
+  status: 'DP' | 'LUNAS';
+  /** Persen persis seperti tercetak MSDPS (dibulatkan ke bawah, koma desimal), mis. "30", "33,3". */
+  persen: string;
+  /** Rupiah bulat sebagai string desimal ("4500000"), atau null bila tak terbaca. */
+  dibayar: string | null;
+  total: string | null;
+  /** Teks ringkasan apa adanya, termasuk kurung siku — untuk tooltip. */
+  teks: string;
+}
+
+const RE_RINGKASAN_PEMBAYARAN =
+  /\[Pembayaran klien(?: saat diteruskan)?:\s*(DP|LUNAS)\s+(\d+(?:[.,]\d+)?)\s*%\s*[—–-]\s*Rp\.?\s*([\d.]+)(?:\s+dari\s+Rp\.?\s*([\d.]+))?\s*\]/;
+
+function rupiahDigits(s: string | undefined): string | null {
+  if (s === undefined) return null;
+  const digits = s.replace(/\./g, '');
+  return /^\d+$/.test(digits) ? String(BigInt(digits)) : null;
+}
+
+/** parseRingkasanPembayaran — null bila catatan tidak memuat pola MSDPS 0377. Tidak pernah melempar. */
+export function parseRingkasanPembayaran(catatan: unknown): RingkasanPembayaran | null {
+  if (typeof catatan !== 'string') return null;
+  const m = RE_RINGKASAN_PEMBAYARAN.exec(catatan);
+  if (m === null) return null;
+  const status = m[1] as 'DP' | 'LUNAS';
+  const pertama = rupiahDigits(m[3]);
+  const kedua = rupiahDigits(m[4]);
+  return {
+    status,
+    persen: m[2],
+    // LUNAS mencetak satu nominal (total); DP mencetak "<dibayar> dari <total>".
+    dibayar: pertama,
+    total: status === 'LUNAS' ? pertama : kedua,
+    teks: m[0],
+  };
+}
+
+/**
+ * ringkasanPembayaranOrder — ringkasan pertama yang ditemukan di baris order.
+ * Membaca payload MENTAH (snake_case) secara toleran, bukan lewat
+ * parsePayloadV1, supaya daftar antrean tidak pernah gagal karena teks bantu.
+ */
+export function ringkasanPembayaranOrder(rawPayload: unknown): RingkasanPembayaran | null {
+  if (rawPayload === null || typeof rawPayload !== 'object') return null;
+  const lines = (rawPayload as Record<string, unknown>).lines;
+  if (!Array.isArray(lines)) return null;
+  for (const l of lines) {
+    if (l === null || typeof l !== 'object') continue;
+    const r = parseRingkasanPembayaran((l as Record<string, unknown>).catatan);
+    if (r !== null) return r;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Shape
 // ---------------------------------------------------------------------------
 
@@ -239,6 +315,8 @@ export interface BridgeOrderSummary {
   ditolakAlasan: string | null;
   diputusOleh: string | null;
   diputusPada: string | null;
+  /** Turunan read-only dari `payload.lines[].catatan` (MSDPS 0377); null = tak ada info. */
+  pembayaran: RingkasanPembayaran | null;
 }
 
 export interface BridgeOrderDetail extends BridgeOrderSummary {
@@ -271,6 +349,7 @@ function rowToSummary(r: OrderRow): BridgeOrderSummary {
     ditolakAlasan: r.ditolak_alasan,
     diputusOleh: r.diputus_oleh,
     diputusPada: r.diputus_pada ? r.diputus_pada.toISOString() : null,
+    pembayaran: ringkasanPembayaranOrder(r.payload),
   };
 }
 

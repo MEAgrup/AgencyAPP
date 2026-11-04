@@ -381,3 +381,104 @@ describeDb('bridge — immutability (aturan rumah #3)', () => {
     await expect(sql`delete from client_external_billing where client_id = ${result.clientId}`).rejects.toThrow(/append-only/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MSDPS 0377 (2026-11-04) — order otomatis sejak DP; ringkasan pembayaran
+// ditempel di lines[].catatan. Kontrak v1 tidak berubah. String uji di bawah
+// SAMA PERSIS dengan keluaran `paymentSummaryText` MSDPS
+// (`lib/bridge/payload.ts`, diuji `scripts/qc_bridge_payload.mjs`).
+// ---------------------------------------------------------------------------
+
+const NOTE_DP = '[Pembayaran klien saat diteruskan: DP 30% — Rp 4.500.000 dari Rp 15.000.000]';
+const NOTE_DP_DESIMAL = '[Pembayaran klien saat diteruskan: DP 33,3% — Rp 1 dari Rp 3]';
+const NOTE_LUNAS = '[Pembayaran klien: LUNAS 100% — Rp 15.000.000]';
+
+describe('bridge.parseRingkasanPembayaran — teks MSDPS 0377 (murni, tanpa DB)', () => {
+  it('membaca DP dengan nominal dibayar dan total', () => {
+    expect(bridge.parseRingkasanPembayaran(`paket 3 bulan ${NOTE_DP}`)).toEqual({
+      status: 'DP', persen: '30', dibayar: '4500000', total: '15000000', teks: NOTE_DP,
+    });
+  });
+
+  it('membaca persen desimal berkoma apa adanya', () => {
+    expect(bridge.parseRingkasanPembayaran(NOTE_DP_DESIMAL)).toEqual({
+      status: 'DP', persen: '33,3', dibayar: '1', total: '3', teks: NOTE_DP_DESIMAL,
+    });
+  });
+
+  it('membaca LUNAS (satu nominal = total = dibayar)', () => {
+    expect(bridge.parseRingkasanPembayaran(NOTE_LUNAS)).toEqual({
+      status: 'LUNAS', persen: '100', dibayar: '15000000', total: '15000000', teks: NOTE_LUNAS,
+    });
+  });
+
+  it('toleran: catatan lama / null / bukan string / pola rusak → null, tidak pernah melempar', () => {
+    expect(bridge.parseRingkasanPembayaran('Strategi + brief bulanan, paket 6 bulan')).toBeNull();
+    expect(bridge.parseRingkasanPembayaran(null)).toBeNull();
+    expect(bridge.parseRingkasanPembayaran(undefined)).toBeNull();
+    expect(bridge.parseRingkasanPembayaran(42)).toBeNull();
+    expect(bridge.parseRingkasanPembayaran('[Pembayaran klien: CICIL 10% — Rp x]')).toBeNull();
+    expect(bridge.parseRingkasanPembayaran('[Pembayaran klien saat diteruskan: DP 30% — Rp 4.500.000 dari Rp 15.000.000')).toBeNull();
+  });
+
+  it('ringkasanPembayaranOrder: ambil yang pertama dari baris mana pun; payload rusak → null', () => {
+    expect(bridge.ringkasanPembayaranOrder({ lines: [{ catatan: null }, { catatan: `x ${NOTE_DP}` }] })?.status).toBe('DP');
+    expect(bridge.ringkasanPembayaranOrder({ lines: [{ catatan: 'tanpa info' }] })).toBeNull();
+    expect(bridge.ringkasanPembayaranOrder({ lines: 'bukan array' })).toBeNull();
+    expect(bridge.ringkasanPembayaranOrder(null)).toBeNull();
+    expect(bridge.ringkasanPembayaranOrder({ lines: [null, 3, { catatan: NOTE_LUNAS }] })?.status).toBe('LUNAS');
+  });
+
+  it('parsePayloadV1 menerima catatan panjang (500 karakter + ringkasan) berisi — % [ ] , apa adanya', () => {
+    const asli = 'a, b — c % [d] '.repeat(34).slice(0, 500);
+    const payload = rawPayload({
+      lines: [{ jenis: 'Account', qty: 1, catatan: `${asli} ${NOTE_DP}`, alasan_non_roster: null, nilai_cross_charge: null }],
+    });
+    const parsed = bridge.parsePayloadV1(payload);
+    expect(parsed.lines[0].catatan).toBe(`${asli} ${NOTE_DP}`.trim());
+    expect(parsed.lines[0].catatan!.length).toBeGreaterThan(570);
+  });
+});
+
+describeDb('bridge — order DP/LUNAS sejak MSDPS 0377 masuk [Masuk] dan bisa diterima', () => {
+  it('order DP: intake [Masuk], payload tersimpan persis, ringkasan muncul di list & detail; order lama tanpa badge', async () => {
+    await insEmployees();
+    const dp = rawPayload({
+      lines: [
+        { jenis: 'Account', qty: 1, catatan: `paket 3 bulan ${NOTE_DP}`, alasan_non_roster: null, nilai_cross_charge: null },
+        { jenis: 'Ads', qty: 1, catatan: NOTE_DP, alasan_non_roster: null, nilai_cross_charge: '300000.00' },
+      ],
+    });
+    const lama = rawPayload();
+    const a = await bridge.intake(sql, dp, `${dp.deal_code as string}:1`);
+    const b = await bridge.intake(sql, lama, `${lama.deal_code as string}:1`);
+    expect(a.status).toBe('[Masuk]');
+
+    const stored = await sql<{ same: boolean }[]>`
+      select payload = ${dp as unknown as never}::jsonb as same from external_orders where id = ${a.ordCode}`;
+    expect(stored[0].same).toBe(true);
+
+    const detail = await bridge.getOrder(sql, a.ordCode);
+    expect(detail.pembayaran).toEqual({ status: 'DP', persen: '30', dibayar: '4500000', total: '15000000', teks: NOTE_DP });
+    expect(detail.payload.attestation.nilai).toBe('15000000.00'); // tetap total kontrak
+
+    const list = await bridge.listOrders(sql, '[Masuk]');
+    expect(list.find((o) => o.id === a.ordCode)?.pembayaran?.status).toBe('DP');
+    expect(list.find((o) => o.id === b.ordCode)?.pembayaran).toBeNull();
+  });
+
+  it('order LUNAS dengan baris Live Stream diterima begitu Live Stream dipetakan (data, bukan skema)', async () => {
+    await insEmployees();
+    const msvLive = await seedMasterService('Paket Live Stream Uji');
+    await insServiceMap('Live Stream', msvLive);
+    const p = rawPayload({
+      lines: [{ jenis: 'Live Stream', qty: 1, catatan: NOTE_LUNAS, alasan_non_roster: null, nilai_cross_charge: null }],
+    });
+    const { ordCode } = await bridge.intake(sql, p, `${p.deal_code as string}:1`);
+    const result = await bridge.accept(sql, leadAccount(), ordCode, acceptInput());
+    expect(result.status).toBe('[Diterima]');
+    expect(result.pembayaran?.status).toBe('LUNAS');
+    const svc = await sql<{ master_service_id: string }[]>`select master_service_id from services where client_id = ${result.clientId}`;
+    expect(svc.map((r) => r.master_service_id)).toEqual([msvLive]);
+  });
+});
