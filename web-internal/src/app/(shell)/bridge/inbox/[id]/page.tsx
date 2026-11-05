@@ -21,6 +21,7 @@ import { isAccountLead } from '@/lib/account';
 import {
   acceptBridgeOrder,
   getBridgeOrder,
+  JENIS_LIVE_STREAM,
   rejectBridgeOrder,
   type BridgeCandidate,
   type BridgeOrderDetail,
@@ -58,6 +59,7 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
   const [targetGmv, setTargetGmv] = useState('');
   const [linkToko, setLinkToko] = useState('');
   const [kategori, setKategori] = useState('');
+  const [linkDrive, setLinkDrive] = useState('');
   const [alasanTolak, setAlasanTolak] = useState('');
   const [busy, setBusy] = useState<'accept' | 'reject' | null>(null);
   const [aksiError, setAksiError] = useState<string | null>(null);
@@ -95,6 +97,7 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
         target_gmv: targetGmv,
         link_toko: linkToko,
         kategori,
+        link_drive_live_stream: linkDrive.trim() === '' ? null : linkDrive.trim(),
       });
       router.push('/bridge/inbox');
     } catch (err) {
@@ -137,6 +140,7 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
 
   const p = order.payload;
   const belumDiputuskan = order.status === '[Masuk]';
+  const adaLiveStream = p.lines.some((l) => l.jenis === JENIS_LIVE_STREAM);
 
   return (
     <div className="stack">
@@ -266,6 +270,22 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
               <input id="kategori" value={kategori} onChange={(e) => setKategori(e.target.value)} />
             </div>
           </div>
+
+          {adaLiveStream && (
+            <div className="field">
+              <label htmlFor="link-drive">Link Google Drive daftar kerja Live Stream (opsional)</label>
+              <input
+                id="link-drive"
+                value={linkDrive}
+                onChange={(e) => setLinkDrive(e.target.value)}
+                placeholder="https://drive.google.com/..."
+              />
+              <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+                Live Stream dari MSDPS di CDPS hanya berupa daftar kerja di Google Drive — tidak
+                membuat brief atau sesi vendor otomatis. Bisa diisi belakangan dari halaman klien.
+              </p>
+            </div>
+          )}
 
           {aksiError && (
             <div className="alert alertError" role="alert">

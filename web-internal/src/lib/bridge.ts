@@ -97,6 +97,48 @@ export function listKlienBelumLunas(): Promise<{ data: KlienBelumLunas[] }> {
   return api.get<{ data: KlienBelumLunas[] }>('/bridge/belum-lunas');
 }
 
+/** BRIDGE-LIVESTREAM (2026-11-05) — layanan bridge MEAGO + link Google Drive daftar kerja. */
+export interface LayananBridge {
+  service_id: string;
+  name: string;
+  status: string;
+  link_drive: string | null;
+}
+
+/** Satu baris order MSDPS yang sudah diterima — hanya-baca dari payload imutabel. */
+export interface RincianBaris {
+  jenis: string;
+  qty: number | null;
+  catatan: string | null;
+  alasan_non_roster: string | null;
+}
+
+export interface RincianOrder {
+  order_id: string;
+  deal_code: string;
+  diputus_pada: string | null;
+  pembayaran: BridgeRingkasanPembayaran | null;
+  lines: RincianBaris[];
+}
+
+export interface RincianOrderKlien {
+  orders: RincianOrder[];
+  services: LayananBridge[];
+}
+
+/** GET /bridge/clients/{id}/rincian → RincianOrderKlien. */
+export function getRincianOrderKlien(clientId: string): Promise<RincianOrderKlien> {
+  return api.get<RincianOrderKlien>(`/bridge/clients/${clientId}/rincian`);
+}
+
+/** POST /bridge/services/{id}/link-drive → LayananBridge. Kosongkan dengan null. */
+export function setLinkDrive(serviceId: string, linkDrive: string | null): Promise<LayananBridge> {
+  return api.post<LayananBridge>(`/bridge/services/${serviceId}/link-drive`, { link_drive: linkDrive });
+}
+
+/** Jenis baris bridge yang di CDPS hanya berupa daftar kerja di Google Drive. */
+export const JENIS_LIVE_STREAM = 'Live Stream';
+
 export interface BridgeCandidate {
   client_id: string;
   toko: string;
@@ -135,6 +177,8 @@ export interface AcceptBridgeOrderInput {
   target_gmv: string;
   link_toko: string;
   kategori: string;
+  /** Link Google Drive daftar kerja baris Live Stream — opsional. */
+  link_drive_live_stream?: string | null;
 }
 
 /** POST /bridge/orders/{id}/accept → BridgeOrderSummary. */

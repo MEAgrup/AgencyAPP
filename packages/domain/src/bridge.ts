@@ -89,6 +89,30 @@ export const MSG_ALREADY_DECIDED = '[order ini sudah diputuskan]';
 export const MSG_BRIDGE_EMPLOYEE_NOT_FOUND =
   '[employee layanan MEAGO Bridge tidak ditemukan, hubungi admin]';
 export const MSG_CLIENT_NOT_FOUND = '[klien tidak ditemukan]';
+export const MSG_LINK_DRIVE_INVALID =
+  '[link Google Drive tidak valid, gunakan tautan https://drive.google.com atau https://docs.google.com]';
+export const MSG_SERVICE_NOT_FOUND = '[layanan tidak ditemukan]';
+export const MSG_SERVICE_BUKAN_BRIDGE = '[link Google Drive hanya untuk layanan dari Bridge MEAGO]';
+export const MSG_FORBIDDEN_LINK_DRIVE = '[anda tidak memiliki akses untuk mengubah link Google Drive layanan ini]';
+
+/** Jenis baris bridge yang di CDPS hanya berupa daftar kerja di Google Drive (keputusan pemilik 2026-11-05). */
+export const JENIS_LIVE_STREAM = 'Live Stream';
+
+const RE_LINK_DRIVE = /^https:\/\/(drive|docs)\.google\.com\/\S+$/;
+
+/**
+ * normalizeLinkDrive — '' / null → null; selain itu wajib tautan Google Drive
+ * (cermin CHECK `ck_services_link_drive`, supaya pengguna mendapat pesan BI,
+ * bukan galat constraint).
+ */
+export function normalizeLinkDrive(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'string') throw new ValidationError(MSG_LINK_DRIVE_INVALID);
+  const t = v.trim();
+  if (t === '') return null;
+  if (t.length > 500 || !RE_LINK_DRIVE.test(t)) throw new ValidationError(MSG_LINK_DRIVE_INVALID);
+  return t;
+}
 
 // ---------------------------------------------------------------------------
 // Permission — mirrors sm_edges gate (require_lead + require_division=Account)
@@ -527,6 +551,113 @@ export async function listBelumLunas(sql: Queryable): Promise<KlienBelumLunas[]>
 }
 
 // ---------------------------------------------------------------------------
+// BRIDGE-LIVESTREAM + rincian order di halaman klien (keputusan pemilik 2026-11-05)
+// ---------------------------------------------------------------------------
+
+/** Satu baris bridge sebagaimana MSDPS kirim — hanya-baca, dari payload imutabel. */
+export interface RincianBaris {
+  jenis: string;
+  qty: number | null;
+  catatan: string | null;
+  alasanNonRoster: string | null;
+}
+
+export interface RincianOrder {
+  orderId: string;
+  dealCode: string;
+  diputusPada: string | null;
+  pembayaran: RingkasanPembayaran | null;
+  lines: RincianBaris[];
+}
+
+export interface LayananBridge {
+  serviceId: string;
+  name: string;
+  status: string;
+  linkDrive: string | null;
+}
+
+export interface RincianOrderKlien {
+  orders: RincianOrder[];
+  services: LayananBridge[];
+}
+
+/**
+ * rincianOrderKlien — daftar kerja order MSDPS yang SUDAH diterima untuk satu
+ * klien (jenis + catatan per baris), plus layanan `sumber='meago'`-nya dengan
+ * link Google Drive. Row scope = RLS (`external_orders_select` memuat AM klien
+ * tertaut; `services_select`), dipanggil lewat `readAsActor`.
+ */
+export async function rincianOrderKlien(sql: Queryable, clientId: string): Promise<RincianOrderKlien> {
+  const orders = await sql<OrderRow[]>`
+    select * from external_orders
+     where client_id = ${clientId} and status = '[Diterima]'
+     order by diputus_pada desc nulls last`;
+  const services = await sql<{ id: string; name: string; status: string; link_drive: string | null }[]>`
+    select id, name, status, link_drive from services
+     where client_id = ${clientId} and sumber = ${SUMBER_MEAGO}
+     order by id`;
+  return {
+    orders: orders.map((o) => {
+      const p = parsePayloadV1(o.payload);
+      return {
+        orderId: o.id,
+        dealCode: p.dealCode,
+        diputusPada: o.diputus_pada ? o.diputus_pada.toISOString() : null,
+        pembayaran: ringkasanPembayaranOrder(o.payload),
+        lines: p.lines.map((l) => ({
+          jenis: l.jenis,
+          qty: l.qty,
+          catatan: l.catatan,
+          alasanNonRoster: l.alasanNonRoster,
+        })),
+      };
+    }),
+    services: services.map((v) => ({ serviceId: v.id, name: v.name, status: v.status, linkDrive: v.link_drive })),
+  };
+}
+
+/**
+ * setLinkDrive — isi/ganti/kosongkan link Google Drive daftar kerja satu
+ * layanan bridge MEAGO. Gerbang: lead Account / Director (`canDecideOrder`)
+ * ATAU AM yang ditugasi ke klien itu. Hanya layanan `sumber='meago'`.
+ * Satu baris audit before→after (aturan rumah #3).
+ */
+export async function setLinkDrive(
+  sql: Sql,
+  actor: Actor,
+  serviceId: string,
+  rawLink: unknown,
+): Promise<LayananBridge> {
+  const link = normalizeLinkDrive(rawLink);
+  return withTransaction(sql, async (tx) => {
+    const rows = await tx<{ id: string; name: string; status: string; sumber: string; link_drive: string | null; assigned_am_id: string | null }[]>`
+      select s.id, s.name, s.status, s.sumber, s.link_drive, c.assigned_am_id
+        from services s join clients c on c.id = s.client_id
+       where s.id = ${serviceId}
+       for update of s`;
+    if (rows.length === 0) throw new NotFoundError(MSG_SERVICE_NOT_FOUND);
+    const svc = rows[0];
+    if (!canDecideOrder(actor) && svc.assigned_am_id !== actor.employeeId) {
+      throw new ForbiddenError(MSG_FORBIDDEN_LINK_DRIVE);
+    }
+    if (svc.sumber !== SUMBER_MEAGO) throw new ValidationError(MSG_SERVICE_BUKAN_BRIDGE);
+    if (svc.link_drive === link) {
+      return { serviceId: svc.id, name: svc.name, status: svc.status, linkDrive: svc.link_drive };
+    }
+    await tx`update services set link_drive = ${link} where id = ${serviceId}`;
+    await executors(tx).audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'bridge_link_drive',
+      beforeJson: { link_drive: svc.link_drive },
+      afterJson: { link_drive: link },
+      createdBy: actor.employeeId,
+    });
+    return { serviceId: svc.id, name: svc.name, status: svc.status, linkDrive: link };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Writes
 // ---------------------------------------------------------------------------
 
@@ -597,6 +728,11 @@ export interface BridgeAcceptInput {
   kategori: string;
   /** Resolved by the API layer from env `MEAGO_BRIDGE_EMPLOYEE_ID` (D5 opsi b). */
   bridgeEmployeeId: string;
+  /**
+   * BRIDGE-LIVESTREAM (2026-11-05): tautan Google Drive daftar kerja untuk
+   * baris `Live Stream`. Opsional — boleh diisi belakangan lewat setLinkDrive.
+   */
+  linkDriveLiveStream?: string | null;
 }
 
 function parseMoneyField(v: string): string {
@@ -635,6 +771,7 @@ export async function accept(
   if (linkToko === '' || kategori === '') throw new ValidationError(MSG_INCOMPLETE);
   const bridgeEmployeeId = (input.bridgeEmployeeId ?? '').trim();
   if (bridgeEmployeeId === '') throw new ValidationError(MSG_INCOMPLETE);
+  const linkDriveLiveStream = normalizeLinkDrive(input.linkDriveLiveStream);
 
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
@@ -776,11 +913,13 @@ export async function accept(
       await tx`
         insert into services
           (id, client_id, contract_id, master_service_id, master_version_no, name,
-           standard_price, commission_rule, status, requires_strategy_plan, plan_tier, sumber, created_by)
+           standard_price, commission_rule, status, requires_strategy_plan, plan_tier, sumber, created_by,
+           link_drive)
         values
           (${svcId}, ${clientId}, ${ctrId}, ${r.masterServiceId}, ${r.versionNo}, ${r.name},
            ${r.standardPrice}, ${r.commissionRule}, '[Awaiting Onboarding]',
-           ${r.requiresStrategyPlan}, ${r.planTier}, ${SUMBER_MEAGO}, ${actor.employeeId})`;
+           ${r.requiresStrategyPlan}, ${r.planTier}, ${SUMBER_MEAGO}, ${actor.employeeId},
+           ${line.jenis === JENIS_LIVE_STREAM ? linkDriveLiveStream : null})`;
     }
 
     // Account intake gate (M5 §5, account.ts:189 reads exactly this column).

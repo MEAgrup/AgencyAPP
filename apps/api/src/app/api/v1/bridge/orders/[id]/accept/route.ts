@@ -18,6 +18,8 @@ interface Body {
   target_gmv?: string;
   link_toko?: string;
   kategori?: string;
+  /** BRIDGE-LIVESTREAM (2026-11-05): link Google Drive daftar kerja baris Live Stream, opsional. */
+  link_drive_live_stream?: string | null;
 }
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
@@ -32,6 +34,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       linkToko: body.link_toko ?? '',
       kategori: body.kategori ?? '',
       bridgeEmployeeId: process.env.MEAGO_BRIDGE_EMPLOYEE_ID ?? '',
+      linkDriveLiveStream: body.link_drive_live_stream ?? null,
     });
     return json(bridgeOrderSummaryToWire(result));
   });

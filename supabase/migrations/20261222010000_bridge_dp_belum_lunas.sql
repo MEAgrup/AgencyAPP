@@ -27,6 +27,14 @@
 --    error. `clients_select` sudah memuat `jwt_division() = 'Finance'`, jadi
 --    nama toko di daftar follow-up ikut terbaca. Tulis tetap nol policy
 --    (hanya `bridge.accept` lewat service role).
+--
+-- 3. BRIDGE-LIVESTREAM (keputusan pemilik 2026-11-05): baris `Live Stream` dari
+--    MSDPS di CDPS HANYA berupa daftar kerja di Google Drive — tidak ada brief,
+--    sesi LSS-, atau papan divisi otomatis. `services.link_drive` NULLABLE
+--    menyimpan tautan Drive itu; CHECK membatasi ke drive.google.com /
+--    docs.google.com supaya kolom ini tidak jadi tempat tautan sembarang.
+--    Ditulis HANYA lewat `bridge.accept` / `bridge.setLinkDrive` (service role,
+--    beraudit) dan hanya untuk layanan `sumber = 'meago'`.
 -- =============================================================================
 
 ALTER TABLE public.client_external_billing
@@ -64,3 +72,17 @@ COMMENT ON POLICY client_external_billing_select ON public.client_external_billi
   'Bridge Fase 1: read-all, lead Account, AM pemilik klien. BRIDGE-DP '
   '(2026-11-04): + divisi Finance semua level (follow-up klien belum lunas; '
   'preseden O41 20260729032805).';
+
+ALTER TABLE public.services
+    ADD COLUMN link_drive varchar(500) NULL;
+
+ALTER TABLE public.services
+    ADD CONSTRAINT ck_services_link_drive CHECK (
+        link_drive IS NULL
+        OR (sumber = 'meago' AND link_drive ~ '^https://(drive|docs)\.google\.com/'));
+
+COMMENT ON COLUMN public.services.link_drive IS
+  'BRIDGE-LIVESTREAM (2026-11-05): tautan Google Drive berisi daftar kerja untuk '
+  'layanan bridge MEAGO (terutama Live Stream, yang di CDPS hanya berupa daftar '
+  'kerja, tanpa brief/sesi otomatis). Hanya sumber=meago; diisi saat accept atau '
+  'lewat bridge.setLinkDrive (beraudit).';
