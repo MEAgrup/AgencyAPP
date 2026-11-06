@@ -28,11 +28,11 @@ import {
   ChangePendingError,
   commissionAchievement,
   commissionAchievementBatch,
-  ContractRequiredError,
   flagBermasalah,
   ForbiddenError,
   getPaymentStatus,
   IncompleteError,
+  loadTransactionAggregate,
   INST_TERVERIFIKASI,
   NotFoundError,
   overdueLabel,
@@ -237,10 +237,33 @@ describeDb('verifyPayment — Lunas', () => {
     expect(client[0].released_to_account_at).not.toBeNull();
   });
 
-  it('blocks full verification when no contract is attached (§7 Rule 2)', async () => {
-    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
-    await expect(verifyPayment(sql, financeStaff(), { transactionId, amount: '9000000', receivedDate: '2026-06-03' }))
-      .rejects.toBeInstanceOf(ContractRequiredError);
+  /**
+   * SPK opsional (feedback Jia 2026-11-04, ACC pemilik 2026-11-06): a
+   * [Bayar Penuh (Lunas)] deal reaches [Lunas] on its FIRST verification, so the
+   * old §7 Rule 2 gate made the contract mandatory up front in practice and held
+   * the client's release to Account hostage to the client's signature.
+   */
+  it('verifies to [Lunas] WITHOUT a contract — flagged "Belum SPK", not blocked', async () => {
+    const { transactionId, clientId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const res = await verifyPayment(sql, financeStaff(), { transactionId, amount: '9000000', receivedDate: '2026-06-03' });
+    expect(res.paymentStatus).toBe('[Lunas]');
+    expect(res.releasedToAccount).toBe(true);
+    const client = await sql<{ released_to_account_at: Date | null }[]>`
+      select released_to_account_at from clients where id = ${clientId}`;
+    expect(client[0].released_to_account_at).not.toBeNull();
+
+    const before = await loadTransactionAggregate(sql, financeStaff(), transactionId);
+    expect(before.belumSpk).toBe(true);
+
+    // Link menyusul — tanpa mengulang verifikasi; jejaknya di audit.
+    await attachContract(sql, financeStaff(), transactionId, 'https://drive/spk-menyusul.pdf');
+    const after = await loadTransactionAggregate(sql, financeStaff(), transactionId);
+    expect(after.belumSpk).toBe(false);
+    expect(after.paymentStatus).toBe('[Lunas]');
+    const audits = await sql<{ n: number }[]>`
+      select count(*)::int n from audit_log
+      where entity_type = 'transaction' and entity_id = ${transactionId} and action = 'contract_attached'`;
+    expect(audits[0].n).toBe(1);
   });
 
   it('accepts the contract link IN the verification, satisfying the [Lunas] gate', async () => {

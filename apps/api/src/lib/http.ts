@@ -205,7 +205,6 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   ChangeDecidedError: 409, // finance.ChangeDecidedError
   ChangePendingError: 409, // finance.ChangePendingError
   ClientPlatformDuplicateError: 409, // client.PlatformDuplicateError (PX-M2a §4b)
-  ContractRequiredError: 409, // finance.ContractRequiredError
   CreativeConflictError: 409, // creative.ConflictError
   DailyActivityConflictError: 409, // dailyactivity.ConflictError (F-6b — sudah dikoreksi)
   DailyOpsConflictError: 409, // dailyops.ConflictError (M19)

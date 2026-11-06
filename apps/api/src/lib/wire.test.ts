@@ -823,9 +823,17 @@ describe('M5 transactionToWire (Finance #1 — antrean menyebut nama toko)', () 
     paymentStatus: '[Terverifikasi - Sebagian]',
     bermasalah: false,
     contractAttachment: null,
+    belumSpk: true,
     releasedToAccountAt: null,
     installments: [],
   };
+
+  it('carries the "Belum SPK" flag explicitly, both ways (SPK opsional 2026-11-06)', () => {
+    expect(transactionToWire(trx).belum_spk).toBe(true);
+    const done = transactionToWire({ ...trx, contractAttachment: 'https://drive/spk.pdf', belumSpk: false });
+    expect(done.belum_spk).toBe(false);
+    expect(done.contract_attachment).toBe('https://drive/spk.pdf');
+  });
 
   it('carries toko through to the wire, alongside client_id — not instead of it', () => {
     const w = transactionToWire(trx);

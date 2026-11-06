@@ -5,7 +5,7 @@
  * Record releases to Account (§5). Ports Go's handleVerifyPayment.
  *
  * mapError: Incomplete / OverVerification → 400, Forbidden → 403,
- * NotFound → 404, ContractRequired → 409.
+ * NotFound → 404. The contract link is optional (SPK opsional, 2026-11-06).
  *
  * Responds with the re-read Transaction aggregate under `transaction`, at 200 —
  * both to match Go (handleVerifyPayment) and because that is what web-internal
@@ -26,9 +26,8 @@ interface Body {
   proof_of_payment?: string;
   /**
    * Optional contract link, attached in the SAME domain transaction as the
-   * verification (M5 §7 Rule 1). The finance page now carries this field inside
-   * the verification form, so the [Lunas] gate (§7 Rule 2) can be satisfied by
-   * the one submit that trips it instead of a separate action nothing linked to it.
+   * verification (M5 §7 Rule 1). Never required — not even for [Lunas] (SPK
+   * opsional, 2026-11-06); a missing one shows as "Belum SPK".
    */
   contract_attachment?: string;
 }

@@ -113,7 +113,8 @@ export default function FinanceQueuePage() {
         <h1>Finance</h1>
         <p className="muted">
           Antrean transaksi yang belum lunas (M5 §8.1) — menunggu verifikasi lebih dulu, lalu yang
-          sudah terverifikasi sebagian dan masih punya kekurangan pembayaran.
+          sudah terverifikasi sebagian dan masih punya kekurangan pembayaran. Transaksi yang sudah lunas
+          tetapi <strong>Belum SPK</strong> tetap tampil di paling bawah sampai link kontraknya dilengkapi.
         </p>
       </div>
 
@@ -268,7 +269,7 @@ export default function FinanceQueuePage() {
         {loading && <p className="muted">Memuat...</p>}
         {error && <div className="alert alertError" role="alert">{error}</div>}
         {!loading && !error && trxs && trxs.length === 0 && (
-          <div className="emptyState">Tidak ada transaksi yang belum lunas.</div>
+          <div className="emptyState">Tidak ada transaksi yang belum lunas atau belum ber-SPK.</div>
         )}
         {!loading && !error && trxs && trxs.length > 0 && (
           <div className="table-wrap">
@@ -302,7 +303,14 @@ export default function FinanceQueuePage() {
                       <Link href={`/clients/${t.client_id}`}>{t.toko || '—'}</Link>
                       <div className="muted" style={{ fontSize: 12 }}>{t.client_id}</div>
                     </td>
-                    <td><StatusBadge status={t.payment_status} /></td>
+                    <td>
+                      <StatusBadge status={t.payment_status} />
+                      {t.belum_spk && (
+                        <div style={{ marginTop: 4 }}>
+                          <span className="badge badge-amber">Belum SPK</span>
+                        </div>
+                      )}
+                    </td>
                     <td>{t.payment_intent_scheme || '—'}</td>
                     <td>{t.total_agreed_value}</td>
                     <td>{t.amount_verified}</td>

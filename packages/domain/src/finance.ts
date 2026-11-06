@@ -70,8 +70,6 @@ const SCHEDULED_SCHEMES = new Set<string>([SCHEME_TERMIN, SCHEME_DI_BELAKANG]);
 
 /** A verification would push Amount Verified past the agreed total (§3 Rule 4). */
 export const MSG_OVER_VERIFICATION = '[jumlah melebihi total transaksi, periksa kembali]';
-/** The contract must be attached before a Transaction may reach [Lunas] (§7 Rule 2). */
-export const MSG_CONTRACT_REQUIRED = '[kontrak belum diupload, lengkapi sebelum verifikasi penuh]';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -106,14 +104,6 @@ export class OverVerificationError extends Error {
   constructor() {
     super(MSG_OVER_VERIFICATION);
     this.name = 'OverVerificationError';
-  }
-}
-
-/** Full verification blocked: no contract attached yet (verbatim BI, → 409). */
-export class ContractRequiredError extends Error {
-  constructor() {
-    super(MSG_CONTRACT_REQUIRED);
-    this.name = 'ContractRequiredError';
   }
 }
 
@@ -362,9 +352,14 @@ export interface VerifyResult {
  * and on the FIRST verification releases the Client Record to Account (§5) — all
  * in one transaction. Admin & Finance / Director only.
  *
- * Guards (verbatim BI): a verification may not push Amount Verified past the
- * agreed total (OverVerificationError); a Transaction may not reach [Lunas]
- * without a contract attached (ContractRequiredError, §7 Rule 2).
+ * Guard (verbatim BI): a verification may not push Amount Verified past the
+ * agreed total (OverVerificationError).
+ *
+ * The contract (SPK/MoU) is NOT a gate on verification any more — not even the
+ * one that reaches [Lunas] (feedback Jia, ACC pemilik 2026-11-06; M5 §7 Rule 2
+ * di-deviasi, lihat docs/decisions/2026-11-06-spk-opsional-di-verifikasi-payment.md).
+ * A Transaction without one is surfaced as "Belum SPK" (`belumSpk`) and stays on
+ * Finance's queue until the link is attached.
  */
 export async function verifyPayment(
   sql: Sql,
@@ -430,9 +425,7 @@ export async function verifyPayment(
     const instVerified = inst ? await sumVerifiedForInstallment(tx, inst.id) : 0n;
     const instSettled = inst !== null && instVerified + amount >= inst.amount;
 
-    // Contract link recorded in the same transaction, BEFORE the [Lunas] gate is
-    // evaluated — so one submit can carry both the paperwork and the payment that
-    // needs it.
+    // Contract link (optional) recorded in the same transaction as the payment.
     const contractLink = nullString(input.contractAttachment);
     if (contractLink !== null && contractLink !== trx.contractAttachment) {
       await tx`update transactions set contract_attachment = ${contractLink} where id = ${trx.id}`;
@@ -447,11 +440,6 @@ export async function verifyPayment(
     // Target Payment Status. Scheduled schemes reach [Lunas] only when EVERY
     // installment is [Terverifikasi] (§4 Rule 3); Lunas / Sebagian are amount-based.
     const target = await computeTarget(tx, trx, newTotal, instSettled ? inst : null, scheduled);
-
-    // Contract gate (§7 Rule 2): no [Lunas] without a contract attached.
-    if (target === PAYMENT_LUNAS && !trx.contractAttachment) {
-      throw new ContractRequiredError();
-    }
 
     // 1) Append the immutable verification event (one proof per event, §7 Rule 1).
     await tx`
@@ -1912,6 +1900,11 @@ export interface TransactionAggregate {
   paymentStatus: string;
   bermasalah: boolean;
   contractAttachment: string | null;
+  /**
+   * Penanda "Belum SPK" (feedback Jia 2026-11-04): link kontrak SPK/MoU belum
+   * dilampirkan. DERIVED dari `contract_attachment` — tidak pernah disimpan.
+   */
+  belumSpk: boolean;
   releasedToAccountAt: Date | null;
   installments: InstallmentRow[];
 }
@@ -1987,6 +1980,7 @@ async function hydrateAggregate(sql: Queryable, r: TransactionDbRow): Promise<Tr
     paymentStatus: r.payment_status,
     bermasalah: r.bermasalah,
     contractAttachment: r.contract_attachment,
+    belumSpk: (r.contract_attachment ?? '').trim() === '',
     releasedToAccountAt: r.released_to_account_at,
     installments: instRows.map(toInstallmentRow),
   };
@@ -2006,6 +2000,11 @@ async function hydrateAggregate(sql: Queryable, r: TransactionDbRow): Promise<Tr
  * chasing the remainder Finance's work. [Lunas] is the only exit (it is the
  * terminal state, §2), so the list still shrinks on its own.
  *
+ * Satu pengecualian (SPK opsional, 2026-11-06): transaksi [Lunas] yang masih
+ * "Belum SPK" TETAP di antrean — verifikasi tidak lagi menunggu SPK, jadi
+ * antrean inilah tempat Finance memantau dokumen yang tertunda. Ia keluar begitu
+ * link kontrak dilampirkan. Urutannya paling bawah: uang lebih dulu, dokumen kemudian.
+ *
  * The `join clients` is safe under RLS here and is NOT an O52 row-erasure: the
  * live `clients_select` policy carries a `jwt_division() = 'Finance'` arm, so
  * Finance reads the row through the policy rather than around it. Verified by
@@ -2023,7 +2022,9 @@ export async function financeQueue(sql: Queryable, actor: Actor): Promise<Transa
     from transactions t
     join clients c on c.id = t.client_id
     where t.payment_status <> ${PAYMENT_LUNAS}
-    order by case when t.payment_status = ${PAYMENT_MENUNGGU} then 0 else 1 end, t.id`;
+       or coalesce(btrim(t.contract_attachment), '') = ''
+    order by case when t.payment_status = ${PAYMENT_MENUNGGU} then 0
+                  when t.payment_status = ${PAYMENT_LUNAS} then 2 else 1 end, t.id`;
   const out: TransactionAggregate[] = [];
   for (const r of rows) {
     out.push(await hydrateAggregate(sql, r));

@@ -1,6 +1,7 @@
 /**
  * POST /api/v1/transactions/{id}/contract — M5 §7 attach the contract link to a
- * Transaction (the hard gate before [Lunas]). Admin & Finance / Director only.
+ * Transaction — any time, also after [Lunas] ("Belum SPK" → lengkap; SPK opsional
+ * 2026-11-06). Admin & Finance / Director only.
  * Ports Go's handleAttachContract. Forbidden → 403, NotFound → 404,
  * Incomplete → 400.
  */

@@ -6,6 +6,7 @@ import { errorMessage } from '@/lib/api';
 import {
   SCHEME_OPTIONS,
   approveSchemeChange,
+  attachContract,
   cancelSchemeChange,
   createSchedule,
   flagBermasalah,
@@ -74,6 +75,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
   const [verifySubmitting, setVerifySubmitting] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
+  // Link kontrak menyusul — tanpa mengulang verifikasi (feedback Jia 2026-11-04).
+  const [contractSubmitting, setContractSubmitting] = useState(false);
 
   // Jadwal Termin
   const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>([{ amount: '', due_date: '' }]);
@@ -163,10 +166,11 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
   }, [load, loadBermasalah, loadChangeRequests]);
 
   /**
-   * One submit carries the payment AND the contract link (M5 §7 Rule 1): the
-   * contract is the hard gate before [Lunas] (§7 Rule 2), so keeping it behind its
-   * own button meant the verification that trips the gate failed with nothing on
-   * screen connecting the two. The API attaches it in the same DB transaction.
+   * One submit carries the payment AND (optionally) the contract link (M5 §7
+   * Rule 1), attached in the same DB transaction. SPK tidak lagi wajib untuk
+   * verifikasi — termasuk yang mencapai [Lunas] (keputusan 2026-11-06); yang
+   * belum ber-SPK diberi penanda "Belum SPK" dan dilengkapi lewat
+   * handleSaveContract.
    */
   async function handleVerify(e: FormEvent) {
     e.preventDefault();
@@ -192,6 +196,22 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
       setVerifyError(errorMessage(err));
     } finally {
       setVerifySubmitting(false);
+    }
+  }
+
+  /** Lampirkan link kontrak SPK/MoU menyusul, tanpa mengulang verifikasi. */
+  async function handleSaveContract() {
+    setVerifyError(null);
+    setVerifyMessage(null);
+    setContractSubmitting(true);
+    try {
+      await attachContract(id, contractLink);
+      setVerifyMessage('Link kontrak berhasil disimpan.');
+      await load();
+    } catch (err) {
+      setVerifyError(errorMessage(err));
+    } finally {
+      setContractSubmitting(false);
     }
   }
 
@@ -422,10 +442,10 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Kontrak</div>
             <div>
-              {trx.contract_attachment ? (
-                <a href={trx.contract_attachment} target="_blank" rel="noreferrer">Lihat Kontrak</a>
+              {trx.belum_spk ? (
+                <span className="badge badge-amber">Belum SPK</span>
               ) : (
-                '—'
+                <a href={trx.contract_attachment} target="_blank" rel="noreferrer">Lihat Kontrak</a>
               )}
             </div>
           </div>
@@ -548,17 +568,34 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               />
             </div>
           </div>
-          {/* Contract link lives in this form, not behind its own button: it is the
-              hard gate before [Lunas] (M5 §7 Rule 2), so it belongs to the submit
-              that needs it. Saved in the same transaction as the verification. */}
+          {/* Link kontrak SPK/MoU OPSIONAL (keputusan 2026-11-06, feedback Jia):
+              boleh ikut tersimpan bersama verifikasi, atau dilengkapi menyusul
+              lewat tombol di sampingnya tanpa mengulang verifikasi. */}
           <div className="field">
-            <label htmlFor="contract-link">Link Kontrak (wajib sebelum pelunasan)</label>
-            <input
-              id="contract-link"
-              value={contractLink}
-              onChange={(e) => setContractLink(e.target.value)}
-              placeholder="https://..."
-            />
+            <label htmlFor="contract-link">Link Kontrak SPK/MoU (opsional, bisa dilengkapi menyusul)</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                id="contract-link"
+                value={contractLink}
+                onChange={(e) => setContractLink(e.target.value)}
+                placeholder="https://..."
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                className="btn"
+                onClick={handleSaveContract}
+                disabled={contractSubmitting || contractLink.trim() === '' || contractLink.trim() === trx.contract_attachment}
+              >
+                {contractSubmitting ? 'Menyimpan...' : 'Simpan Link Kontrak'}
+              </button>
+            </div>
+            {trx.belum_spk && (
+              <p className="muted" style={{ fontSize: 13, margin: '4px 0 0' }}>
+                Transaksi ini <strong>Belum SPK</strong> — verifikasi pembayaran tetap bisa disimpan; transaksi tetap
+                di antrean Finance sampai link kontrak dilengkapi.
+              </p>
+            )}
           </div>
           <div>
             <button type="submit" className="btn btnPrimary" disabled={verifySubmitting}>

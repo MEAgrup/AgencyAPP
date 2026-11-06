@@ -30,6 +30,12 @@ export interface Transaction {
   payment_status: string;
   bermasalah: boolean;
   contract_attachment: string;
+  /**
+   * Penanda "Belum SPK" (feedback Jia 2026-11-04): link kontrak SPK/MoU belum
+   * dilampirkan. Verifikasi pembayaran TIDAK menunggu SPK; transaksi ini tetap
+   * di antrean Finance sampai link-nya dilengkapi.
+   */
+  belum_spk: boolean;
   released_to_account_at: string | null;
   installments: Installment[];
   /**
