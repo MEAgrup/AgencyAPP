@@ -86,6 +86,8 @@ interface PayloadOpts {
   externalId?: string;
   attestation?: Partial<{ diverifikasi_pada: string | null; bentuk_kerjasama: string }>;
   lines?: Record<string, unknown>[];
+  /** Baseline BD (field opsional, owner ACC 2026-11-06). Absen = payload lama. */
+  baseline?: Record<string, unknown>;
 }
 
 function rawPayload(opts: PayloadOpts = {}): Record<string, unknown> {
@@ -103,6 +105,7 @@ function rawPayload(opts: PayloadOpts = {}): Record<string, unknown> {
       pic_whatsapp: '0812xxxx',
       tanggal_mulai_kontrak: '2026-09-15',
       tanggal_akhir_kontrak: '2027-03-15',
+      ...opts.baseline,
     },
     attestation: {
       external_trx_ref: `ZBR-TRX-${uniq()}`,
@@ -118,10 +121,6 @@ function rawPayload(opts: PayloadOpts = {}): Record<string, unknown> {
 
 const acceptInput = (over: Partial<bridge.BridgeAcceptInput> = {}): bridge.BridgeAcceptInput => ({
   existingClientId: null,
-  gmvBaseline: '0',
-  targetGmv: '0',
-  linkToko: 'https://toko.example/uji',
-  kategori: 'Dining',
   bridgeEmployeeId: BRIDGE_EMP,
   ...over,
 });
@@ -236,6 +235,81 @@ describeDb('bridge.accept — unmapped service fails the WHOLE accept, atomicall
     const order = await sql<{ status: string; client_id: string | null }[]>`select status, client_id from external_orders where id = ${ordCode}`;
     expect(order[0].status).toBe('[Masuk]');
     expect(order[0].client_id).toBeNull();
+  });
+});
+
+// Owner ACC 2026-11-06 (membalik D7): baseline datang dari transaksi MSDPS yang
+// didaftarkan BD, bukan diketik Head. Pure-parser tests — no DB needed.
+describe('parsePayloadV1 — baseline BD opsional', () => {
+  it('membaca gmv_baseline/target_gmv/link_toko/kategori bila dikirim BD', () => {
+    const p = bridge.parsePayloadV1(rawPayload({
+      baseline: { gmv_baseline: '25000000', target_gmv: '40000000.00', link_toko: 'https://shop.example/x', kategori: 'Kuliner' },
+    }));
+    expect(p.merchant.gmvBaseline).toBe('25000000.00');
+    expect(p.merchant.targetGmv).toBe('40000000.00');
+    expect(p.merchant.linkToko).toBe('https://shop.example/x');
+    expect(p.merchant.kategori).toBe('Kuliner');
+  });
+
+  it('payload lama tanpa field baseline tetap lolos — semua null, tanpa pesan data tidak lengkap', () => {
+    const p = bridge.parsePayloadV1(rawPayload());
+    expect(p.merchant.gmvBaseline).toBeNull();
+    expect(p.merchant.targetGmv).toBeNull();
+    expect(p.merchant.linkToko).toBeNull();
+    expect(p.merchant.kategori).toBeNull();
+    const p2 = bridge.parsePayloadV1(rawPayload({ baseline: { gmv_baseline: null, target_gmv: '', link_toko: '  ', kategori: null } }));
+    expect(p2.merchant.gmvBaseline).toBeNull();
+    expect(p2.merchant.targetGmv).toBeNull();
+    expect(p2.merchant.linkToko).toBeNull();
+  });
+
+  it('uang rusak (format lokal) ditolak, bukan ditebak', () => {
+    expect(() => bridge.parsePayloadV1(rawPayload({ baseline: { gmv_baseline: 'dua puluh juta' } }))).toThrow(ValidationError);
+  });
+
+  it('baselineFromPayload: field kosong jatuh ke nilai netral + dicatat; kategori fallback ke kategori POI', () => {
+    const kosong = bridge.baselineFromPayload(bridge.parsePayloadV1(rawPayload()).merchant);
+    expect(kosong).toEqual({
+      gmvBaseline: '0.00', targetGmv: '0.00', linkToko: '', kategori: 'Dining',
+      kosong: ['gmv_baseline', 'target_gmv', 'link_toko', 'kategori'],
+    });
+    const isi = bridge.baselineFromPayload(bridge.parsePayloadV1(rawPayload({
+      baseline: { gmv_baseline: '1000', target_gmv: '2000', link_toko: 'https://t.example', kategori: 'Hotel' },
+    })).merchant);
+    expect(isi).toEqual({ gmvBaseline: '1000.00', targetGmv: '2000.00', linkToko: 'https://t.example', kategori: 'Hotel', kosong: [] });
+  });
+});
+
+describeDb('bridge.accept — baseline dari MSDPS (membalik D7)', () => {
+  it('Head menerima TANPA mengetik baseline; CLI- baru memakai nilai BD dari payload', async () => {
+    await insEmployees();
+    const msv = await seedMasterService('Paket Account Uji Baseline');
+    await insServiceMap('Account', msv);
+    const { ordCode } = await bridge.intake(
+      sql,
+      rawPayload({ baseline: { gmv_baseline: '25000000', target_gmv: '40000000', link_toko: 'https://shop.example/bd', kategori: 'Kuliner' } }),
+      `ZBR-DEAL-${uniq()}:1`,
+    );
+    const result = await bridge.accept(sql, leadAccount(), ordCode, acceptInput());
+    const cli = await sql<{ gmv_baseline: string; target_gmv: string; link_toko: string; kategori: string }[]>`
+      select gmv_baseline::text, target_gmv::text, link_toko, kategori from clients where id = ${result.clientId}`;
+    expect(cli[0]).toEqual({ gmv_baseline: '25000000.00', target_gmv: '40000000.00', link_toko: 'https://shop.example/bd', kategori: 'Kuliner' });
+  });
+
+  it('baseline kosong di MSDPS TIDAK memunculkan "data tidak lengkap" — order tetap diterima, kekosongan diaudit', async () => {
+    await insEmployees();
+    const msv = await seedMasterService('Paket Account Uji Baseline Kosong');
+    await insServiceMap('Account', msv);
+    const { ordCode } = await bridge.intake(sql, rawPayload(), `ZBR-DEAL-${uniq()}:1`);
+    const result = await bridge.accept(sql, leadAccount(), ordCode, acceptInput());
+    expect(result.status).toBe('[Diterima]');
+    const cli = await sql<{ gmv_baseline: string; kategori: string; link_toko: string }[]>`
+      select gmv_baseline::text, kategori, link_toko from clients where id = ${result.clientId}`;
+    expect(cli[0]).toEqual({ gmv_baseline: '0.00', kategori: 'Dining', link_toko: '' });
+    const aud = await sql<{ after_json: { baseline_sumber?: string; baseline_kosong?: string[] } }[]>`
+      select after_json from audit_log where entity_type = 'client' and entity_id = ${result.clientId} and action = 'create'`;
+    expect(aud[0].after_json.baseline_sumber).toBe('msdps');
+    expect(aud[0].after_json.baseline_kosong).toEqual(['gmv_baseline', 'target_gmv', 'link_toko', 'kategori']);
   });
 });
 

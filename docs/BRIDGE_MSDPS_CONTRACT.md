@@ -47,7 +47,14 @@ Response: `{ "ord_code": "ORD-202609-0001", "status": "[Masuk]" }`.
     "pic_nama": "…",
     "pic_whatsapp": "…" | null,
     "tanggal_mulai_kontrak": "YYYY-MM-DD",  // WIB calendar string, NOT a visit window
-    "tanggal_akhir_kontrak": "YYYY-MM-DD"
+    "tanggal_akhir_kontrak": "YYYY-MM-DD",
+    // ── Baseline BD (OPSIONAL, additive v1 — owner ACC 2026-11-06, membalik D7) ──
+    // Diisi BD saat mendaftarkan transaksi di MSDPS. Absen/null = belum diisi;
+    // CDPS TIDAK menolak order karena ini kosong.
+    "gmv_baseline": "25000000.00" | null,   // integer-rupiah DECIMAL string
+    "target_gmv": "40000000.00" | null,     // integer-rupiah DECIMAL string
+    "link_toko": "https://…" | null,
+    "kategori": "…" | null                  // kategori toko (≠ kategori_poi)
   },
   "attestation": {                  // MANDATORY block — CDPS refuses an order
                                      // without it, for ANY actor, Director
@@ -116,9 +123,14 @@ nothing caches a parsed/renamed copy.
 
 - No CDPS `TRX-`/transaction id — CDPS never creates a shadow transaction for
   a MEAGO order (see `docs/DECISIONS.md` 2026-09-10, A7 anti-drift).
-- No `gmv_baseline`/`target_gmv`/`link_toko`/`kategori` — these are typed by
-  the human accepting the order (D7), never derived from MSDPS data whose
-  definitions differ from CDPS's own.
+- ~~No `gmv_baseline`/`target_gmv`/`link_toko`/`kategori`~~ — **dicabut
+  2026-11-06** (`docs/decisions/2026-11-06-bridge-baseline-dari-msdps.md`,
+  membalik D7): keempatnya kini field OPSIONAL di blok `merchant`, diisi BD di
+  MSDPS dan ditampilkan read-only ke Head Account saat Terima order. Head
+  tidak mengetik ulang. Field kosong → CDPS menyimpan nilai netral
+  (`0.00` / `''` / `kategori_poi`) dan mencatat daftar field kosong di audit
+  `client.create` (`baseline_kosong`); tidak pernah memunculkan
+  `[data tidak lengkap…]`. Uang yang diisi tapi rusak tetap ditolak di intake.
 - No status callback fields — Fase 1 is one-way. `cdps_order_status` and any
   polling belong to Fase 2.
 
