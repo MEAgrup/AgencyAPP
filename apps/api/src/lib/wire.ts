@@ -264,6 +264,8 @@ export interface IntakeClientWire {
   kota: string;
   kategori: string;
   service_count: number;
+  /** Services bought (§3 Flow 2); `[]` when none — never absent. */
+  services: { service_id: string; name: string }[];
   released_to_account_at: string | null;
 }
 
@@ -275,6 +277,7 @@ export function intakeClientToWire(c: account.IntakeClient): IntakeClientWire {
     kota: c.kota,
     kategori: c.kategori,
     service_count: c.serviceCount,
+    services: c.services.map((sv) => ({ service_id: sv.serviceId, name: sv.name })),
     released_to_account_at: c.releasedToAccountAt ? c.releasedToAccountAt.toISOString() : null,
   };
 }

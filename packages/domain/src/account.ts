@@ -138,8 +138,18 @@ export function canReadIntake(a: Actor): boolean {
 // ---------------------------------------------------------------------------
 
 /**
+ * IntakeService is one Service the client bought, shown inline on its intake row
+ * so SPV sees *what* was bought (§3 Flow 2 "services bought"), not just a count.
+ */
+export interface IntakeService {
+  serviceId: string;
+  name: string;
+}
+
+/**
  * IntakeClient is one row of the Unassigned Intake Queue (§3 Rule 1) — the slim
- * projection SPV needs to pick an AM (client profile + when it was released).
+ * projection SPV needs to pick an AM (client profile, services bought, and when
+ * it was released).
  */
 export interface IntakeClient {
   clientId: string;
@@ -148,6 +158,8 @@ export interface IntakeClient {
   kota: string;
   kategori: string;
   serviceCount: number;
+  /** Services bought, oldest Service ID first; empty array (never absent) when none. */
+  services: IntakeService[];
   releasedToAccountAt: Date | null;
 }
 
@@ -182,10 +194,13 @@ export async function intakeQueue(sql: Queryable, actor: Actor): Promise<IntakeC
     {
       id: string; nama_pic: string; toko: string; kota: string; kategori: string;
       service_count: string; released_to_account_at: Date | null;
+      services: { service_id: string; name: string }[] | null;
     }[]
   >`
     select c.id, c.nama_pic, c.toko, c.kota, c.kategori,
            (select count(*) from services s where s.client_id = c.id) as service_count,
+           (select json_agg(json_build_object('service_id', s.id, 'name', s.name) order by s.id)
+              from services s where s.client_id = c.id) as services,
            c.released_to_account_at
       from clients c
      where c.released_to_account_at is not null
@@ -194,7 +209,9 @@ export async function intakeQueue(sql: Queryable, actor: Actor): Promise<IntakeC
      order by c.released_to_account_at asc, c.id asc`;
   return rows.map((r) => ({
     clientId: r.id, namaPic: r.nama_pic, toko: r.toko, kota: r.kota, kategori: r.kategori,
-    serviceCount: Number(r.service_count), releasedToAccountAt: r.released_to_account_at,
+    serviceCount: Number(r.service_count),
+    services: (r.services ?? []).map((sv) => ({ serviceId: sv.service_id, name: sv.name })),
+    releasedToAccountAt: r.released_to_account_at,
   }));
 }
 

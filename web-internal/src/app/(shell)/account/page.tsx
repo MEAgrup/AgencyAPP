@@ -524,7 +524,7 @@ export default function AccountWorkspacePage() {
                     <th>Toko</th>
                     <th>Kota</th>
                     <th>Kategori</th>
-                    <th>Service</th>
+                    <th>Layanan Dibeli</th>
                     <th>Dirilis ke Account</th>
                     <th></th>
                   </tr>
@@ -536,7 +536,23 @@ export default function AccountWorkspacePage() {
                       <td>{c.toko || '—'}</td>
                       <td>{c.kota || '—'}</td>
                       <td>{c.kategori || '—'}</td>
-                      <td>{c.service_count}</td>
+                      <td>
+                        {c.services.length === 0 ? (
+                          '—'
+                        ) : (
+                          <ul style={{ margin: 0, paddingLeft: 16 }}>
+                            {c.services.map((sv) => (
+                              <li key={sv.service_id}>
+                                {sv.name || '—'}{' '}
+                                <span className="muted" style={{ fontSize: 11 }}>{sv.service_id}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {c.services.length > 1 && (
+                          <div className="muted" style={{ fontSize: 11 }}>{c.service_count} layanan</div>
+                        )}
+                      </td>
                       <td>{formatDate(c.released_to_account_at)}</td>
                       <td>
                         {canManage && (
