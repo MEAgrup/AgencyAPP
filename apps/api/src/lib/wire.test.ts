@@ -219,20 +219,31 @@ describe('M6 account wire mappers', () => {
   it('intakeClientToWire maps IntakeClient (ISO released_to_account_at)', () => {
     const c: account.IntakeClient = {
       clientId: 'CLI-202607-0001', namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta',
-      kategori: 'Fashion', serviceCount: 2, releasedToAccountAt: new Date('2026-07-01T00:00:00.000Z'),
+      kategori: 'Fashion', serviceCount: 2,
+      services: [
+        { serviceId: 'SVC-202607-0001', name: 'TikTok Shop Full Management' },
+        { serviceId: 'SVC-202607-0002', name: 'Shopee Ads' },
+      ],
+      releasedToAccountAt: new Date('2026-07-01T00:00:00.000Z'),
     };
     expect(intakeClientToWire(c)).toEqual({
       client_id: 'CLI-202607-0001', nama_pic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta',
-      kategori: 'Fashion', service_count: 2, released_to_account_at: '2026-07-01T00:00:00.000Z',
+      kategori: 'Fashion', service_count: 2,
+      services: [
+        { service_id: 'SVC-202607-0001', name: 'TikTok Shop Full Management' },
+        { service_id: 'SVC-202607-0002', name: 'Shopee Ads' },
+      ],
+      released_to_account_at: '2026-07-01T00:00:00.000Z',
     });
   });
 
   it('intakeClientToWire renders a null release timestamp as null', () => {
     const c: account.IntakeClient = {
       clientId: 'CLI-1', namaPic: 'P', toko: 'T', kota: 'K', kategori: 'F',
-      serviceCount: 0, releasedToAccountAt: null,
+      serviceCount: 0, services: [], releasedToAccountAt: null,
     };
     expect(intakeClientToWire(c).released_to_account_at).toBeNull();
+    expect(intakeClientToWire(c).services).toEqual([]);
   });
 
   it('amWorkloadToWire maps AMWorkload', () => {

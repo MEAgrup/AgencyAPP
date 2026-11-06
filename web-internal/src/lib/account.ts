@@ -29,6 +29,8 @@ export interface IntakeClient {
   kota: string;
   kategori: string;
   service_count: number;
+  /** Services bought (M6 §3 Flow 2), oldest Service ID first; [] when none. */
+  services: { service_id: string; name: string }[];
   released_to_account_at: string | null; // RFC3339 or null (explicit *time.Time)
 }
 

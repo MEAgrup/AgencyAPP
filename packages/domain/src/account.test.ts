@@ -402,6 +402,21 @@ describeDb('intakeQueue + workload (§3 Rule 1 / Rule 5)', () => {
     expect(ids).toContain(q1);
     expect(ids).not.toContain(q2);
     expect(ids).not.toContain(pre);
+    // No Service yet → explicit empty list, never absent.
+    expect(q.find((r) => r.clientId === q1)?.services).toEqual([]);
+
+    // §3 Flow 2 "services bought": each Service is listed by name, oldest ID first.
+    const base = nextSvcId();
+    const svcA = `${base}-A`;
+    const svcB = `${base}-B`;
+    await insertService(svcB, q1, false, '[Awaiting Onboarding]');
+    await insertService(svcA, q1, true, '[Awaiting Onboarding]');
+    const row = (await intakeQueue(sql, accountLead())).find((r) => r.clientId === q1);
+    expect(row?.serviceCount).toBe(2);
+    expect(row?.services).toEqual([
+      { serviceId: svcA, name: 'TikTok Shop Full Management' },
+      { serviceId: svcB, name: 'TikTok Shop Full Management' },
+    ]);
 
     for (const a of [od(), director()]) {
       await expect(intakeQueue(sql, a)).resolves.toBeTruthy();
