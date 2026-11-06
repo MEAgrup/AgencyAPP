@@ -2,7 +2,8 @@
  * /api/v1/daily-activities — F-6 (feedback lapangan 2026-09-14): log (POST) and
  * list (GET) daily work activities (Meeting Klien/Internal, Training, Webinar,
  * Input Data, Lainnya). Row scope is entirely RLS's (`daily_activities_select`,
- * migration 20261021010000) — staff sees own rows, Lead/SPV the whole division,
+ * migration 20261021010000 + F-6c 20261222010000) — staff sees own rows, Lead/SPV
+ * the whole division (Head of Account also Ads/KOL/AI Optimizer/Store Operation),
  * OD/Director everything — so GET reads through `readAsActor` and passes
  * whatever filters the caller sent straight to the domain layer.
  */

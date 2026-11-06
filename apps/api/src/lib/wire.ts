@@ -3840,6 +3840,8 @@ export interface DailyActivityWire {
   id: string;
   employee_id: string;
   employee_nama: string;
+  /** F-6c — jabatan HRIS pelaku (label filter Riwayat), null kalau tak terpetakan. */
+  employee_jabatan: string | null;
   divisi: string;
   activity_type: string;
   activity_date: string;
@@ -3860,6 +3862,7 @@ export function dailyActivityToWire(a: dailyactivity.DailyActivity): DailyActivi
     id: a.id,
     employee_id: a.employeeId,
     employee_nama: a.employeeNama,
+    employee_jabatan: a.employeeJabatan,
     divisi: a.divisi,
     activity_type: a.activityType,
     activity_date: a.activityDate,
