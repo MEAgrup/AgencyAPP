@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { errorMessage, isForbidden } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { canEditClientProfile, isAccountLead, isAccountStaff } from '@/lib/account';
+import RincianOrderMsdpsPanel from '@/components/bridge/RincianOrderMsdpsPanel';
 import {
   PRASYARAT_LABELS,
   VERDICT_LABELS,
@@ -823,6 +824,13 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           barisnya saling menaut (Service → sesi yang mencakupnya, dan
           sebaliknya). Anchor `#interview` dipertahankan: Service hub
           menautkannya. */}
+      {/* Bridge MSDPS (keputusan pemilik 2026-11-05) — daftar kerja order MEAGO +
+          link Google Drive per layanan. Dirender hanya bila klien punya order bridge. */}
+      <RincianOrderMsdpsPanel
+        clientId={id}
+        bolehUbah={isAccountStaff(role) || isAccountLead(role) || !!role?.director}
+      />
+
       <section className="card" id="delivery">
         <div className="cardHeader">
           <h2>Delivery Klien</h2>

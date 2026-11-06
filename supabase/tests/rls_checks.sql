@@ -1921,6 +1921,46 @@ END $$;
 
 RESET ROLE;
 
+-- ---------------------------------------------------------------------------
+-- 50. BRIDGE-DP (migrasi 20261222010000, keputusan pemilik 2026-11-04 opsi b)
+--     — Finance (staff maupun lead) membaca `client_external_billing` untuk
+--     follow-up klien MEAGO yang diteruskan saat baru DP. Preseden O41: arm
+--     lead-saja memberi Finance staff daftar KOSONG tanpa error. Kontrol
+--     negatif: staff divisi lain yang tidak memiliki klien tetap nol baris.
+-- ---------------------------------------------------------------------------
+RESET ROLE;
+
+INSERT INTO clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline,
+                     target_gmv, sales_pic_id, commission_payment_pic_id, created_by)
+VALUES ('CLI-RLS-DP', 'PIC DP', 'Toko DP', 'Bandung', 'http://x/dp', 'Dining', 0, 0,
+        'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER');
+
+INSERT INTO client_external_billing
+  (client_id, sumber, external_deal_code, external_trx_ref, bentuk_kerjasama, nilai,
+   diverifikasi_pada, dilaporkan_oleh, persen_terbayar_saat_diteruskan, nominal_terbayar_saat_diteruskan)
+VALUES ('CLI-RLS-DP', 'meago', 'DEAL-RLS-DP', 'TRX-RLS-DP', 'Berbayar', 15000000,
+        now(), 'EMP-RLS-SLS1', 30.0, 4500000);
+
+SET LOCAL ROLE authenticated;
+
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-FIN1","division":"Finance","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM client_external_billing WHERE client_id='CLI-RLS-DP') <> 1
+  THEN RAISE EXCEPTION 'RLS client_external_billing: Finance STAFF harus membaca baris follow-up DP (BRIDGE-DP, preseden O41)'; END IF;
+  IF (SELECT count(*) FROM clients WHERE id='CLI-RLS-DP') <> 1
+  THEN RAISE EXCEPTION 'RLS clients: Finance harus membaca klien yang ia follow-up (nama toko di daftar belum lunas)'; END IF;
+END $$;
+
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE9","division":"Creative","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM client_external_billing WHERE client_id='CLI-RLS-DP') <> 0
+  THEN RAISE EXCEPTION 'RLS client_external_billing: staff divisi lain yang tidak memiliki klien TIDAK boleh membaca atestasi pembayaran'; END IF;
+END $$;
+
+RESET ROLE;
+
 ROLLBACK;
 
 \echo 'rls_checks: PASS'

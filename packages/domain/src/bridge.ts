@@ -89,6 +89,30 @@ export const MSG_ALREADY_DECIDED = '[order ini sudah diputuskan]';
 export const MSG_BRIDGE_EMPLOYEE_NOT_FOUND =
   '[employee layanan MEAGO Bridge tidak ditemukan, hubungi admin]';
 export const MSG_CLIENT_NOT_FOUND = '[klien tidak ditemukan]';
+export const MSG_LINK_DRIVE_INVALID =
+  '[link Google Drive tidak valid, gunakan tautan https://drive.google.com atau https://docs.google.com]';
+export const MSG_SERVICE_NOT_FOUND = '[layanan tidak ditemukan]';
+export const MSG_SERVICE_BUKAN_BRIDGE = '[link Google Drive hanya untuk layanan dari Bridge MEAGO]';
+export const MSG_FORBIDDEN_LINK_DRIVE = '[anda tidak memiliki akses untuk mengubah link Google Drive layanan ini]';
+
+/** Jenis baris bridge yang di CDPS hanya berupa daftar kerja di Google Drive (keputusan pemilik 2026-11-05). */
+export const JENIS_LIVE_STREAM = 'Live Stream';
+
+const RE_LINK_DRIVE = /^https:\/\/(drive|docs)\.google\.com\/\S+$/;
+
+/**
+ * normalizeLinkDrive — '' / null → null; selain itu wajib tautan Google Drive
+ * (cermin CHECK `ck_services_link_drive`, supaya pengguna mendapat pesan BI,
+ * bukan galat constraint).
+ */
+export function normalizeLinkDrive(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'string') throw new ValidationError(MSG_LINK_DRIVE_INVALID);
+  const t = v.trim();
+  if (t === '') return null;
+  if (t.length > 500 || !RE_LINK_DRIVE.test(t)) throw new ValidationError(MSG_LINK_DRIVE_INVALID);
+  return t;
+}
 
 // ---------------------------------------------------------------------------
 // Permission — mirrors sm_edges gate (require_lead + require_division=Account)
@@ -226,6 +250,98 @@ export function parsePayloadV1(raw: unknown): BridgeOrderPayloadV1 {
 }
 
 // ---------------------------------------------------------------------------
+// Ringkasan pembayaran klien di `lines[].catatan` (MSDPS 0377, 2026-11-04).
+//
+// Sejak MSDPS 0377 order masuk OTOMATIS begitu Finance MSDPS memverifikasi
+// pembayaran PERTAMA — DP pun cukup. Kontrak v1 TIDAK berubah (nol kunci
+// baru): MSDPS menempelkan ringkasan pembayaran di ujung setiap
+// `lines[].catatan`, dibangun oleh `paymentSummaryText` di MSDPS
+// `lib/bridge/payload.ts`:
+//
+//   "[Pembayaran klien saat diteruskan: DP 30% — Rp 4.500.000 dari Rp 15.000.000]"
+//   "[Pembayaran klien: LUNAS 100% — Rp 15.000.000]"
+//
+// Ini TEKS UNTUK MANUSIA, bukan field kontrak — jadi parser di bawah toleran
+// penuh: catatan tanpa pola (order sebelum 2026-11-04, atau catatan null)
+// menghasilkan `null`, tidak pernah melempar. Hasilnya hanya untuk
+// ditampilkan di antrean; payload tersimpan tidak disentuh (imutabel), dan
+// tidak ada keputusan otomatis yang bergantung padanya. `docs/decisions/
+// 2026-11-03-amandemen-bridge-fase1-order-otomatis-sejak-dp.md`.
+// ---------------------------------------------------------------------------
+
+export interface RingkasanPembayaran {
+  /** 'DP' (sebagian) | 'LUNAS'. */
+  status: 'DP' | 'LUNAS';
+  /** Persen persis seperti tercetak MSDPS (dibulatkan ke bawah, koma desimal), mis. "30", "33,3". */
+  persen: string;
+  /** Rupiah bulat sebagai string desimal ("4500000"), atau null bila tak terbaca. */
+  dibayar: string | null;
+  total: string | null;
+  /** Teks ringkasan apa adanya, termasuk kurung siku — untuk tooltip. */
+  teks: string;
+}
+
+const RE_RINGKASAN_PEMBAYARAN =
+  /\[Pembayaran klien(?: saat diteruskan)?:\s*(DP|LUNAS)\s+(\d+(?:[.,]\d+)?)\s*%\s*[—–-]\s*Rp\.?\s*([\d.]+)(?:\s+dari\s+Rp\.?\s*([\d.]+))?\s*\]/;
+
+function rupiahDigits(s: string | undefined): string | null {
+  if (s === undefined) return null;
+  const digits = s.replace(/\./g, '');
+  return /^\d+$/.test(digits) ? String(BigInt(digits)) : null;
+}
+
+/** parseRingkasanPembayaran — null bila catatan tidak memuat pola MSDPS 0377. Tidak pernah melempar. */
+export function parseRingkasanPembayaran(catatan: unknown): RingkasanPembayaran | null {
+  if (typeof catatan !== 'string') return null;
+  const m = RE_RINGKASAN_PEMBAYARAN.exec(catatan);
+  if (m === null) return null;
+  const status = m[1] as 'DP' | 'LUNAS';
+  const pertama = rupiahDigits(m[3]);
+  const kedua = rupiahDigits(m[4]);
+  return {
+    status,
+    persen: m[2],
+    // LUNAS mencetak satu nominal (total); DP mencetak "<dibayar> dari <total>".
+    dibayar: pertama,
+    total: status === 'LUNAS' ? pertama : kedua,
+    teks: m[0],
+  };
+}
+
+/**
+ * ringkasanPembayaranOrder — ringkasan pertama yang ditemukan di baris order.
+ * Membaca payload MENTAH (snake_case) secara toleran, bukan lewat
+ * parsePayloadV1, supaya daftar antrean tidak pernah gagal karena teks bantu.
+ */
+export function ringkasanPembayaranOrder(rawPayload: unknown): RingkasanPembayaran | null {
+  if (rawPayload === null || typeof rawPayload !== 'object') return null;
+  const lines = (rawPayload as Record<string, unknown>).lines;
+  if (!Array.isArray(lines)) return null;
+  for (const l of lines) {
+    if (l === null || typeof l !== 'object') continue;
+    const r = parseRingkasanPembayaran((l as Record<string, unknown>).catatan);
+    if (r !== null) return r;
+  }
+  return null;
+}
+
+/**
+ * snapshotPembayaran — kolom `client_external_billing` BRIDGE-DP dari hasil
+ * parse. Persen dicetak MSDPS berkoma ("33,3") → numeric ("33.3"); LUNAS
+ * selalu 100. Nilai di luar 0..100 (teks rusak) dibuang ke null alih-alih
+ * menggagalkan accept lewat CHECK — info ini bantuan, bukan gerbang.
+ */
+export function snapshotPembayaran(
+  r: RingkasanPembayaran | null,
+): { persen: string | null; nominal: string | null } {
+  if (r === null) return { persen: null, nominal: null };
+  const persen = r.status === 'LUNAS' ? '100' : r.persen.replace(',', '.');
+  const n = Number(persen);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return { persen: null, nominal: r.dibayar };
+  return { persen, nominal: r.dibayar };
+}
+
+// ---------------------------------------------------------------------------
 // Shape
 // ---------------------------------------------------------------------------
 
@@ -239,6 +355,8 @@ export interface BridgeOrderSummary {
   ditolakAlasan: string | null;
   diputusOleh: string | null;
   diputusPada: string | null;
+  /** Turunan read-only dari `payload.lines[].catatan` (MSDPS 0377); null = tak ada info. */
+  pembayaran: RingkasanPembayaran | null;
 }
 
 export interface BridgeOrderDetail extends BridgeOrderSummary {
@@ -271,6 +389,7 @@ function rowToSummary(r: OrderRow): BridgeOrderSummary {
     ditolakAlasan: r.ditolak_alasan,
     diputusOleh: r.diputus_oleh,
     diputusPada: r.diputus_pada ? r.diputus_pada.toISOString() : null,
+    pembayaran: ringkasanPembayaranOrder(r.payload),
   };
 }
 
@@ -370,6 +489,175 @@ export async function candidates(sql: Queryable, orderId: string): Promise<Bridg
 }
 
 // ---------------------------------------------------------------------------
+// BRIDGE-DP (opsi b) — daftar follow-up Finance
+// ---------------------------------------------------------------------------
+
+/** Satu klien MEAGO yang order-nya diterima saat pembayaran belum lunas. */
+export interface KlienBelumLunas {
+  clientId: string;
+  toko: string;
+  kota: string;
+  externalDealCode: string;
+  /** Total kontrak (attestation.nilai), string desimal, atau null. */
+  nilai: string | null;
+  persenTerbayar: string;
+  nominalTerbayar: string | null;
+  /** Kapan MSDPS memverifikasi pembayaran pertama (ISO). */
+  diverifikasiPada: string;
+  /** Kapan order diterima di CDPS (baris atestasi ditulis, ISO). */
+  diterimaPada: string;
+}
+
+interface BelumLunasRow {
+  client_id: string;
+  toko: string;
+  kota: string;
+  external_deal_code: string;
+  nilai: string | null;
+  persen_terbayar_saat_diteruskan: string;
+  nominal_terbayar_saat_diteruskan: string | null;
+  diverifikasi_pada: Date;
+  created_at: Date;
+}
+
+/**
+ * listBelumLunas — klien MEAGO yang diterima dengan pembayaran < 100% saat
+ * diteruskan, terbaru dulu. Row scope = RLS (`client_external_billing_select`:
+ * read-all, lead Account, Finance semua level, AM pemilik) — dipanggil lewat
+ * `readAsActor`, tanpa gerbang TS tambahan. SNAPSHOT: MSDPS Fase 1 tidak
+ * mengirim pelunasan, jadi daftar ini tidak menyusut dengan sendirinya.
+ */
+export async function listBelumLunas(sql: Queryable): Promise<KlienBelumLunas[]> {
+  const rows = await sql<BelumLunasRow[]>`
+    select b.client_id, c.toko, c.kota, b.external_deal_code, b.nilai::text as nilai,
+           b.persen_terbayar_saat_diteruskan::text as persen_terbayar_saat_diteruskan,
+           b.nominal_terbayar_saat_diteruskan::text as nominal_terbayar_saat_diteruskan,
+           b.diverifikasi_pada, b.created_at
+      from client_external_billing b
+      join clients c on c.id = b.client_id
+     where b.persen_terbayar_saat_diteruskan < 100
+     order by b.created_at desc`;
+  return rows.map((r) => ({
+    clientId: r.client_id,
+    toko: r.toko,
+    kota: r.kota,
+    externalDealCode: r.external_deal_code,
+    nilai: r.nilai,
+    persenTerbayar: r.persen_terbayar_saat_diteruskan,
+    nominalTerbayar: r.nominal_terbayar_saat_diteruskan,
+    diverifikasiPada: r.diverifikasi_pada.toISOString(),
+    diterimaPada: r.created_at.toISOString(),
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// BRIDGE-LIVESTREAM + rincian order di halaman klien (keputusan pemilik 2026-11-05)
+// ---------------------------------------------------------------------------
+
+/** Satu baris bridge sebagaimana MSDPS kirim — hanya-baca, dari payload imutabel. */
+export interface RincianBaris {
+  jenis: string;
+  qty: number | null;
+  catatan: string | null;
+  alasanNonRoster: string | null;
+}
+
+export interface RincianOrder {
+  orderId: string;
+  dealCode: string;
+  diputusPada: string | null;
+  pembayaran: RingkasanPembayaran | null;
+  lines: RincianBaris[];
+}
+
+export interface LayananBridge {
+  serviceId: string;
+  name: string;
+  status: string;
+  linkDrive: string | null;
+}
+
+export interface RincianOrderKlien {
+  orders: RincianOrder[];
+  services: LayananBridge[];
+}
+
+/**
+ * rincianOrderKlien — daftar kerja order MSDPS yang SUDAH diterima untuk satu
+ * klien (jenis + catatan per baris), plus layanan `sumber='meago'`-nya dengan
+ * link Google Drive. Row scope = RLS (`external_orders_select` memuat AM klien
+ * tertaut; `services_select`), dipanggil lewat `readAsActor`.
+ */
+export async function rincianOrderKlien(sql: Queryable, clientId: string): Promise<RincianOrderKlien> {
+  const orders = await sql<OrderRow[]>`
+    select * from external_orders
+     where client_id = ${clientId} and status = '[Diterima]'
+     order by diputus_pada desc nulls last`;
+  const services = await sql<{ id: string; name: string; status: string; link_drive: string | null }[]>`
+    select id, name, status, link_drive from services
+     where client_id = ${clientId} and sumber = ${SUMBER_MEAGO}
+     order by id`;
+  return {
+    orders: orders.map((o) => {
+      const p = parsePayloadV1(o.payload);
+      return {
+        orderId: o.id,
+        dealCode: p.dealCode,
+        diputusPada: o.diputus_pada ? o.diputus_pada.toISOString() : null,
+        pembayaran: ringkasanPembayaranOrder(o.payload),
+        lines: p.lines.map((l) => ({
+          jenis: l.jenis,
+          qty: l.qty,
+          catatan: l.catatan,
+          alasanNonRoster: l.alasanNonRoster,
+        })),
+      };
+    }),
+    services: services.map((v) => ({ serviceId: v.id, name: v.name, status: v.status, linkDrive: v.link_drive })),
+  };
+}
+
+/**
+ * setLinkDrive — isi/ganti/kosongkan link Google Drive daftar kerja satu
+ * layanan bridge MEAGO. Gerbang: lead Account / Director (`canDecideOrder`)
+ * ATAU AM yang ditugasi ke klien itu. Hanya layanan `sumber='meago'`.
+ * Satu baris audit before→after (aturan rumah #3).
+ */
+export async function setLinkDrive(
+  sql: Sql,
+  actor: Actor,
+  serviceId: string,
+  rawLink: unknown,
+): Promise<LayananBridge> {
+  const link = normalizeLinkDrive(rawLink);
+  return withTransaction(sql, async (tx) => {
+    const rows = await tx<{ id: string; name: string; status: string; sumber: string; link_drive: string | null; assigned_am_id: string | null }[]>`
+      select s.id, s.name, s.status, s.sumber, s.link_drive, c.assigned_am_id
+        from services s join clients c on c.id = s.client_id
+       where s.id = ${serviceId}
+       for update of s`;
+    if (rows.length === 0) throw new NotFoundError(MSG_SERVICE_NOT_FOUND);
+    const svc = rows[0];
+    if (!canDecideOrder(actor) && svc.assigned_am_id !== actor.employeeId) {
+      throw new ForbiddenError(MSG_FORBIDDEN_LINK_DRIVE);
+    }
+    if (svc.sumber !== SUMBER_MEAGO) throw new ValidationError(MSG_SERVICE_BUKAN_BRIDGE);
+    if (svc.link_drive === link) {
+      return { serviceId: svc.id, name: svc.name, status: svc.status, linkDrive: svc.link_drive };
+    }
+    await tx`update services set link_drive = ${link} where id = ${serviceId}`;
+    await executors(tx).audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'bridge_link_drive',
+      beforeJson: { link_drive: svc.link_drive },
+      afterJson: { link_drive: link },
+      createdBy: actor.employeeId,
+    });
+    return { serviceId: svc.id, name: svc.name, status: svc.status, linkDrive: link };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Writes
 // ---------------------------------------------------------------------------
 
@@ -440,6 +728,11 @@ export interface BridgeAcceptInput {
   kategori: string;
   /** Resolved by the API layer from env `MEAGO_BRIDGE_EMPLOYEE_ID` (D5 opsi b). */
   bridgeEmployeeId: string;
+  /**
+   * BRIDGE-LIVESTREAM (2026-11-05): tautan Google Drive daftar kerja untuk
+   * baris `Live Stream`. Opsional — boleh diisi belakangan lewat setLinkDrive.
+   */
+  linkDriveLiveStream?: string | null;
 }
 
 function parseMoneyField(v: string): string {
@@ -478,6 +771,7 @@ export async function accept(
   if (linkToko === '' || kategori === '') throw new ValidationError(MSG_INCOMPLETE);
   const bridgeEmployeeId = (input.bridgeEmployeeId ?? '').trim();
   if (bridgeEmployeeId === '') throw new ValidationError(MSG_INCOMPLETE);
+  const linkDriveLiveStream = normalizeLinkDrive(input.linkDriveLiveStream);
 
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
@@ -564,16 +858,21 @@ export async function accept(
       values (${clientId}, ${SUMBER_MEAGO}, ${payload.merchant.externalId}, ${actor.employeeId})`;
 
     // client_external_billing — the attestation, verbatim from the stored
-    // (immutable) payload.
+    // (immutable) payload. BRIDGE-DP (opsi b, 2026-11-04): the payment
+    // snapshot MSDPS 0377 writes into lines[].catatan is stored alongside it,
+    // so Finance can follow up clients forwarded while still on DP. Null when
+    // the order carries no such text (pre-0377) — accept never fails on it.
+    const bayar = snapshotPembayaran(ringkasanPembayaranOrder(order.payload));
     await tx`
       insert into client_external_billing
         (client_id, sumber, external_deal_code, external_trx_ref, bentuk_kerjasama, nilai,
-         nilai_cross_charge, diverifikasi_pada, diverifikasi_oleh_external, dilaporkan_oleh)
+         nilai_cross_charge, diverifikasi_pada, diverifikasi_oleh_external, dilaporkan_oleh,
+         persen_terbayar_saat_diteruskan, nominal_terbayar_saat_diteruskan)
       values
         (${clientId}, ${SUMBER_MEAGO}, ${payload.dealCode}, ${payload.attestation.externalTrxRef},
          'Berbayar', ${payload.attestation.nilai}, ${sumCrossCharge(payload.lines)},
          ${payload.attestation.diverifikasiPada}::timestamptz, ${payload.attestation.diverifikasiOlehExternal},
-         ${actor.employeeId})`;
+         ${actor.employeeId}, ${bayar.persen}, ${bayar.nominal})`;
 
     // One CTR- carrying the merchant's own contract window (payload), one
     // SVC- per bridged line hanging off it — both branches (new/attach)
@@ -614,11 +913,13 @@ export async function accept(
       await tx`
         insert into services
           (id, client_id, contract_id, master_service_id, master_version_no, name,
-           standard_price, commission_rule, status, requires_strategy_plan, plan_tier, sumber, created_by)
+           standard_price, commission_rule, status, requires_strategy_plan, plan_tier, sumber, created_by,
+           link_drive)
         values
           (${svcId}, ${clientId}, ${ctrId}, ${r.masterServiceId}, ${r.versionNo}, ${r.name},
            ${r.standardPrice}, ${r.commissionRule}, '[Awaiting Onboarding]',
-           ${r.requiresStrategyPlan}, ${r.planTier}, ${SUMBER_MEAGO}, ${actor.employeeId})`;
+           ${r.requiresStrategyPlan}, ${r.planTier}, ${SUMBER_MEAGO}, ${actor.employeeId},
+           ${line.jenis === JENIS_LIVE_STREAM ? linkDriveLiveStream : null})`;
     }
 
     // Account intake gate (M5 §5, account.ts:189 reads exactly this column).

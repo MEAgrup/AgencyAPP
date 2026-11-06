@@ -49,12 +49,95 @@ export interface BridgeOrderSummary {
   ditolak_alasan: string | null;
   diputus_oleh: string | null;
   diputus_pada: string | null;
+  /** Ringkasan pembayaran klien dari lines[].catatan (MSDPS 0377) — null untuk order lama/tanpa info. */
+  pembayaran: BridgeRingkasanPembayaran | null;
+}
+
+/**
+ * Turunan read-only (server-side, `bridge.ringkasanPembayaranOrder`) dari teks
+ * yang MSDPS tempelkan ke `lines[].catatan` sejak 2026-11-04. Hanya untuk
+ * ditampilkan — tidak mengubah apa pun pada payload atau gerbang accept.
+ */
+export interface BridgeRingkasanPembayaran {
+  /** 'DP' | 'LUNAS'. */
+  status: string;
+  /** Persen seperti tercetak MSDPS, mis. "30" atau "33,3". */
+  persen: string;
+  dibayar: string | null;
+  total: string | null;
+  /** Teks asli (dengan kurung siku) — untuk tooltip. */
+  teks: string;
 }
 
 export interface BridgeOrderDetail extends BridgeOrderSummary {
   payload_versi: number;
   payload: BridgeOrderPayload;
 }
+
+/**
+ * BRIDGE-DP (opsi b, 2026-11-04) — klien MEAGO yang diterima saat pembayaran
+ * klien belum lunas (snapshot saat diteruskan MSDPS), untuk follow-up Finance.
+ */
+export interface KlienBelumLunas {
+  client_id: string;
+  toko: string;
+  kota: string;
+  external_deal_code: string;
+  /** Total kontrak. */
+  nilai: string | null;
+  /** Persen terbayar saat diteruskan, mis. "30.0". */
+  persen_terbayar: string;
+  nominal_terbayar: string | null;
+  diverifikasi_pada: string;
+  diterima_pada: string;
+}
+
+/** GET /bridge/belum-lunas → {data: KlienBelumLunas[]}. */
+export function listKlienBelumLunas(): Promise<{ data: KlienBelumLunas[] }> {
+  return api.get<{ data: KlienBelumLunas[] }>('/bridge/belum-lunas');
+}
+
+/** BRIDGE-LIVESTREAM (2026-11-05) — layanan bridge MEAGO + link Google Drive daftar kerja. */
+export interface LayananBridge {
+  service_id: string;
+  name: string;
+  status: string;
+  link_drive: string | null;
+}
+
+/** Satu baris order MSDPS yang sudah diterima — hanya-baca dari payload imutabel. */
+export interface RincianBaris {
+  jenis: string;
+  qty: number | null;
+  catatan: string | null;
+  alasan_non_roster: string | null;
+}
+
+export interface RincianOrder {
+  order_id: string;
+  deal_code: string;
+  diputus_pada: string | null;
+  pembayaran: BridgeRingkasanPembayaran | null;
+  lines: RincianBaris[];
+}
+
+export interface RincianOrderKlien {
+  orders: RincianOrder[];
+  services: LayananBridge[];
+}
+
+/** GET /bridge/clients/{id}/rincian → RincianOrderKlien. */
+export function getRincianOrderKlien(clientId: string): Promise<RincianOrderKlien> {
+  return api.get<RincianOrderKlien>(`/bridge/clients/${clientId}/rincian`);
+}
+
+/** POST /bridge/services/{id}/link-drive → LayananBridge. Kosongkan dengan null. */
+export function setLinkDrive(serviceId: string, linkDrive: string | null): Promise<LayananBridge> {
+  return api.post<LayananBridge>(`/bridge/services/${serviceId}/link-drive`, { link_drive: linkDrive });
+}
+
+/** Jenis baris bridge yang di CDPS hanya berupa daftar kerja di Google Drive. */
+export const JENIS_LIVE_STREAM = 'Live Stream';
 
 export interface BridgeCandidate {
   client_id: string;
@@ -94,6 +177,8 @@ export interface AcceptBridgeOrderInput {
   target_gmv: string;
   link_toko: string;
   kategori: string;
+  /** Link Google Drive daftar kerja baris Live Stream — opsional. */
+  link_drive_live_stream?: string | null;
 }
 
 /** POST /bridge/orders/{id}/accept → BridgeOrderSummary. */

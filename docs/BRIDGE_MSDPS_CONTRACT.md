@@ -72,6 +72,30 @@ Response: `{ "ord_code": "ORD-202609-0001", "status": "[Masuk]" }`.
 }
 ```
 
+## Catatan 2026-11-04 — ringkasan pembayaran di `lines[].catatan` (MSDPS 0377)
+
+**Bukan perubahan field.** Kunci, tipe, dan `payload_versi` (1) tetap persis
+seperti di atas. Sejak MSDPS 0377 order dikirim otomatis begitu pembayaran
+PERTAMA diverifikasi (DP pun cukup), dan setiap `lines[].catatan` diakhiri
+ringkasan pembayaran berformat (dibangun MSDPS `lib/bridge/payload.ts`
+`paymentSummaryText`):
+
+```text
+"paket 3 bulan [Pembayaran klien saat diteruskan: DP 30% — Rp 4.500.000 dari Rp 15.000.000]"
+"[Pembayaran klien: LUNAS 100% — Rp 15.000.000]"     ← catatan asli kosong, lunas
+```
+
+- Catatan asli (bila ada) di depan, dipisah satu spasi; persen dibulatkan ke
+  bawah 1 desimal dengan koma (`33,3%`); nominal `Rp` bertitik ribuan.
+- `catatan` karenanya bisa lebih panjang dan memuat `—`, `%`, `[`, `]`, `,` —
+  CDPS tidak membatasi panjang `catatan` (payload `jsonb`, parser hanya trim).
+- `attestation.nilai` tetap **total kontrak**; `attestation.diverifikasi_pada`
+  = verifikasi pembayaran **pertama** (bisa DP).
+- Snapshot saat diantre: pelunasan berikutnya **tidak** dikirim ulang (Fase 1).
+- CDPS mem-parse teks ini secara toleran hanya untuk tampilan antrean
+  (`bridge.ringkasanPembayaranOrder`); order lama tanpa pola tampil tanpa info.
+  Otoritas: `docs/decisions/2026-11-03-amandemen-bridge-fase1-order-otomatis-sejak-dp.md`.
+
 ## Non-negotiables (both sides assert these)
 
 1. **Dates are WIB calendar strings** (`YYYY-MM-DD`), never a UTC instant

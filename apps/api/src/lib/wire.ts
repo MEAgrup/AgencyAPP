@@ -8976,6 +8976,17 @@ export interface BridgeOrderSummaryWire {
   ditolak_alasan: string | null;
   diputus_oleh: string | null;
   diputus_pada: string | null;
+  /** Turunan read-only dari lines[].catatan (MSDPS 0377) — null bila tak ada info. */
+  pembayaran: BridgeRingkasanPembayaranWire | null;
+}
+
+/** bridge.RingkasanPembayaran as web-internal's `BridgeRingkasanPembayaran` expects it. */
+export interface BridgeRingkasanPembayaranWire {
+  status: string;
+  persen: string;
+  dibayar: string | null;
+  total: string | null;
+  teks: string;
 }
 
 export function bridgeOrderSummaryToWire(o: bridge.BridgeOrderSummary): BridgeOrderSummaryWire {
@@ -8989,6 +9000,96 @@ export function bridgeOrderSummaryToWire(o: bridge.BridgeOrderSummary): BridgeOr
     ditolak_alasan: o.ditolakAlasan,
     diputus_oleh: o.diputusOleh,
     diputus_pada: o.diputusPada,
+    pembayaran:
+      o.pembayaran === null
+        ? null
+        : {
+            status: o.pembayaran.status,
+            persen: o.pembayaran.persen,
+            dibayar: o.pembayaran.dibayar,
+            total: o.pembayaran.total,
+            teks: o.pembayaran.teks,
+          },
+  };
+}
+
+/** bridge.KlienBelumLunas as web-internal's `KlienBelumLunas` expects it (BRIDGE-DP). */
+export interface KlienBelumLunasWire {
+  client_id: string;
+  toko: string;
+  kota: string;
+  external_deal_code: string;
+  nilai: string | null;
+  persen_terbayar: string;
+  nominal_terbayar: string | null;
+  diverifikasi_pada: string;
+  diterima_pada: string;
+}
+
+export function klienBelumLunasToWire(k: bridge.KlienBelumLunas): KlienBelumLunasWire {
+  return {
+    client_id: k.clientId,
+    toko: k.toko,
+    kota: k.kota,
+    external_deal_code: k.externalDealCode,
+    nilai: k.nilai,
+    persen_terbayar: k.persenTerbayar,
+    nominal_terbayar: k.nominalTerbayar,
+    diverifikasi_pada: k.diverifikasiPada,
+    diterima_pada: k.diterimaPada,
+  };
+}
+
+/** bridge.LayananBridge as web-internal's `LayananBridge` expects it (BRIDGE-LIVESTREAM). */
+export interface LayananBridgeWire {
+  service_id: string;
+  name: string;
+  status: string;
+  link_drive: string | null;
+}
+
+export function layananBridgeToWire(v: bridge.LayananBridge): LayananBridgeWire {
+  return { service_id: v.serviceId, name: v.name, status: v.status, link_drive: v.linkDrive };
+}
+
+/** bridge.RincianBaris as web-internal's `RincianBaris` expects it. */
+export interface RincianBarisWire {
+  jenis: string;
+  qty: number | null;
+  catatan: string | null;
+  alasan_non_roster: string | null;
+}
+
+/** bridge.RincianOrder as web-internal's `RincianOrder` expects it. */
+export interface RincianOrderWire {
+  order_id: string;
+  deal_code: string;
+  diputus_pada: string | null;
+  pembayaran: BridgeRingkasanPembayaranWire | null;
+  lines: RincianBarisWire[];
+}
+
+/** bridge.RincianOrderKlien as web-internal's `RincianOrderKlien` expects it. */
+export interface RincianOrderKlienWire {
+  orders: RincianOrderWire[];
+  services: LayananBridgeWire[];
+}
+
+export function rincianOrderKlienToWire(r: bridge.RincianOrderKlien): RincianOrderKlienWire {
+  return {
+    orders: r.orders.map((o) => ({
+      order_id: o.orderId,
+      deal_code: o.dealCode,
+      diputus_pada: o.diputusPada,
+      pembayaran: o.pembayaran === null ? null : { ...o.pembayaran },
+      lines: o.lines.map((l) => ({
+        jenis: l.jenis,
+        qty: l.qty,
+        catatan: l.catatan,
+        alasan_non_roster: l.alasanNonRoster,
+      })),
+    })),
+    services: r.services.map(layananBridgeToWire),
   };
 }
 

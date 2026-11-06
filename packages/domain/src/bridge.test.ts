@@ -381,3 +381,275 @@ describeDb('bridge — immutability (aturan rumah #3)', () => {
     await expect(sql`delete from client_external_billing where client_id = ${result.clientId}`).rejects.toThrow(/append-only/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MSDPS 0377 (2026-11-04) — order otomatis sejak DP; ringkasan pembayaran
+// ditempel di lines[].catatan. Kontrak v1 tidak berubah. String uji di bawah
+// SAMA PERSIS dengan keluaran `paymentSummaryText` MSDPS
+// (`lib/bridge/payload.ts`, diuji `scripts/qc_bridge_payload.mjs`).
+// ---------------------------------------------------------------------------
+
+const NOTE_DP = '[Pembayaran klien saat diteruskan: DP 30% — Rp 4.500.000 dari Rp 15.000.000]';
+const NOTE_DP_DESIMAL = '[Pembayaran klien saat diteruskan: DP 33,3% — Rp 1 dari Rp 3]';
+const NOTE_LUNAS = '[Pembayaran klien: LUNAS 100% — Rp 15.000.000]';
+
+describe('bridge.parseRingkasanPembayaran — teks MSDPS 0377 (murni, tanpa DB)', () => {
+  it('membaca DP dengan nominal dibayar dan total', () => {
+    expect(bridge.parseRingkasanPembayaran(`paket 3 bulan ${NOTE_DP}`)).toEqual({
+      status: 'DP', persen: '30', dibayar: '4500000', total: '15000000', teks: NOTE_DP,
+    });
+  });
+
+  it('membaca persen desimal berkoma apa adanya', () => {
+    expect(bridge.parseRingkasanPembayaran(NOTE_DP_DESIMAL)).toEqual({
+      status: 'DP', persen: '33,3', dibayar: '1', total: '3', teks: NOTE_DP_DESIMAL,
+    });
+  });
+
+  it('membaca LUNAS (satu nominal = total = dibayar)', () => {
+    expect(bridge.parseRingkasanPembayaran(NOTE_LUNAS)).toEqual({
+      status: 'LUNAS', persen: '100', dibayar: '15000000', total: '15000000', teks: NOTE_LUNAS,
+    });
+  });
+
+  it('toleran: catatan lama / null / bukan string / pola rusak → null, tidak pernah melempar', () => {
+    expect(bridge.parseRingkasanPembayaran('Strategi + brief bulanan, paket 6 bulan')).toBeNull();
+    expect(bridge.parseRingkasanPembayaran(null)).toBeNull();
+    expect(bridge.parseRingkasanPembayaran(undefined)).toBeNull();
+    expect(bridge.parseRingkasanPembayaran(42)).toBeNull();
+    expect(bridge.parseRingkasanPembayaran('[Pembayaran klien: CICIL 10% — Rp x]')).toBeNull();
+    expect(bridge.parseRingkasanPembayaran('[Pembayaran klien saat diteruskan: DP 30% — Rp 4.500.000 dari Rp 15.000.000')).toBeNull();
+  });
+
+  it('ringkasanPembayaranOrder: ambil yang pertama dari baris mana pun; payload rusak → null', () => {
+    expect(bridge.ringkasanPembayaranOrder({ lines: [{ catatan: null }, { catatan: `x ${NOTE_DP}` }] })?.status).toBe('DP');
+    expect(bridge.ringkasanPembayaranOrder({ lines: [{ catatan: 'tanpa info' }] })).toBeNull();
+    expect(bridge.ringkasanPembayaranOrder({ lines: 'bukan array' })).toBeNull();
+    expect(bridge.ringkasanPembayaranOrder(null)).toBeNull();
+    expect(bridge.ringkasanPembayaranOrder({ lines: [null, 3, { catatan: NOTE_LUNAS }] })?.status).toBe('LUNAS');
+  });
+
+  it('parsePayloadV1 menerima catatan panjang (500 karakter + ringkasan) berisi — % [ ] , apa adanya', () => {
+    const asli = 'a, b — c % [d] '.repeat(34).slice(0, 500);
+    const payload = rawPayload({
+      lines: [{ jenis: 'Account', qty: 1, catatan: `${asli} ${NOTE_DP}`, alasan_non_roster: null, nilai_cross_charge: null }],
+    });
+    const parsed = bridge.parsePayloadV1(payload);
+    expect(parsed.lines[0].catatan).toBe(`${asli} ${NOTE_DP}`.trim());
+    expect(parsed.lines[0].catatan!.length).toBeGreaterThan(570);
+  });
+});
+
+describeDb('bridge — order DP/LUNAS sejak MSDPS 0377 masuk [Masuk] dan bisa diterima', () => {
+  it('order DP: intake [Masuk], payload tersimpan persis, ringkasan muncul di list & detail; order lama tanpa badge', async () => {
+    await insEmployees();
+    const dp = rawPayload({
+      lines: [
+        { jenis: 'Account', qty: 1, catatan: `paket 3 bulan ${NOTE_DP}`, alasan_non_roster: null, nilai_cross_charge: null },
+        { jenis: 'Ads', qty: 1, catatan: NOTE_DP, alasan_non_roster: null, nilai_cross_charge: '300000.00' },
+      ],
+    });
+    const lama = rawPayload();
+    const a = await bridge.intake(sql, dp, `${dp.deal_code as string}:1`);
+    const b = await bridge.intake(sql, lama, `${lama.deal_code as string}:1`);
+    expect(a.status).toBe('[Masuk]');
+
+    const stored = await sql<{ same: boolean }[]>`
+      select payload = ${dp as unknown as never}::jsonb as same from external_orders where id = ${a.ordCode}`;
+    expect(stored[0].same).toBe(true);
+
+    const detail = await bridge.getOrder(sql, a.ordCode);
+    expect(detail.pembayaran).toEqual({ status: 'DP', persen: '30', dibayar: '4500000', total: '15000000', teks: NOTE_DP });
+    expect(detail.payload.attestation.nilai).toBe('15000000.00'); // tetap total kontrak
+
+    const list = await bridge.listOrders(sql, '[Masuk]');
+    expect(list.find((o) => o.id === a.ordCode)?.pembayaran?.status).toBe('DP');
+    expect(list.find((o) => o.id === b.ordCode)?.pembayaran).toBeNull();
+  });
+
+  it('order LUNAS dengan baris Live Stream diterima begitu Live Stream dipetakan (data, bukan skema)', async () => {
+    await insEmployees();
+    const msvLive = await seedMasterService('Paket Live Stream Uji');
+    await insServiceMap('Live Stream', msvLive);
+    const p = rawPayload({
+      lines: [{ jenis: 'Live Stream', qty: 1, catatan: NOTE_LUNAS, alasan_non_roster: null, nilai_cross_charge: null }],
+    });
+    const { ordCode } = await bridge.intake(sql, p, `${p.deal_code as string}:1`);
+    const result = await bridge.accept(sql, leadAccount(), ordCode, acceptInput());
+    expect(result.status).toBe('[Diterima]');
+    expect(result.pembayaran?.status).toBe('LUNAS');
+    const svc = await sql<{ master_service_id: string }[]>`select master_service_id from services where client_id = ${result.clientId}`;
+    expect(svc.map((r) => r.master_service_id)).toEqual([msvLive]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BRIDGE-DP (opsi b, keputusan pemilik 2026-11-04) — accept menyimpan snapshot
+// pembayaran; Finance mem-follow-up klien yang diterima saat baru DP.
+// ---------------------------------------------------------------------------
+
+describe('bridge.snapshotPembayaran (murni, tanpa DB)', () => {
+  it('DP berkoma → numeric bertitik; LUNAS → 100; tanpa info → null; persen mustahil → null tanpa menggagalkan accept', () => {
+    expect(bridge.snapshotPembayaran(bridge.parseRingkasanPembayaran(NOTE_DP_DESIMAL))).toEqual({ persen: '33.3', nominal: '1' });
+    expect(bridge.snapshotPembayaran(bridge.parseRingkasanPembayaran(NOTE_DP))).toEqual({ persen: '30', nominal: '4500000' });
+    expect(bridge.snapshotPembayaran(bridge.parseRingkasanPembayaran(NOTE_LUNAS))).toEqual({ persen: '100', nominal: '15000000' });
+    expect(bridge.snapshotPembayaran(null)).toEqual({ persen: null, nominal: null });
+    expect(
+      bridge.snapshotPembayaran({ status: 'DP', persen: '130', dibayar: '1', total: '1', teks: 'x' }),
+    ).toEqual({ persen: null, nominal: '1' });
+  });
+});
+
+describeDb('bridge.accept — BRIDGE-DP snapshot + daftar follow-up Finance', () => {
+  it('DP → persen/nominal tersimpan & muncul di listBelumLunas; LUNAS → 100 & tidak muncul; order lama → null & tidak muncul', async () => {
+    await insEmployees();
+    const msv = await seedMasterService('Paket Account Uji DP');
+    await insServiceMap('Account', msv);
+    const line = (catatan: string | null) => [{ jenis: 'Account', qty: 1, catatan, alasan_non_roster: null, nilai_cross_charge: null }];
+
+    const dp = rawPayload({ lines: line(`paket 3 bulan ${NOTE_DP}`) });
+    const lunas = rawPayload({ lines: line(NOTE_LUNAS) });
+    const lama = rawPayload({ lines: line('catatan lama') });
+    const terima = async (p: Record<string, unknown>) => {
+      const { ordCode } = await bridge.intake(sql, p, `${p.deal_code as string}:1`);
+      return (await bridge.accept(sql, leadAccount(), ordCode, acceptInput())).clientId as string;
+    };
+    const cliDp = await terima(dp);
+    const cliLunas = await terima(lunas);
+    const cliLama = await terima(lama);
+
+    const billing = await sql<{ client_id: string; persen: string | null; nominal: string | null }[]>`
+      select client_id, persen_terbayar_saat_diteruskan::text as persen, nominal_terbayar_saat_diteruskan::text as nominal
+        from client_external_billing where client_id in (${cliDp}, ${cliLunas}, ${cliLama})`;
+    const by = Object.fromEntries(billing.map((b) => [b.client_id, b]));
+    expect(by[cliDp]).toMatchObject({ persen: '30.0', nominal: '4500000.00' });
+    expect(by[cliLunas]).toMatchObject({ persen: '100.0', nominal: '15000000.00' });
+    expect(by[cliLama]).toMatchObject({ persen: null, nominal: null });
+
+    const daftar = (await bridge.listBelumLunas(sql)).filter((k) => [cliDp, cliLunas, cliLama].includes(k.clientId));
+    expect(daftar).toHaveLength(1);
+    expect(daftar[0]).toMatchObject({
+      clientId: cliDp,
+      externalDealCode: dp.deal_code,
+      nilai: '15000000.00',
+      persenTerbayar: '30.0',
+      nominalTerbayar: '4500000.00',
+    });
+  });
+
+  it('snapshot ikut imutabel: kolom BRIDGE-DP tidak bisa di-UPDATE (follow-up tidak menulis ulang atestasi)', async () => {
+    await insEmployees();
+    const msv = await seedMasterService('Paket Account Uji DP imutabel');
+    await insServiceMap('Account', msv);
+    const p = rawPayload({ lines: [{ jenis: 'Account', qty: 1, catatan: NOTE_DP, alasan_non_roster: null, nilai_cross_charge: null }] });
+    const { ordCode } = await bridge.intake(sql, p, `${p.deal_code as string}:1`);
+    const r = await bridge.accept(sql, leadAccount(), ordCode, acceptInput());
+    await expect(
+      sql`update client_external_billing set persen_terbayar_saat_diteruskan = 100 where client_id = ${r.clientId}`,
+    ).rejects.toThrow(/append-only/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BRIDGE-LIVESTREAM (keputusan pemilik 2026-11-05) — Live Stream di CDPS hanya
+// daftar kerja di Google Drive; rincian order MSDPS tampil di halaman klien.
+// ---------------------------------------------------------------------------
+
+describe('bridge.normalizeLinkDrive (murni, tanpa DB)', () => {
+  it('menerima drive/docs.google.com, mengosongkan string kosong, menolak tautan lain', () => {
+    expect(bridge.normalizeLinkDrive('  https://drive.google.com/drive/folders/abc  ')).toBe('https://drive.google.com/drive/folders/abc');
+    expect(bridge.normalizeLinkDrive('https://docs.google.com/spreadsheets/d/xyz/edit')).toBe('https://docs.google.com/spreadsheets/d/xyz/edit');
+    expect(bridge.normalizeLinkDrive('')).toBeNull();
+    expect(bridge.normalizeLinkDrive(null)).toBeNull();
+    expect(bridge.normalizeLinkDrive(undefined)).toBeNull();
+    for (const buruk of ['http://drive.google.com/x', 'https://evil.com/drive.google.com/', 'https://drive.google.com/', 'drive.google.com/x', 42]) {
+      expect(() => bridge.normalizeLinkDrive(buruk)).toThrow(bridge.MSG_LINK_DRIVE_INVALID);
+    }
+  });
+});
+
+describeDb('bridge — Live Stream sebagai daftar kerja di Google Drive', () => {
+  const LINK = 'https://drive.google.com/drive/folders/zbr-live';
+
+  async function terimaLiveStream(link: string | null) {
+    await insEmployees();
+    const msvLive = await seedMasterService('Paket Live Stream Uji Drive');
+    const msvAcc = await seedMasterService('Paket Account Uji Drive');
+    await insServiceMap('Live Stream', msvLive);
+    await insServiceMap('Account', msvAcc);
+    const p = rawPayload({
+      lines: [
+        { jenis: 'Live Stream', qty: 8, catatan: `2 sesi/minggu malam ${NOTE_DP}`, alasan_non_roster: null, nilai_cross_charge: null },
+        { jenis: 'Account', qty: 1, catatan: 'brief bulanan', alasan_non_roster: null, nilai_cross_charge: null },
+      ],
+    });
+    const { ordCode } = await bridge.intake(sql, p, `${p.deal_code as string}:1`);
+    const r = await bridge.accept(sql, leadAccount(), ordCode, acceptInput({ linkDriveLiveStream: link }));
+    return { clientId: r.clientId as string, msvLive, ordCode, dealCode: p.deal_code as string };
+  }
+
+  it('accept menaruh link HANYA di layanan Live Stream; tanpa brief/sesi otomatis; rincian klien memuat catatan', async () => {
+    const { clientId, msvLive, ordCode, dealCode } = await terimaLiveStream(LINK);
+    const svc = await sql<{ master_service_id: string; link_drive: string | null }[]>`
+      select master_service_id, link_drive from services where client_id = ${clientId} order by id`;
+    expect(svc.find((v) => v.master_service_id === msvLive)?.link_drive).toBe(LINK);
+    expect(svc.filter((v) => v.master_service_id !== msvLive).every((v) => v.link_drive === null)).toBe(true);
+
+    const briefs = await sql<{ n: string }[]>`
+      select count(*)::text as n from briefs b join services s on s.id = b.service_id where s.client_id = ${clientId}`;
+    expect(briefs[0].n).toBe('0');
+
+    const rincian = await bridge.rincianOrderKlien(sql, clientId);
+    expect(rincian.orders).toHaveLength(1);
+    expect(rincian.orders[0]).toMatchObject({ orderId: ordCode, dealCode });
+    expect(rincian.orders[0].pembayaran?.status).toBe('DP');
+    expect(rincian.orders[0].lines.map((l) => l.jenis)).toEqual(['Live Stream', 'Account']);
+    expect(rincian.orders[0].lines[0].catatan).toContain('2 sesi/minggu malam');
+    expect(rincian.services).toHaveLength(2);
+  });
+
+  it('accept menolak link yang bukan Google Drive dengan pesan BI, tanpa menulis apa pun', async () => {
+    await insEmployees();
+    const msvLive = await seedMasterService('Paket Live Stream Uji Drive buruk');
+    await insServiceMap('Live Stream', msvLive);
+    const p = rawPayload({ lines: [{ jenis: 'Live Stream', qty: 1, catatan: null, alasan_non_roster: null, nilai_cross_charge: null }] });
+    const { ordCode } = await bridge.intake(sql, p, `${p.deal_code as string}:1`);
+    await expect(
+      bridge.accept(sql, leadAccount(), ordCode, acceptInput({ linkDriveLiveStream: 'https://contoh.com/x' })),
+    ).rejects.toThrow(bridge.MSG_LINK_DRIVE_INVALID);
+    expect((await bridge.getOrder(sql, ordCode)).status).toBe('[Masuk]');
+  });
+
+  it('setLinkDrive: lead Account & Director boleh, AM yang bukan AM klien & OD tidak; beraudit; kosongkan dengan null', async () => {
+    const { clientId, msvLive } = await terimaLiveStream(null);
+    const [{ id: svcId }] = await sql<{ id: string }[]>`
+      select id from services where client_id = ${clientId} and master_service_id = ${msvLive}`;
+
+    await expect(bridge.setLinkDrive(sql, amStaff(), svcId, LINK)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(bridge.setLinkDrive(sql, od(), svcId, LINK)).rejects.toBeInstanceOf(ForbiddenError);
+
+    expect((await bridge.setLinkDrive(sql, leadAccount(), svcId, LINK)).linkDrive).toBe(LINK);
+    const audit = await sql<{ before_json: unknown; after_json: unknown }[]>`
+      select before_json, after_json from audit_log
+       where entity_type = 'service' and entity_id = ${svcId} and action = 'bridge_link_drive'`;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].after_json).toEqual({ link_drive: LINK });
+
+    // AM yang ditugasi ke klien ini boleh.
+    await sql`update clients set assigned_am_id = 'ZBR-AM' where id = ${clientId}`;
+    const LINK2 = 'https://docs.google.com/spreadsheets/d/zbr/edit';
+    expect((await bridge.setLinkDrive(sql, amStaff(), svcId, LINK2)).linkDrive).toBe(LINK2);
+    expect((await bridge.setLinkDrive(sql, director(), svcId, null)).linkDrive).toBeNull();
+
+    await expect(bridge.setLinkDrive(sql, leadAccount(), 'SVC-TIDAK-ADA', LINK)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(bridge.setLinkDrive(sql, leadAccount(), svcId, 'https://contoh.com')).rejects.toThrow(bridge.MSG_LINK_DRIVE_INVALID);
+  });
+
+  it('DB menolak link_drive pada layanan non-MEAGO (CHECK ck_services_link_drive)', async () => {
+    const { clientId } = await terimaLiveStream(null);
+    const [{ id }] = await sql<{ id: string }[]>`select id from services where client_id = ${clientId} limit 1`;
+    await sql`update services set sumber = 'sales' where id = ${id}`;
+    await expect(sql`update services set link_drive = ${LINK} where id = ${id}`).rejects.toThrow(/ck_services_link_drive/);
+    await expect(bridge.setLinkDrive(sql, leadAccount(), id, LINK)).rejects.toThrow(bridge.MSG_SERVICE_BUKAN_BRIDGE);
+  });
+});

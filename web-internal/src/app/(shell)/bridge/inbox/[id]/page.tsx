@@ -21,12 +21,14 @@ import { isAccountLead } from '@/lib/account';
 import {
   acceptBridgeOrder,
   getBridgeOrder,
+  JENIS_LIVE_STREAM,
   rejectBridgeOrder,
   type BridgeCandidate,
   type BridgeOrderDetail,
 } from '@/lib/bridge';
 import { formatIDR } from '@/lib/money';
 import StatusBadge from '@/components/StatusBadge';
+import PembayaranBadge, { pembayaranTooltip } from '@/components/bridge/PembayaranBadge';
 import { MetaGrid } from '@/components/persetujuan/ApprovalCard';
 
 function formatDateTime(value: string | null | undefined) {
@@ -57,6 +59,7 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
   const [targetGmv, setTargetGmv] = useState('');
   const [linkToko, setLinkToko] = useState('');
   const [kategori, setKategori] = useState('');
+  const [linkDrive, setLinkDrive] = useState('');
   const [alasanTolak, setAlasanTolak] = useState('');
   const [busy, setBusy] = useState<'accept' | 'reject' | null>(null);
   const [aksiError, setAksiError] = useState<string | null>(null);
@@ -94,6 +97,7 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
         target_gmv: targetGmv,
         link_toko: linkToko,
         kategori,
+        link_drive_live_stream: linkDrive.trim() === '' ? null : linkDrive.trim(),
       });
       router.push('/bridge/inbox');
     } catch (err) {
@@ -136,6 +140,7 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
 
   const p = order.payload;
   const belumDiputuskan = order.status === '[Masuk]';
+  const adaLiveStream = p.lines.some((l) => l.jenis === JENIS_LIVE_STREAM);
 
   return (
     <div className="stack">
@@ -144,7 +149,10 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
           <h1>{order.id}</h1>
           <p className="muted">{p.deal_code} — MSDPS (MEAGO!/MCN MEA)</p>
         </div>
-        <StatusBadge status={order.status} />
+        <span className="row" style={{ gap: 6 }}>
+          <PembayaranBadge pembayaran={order.pembayaran} />
+          <StatusBadge status={order.status} />
+        </span>
       </div>
 
       <section className="card" style={{ padding: 14 }}>
@@ -172,7 +180,11 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
           items={[
             { label: 'Bentuk kerjasama', value: p.attestation.bentuk_kerjasama },
             { label: 'Ref transaksi MSDPS', value: p.attestation.external_trx_ref },
-            { label: 'Nilai', value: p.attestation.nilai ? formatIDR(p.attestation.nilai) : '—' },
+            { label: 'Nilai kontrak', value: p.attestation.nilai ? formatIDR(p.attestation.nilai) : '—' },
+            {
+              label: 'Pembayaran saat diteruskan',
+              value: order.pembayaran ? pembayaranTooltip(order.pembayaran) : '—',
+            },
             { label: 'Diverifikasi pada', value: formatDateTime(p.attestation.diverifikasi_pada) },
             { label: 'Diverifikasi/dibawa oleh', value: p.attestation.diverifikasi_oleh_external ?? '—' },
           ]}
@@ -258,6 +270,22 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
               <input id="kategori" value={kategori} onChange={(e) => setKategori(e.target.value)} />
             </div>
           </div>
+
+          {adaLiveStream && (
+            <div className="field">
+              <label htmlFor="link-drive">Link Google Drive daftar kerja Live Stream (opsional)</label>
+              <input
+                id="link-drive"
+                value={linkDrive}
+                onChange={(e) => setLinkDrive(e.target.value)}
+                placeholder="https://drive.google.com/..."
+              />
+              <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+                Live Stream dari MSDPS di CDPS hanya berupa daftar kerja di Google Drive — tidak
+                membuat brief atau sesi vendor otomatis. Bisa diisi belakangan dari halaman klien.
+              </p>
+            </div>
+          )}
 
           {aksiError && (
             <div className="alert alertError" role="alert">
