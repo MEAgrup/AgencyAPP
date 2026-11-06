@@ -166,6 +166,8 @@ pembeli, dan perubahan periode.
 `prod_tp` (Analitik Produk Tokopedia) **tidak** ikut — M14 sendiri menandainya
 `UNUSED`, dan memanen kolom tanpa konsumen adalah skema spekulatif.
 
+> **Diperbarui 2026-11-06 (M20-R8-PROD-TP, `docs/decisions/2026-11-06-m20-r8-prod-tp-tokopedia-analitik-produk.md`):** `prod_tp` kini dikenali modul `tt_product_analytics_tokopedia` (deteksi + validasi, belum menulis fakta).
+
 ### R9 · Bagian TikTok Ads Manager (upper funnel)
 Empat modul parser baru, tanda tangan diambil apa adanya dari
 `report/detect.ts` `TTAM_TYPES` — termasuk **penyangkalan** pada `ttam_follows`
