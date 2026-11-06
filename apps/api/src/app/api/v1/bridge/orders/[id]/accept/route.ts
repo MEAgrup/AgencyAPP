@@ -5,6 +5,10 @@
  * `MEAGO_BRIDGE_EMPLOYEE_ID` (D5 opsi b — one service employee, never the
  * MEAGO BD's own login), not accepted from the request body: the accepting
  * human does not get to pick who a MEAGO client's `sales_pic_id` is.
+ *
+ * Baseline/target/link toko/kategori TIDAK lagi diterima dari body: nilainya
+ * dibaca dari payload MSDPS yang diisi BD (owner ACC 2026-11-06, membalik
+ * D7). Klien lama yang masih mengirim field itu diabaikan, bukan ditolak.
  */
 import { bridge } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
@@ -14,10 +18,6 @@ import { bridgeOrderSummaryToWire } from '@/lib/wire';
 
 interface Body {
   existing_client_id?: string | null;
-  gmv_baseline?: string;
-  target_gmv?: string;
-  link_toko?: string;
-  kategori?: string;
 }
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
@@ -27,10 +27,6 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     const body = await readJson<Body>(request);
     const result = await bridge.accept(db(), actor, id, {
       existingClientId: body.existing_client_id ?? null,
-      gmvBaseline: body.gmv_baseline ?? '',
-      targetGmv: body.target_gmv ?? '',
-      linkToko: body.link_toko ?? '',
-      kategori: body.kategori ?? '',
       bridgeEmployeeId: process.env.MEAGO_BRIDGE_EMPLOYEE_ID ?? '',
     });
     return json(bridgeOrderSummaryToWire(result));

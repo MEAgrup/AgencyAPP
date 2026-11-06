@@ -131,6 +131,15 @@ export interface BridgeMerchant {
   picWhatsapp: string | null;
   tanggalMulaiKontrak: string;
   tanggalAkhirKontrak: string;
+  /**
+   * Baseline yang didaftarkan BD MEAGO pada transaksi MSDPS (owner ACC
+   * 2026-11-06, membalik D7). OPSIONAL — payload lama/BD yang belum mengisi
+   * mengirim null/absen; tidak pernah menghalangi Terima order.
+   */
+  gmvBaseline: string | null;
+  targetGmv: string | null;
+  linkToko: string | null;
+  kategori: string | null;
 }
 
 export interface BridgeOrderPayloadV1 {
@@ -150,6 +159,22 @@ function requireStr(v: unknown): string {
   const s = str(v);
   if (s === null) throw new ValidationError(MSG_INCOMPLETE);
   return s;
+}
+
+/**
+ * optMoney — field uang OPSIONAL (baseline BD). Absen/null/'' ⇒ null. Bila
+ * diisi, wajib string desimal rupiah bulat (kontrak non-negotiable #2);
+ * nilai rusak ditolak, bukan ditebak.
+ */
+function optMoney(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  if (s === '') return null;
+  try {
+    return money.decimal(money.parse(s));
+  } catch {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
 }
 
 /**
@@ -179,6 +204,10 @@ export function parsePayloadV1(raw: unknown): BridgeOrderPayloadV1 {
     picWhatsapp: str(m.pic_whatsapp),
     tanggalMulaiKontrak: requireStr(m.tanggal_mulai_kontrak),
     tanggalAkhirKontrak: requireStr(m.tanggal_akhir_kontrak),
+    gmvBaseline: optMoney(m.gmv_baseline),
+    targetGmv: optMoney(m.target_gmv),
+    linkToko: str(m.link_toko),
+    kategori: str(m.kategori),
   };
 
   const a = p.attestation as Record<string, unknown> | undefined;
@@ -430,24 +459,44 @@ export async function intake(
   });
 }
 
-/** Field the human accepting types by hand — never derived from the payload (D7). */
+/**
+ * Input Terima order. Head TIDAK lagi mengetik baseline/target/link/kategori —
+ * nilainya dibaca read-only dari payload MSDPS (owner ACC 2026-11-06,
+ * `docs/decisions/2026-11-06-bridge-baseline-dari-msdps.md`, membalik D7).
+ */
 export interface BridgeAcceptInput {
   /** Existing CLI- to attach to, or null to mint a new one. */
   existingClientId: string | null;
-  gmvBaseline: string;
-  targetGmv: string;
-  linkToko: string;
-  kategori: string;
   /** Resolved by the API layer from env `MEAGO_BRIDGE_EMPLOYEE_ID` (D5 opsi b). */
   bridgeEmployeeId: string;
 }
 
-function parseMoneyField(v: string): string {
-  try {
-    return money.decimal(money.parse(v));
-  } catch {
-    throw new ValidationError(MSG_INCOMPLETE);
-  }
+/**
+ * Nilai kolom NOT NULL `clients` untuk klien MEAGO baru, dari payload. Field
+ * yang belum diisi BD jatuh ke nilai netral (0 / '' / kategori POI) supaya
+ * Terima tidak pernah gagal karena baseline kosong; daftar field kosong
+ * dicatat di audit agar jejaknya tetap jujur. GMV Growth klien MEAGO sudah
+ * dikecualikan dari Health Score (D6), jadi 0 tidak mendistorsi skor.
+ */
+export function baselineFromPayload(m: BridgeMerchant): {
+  gmvBaseline: string;
+  targetGmv: string;
+  linkToko: string;
+  kategori: string;
+  kosong: string[];
+} {
+  const kosong: string[] = [];
+  if (m.gmvBaseline === null) kosong.push('gmv_baseline');
+  if (m.targetGmv === null) kosong.push('target_gmv');
+  if (m.linkToko === null) kosong.push('link_toko');
+  if (m.kategori === null) kosong.push('kategori');
+  return {
+    gmvBaseline: m.gmvBaseline ?? '0.00',
+    targetGmv: m.targetGmv ?? '0.00',
+    linkToko: m.linkToko ?? '',
+    kategori: m.kategori ?? m.kategoriPoi,
+    kosong,
+  };
 }
 
 /** Months between two YYYY-MM-DD dates, clamped to the contracts CHECK range [1,36]. */
@@ -471,11 +520,6 @@ export async function accept(
 ): Promise<BridgeOrderSummary> {
   if (!canDecideOrder(actor)) throw new ForbiddenError(MSG_FORBIDDEN);
 
-  const gmvBaseline = parseMoneyField(input.gmvBaseline);
-  const targetGmv = parseMoneyField(input.targetGmv);
-  const linkToko = (input.linkToko ?? '').trim();
-  const kategori = (input.kategori ?? '').trim();
-  if (linkToko === '' || kategori === '') throw new ValidationError(MSG_INCOMPLETE);
   const bridgeEmployeeId = (input.bridgeEmployeeId ?? '').trim();
   if (bridgeEmployeeId === '') throw new ValidationError(MSG_INCOMPLETE);
 
@@ -540,19 +584,23 @@ export async function accept(
       clientId = existing[0].id;
     } else {
       clientId = await ident.nextId(ex.ident, 'CLI', now);
+      const b = baselineFromPayload(payload.merchant);
       await tx`
         insert into clients
           (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
            sales_pic_id, commission_payment_pic_id, sumber, created_by)
         values
           (${clientId}, ${payload.merchant.picNama}, ${payload.merchant.nama}, ${payload.merchant.kota},
-           ${linkToko}, ${kategori}, ${gmvBaseline}, ${targetGmv},
+           ${b.linkToko}, ${b.kategori}, ${b.gmvBaseline}, ${b.targetGmv},
            ${bridgeEmployeeId}, ${bridgeEmployeeId}, ${SUMBER_MEAGO}, ${actor.employeeId})`;
       await ex.audit.insertAudit({
         entityType: ENTITY_CLIENT, entityId: clientId, actorEmployeeId: actor.employeeId,
         action: 'create',
         beforeJson: null,
-        afterJson: { sumber: SUMBER_MEAGO, external_deal_code: payload.dealCode, order_id: order.id },
+        afterJson: {
+          sumber: SUMBER_MEAGO, external_deal_code: payload.dealCode, order_id: order.id,
+          baseline_sumber: 'msdps', baseline_kosong: b.kosong,
+        },
         createdBy: actor.employeeId,
       });
     }

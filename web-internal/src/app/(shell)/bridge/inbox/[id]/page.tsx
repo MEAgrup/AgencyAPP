@@ -5,9 +5,10 @@
  *
  * Payload imutabel dirender terbaca (deal, merchant, PIC, kategori, jendela
  * kontrak, baris bridge, atestasi + cross-charge), pemilih kandidat dedup
- * (never auto-selects — human chooses), empat field manual AM
- * (gmv_baseline/target_gmv/link_toko/kategori — D7: TIDAK PERNAH diturunkan
- * dari payload), dan Reject dengan alasan wajib.
+ * (never auto-selects — human chooses), data baseline BD READ-ONLY
+ * (gmv_baseline/target_gmv/link_toko/kategori dari transaksi MSDPS — owner
+ * ACC 2026-11-06 membalik D7; Head tidak mengisi ulang), dan Reject dengan
+ * alasan wajib.
  *
  * Gerbang D10 (lead Account atau Director) ditegakkan SERVER-side
  * (`bridge.canDecideOrder`, mirror `sm_edges` machine #35); di sini hanya
@@ -53,10 +54,6 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
   const [terlarang, setTerlarang] = useState(false);
 
   const [pilihan, setPilihan] = useState<string>(''); // '' = klien baru
-  const [gmvBaseline, setGmvBaseline] = useState('');
-  const [targetGmv, setTargetGmv] = useState('');
-  const [linkToko, setLinkToko] = useState('');
-  const [kategori, setKategori] = useState('');
   const [alasanTolak, setAlasanTolak] = useState('');
   const [busy, setBusy] = useState<'accept' | 'reject' | null>(null);
   const [aksiError, setAksiError] = useState<string | null>(null);
@@ -68,7 +65,6 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
       const res = await getBridgeOrder(id);
       setOrder(res.order);
       setCandidates(res.candidates);
-      setKategori((prev) => prev || res.order.payload.merchant.kategori_poi);
     } catch (err) {
       if (isForbidden(err)) {
         setTerlarang(true);
@@ -90,10 +86,6 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
     try {
       await acceptBridgeOrder(id, {
         existing_client_id: pilihan === '' ? null : pilihan,
-        gmv_baseline: gmvBaseline,
-        target_gmv: targetGmv,
-        link_toko: linkToko,
-        kategori,
       });
       router.push('/bridge/inbox');
     } catch (err) {
@@ -240,24 +232,19 @@ export default function BridgeOrderDetailPage({ params }: { params: Promise<{ id
             </div>
           )}
 
-          <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
-            <div className="field">
-              <label htmlFor="gmv-baseline">GMV baseline</label>
-              <input id="gmv-baseline" value={gmvBaseline} onChange={(e) => setGmvBaseline(e.target.value)} placeholder="0" />
-            </div>
-            <div className="field">
-              <label htmlFor="target-gmv">Target GMV</label>
-              <input id="target-gmv" value={targetGmv} onChange={(e) => setTargetGmv(e.target.value)} placeholder="0" />
-            </div>
-            <div className="field">
-              <label htmlFor="link-toko">Link toko</label>
-              <input id="link-toko" value={linkToko} onChange={(e) => setLinkToko(e.target.value)} />
-            </div>
-            <div className="field">
-              <label htmlFor="kategori">Kategori</label>
-              <input id="kategori" value={kategori} onChange={(e) => setKategori(e.target.value)} />
-            </div>
-          </div>
+          <h3 style={{ fontSize: 14, margin: '12px 0 4px' }}>Data baseline dari BD (MSDPS)</h3>
+          <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+            Diisi BD saat mendaftarkan transaksi di MSDPS — hanya-baca, tidak perlu
+            diisi ulang. Untuk klien baru, nilai ini yang disimpan ke <code>CLI-</code>.
+          </p>
+          <MetaGrid
+            items={[
+              { label: 'GMV baseline', value: p.merchant.gmv_baseline ? formatIDR(p.merchant.gmv_baseline) : '— (belum diisi BD)' },
+              { label: 'Target GMV', value: p.merchant.target_gmv ? formatIDR(p.merchant.target_gmv) : '— (belum diisi BD)' },
+              { label: 'Link toko', value: p.merchant.link_toko ?? '— (belum diisi BD)' },
+              { label: 'Kategori', value: p.merchant.kategori ?? `${p.merchant.kategori_poi} (Kategori POI)` },
+            ]}
+          />
 
           {aksiError && (
             <div className="alert alertError" role="alert">

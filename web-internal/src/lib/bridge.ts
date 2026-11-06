@@ -12,6 +12,11 @@ export interface BridgeMerchant {
   pic_whatsapp: string | null;
   tanggal_mulai_kontrak: string;
   tanggal_akhir_kontrak: string;
+  /** Baseline yang didaftarkan BD di MSDPS — null bila belum diisi. */
+  gmv_baseline: string | null;
+  target_gmv: string | null;
+  link_toko: string | null;
+  kategori: string | null;
 }
 
 export interface BridgeAttestation {
@@ -88,12 +93,9 @@ export function getBridgeOrder(
   return api.get<{ order: BridgeOrderDetail; candidates: BridgeCandidate[] }>(`/bridge/orders/${id}`);
 }
 
+/** Baseline tidak dikirim — server membacanya dari payload MSDPS (membalik D7). */
 export interface AcceptBridgeOrderInput {
   existing_client_id: string | null;
-  gmv_baseline: string;
-  target_gmv: string;
-  link_toko: string;
-  kategori: string;
 }
 
 /** POST /bridge/orders/{id}/accept → BridgeOrderSummary. */

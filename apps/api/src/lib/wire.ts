@@ -8906,6 +8906,10 @@ export interface BridgeMerchantWire {
   pic_whatsapp: string | null;
   tanggal_mulai_kontrak: string;
   tanggal_akhir_kontrak: string;
+  gmv_baseline: string | null;
+  target_gmv: string | null;
+  link_toko: string | null;
+  kategori: string | null;
 }
 
 /** bridge.BridgeAttestation as web-internal's `BridgeAttestation` expects it. */
@@ -8950,6 +8954,10 @@ function bridgePayloadToWire(p: bridge.BridgeOrderPayloadV1): BridgeOrderPayload
       pic_whatsapp: p.merchant.picWhatsapp,
       tanggal_mulai_kontrak: p.merchant.tanggalMulaiKontrak,
       tanggal_akhir_kontrak: p.merchant.tanggalAkhirKontrak,
+      gmv_baseline: p.merchant.gmvBaseline,
+      target_gmv: p.merchant.targetGmv,
+      link_toko: p.merchant.linkToko,
+      kategori: p.merchant.kategori,
     },
     attestation: {
       external_trx_ref: p.attestation.externalTrxRef,
