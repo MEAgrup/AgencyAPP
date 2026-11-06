@@ -16,6 +16,7 @@ export interface DailyActivity {
   id: string;
   employee_id: string;
   employee_nama: string;
+  employee_jabatan: string | null; // F-6c
   divisi: string;
   activity_type: string;
   activity_date: string; // YYYY-MM-DD

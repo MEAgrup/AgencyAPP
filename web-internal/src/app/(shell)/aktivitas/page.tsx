@@ -17,6 +17,12 @@
  * lama. Baris lama tetap ada di riwayat, ditandai "Dikoreksi" dan kehilangan
  * tombol Edit-nya sendiri — untuk mengoreksi lagi, edit versi terbaru
  * (ujung rantai), bukan versi asli.
+ *
+ * F-6c (feedback Head of Account 2026-10-30, ACC pemilik 2026-11-06): Head of
+ * Account melihat seluruh tim di bawahnya (RLS, migrasi 20261222010000), jadi
+ * Riwayat butuh filter Nama Karyawan & Jabatan selain tanggal. Keduanya
+ * MENYEMPITKAN baris yang sudah RLS izinkan, di klien — opsinya diambil dari
+ * baris yang datang, jadi tidak pernah menawarkan orang di luar cakupan.
  */
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -45,6 +51,8 @@ export default function AktivitasHarianPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filterDate, setFilterDate] = useState('');
+  const [filterEmployee, setFilterEmployee] = useState('');
+  const [filterJabatan, setFilterJabatan] = useState('');
 
   const [activityType, setActivityType] = useState<string>(ACTIVITY_TYPES[0]);
   const [activityDate, setActivityDate] = useState(today());
@@ -129,6 +137,18 @@ export default function AktivitasHarianPage() {
 
   const showWhose = rows.some((r) => r.employee_id !== employee?.employee_id);
 
+  // F-6c — opsi filter dari baris yang RLS izinkan; tanpa filter = semua.
+  const employeeOptions = Array.from(
+    new Map(rows.map((r) => [r.employee_id, r.employee_nama || r.employee_id])).entries(),
+  ).sort((a, b) => a[1].localeCompare(b[1], 'id'));
+  const jabatanOptions = Array.from(
+    new Set(rows.map((r) => r.employee_jabatan).filter((j): j is string => !!j)),
+  ).sort((a, b) => a.localeCompare(b, 'id'));
+  const visibleRows = rows.filter((r) =>
+    (filterEmployee === '' || r.employee_id === filterEmployee) &&
+    (filterJabatan === '' || r.employee_jabatan === filterJabatan));
+  const anyFilter = filterDate !== '' || filterEmployee !== '' || filterJabatan !== '';
+
   return (
     <div className="stack">
       <div>
@@ -205,7 +225,7 @@ export default function AktivitasHarianPage() {
 
       <section className="card">
         <div className="cardHeader">
-          <h2>Riwayat{seeOthers ? ' (divisi Anda)' : ' Saya'}</h2>
+          <h2>Riwayat{seeOthers ? ' (tim Anda)' : ' Saya'}</h2>
         </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div className="field">
@@ -218,20 +238,59 @@ export default function AktivitasHarianPage() {
               disabled={loading}
             />
           </div>
-          {filterDate && (
-            <button type="button" className="btn" onClick={() => setFilterDate('')} disabled={loading}>
-              Semua Tanggal
+          {showWhose && (
+            <div className="field">
+              <label htmlFor="dact-filter-employee">Nama Karyawan</label>
+              <select
+                id="dact-filter-employee"
+                value={filterEmployee}
+                onChange={(e) => setFilterEmployee(e.target.value)}
+                disabled={loading}
+              >
+                <option value="">Semua Karyawan</option>
+                {employeeOptions.map(([empId, nama]) => (
+                  <option key={empId} value={empId}>{nama}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {showWhose && (
+            <div className="field">
+              <label htmlFor="dact-filter-jabatan">Jabatan</label>
+              <select
+                id="dact-filter-jabatan"
+                value={filterJabatan}
+                onChange={(e) => setFilterJabatan(e.target.value)}
+                disabled={loading}
+              >
+                <option value="">Semua Jabatan</option>
+                {jabatanOptions.map((j) => (
+                  <option key={j} value={j}>{j}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {anyFilter && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => { setFilterDate(''); setFilterEmployee(''); setFilterJabatan(''); }}
+              disabled={loading}
+            >
+              Reset Filter
             </button>
           )}
         </div>
         {loading && <p className="muted">Memuat...</p>}
         {loadError && <div className="alert alertError" role="alert">{loadError}</div>}
-        {!loading && !loadError && rows.length === 0 && (
+        {!loading && !loadError && visibleRows.length === 0 && (
           <div className="emptyState">
-            {filterDate ? `Tidak ada aktivitas tercatat pada ${formatDate(filterDate)}.` : 'Belum ada aktivitas tercatat.'}
+            {filterEmployee || filterJabatan
+              ? 'Tidak ada aktivitas yang cocok dengan filter.'
+              : filterDate ? `Tidak ada aktivitas tercatat pada ${formatDate(filterDate)}.` : 'Belum ada aktivitas tercatat.'}
           </div>
         )}
-        {!loading && !loadError && rows.length > 0 && (
+        {!loading && !loadError && visibleRows.length > 0 && (
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -239,6 +298,7 @@ export default function AktivitasHarianPage() {
                   <th>Tanggal</th>
                   <th>Jam</th>
                   {showWhose && <th>Karyawan</th>}
+                  {showWhose && <th>Jabatan</th>}
                   <th>Jenis</th>
                   <th>Keterangan</th>
                   <th>Bukti</th>
@@ -246,7 +306,7 @@ export default function AktivitasHarianPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => {
+                {visibleRows.map((r) => {
                   const isMine = r.employee_id === employee?.employee_id;
                   const superseded = !!r.dikoreksi_oleh;
                   return (
@@ -256,6 +316,7 @@ export default function AktivitasHarianPage() {
                       </td>
                       <td>{r.jam_mulai}{r.jam_selesai ? `–${r.jam_selesai}` : ''}</td>
                       {showWhose && <td>{r.employee_nama || r.employee_id}</td>}
+                      {showWhose && <td>{r.employee_jabatan ?? '—'}</td>}
                       <td>{r.activity_type}</td>
                       <td>
                         {r.keterangan}

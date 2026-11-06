@@ -84,6 +84,12 @@ export interface DailyActivity {
   id: string;
   employeeId: string;
   employeeNama: string;
+  /**
+   * F-6c: jabatan HRIS pelaku SAAT INI (label filter Riwayat, bukan scope —
+   * scope tetap `divisi`). Null kalau posisinya tak terpetakan di
+   * `role_mappings` (Director/OD murni).
+   */
+  employeeJabatan: string | null;
   divisi: string;
   activityType: string;
   activityDate: string;
@@ -192,11 +198,12 @@ export async function log(
          ${buktiPelaksanaan === '' ? null : buktiPelaksanaan}, ${actor.employeeId},
          ${koreksiDari === '' ? null : koreksiDari})`;
 
-    const nameRows = await tx<{ nama: string }[]>`
-      select nama from employees where employee_id = ${actor.employeeId}`;
+    const nameRows = await tx<{ nama: string; jabatan: string | null }[]>`
+      select nama, jabatan from employees where employee_id = ${actor.employeeId}`;
     return {
       id, employeeId: actor.employeeId,
       employeeNama: nameRows.length > 0 ? nameRows[0].nama : actor.employeeId,
+      employeeJabatan: nameRows.length > 0 ? nameRows[0].jabatan : null,
       divisi, activityType, activityDate, jamMulai,
       jamSelesai: jamSelesai === '' ? null : jamSelesai,
       keterangan, buktiPelaksanaan: buktiPelaksanaan === '' ? null : buktiPelaksanaan,
@@ -208,7 +215,7 @@ export async function log(
 }
 
 interface DailyActivityRow {
-  id: string; employee_id: string; employee_nama: string; divisi: string;
+  id: string; employee_id: string; employee_nama: string; employee_jabatan: string | null; divisi: string;
   activity_type: string; activity_date: string; jam_mulai: string; jam_selesai: string | null;
   keterangan: string; bukti_pelaksanaan: string | null; created_at: Date;
   koreksi_dari: string | null; dikoreksi_oleh: string | null;
@@ -216,7 +223,8 @@ interface DailyActivityRow {
 
 function toDailyActivity(r: DailyActivityRow): DailyActivity {
   return {
-    id: r.id, employeeId: r.employee_id, employeeNama: r.employee_nama, divisi: r.divisi,
+    id: r.id, employeeId: r.employee_id, employeeNama: r.employee_nama,
+    employeeJabatan: r.employee_jabatan, divisi: r.divisi,
     activityType: r.activity_type, activityDate: r.activity_date, jamMulai: r.jam_mulai,
     jamSelesai: r.jam_selesai, keterangan: r.keterangan, buktiPelaksanaan: r.bukti_pelaksanaan,
     createdAt: r.created_at, koreksiDari: r.koreksi_dari, dikoreksiOleh: r.dikoreksi_oleh,
@@ -246,10 +254,14 @@ export async function list(sql: Queryable, filter: ListFilter = {}): Promise<Dai
   const toDate = (filter.to ?? '').trim() || null;
   const rows = await sql<DailyActivityRow[]>`
     select a.id, a.employee_id, private.employee_display_name(a.employee_id) as employee_nama,
-           a.divisi, a.activity_type, a.activity_date, a.jam_mulai, a.jam_selesai,
+           r.jabatan as employee_jabatan, a.divisi, a.activity_type, a.activity_date, a.jam_mulai, a.jam_selesai,
            a.keterangan, a.bukti_pelaksanaan, a.created_at, a.koreksi_dari,
            (select c.id from daily_activities c where c.koreksi_dari = a.id) as dikoreksi_oleh
     from daily_activities a
+    -- F-6c: jabatan untuk filter Riwayat. employees_select hanya
+    -- meloloskan baris diri sendiri, jadi lewat roster SECURITY DEFINER yang
+    -- sudah ada (pola employee_display_name), bukan join employees langsung.
+    left join private.employee_roster() r on r.employee_id = a.employee_id
     where (${employeeId} = '' or a.employee_id = ${employeeId})
       and (${fromDate}::date is null or a.activity_date >= ${fromDate}::date)
       and (${toDate}::date is null or a.activity_date <= ${toDate}::date)
