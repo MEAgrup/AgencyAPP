@@ -259,6 +259,25 @@ describeDb('financeQueue', () => {
     expect((await financeQueue(sql, financeStaff())).map((r) => r.id)).not.toContain(transactionId);
   });
 
+  it('KEEPS a [Lunas] transaction that is still "Belum SPK", last, until the link is attached', async () => {
+    // SPK opsional (2026-11-06): verification no longer waits for the contract, so
+    // the queue is where Finance tracks the paperwork still owed.
+    const fresh = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await verifyPayment(sql, financeStaff(), { transactionId, amount: '9000000', receivedDate: '2026-06-03' });
+
+    const rows = await financeQueue(sql, financeStaff());
+    const row = rows.find((r) => r.id === transactionId);
+    expect(row, 'Lunas tanpa SPK harus tetap di antrean').toBeDefined();
+    expect(row!.paymentStatus).toBe('[Lunas]');
+    expect(row!.belumSpk).toBe(true);
+    const ids = rows.map((r) => r.id);
+    expect(ids.indexOf(fresh.transactionId)).toBeLessThan(ids.indexOf(transactionId));
+
+    await attachContract(sql, financeStaff(), transactionId, 'https://drive/spk.pdf');
+    expect((await financeQueue(sql, financeStaff())).map((r) => r.id)).not.toContain(transactionId);
+  });
+
   it('orders awaiting-verification before partially-verified', async () => {
     // The partially-paid deal is created FIRST so it holds the LOWER id: plain
     // `order by id` would put it on top, so this only passes if status leads.

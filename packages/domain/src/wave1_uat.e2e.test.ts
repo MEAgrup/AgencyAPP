@@ -27,9 +27,9 @@ import {
 import {
   verifyPayment, attachContract, getPaymentStatus, commissionAchievement, scanReminders,
   reminderDashboard, requestSchemeChange, cancelSchemeChange,
-  OverVerificationError, ContractRequiredError, ScheduleTotalError, SchemeLockedError,
+  OverVerificationError, ScheduleTotalError, SchemeLockedError,
   PAYMENT_SEBAGIAN, PAYMENT_LUNAS, INST_JATUH_TEMPO, INST_TERVERIFIKASI,
-  MSG_OVER_VERIFICATION, MSG_CONTRACT_REQUIRED, MSG_SCHEDULE_TOTAL, MSG_OUTSTANDING_TOTAL,
+  MSG_OVER_VERIFICATION, MSG_SCHEDULE_TOTAL, MSG_OUTSTANDING_TOTAL,
 } from './finance';
 import {
   updateClient, addPlatform, updatePlatform, voidService,
@@ -293,9 +293,8 @@ describeDb('Wave 1 exit — end-to-end money-path UAT', () => {
       : fail('C4 change awaits Director ACC', 'Finance SPV', JSON.stringify({ st: tcr.status, instWhilePending }));
     await cancelSchemeChange(sql, financeLead(), tcr.id);
 
-    // === C8 — contract gate before final verify, then [Lunas]
-    await expectThrow('C8 contract gate before Lunas', 'Finance', MSG_CONTRACT_REQUIRED, () =>
-      verifyPayment(sql, finance(), { transactionId: trxId, installmentId: inst2, amount: '11900000', receivedDate: '2026-07-23' }));
+    // === C8 — contract attached, then final verify → [Lunas]. The contract is no
+    // longer a gate (SPK opsional, 2026-11-06) — attached here as the normal path.
     await attachContract(sql, finance(), trxId, 'https://drive/contract-alpha');
     const v2 = await verifyPayment(sql, finance(), { transactionId: trxId, installmentId: inst2, amount: '11900000', receivedDate: '2026-07-23' });
     const relStable = (await sql<{ released_to_account_at: Date | null }[]>`select released_to_account_at from transactions where id = ${trxId}`)[0].released_to_account_at;

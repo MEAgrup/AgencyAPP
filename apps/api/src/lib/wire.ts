@@ -3234,6 +3234,8 @@ export interface TransactionWire {
   payment_status: string;
   bermasalah: boolean;
   contract_attachment: string;
+  /** Penanda "Belum SPK" — link kontrak SPK/MoU belum dilampirkan (derived). */
+  belum_spk: boolean;
   released_to_account_at: string | null;
   installments: InstallmentWire[];
   // Feedback OD 2026-09-07 Finance #1 — antrean approval menyebut nama toko,
@@ -3257,6 +3259,7 @@ export function transactionToWire(t: finance.TransactionAggregate): TransactionW
     payment_status: t.paymentStatus,
     bermasalah: t.bermasalah,
     contract_attachment: t.contractAttachment ?? '',
+    belum_spk: t.belumSpk,
     released_to_account_at: t.releasedToAccountAt ? t.releasedToAccountAt.toISOString() : null,
     installments: t.installments.map(installmentToWire),
     toko: t.toko,
