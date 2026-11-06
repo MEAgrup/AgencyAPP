@@ -1,5 +1,5 @@
 /**
- * G1-02 — tes `detectPdtModule` terhadap seluruh 33 modul.
+ * G1-02 — tes `detectPdtModule` terhadap seluruh 34 modul.
  *
  * DoD backlog: "deteksi diuji terhadap 28 berkas sample (Fim Motor/Shopee,
  * Avitaskin/TikTok) dengan target nol salah-slot". Berkas mentahnya sendiri
@@ -37,7 +37,7 @@ function expectExactMatch(rows: Aoa, expected: string): void {
   expect(r.ambiguous, `fixture ${expected}`).toBe(false);
 }
 
-describe('detectPdtModule — TikTok (17 modul)', () => {
+describe('detectPdtModule — TikTok (18 modul)', () => {
   it('tt_orders', () => {
     expectExactMatch(
       [
@@ -126,6 +126,23 @@ describe('detectPdtModule — TikTok (17 modul)', () => {
       ],
       'tt_shop_analytics_tokopedia',
     );
+  });
+
+  // 2026-11-06 M20-R8-PROD-TP — berkas "[bisnis]-Tokopedia produk" (laporan
+  // Yulianti 29-10). Kolom = tanda tangan `baseline/detect.ts` `prod_tp`.
+  it('tt_product_analytics_tokopedia', () => {
+    expectExactMatch(
+      [
+        ['Produk', 'GMV', 'GMV tab Toko', 'GMV dari kartu produk', 'Pesanan'],
+        ['Kasur Busa A', '1200000', '800000', '400000', '3'],
+      ],
+      'tt_product_analytics_tokopedia',
+    );
+  });
+
+  it('tt_product_analytics_tokopedia TIDAK menyerobot Analitik Produk TikTok (punya GMV tab Toko + GMV dari kreator)', () => {
+    const r = detectPdtModule([['Produk', 'ID Produk', 'GMV dari kreator', 'Klik produk', 'GMV tab Toko', 'GMV dari kartu produk']], PDT_MODULES);
+    expect(r.matches).not.toContain('tt_product_analytics_tokopedia');
   });
 
   it('tt_ads_product', () => {
@@ -323,11 +340,11 @@ describe('detectPdtModule — TikTok (17 modul)', () => {
     );
   });
 
-  it('ketujuh belas fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
+  it('kedelapan belas fixture TikTok saling eksklusif — tak ada dua yang cocok ke fixture yang sama (nol salah-slot)', () => {
     // Sudah tercakup satu-per-satu di atas (expectExactMatch memaksa matches
-    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 17 sekaligus,
+    // panjang 1) — tes ini menegaskan itu berlaku untuk SEMUA 18 sekaligus,
     // bukan cuma yang paling akhir diuji.
-    expect(TIKTOK).toHaveLength(17);
+    expect(TIKTOK).toHaveLength(18);
   });
 });
 
@@ -552,9 +569,9 @@ describe('detectPdtModule — meta_ads', () => {
 });
 
 describe('detectPdtModule — registry', () => {
-  it('33 modul total, kode unik', () => {
-    expect(PDT_MODULES).toHaveLength(33);
-    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(33);
+  it('34 modul total, kode unik', () => {
+    expect(PDT_MODULES).toHaveLength(34);
+    expect(new Set(PDT_MODULES.map((m) => m.kode)).size).toBe(34);
   });
 
   it('sheet kosong tidak pernah cocok ke modul manapun', () => {

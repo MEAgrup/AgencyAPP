@@ -251,8 +251,8 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // `pdt/fakta.ts`). Tanda tangan LANGSUNG dari R8 (bersumber
     // `baseline/detect.ts` `shop_tp`): GMV + Pendapatan bruto + Pengunjung,
     // MENYANGKAL GMV dari LIVE kreator (menolak file TikTok `tt_shop_analytics`
-    // sendiri) dan ID Produk. `prod_tp` (Analitik Produk Tokopedia) SENGAJA
-    // tidak didaftarkan modul terpisah — R8 eksplisit "prod_tp tidak ikut".
+    // sendiri) dan ID Produk. `prod_tp` (Analitik Produk Tokopedia) kini
+    // modul tersendiri `tt_product_analytics_tokopedia` di bawah (2026-11-06).
     tandaTanganKolom: { must: ['GMV', 'Pendapatan bruto', 'Pengunjung'], mustNot: ['GMV dari LIVE kreator', 'ID Produk'] },
     barisHeaderHint: 1,
     // Sample TIDAK punya 'Klik produk' (kolom itu murni TikTok) — daftar di
@@ -264,6 +264,33 @@ export const PDT_MODULES: readonly PdtModuleDef[] = [
     // independen lewat marker (docblock `ekstrakBarisShopDailyTokopedia`).
     kolomDipanen: ['GMV', 'Pesanan', 'Pembeli', 'Produk terjual', 'Pengembalian dana', 'Pengunjung', 'Persentase konversi'],
     wajib: true,
+  },
+  {
+    kode: 'tt_product_analytics_tokopedia',
+    // Kembaran `tt_shop_analytics_tokopedia` di atas untuk berkas
+    // "[bisnis]-Tokopedia produk" (`prod_tp`) — `docs/DECISIONS.md`
+    // 2026-11-06 M20-R8-PROD-TP (laporan Yulianti 29-10, ACC Yohan): berkas
+    // ini menumpang batch/ZIP TikTok Shop yang sama, jadi `platform: 'tiktok'`
+    // dengan alasan yang PERSIS sama (PDT-22 tetap berlaku untuk toko yang
+    // platform UTAMA-nya Tokopedia).
+    platform: 'tiktok',
+    namaTampilan: 'Tokopedia — Analitik Produk (via TikTok Shop)',
+    // Tanda tangan dari registry lama `baseline/detect.ts` `prod_tp` (tiga
+    // kolom EKSAK yang M14 sudah kenali dari ekspor nyata). `mustNot: 'GMV
+    // dari kreator'` menolak Analitik Produk TikTok (`tt_product_analytics`,
+    // yang punya 'GMV tab Toko' juga) — pola penyangkal yang sama dengan
+    // `tt_shop_analytics_tokopedia` ('GMV dari LIVE kreator').
+    tandaTanganKolom: { must: ['GMV tab Toko', 'GMV dari kartu produk', 'Produk'], mustNot: ['GMV dari kreator'] },
+    barisHeaderHint: 1, // Rule 7: dicari (`temukanBarisHeader`), hint hanya titik awal
+    // HANYA tiga kolom tanda tangan — satu-satunya kolom yang terbukti ada di
+    // berkas nyata. Modul ini SENGAJA belum punya penulis fakta (sama seperti
+    // `shopee_video`/`meta_ads`): berkas dikenali, divalidasi, dan raw-nya
+    // tersimpan di ZIP batch, sehingga batch tidak lagi macet di "Perlu Pilih
+    // Modul". Penulis fakta + bagian laporan menyusul begitu sample asli
+    // membuka kolom per-produk lainnya; saat itu `PDT_PARSER_VERSI` naik dan
+    // batch lama diproses ulang `planPdtReparseTick`.
+    kolomDipanen: ['Produk', 'GMV tab Toko', 'GMV dari kartu produk'],
+    wajib: false, // opsional — bukan pasangan rekonsiliasi GMV TikTok
   },
   {
     kode: 'tt_ads_product',
